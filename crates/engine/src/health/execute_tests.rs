@@ -1,5 +1,8 @@
 use super::super::HealthSort;
-use super::super::component_rollup::append_component_rollup_findings;
+use super::super::component_rollup::{
+    ComponentTemplateUnit, ComponentTemplateUnitScope, append_component_rollup_findings,
+    collect_component_template_units,
+};
 use super::super::filters::{
     filter_complexity_findings_by_diff, filter_hotspots_by_diff, filter_large_functions_by_diff,
 };
@@ -2025,6 +2028,31 @@ fn rollup_resolver(
     )
 }
 
+/// One template unit attributed to `owner`, as produced by
+/// `collect_component_template_units`.
+fn template_units_for(
+    owner: &str,
+    template_path: &str,
+    cyclomatic: u16,
+    cognitive: u16,
+) -> FxHashMap<PathBuf, Vec<ComponentTemplateUnit>> {
+    let mut map = FxHashMap::default();
+    map.insert(
+        PathBuf::from(owner),
+        vec![ComponentTemplateUnit {
+            path: PathBuf::from(template_path),
+            cyclomatic,
+            cognitive,
+            line_count: 30,
+        }],
+    );
+    map
+}
+
+fn no_template_units() -> FxHashMap<PathBuf, Vec<ComponentTemplateUnit>> {
+    FxHashMap::default()
+}
+
 fn make_class_finding(
     path: &str,
     name: &str,
@@ -2100,11 +2128,15 @@ fn rollup_external_template_via_provenance_lookup() {
         make_class_finding(component_ts.to_str().unwrap(), "handleClick", 42, 3, 4),
         make_template_finding(template_html.to_str().unwrap(), 1, 6, 10),
     ];
-    let mut lookup = rustc_hash::FxHashMap::default();
-    lookup.insert(template_html.clone(), component_ts.clone());
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        template_html.to_str().unwrap(),
+        6,
+        10,
+    );
     append_component_rollup_findings(
         &mut findings,
-        Some(&lookup),
+        &template_units,
         &rollup_resolver(&[], 8, 8),
         Path::new(ROLLUP_ROOT),
         &mut ThresholdOverrideStateTracker::default(),
@@ -2137,9 +2169,15 @@ fn rollup_inline_template_owner_is_same_ts_file() {
         make_class_finding(component_ts.to_str().unwrap(), "ngOnInit", 25, 5, 8),
         make_template_finding(component_ts.to_str().unwrap(), 10, 4, 6),
     ];
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        component_ts.to_str().unwrap(),
+        4,
+        6,
+    );
     append_component_rollup_findings(
         &mut findings,
-        None,
+        &template_units,
         &rollup_resolver(&[], 8, 8),
         Path::new(ROLLUP_ROOT),
         &mut ThresholdOverrideStateTracker::default(),
@@ -2166,11 +2204,15 @@ fn rollup_picks_worst_class_function_by_cyclomatic() {
         make_class_finding(component_ts.to_str().unwrap(), "middle", 30, 5, 6),
         make_template_finding(template.to_str().unwrap(), 1, 4, 6),
     ];
-    let mut lookup = rustc_hash::FxHashMap::default();
-    lookup.insert(template, component_ts);
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        template.to_str().unwrap(),
+        4,
+        6,
+    );
     append_component_rollup_findings(
         &mut findings,
-        Some(&lookup),
+        &template_units,
         &rollup_resolver(&[], 8, 8),
         Path::new(ROLLUP_ROOT),
         &mut ThresholdOverrideStateTracker::default(),
@@ -2184,18 +2226,57 @@ fn rollup_picks_worst_class_function_by_cyclomatic() {
 }
 
 #[test]
-fn rollup_skipped_when_no_template_finding() {
+fn rollup_skipped_when_no_template_unit() {
     let component_ts = "/proj/src/only-class.component.ts";
     let mut findings = vec![make_class_finding(component_ts, "Foo.method", 10, 5, 7)];
     let before = findings.len();
     append_component_rollup_findings(
         &mut findings,
-        None,
+        &no_template_units(),
         &rollup_resolver(&[], 30, 25),
         Path::new(ROLLUP_ROOT),
         &mut ThresholdOverrideStateTracker::default(),
     );
     assert_eq!(findings.len(), before, "no template means no rollup");
+}
+
+/// The template half comes from extracted complexity, not from the findings
+/// list, so a template that breaches no threshold of its own (including one
+/// that would previously only have fired on CRAP) still feeds the rollup
+/// (issue #2235).
+#[test]
+fn rollup_survives_a_template_below_its_own_thresholds() {
+    let component_ts = PathBuf::from("/proj/src/quiet-template.component.ts");
+    let template_html = PathBuf::from("/proj/src/quiet-template.component.html");
+    let mut findings = vec![make_class_finding(
+        component_ts.to_str().unwrap(),
+        "classify",
+        29,
+        22,
+        18,
+    )];
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        template_html.to_str().unwrap(),
+        11,
+        9,
+    );
+    append_component_rollup_findings(
+        &mut findings,
+        &template_units,
+        &rollup_resolver(&[], 20, 25),
+        Path::new(ROLLUP_ROOT),
+        &mut ThresholdOverrideStateTracker::default(),
+    );
+
+    let rollup = findings
+        .iter()
+        .find(|finding| finding.name == "<component>")
+        .expect("a below-threshold template still contributes its complexity");
+    assert_eq!(rollup.cyclomatic, 33, "22 (worst class) + 11 (template)");
+    assert_eq!(rollup.cognitive, 27, "18 (worst class) + 9 (template)");
+    let breakdown = rollup.component_rollup.as_ref().expect("breakdown");
+    assert_eq!(breakdown.template_path, template_html);
 }
 
 #[test]
@@ -2208,12 +2289,16 @@ fn rollup_skipped_when_no_class_findings() {
         6,
         10,
     )];
-    let mut lookup = rustc_hash::FxHashMap::default();
-    lookup.insert(template_html, component_ts);
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        template_html.to_str().unwrap(),
+        6,
+        10,
+    );
     let before = findings.len();
     append_component_rollup_findings(
         &mut findings,
-        Some(&lookup),
+        &template_units,
         &rollup_resolver(&[], 8, 8),
         Path::new(ROLLUP_ROOT),
         &mut ThresholdOverrideStateTracker::default(),
@@ -2233,10 +2318,25 @@ fn rollup_skipped_when_multiple_templates_on_one_owner() {
         make_template_finding(component_ts.to_str().unwrap(), 5, 3, 4),
         make_template_finding(component_ts.to_str().unwrap(), 50, 4, 5),
     ];
+    let mut template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        component_ts.to_str().unwrap(),
+        3,
+        4,
+    );
+    template_units
+        .get_mut(component_ts.as_path())
+        .expect("owner entry")
+        .push(ComponentTemplateUnit {
+            path: component_ts.clone(),
+            cyclomatic: 4,
+            cognitive: 5,
+            line_count: 30,
+        });
     let before = findings.len();
     append_component_rollup_findings(
         &mut findings,
-        None,
+        &template_units,
         &rollup_resolver(&[], 30, 25),
         Path::new(ROLLUP_ROOT),
         &mut ThresholdOverrideStateTracker::default(),
@@ -2248,23 +2348,76 @@ fn rollup_skipped_when_multiple_templates_on_one_owner() {
     );
 }
 
+/// Owner attribution happens in `collect_component_template_units`: `.html`
+/// templates resolve through the inverse `templateUrl` provenance lookup,
+/// inline `.ts` templates own themselves, and a `.html` template without a
+/// lookup entry stays unattributed. Suppressed template units are excluded so
+/// a `fallow-ignore` on the template keeps hiding the rollup.
 #[test]
-fn rollup_external_template_skipped_when_lookup_missing() {
-    let template_html = PathBuf::from("/proj/src/no-owner.component.html");
-    let component_ts = "/proj/src/no-owner.component.ts";
-    let mut findings = vec![
-        make_class_finding(component_ts, "NoOwner.fn", 10, 5, 7),
-        make_template_finding(template_html.to_str().unwrap(), 1, 6, 10),
+fn collect_component_template_units_attributes_owners_and_respects_suppression() {
+    let html_id = FileId(1);
+    let inline_id = FileId(2);
+    let svelte_id = FileId(3);
+    let html_path = PathBuf::from("/proj/src/host.component.html");
+    let inline_path = PathBuf::from("/proj/src/inline.component.ts");
+    let svelte_path = PathBuf::from("/proj/src/Widget.svelte");
+    let owner_path = PathBuf::from("/proj/src/host.component.ts");
+    let modules = vec![
+        make_module(html_id, vec![make_fc("<template>", 6, 10, 30)]),
+        make_module(inline_id, vec![make_fc("<template>", 4, 6, 30)]),
+        make_module(svelte_id, vec![make_fc("<template>", 9, 21, 30)]),
     ];
-    let before = findings.len();
-    append_component_rollup_findings(
-        &mut findings,
-        None,
-        &rollup_resolver(&[], 30, 25),
-        Path::new(ROLLUP_ROOT),
-        &mut ThresholdOverrideStateTracker::default(),
+    let mut file_paths = FxHashMap::default();
+    file_paths.insert(html_id, &html_path);
+    file_paths.insert(inline_id, &inline_path);
+    file_paths.insert(svelte_id, &svelte_path);
+    let scope = ComponentTemplateUnitScope {
+        config_root: Path::new(ROLLUP_ROOT),
+        ignore_set: &globset::GlobSet::empty(),
+        changed_files: None,
+        ws_roots: None,
+    };
+
+    let without_lookup = collect_component_template_units(&modules, &file_paths, None, &scope);
+    assert!(
+        !without_lookup.contains_key(&owner_path),
+        "an unattributable .html template must not roll up: {without_lookup:#?}"
     );
-    assert_eq!(findings.len(), before);
+    assert!(
+        without_lookup.contains_key(&inline_path),
+        "inline templates own themselves: {without_lookup:#?}"
+    );
+    assert!(
+        !without_lookup.contains_key(&svelte_path),
+        "SFC dialects have no component rollup: {without_lookup:#?}"
+    );
+
+    let mut lookup = FxHashMap::default();
+    lookup.insert(html_path.clone(), owner_path.clone());
+    let with_lookup =
+        collect_component_template_units(&modules, &file_paths, Some(&lookup), &scope);
+    let units = with_lookup
+        .get(&owner_path)
+        .expect("the provenance lookup attributes the .html template");
+    assert_eq!(units.len(), 1);
+    assert_eq!(units[0].path, html_path);
+    assert_eq!(units[0].cyclomatic, 6);
+
+    let mut suppressed_module = make_module(html_id, vec![make_fc("<template>", 6, 10, 30)]);
+    suppressed_module
+        .suppressions
+        .push(crate::suppress::Suppression::issue(
+            1,
+            0,
+            crate::suppress::IssueKind::Complexity,
+        ));
+    let suppressed_modules = vec![suppressed_module];
+    let suppressed =
+        collect_component_template_units(&suppressed_modules, &file_paths, Some(&lookup), &scope);
+    assert!(
+        suppressed.is_empty(),
+        "a suppressed template contributes nothing: {suppressed:#?}"
+    );
 }
 
 fn issue_2163_globals() -> GlobalHealthThresholds {
@@ -2979,9 +3132,15 @@ fn a_component_rollup_is_measured_against_the_override_ceilings() {
         make_class_finding(component_ts.to_str().unwrap(), "classify", 29, 15, 12),
         make_template_finding(component_ts.to_str().unwrap(), 3, 8, 6),
     ];
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        component_ts.to_str().unwrap(),
+        8,
+        6,
+    );
     append_component_rollup_findings(
         &mut findings,
-        None,
+        &template_units,
         &rollup_resolver(&overrides, 3, 3),
         Path::new(ROLLUP_ROOT),
         &mut ThresholdOverrideStateTracker::default(),
@@ -3012,9 +3171,15 @@ fn a_surviving_component_rollup_publishes_its_override_ceilings() {
         make_class_finding(component_ts.to_str().unwrap(), "classify", 29, 15, 12),
         make_template_finding(component_ts.to_str().unwrap(), 3, 8, 6),
     ];
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        component_ts.to_str().unwrap(),
+        8,
+        6,
+    );
     append_component_rollup_findings(
         &mut findings,
-        None,
+        &template_units,
         &rollup_resolver(&overrides, 3, 3),
         Path::new(ROLLUP_ROOT),
         &mut ThresholdOverrideStateTracker::default(),
@@ -3062,10 +3227,16 @@ fn a_component_scoped_entry_that_silences_the_rollup_is_not_reported_no_match() 
         make_class_finding(component_ts.to_str().unwrap(), "classify", 29, 15, 12),
         make_template_finding(component_ts.to_str().unwrap(), 3, 8, 6),
     ];
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        component_ts.to_str().unwrap(),
+        8,
+        6,
+    );
     let mut tracker = ThresholdOverrideStateTracker::default();
     append_component_rollup_findings(
         &mut findings,
-        None,
+        &template_units,
         &resolver,
         Path::new(ROLLUP_ROOT),
         &mut tracker,
@@ -3118,10 +3289,16 @@ fn a_crap_only_component_entry_that_emits_no_row_is_still_reported_no_match() {
         make_class_finding(component_ts.to_str().unwrap(), "classify", 29, 15, 12),
         make_template_finding(component_ts.to_str().unwrap(), 3, 8, 6),
     ];
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        component_ts.to_str().unwrap(),
+        8,
+        6,
+    );
     let mut tracker = ThresholdOverrideStateTracker::default();
     append_component_rollup_findings(
         &mut findings,
-        None,
+        &template_units,
         &resolver,
         Path::new(ROLLUP_ROOT),
         &mut tracker,
@@ -3165,10 +3342,16 @@ fn a_surviving_component_rollup_row_names_its_outstanding_dimension() {
         make_class_finding(component_ts.to_str().unwrap(), "classify", 29, 15, 12),
         make_template_finding(component_ts.to_str().unwrap(), 3, 8, 6),
     ];
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        component_ts.to_str().unwrap(),
+        8,
+        6,
+    );
     let mut tracker = ThresholdOverrideStateTracker::default();
     append_component_rollup_findings(
         &mut findings,
-        None,
+        &template_units,
         &resolver,
         Path::new(ROLLUP_ROOT),
         &mut tracker,
@@ -3208,10 +3391,16 @@ fn a_component_rollup_row_does_not_score_a_unit_size_term() {
         make_class_finding(component_ts.to_str().unwrap(), "classify", 29, 15, 12),
         make_template_finding(component_ts.to_str().unwrap(), 3, 8, 6),
     ];
+    let template_units = template_units_for(
+        component_ts.to_str().unwrap(),
+        component_ts.to_str().unwrap(),
+        8,
+        6,
+    );
     let mut tracker = ThresholdOverrideStateTracker::default();
     append_component_rollup_findings(
         &mut findings,
-        None,
+        &template_units,
         &resolver,
         Path::new(ROLLUP_ROOT),
         &mut tracker,

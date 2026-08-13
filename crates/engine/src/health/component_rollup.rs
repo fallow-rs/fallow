@@ -25,17 +25,115 @@ use super::threshold_overrides::{
 /// `outstanding` dimensions.
 const COMPONENT_ROLLUP_NAME: &str = "<component>";
 
+/// One synthetic `<template>` complexity unit attributed to a component
+/// owner: the template half of a `<component>` rollup. Sourced from
+/// `module.complexity` by [`collect_component_template_units`], not from the
+/// findings list, so a template that breaches no threshold of its own still
+/// contributes its measured complexity to the rollup (issue #2235: template
+/// units left the CRAP dimension, and rollups keyed on template FINDINGS
+/// would have silently vanished for every component whose template only
+/// breached on CRAP).
+#[derive(Debug, Clone)]
+pub(super) struct ComponentTemplateUnit {
+    /// Path of the file the template unit was extracted from (the `.html`
+    /// sibling, or the `.ts` file itself for inline templates).
+    pub(super) path: PathBuf,
+    pub(super) cyclomatic: u16,
+    pub(super) cognitive: u16,
+    pub(super) line_count: u32,
+}
+
+/// Scope filters for [`collect_component_template_units`], mirroring the
+/// filters the findings collection pass applies to modules.
+pub(super) struct ComponentTemplateUnitScope<'a> {
+    pub(super) config_root: &'a Path,
+    pub(super) ignore_set: &'a globset::GlobSet,
+    pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<PathBuf>>,
+    pub(super) ws_roots: Option<&'a [PathBuf]>,
+}
+
+/// Collect every in-scope synthetic `<template>` unit, keyed by its component
+/// owner. `.html` templates resolve their owner through the inverse
+/// `templateUrl` provenance lookup; inline `@Component({ template })` units
+/// own themselves. Suppressed template units are excluded, preserving the
+/// invariant that a `fallow-ignore` comment on the template hides the rollup
+/// along with the template's own finding.
+pub(super) fn collect_component_template_units(
+    modules: &[crate::source::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &PathBuf>,
+    template_owner_lookup: Option<&rustc_hash::FxHashMap<PathBuf, PathBuf>>,
+    scope: &ComponentTemplateUnitScope<'_>,
+) -> rustc_hash::FxHashMap<PathBuf, Vec<ComponentTemplateUnit>> {
+    let mut by_owner: rustc_hash::FxHashMap<PathBuf, Vec<ComponentTemplateUnit>> =
+        rustc_hash::FxHashMap::default();
+    for module in modules {
+        let Some(&path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+        if !template_module_in_scope(path, scope) {
+            continue;
+        }
+        let Some(owner) = component_template_owner(path, template_owner_lookup) else {
+            continue;
+        };
+        for fc in &module.complexity {
+            if fc.name.as_str() != "<template>" {
+                continue;
+            }
+            if crate::suppress::is_suppressed(
+                &module.suppressions,
+                fc.line,
+                crate::suppress::IssueKind::Complexity,
+            ) {
+                continue;
+            }
+            by_owner
+                .entry(owner.clone())
+                .or_default()
+                .push(ComponentTemplateUnit {
+                    path: path.clone(),
+                    cyclomatic: fc.cyclomatic,
+                    cognitive: fc.cognitive,
+                    line_count: fc.line_count,
+                });
+        }
+    }
+    by_owner
+}
+
+fn template_module_in_scope(path: &Path, scope: &ComponentTemplateUnitScope<'_>) -> bool {
+    let relative = path.strip_prefix(scope.config_root).unwrap_or(path);
+    if scope.ignore_set.is_match(relative) {
+        return false;
+    }
+    if let Some(changed) = scope.changed_files
+        && !changed.contains(path)
+    {
+        return false;
+    }
+    if let Some(ws) = scope.ws_roots
+        && !ws.iter().any(|root| path.starts_with(root))
+    {
+        return false;
+    }
+    true
+}
+
 /// Synthesise per-Angular-component rollup findings.
 ///
-/// For each Angular component that has both at least one class-function
-/// finding above threshold and a synthetic `<template>` finding, emit a new
-/// `<component>` `ComplexityViolation` whose `cyclomatic` / `cognitive` totals
-/// are `max(class) + template`. The rollup is anchored at the worst class
-/// function's `(path, line, col)` so an existing
-/// `// fallow-ignore-next-line complexity` placed above that function, or the
-/// `@Component` decorator on inline-template components, continues to hide both
-/// the per-function finding and the rollup. Per-function and per-`<template>`
-/// findings are not removed, the rollup is strictly additive.
+/// For each Angular component that has at least one class-function finding
+/// above threshold and exactly one synthetic `<template>` complexity unit,
+/// emit a new `<component>` `ComplexityViolation` whose `cyclomatic` /
+/// `cognitive` totals are `max(class) + template`. The template half comes
+/// from `template_units` (extracted complexity, via
+/// [`collect_component_template_units`]), not from the findings list, so the
+/// rollup survives even when the template unit itself breaches no threshold.
+/// The rollup is anchored at the worst class function's `(path, line, col)`
+/// so an existing `// fallow-ignore-next-line complexity` placed above that
+/// function, or the `@Component` decorator on inline-template components,
+/// continues to hide both the per-function finding and the rollup.
+/// Per-function and per-`<template>` findings are not removed, the rollup is
+/// strictly additive.
 ///
 /// The rollup is measured against the owner file's resolved
 /// `health.thresholdOverrides` ceilings, not the run globals, and publishes the
@@ -45,33 +143,32 @@ const COMPONENT_ROLLUP_NAME: &str = "<component>";
 /// `no_match` while it silently changes the finding set (issue #2163).
 pub(super) fn append_component_rollup_findings(
     findings: &mut Vec<ComplexityViolation>,
-    template_owner_lookup: Option<&rustc_hash::FxHashMap<PathBuf, PathBuf>>,
+    template_units: &rustc_hash::FxHashMap<PathBuf, Vec<ComponentTemplateUnit>>,
     resolver: &ThresholdOverrideResolver,
     config_root: &Path,
     state_tracker: &mut ThresholdOverrideStateTracker,
 ) {
-    let mut by_owner: rustc_hash::FxHashMap<PathBuf, (Vec<usize>, Vec<usize>)> =
+    let mut class_by_owner: rustc_hash::FxHashMap<PathBuf, Vec<usize>> =
         rustc_hash::FxHashMap::default();
     for (idx, finding) in findings.iter().enumerate() {
-        if finding.name == "<template>" {
-            if let Some(owner) = component_template_owner(finding, template_owner_lookup) {
-                by_owner.entry(owner).or_default().1.push(idx);
-            }
-        } else if is_component_class_finding(finding) {
-            by_owner
+        if is_component_class_finding(finding) {
+            class_by_owner
                 .entry(finding.path.clone())
                 .or_default()
-                .0
                 .push(idx);
         }
     }
 
     let mut to_push: Vec<ComplexityViolation> = Vec::new();
-    for (owner, (class_idxs, template_idxs)) in by_owner {
-        if class_idxs.is_empty() || template_idxs.is_empty() || template_idxs.len() > 1 {
+    for (owner, class_idxs) in class_by_owner {
+        let Some(units) = template_units.get(&owner) else {
             continue;
-        }
-        let template = &findings[template_idxs[0]];
+        };
+        // Two templates on one owner is defensively skipped, matching the
+        // pre-existing multi-template guard on the findings-based rollup.
+        let [template] = units.as_slice() else {
+            continue;
+        };
         let Some(worst_idx) = class_idxs
             .iter()
             .copied()
@@ -90,25 +187,25 @@ pub(super) fn append_component_rollup_findings(
 }
 
 fn component_template_owner(
-    finding: &ComplexityViolation,
+    template_path: &Path,
     template_owner_lookup: Option<&rustc_hash::FxHashMap<PathBuf, PathBuf>>,
 ) -> Option<PathBuf> {
-    let ext = finding
-        .path
+    let ext = template_path
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase);
     match ext.as_deref() {
         Some("html") => template_owner_lookup
-            .and_then(|lookup| lookup.get(&finding.path))
+            .and_then(|lookup| lookup.get(template_path))
             .cloned(),
-        Some("ts" | "tsx" | "mts" | "cts") => Some(finding.path.clone()),
+        Some("ts" | "tsx" | "mts" | "cts") => Some(template_path.to_path_buf()),
         _ => None,
     }
 }
 
 fn is_component_class_finding(finding: &ComplexityViolation) -> bool {
     finding.name != COMPONENT_ROLLUP_NAME
+        && !fallow_types::extract::is_synthetic_template_unit(&finding.name)
         && finding
             .path
             .extension()
@@ -136,7 +233,7 @@ struct ComponentRollupTotals {
 fn make_component_rollup_violation(
     owner: PathBuf,
     worst: &ComplexityViolation,
-    template: &ComplexityViolation,
+    template: &ComponentTemplateUnit,
     totals: &ComponentRollupTotals,
     applied: AppliedHealthThresholds,
 ) -> ComplexityViolation {
@@ -196,7 +293,7 @@ fn make_component_rollup_violation(
 fn build_component_rollup(
     owner: PathBuf,
     worst: &ComplexityViolation,
-    template: &ComplexityViolation,
+    template: &ComponentTemplateUnit,
     resolver: &ThresholdOverrideResolver,
     config_root: &Path,
     state_tracker: &mut ThresholdOverrideStateTracker,

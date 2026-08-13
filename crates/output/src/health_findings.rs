@@ -147,7 +147,7 @@ pub fn build_health_finding_actions(
         actions.push(action);
     }
 
-    let is_template = name == "<template>";
+    let is_template = fallow_types::extract::is_synthetic_template_unit(name);
     let is_component = name == "<component>";
     if should_add_refactor_action(RefactorActionDecision {
         crap_only,
@@ -204,8 +204,22 @@ fn build_refactor_action(
     is_template: bool,
     is_component: bool,
 ) -> HealthFindingAction {
+    let is_svelte = violation
+        .path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("svelte"));
     let (description, note): (String, &str) = if is_component {
         component_refactor_copy(violation)
+    } else if is_template && is_svelte {
+        // Svelte has an in-file decomposition primitive that fallow scores as
+        // its own unit, so the cheap lever is named before the file split.
+        (
+            format!(
+                "Refactor `{name}` to reduce template complexity (move a repeated or deeply nested block into a {{#snippet}}; fallow scores a top-level snippet as its own unit)"
+            ),
+            "A top-level {#snippet name(...)} becomes its own `<snippet:name>` complexity unit, so in-file extraction moves the score; splitting into a child component also works",
+        )
     } else if is_template {
         (
             format!(
@@ -334,6 +348,10 @@ fn suppress_line_action(description: &str, comment: &str, placement: &str) -> He
 }
 
 /// Build the coverage-leaning action for a CRAP-contributing finding.
+///
+/// Synthetic template-family units never reach this builder: they are
+/// excluded from the CRAP dimension at the scoring choke point, so their
+/// findings never carry `exceeded: crap` (issue #2235).
 fn build_crap_coverage_action(
     name: &str,
     tier: Option<CoverageTier>,
@@ -358,27 +376,6 @@ fn build_crap_coverage_action(
             comment: None,
             placement: None,
             target_path: Some(owner_str),
-        });
-    }
-
-    // A synthetic `<template>` unit is exercised only through its component, so
-    // its coverage term is fixed at zero and CRAP collapses to CC^2 + CC. No
-    // test the user can write against this unit moves the number, which makes
-    // the generic add-tests advice un-actionable (issue #2163). Angular `.html`
-    // templates are already redirected above through `inherited_from`.
-    if name == "<template>" {
-        return Some(HealthFindingAction {
-            kind: HealthFindingActionType::RefactorFunction,
-            auto_fixable: false,
-            description: format!(
-                "Reduce branching in `{name}` or raise `maxCrap` for this file (a template carries no direct test coverage, so tests cannot lower its CRAP score)"
-            ),
-            note: Some(
-                "CRAP = CC^2 * (1 - cov/100)^3 + CC; a template's coverage term is fixed at zero, so its CRAP is a pure function of branch count. The levers are removing template branches or a health.thresholdOverrides entry setting maxCrap for this file".to_string(),
-            ),
-            comment: None,
-            placement: None,
-            target_path: None,
         });
     }
 
@@ -1116,21 +1113,10 @@ mod crap_action_tests {
     use super::*;
 
     #[test]
-    fn synthetic_template_never_gets_add_tests() {
-        let action = build_crap_coverage_action("<template>", None, true, None)
-            .expect("a CRAP-contributing template gets an action");
-        assert!(
-            !matches!(action.kind, HealthFindingActionType::AddTests),
-            "a template has no unit to test, so add-tests cannot lower its CRAP: {action:?}"
-        );
-        assert!(action.description.contains("maxCrap"));
-    }
-
-    #[test]
-    fn angular_inherited_template_still_redirects_to_the_owning_component() {
+    fn inherited_coverage_redirects_to_the_owning_component() {
         let owner = Path::new("src/host.component.ts");
         let action = build_crap_coverage_action("<template>", None, true, Some(owner))
-            .expect("an inherited template gets an action");
+            .expect("an inherited-coverage finding gets an action");
         assert!(matches!(
             action.kind,
             HealthFindingActionType::IncreaseCoverage
@@ -1143,5 +1129,51 @@ mod crap_action_tests {
         let action = build_crap_coverage_action("parseExpression", None, true, None)
             .expect("an untested function gets an action");
         assert!(matches!(action.kind, HealthFindingActionType::AddTests));
+    }
+
+    #[test]
+    fn snippet_units_on_svelte_route_to_the_sfc_suppress_comment() {
+        let mut violation = crate::ComplexityViolation {
+            path: std::path::PathBuf::from("src/Widget.svelte"),
+            name: "<snippet:rowBody>".to_string(),
+            line: 12,
+            col: 2,
+            cyclomatic: 16,
+            cognitive: 13,
+            line_count: 20,
+            param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            react_hook_profile: None,
+            exceeded: ExceededThreshold::Cognitive,
+            severity: crate::FindingSeverity::Moderate,
+            crap: None,
+            coverage_pct: None,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+            contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
+        };
+        let action = build_suppress_action(&violation, true, false);
+        assert_eq!(
+            action.comment.as_deref(),
+            Some(SFC_TEMPLATE_SUPPRESS_COMMENT),
+            "a // comment is rendered text in Svelte markup and suppresses nothing"
+        );
+        assert_eq!(
+            action.placement.as_deref(),
+            Some("above-template-anchor-line")
+        );
+
+        violation.name = "<template>".to_string();
+        let template_action = build_suppress_action(&violation, true, false);
+        assert_eq!(
+            template_action.placement.as_deref(),
+            Some("above-template-anchor-line")
+        );
     }
 }

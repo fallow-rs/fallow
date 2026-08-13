@@ -44,6 +44,9 @@ fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
     match name {
         "<template>" => Cow::Borrowed("<template> (template complexity)"),
         "<component>" => Cow::Borrowed("<component> (component rollup)"),
+        name if fallow_types::extract::is_synthetic_template_unit(name) => {
+            Cow::Owned(format!("{name} (snippet complexity)"))
+        }
         _ => Cow::Borrowed(name),
     }
 }
@@ -1635,10 +1638,10 @@ fn write_findings_section(out: &mut String, report: &fallow_output::HealthReport
         return;
     }
 
-    let has_synthetic = report
-        .findings
-        .iter()
-        .any(|finding| matches!(finding.name.as_str(), "<template>" | "<component>"));
+    let has_synthetic = report.findings.iter().any(|finding| {
+        fallow_types::extract::is_synthetic_template_unit(&finding.name)
+            || finding.name == "<component>"
+    });
     write_findings_heading(out, report, has_synthetic);
     write_findings_table_header(out, has_synthetic);
 
@@ -1792,6 +1795,14 @@ fn write_threshold_overrides_section(
                 )
             },
         );
+        // Mirror of the human renderer's copy: a crap-dimension row against a
+        // template-family unit reports a dimension the unit is not scored on,
+        // so the row must read as removable, not as an unqualified success.
+        let metrics = if threshold_override_crap_not_applicable(entry) {
+            format!("{metrics}; not scored on CRAP (this entry can be removed)")
+        } else {
+            metrics
+        };
         let _ = writeln!(
             out,
             "| {} | {} | {} | {} | {} | {} |",
@@ -1813,6 +1824,20 @@ fn threshold_override_dimension_label(
         fallow_output::ThresholdOverrideDimension::Complexity => "complexity",
         fallow_output::ThresholdOverrideDimension::Crap => "crap",
     }
+}
+
+/// True for a crap-dimension override row recorded against a synthetic
+/// template-family unit: measured complexity metrics present, CRAP value
+/// absent because the unit is excluded from the CRAP dimension.
+fn threshold_override_crap_not_applicable(entry: &fallow_output::ThresholdOverrideState) -> bool {
+    matches!(
+        entry.dimension,
+        fallow_output::ThresholdOverrideDimension::Crap
+    ) && entry.metrics.is_some_and(|metrics| metrics.crap.is_none())
+        && entry
+            .function
+            .as_deref()
+            .is_some_and(fallow_types::extract::is_synthetic_template_unit)
 }
 
 /// Write the file health scores table to the output.

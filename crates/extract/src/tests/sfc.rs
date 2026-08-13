@@ -1606,6 +1606,46 @@ const helper = () => { if (flag) return 1; return 0; };
 }
 
 #[test]
+fn svelte_top_level_snippet_adds_its_own_unit() {
+    let info = parse_sfc_with_complexity(
+        r"<script>
+const helper = () => { if (flag) return 1; return 0; };
+</script>
+{#snippet rowBody(row)}
+  {#if row.active}
+    {#each row.cells as cell}
+      <p>{cell.length > 3 ? 'wide' : 'thin'}</p>
+    {/each}
+  {:else}
+    <p>-</p>
+  {/if}
+{/snippet}
+{#each rows as row (row.id)}
+  {@render rowBody(row)}
+{/each}
+",
+        "SvelteSnippet.svelte",
+    );
+
+    let snippet = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "<snippet:rowBody>")
+        .expect("a top-level snippet becomes its own module.complexity unit");
+    let template = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "<template>")
+        .expect("the parent template keeps its own unit");
+    assert!(snippet.cyclomatic > 1, "{snippet:?}");
+    assert!(
+        template.cyclomatic < snippet.cyclomatic,
+        "the parent no longer accumulates the snippet body: template {template:?} vs snippet {snippet:?}"
+    );
+    assert!(info.complexity.iter().any(|fc| fc.name == "helper"));
+}
+
+#[test]
 fn vue_markup_only_template_adds_no_synthetic_entry() {
     let info = parse_sfc_with_complexity(
         r#"<script setup>

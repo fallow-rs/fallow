@@ -378,6 +378,60 @@ impl ThresholdOverrideStateTracker {
         }
     }
 
+    /// Record a matched CRAP-dimension row for a synthetic template-family
+    /// unit. Template units are not scored on the CRAP dimension, so the
+    /// per-function CRAP loop never reaches them and `record_crap` never
+    /// runs; without this entry point a `maxCrap`-only override scoped to
+    /// `<template>` (the exact config shape v3.15.0 recommended) regressed
+    /// to a first-sorted `no_match` row (issue #2235).
+    ///
+    /// The row always reads `stale` with an empty `outstanding` list and
+    /// `metrics.crap` absent: absent, not `0.0`, because `0.0` would assert
+    /// a measurement that was never taken. The renderers pair this shape
+    /// with copy saying the unit is not scored on CRAP and the entry can be
+    /// removed.
+    pub(super) fn record_crap_not_applicable(
+        &mut self,
+        function: CrapFunctionContext<'_>,
+        measured: (u16, u16),
+        matches: &[ThresholdOverrideMatch<'_>],
+        effective: fallow_output::HealthEffectiveThresholds,
+    ) {
+        let CrapFunctionContext {
+            path,
+            function,
+            line,
+            col,
+            suppressed: _,
+        } = function;
+        let (cyclomatic, cognitive) = measured;
+        for matched in matches {
+            if matched.entry.configured.max_crap.is_none() {
+                continue;
+            }
+            self.matched_indexes.insert(matched.entry.index);
+            self.push_state(ThresholdOverrideStateInput {
+                status: fallow_output::ThresholdOverrideStatus::Stale,
+                override_index: matched.entry.index,
+                outstanding: Vec::new(),
+                path: Some(path.to_path_buf()),
+                function: Some(function.to_string()),
+                line: Some(line),
+                col: Some(col),
+                configured_thresholds: matched.entry.configured,
+                effective_thresholds: effective,
+                metrics: Some(fallow_output::ThresholdOverrideMetrics {
+                    cyclomatic,
+                    cognitive,
+                    crap: None,
+                    line_count: None,
+                }),
+                reason: matched.entry.reason.clone(),
+                dimension: ThresholdOverrideDimension::Crap,
+            });
+        }
+    }
+
     pub(super) fn record_no_match_entries(
         &mut self,
         resolver: &ThresholdOverrideResolver,

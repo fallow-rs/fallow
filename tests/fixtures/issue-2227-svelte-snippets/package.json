@@ -1,0 +1,7 @@
+{
+  "name": "issue-2227-svelte-snippets",
+  "main": "src/main.ts",
+  "dependencies": {
+    "svelte": "^5.0.0"
+  }
+}

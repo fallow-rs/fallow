@@ -477,6 +477,48 @@ fn build_complexity_suppressions_by_path<'a>(
         .collect()
 }
 
+/// Emit matched CRAP-dimension override rows for synthetic template-family
+/// units. Those units are excluded from the CRAP dimension at the scoring
+/// choke point, so the per-function CRAP loop never reaches them and
+/// `record_crap` never marks their overrides as matched; without this walk a
+/// `maxCrap`-only entry scoped to a template unit (the exact shape v3.15.0's
+/// remediation copy recommended) would surface as a first-sorted `no_match`
+/// typo warning. Runs over the same scope-filtered module set that feeds
+/// `collect_findings`, so the row exists whether or not any finding survives.
+pub(super) fn record_template_crap_override_rows(input: &mut CrapFindingMergeInput<'_>) {
+    if input.threshold_resolver.is_empty() {
+        return;
+    }
+    for module in input.modules {
+        let Some(&path) = input.file_paths.get(&module.file_id) else {
+            continue;
+        };
+        if !crap_path_in_scope(path, input) {
+            continue;
+        }
+        let relative = path.strip_prefix(input.config_root).unwrap_or(path);
+        for fc in &module.complexity {
+            if !fallow_types::extract::is_synthetic_template_unit(&fc.name) {
+                continue;
+            }
+            let (applied_thresholds, matched_overrides) =
+                input.threshold_resolver.resolve(relative, &fc.name);
+            input.threshold_state_tracker.record_crap_not_applicable(
+                CrapFunctionContext {
+                    path,
+                    function: &fc.name,
+                    line: fc.line,
+                    col: fc.col,
+                    suppressed: false,
+                },
+                (fc.cyclomatic, fc.cognitive),
+                &matched_overrides,
+                applied_thresholds.effective,
+            );
+        }
+    }
+}
+
 fn crap_path_in_scope(path: &std::path::Path, input: &CrapFindingMergeInput<'_>) -> bool {
     let relative = path.strip_prefix(input.config_root).unwrap_or(path);
     if input.ignore_set.is_match(relative) {

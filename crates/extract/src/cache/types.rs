@@ -924,7 +924,12 @@ use crate::MemberKind;
 /// Bumped to 269: a class's own lexical type binding now retains member accesses
 /// against that class while generic and nested type shadows still fail closed.
 /// Warm 268 caches can omit self-typed class member uses.
-pub(super) const CACHE_VERSION: u32 = 269;
+///
+/// Bumped to 270: Svelte extraction emits each top-level `{#snippet}` block as
+/// its own `<snippet:NAME>` complexity unit and rebases the body's nesting to
+/// zero, changing the serialized `module.complexity` for snippet-using files.
+/// Warm 269 caches would keep the folded single-unit shape.
+pub(super) const CACHE_VERSION: u32 = 270;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

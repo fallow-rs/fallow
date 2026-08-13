@@ -991,6 +991,18 @@ pub fn byte_offset_to_line_col(line_offsets: &[u32], byte_offset: u32) -> (u32, 
     (line, col)
 }
 
+/// True when `name` identifies a synthetic template-family complexity unit:
+/// the per-file `<template>` unit every framework template scanner emits, or a
+/// Svelte `<snippet:NAME>` unit. These units are exercised only through their
+/// component, carry no directly measurable test coverage, and are therefore
+/// excluded from the CRAP dimension. The `<component>` rollup is NOT part of
+/// this family: it is an aggregate over class + template findings, not an
+/// extracted unit.
+#[must_use]
+pub fn is_synthetic_template_unit(name: &str) -> bool {
+    name == "<template>" || name.starts_with("<snippet:")
+}
+
 /// Complexity metrics for a single function/method/arrow.
 #[derive(Debug, Clone, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 pub struct FunctionComplexity {

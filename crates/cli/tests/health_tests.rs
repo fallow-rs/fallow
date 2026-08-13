@@ -1010,6 +1010,61 @@ fn health_reports_angular_template_complexity() {
     );
 }
 
+/// The `<component>` rollup is built from the template's EXTRACTED complexity,
+/// not from the findings list, so a component whose template produces no
+/// finding of its own (here: lifted by an override; before issue #2235 the
+/// same shape was a CRAP-only template) keeps its rollup (panel decision on
+/// issue #2235, amendment 2).
+#[test]
+fn health_component_rollup_survives_a_template_without_its_own_finding() {
+    let dir = tempdir().unwrap();
+    copy_dir_recursive(&fixture_path("angular-component-rollup"), dir.path());
+    write_file(
+        &dir.path().join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/host-game.component.html"], "maxCyclomatic": 500, "maxCognitive": 500 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "4",
+            "--max-cognitive",
+            "100",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+    let findings = json["findings"].as_array().expect("findings array");
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["name"] != "<template>"),
+        "the override lifts the template's own finding: {findings:#?}"
+    );
+    let rollup = findings
+        .iter()
+        .find(|finding| finding["name"] == "<component>")
+        .unwrap_or_else(|| {
+            panic!("the rollup must survive without a template finding: {findings:#?}")
+        });
+    assert_eq!(
+        rollup["component_rollup"]["template_cyclomatic"].as_u64(),
+        Some(6),
+        "the template half still carries its extracted complexity: {rollup:#?}"
+    );
+}
+
 #[test]
 fn health_emits_component_rollup_for_angular_component() {
     let output = run_fallow(
@@ -1113,12 +1168,15 @@ fn health_emits_component_rollup_for_angular_component() {
     );
 }
 
+/// Template units left the CRAP dimension (issue #2235): even with Istanbul
+/// coverage loaded and a tested owning component, an Angular `.html` template
+/// finding fires on complexity only and carries none of the coverage fields.
 #[test]
 #[expect(
     clippy::too_many_lines,
     reason = "test fixture; linear setup/assert, length is not a maintainability concern"
 )]
-fn health_angular_template_crap_inherits_from_component_ts() {
+fn health_angular_template_carries_no_crap_dimension() {
     let dir = tempdir().unwrap();
     let fixture = fixture_path("angular-template-complexity");
     copy_dir_recursive(&fixture, dir.path());
@@ -1126,7 +1184,7 @@ fn health_angular_template_crap_inherits_from_component_ts() {
     write_file(
         &dir.path().join("package.json"),
         r#"{
-            "name": "issue-186-tier1-inherit",
+            "name": "issue-2235-template-no-crap",
             "main": "src/main.ts",
             "dependencies": {
                 "@angular/core": "^19.0.0",
@@ -1171,6 +1229,7 @@ fn health_angular_template_crap_inherits_from_component_ts() {
         dir.path(),
         &[
             "--complexity",
+            "--file-scores",
             "--coverage",
             "coverage/coverage-final.json",
             "--max-cyclomatic",
@@ -1196,123 +1255,51 @@ fn health_angular_template_crap_inherits_from_component_ts() {
         })
         .unwrap_or_else(|| panic!("expected <template> finding, got: {findings:#?}"));
 
-    let coverage_source = template["coverage_source"]
-        .as_str()
-        .unwrap_or_else(|| panic!("expected coverage_source field, got: {template:#?}"));
-    assert_eq!(
-        coverage_source, "estimated_component_inherited",
-        "<template> finding must carry the inherit-from-component discriminator (regression guard for #186 tier 1): {template:#?}"
-    );
-
-    let inherited_from = template["inherited_from"]
-        .as_str()
-        .unwrap_or_else(|| panic!("expected inherited_from field, got: {template:#?}"));
+    let exceeded = template["exceeded"].as_str().expect("exceeded field");
     assert!(
-        inherited_from.ends_with("permissions.component.ts"),
-        "inherited_from must point at the owning component .ts, got: {inherited_from:?}"
+        !exceeded.contains("crap"),
+        "a template finding never fires on the CRAP dimension: {template:#?}"
     );
-
-    let tier = template["coverage_tier"]
-        .as_str()
-        .unwrap_or_else(|| panic!("expected coverage_tier field, got: {template:#?}"));
-    assert!(
-        matches!(tier, "partial" | "high"),
-        "<template> coverage_tier inherited from the tested component .ts must be partial or high, got: {tier:?}"
-    );
-
+    for field in [
+        "crap",
+        "coverage_pct",
+        "coverage_tier",
+        "coverage_source",
+        "inherited_from",
+    ] {
+        assert!(
+            template[field].is_null(),
+            "{field} must be absent on a template finding: {template:#?}"
+        );
+    }
     let actions = template["actions"]
         .as_array()
         .expect("actions array present on health finding");
-    let coverage_action = actions
-        .iter()
-        .find(|a| a["type"] == "increase-coverage")
-        .unwrap_or_else(|| panic!("expected an increase-coverage action, got: {actions:#?}"));
-    let target_path = coverage_action["target_path"].as_str().unwrap_or_else(|| {
-        panic!("expected target_path on increase-coverage action, got: {coverage_action:#?}")
-    });
     assert!(
-        target_path.ends_with("permissions.component.ts"),
-        "increase-coverage action's target_path must point at the owning .ts, got: {target_path:?}"
-    );
-}
-
-#[test]
-fn health_angular_template_inheritance_respects_mocked_component() {
-    let dir = tempdir().unwrap();
-    let fixture = fixture_path("angular-template-complexity");
-    copy_dir_recursive(&fixture, dir.path());
-
-    write_file(
-        &dir.path().join("package.json"),
-        r#"{
-            "name": "mocked-angular-template-inheritance",
-            "main": "src/main.ts",
-            "dependencies": {
-                "@angular/core": "^19.0.0",
-                "@angular/platform-browser": "^19.0.0"
-            },
-            "devDependencies": {
-                "vitest": "^3.2.4"
-            }
-        }"#,
-    );
-    write_file(
-        &dir.path().join("src/permissions-wrapper.ts"),
-        "import { PermissionsComponent } from './permissions.component';\n\
-         export const permissionsType = (): unknown => PermissionsComponent;\n",
-    );
-    write_file(
-        &dir.path().join("src/permissions-wrapper.test.ts"),
-        "import { expect, it, vi } from 'vitest';\n\
-         import { permissionsType } from './permissions-wrapper';\n\
-         vi.mock('./permissions.component', () => ({ PermissionsComponent: class {} }));\n\
-         it('uses the replacement', () => {\n  \
-           expect(permissionsType()).toBeDefined();\n\
-         });\n",
+        actions
+            .iter()
+            .all(|action| action["type"] != "increase-coverage" && action["type"] != "add-tests"),
+        "coverage-leaning actions are meaningless on a unit with no CRAP dimension: {actions:#?}"
     );
 
-    let output = run_fallow_in_root(
-        "health",
-        dir.path(),
-        &[
-            "--complexity",
-            "--max-cyclomatic",
-            "3",
-            "--max-cognitive",
-            "3",
-            "--max-crap",
-            "30",
-            "--format",
-            "json",
-            "--quiet",
-            "--no-cache",
-        ],
-    );
-    let json = parse_json(&output);
-    let findings = json["findings"].as_array().expect("findings array");
-    let template = findings
+    let html_score = json["file_scores"]
+        .as_array()
+        .expect("file_scores array")
         .iter()
-        .find(|finding| {
-            finding["name"] == "<template>"
-                && finding["path"]
-                    .as_str()
-                    .is_some_and(|path| path.ends_with("permissions.component.html"))
+        .find(|score| {
+            score["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("permissions.component.html"))
         })
-        .unwrap_or_else(|| panic!("expected <template> finding, got: {findings:#?}"));
-
-    assert_eq!(
-        template["coverage_source"], "estimated_component_inherited",
-        "the template should retain its component-owned coverage contract: {template:#?}"
-    );
-    assert_eq!(
-        template["coverage_tier"], "none",
-        "a test root that replaces the owning component must not cover its template: {template:#?}"
-    );
+        .unwrap_or_else(|| panic!("expected a .html file score: {json:#?}"));
     assert!(
-        template["inherited_from"]
-            .as_str()
-            .is_some_and(|path| path.ends_with("permissions.component.ts")),
-        "template coverage provenance must still identify the owning component: {template:#?}"
+        (html_score["crap_max"].as_f64().unwrap_or(-1.0)).abs() < f64::EPSILON,
+        "a module whose only unit is the template reports crap_max 0.0: {html_score:#?}"
+    );
+    assert_eq!(
+        html_score["crap_above_threshold"].as_u64(),
+        Some(0),
+        "{html_score:#?}"
     );
 }
 
@@ -7013,8 +7000,13 @@ fn write_issue_2163_fixture(root: &Path, config: &str) {
     write_file(&root.join(".fallowrc.json"), config);
 }
 
+/// Rewritten for issue #2235: template units left the CRAP dimension, so an
+/// override that raises only the complexity ceilings now clears the template
+/// finding entirely. The row must still be disclosed as a matched `active`
+/// entry (never `no_match`), and `outstanding` can never contain `crap` for a
+/// template unit.
 #[test]
-fn health_override_discloses_the_crap_dimension_that_kept_the_finding() {
+fn health_override_raising_complexity_ceilings_clears_a_template_finding() {
     let dir = tempdir().expect("create temp dir");
     write_issue_2163_fixture(dir.path(), &issue_2163_override_config(None));
 
@@ -7023,13 +7015,12 @@ fn health_override_discloses_the_crap_dimension_that_kept_the_finding() {
         dir.path(),
         &["--complexity", "--format", "json", "--quiet"],
     ));
-    let finding = sfc_template_finding(&json, "Widget.svelte");
-    assert_eq!(
-        finding["exceeded"].as_str(),
-        Some("crap"),
-        "the raised complexity ceilings leave CRAP as the only breaching dimension: {finding:#?}"
+    assert!(
+        json["findings"]
+            .as_array()
+            .is_none_or(|findings| findings.is_empty()),
+        "no CRAP dimension is left to keep the template finding alive: {json:#?}"
     );
-    assert_eq!(finding["threshold_source"].as_str(), Some("override"));
 
     let states = json["threshold_overrides"]
         .as_array()
@@ -7045,36 +7036,38 @@ fn health_override_discloses_the_crap_dimension_that_kept_the_finding() {
         .find(|state| state["dimension"] == "complexity")
         .unwrap_or_else(|| panic!("a complexity-dimension row: {states:#?}"));
     assert_eq!(
-        complexity_row["outstanding"].as_array(),
-        Some(&vec![serde_json::Value::from("crap")]),
-        "the row must name the dimension the override does not configure: {complexity_row:#?}"
+        complexity_row["status"].as_str(),
+        Some("active"),
+        "the entry clears the finding, so the row reads active: {complexity_row:#?}"
+    );
+    assert!(
+        states.iter().all(|state| {
+            state["outstanding"]
+                .as_array()
+                .is_none_or(|outstanding| !outstanding.contains(&serde_json::json!("crap")))
+        }),
+        "outstanding can never contain crap for a template unit: {states:#?}"
     );
 
     let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
     assert!(
-        human.stdout.contains("! CRAP"),
-        "human output must mark CRAP as the breaching dimension: {}",
+        human.stdout.contains("#0 complexity active"),
+        "the override row is still disclosed: {}",
         human.stdout
     );
     assert!(
-        !human.stdout.contains("! cyclomatic") && !human.stdout.contains("! cognitive"),
-        "human output must not mark the dimensions the override cleared: {}",
-        human.stdout
-    );
-    assert!(
-        human.stdout.contains("CRAP 30.0"),
-        "human output must name the CRAP ceiling still in force: {}",
-        human.stdout
-    );
-    assert!(
-        human.stdout.contains("(still breaches: CRAP)"),
-        "the override row must not read as unqualified success: {}",
+        !human.stdout.contains("no_match"),
+        "a matched entry must never read as a typo warning: {}",
         human.stdout
     );
 }
 
+/// A `maxCrap` value on a template unit no longer has anything to clear or
+/// fail to clear: the unit is not scored on CRAP. The row must read as a
+/// matched, removable entry with `metrics.crap` absent (issue #2235), never
+/// as `insufficient` against a score that was never computed.
 #[test]
-fn health_override_that_raises_max_crap_too_little_reports_insufficient() {
+fn health_max_crap_on_a_template_reports_a_removable_row() {
     let dir = tempdir().expect("create temp dir");
     write_issue_2163_fixture(dir.path(), &issue_2163_override_config(Some("40")));
 
@@ -7083,9 +7076,12 @@ fn health_override_that_raises_max_crap_too_little_reports_insufficient() {
         dir.path(),
         &["--complexity", "--format", "json", "--quiet"],
     ));
-    let finding = sfc_template_finding(&json, "Widget.svelte");
-    assert_eq!(finding["exceeded"].as_str(), Some("crap"));
-
+    assert!(
+        json["findings"]
+            .as_array()
+            .is_none_or(|findings| findings.is_empty()),
+        "the raised complexity ceilings clear the template finding: {json:#?}"
+    );
     let states = json["threshold_overrides"]
         .as_array()
         .expect("threshold_overrides array");
@@ -7095,27 +7091,36 @@ fn health_override_that_raises_max_crap_too_little_reports_insufficient() {
         .unwrap_or_else(|| panic!("a crap-dimension row: {states:#?}"));
     assert_eq!(
         crap_row["status"].as_str(),
-        Some("insufficient"),
-        "a ceiling the code still exceeds is neither active nor stale: {crap_row:#?}"
+        Some("stale"),
+        "not scored on CRAP means the ceiling buys nothing: {crap_row:#?}"
     );
     assert_eq!(
-        crap_row["outstanding"].as_array(),
-        Some(&vec![serde_json::Value::from("crap")]),
-        "outstanding must not go silent just because the entry configures the breaching ceiling: {crap_row:#?}"
+        crap_row["function"].as_str(),
+        Some("<template>"),
+        "{crap_row:#?}"
+    );
+    assert!(
+        crap_row["metrics"]["crap"].is_null(),
+        "no CRAP score exists for the unit, so none may be asserted: {crap_row:#?}"
     );
 
     let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
     assert!(
-        human.stdout.contains("#0 crap insufficient"),
-        "the human row must say the raised ceiling did not clear the finding: {}",
+        human
+            .stdout
+            .contains("template units are not scored on CRAP; this entry can be removed"),
+        "the human row must explain why the entry is removable: {}",
         human.stdout
     );
 }
 
-/// The whole override section used to disappear here, which is the same
-/// feedback vacuum that produced issue #2163 in the first place.
+/// The exact config shape v3.15.0's remediation copy recommended: a
+/// `maxCrap`-only entry scoped to a template file. It must produce a matched,
+/// truthful row and zero findings, never a first-sorted `no_match` warning
+/// (issue #2235, amendment 1). The `functions`-scoped variant is covered by
+/// `health_max_crap_only_function_scoped_template_override_matches`.
 #[test]
-fn health_crap_only_override_that_is_still_breached_still_reports_a_row() {
+fn health_max_crap_only_template_override_is_not_reported_no_match() {
     let dir = tempdir().expect("create temp dir");
     write_issue_2163_fixture(
         dir.path(),
@@ -7136,10 +7141,14 @@ fn health_crap_only_override_that_is_still_breached_still_reports_a_row() {
     ));
     let states = json["threshold_overrides"]
         .as_array()
-        .expect("an override whose only ceiling is still breached must still report");
+        .expect("a maxCrap-only template override must still report");
     assert_eq!(states.len(), 1, "{states:#?}");
-    assert_eq!(states[0]["status"].as_str(), Some("insufficient"));
+    assert_eq!(states[0]["status"].as_str(), Some("stale"));
     assert_eq!(states[0]["dimension"].as_str(), Some("crap"));
+    assert!(
+        states[0]["path"].as_str().is_some(),
+        "the row is matched to the template unit, not a no_match placeholder: {states:#?}"
+    );
 
     let human = run_fallow_in_root("health", dir.path(), &["--complexity", "--quiet"]);
     assert!(
@@ -7147,6 +7156,44 @@ fn health_crap_only_override_that_is_still_breached_still_reports_a_row() {
         "the section must not vanish: {}",
         human.stdout
     );
+    assert!(
+        !human.stdout.contains("no_match"),
+        "config the tool itself recommended must not read as a typo: {}",
+        human.stdout
+    );
+}
+
+/// `functions: ["<template>"]` scoping keeps matching after issue #2235: the
+/// exact-match key still resolves, through the not-applicable recorder rather
+/// than the CRAP loop.
+#[test]
+fn health_max_crap_only_function_scoped_template_override_matches() {
+    let dir = tempdir().expect("create temp dir");
+    write_issue_2163_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/Widget.svelte"], "functions": ["<template>"], "maxCrap": 40 }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--complexity", "--format", "json", "--quiet"],
+    ));
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    assert_eq!(states.len(), 1, "{states:#?}");
+    assert_eq!(states[0]["status"].as_str(), Some("stale"));
+    assert_eq!(states[0]["dimension"].as_str(), Some("crap"));
+    assert_eq!(states[0]["function"].as_str(), Some("<template>"));
+    assert!(states[0]["metrics"]["crap"].is_null(), "{states:#?}");
 }
 
 #[test]
@@ -7207,7 +7254,7 @@ fn health_override_that_also_raises_max_crap_clears_the_finding() {
         json["findings"]
             .as_array()
             .is_none_or(|findings| findings.is_empty()),
-        "raising maxCrap too must empty the findings list: {json:#?}"
+        "the raised complexity ceilings empty the findings list: {json:#?}"
     );
     let states = json["threshold_overrides"]
         .as_array()
@@ -7233,8 +7280,8 @@ fn health_override_that_also_raises_max_crap_clears_the_finding() {
         human.stdout
     );
     assert!(
-        human.stdout.contains("#0 complexity active") && human.stdout.contains("#0 crap active"),
-        "each row must name its dimension: {}",
+        human.stdout.contains("#0 complexity active") && human.stdout.contains("#0 crap stale"),
+        "each row must name its dimension; the maxCrap half is inert on a template unit: {}",
         human.stdout
     );
 }
@@ -7279,8 +7326,10 @@ fn health_threshold_override_reports_no_match_on_a_full_run() {
     );
 }
 
-/// Two overrides on two different files, each too small to clear its finding, so
-/// both rows carry a non-empty `outstanding`.
+/// Two overrides on two different files: the Widget entry is too small to
+/// clear its finding (non-empty `outstanding`), the Board entry configures
+/// `maxCrap` on a template unit and is therefore inert (stale, empty
+/// `outstanding`) since template units left the CRAP dimension (issue #2235).
 fn write_two_override_fixture(root: &Path) {
     copy_dir_recursive(&fixture_path("issue-2163-sfc-template-complexity"), root);
     write_file(
@@ -7340,8 +7389,8 @@ fn health_override_outstanding_survives_top_truncation() {
     assert!(
         outstanding_by_override_index(&truncated)
             .iter()
-            .all(|(_, count)| *count > 0),
-        "both overrides are too small to clear their finding: {truncated:#?}"
+            .any(|(index, count)| *index == 0 && *count > 0),
+        "the too-small Widget override still reports its surviving dimension: {truncated:#?}"
     );
 }
 
@@ -7419,17 +7468,23 @@ fn health_override_outstanding_survives_a_diff_filter() {
     assert!(
         outstanding_by_override_index(&scoped)
             .iter()
-            .all(|(_, count)| *count > 0),
-        "both overrides are too small to clear their finding: {scoped:#?}"
+            .any(|(index, count)| *index == 0 && *count > 0),
+        "the too-small Widget override still reports its surviving dimension: {scoped:#?}"
     );
 
     let mut human_args = vec!["--complexity", "--quiet"];
     human_args.extend_from_slice(&["--diff-file", diff_path.to_str().expect("utf8 path")]);
     let human = run_fallow_in_root("health", dir.path(), &human_args);
     assert!(
-        human.stdout.contains("(still breaches: complexity, CRAP)")
-            && human.stdout.contains("(still breaches: CRAP)"),
+        human.stdout.contains("(still breaches: complexity)"),
         "an insufficient row must never render without the dimensions it failed to clear: {}",
+        human.stdout
+    );
+    assert!(
+        human
+            .stdout
+            .contains("template units are not scored on CRAP; this entry can be removed"),
+        "the inert maxCrap entry on the Astro template must read as removable: {}",
         human.stdout
     );
 }
@@ -7480,7 +7535,17 @@ fn health_no_match_row_names_the_dimension_the_entry_configures() {
 #[test]
 fn health_compact_output_names_the_breaching_dimension() {
     let dir = tempdir().expect("create temp dir");
-    write_issue_2163_fixture(dir.path(), &issue_2163_override_config(None));
+    write_issue_2163_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/Widget.svelte"], "maxCognitive": 20 }
+    ]
+  }
+}
+"#,
+    );
 
     let output = run_fallow_in_root(
         "health",
@@ -7493,7 +7558,7 @@ fn health_compact_output_names_the_breaching_dimension() {
         .find(|line| line.starts_with("high-complexity:"))
         .unwrap_or_else(|| panic!("a high-complexity compact row: {}", output.stdout));
     assert!(
-        row.contains(",exceeded=crap"),
+        row.contains(",exceeded=cognitive"),
         "compact must carry the dimension: {row}"
     );
     assert!(
@@ -7511,7 +7576,7 @@ fn health_compact_output_names_the_breaching_dimension() {
 #[test]
 fn health_markdown_findings_table_explains_the_breach_marker() {
     let dir = tempdir().expect("create temp dir");
-    write_issue_2163_fixture(dir.path(), &issue_2163_override_config(None));
+    write_issue_2163_fixture(dir.path(), "{}\n");
 
     let output = run_fallow_in_root(
         "health",
@@ -7792,14 +7857,14 @@ fn health_override_rows_do_not_collapse_across_same_named_units() {
     );
 }
 
-fn board_astro_override_root(root: &Path) {
+fn widget_svelte_override_root(root: &Path) {
     copy_dir_recursive(&fixture_path("issue-2163-sfc-template-complexity"), root);
     write_file(
         &root.join(".fallowrc.json"),
         r#"{
   "health": {
     "thresholdOverrides": [
-      { "files": ["src/Board.astro"], "maxCrap": 100 }
+      { "files": ["src/Widget.svelte"], "maxCognitive": 20 }
     ]
   }
 }
@@ -7807,7 +7872,7 @@ fn board_astro_override_root(root: &Path) {
     );
 }
 
-fn board_astro_codeclimate_description(text: &str) -> String {
+fn widget_svelte_codeclimate_description(text: &str) -> String {
     let issues: Vec<serde_json::Value> =
         serde_json::from_str(text).unwrap_or_else(|error| panic!("codeclimate JSON: {error}"));
     issues
@@ -7815,14 +7880,14 @@ fn board_astro_codeclimate_description(text: &str) -> String {
         .find(|issue| {
             issue["location"]["path"]
                 .as_str()
-                .is_some_and(|path| path.ends_with("Board.astro"))
+                .is_some_and(|path| path.ends_with("Widget.svelte"))
         })
         .and_then(|issue| issue["description"].as_str())
-        .unwrap_or_else(|| panic!("a Board.astro codeclimate issue: {text}"))
+        .unwrap_or_else(|| panic!("a Widget.svelte codeclimate issue: {text}"))
         .to_owned()
 }
 
-fn board_astro_sarif_message(text: &str) -> String {
+fn widget_svelte_sarif_message(text: &str) -> String {
     let sarif: serde_json::Value =
         serde_json::from_str(text).unwrap_or_else(|error| panic!("sarif JSON: {error}"));
     sarif["runs"][0]["results"]
@@ -7832,17 +7897,17 @@ fn board_astro_sarif_message(text: &str) -> String {
         .find(|result| {
             result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
                 .as_str()
-                .is_some_and(|uri| uri.ends_with("Board.astro"))
+                .is_some_and(|uri| uri.ends_with("Widget.svelte"))
         })
         .and_then(|result| result["message"]["text"].as_str())
-        .unwrap_or_else(|| panic!("a Board.astro sarif result: {text}"))
+        .unwrap_or_else(|| panic!("a Widget.svelte sarif result: {text}"))
         .to_owned()
 }
 
-fn board_astro_comment_row(text: &str) -> String {
+fn widget_svelte_comment_row(text: &str) -> String {
     text.lines()
-        .find(|line| line.contains("Board.astro") && line.contains("CRAP score"))
-        .unwrap_or_else(|| panic!("a Board.astro comment row: {text}"))
+        .find(|line| line.contains("Widget.svelte") && line.contains("cognitive complexity"))
+        .unwrap_or_else(|| panic!("a Widget.svelte comment row: {text}"))
         .to_owned()
 }
 
@@ -7853,7 +7918,7 @@ fn board_astro_comment_row(text: &str) -> String {
 fn health_formats_agree_on_an_override_affected_ceiling() {
     let dir = tempdir().expect("create temp dir");
     let root = dir.path();
-    board_astro_override_root(root);
+    widget_svelte_override_root(root);
 
     let json = run_fallow_in_root(
         "health",
@@ -7892,27 +7957,27 @@ fn health_formats_agree_on_an_override_affected_ceiling() {
     for (label, row) in [
         (
             "direct sarif",
-            board_astro_sarif_message(&direct_sarif.stdout),
+            widget_svelte_sarif_message(&direct_sarif.stdout),
         ),
         (
             "saved sarif",
-            board_astro_sarif_message(&saved_sarif.stdout),
+            widget_svelte_sarif_message(&saved_sarif.stdout),
         ),
         (
             "codeclimate",
-            board_astro_codeclimate_description(&codeclimate.stdout),
+            widget_svelte_codeclimate_description(&codeclimate.stdout),
         ),
         (
             "pr-comment-github",
-            board_astro_comment_row(&comment.stdout),
+            widget_svelte_comment_row(&comment.stdout),
         ),
     ] {
         assert!(
-            row.contains("threshold: 100.0"),
+            row.contains("threshold: 20"),
             "{label} must quote the override ceiling: {row}"
         );
         assert!(
-            !row.contains("threshold: 30.0"),
+            !row.contains("threshold: 15"),
             "{label} must not quote the global ceiling: {row}"
         );
     }
@@ -8048,4 +8113,335 @@ fn health_component_scoped_override_reaches_the_rollup_and_is_disclosed() {
         row["line"].as_u64().is_some(),
         "the row carries the rollup's anchor position: {row:#?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #2227: top-level Svelte `{#snippet}` blocks as their own units.
+// ---------------------------------------------------------------------------
+
+const SNIPPET_FIXTURE: &str = "issue-2227-svelte-snippets";
+
+const SNIPPET_ARGS: [&str; 8] = [
+    "--complexity",
+    "--max-cyclomatic",
+    "1",
+    "--max-cognitive",
+    "1",
+    "--format",
+    "json",
+    "--quiet",
+];
+
+fn finding_for<'a>(
+    json: &'a serde_json::Value,
+    file: &str,
+    name: &str,
+) -> Option<&'a serde_json::Value> {
+    json["findings"].as_array().and_then(|findings| {
+        findings.iter().find(|finding| {
+            finding["name"] == name && finding["path"].as_str().is_some_and(|p| p.ends_with(file))
+        })
+    })
+}
+
+/// The issue's three-variant shape, with a byte-identical row body: the
+/// snippet variant's units equal the file split's units, and the monolithic
+/// variant pays the nesting surcharge the snippet extraction removes.
+#[test]
+fn health_svelte_snippet_units_match_the_file_split() {
+    let json = parse_json(&run_fallow("health", SNIPPET_FIXTURE, &SNIPPET_ARGS));
+
+    let snippet = finding_for(&json, "Snip.svelte", "<snippet:rowBody>")
+        .unwrap_or_else(|| panic!("a <snippet:rowBody> finding: {json:#?}"));
+    let split_body = finding_for(&json, "Body.svelte", "<template>")
+        .unwrap_or_else(|| panic!("the file-split body template finding: {json:#?}"));
+    assert_eq!(snippet["cyclomatic"].as_u64(), Some(6), "{snippet:#?}");
+    assert_eq!(snippet["cognitive"].as_u64(), Some(10), "{snippet:#?}");
+    assert_eq!(
+        snippet["cyclomatic"], split_body["cyclomatic"],
+        "the snippet unit scores like the file split: {snippet:#?} vs {split_body:#?}"
+    );
+    assert_eq!(snippet["cognitive"], split_body["cognitive"]);
+
+    let mono = finding_for(&json, "Mono.svelte", "<template>")
+        .unwrap_or_else(|| panic!("the monolithic template finding: {json:#?}"));
+    assert_eq!(mono["cyclomatic"].as_u64(), Some(7), "{mono:#?}");
+    assert_eq!(
+        mono["cognitive"].as_u64(),
+        Some(14),
+        "the inlined body pays nesting weight the snippet variant does not: {mono:#?}"
+    );
+
+    // A snippet declared as a component-tag child sits at logic-block
+    // nesting 0 and is its own unit (the dominant Svelte 5 idiom).
+    let child = finding_for(&json, "Card.svelte", "<snippet:row>")
+        .unwrap_or_else(|| panic!("a component-child snippet finding: {json:#?}"));
+    assert_eq!(child["cyclomatic"].as_u64(), Some(3), "{child:#?}");
+
+    // Snippet units are template-family: never a CRAP dimension.
+    for finding in json["findings"].as_array().expect("findings") {
+        let name = finding["name"].as_str().unwrap_or_default();
+        if name == "<template>" || name.starts_with("<snippet:") {
+            assert!(
+                finding["crap"].is_null() && finding["coverage_tier"].is_null(),
+                "template-family units carry no CRAP dimension: {finding:#?}"
+            );
+            assert!(
+                !finding["exceeded"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("crap"),
+                "{finding:#?}"
+            );
+        }
+    }
+}
+
+/// `health.thresholdOverrides[].functions` matches the snippet unit name
+/// exactly, lifting only that unit.
+#[test]
+fn health_svelte_snippet_override_matches_the_exact_unit_name() {
+    let dir = tempdir().expect("create temp dir");
+    copy_dir_recursive(&fixture_path(SNIPPET_FIXTURE), dir.path());
+    write_file(
+        &dir.path().join(".fallowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/Snip.svelte"],
+        "functions": ["<snippet:rowBody>"],
+        "maxCyclomatic": 500,
+        "maxCognitive": 500
+      }
+    ]
+  }
+}
+"#,
+    );
+
+    let json = parse_json(&run_fallow_in_root("health", dir.path(), &SNIPPET_ARGS));
+    assert!(
+        finding_for(&json, "Snip.svelte", "<snippet:rowBody>").is_none(),
+        "the override lifts the snippet unit: {json:#?}"
+    );
+    assert!(
+        finding_for(&json, "Snip.svelte", "<template>").is_some(),
+        "the parent template is not covered by the snippet-scoped entry: {json:#?}"
+    );
+    let rows = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    let row = rows
+        .iter()
+        .find(|row| row["function"].as_str() == Some("<snippet:rowBody>"))
+        .unwrap_or_else(|| panic!("a row for the snippet unit: {rows:#?}"));
+    assert_eq!(row["status"].as_str(), Some("active"), "{row:#?}");
+}
+
+/// The SFC markup comment above the snippet's anchor line suppresses only the
+/// snippet unit; the parent template finding survives (issue #2227, panel
+/// amendment 6).
+#[test]
+fn health_svelte_snippet_suppression_hits_only_the_snippet() {
+    let dir = tempdir().expect("create temp dir");
+    copy_dir_recursive(&fixture_path(SNIPPET_FIXTURE), dir.path());
+
+    let before = parse_json(&run_fallow_in_root("health", dir.path(), &SNIPPET_ARGS));
+    let snippet = finding_for(&before, "Snip.svelte", "<snippet:rowBody>")
+        .unwrap_or_else(|| panic!("a snippet finding: {before:#?}"));
+    let suppress = snippet["actions"]
+        .as_array()
+        .expect("actions array")
+        .iter()
+        .find(|action| action["type"] == "suppress-line")
+        .unwrap_or_else(|| panic!("a suppress-line action: {snippet:#?}"));
+    assert_eq!(
+        suppress["comment"].as_str(),
+        Some("<!-- fallow-ignore-next-line complexity -->"),
+        "a // comment is rendered text in Svelte markup: {suppress:#?}"
+    );
+    assert_eq!(
+        suppress["placement"].as_str(),
+        Some("above-template-anchor-line"),
+        "{suppress:#?}"
+    );
+
+    let anchor = snippet["line"].as_u64().expect("snippet anchor line");
+    insert_line_above(
+        &dir.path().join("src/Snip.svelte"),
+        anchor,
+        "<!-- fallow-ignore-next-line complexity -->",
+    );
+    let after = parse_json(&run_fallow_in_root("health", dir.path(), &SNIPPET_ARGS));
+    assert!(
+        finding_for(&after, "Snip.svelte", "<snippet:rowBody>").is_none(),
+        "the recommended comment must suppress the snippet unit: {after:#?}"
+    );
+    assert!(
+        finding_for(&after, "Snip.svelte", "<template>").is_some(),
+        "suppressing the snippet leaves the parent template finding intact: {after:#?}"
+    );
+}
+
+/// Human output renders a distinct display name for snippet units, keeps the
+/// synthetic-entries copy, offers the in-file `{#snippet}` lever in the
+/// refactor action, and never prints the TypeScript suppression hint for a
+/// template-family-only report.
+#[test]
+fn health_svelte_snippet_human_output_names_the_unit() {
+    let human = run_fallow(
+        "health",
+        SNIPPET_FIXTURE,
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "1",
+            "--max-cognitive",
+            "1",
+            "--quiet",
+        ],
+    );
+    assert!(
+        human
+            .stdout
+            .contains("<snippet:rowBody> (snippet complexity)"),
+        "snippet units get a labelled display name: {}",
+        human.stdout
+    );
+    assert!(
+        human
+            .stdout
+            .contains("Functions and synthetic template or component entries"),
+        "snippet units count as synthetic entries in the footer copy: {}",
+        human.stdout
+    );
+    assert!(
+        human
+            .stdout
+            .contains("To suppress SFC templates: <!-- fallow-ignore-next-line complexity -->"),
+        "the SFC suppression hint covers snippet findings: {}",
+        human.stdout
+    );
+    assert!(
+        !human.stdout.contains("To suppress: //"),
+        "a template-family-only report must not print the TS comment hint: {}",
+        human.stdout
+    );
+
+    let json = parse_json(&run_fallow("health", SNIPPET_FIXTURE, &SNIPPET_ARGS));
+    let mono = finding_for(&json, "Mono.svelte", "<template>")
+        .unwrap_or_else(|| panic!("the monolithic template finding: {json:#?}"));
+    let refactor = mono["actions"]
+        .as_array()
+        .expect("actions array")
+        .iter()
+        .find(|action| action["type"] == "refactor-function")
+        .unwrap_or_else(|| panic!("a refactor action: {mono:#?}"));
+    assert!(
+        refactor["description"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("{#snippet}"),
+        "the .svelte refactor copy names the in-file lever first: {refactor:#?}"
+    );
+}
+
+/// New `<snippet:NAME>` unit names create NEW baseline buckets, so a baseline
+/// saved before the snippet units existed overflows and the gate flips red;
+/// projects must re-save their baseline on upgrade (issue #2227, panel
+/// amendment 8).
+#[test]
+fn health_snippet_units_overflow_a_pre_snippet_baseline() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"snippet-baseline-overflow","main":"src/main.ts","dependencies":{"svelte":"^5.0.0"}}"#,
+    );
+    write_file(
+        &root.join("src/main.ts"),
+        "import Widget from './Widget.svelte';\n\nexport const registry = { Widget };\n",
+    );
+    let mono = std::fs::read_to_string(fixture_path(SNIPPET_FIXTURE).join("src/Mono.svelte"))
+        .expect("read mono variant");
+    let snip = std::fs::read_to_string(fixture_path(SNIPPET_FIXTURE).join("src/Snip.svelte"))
+        .expect("read snippet variant");
+    write_file(&root.join("src/Widget.svelte"), &mono);
+
+    let baseline = root.join("health-baseline.json");
+    let mut save_args = SNIPPET_ARGS.to_vec();
+    save_args.extend_from_slice(&[
+        "--baseline-mode",
+        "identity",
+        "--save-baseline",
+        baseline.to_str().unwrap(),
+    ]);
+    run_fallow_in_root("health", root, &save_args);
+
+    // The same complexity, decomposed into a snippet: the total does not rise,
+    // but the new unit name has no baseline bucket.
+    write_file(&root.join("src/Widget.svelte"), &snip);
+    let mut baselined_args = SNIPPET_ARGS.to_vec();
+    baselined_args.extend_from_slice(&[
+        "--baseline-mode",
+        "identity",
+        "--baseline",
+        baseline.to_str().unwrap(),
+    ]);
+    let json = parse_json(&run_fallow_in_root("health", root, &baselined_args));
+
+    assert!(
+        finding_for(&json, "Widget.svelte", "<snippet:rowBody>").is_some(),
+        "the snippet unit has no baseline bucket, so it must survive the filter: {json:#?}"
+    );
+    assert!(
+        finding_for(&json, "Widget.svelte", "<template>").is_none(),
+        "the template bucket still absorbs the template finding: {json:#?}"
+    );
+}
+
+/// Snippet units move the unit-level aggregates, not just findings: the same
+/// markup contributes one large unit in the monolithic variant and two
+/// smaller units in the snippet variant (issue #2227, panel amendment 9).
+#[test]
+fn health_snippet_units_move_vital_signs() {
+    let mono_dir = tempdir().expect("create temp dir");
+    let snip_dir = tempdir().expect("create temp dir");
+    for (root, variant) in [
+        (mono_dir.path(), "Mono.svelte"),
+        (snip_dir.path(), "Snip.svelte"),
+    ] {
+        write_file(
+            &root.join("package.json"),
+            r#"{"name":"snippet-vital-signs","main":"src/main.ts","dependencies":{"svelte":"^5.0.0"}}"#,
+        );
+        write_file(
+            &root.join("src/main.ts"),
+            "import Widget from './Widget.svelte';\n\nexport const registry = { Widget };\n",
+        );
+        let source =
+            std::fs::read_to_string(fixture_path(SNIPPET_FIXTURE).join("src").join(variant))
+                .expect("read fixture variant");
+        write_file(&root.join("src/Widget.svelte"), &source);
+    }
+
+    let args = ["--complexity", "--format", "json", "--quiet"];
+    let mono = parse_json(&run_fallow_in_root("health", mono_dir.path(), &args));
+    let snip = parse_json(&run_fallow_in_root("health", snip_dir.path(), &args));
+
+    assert_eq!(
+        mono["vital_signs"]["avg_cyclomatic"].as_f64(),
+        Some(7.0),
+        "one folded unit: {:#?}",
+        mono["vital_signs"]
+    );
+    assert_eq!(
+        snip["vital_signs"]["avg_cyclomatic"].as_f64(),
+        Some(4.0),
+        "two units at 2 and 6: {:#?}",
+        snip["vital_signs"]
+    );
+    assert_eq!(mono["vital_signs"]["p90_cyclomatic"].as_u64(), Some(7));
+    assert_eq!(snip["vital_signs"]["p90_cyclomatic"].as_u64(), Some(6));
 }

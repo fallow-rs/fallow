@@ -8,11 +8,13 @@ use fallow_output::{ComplexityViolation, FindingSeverity, RefactoringTarget};
 use crate::baseline::HealthBaselineData;
 
 use super::baseline_io::{HealthBaselineSaveInput, load_health_baseline, save_health_baseline};
-use super::component_rollup::append_component_rollup_findings;
+use super::component_rollup::{
+    ComponentTemplateUnitScope, append_component_rollup_findings, collect_component_template_units,
+};
 use super::filters::filter_complexity_findings_by_diff;
 use super::findings::{
     CollectFindingsInput, CrapFindingMergeInput, collect_findings_with_resolver,
-    merge_crap_findings,
+    merge_crap_findings, record_template_crap_override_rows,
 };
 use super::threshold_overrides::{
     GlobalHealthThresholds, ThresholdOverrideResolver, ThresholdOverrideStateTracker,
@@ -190,11 +192,23 @@ fn apply_optional_crap_findings(
             threshold_state_tracker: ctx.threshold_state_tracker,
         };
         merge_crap_findings(findings, &mut input);
+        record_template_crap_override_rows(&mut input);
     }
-    append_component_rollup_findings(
-        findings,
+    let template_units = collect_component_template_units(
+        ctx.modules,
+        ctx.file_paths,
         ctx.score_output
             .map(|output| &output.template_inherit_provenance),
+        &ComponentTemplateUnitScope {
+            config_root: ctx.config_root,
+            ignore_set: ctx.ignore_set,
+            changed_files: ctx.changed_files,
+            ws_roots: ctx.ws_roots,
+        },
+    );
+    append_component_rollup_findings(
+        findings,
+        &template_units,
         ctx.threshold_resolver,
         ctx.config_root,
         ctx.threshold_state_tracker,

@@ -1622,7 +1622,7 @@ fn is_sfc_template_extension(ext: &str) -> bool {
 }
 
 fn template_finding_extension(finding: &fallow_output::ComplexityViolation) -> Option<&str> {
-    if finding.name != "<template>" {
+    if !fallow_types::extract::is_synthetic_template_unit(&finding.name) {
         return None;
     }
     finding.path.extension().and_then(|ext| ext.to_str())
@@ -1647,14 +1647,14 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &fallow_output::Hea
         .iter()
         .any(|finding| template_finding_extension(finding).is_some_and(is_sfc_template_extension));
     // Exact complement of the `above-angular-decorator` fallthrough in
-    // `fallow_output::build_suppress_action`: every template that is neither
-    // `.html` nor SFC markup gets the Angular hint there, so narrowing this to an
-    // extension allowlist would leave the human surface silent while JSON still
-    // advertises the action. Keep the `<template>` guard explicit rather than
-    // routing through `template_finding_extension`, whose `None` also covers
-    // ordinary function findings.
+    // `fallow_output::build_suppress_action`: every template-family unit that
+    // is neither `.html` nor SFC markup gets the Angular hint there, so
+    // narrowing this to an extension allowlist would leave the human surface
+    // silent while JSON still advertises the action. Keep the family guard
+    // explicit rather than routing through `template_finding_extension`,
+    // whose `None` also covers ordinary function findings.
     let has_inline_template = report.findings.iter().any(|finding| {
-        finding.name == "<template>"
+        fallow_types::extract::is_synthetic_template_unit(&finding.name)
             && finding
                 .path
                 .extension()
@@ -1667,10 +1667,13 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &fallow_output::Hea
         .findings
         .iter()
         .any(|finding| finding.name == "<component>");
-    let has_function_finding = report
-        .findings
-        .iter()
-        .any(|finding| finding.name != "<template>" && finding.name != "<component>");
+    // Snippet units are template-family, so a snippet-only report must not
+    // print the generic `//` function suppression hint (rendered text in
+    // Svelte markup).
+    let has_function_finding = report.findings.iter().any(|finding| {
+        !fallow_types::extract::is_synthetic_template_unit(&finding.name)
+            && finding.name != "<component>"
+    });
     if has_html_template {
         lines.push(format!(
             "  {}",
@@ -1791,16 +1794,19 @@ fn push_findings_header(lines: &mut Vec<String>, report: &fallow_output::HealthR
 }
 
 fn has_synthetic_complexity_entries(report: &fallow_output::HealthReport) -> bool {
-    report
-        .findings
-        .iter()
-        .any(|finding| matches!(finding.name.as_str(), "<template>" | "<component>"))
+    report.findings.iter().any(|finding| {
+        fallow_types::extract::is_synthetic_template_unit(&finding.name)
+            || finding.name == "<component>"
+    })
 }
 
 fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
     match name {
         "<template>" => Cow::Borrowed("<template> (template complexity)"),
         "<component>" => Cow::Borrowed("<component> (component rollup)"),
+        name if fallow_types::extract::is_synthetic_template_unit(name) => {
+            Cow::Owned(format!("{name} (snippet complexity)"))
+        }
         _ => Cow::Borrowed(name),
     }
 }
@@ -2121,13 +2127,36 @@ fn render_threshold_overrides(
                 metrics.cyclomatic, metrics.cognitive, line_count, crap
             )
         });
+        // A crap-dimension row on a template-family unit is not a success or a
+        // failure: the unit is not scored on CRAP at all, so the entry buys
+        // nothing and can be deleted (issue #2235).
+        let note = if threshold_override_crap_not_applicable(entry) {
+            " (template units are not scored on CRAP; this entry can be removed)"
+        } else {
+            ""
+        };
         lines.push(format!(
-            "    #{idx} {dimension} {status} {target}{metrics}{outstanding}",
+            "    #{idx} {dimension} {status} {target}{metrics}{outstanding}{note}",
             idx = entry.override_index
         ));
     }
     push_threshold_overrides_overflow(lines, &display);
     lines.push(String::new());
+}
+
+/// True for a crap-dimension override row recorded against a synthetic
+/// template-family unit. Recognized by shape: the row carries measured
+/// complexity metrics but no CRAP value, because the unit is excluded from
+/// the CRAP dimension and the score was never computed.
+fn threshold_override_crap_not_applicable(entry: &fallow_output::ThresholdOverrideState) -> bool {
+    matches!(
+        entry.dimension,
+        fallow_output::ThresholdOverrideDimension::Crap
+    ) && entry.metrics.is_some_and(|metrics| metrics.crap.is_none())
+        && entry
+            .function
+            .as_deref()
+            .is_some_and(fallow_types::extract::is_synthetic_template_unit)
 }
 
 fn threshold_override_status_label(status: fallow_output::ThresholdOverrideStatus) -> &'static str {

@@ -33,7 +33,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropped in the resolver; manual-mock discovery through relative and aliased
   specifiers is unchanged.
 
+### Added
+
+- **Top-level Svelte `{#snippet}` blocks are scored as their own complexity
+  units** (Closes [#2227](https://github.com/fallow-rs/fallow/issues/2227)).
+  Each `{#snippet name(params)}` opened at logic-block nesting 0, including a
+  snippet declared as a component-tag child, becomes a `<snippet:name>` unit:
+  its body is scored with nesting rebased to zero and no longer accumulates
+  into the parent `<template>` unit, so Svelte's idiomatic in-file
+  decomposition now moves the score exactly like the equivalent file split
+  (previously it changed nothing and even carried a nesting surcharge).
+  `<snippet:name>` is an exact-match key for
+  `health.thresholdOverrides[].functions`; on `.svelte` files snippet findings
+  suppress with `<!-- fallow-ignore-next-line complexity -->` above the
+  reported anchor line, and the `.svelte` refactor advice names the snippet
+  lever before a file split. Snippets nested inside `{#if}`/`{#each}`/other
+  snippets stay folded into the enclosing unit for now. Unit counts and the
+  unit-level aggregates (`avg_cyclomatic`, `p90_cyclomatic`,
+  `unit_size_profile`, `unit_interfacing_profile`,
+  `functions_over_60_loc_per_k`) move on snippet-using Svelte projects, and
+  through them the health score can move. **Action required for baselined
+  CI**: new `<snippet:name>` unit names create new health-baseline buckets in
+  both `identity` and `count` modes, so a baseline saved before this release
+  overflows (the gate flips red, not merely stale) on snippet-using Svelte
+  code; re-save the baseline as part of the upgrade, before the next gated
+  run.
+
 ### Changed
+
+- **Synthetic template-family units no longer participate in the CRAP
+  dimension** (Closes [#2235](https://github.com/fallow-rs/fallow/issues/2235)).
+  A `<template>` unit (Angular `.html` and inline decorator templates, Vue,
+  Svelte, and Astro markup) and the new Svelte `<snippet:name>` units are
+  exercised only through their component, so their CRAP coverage term could
+  never be measured: with the default `maxCrap` of 30, the dimension acted as
+  a hidden second cyclomatic gate at 5 (untested file), 10 (test-reachable or
+  Angular-inherited), or 28 (directly test-referenced). This release removes
+  that unsubstantiated coverage claim, not a check: the cyclomatic and
+  cognitive gates on templates are unchanged. Template findings no longer
+  carry `crap`, `coverage_pct`, `coverage_tier`, `coverage_source`, or
+  `inherited_from`; a template that breached only on CRAP emits no finding;
+  surviving template findings can drop in severity without the CRAP
+  escalation; and template units no longer count toward `crap_max`,
+  `crap_above_threshold`, refactoring-target coverage factors, or the
+  Istanbul match statistics, so file scores for template-dominant files lose
+  their CRAP risk axis and can re-order. A `maxCrap` ceiling scoped to a
+  template unit (the shape v3.15.0's remediation advice suggested) now
+  reports a matched crap-dimension row reading `stale` with no CRAP value and
+  copy saying the entry can be removed, never a `no_match` typo warning.
+  Existing health baselines absorb the severity downgrades (a baselined
+  `critical` covers the finding's new lower tier), so this change alone does
+  not flip a baselined CI red; the snippet-unit change above is the one that
+  requires a baseline re-save. Rendering a pre-3.16 saved JSON envelope
+  through `fallow report --from` still works; legacy template rows with
+  `exceeded: "crap"` render against the updated rule text.
+- **`<component>` rollups are built from extracted template complexity, not
+  from the findings list.** An Angular component keeps its rollup even when
+  its template produces no finding of its own (previously the rollup vanished
+  with the template finding, which after the CRAP change would have silently
+  dropped every rollup whose template breached only on CRAP). A component
+  whose class fires while its template sits below the ceilings can now emit a
+  rollup that previously required a template finding; rollup totals and
+  anchors are unchanged, and suppressing the template or the worst class
+  method still hides it.
 
 - **Threshold override rows carry the measured span and read `stale` on
   suppressed units.** `threshold_overrides[]` metrics gain an additive

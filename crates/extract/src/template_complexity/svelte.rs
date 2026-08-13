@@ -1,4 +1,5 @@
-//! Synthetic `<template>` complexity for Svelte single-file components.
+//! Synthetic `<template>` and `<snippet:NAME>` complexity for Svelte
+//! single-file components.
 //!
 //! Scores Svelte logic blocks (`{#if}` / `{:else if}` / `{#each}` / `{#await}` /
 //! `{:then}` / `{:catch}` / `{#key}`) plus `{ }` text interpolations, bound block
@@ -17,11 +18,11 @@ use std::sync::LazyLock;
 
 use fallow_types::extract::{ComplexityContributionKind, FunctionComplexity};
 
-use super::build_template_complexity;
 use super::engine::{
     RegexContext, ScanError, TemplateComplexity, read_identifier, skip_block_comment,
     skip_line_comment, skip_number_literal, skip_quoted, skip_regex_literal,
 };
+use super::{build_template_complexity, build_unit_complexity};
 
 static MASK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(
@@ -29,14 +30,30 @@ static MASK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     )
 });
 
-/// Compute synthetic `<template>` complexity for a Svelte SFC. Returns `None`
-/// for a trivial template (no logic blocks, no non-trivial expression) or any
-/// malformed-markup short-circuit.
+/// Compute synthetic template-family complexity units for a Svelte SFC: the
+/// `<template>` unit plus one `<snippet:NAME>` unit per top-level
+/// `{#snippet}` block. A qualifying snippet body is scored with nesting
+/// rebased to zero and no longer accumulates into the parent template.
+/// Returns an empty vector for a trivial template (no logic blocks, no
+/// non-trivial expression) or any malformed-markup short-circuit; trivial
+/// snippet bodies emit no unit.
 #[must_use]
-pub fn compute_svelte_template_complexity(source: &str) -> Option<FunctionComplexity> {
+pub fn compute_svelte_template_complexity(source: &str) -> Vec<FunctionComplexity> {
     let markup = mask_non_template(source);
-    let complexity = SvelteScanner::new(&markup).scan().ok()?;
-    build_template_complexity(source, &complexity)
+    let Ok(scan) = SvelteScanner::new(&markup).scan() else {
+        return Vec::new();
+    };
+    let mut units = Vec::new();
+    units.extend(build_template_complexity(source, &scan.template));
+    for snippet in &scan.snippets {
+        units.extend(build_unit_complexity(
+            source,
+            &snippet.complexity,
+            &format!("<snippet:{}>", snippet.name),
+            Some(snippet.region.clone()),
+        ));
+    }
+    units
 }
 
 /// Replace `<script>` / `<style>` blocks and HTML comments with equal-length
@@ -46,10 +63,39 @@ fn mask_non_template(source: &str) -> String {
     super::mask_ranges(source, &MASK_RE)
 }
 
+/// One finished top-level `{#snippet}` unit: its rebased-nesting accumulator
+/// plus the byte span of the whole `{#snippet}`..`{/snippet}` block.
+struct SnippetUnit {
+    name: String,
+    complexity: TemplateComplexity,
+    region: std::ops::Range<usize>,
+}
+
+/// The snippet unit currently being scored. While active, the scanner's
+/// `complexity` accumulator holds the snippet body and the parent template's
+/// accumulator is parked here; `inner_depth` counts `{#snippet}` opens folded
+/// inside the body so the matching `{/snippet}` close is found by name AND
+/// depth, never by generic block depth.
+struct ActiveSnippet {
+    name: String,
+    parent: TemplateComplexity,
+    parent_nesting: u16,
+    /// Byte offset of the `{` of the opening `{#snippet ...}`.
+    start: usize,
+    inner_depth: u16,
+}
+
+struct SvelteScan {
+    template: TemplateComplexity,
+    snippets: Vec<SnippetUnit>,
+}
+
 struct SvelteScanner<'a> {
     source: &'a str,
     complexity: TemplateComplexity,
     nesting: u16,
+    active_snippet: Option<ActiveSnippet>,
+    snippets: Vec<SnippetUnit>,
 }
 
 impl<'a> SvelteScanner<'a> {
@@ -58,10 +104,12 @@ impl<'a> SvelteScanner<'a> {
             source,
             complexity: TemplateComplexity::default(),
             nesting: 0,
+            active_snippet: None,
+            snippets: Vec::new(),
         }
     }
 
-    fn scan(mut self) -> Result<TemplateComplexity, ScanError> {
+    fn scan(mut self) -> Result<SvelteScan, ScanError> {
         let mut offset = 0;
         while offset < self.source.len() {
             match self.source.as_bytes()[offset] {
@@ -75,7 +123,16 @@ impl<'a> SvelteScanner<'a> {
                 }
             }
         }
-        Ok(self.complexity)
+        if self.active_snippet.is_some() {
+            // An unclosed `{#snippet}` keeps the all-or-nothing malformed
+            // drop: half a unit boundary would misattribute everything after
+            // the open to the snippet.
+            return Err(ScanError);
+        }
+        Ok(SvelteScan {
+            template: self.complexity,
+            snippets: self.snippets,
+        })
     }
 
     /// Scan an HTML tag's attribute bindings for expression complexity. Markup
@@ -125,22 +182,26 @@ impl<'a> SvelteScanner<'a> {
         let end = find_matching_curly(self.source, offset)?;
         let inner = self.source[offset + 1..end].trim();
         let inner_offset = offset + 1;
-        self.dispatch_curly(inner, inner_offset)?;
+        self.dispatch_curly(inner, inner_offset, offset, end)?;
         Ok(end + 1)
     }
 
-    fn dispatch_curly(&mut self, inner: &str, inner_offset: usize) -> Result<(), ScanError> {
+    fn dispatch_curly(
+        &mut self,
+        inner: &str,
+        inner_offset: usize,
+        open: usize,
+        close: usize,
+    ) -> Result<(), ScanError> {
         if inner.is_empty() {
             return Ok(());
         }
         if let Some(rest) = inner.strip_prefix('/') {
-            // Closing block (`{/if}`, `{/each}`, ...): pop one nesting level.
-            let _ = rest;
-            self.nesting = self.nesting.saturating_sub(1);
+            self.close_block(rest.trim(), close);
             return Ok(());
         }
         if let Some(rest) = inner.strip_prefix('#') {
-            return self.scan_block_open(rest, inner_offset);
+            return self.scan_block_open(rest, inner_offset, open);
         }
         if let Some(rest) = inner.strip_prefix(':') {
             return self.scan_block_continuation(rest, inner_offset);
@@ -154,7 +215,47 @@ impl<'a> SvelteScanner<'a> {
         self.add_expr_slice(inner)
     }
 
-    fn scan_block_open(&mut self, rest: &str, inner_offset: usize) -> Result<(), ScanError> {
+    /// Close a block (`{/if}`, `{/each}`, `{/snippet}`, ...). The
+    /// `{/snippet}` close is matched by NAME against the active unit, not by
+    /// generic depth, so an unclosed inner logic block cannot silently
+    /// swallow the unit boundary; every other close pops one nesting level.
+    fn close_block(&mut self, keyword: &str, close: usize) {
+        if keyword == "snippet"
+            && let Some(active) = self.active_snippet.as_mut()
+        {
+            if active.inner_depth > 0 {
+                active.inner_depth -= 1;
+                self.nesting = self.nesting.saturating_sub(1);
+            } else {
+                self.finish_snippet(close);
+            }
+            return;
+        }
+        self.nesting = self.nesting.saturating_sub(1);
+    }
+
+    /// Finalize the active snippet unit: restore the parent accumulator and
+    /// nesting, and record the unit with its full block byte span
+    /// (`{#snippet` open through the `}` of `{/snippet}`).
+    fn finish_snippet(&mut self, close: usize) {
+        let Some(active) = self.active_snippet.take() else {
+            return;
+        };
+        let complexity = std::mem::replace(&mut self.complexity, active.parent);
+        self.nesting = active.parent_nesting;
+        self.snippets.push(SnippetUnit {
+            name: active.name,
+            complexity,
+            region: active.start..close + 1,
+        });
+    }
+
+    fn scan_block_open(
+        &mut self,
+        rest: &str,
+        inner_offset: usize,
+        open: usize,
+    ) -> Result<(), ScanError> {
         let (keyword, after) = split_keyword(rest);
         match keyword {
             // `{#if cond}` / `{#key expr}`: one branch each, whose whole
@@ -204,8 +305,34 @@ impl<'a> SvelteScanner<'a> {
                 Ok(())
             }
             // `{#snippet name(params)}` opens a scope but is not control flow.
+            // A snippet opened at logic-block nesting 0 outside any other
+            // snippet becomes its own `<snippet:NAME>` unit with nesting
+            // rebased to zero. Nesting 0 deliberately INCLUDES a snippet
+            // declared as a child of a component tag
+            // (`<Table>{#snippet row(item)}...{/snippet}</Table>`): markup
+            // elements carry no logic-block nesting (`scan_element` consumes
+            // the tag and pushes nothing), and that is the dominant Svelte 5
+            // idiom. Nested or unnameable snippets keep the folded behavior:
+            // one nesting level, body charged to the enclosing unit.
             "snippet" => {
-                self.nesting = self.nesting.saturating_add(1);
+                match snippet_name(after) {
+                    Some(name) if self.nesting == 0 && self.active_snippet.is_none() => {
+                        self.active_snippet = Some(ActiveSnippet {
+                            name: name.to_string(),
+                            parent: std::mem::take(&mut self.complexity),
+                            parent_nesting: self.nesting,
+                            start: open,
+                            inner_depth: 0,
+                        });
+                        self.nesting = 0;
+                    }
+                    _ => {
+                        if let Some(active) = self.active_snippet.as_mut() {
+                            active.inner_depth = active.inner_depth.saturating_add(1);
+                        }
+                        self.nesting = self.nesting.saturating_add(1);
+                    }
+                }
                 Ok(())
             }
             _ => Ok(()),
@@ -431,6 +558,25 @@ fn starts_block_close(source: &str, slash: usize) -> bool {
     })
 }
 
+/// Parse the snippet identifier from a `{#snippet name(params)}` body
+/// remainder: the text before the first `(`, trimmed. Returns `None` when no
+/// plausible identifier is present, in which case the snippet is folded into
+/// the enclosing unit rather than emitting a `<snippet:>` unit with an empty
+/// or garbage name.
+fn snippet_name(after: &str) -> Option<&str> {
+    let trimmed = after.trim();
+    // '(' is ASCII, so byte-slicing at its index is char-boundary safe.
+    let name = trimmed[..trimmed.find('(').unwrap_or(trimmed.len())].trim_end();
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    if first != '_' && first != '$' && !first.is_ascii_alphabetic() {
+        return None;
+    }
+    chars
+        .all(|c| c == '_' || c == '$' || c.is_ascii_alphanumeric())
+        .then_some(name)
+}
+
 /// Split a block body into its leading keyword (`if`, `each`, `else`, ...) and
 /// the remainder after the first whitespace run.
 fn split_keyword(body: &str) -> (&str, &str) {
@@ -602,11 +748,22 @@ fn after_is_boundary(source: &str, index: usize) -> bool {
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::compute_svelte_template_complexity;
-    use fallow_types::extract::{ComplexityContributionKind, ComplexityMetric};
+    use fallow_types::extract::{ComplexityContributionKind, ComplexityMetric, FunctionComplexity};
+
+    /// Convenience for tests expecting at most the `<template>` unit: scans
+    /// and returns it, asserting no snippet units were emitted.
+    fn single_unit(source: &str) -> Option<FunctionComplexity> {
+        let mut units = compute_svelte_template_complexity(source);
+        assert!(
+            units.len() <= 1,
+            "expected at most the <template> unit: {units:#?}"
+        );
+        units.pop()
+    }
 
     #[test]
     fn each_in_if_with_else_if_counts() {
-        let complexity = compute_svelte_template_complexity(
+        let complexity = single_unit(
             r"
 {#if user?.enabled && ready}
   {#each items as item (item.id)}
@@ -625,7 +782,7 @@ mod tests {
 
     #[test]
     fn else_if_cascade_increments_per_branch() {
-        let complexity = compute_svelte_template_complexity(
+        let complexity = single_unit(
             "{#if a}<p>1</p>{:else if b}<p>2</p>{:else if c}<p>3</p>{:else}<p>4</p>{/if}",
         )
         .expect("template should have complexity");
@@ -635,7 +792,7 @@ mod tests {
 
     #[test]
     fn bare_else_is_continuation_not_a_branch() {
-        let complexity = compute_svelte_template_complexity("{#if a}<p>1</p>{:else}<p>2</p>{/if}")
+        let complexity = single_unit("{#if a}<p>1</p>{:else}<p>2</p>{/if}")
             .expect("template should have complexity");
         assert_eq!(complexity.cyclomatic, 2, "{complexity:?}");
         assert!(complexity.cognitive >= 2, "{complexity:?}");
@@ -643,7 +800,7 @@ mod tests {
 
     #[test]
     fn await_then_catch_each_count() {
-        let complexity = compute_svelte_template_complexity(
+        let complexity = single_unit(
             "{#await promise}\n<p>loading</p>\n{:then value}\n<p>{value}</p>\n{:catch error}\n<p>{error}</p>\n{/await}",
         )
         .expect("template should have complexity");
@@ -697,8 +854,8 @@ mod tests {
                 ComplexityContributionKind::Then,
             ),
         ] {
-            let complexity = compute_svelte_template_complexity(source)
-                .expect("shorthand await block should have complexity");
+            let complexity =
+                single_unit(source).expect("shorthand await block should have complexity");
             assert_eq!(complexity.cyclomatic, 3, "{source}: {complexity:?}");
             assert_eq!(complexity.cognitive, 2, "{source}: {complexity:?}");
 
@@ -721,7 +878,7 @@ mod tests {
 
     #[test]
     fn await_shorthand_splits_only_the_top_level_state_keyword() {
-        let complexity = compute_svelte_template_complexity(
+        let complexity = single_unit(
             r#"{#await resolve({ then: "catch" }).then(load) && ready then value}<p>{value}</p>{/await}"#,
         )
         .expect("shorthand await block should have complexity");
@@ -753,8 +910,8 @@ mod tests {
                 3,
             ),
         ] {
-            let complexity = compute_svelte_template_complexity(source)
-                .expect("regex await expression should have complexity");
+            let complexity =
+                single_unit(source).expect("regex await expression should have complexity");
             assert_eq!(complexity.cyclomatic, 3, "{source}: {complexity:?}");
             assert_eq!(complexity.cognitive, 2, "{source}: {complexity:?}");
             assert!(
@@ -792,7 +949,7 @@ mod tests {
                 ComplexityContributionKind::Then,
             ),
         ] {
-            let complexity = compute_svelte_template_complexity(source)
+            let complexity = single_unit(source)
                 .unwrap_or_else(|| panic!("await shorthand should have complexity: {source}"));
             assert_eq!(complexity.cyclomatic, 3, "{source}: {complexity:?}");
             assert_eq!(complexity.cognitive, 2, "{source}: {complexity:?}");
@@ -811,8 +968,8 @@ mod tests {
     #[test]
     fn await_regex_after_return_scores_expression_and_real_shorthand() {
         let source = "{#await (() => { return /[))] then fake/; })() && ready\nthen result}<p>{result}</p>{/await}";
-        let complexity = compute_svelte_template_complexity(source)
-            .expect("valid regex expression should preserve await complexity");
+        let complexity =
+            single_unit(source).expect("valid regex expression should preserve await complexity");
 
         assert_eq!(complexity.cyclomatic, 4, "{complexity:?}");
         assert_eq!(complexity.cognitive, 3, "{complexity:?}");
@@ -840,8 +997,8 @@ mod tests {
     #[test]
     fn if_regex_contents_are_ignored_and_following_operators_are_scored() {
         let source = "{#if /[?():{}&|]+/.test(input) && ready}<p>ready</p>{/if}";
-        let complexity = compute_svelte_template_complexity(source)
-            .expect("valid regex condition should preserve template complexity");
+        let complexity =
+            single_unit(source).expect("valid regex condition should preserve template complexity");
 
         assert_eq!(complexity.cyclomatic, 3, "{complexity:?}");
         assert_eq!(complexity.cognitive, 2, "{complexity:?}");
@@ -860,7 +1017,7 @@ mod tests {
 
     #[test]
     fn await_bindingless_continuations_count() {
-        let complexity = compute_svelte_template_complexity(
+        let complexity = single_unit(
             "{#await load()}<p>loading</p>{:then}<p>done</p>{:catch}<p>failed</p>{/await}",
         )
         .expect("bindingless continuations should have complexity");
@@ -871,31 +1028,27 @@ mod tests {
 
     #[test]
     fn key_block_counts() {
-        let complexity = compute_svelte_template_complexity("{#key selectedId}<Child />{/key}")
+        let complexity = single_unit("{#key selectedId}<Child />{/key}")
             .expect("template should have complexity");
         assert!(complexity.cyclomatic >= 2, "{complexity:?}");
     }
 
     #[test]
     fn interpolation_expressions_contribute() {
-        let complexity =
-            compute_svelte_template_complexity("<p>{enabled && draft ? 'Draft' : 'New'}</p>")
-                .expect("template should have complexity");
+        let complexity = single_unit("<p>{enabled && draft ? 'Draft' : 'New'}</p>")
+            .expect("template should have complexity");
         assert!(complexity.cyclomatic >= 3, "{complexity:?}");
     }
 
     #[test]
     fn markup_only_template_has_no_synthetic_complexity() {
-        assert!(
-            compute_svelte_template_complexity(r#"<div class="x"><p>Hello world</p></div>"#)
-                .is_none()
-        );
+        assert!(single_unit(r#"<div class="x"><p>Hello world</p></div>"#).is_none());
     }
 
     #[test]
     fn script_control_flow_is_not_counted() {
         assert!(
-            compute_svelte_template_complexity(
+            single_unit(
                 r"<script>
 const x = items.filter((i) => i && i.active);
 if (a && b) { go(); }
@@ -910,36 +1063,32 @@ for (const i of items) { use(i); }
     #[test]
     fn malformed_template_does_not_panic_and_yields_no_entry() {
         // Unterminated block expression.
-        assert!(compute_svelte_template_complexity("{#if a && ").is_none());
+        assert!(single_unit("{#if a && ").is_none());
         // Logical with no RHS inside an interpolation.
-        assert!(compute_svelte_template_complexity("<p>{a && }</p>").is_none());
+        assert!(single_unit("<p>{a && }</p>").is_none());
         // Shorthand await expression with no logical RHS.
-        assert!(compute_svelte_template_complexity("{#await a && then value}{/await}").is_none());
+        assert!(single_unit("{#await a && then value}{/await}").is_none());
         // Unterminated curly.
-        assert!(compute_svelte_template_complexity("<p>{ a && b").is_none());
+        assert!(single_unit("<p>{ a && b").is_none());
     }
 
     #[test]
     fn multibyte_text_does_not_panic() {
-        let complexity =
-            compute_svelte_template_complexity("{#if a && b}\u{4f4f}\u{6240}<p>{c?.d}</p>{/if}")
-                .expect("template should have complexity");
+        let complexity = single_unit("{#if a && b}\u{4f4f}\u{6240}<p>{c?.d}</p>{/if}")
+            .expect("template should have complexity");
         assert!(complexity.cyclomatic >= 2, "{complexity:?}");
     }
 
     #[test]
     fn comments_are_masked() {
-        assert!(
-            compute_svelte_template_complexity("<!-- {#if a && b && c} --><p>plain</p>").is_none()
-        );
+        assert!(single_unit("<!-- {#if a && b && c} --><p>plain</p>").is_none());
     }
 
     #[test]
     fn at_const_rhs_contributes() {
-        let complexity = compute_svelte_template_complexity(
-            "{#each items as item}{@const ok = item?.a && item?.b}<p>{ok}</p>{/each}",
-        )
-        .expect("template should have complexity");
+        let complexity =
+            single_unit("{#each items as item}{@const ok = item?.a && item?.b}<p>{ok}</p>{/each}")
+                .expect("template should have complexity");
         // #each control flow + @const optional chains.
         assert!(complexity.cyclomatic >= 3, "{complexity:?}");
     }
@@ -951,18 +1100,15 @@ for (const i of items) { use(i); }
         // NOT reached by the top-level text-interpolation walk). Parity
         // regression: this whole class was previously dropped because the tag
         // interior was skipped wholesale.
-        let class_bind = compute_svelte_template_complexity(
-            r#"<div class={a && b ? "x" : (c || d ? "y" : "z")}>t</div>"#,
-        )
-        .expect("an attribute binding with logic has complexity");
+        let class_bind = single_unit(r#"<div class={a && b ? "x" : (c || d ? "y" : "z")}>t</div>"#)
+            .expect("an attribute binding with logic has complexity");
         assert!(
             class_bind.cyclomatic >= 4,
             "class={{ternary+logical}} should score: {class_bind:?}"
         );
         // Event handler and class: directive bindings are also scored.
-        let event =
-            compute_svelte_template_complexity("<button onclick={() => a && b && go()}>x</button>")
-                .expect("event handler with logic has complexity");
+        let event = single_unit("<button onclick={() => a && b && go()}>x</button>")
+            .expect("event handler with logic has complexity");
         assert!(
             event.cyclomatic >= 2,
             "onclick logic should score: {event:?}"
@@ -970,8 +1116,279 @@ for (const i of items) { use(i); }
         // A `>` inside a quoted attribute value must not end the tag early; a
         // plain shorthand carries no complexity and stays dropped.
         assert!(
-            compute_svelte_template_complexity(r#"<a title="a > b" href={url}>x</a>"#).is_none(),
+            single_unit(r#"<a title="a > b" href={url}>x</a>"#).is_none(),
             "a quote-enclosed > plus a plain binding has no logic and is dropped"
         );
+    }
+
+    /// The issue-2227 row body used across the three-variant parity tests.
+    const ROW_BODY: &str = "\
+  {#if row.big}
+    {#each row.cells as cell}
+      <span>{cell.length > 3 ? 'wide' : 'thin'}</span>
+    {/each}
+  {:else}
+    <span>-</span>
+  {/if}
+";
+
+    fn find_unit<'a>(units: &'a [FunctionComplexity], name: &str) -> &'a FunctionComplexity {
+        units
+            .iter()
+            .find(|unit| unit.name == name)
+            .unwrap_or_else(|| panic!("missing unit {name}: {units:#?}"))
+    }
+
+    /// A top-level `{#snippet}` becomes its own unit whose metrics equal the
+    /// file-split equivalent: the parent template scores as if the body lived
+    /// in another file, and the snippet body scores with nesting rebased to
+    /// zero (no snippet-frame surcharge).
+    #[test]
+    fn top_level_snippet_matches_the_file_split_arithmetic() {
+        let snippet_variant = format!(
+            "{{#snippet rowBody(row)}}\n{ROW_BODY}{{/snippet}}\n{{#each rows as row}}\n  {{@render rowBody(row)}}\n{{/each}}\n"
+        );
+        let split_outer = "{#each rows as row}\n  <Body row={row} />\n{/each}\n";
+
+        let units = compute_svelte_template_complexity(&snippet_variant);
+        assert_eq!(units.len(), 2, "{units:#?}");
+        let template = find_unit(&units, "<template>");
+        let snippet = find_unit(&units, "<snippet:rowBody>");
+
+        let outer = single_unit(split_outer).expect("outer split template has complexity");
+        assert_eq!(template.cyclomatic, outer.cyclomatic, "{units:#?}");
+        assert_eq!(template.cognitive, outer.cognitive, "{units:#?}");
+
+        let body = single_unit(ROW_BODY).expect("row body has complexity");
+        assert_eq!(snippet.cyclomatic, body.cyclomatic, "{units:#?}");
+        assert_eq!(
+            snippet.cognitive, body.cognitive,
+            "the snippet frame must add no nesting surcharge: {units:#?}"
+        );
+
+        // The monolithic variant (body inlined under the `{#each}`) pays the
+        // nesting surcharge the snippet extraction removes.
+        let mono = format!("{{#each rows as row}}\n{ROW_BODY}{{/each}}\n");
+        let mono_unit = single_unit(&mono).expect("monolithic template has complexity");
+        assert_eq!(
+            mono_unit.cyclomatic,
+            outer.cyclomatic + body.cyclomatic - 1,
+            "cyclomatic is flat: mono equals the two units minus one shared baseline"
+        );
+        assert!(
+            mono_unit.cognitive > outer.cognitive + body.cognitive,
+            "inlining must cost nesting weight: {mono_unit:#?}"
+        );
+    }
+
+    /// A snippet declared as a component-tag child sits at logic-block
+    /// nesting 0 (markup elements push no nesting), so it still becomes its
+    /// own unit. This is the dominant Svelte 5 idiom.
+    #[test]
+    fn snippet_as_component_child_is_its_own_unit() {
+        let source = "\
+<Table rows={rows}>
+  {#snippet row(item)}
+    {#if item.active}
+      <td>{item.value > 3 ? 'high' : 'low'}</td>
+    {/if}
+  {/snippet}
+</Table>
+";
+        let units = compute_svelte_template_complexity(source);
+        let snippet = find_unit(&units, "<snippet:row>");
+        assert!(snippet.cyclomatic >= 3, "{units:#?}");
+        assert!(
+            units.iter().all(|unit| unit.name != "<template>"),
+            "the parent has no remaining non-trivial complexity: {units:#?}"
+        );
+    }
+
+    #[test]
+    fn snippet_line_count_covers_the_block_span_and_anchors_in_the_body() {
+        let source = "\
+<p>{top && bottom}</p>
+{#snippet rowBody(row)}
+  {#if row.big}
+    <b>{row.name}</b>
+  {/if}
+{/snippet}
+";
+        let units = compute_svelte_template_complexity(source);
+        let snippet = find_unit(&units, "<snippet:rowBody>");
+        assert_eq!(
+            snippet.line_count, 5,
+            "{{#snippet}}..{{/snippet}} spans 5 lines"
+        );
+        assert_eq!(
+            snippet.line, 3,
+            "anchored at the first construct inside the body"
+        );
+        let template = find_unit(&units, "<template>");
+        assert_eq!(template.line, 1, "{units:#?}");
+        assert!(
+            snippet
+                .contributions
+                .iter()
+                .all(|contribution| (3..=5).contains(&contribution.line)),
+            "contribution anchors must land inside the body: {snippet:#?}"
+        );
+    }
+
+    #[test]
+    fn nested_snippet_stays_folded_into_the_enclosing_unit() {
+        // Inner snippet inside a top-level snippet: folded into the outer
+        // snippet unit with the pre-existing nesting surcharge.
+        let source = "\
+{#snippet outer(row)}
+  {#snippet inner(cell)}
+    {#if cell.wide}<span>{cell.v}</span>{/if}
+  {/snippet}
+  {#if row.big}{@render inner(row.cell)}{/if}
+{/snippet}
+";
+        let units = compute_svelte_template_complexity(source);
+        assert_eq!(units.len(), 1, "{units:#?}");
+        let outer = find_unit(&units, "<snippet:outer>");
+        assert!(outer.cyclomatic >= 3, "{units:#?}");
+
+        // Snippet inside a logic block: folded into the template unit.
+        let inside_if = "\
+{#if ready}
+  {#snippet row(item)}
+    {#if item.active}<td>{item.v}</td>{/if}
+  {/snippet}
+  {@render row(current)}
+{/if}
+";
+        let units = compute_svelte_template_complexity(inside_if);
+        assert_eq!(units.len(), 1, "{units:#?}");
+        assert_eq!(units[0].name, "<template>");
+        assert!(units[0].cyclomatic >= 3, "{units:#?}");
+    }
+
+    #[test]
+    fn trivial_snippet_body_emits_no_unit() {
+        let source = "\
+{#snippet label()}
+  <p>static</p>
+{/snippet}
+<p>{a && b}</p>
+";
+        let units = compute_svelte_template_complexity(source);
+        assert_eq!(units.len(), 1, "{units:#?}");
+        assert_eq!(units[0].name, "<template>");
+    }
+
+    #[test]
+    fn unbalanced_snippet_drops_the_whole_template() {
+        assert!(
+            compute_svelte_template_complexity(
+                "{#snippet rowBody(row)}\n{#if row.big}<b>x</b>{/if}\n"
+            )
+            .is_empty(),
+            "an unclosed {{#snippet}} must keep the all-or-nothing drop"
+        );
+    }
+
+    #[test]
+    fn snippet_close_is_matched_by_name_across_an_unclosed_inner_block() {
+        // The `{#if}` inside the body is never closed; name matching still
+        // finds the `{/snippet}` boundary and the unit survives.
+        let source = "\
+{#snippet rowBody(row)}
+  {#if row.big}
+    <b>{row.name}</b>
+{/snippet}
+<p>{a && b}</p>
+";
+        let units = compute_svelte_template_complexity(source);
+        assert!(
+            units.iter().any(|unit| unit.name == "<snippet:rowBody>"),
+            "{units:#?}"
+        );
+    }
+
+    #[test]
+    fn snippet_params_with_braces_and_defaults_do_not_break_the_boundary() {
+        let source = "\
+{#snippet cell(props = { pad: 1 }, flag = x && y)}
+  {#if props.pad > 0}<td>{flag}</td>{/if}
+{/snippet}
+";
+        let units = compute_svelte_template_complexity(source);
+        let snippet = find_unit(&units, "<snippet:cell>");
+        assert_eq!(
+            snippet.cyclomatic, 2,
+            "the body's if is scored; the parameter defaults are signature, not body: {units:#?}"
+        );
+    }
+
+    #[test]
+    fn unnameable_snippet_falls_back_to_folding() {
+        for open in ["{#snippet}", "{#snippet 123bad()}"] {
+            let source = format!("{open}\n  {{#if a && b}}<p>x</p>{{/if}}\n{{/snippet}}\n");
+            let units = compute_svelte_template_complexity(&source);
+            assert_eq!(units.len(), 1, "{open}: {units:#?}");
+            assert_eq!(units[0].name, "<template>", "{open}: {units:#?}");
+        }
+    }
+
+    #[test]
+    fn duplicate_snippet_names_emit_one_unit_each() {
+        let source = "\
+{#snippet row(item)}
+  {#if item.a}<td>1</td>{/if}
+{/snippet}
+{#snippet row(item)}
+  {#if item.b}<td>2</td>{/if}
+{/snippet}
+";
+        let units = compute_svelte_template_complexity(source);
+        assert_eq!(
+            units
+                .iter()
+                .filter(|unit| unit.name == "<snippet:row>")
+                .count(),
+            2,
+            "{units:#?}"
+        );
+    }
+
+    #[test]
+    fn multibyte_snippet_content_does_not_panic() {
+        let source = "\
+{#snippet row(item)}
+  {#if item.a}\u{4f4f}\u{6240}<td>{item.v?.w}</td>{/if}
+{/snippet}
+";
+        let units = compute_svelte_template_complexity(source);
+        let snippet = find_unit(&units, "<snippet:row>");
+        assert!(snippet.cyclomatic >= 2, "{units:#?}");
+    }
+
+    #[test]
+    fn render_expression_is_scored_in_the_parent() {
+        let source = "\
+{#snippet row(item)}
+  {#if item.a}<td>x</td>{/if}
+{/snippet}
+{@render (compact ? row : row)(current)}
+";
+        let units = compute_svelte_template_complexity(source);
+        let template = find_unit(&units, "<template>");
+        assert!(
+            template.cyclomatic >= 2,
+            "the ternary in the render expression belongs to the parent: {units:#?}"
+        );
+    }
+
+    #[test]
+    fn svelte_files_without_snippets_are_unchanged() {
+        let source = "{#if a}<p>1</p>{:else if b}<p>2</p>{:else}<p>3</p>{/if}";
+        let units = compute_svelte_template_complexity(source);
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].name, "<template>");
+        assert_eq!(units[0].cyclomatic, 3, "{units:#?}");
     }
 }

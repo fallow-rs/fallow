@@ -477,11 +477,18 @@ pub(crate) fn parse_sfc_to_module(
 /// `translate_script_complexity`). Mirrors Angular's synthetic entry; no new rule
 /// or threshold, the entry folds into the existing complexity aggregate.
 fn append_template_complexity(kind: SfcKind, source: &str, combined: &mut ModuleInfo) {
-    let template_complexity = match kind {
-        SfcKind::Vue => crate::template_complexity::compute_vue_template_complexity(source),
-        SfcKind::Svelte => crate::template_complexity::compute_svelte_template_complexity(source),
-    };
-    combined.complexity.extend(template_complexity);
+    match kind {
+        SfcKind::Vue => {
+            combined.complexity.extend(
+                crate::template_complexity::compute_vue_template_complexity(source),
+            );
+        }
+        // Svelte yields the `<template>` unit plus one `<snippet:NAME>` unit
+        // per top-level `{#snippet}` block.
+        SfcKind::Svelte => combined
+            .complexity
+            .extend(crate::template_complexity::compute_svelte_template_complexity(source)),
+    }
 }
 
 /// Turn static relative asset references in markup (`<img src="./logo.png">`)
