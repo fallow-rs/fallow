@@ -65,6 +65,16 @@ fn is_zero_u16(value: &u16) -> bool {
     *value == 0
 }
 
+/// `skip_serializing_if` predicate: drop a `usize` field from JSON when zero,
+/// so default-configuration file-score rows stay byte-identical.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires a by-reference predicate"
+)]
+fn is_zero_usize(value: &usize) -> bool {
+    *value == 0
+}
+
 /// Overall project health score: 100 minus capped per-category penalties.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -975,10 +985,27 @@ pub struct FileHealthScore {
     pub function_count: usize,
     /// Lines of code in the file.
     pub lines: u32,
-    /// Highest CRAP score among the file's functions.
+    /// Highest CRAP score among the file's functions. Always the raw measured
+    /// value; threshold overrides never rewrite it.
     pub crap_max: f64,
-    /// Functions whose CRAP score exceeds the threshold.
+    /// Functions whose rounded CRAP score meets or exceeds their effective
+    /// ceiling, resolved from `health.thresholdOverrides` over the global
+    /// `maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled
+    /// (global ceiling `0`).
     pub crap_above_threshold: usize,
+    /// Functions whose rounded CRAP score is at or above the canonical 30.0
+    /// baseline but below their effective ceiling: the count the configuration
+    /// let through. Stays `0` when the effective ceiling is stricter than 30.
+    /// When CRAP enforcement is disabled (global ceiling `0`), counts every
+    /// function at or above the canonical baseline. Omitted when zero.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub crap_exempted: usize,
+    /// Lowest effective CRAP ceiling among the file's functions, present only
+    /// when it differs from the run global (`summary.max_crap_threshold`).
+    /// Consumers fall back to `summary.max_crap_threshold` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crap_effective_threshold: Option<f64>,
 }
 
 /// A hotspot: a file that is both complex and frequently changing.

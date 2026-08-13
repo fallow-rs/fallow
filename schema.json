@@ -1007,7 +1007,7 @@
           "default": 15
         },
         "maxCrap": {
-          "description": "Maximum allowed CRAP (Change Risk Anti-Patterns) score per function\n(default: 30.0). CRAP combines cyclomatic complexity with test\ncoverage: high complexity plus low coverage produces a high CRAP\nscore. Functions meeting or exceeding this threshold are reported.\nUse `--coverage` with Istanbul data for accurate per-function CRAP;\notherwise fallow estimates coverage from the module graph. Governs\nfindings only, never the health score.",
+          "description": "Maximum allowed CRAP (Change Risk Anti-Patterns) score per function\n(default: 30.0). CRAP combines cyclomatic complexity with test\ncoverage: high complexity plus low coverage produces a high CRAP\nscore. Functions meeting or exceeding this threshold are reported.\nUse `--coverage` with Istanbul data for accurate per-function CRAP;\notherwise fallow estimates coverage from the module graph. Governs\nfindings and the threshold-relative file-score signals\n(`crap_above_threshold`, the `risk` triage tag, and the\n`add_test_coverage` refactoring target); measured values such as\n`crap_max` and the overall health score never move with it. Set to\n`0` to disable CRAP enforcement entirely: no findings, nothing counts\nabove threshold, and file-score rows disclose baseline breaches as\nexempt instead.",
           "type": "number",
           "format": "double",
           "default": 30.0

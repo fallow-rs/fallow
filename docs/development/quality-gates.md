@@ -11,12 +11,14 @@ The type-aware CLI tests launch the real sidecar from
 npm --prefix tools/type-aware-sidecar install
 ```
 
-Without it, `type_aware_class_method_impact_uses_exact_owner_identity`,
-`type_aware_framework_contract_requires_package_provenance`, and
-`type_aware_refines_ambiguous_unused_exports_without_unsafe_fixes` fail with an
-exit code of 2 and empty stderr. That failure looks like a code defect but is a
-missing install; CI installs the sidecar, so these pass there either way. Check
-this first before investigating those three.
+Without it, the sidecar falls back to whatever `typescript` ancestor
+`node_modules` directories provide. The root install pins the same
+`typescript` version as the sidecar (kept in lockstep through the root
+`package.json` `overrides` entry), so the type-aware CLI tests still pass
+after a root-only `npm ci`. When the resolvable `typescript` is missing or too
+old, the sidecar exits with code 2 and a stderr message naming the conflict
+and the install command above; that failure is a missing install, not a code
+defect. CI installs the sidecar, so these tests pass there either way.
 
 ## Canonical commands
 

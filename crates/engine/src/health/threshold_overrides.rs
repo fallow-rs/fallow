@@ -145,6 +145,27 @@ impl ThresholdOverrideResolver {
         effective
     }
 
+    /// Resolve the effective CRAP ceiling for a single function, applying the
+    /// last matching override on top of the global `maxCrap` / `--max-crap`
+    /// value. Cheaper than [`resolve`](Self::resolve): it allocates nothing, so
+    /// it is safe to call in the per-file scoring hot loop.
+    #[must_use]
+    pub(super) fn effective_max_crap(&self, relative: &Path, function: &str) -> f64 {
+        let mut effective = self.global.crap;
+        for entry in &self.entries {
+            if !entry.matchers.is_match(relative) {
+                continue;
+            }
+            if !entry.functions.is_empty() && !entry.functions.iter().any(|f| f == function) {
+                continue;
+            }
+            if let Some(max_crap) = entry.configured.max_crap {
+                effective = max_crap;
+            }
+        }
+        effective
+    }
+
     fn entries(&self) -> &[CompiledThresholdOverride] {
         &self.entries
     }

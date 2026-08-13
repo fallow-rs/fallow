@@ -35,6 +35,8 @@ pub(super) struct HealthAnalysisDataInput<'a> {
     pub(super) pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     pub(super) needs_file_scores: bool,
     pub(super) seams: &'a HealthSeams<'a>,
+    pub(super) threshold_resolver: &'a super::threshold_overrides::ThresholdOverrideResolver,
+    pub(super) enforce_crap: bool,
 }
 
 pub(super) fn prepare_health_analysis_data(
@@ -74,6 +76,8 @@ pub(super) fn prepare_health_analysis_data(
             ignore_set: input.ignore_set,
             istanbul_coverage: input.istanbul_coverage,
             needs_file_scores: input.needs_file_scores,
+            threshold_resolver: input.threshold_resolver,
+            enforce_crap: input.enforce_crap,
         },
         precomputed_for_scores,
     )?;

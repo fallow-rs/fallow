@@ -37,7 +37,7 @@ paths:
 ## Plugin trait extensions
 - `path_aliases()` for framework-specific alias resolution (Nuxt `~/`, Next.js `@/`)
 - `virtual_module_prefixes()` for framework virtual modules (Docusaurus `@theme/`, `@docusaurus/`)
-- `virtual_package_suffixes()` for framework virtual package conventions (Vitest `/__mocks__`). Matches as `ends_with` on the extracted package name, suppressing `unlisted-dependency` reports for non-npm specifiers like `@aws-sdk/__mocks__`.
+- `virtual_package_suffixes()` for framework virtual package conventions. Matches as `ends_with` on the extracted package name, suppressing `unlisted-dependency` reports for matching specifiers. No built-in plugin declares a suffix since issue #2226 (Vitest dropped `/__mocks__`, so a literal `X/__mocks__` import reports as unlisted under both Jest and Vitest); the capability stays available to external plugins.
 
 ## External plugins
 Standalone definitions in JSONC/JSON/TOML or inline via `framework` config field. Discovered from `plugins` config, `.fallow/plugins/`, and `fallow-plugin-*` files. See `docs/plugin-authoring.md`.

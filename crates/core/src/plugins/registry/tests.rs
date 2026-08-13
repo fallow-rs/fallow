@@ -680,16 +680,17 @@ fn fumadocs_contributes_virtual_module_prefixes() {
     );
 }
 
+/// Issue #2226: literal `X/__mocks__` imports carry no runner semantics, so
+/// Vitest must not suppress them and stays in parity with Jest.
 #[test]
-fn vitest_contributes_mocks_virtual_package_suffix() {
+fn vitest_contributes_no_virtual_package_suffixes() {
     let registry = PluginRegistry::default();
     let pkg = make_pkg_dev(&["vitest"]);
     let result = registry.run(&pkg, Path::new("/project"), &[]);
     assert!(
-        result
-            .virtual_package_suffixes
-            .contains(&"/__mocks__".to_string()),
-        "vitest should contribute '/__mocks__' virtual package suffix"
+        result.virtual_package_suffixes.is_empty(),
+        "vitest must not contribute virtual package suffixes, got: {:?}",
+        result.virtual_package_suffixes
     );
 }
 

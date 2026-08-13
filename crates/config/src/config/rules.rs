@@ -82,6 +82,13 @@ pub struct RulesConfig {
     /// loading, not by serde: type-aware hosts default this opt-in rule to
     /// `warn`, and this flag lets an explicit user `off` win over that
     /// default (issue #2170).
+    ///
+    /// Because the field is `serde(skip)`, any serialize/deserialize
+    /// round-trip of [`FallowConfig`](crate::FallowConfig) silently resets it
+    /// to `false`, which would re-enable the type-aware `warn` default for a
+    /// user who explicitly set the rule to `off`. Do not route configs through
+    /// a serde round-trip after [`FallowConfig::load`](crate::FallowConfig::load)
+    /// without re-recording this flag.
     #[serde(skip)]
     pub private_type_leaks_configured: bool,
     /// A declared `dependencies` entry never observed used. Defaults to

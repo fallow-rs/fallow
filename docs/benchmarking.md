@@ -11,6 +11,22 @@ its child process, so `tools/type-aware-sidecar/bench/session.mjs` uses the
 supported Tinybench integration to track cold Program construction and warm
 persistent-session reuse as distinct benchmarks.
 
+Rust walltime retain gates run through the separate, manual
+`.github/workflows/bench-rust-walltime.yml` workflow. Its fixed suite choices
+cover core analysis, stable programmatic sessions, and engine components
+without accepting arbitrary commands. Keeping it manual avoids adding
+release-LTO builds to every pull request while preserving comparable Linux
+base/head evidence:
+
+```bash
+gh workflow run bench-rust-walltime.yml \
+  --ref <commit-or-branch> \
+  -f workload=analysis
+```
+
+Use the same workload on the exact base and head refs, then compare those two
+walltime runs in CodSpeed. Do not compare values across workload choices.
+
 Fast PR shards are selected by `.github/scripts/generate-benchmark-matrix.mjs`.
 Like Oxc's benchmark workflow, this keeps the tracked surface broad while only
 running the shards affected by a given change. Manual and merge-queue runs use

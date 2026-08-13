@@ -1,0 +1,11 @@
+{
+  "name": "issue-2225-vitest-root-mocks",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@bacons/apple-targets": "^5.0.0",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

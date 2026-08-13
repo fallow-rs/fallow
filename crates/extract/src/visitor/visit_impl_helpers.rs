@@ -346,6 +346,28 @@ pub(super) fn vitest_auto_mock_source(source: &str) -> Option<String> {
     Some(format!("{dir}/__mocks__/{file_name}"))
 }
 
+/// Root-level manual-mock candidate for a factory-less mock of a bare
+/// package specifier (`vi.mock('lodash')`, `jest.mock('@scope/pkg')`).
+///
+/// Both runners resolve such mocks to `__mocks__/<specifier>` at the project
+/// root: Jest applies node-module manual mocks automatically, Vitest only for
+/// registered `vi.mock` calls (issue #2225). The candidate stays root-relative
+/// because the extractor does not know the project root; the resolver probes
+/// it against ancestor `__mocks__` directories and drops it when no such file
+/// exists. Relative, absolute, `#`-alias, and URL-shaped sources are not bare
+/// package specifiers and get no root candidate.
+pub(super) fn root_manual_mock_source(source: &str) -> Option<String> {
+    let bare_package_shaped = !source.is_empty()
+        && !source.starts_with('.')
+        && !source.starts_with('/')
+        && !source.starts_with('#')
+        && !source.contains("://")
+        && !source.starts_with("data:")
+        && !source.ends_with('/')
+        && !source.split('/').any(|segment| segment == "__mocks__");
+    bare_package_shaped.then(|| format!("__mocks__/{source}"))
+}
+
 pub(super) fn pino_factory_callee_name(callee: &Expression<'_>) -> Option<String> {
     match unwrap_static_expr(callee) {
         Expression::Identifier(ident) => Some(ident.name.to_string()),
@@ -1536,6 +1558,52 @@ mod tests {
     fn vitest_auto_mock_source_nested_path_synthesizes_mocks_sibling() {
         let result = vitest_auto_mock_source("../utils/format");
         assert_eq!(result.as_deref(), Some("../utils/__mocks__/format"));
+    }
+
+    // -------------------------------------------------------------------------
+    // root_manual_mock_source
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn root_manual_mock_source_bare_package_synthesizes_root_candidate() {
+        assert_eq!(
+            root_manual_mock_source("lodash").as_deref(),
+            Some("__mocks__/lodash")
+        );
+    }
+
+    #[test]
+    fn root_manual_mock_source_scoped_package_synthesizes_root_candidate() {
+        assert_eq!(
+            root_manual_mock_source("@bacons/apple-targets").as_deref(),
+            Some("__mocks__/@bacons/apple-targets")
+        );
+    }
+
+    #[test]
+    fn root_manual_mock_source_package_subpath_synthesizes_root_candidate() {
+        assert_eq!(
+            root_manual_mock_source("lodash/merge").as_deref(),
+            Some("__mocks__/lodash/merge")
+        );
+    }
+
+    #[test]
+    fn root_manual_mock_source_non_bare_shapes_return_none() {
+        assert!(root_manual_mock_source("").is_none());
+        assert!(root_manual_mock_source("./services/api").is_none());
+        assert!(root_manual_mock_source("../utils/format").is_none());
+        assert!(root_manual_mock_source("/abs/path").is_none());
+        assert!(root_manual_mock_source("#internal/alias").is_none());
+        assert!(root_manual_mock_source("https://example.com/mod").is_none());
+        assert!(root_manual_mock_source("data:text/plain,foo").is_none());
+        assert!(root_manual_mock_source("pkg/").is_none());
+    }
+
+    #[test]
+    fn root_manual_mock_source_mocks_segment_returns_none() {
+        assert!(root_manual_mock_source("__mocks__/lodash").is_none());
+        assert!(root_manual_mock_source("@scope/__mocks__").is_none());
     }
 
     // -------------------------------------------------------------------------

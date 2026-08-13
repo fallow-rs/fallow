@@ -13,7 +13,9 @@ use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, relative_path,
     split_dir_filename, thousands,
 };
-use crate::health::scoring::{FileScoreConcern, file_score_concern_axis};
+use crate::health::scoring::{
+    FileScoreConcern, file_score_concern_axis, file_score_fully_crap_exempt,
+};
 
 /// Docs base URL for health explanations.
 const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
@@ -2299,17 +2301,41 @@ fn render_file_scores(lines: &mut Vec<String>, report: &fallow_output::HealthRep
 
     push_file_scores_header(lines, report.file_scores.len());
 
+    let max_crap_threshold = report.summary.max_crap_threshold;
     let shown_scores = report.file_scores.len().min(MAX_FLAT_ITEMS);
     for score in &report.file_scores[..shown_scores] {
-        render_file_score_row(lines, score, root);
+        render_file_score_row(lines, score, root, max_crap_threshold);
     }
     push_file_scores_overflow(lines, report.file_scores.len());
     let crap_note = file_scores_crap_note(report);
+    let risk_bands = file_scores_risk_bands_note(max_crap_threshold);
     lines.push(format!(
         "  {}",
-        format!("Sorted by triage concern: the larger of low-MI concern and CRAP risk. The risk / structure tag marks which one placed each file. MI reflects complexity, coupling, and dead code; risk reflects untested complexity (CRAP) and can diverge from MI. Risk: low <15, moderate 15-30, high >=30. {crap_note} {DOCS_HEALTH}#file-health-scores").dimmed()
+        format!("Sorted by triage concern: the larger of low-MI concern and CRAP risk. The risk / structure tag marks which one placed each file. MI reflects complexity, coupling, and dead code; risk reflects untested complexity (CRAP) and can diverge from MI. {risk_bands} {crap_note} {DOCS_HEALTH}#file-health-scores").dimmed()
     ));
     lines.push(String::new());
+}
+
+/// Risk band segment of the file-scores footnote, stated relative to the run's
+/// configured CRAP ceiling so a raised `maxCrap` / `--max-crap` does not leave
+/// the note claiming the default 15/30 bands.
+fn file_scores_risk_bands_note(max_crap_threshold: f64) -> String {
+    if max_crap_threshold <= 0.0 {
+        return "CRAP enforcement is disabled (maxCrap 0): no function counts above threshold; exempt counts use the canonical 30 baseline.".to_string();
+    }
+    let high = format_risk_band_bound(max_crap_threshold);
+    let low = format_risk_band_bound(max_crap_threshold / 2.0);
+    format!("Risk: low <{low}, moderate {low}-{high}, high >={high}.")
+}
+
+/// Render a risk band bound without a trailing `.0`, so the default note keeps
+/// reading `low <15, moderate 15-30, high >=30`.
+fn format_risk_band_bound(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.1}")
+    }
 }
 
 fn push_file_scores_header(lines: &mut Vec<String>, score_count: usize) {
@@ -2328,6 +2354,7 @@ fn render_file_score_row(
     lines: &mut Vec<String>,
     score: &fallow_output::FileHealthScore,
     root: &Path,
+    max_crap_threshold: f64,
 ) {
     let file_str = relative_path(&score.path, root).display().to_string();
     let (dir, filename) = split_dir_filename(&file_str);
@@ -2341,16 +2368,17 @@ fn render_file_score_row(
         dir.dimmed(),
         filename,
         " ".repeat(pad),
-        file_score_concern_colored(score),
+        file_score_concern_colored(score, max_crap_threshold),
     ));
     lines.push(format!(
-        "         {} LOC  {} fan-in  {} fan-out  {} dead  {} density{}",
+        "         {} LOC  {} fan-in  {} fan-out  {} dead  {} density{}{}",
         format!("{:>6}", score.lines).dimmed(),
         format!("{:>3}", score.fan_in).dimmed(),
         format!("{:>3}", score.fan_out).dimmed(),
         format!("{:>3.0}%", score.dead_code_ratio * 100.0).dimmed(),
         format!("{:.2}", score.complexity_density).dimmed(),
-        file_score_risk_suffix(score),
+        file_score_risk_suffix(score, max_crap_threshold),
+        file_score_exempt_marker(score, max_crap_threshold),
     ));
     lines.push(String::new());
 }
@@ -2366,13 +2394,17 @@ fn maintainability_colored(mi: f64) -> String {
     }
 }
 
-fn file_score_concern_colored(score: &fallow_output::FileHealthScore) -> String {
-    let label = file_score_concern_axis(score).label();
-    match file_score_concern_axis(score) {
+fn file_score_concern_colored(
+    score: &fallow_output::FileHealthScore,
+    max_crap_threshold: f64,
+) -> String {
+    let label = file_score_concern_axis(score, max_crap_threshold).label();
+    match file_score_concern_axis(score, max_crap_threshold) {
         FileScoreConcern::Risk => {
-            if score.crap_max >= 30.0 {
+            let ceiling = score.crap_effective_threshold.unwrap_or(max_crap_threshold);
+            if score.crap_max >= ceiling {
                 label.red().bold().to_string()
-            } else if score.crap_max >= 15.0 {
+            } else if score.crap_max >= ceiling / 2.0 {
                 label.yellow().to_string()
             } else {
                 label.dimmed().to_string()
@@ -2390,7 +2422,10 @@ fn file_score_concern_colored(score: &fallow_output::FileHealthScore) -> String 
     }
 }
 
-fn file_score_risk_suffix(score: &fallow_output::FileHealthScore) -> String {
+fn file_score_risk_suffix(
+    score: &fallow_output::FileHealthScore,
+    max_crap_threshold: f64,
+) -> String {
     if score.crap_max <= 0.0 {
         return String::new();
     }
@@ -2399,14 +2434,43 @@ fn file_score_risk_suffix(score: &fallow_output::FileHealthScore) -> String {
     } else {
         format!("{:.1}", score.crap_max)
     };
-    let risk_colored = if score.crap_max >= 30.0 {
-        risk_str.red().bold().to_string()
-    } else if score.crap_max >= 15.0 {
-        risk_str.yellow().to_string()
-    } else {
+    // A fully exempt row renders dimmed regardless of magnitude: the run has
+    // zero CRAP findings for it, so a red-bold number would contradict the
+    // findings story the configuration produced (issue #2228).
+    let risk_colored = if file_score_fully_crap_exempt(score, max_crap_threshold) {
         risk_str.dimmed().to_string()
+    } else {
+        let ceiling = score.crap_effective_threshold.unwrap_or(max_crap_threshold);
+        if score.crap_max >= ceiling {
+            risk_str.red().bold().to_string()
+        } else if score.crap_max >= ceiling / 2.0 {
+            risk_str.yellow().to_string()
+        } else {
+            risk_str.dimmed().to_string()
+        }
     };
     format!("  {risk_colored} risk")
+}
+
+/// Dimmed disclosure appended to rows whose CRAP breaches were let through by
+/// configuration, so a reader copying the row sees why it is not shouting. The
+/// wording distinguishes a per-file override from a raised (or disabled)
+/// global ceiling; default-configuration rows render nothing.
+fn file_score_exempt_marker(
+    score: &fallow_output::FileHealthScore,
+    max_crap_threshold: f64,
+) -> String {
+    if score.crap_exempted == 0 {
+        return String::new();
+    }
+    let marker = if score.crap_effective_threshold.is_some() {
+        "exempt (override)"
+    } else if max_crap_threshold <= 0.0 {
+        "exempt (crap disabled)"
+    } else {
+        "exempt (raised threshold)"
+    };
+    format!("  {}", marker.dimmed())
 }
 
 fn push_file_scores_overflow(lines: &mut Vec<String>, score_count: usize) {
@@ -4596,6 +4660,8 @@ mod tests {
             lines: 200,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -4627,6 +4693,8 @@ mod tests {
                 lines: 100,
                 crap_max: 552.0,
                 crap_above_threshold: 1,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
             fallow_output::FileHealthScore {
                 path: root.join("src/messy.ts"),
@@ -4641,6 +4709,8 @@ mod tests {
                 lines: 100,
                 crap_max: 2.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
         ];
         let text = plain(&build_health_human_lines(&report, &root));
@@ -4662,6 +4732,142 @@ mod tests {
         );
     }
 
+    fn exempt_score(
+        root: &Path,
+        crap_effective_threshold: Option<f64>,
+    ) -> fallow_output::FileHealthScore {
+        fallow_output::FileHealthScore {
+            path: root.join("src/legacy.ts"),
+            fan_in: 1,
+            fan_out: 0,
+            dead_code_ratio: 0.0,
+            complexity_density: 0.77,
+            maintainability_index: 88.0,
+            total_cyclomatic: 20,
+            total_cognitive: 18,
+            function_count: 2,
+            lines: 26,
+            crap_max: 110.0,
+            crap_above_threshold: 0,
+            crap_exempted: 2,
+            crap_effective_threshold,
+        }
+    }
+
+    #[test]
+    fn file_scores_override_exempt_row_reads_structure_with_marker() {
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.file_scores = vec![exempt_score(&root, Some(500.0))];
+        let text = plain(&build_health_human_lines(&report, &root));
+        let tag_line = text
+            .lines()
+            .find(|l| l.contains("legacy.ts"))
+            .expect("legacy path line");
+        assert!(
+            tag_line.trim_end().ends_with("structure"),
+            "expected structure tag on an override-exempt row, got: {tag_line:?}"
+        );
+        let metrics_line = text
+            .lines()
+            .find(|l| l.contains("110.0 risk"))
+            .expect("risk metrics line");
+        assert!(
+            metrics_line.contains("exempt (override)"),
+            "expected override marker, got: {metrics_line:?}"
+        );
+    }
+
+    #[test]
+    fn file_scores_global_raise_marker_and_relative_note_bands() {
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.summary.max_crap_threshold = 5000.0;
+        report.file_scores = vec![exempt_score(&root, None)];
+        let text = plain(&build_health_human_lines(&report, &root));
+        let metrics_line = text
+            .lines()
+            .find(|l| l.contains("110.0 risk"))
+            .expect("risk metrics line");
+        assert!(
+            metrics_line.contains("exempt (raised threshold)"),
+            "expected global-raise marker, got: {metrics_line:?}"
+        );
+        assert!(
+            text.contains("Risk: low <2500, moderate 2500-5000, high >=5000."),
+            "expected bands relative to the run global"
+        );
+        assert!(!text.contains("moderate 15-30"));
+    }
+
+    #[test]
+    fn file_scores_disabled_crap_enforcement_notes_and_marks_rows() {
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.summary.max_crap_threshold = 0.0;
+        report.file_scores = vec![exempt_score(&root, None)];
+        let text = plain(&build_health_human_lines(&report, &root));
+        let metrics_line = text
+            .lines()
+            .find(|l| l.contains("110.0 risk"))
+            .expect("risk metrics line");
+        assert!(
+            metrics_line.contains("exempt (crap disabled)"),
+            "expected disabled-enforcement marker, got: {metrics_line:?}"
+        );
+        assert!(text.contains("CRAP enforcement is disabled (maxCrap 0)"));
+    }
+
+    #[test]
+    fn file_scores_default_note_keeps_canonical_bands_without_markers() {
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.file_scores = vec![fallow_output::FileHealthScore {
+            path: root.join("src/risky.ts"),
+            fan_in: 0,
+            fan_out: 0,
+            dead_code_ratio: 0.0,
+            complexity_density: 0.5,
+            maintainability_index: 85.0,
+            total_cyclomatic: 20,
+            total_cognitive: 18,
+            function_count: 2,
+            lines: 40,
+            crap_max: 110.0,
+            crap_above_threshold: 2,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
+        }];
+        let text = plain(&build_health_human_lines(&report, &root));
+        assert!(text.contains("Risk: low <15, moderate 15-30, high >=30."));
+        assert!(!text.contains("exempt ("));
+        let tag_line = text
+            .lines()
+            .find(|l| l.contains("risky.ts"))
+            .expect("risky path line");
+        assert!(tag_line.trim_end().ends_with("risk"));
+    }
+
+    #[test]
+    fn file_scores_insufficient_override_row_keeps_risk_story() {
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        let mut score = exempt_score(&root, Some(50.0));
+        score.crap_above_threshold = 2;
+        score.crap_exempted = 0;
+        report.file_scores = vec![score];
+        let text = plain(&build_health_human_lines(&report, &root));
+        let tag_line = text
+            .lines()
+            .find(|l| l.contains("legacy.ts"))
+            .expect("legacy path line");
+        assert!(
+            tag_line.trim_end().ends_with("risk"),
+            "expected risk tag when the override is insufficient, got: {tag_line:?}"
+        );
+        assert!(!text.contains("exempt ("));
+    }
+
     #[test]
     fn file_scores_mi_color_thresholds() {
         let root = PathBuf::from("/project");
@@ -4680,6 +4886,8 @@ mod tests {
                 lines: 50,
                 crap_max: 0.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
             fallow_output::FileHealthScore {
                 path: root.join("src/okay.ts"),
@@ -4694,6 +4902,8 @@ mod tests {
                 lines: 100,
                 crap_max: 0.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
             fallow_output::FileHealthScore {
                 path: root.join("src/bad.ts"),
@@ -4708,6 +4918,8 @@ mod tests {
                 lines: 500,
                 crap_max: 0.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             },
         ];
         let lines = build_health_human_lines(&report, &root);
@@ -4736,6 +4948,8 @@ mod tests {
                 lines: 50,
                 crap_max: 0.0,
                 crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
             });
         }
         let lines = build_health_human_lines(&report, &root);
@@ -4765,6 +4979,8 @@ mod tests {
             lines: 50,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -5310,6 +5526,8 @@ mod tests {
             lines: 200,
             crap_max: 0.0,
             crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
         }];
         report.hotspots = vec![
             fallow_output::HotspotEntry {

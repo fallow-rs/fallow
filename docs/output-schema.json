@@ -3249,11 +3249,22 @@
         },
         "crap_max": {
           "type": "number",
-          "description": "Highest CRAP score among the file's functions."
+          "description": "Highest CRAP score among the file's functions. Always the raw measured\nvalue; threshold overrides never rewrite it."
         },
         "crap_above_threshold": {
           "type": "integer",
-          "description": "Functions whose CRAP score exceeds the threshold."
+          "description": "Functions whose rounded CRAP score meets or exceeds their effective\nceiling, resolved from `health.thresholdOverrides` over the global\n`maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled\n(global ceiling `0`)."
+        },
+        "crap_exempted": {
+          "type": "integer",
+          "description": "Functions whose rounded CRAP score is at or above the canonical 30.0\nbaseline but below their effective ceiling: the count the configuration\nlet through. Stays `0` when the effective ceiling is stricter than 30.\nWhen CRAP enforcement is disabled (global ceiling `0`), counts every\nfunction at or above the canonical baseline. Omitted when zero."
+        },
+        "crap_effective_threshold": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Lowest effective CRAP ceiling among the file's functions, present only\nwhen it differs from the run global (`summary.max_crap_threshold`).\nConsumers fall back to `summary.max_crap_threshold` when absent."
         }
       },
       "required": [

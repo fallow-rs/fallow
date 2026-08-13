@@ -1,0 +1,93 @@
+name: Rust Walltime Benchmarks
+
+# Keep walltime in a separate run from simulation so CodSpeed can assemble
+# both reports reliably. This workflow is manual because release-LTO walltime
+# builds are intentionally reserved for retain-gate validation.
+
+on:
+  workflow_dispatch:
+    inputs:
+      workload:
+        description: Fixed Rust workload to measure
+        required: true
+        type: choice
+        options:
+          - analysis
+          - programmatic-stable
+          - component-engine
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-C debuginfo=1 -C strip=none -g --cfg codspeed"
+
+jobs:
+  benchmark:
+    name: CodSpeed walltime (${{ inputs.workload }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: rust-walltime-${{ inputs.workload }}
+
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@cb33e69fad06166ca28a42b2575e4dadabf62ee8 # v2.85.8
+        with:
+          tool: cargo-codspeed@4.7.0
+
+      - name: Select fixed workload
+        id: workload
+        env:
+          WALLTIME_WORKLOAD: ${{ inputs.workload }}
+        run: |
+          set -euo pipefail
+          case "$WALLTIME_WORKLOAD" in
+            analysis)
+              echo "package=fallow-core" >> "$GITHUB_OUTPUT"
+              echo "bench=analysis" >> "$GITHUB_OUTPUT"
+              ;;
+            programmatic-stable)
+              echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
+              echo "bench=programmatic_stable" >> "$GITHUB_OUTPUT"
+              ;;
+            component-engine)
+              echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
+              echo "bench=component_engine" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported walltime workload: $WALLTIME_WORKLOAD" >&2
+              exit 2
+              ;;
+          esac
+
+      - name: Build benchmark workload
+        env:
+          BENCH_PACKAGE: ${{ steps.workload.outputs.package }}
+          BENCH_TARGET: ${{ steps.workload.outputs.bench }}
+        run: >-
+          cargo codspeed build -m walltime
+          -p "$BENCH_PACKAGE"
+          --bench "$BENCH_TARGET"
+          --features codspeed
+
+      - name: Run benchmark workload
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
+        env:
+          BENCH_PACKAGE: ${{ steps.workload.outputs.package }}
+          BENCH_TARGET: ${{ steps.workload.outputs.bench }}
+        with:
+          mode: walltime
+          run: >-
+            cargo codspeed run
+            -p "$BENCH_PACKAGE"
+            --bench "$BENCH_TARGET"

@@ -233,22 +233,566 @@ fn run_fallow_raw_with_env(
 }
 
 fn audit_cache_paths(root: &Path, base_sha: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-    // For a git-repo fixture root the requested root IS the repo toplevel, so a
-    // single canonical hash fills both the repo and root slots. Source it from
-    // the production helper (dunce canonicalization + platform path-identity
-    // bytes) so the fixtures land where the spawned binary enumerates them;
-    // recomputing via `Path::canonicalize` + UTF-8 bytes diverges on Windows,
-    // where std canonicalize keeps the `\\?\` verbatim prefix (production strips
-    // it via dunce) and the identity is hashed as UTF-16LE bytes.
+    audit_cache_paths_in(root, base_sha, &std::env::temp_dir())
+}
+
+/// Compute the cache entry paths for `root` under an explicit scan root.
+///
+/// For a git-repo fixture root the requested root IS the repo toplevel, so a
+/// single canonical hash fills both the repo and root slots. Source it from
+/// the production helper (dunce canonicalization + platform path-identity
+/// bytes) so the fixtures land where the spawned binary enumerates them;
+/// recomputing via `Path::canonicalize` + UTF-8 bytes diverges on Windows,
+/// where std canonicalize keeps the `\\?\` verbatim prefix (production strips
+/// it via dunce) and the identity is hashed as UTF-16LE bytes.
+///
+/// Prune tests MUST pass a private scan root and redirect the spawned
+/// binary's temp dir onto it (see [`run_prune_with_scan_root`]): prune's
+/// cross-repo pass scans the whole temp dir, so running it against the shared
+/// system temp would race parallel test binaries and could reclaim a
+/// developer's real warm caches.
+fn audit_cache_paths_in(
+    root: &Path,
+    base_sha: &str,
+    scan_root: &Path,
+) -> (std::path::PathBuf, std::path::PathBuf) {
     let hash = fallow_cli::canonical_root_hash(root);
-    let new_path = std::env::temp_dir().join(format!(
+    let new_path = scan_root.join(format!(
         "fallow-audit-base-cache-{hash:016x}-root-{hash:016x}"
     ));
-    let legacy_path = std::env::temp_dir().join(format!(
+    let legacy_path = scan_root.join(format!(
         "fallow-audit-base-cache-{hash:016x}-{}",
         &base_sha[..16]
     ));
     (new_path, legacy_path)
+}
+
+/// Run `fallow` with its temp dir redirected onto `scan_root` so the prune
+/// cross-repo pass only ever sees this test's own fixtures.
+fn run_prune_with_scan_root(args: &[&str], scan_root: &Path) -> common::CommandOutput {
+    run_fallow_raw_with_env(
+        args,
+        &[
+            ("TMPDIR", scan_root),
+            ("TMP", scan_root),
+            ("TEMP", scan_root),
+        ],
+    )
+}
+
+/// Backdate a file's mtime by whole days.
+fn backdate_days(path: &Path, days: u64) {
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("file should open for backdating");
+    let when = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400);
+    file.set_modified(when)
+        .expect("set_modified should succeed");
+}
+
+/// Deterministic snapshot of a directory's entry names, sizes, and mtimes,
+/// for byte-level "dry run must not mutate" assertions.
+fn snapshot_dir_entries(dir: &Path) -> Vec<(String, u64, std::time::SystemTime)> {
+    let mut entries: Vec<(String, u64, std::time::SystemTime)> = fs::read_dir(dir)
+        .expect("directory should be readable")
+        .flatten()
+        .map(|entry| {
+            let metadata = entry.metadata().expect("entry metadata should be readable");
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                metadata.len(),
+                metadata.modified().expect("entry mtime should be readable"),
+            )
+        })
+        .collect();
+    entries.sort();
+    entries
+}
+
+/// Materialize an aged cache entry (directory with content, `.sha`, and a
+/// backdated owner-recording `.last-used`) at `cache_path`.
+fn write_aged_cache_entry(cache_path: &Path, base_sha: &str, owner: &Path, age_days: u64) {
+    fs::create_dir_all(cache_path.join("node_modules")).expect("cache tree should be created");
+    fs::write(cache_path.join("node_modules/blob.bin"), vec![0u8; 2048])
+        .expect("cache content should be written");
+    fs::write(cache_sidecar(cache_path, ".sha"), format!("{base_sha}\n"))
+        .expect("readiness sidecar should be written");
+    fs::write(
+        cache_sidecar(cache_path, ".last-used"),
+        format!("{}\n", owner.display()),
+    )
+    .expect("last-used sidecar should be written");
+    backdate_days(&cache_sidecar(cache_path, ".last-used"), age_days);
+}
+
+#[test]
+fn audit_cache_prune_dry_run_reports_without_filesystem_mutation() {
+    let fixture = create_audit_fixture("cache-prune-dry-run");
+    let root = fixture.path();
+    let scan = TempDir::new().expect("scan root should be created");
+    let base_sha = "0123456789abcdef0123456789abcdef01234567";
+    let (aged_path, _) = audit_cache_paths_in(root, base_sha, scan.path());
+    write_aged_cache_entry(&aged_path, base_sha, root, 40);
+    let before = snapshot_dir_entries(scan.path());
+
+    let output = run_prune_with_scan_root(
+        &[
+            "audit-cache",
+            "prune",
+            "--dry-run",
+            "--root",
+            root.to_str().expect("root should be utf-8"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        scan.path(),
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "prune dry-run should succeed: {}{}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["kind"], serde_json::json!("audit-cache-prune"));
+    assert_eq!(json["schema_version"], serde_json::json!(1));
+    assert_eq!(json["command"], serde_json::json!("audit-cache prune"));
+    assert_eq!(json["dry_run"], serde_json::json!(true));
+    assert_eq!(json["max_age_days"], serde_json::json!(30));
+    assert_eq!(json["max_age_source"], serde_json::json!("default"));
+    assert_eq!(json["found"], serde_json::json!(1));
+    assert_eq!(json["removed"], serde_json::json!(1));
+    assert_eq!(json["kept"], serde_json::json!(0));
+    assert_eq!(json["skipped"], serde_json::json!(0));
+    assert_eq!(json["failed"], serde_json::json!(0));
+    assert_eq!(json["complete"], serde_json::json!(true));
+    let entries = json["entries"]
+        .as_array()
+        .expect("entries should be an array");
+    assert_eq!(entries.len(), 1, "found must equal entries.len()");
+    let entry = &entries[0];
+    assert_eq!(entry["pass"], serde_json::json!("owned"));
+    assert_eq!(entry["disposition"], serde_json::json!("removed"));
+    assert_eq!(entry["reason"], serde_json::json!("aged-out"));
+    assert_eq!(entry["age_days"], serde_json::json!(40));
+    assert!(
+        entry["size_bytes"]
+            .as_u64()
+            .is_some_and(|size| size >= 2048),
+        "size walk should count the cache content: {entry}"
+    );
+    assert_eq!(json["reclaimed_bytes"], entry["size_bytes"]);
+    assert_eq!(
+        snapshot_dir_entries(scan.path()),
+        before,
+        "dry run must leave the scan root byte-identical (no removal, no `.lock`, no seeding)",
+    );
+}
+
+#[test]
+fn audit_cache_prune_applies_policy_and_closes_counts() {
+    let fixture = create_audit_fixture("cache-prune-apply");
+    let root = fixture.path();
+    let other = create_audit_fixture("cache-prune-apply-other");
+    let scan = TempDir::new().expect("scan root should be created");
+    let base_sha = "0123456789abcdef0123456789abcdef01234567";
+    let (aged_path, fresh_path) = audit_cache_paths_in(root, base_sha, scan.path());
+    write_aged_cache_entry(&aged_path, base_sha, root, 40);
+    fs::create_dir_all(&fresh_path).expect("fresh cache should be created");
+    fs::write(cache_sidecar(&fresh_path, ".sha"), format!("{base_sha}\n"))
+        .expect("fresh readiness sidecar should be written");
+    fs::write(
+        cache_sidecar(&fresh_path, ".last-used"),
+        format!("{}\n", root.display()),
+    )
+    .expect("fresh last-used sidecar should be written");
+    let (foreign_path, _) = audit_cache_paths_in(other.path(), base_sha, scan.path());
+    write_aged_cache_entry(&foreign_path, base_sha, other.path(), 40);
+
+    let output = run_prune_with_scan_root(
+        &[
+            "audit-cache",
+            "prune",
+            "--root",
+            root.to_str().expect("root should be utf-8"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        scan.path(),
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "prune should succeed: {}{}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["dry_run"], serde_json::json!(false));
+    assert_eq!(json["found"], serde_json::json!(3));
+    assert_eq!(json["removed"], serde_json::json!(1));
+    assert_eq!(json["kept"], serde_json::json!(2));
+    assert_eq!(json["skipped"], serde_json::json!(0));
+    assert_eq!(json["failed"], serde_json::json!(0));
+    assert_eq!(json["complete"], serde_json::json!(true));
+    let entries = json["entries"]
+        .as_array()
+        .expect("entries should be an array");
+    assert_eq!(entries.len(), 3, "found must equal entries.len()");
+    let by_path = |path: &Path| {
+        entries
+            .iter()
+            .find(|entry| entry["path"] == serde_json::json!(path))
+            .unwrap_or_else(|| panic!("entry for {} should be reported", path.display()))
+    };
+    let aged = by_path(&aged_path);
+    assert_eq!(aged["disposition"], serde_json::json!("removed"));
+    assert_eq!(aged["reason"], serde_json::json!("aged-out"));
+    assert_eq!(aged["pass"], serde_json::json!("owned"));
+    let fresh = by_path(&fresh_path);
+    assert_eq!(fresh["disposition"], serde_json::json!("kept"));
+    assert_eq!(fresh["reason"], serde_json::json!("fresh"));
+    assert_eq!(fresh["pass"], serde_json::json!("legacy"));
+    assert_eq!(fresh["age_days"], serde_json::json!(0));
+    let foreign = by_path(&foreign_path);
+    assert_eq!(foreign["disposition"], serde_json::json!("kept"));
+    assert_eq!(foreign["reason"], serde_json::json!("owner-live"));
+    assert_eq!(foreign["pass"], serde_json::json!("foreign"));
+    assert_eq!(
+        foreign["owner_root"],
+        serde_json::json!(other.path().display().to_string()),
+        "the recorded live owner root must be reported",
+    );
+    assert!(
+        json["reclaimed_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes >= 2048),
+        "reclaimed_bytes should carry the removed entry's size: {json}"
+    );
+
+    assert!(!aged_path.exists(), "the aged entry must be removed");
+    assert!(!cache_sidecar(&aged_path, ".sha").exists());
+    assert!(!cache_sidecar(&aged_path, ".last-used").exists());
+    assert!(
+        cache_sidecar(&aged_path, ".lock").exists(),
+        "the `.lock` sidecar must never be deleted",
+    );
+    assert!(fresh_path.is_dir(), "a fresh entry must be kept");
+    assert!(
+        foreign_path.is_dir(),
+        "a foreign entry with a live owner must be kept",
+    );
+}
+
+#[test]
+fn audit_cache_prune_human_output_lists_rows_and_hints() {
+    let fixture = create_audit_fixture("cache-prune-human");
+    let root = fixture.path();
+    let other = create_audit_fixture("cache-prune-human-other");
+    let scan = TempDir::new().expect("scan root should be created");
+    let base_sha = "0123456789abcdef0123456789abcdef01234567";
+    let (aged_path, _) = audit_cache_paths_in(root, base_sha, scan.path());
+    write_aged_cache_entry(&aged_path, base_sha, root, 40);
+    let (foreign_path, _) = audit_cache_paths_in(other.path(), base_sha, scan.path());
+    write_aged_cache_entry(&foreign_path, base_sha, other.path(), 40);
+    fs::write(
+        scan.path()
+            .join("fallow-audit-base-cache-1111111111111111-root-2222222222222222.lock"),
+        "",
+    )
+    .expect("bare lock sidecar should be written");
+
+    let output = run_prune_with_scan_root(
+        &[
+            "audit-cache",
+            "prune",
+            "--dry-run",
+            "--max-age-days",
+            "30",
+            "--root",
+            root.to_str().expect("root should be utf-8"),
+        ],
+        scan.path(),
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "prune dry-run should succeed: {}{}",
+        output.stdout, output.stderr
+    );
+    let stdout = &output.stdout;
+    assert!(
+        stdout.contains("audit cache prune (threshold 30d from flag) in "),
+        "header should name the threshold, source, and scan root: {stdout}"
+    );
+    assert!(
+        stdout.contains("would remove") && stdout.contains("aged 40d"),
+        "dry-run rows should use would-remove wording with the age: {stdout}"
+    );
+    assert!(
+        stdout.contains("owner live: "),
+        "live-owner rows should name the owner: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 lock sidecar with no cache remain (harmless, kept by design)"),
+        "lock-only entries should aggregate into one line: {stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "kept 1 entry owned by other live projects; run `fallow audit-cache remove --root <path> --yes` in a project to clear its own cache"
+        ),
+        "live-owner rows should come with a next-step hint: {stdout}"
+    );
+    assert!(
+        stdout.contains("would reclaim "),
+        "dry-run summary should use would-reclaim wording: {stdout}"
+    );
+}
+
+#[test]
+fn audit_cache_prune_zero_max_age_reclaims_orphans_only() {
+    let fixture = create_audit_fixture("cache-prune-zero-age");
+    let root = fixture.path();
+    let scan = TempDir::new().expect("scan root should be created");
+    let base_sha = "0123456789abcdef0123456789abcdef01234567";
+    let (aged_path, orphan_path) = audit_cache_paths_in(root, base_sha, scan.path());
+    write_aged_cache_entry(&aged_path, base_sha, root, 40);
+    fs::write(cache_sidecar(&orphan_path, ".sha"), format!("{base_sha}\n"))
+        .expect("orphan readiness sidecar should be written");
+    fs::write(cache_sidecar(&orphan_path, ".last-used"), "")
+        .expect("orphan last-used sidecar should be written");
+
+    let output = run_prune_with_scan_root(
+        &[
+            "audit-cache",
+            "prune",
+            "--max-age-days",
+            "0",
+            "--root",
+            root.to_str().expect("root should be utf-8"),
+        ],
+        scan.path(),
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "prune with a zero threshold should succeed: {}{}",
+        output.stdout, output.stderr
+    );
+    assert!(
+        output.stdout.contains(
+            "audit cache prune (age-based reclaim disabled by --max-age-days 0; reclaiming orphaned entries only) in "
+        ),
+        "the zero-threshold header must say age-based reclaim is disabled: {}",
+        output.stdout
+    );
+    assert!(
+        !cache_sidecar(&orphan_path, ".sha").exists()
+            && !cache_sidecar(&orphan_path, ".last-used").exists(),
+        "orphaned sidecars must still be reclaimed with age-based GC disabled",
+    );
+    assert!(
+        aged_path.is_dir(),
+        "no age-based reclaim may happen under --max-age-days 0",
+    );
+}
+
+#[test]
+fn audit_cache_prune_reports_lock_contention_with_exit_zero() {
+    let fixture = create_audit_fixture("cache-prune-contended");
+    let root = fixture.path();
+    let scan = TempDir::new().expect("scan root should be created");
+    let base_sha = "0123456789abcdef0123456789abcdef01234567";
+    let (aged_path, _) = audit_cache_paths_in(root, base_sha, scan.path());
+    write_aged_cache_entry(&aged_path, base_sha, root, 2);
+    fs::write(cache_sidecar(&aged_path, ".lock"), "").expect("lock sidecar should be written");
+    let held_lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(cache_sidecar(&aged_path, ".lock"))
+        .expect("cache lock should open");
+    held_lock.try_lock().expect("cache lock should be held");
+
+    let output = run_prune_with_scan_root(
+        &[
+            "audit-cache",
+            "prune",
+            "--max-age-days",
+            "1",
+            "--root",
+            root.to_str().expect("root should be utf-8"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        scan.path(),
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "contention is a deferral, not a failure: {}{}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["found"], serde_json::json!(1));
+    assert_eq!(json["skipped"], serde_json::json!(1));
+    assert_eq!(json["removed"], serde_json::json!(0));
+    assert_eq!(json["complete"], serde_json::json!(false));
+    let entries = json["entries"]
+        .as_array()
+        .expect("entries should be an array");
+    assert_eq!(entries[0]["disposition"], serde_json::json!("skipped"));
+    assert_eq!(entries[0]["reason"], serde_json::json!("lock-contention"));
+    assert!(aged_path.is_dir(), "a contended entry must remain");
+    drop(held_lock);
+}
+
+#[test]
+fn audit_cache_prune_defaults_root_to_cwd_and_honors_threshold_precedence() {
+    let fixture = create_audit_fixture("cache-prune-cwd");
+    let root = fixture.path();
+    let scan = TempDir::new().expect("scan root should be created");
+
+    // No --root: prune defaults to the current directory (remove keeps its
+    // explicit-root requirement, covered by the remove tests above).
+    let no_root = Command::new(common::fallow_bin())
+        .current_dir(root)
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .env("TMPDIR", scan.path())
+        .env("TMP", scan.path())
+        .env("TEMP", scan.path())
+        .args([
+            "audit-cache",
+            "prune",
+            "--dry-run",
+            "--format",
+            "json",
+            "--quiet",
+        ])
+        .output()
+        .expect("fallow should run");
+    assert_eq!(
+        no_root.status.code(),
+        Some(0),
+        "prune must not require an explicit --root: {}{}",
+        String::from_utf8_lossy(&no_root.stdout),
+        String::from_utf8_lossy(&no_root.stderr),
+    );
+    let json: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&no_root.stdout))
+        .expect("prune JSON should parse");
+    assert_eq!(json["kind"], serde_json::json!("audit-cache-prune"));
+
+    // Threshold precedence: the flag beats the env var, the env var beats the
+    // default.
+    let flag_wins = run_fallow_raw_with_env(
+        &[
+            "audit-cache",
+            "prune",
+            "--dry-run",
+            "--max-age-days",
+            "9",
+            "--root",
+            root.to_str().expect("root should be utf-8"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[
+            ("TMPDIR", scan.path()),
+            ("TMP", scan.path()),
+            ("TEMP", scan.path()),
+            ("FALLOW_AUDIT_CACHE_MAX_AGE_DAYS", Path::new("7")),
+        ],
+    );
+    let flag_json = parse_json(&flag_wins);
+    assert_eq!(flag_json["max_age_days"], serde_json::json!(9));
+    assert_eq!(flag_json["max_age_source"], serde_json::json!("flag"));
+    let env_wins = run_fallow_raw_with_env(
+        &[
+            "audit-cache",
+            "prune",
+            "--dry-run",
+            "--root",
+            root.to_str().expect("root should be utf-8"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[
+            ("TMPDIR", scan.path()),
+            ("TMP", scan.path()),
+            ("TEMP", scan.path()),
+            ("FALLOW_AUDIT_CACHE_MAX_AGE_DAYS", Path::new("7")),
+        ],
+    );
+    let env_json = parse_json(&env_wins);
+    assert_eq!(env_json["max_age_days"], serde_json::json!(7));
+    assert_eq!(env_json["max_age_source"], serde_json::json!("env"));
+}
+
+#[test]
+fn audit_gc_debug_diagnostics_require_explicit_rust_log() {
+    let fixture = create_audit_fixture("gc-diagnostics");
+    let root = fixture.path();
+    let scan = TempDir::new().expect("scan root should be created");
+    // One reclaim candidate so the sweep has an entry to report: a bare
+    // foreign lock sidecar.
+    fs::write(
+        scan.path()
+            .join("fallow-audit-base-cache-3333333333333333-root-4444444444444444.lock"),
+        "",
+    )
+    .expect("bare lock sidecar should be written");
+    // Uncommitted change so audit does real changed-code work (the sweep only
+    // runs then).
+    fs::write(root.join("src/new.ts"), "export const changed = () => 1;\n")
+        .expect("changed file should be written");
+    let args = [
+        "audit",
+        "--root",
+        root.to_str().expect("root should be utf-8"),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+
+    let with_debug = run_fallow_raw_with_env(
+        &args,
+        &[
+            ("TMPDIR", scan.path()),
+            ("TMP", scan.path()),
+            ("TEMP", scan.path()),
+            ("RUST_LOG", Path::new("fallow=debug")),
+        ],
+    );
+    assert!(
+        with_debug
+            .stderr
+            .contains("audit cache sweep considered entry"),
+        "RUST_LOG=fallow=debug should surface one decision line per considered entry: {}",
+        with_debug.stderr
+    );
+    assert!(
+        // ANSI styling may sit between the field name and its value, so match
+        // the reason value alone.
+        with_debug.stderr.contains("\"lock-only\""),
+        "the decision line should carry the reason field: {}",
+        with_debug.stderr
+    );
+
+    let without_debug = run_prune_with_scan_root(&args, scan.path());
+    assert!(
+        !without_debug
+            .stderr
+            .contains("audit cache sweep considered entry"),
+        "without an explicit RUST_LOG the audit stderr must stay diagnostics-free: {}",
+        without_debug.stderr
+    );
 }
 
 fn cache_sidecar(path: &Path, suffix: &str) -> std::path::PathBuf {

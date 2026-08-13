@@ -4,8 +4,11 @@ use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
 
 use super::common::{create_config, fixture_path};
 
+/// Issue #2226: a user-written literal import of an `X/__mocks__` package
+/// carries no runner semantics, so it is reported as an unlisted dependency
+/// under Vitest, exactly as under Jest.
 #[test]
-fn vitest_mocks_specifiers_not_flagged_as_unlisted_dep() {
+fn vitest_literal_mocks_import_flagged_as_unlisted_dep() {
     let root = fixture_path("vitest-mocks-virtual");
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -17,13 +20,35 @@ fn vitest_mocks_specifiers_not_flagged_as_unlisted_dep() {
         .collect();
 
     assert!(
-        !unlisted_names.contains(&"@aws-sdk/__mocks__"),
-        "@aws-sdk/__mocks__ should not be flagged as an unlisted dependency, got: {unlisted_names:?}"
+        unlisted_names.contains(&"@aws-sdk/__mocks__"),
+        "literal @aws-sdk/__mocks__ import should be flagged as an unlisted dependency, got: {unlisted_names:?}"
     );
 }
 
+/// Jest side of the issue #2226 parity matrix: the same literal import is
+/// flagged in a Jest project too.
 #[test]
-fn vitest_mocks_scoped_specifiers_not_flagged_in_workspace_monorepo() {
+fn jest_literal_mocks_import_flagged_as_unlisted_dep() {
+    let root = fixture_path("issue-2226-jest-mocks-literal");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        unlisted_names.contains(&"@aws-sdk/__mocks__"),
+        "literal @aws-sdk/__mocks__ import should be flagged as an unlisted dependency, got: {unlisted_names:?}"
+    );
+}
+
+/// Issue #2226: literal `X/__mocks__` imports are flagged in workspace
+/// monorepos too; the removed suffix suppression no longer masks them.
+#[test]
+fn vitest_literal_mocks_imports_flagged_in_workspace_monorepo() {
     let root = fixture_path("vitest-mocks-workspace");
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -40,8 +65,8 @@ fn vitest_mocks_scoped_specifiers_not_flagged_in_workspace_monorepo() {
         "@sentry/__mocks__",
     ] {
         assert!(
-            !unlisted_names.contains(specifier),
-            "{specifier} should not be flagged as an unlisted dependency in workspace monorepo, got: {unlisted_names:?}"
+            unlisted_names.contains(specifier),
+            "{specifier} should be flagged as an unlisted dependency in workspace monorepo, got: {unlisted_names:?}"
         );
     }
 }

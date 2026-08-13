@@ -6140,13 +6140,31 @@ function_count: number
  */
 lines: number
 /**
- * Highest CRAP score among the file's functions.
+ * Highest CRAP score among the file's functions. Always the raw measured
+ * value; threshold overrides never rewrite it.
  */
 crap_max: number
 /**
- * Functions whose CRAP score exceeds the threshold.
+ * Functions whose rounded CRAP score meets or exceeds their effective
+ * ceiling, resolved from `health.thresholdOverrides` over the global
+ * `maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled
+ * (global ceiling `0`).
  */
 crap_above_threshold: number
+/**
+ * Functions whose rounded CRAP score is at or above the canonical 30.0
+ * baseline but below their effective ceiling: the count the configuration
+ * let through. Stays `0` when the effective ceiling is stricter than 30.
+ * When CRAP enforcement is disabled (global ceiling `0`), counts every
+ * function at or above the canonical baseline. Omitted when zero.
+ */
+crap_exempted?: number
+/**
+ * Lowest effective CRAP ceiling among the file's functions, present only
+ * when it differs from the run global (`summary.max_crap_threshold`).
+ * Consumers fall back to `summary.max_crap_threshold` when absent.
+ */
+crap_effective_threshold?: (number | null)
 }
 /**
  * Static test coverage gaps derived from the module graph. Shows runtime files

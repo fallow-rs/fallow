@@ -13,8 +13,8 @@ use super::super::{
 use super::visit_helpers::{
     collect_fixture_type_bindings_from_members, collect_fixture_type_bindings_from_type,
     mock_method_object_span, mock_object_is_literal_global, mock_replacement_candidate,
-    mock_static_target_source, playwright_extend_base_name, vi_mock_has_factory,
-    vitest_auto_mock_source,
+    mock_static_target_source, playwright_extend_base_name, root_manual_mock_source,
+    vi_mock_has_factory, vitest_auto_mock_source,
 };
 use crate::parse::MockApiReferenceSpans;
 
@@ -324,7 +324,23 @@ impl ModuleInfoExtractor {
             is_speculative: false,
         });
 
-        if !has_factory && let Some(mock_source) = vitest_auto_mock_source(target_source) {
+        if has_factory {
+            return;
+        }
+        // Two candidate conventions: the `__mocks__` sibling next to the
+        // mocked module (relative and alias-shaped specifiers, issue #251) and
+        // the root-level `__mocks__/<specifier>` manual mock for bare package
+        // specifiers (issue #2225). A slash-bearing bare source gets both: for
+        // an aliased user module the sibling resolves internally and the root
+        // candidate misses, while for a real package the sibling is dropped in
+        // package space and the root candidate probes the runner convention.
+        for mock_source in [
+            vitest_auto_mock_source(target_source),
+            root_manual_mock_source(target_source),
+        ]
+        .into_iter()
+        .flatten()
+        {
             self.dynamic_imports.push(DynamicImportInfo {
                 source: mock_source,
                 span,

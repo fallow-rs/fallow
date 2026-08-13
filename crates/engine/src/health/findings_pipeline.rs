@@ -16,9 +16,7 @@ use super::findings::{
     CollectFindingsInput, CrapFindingMergeInput, collect_findings_with_resolver,
     merge_crap_findings, record_template_crap_override_rows,
 };
-use super::threshold_overrides::{
-    GlobalHealthThresholds, ThresholdOverrideResolver, ThresholdOverrideStateTracker,
-};
+use super::threshold_overrides::{ThresholdOverrideResolver, ThresholdOverrideStateTracker};
 use super::{HealthError, HealthOptions, scoring, sort_findings};
 
 pub(super) struct HealthFindingsData {
@@ -53,10 +51,11 @@ pub(super) struct HealthFindingsInput<'a> {
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
     pub(super) diff_index: Option<&'a fallow_output::DiffIndex>,
-    pub(super) max_cyclomatic: u16,
-    pub(super) max_cognitive: u16,
-    pub(super) max_crap: f64,
     pub(super) enforce_crap: bool,
+    /// Run-wide override resolver, constructed once in
+    /// `prepare_health_core_sections` so file scoring and findings resolve the
+    /// same effective ceilings.
+    pub(super) threshold_resolver: &'a ThresholdOverrideResolver,
     pub(super) score_output: Option<&'a scoring::FileScoreOutput>,
 }
 
@@ -64,17 +63,10 @@ pub(super) fn prepare_health_findings(
     input: HealthFindingsInput<'_>,
 ) -> Result<HealthFindingsData, HealthError> {
     let t = Instant::now();
-    let global_thresholds = GlobalHealthThresholds {
-        cyclomatic: input.max_cyclomatic,
-        cognitive: input.max_cognitive,
-        crap: input.max_crap,
-        unit_size: input.config.health.max_unit_size,
-    };
-    let threshold_resolver =
-        ThresholdOverrideResolver::new(&input.config.health.threshold_overrides, global_thresholds);
+    let threshold_resolver = input.threshold_resolver;
     let mut threshold_state_tracker = ThresholdOverrideStateTracker::default();
     let mut collected =
-        collect_health_findings(input, &threshold_resolver, &mut threshold_state_tracker, t);
+        collect_health_findings(input, threshold_resolver, &mut threshold_state_tracker, t);
 
     let mut crap_ctx = HealthCrapMergeContext {
         modules: input.modules,
@@ -85,7 +77,7 @@ pub(super) fn prepare_health_findings(
         enforce_crap: input.enforce_crap,
         score_output: input.score_output,
         config_root: &input.config.root,
-        threshold_resolver: &threshold_resolver,
+        threshold_resolver,
         threshold_state_tracker: &mut threshold_state_tracker,
     };
     apply_optional_crap_findings(input.opts, &mut collected.findings, &mut crap_ctx);
@@ -105,7 +97,7 @@ pub(super) fn prepare_health_findings(
         &mut threshold_state_tracker,
     )?;
     threshold_state_tracker.record_no_match_entries(
-        &threshold_resolver,
+        threshold_resolver,
         should_emit_no_match_threshold_overrides(
             input.opts,
             input.changed_files,

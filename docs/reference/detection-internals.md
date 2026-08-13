@@ -131,12 +131,19 @@ target must be a static string (string literal, expressionless template
 literal, or `import('...')` with a string-literal source); a templated
 ``vi.doMock(`./adapters/${name}`)`` credits nothing. The speculative `__mocks__`
 sibling is synthesized only for path-shaped specifiers containing a `/`
-(`./services/api` credits `./services/__mocks__/api`); a bare package
-specifier (`vi.mock('axios')`) credits the package itself but gets no
-root-level `__mocks__/axios.ts` sibling edge, so a root manual mock referenced
-only through a bare-specifier mock can still surface as an unused file.
-"Anything unproven keeps coverage credit" describes masking abstention only;
-it does not imply a credit edge exists.
+(`./services/api` credits `./services/__mocks__/api`); a sibling that stays in
+package space after alias substitution is dropped so it cannot fabricate a
+phantom `@scope/__mocks__` package (issue #2213). A bare package specifier
+(`vi.mock('axios')`, `jest.mock('@scope/pkg')`) additionally synthesizes a
+root-level `__mocks__/<specifier>` candidate; the resolver probes ancestor
+`__mocks__` directories of the test file up to the analysis root and credits
+the manual mock file when it exists, so root-level node-module mocks do not
+surface as unused files (issue #2225). A root mock with no matching
+factory-less mock call keeps surfacing under Vitest, which applies manual
+mocks only through `vi.mock`; under Jest the plugin's `__mocks__` entry
+patterns keep every manual mock used, matching Jest's automatic node-module
+mocking. "Anything unproven keeps coverage credit" describes masking
+abstention only; it does not imply a credit edge exists.
 
 ## Script indirection crediting
 

@@ -925,11 +925,16 @@ use crate::MemberKind;
 /// against that class while generic and nested type shadows still fail closed.
 /// Warm 268 caches can omit self-typed class member uses.
 ///
-/// Bumped to 270: Svelte extraction emits each top-level `{#snippet}` block as
+/// Bumped to 270 for issue #2225: factory-less `vi.mock` / `jest.mock` calls
+/// with a bare package specifier now synthesize a speculative root-level
+/// `__mocks__/<specifier>` candidate. Warm 269 caches lack the candidate, so a
+/// root manual mock would stay reported as an unused file.
+///
+/// Bumped to 271: Svelte extraction emits each top-level `{#snippet}` block as
 /// its own `<snippet:NAME>` complexity unit and rebases the body's nesting to
 /// zero, changing the serialized `module.complexity` for snippet-using files.
-/// Warm 269 caches would keep the folded single-unit shape.
-pub(super) const CACHE_VERSION: u32 = 270;
+/// Warm 270 caches would keep the folded single-unit shape.
+pub(super) const CACHE_VERSION: u32 = 271;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
