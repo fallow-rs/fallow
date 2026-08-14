@@ -243,7 +243,7 @@ pub fn coverage_analyze_meta() -> Value {
     json!({
         "docs_url": COVERAGE_ANALYZE_DOCS,
         "field_definitions": {
-            "schema_version": "Standalone coverage analyze envelope version. \"1\" for the current shape.",
+            "schema_version": "Standalone coverage analyze envelope version. \"2\" for the current shape.",
             "version": "fallow CLI version that produced this output.",
             "elapsed_ms": "Wall-clock milliseconds spent producing the report.",
             "runtime_coverage": "Same RuntimeCoverageReport block emitted by `fallow health --runtime-coverage`.",

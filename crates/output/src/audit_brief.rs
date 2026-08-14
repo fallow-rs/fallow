@@ -6,12 +6,16 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Wire version for the `fallow audit --brief --format json` envelope.
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 6;
+pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 7;
 
 /// Independently-versioned wire-version newtype for the brief envelope.
 /// Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(extend("const" = REVIEW_BRIEF_SCHEMA_VERSION))
+)]
 pub struct ReviewBriefSchemaVersion(pub u32);
 
 impl Default for ReviewBriefSchemaVersion {

@@ -25,6 +25,13 @@ and SHA-256 declaration guard, but Fallow owns the final decision and fix
 policy. The sidecar does not emit TypeScript compiler diagnostics as Fallow
 findings and does not implement generic typed lint rules.
 
+The raw TypeScript-Go host cannot currently expose Svelte virtual-module named
+exports. If source code imports or re-exports such a name and checker resolution
+has no declaration target, the sidecar returns
+`svelte-virtual-module-exports` instead of claiming complete evidence. Run
+`svelte-check` for framework diagnostics; Fallow stays fail-closed until a
+supported host seam can preserve virtual source identity and mappings.
+
 ## Run locally
 
 ```sh

@@ -32,6 +32,7 @@
   },
   "devDependencies": {
     "@codspeed/tinybench-plugin": "5.7.1",
-    "tinybench": "6.1.2"
+    "tinybench": "6.1.2",
+    "zod": "4.4.3"
   }
 }

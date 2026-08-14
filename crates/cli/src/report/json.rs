@@ -423,6 +423,15 @@ fn add_type_aware_abstention_metric_definitions(meta: &mut fallow_types::envelop
             ),
         ),
         (
+            "type_aware.abstention_reasons.svelte_virtual_module_exports".to_owned(),
+            type_aware_metric(
+                "Svelte Virtual-module Export Abstention Count",
+                "Candidates retained because TypeScript-Go could not resolve named Svelte virtual-module exports.",
+                "[0, type_aware.unresolved_count]",
+                "zero means no candidate depended on unavailable Svelte virtual-module exports",
+            ),
+        ),
+        (
             "type_aware.abstention_reasons.unknown_symbol".to_owned(),
             type_aware_metric(
                 "Unknown-symbol Abstention Count",
@@ -1100,7 +1109,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
-        assert_eq!(output["schema_version"], 8);
+        assert_eq!(output["schema_version"], 9);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
@@ -1984,7 +1993,7 @@ mod tests {
             output["schema_version"],
             fallow_output::CHECK_SCHEMA_VERSION
         );
-        assert_eq!(output["schema_version"], 8);
+        assert_eq!(output["schema_version"], 9);
     }
 
     #[test]
@@ -2183,7 +2192,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
-        assert_eq!(output["schema_version"], 8);
+        assert_eq!(output["schema_version"], 9);
         assert_eq!(output["elapsed_ms"], 99);
     }
 
@@ -2266,6 +2275,7 @@ mod tests {
             "type_aware.abstention_reasons.no_project",
             "type_aware.abstention_reasons.ambiguous_project",
             "type_aware.abstention_reasons.blocking_diagnostics",
+            "type_aware.abstention_reasons.svelte_virtual_module_exports",
             "type_aware.abstention_reasons.unknown_symbol",
             "type_aware.abstention_reasons.unsupported_syntax",
             "type_aware.abstention_reasons.capacity",

@@ -285,7 +285,7 @@ writeFileSync(
 {
   const report = await detectDeadCode({ root, explain: true });
   assert.equal(report.kind, "dead-code");
-  assert.equal(report.schema_version, 8);
+  assert.equal(report.schema_version, 9);
   assert.ok(report._meta);
   assert.ok(report.unused_exports.some((item) => item.export_name === "unusedThing"));
   console.log("  [PASS] detectDeadCode");

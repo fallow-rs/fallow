@@ -118,6 +118,9 @@ pub enum ImpactReportSchemaVersion {
     /// First release of the `fallow impact --format json` shape.
     #[serde(rename = "1")]
     V1,
+    /// Expands the required semantic omission reason-code enum.
+    #[serde(rename = "2")]
+    V2,
 }
 
 /// The rendered impact report, derived purely from the store.
@@ -213,6 +216,9 @@ pub enum CrossRepoImpactSchemaVersion {
     /// First release of the `fallow impact --all --format json` shape.
     #[serde(rename = "1")]
     V1,
+    /// Expands the required semantic omission reason-code enum in embedded reports.
+    #[serde(rename = "2")]
+    V2,
 }
 
 /// Grand totals across every tracked project (including repos whose directory no
@@ -262,7 +268,7 @@ pub struct CrossRepoProjectEntry {
     schemars(title = "fallow impact --all --format json")
 )]
 pub struct CrossRepoImpactReport {
-    /// Cross-repo output schema version; serialized as the string `"1"`.
+    /// Cross-repo output schema version; currently serialized as the string `"2"`.
     pub schema_version: CrossRepoImpactSchemaVersion,
     /// Per-project stores successfully parsed (add `unreadable_count` for the
     /// total number of store files found in the user config dir).
@@ -314,7 +320,7 @@ mod tests {
 
     fn impact_report() -> ImpactReport {
         ImpactReport {
-            schema_version: ImpactReportSchemaVersion::V1,
+            schema_version: ImpactReportSchemaVersion::V2,
             enabled: true,
             enabled_source: EnabledSource::Project,
             record_count: 0,
@@ -343,14 +349,14 @@ mod tests {
                 .expect("impact report should serialize");
 
         assert_eq!(value["kind"], "impact");
-        assert_eq!(value["schema_version"], "1");
+        assert_eq!(value["schema_version"], "2");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-1");
     }
 
     #[test]
     fn cross_repo_impact_json_output_uses_named_root_contract() {
         let report = CrossRepoImpactReport {
-            schema_version: CrossRepoImpactSchemaVersion::V1,
+            schema_version: CrossRepoImpactSchemaVersion::V2,
             project_count: 1,
             tracked_count: 1,
             unreadable_count: 0,
@@ -371,7 +377,7 @@ mod tests {
         .expect("cross-repo impact report should serialize");
 
         assert_eq!(value["kind"], "impact-cross-repo");
-        assert_eq!(value["schema_version"], "1");
+        assert_eq!(value["schema_version"], "2");
         assert_eq!(value["project_count"], 1);
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-2");
     }

@@ -430,6 +430,9 @@ pub struct TypeAwareAbstentionCounts {
     pub ambiguous_project: usize,
     /// Candidates retained because structural diagnostics block scanning.
     pub blocking_diagnostics: usize,
+    /// Candidates retained because the raw TypeScript-Go host cannot expose
+    /// named exports from Svelte virtual modules.
+    pub svelte_virtual_module_exports: usize,
     /// Candidates whose exact declaration identity could not be resolved.
     pub unknown_symbol: usize,
     /// Candidates using declaration syntax unsupported by the semantic backend.

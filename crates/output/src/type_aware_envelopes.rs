@@ -72,7 +72,7 @@ mod tests {
                 discovery_source: Some("installed-sibling".to_string()),
                 companion_path: Some("node_modules/.bin/fallow-type-aware".to_string()),
                 package_version: Some("3.8.1".to_string()),
-                protocol_version: 6,
+                protocol_version: 7,
                 backend_family: Some("typescript-go".to_string()),
                 backend_version: Some("7.0.2".to_string()),
                 remediation: None,

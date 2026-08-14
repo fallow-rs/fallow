@@ -201,6 +201,9 @@ pub enum SemanticGapReason {
     AmbiguousProject,
     /// Structural diagnostics make the selected project unsafe to query.
     BlockingDiagnostics,
+    /// Named exports from a Svelte virtual module are unavailable without a
+    /// framework-aware TypeScript-Go host.
+    SvelteVirtualModuleExports,
     /// The exact declaration could not be resolved.
     UnknownSymbol,
     /// A requested package-public entry point could not be resolved.

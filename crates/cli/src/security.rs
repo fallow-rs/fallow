@@ -525,7 +525,7 @@ fn security_rule_severities(config: &fallow_config::ResolvedConfig) -> SecurityR
 
 fn build_security_output(input: SecurityOutputInput<'_, '_>) -> SecurityOutput {
     SecurityOutput {
-        schema_version: SecuritySchemaVersion::V7,
+        schema_version: SecuritySchemaVersion::V8,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(input.started.elapsed().as_millis() as u64),
         config: security_output_config(
@@ -2997,7 +2997,7 @@ mod tests {
 
     fn output_with(findings: Vec<SecurityFinding>, unresolved_edge_files: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V7,
+            schema_version: SecuritySchemaVersion::V8,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),
             config: test_output_config(),
@@ -3013,7 +3013,7 @@ mod tests {
 
     fn output_with_gate(verdict: SecurityGateVerdict, new_count: usize) -> SecurityOutput {
         SecurityOutput {
-            schema_version: SecuritySchemaVersion::V7,
+            schema_version: SecuritySchemaVersion::V8,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),
             config: test_output_config(),
@@ -3790,7 +3790,7 @@ mod tests {
         let finding = relativize_finding(sample_finding(root), root);
         let rendered = render_json(&output_with(vec![finding], 1));
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
-        assert_eq!(value["schema_version"], "7");
+        assert_eq!(value["schema_version"], "8");
         assert_eq!(value["version"], "test");
         assert_eq!(value["elapsed_ms"], 0);
         assert_eq!(
@@ -3870,7 +3870,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
 
         assert_eq!(value["kind"], "security");
-        assert_eq!(value["schema_version"], "7");
+        assert_eq!(value["schema_version"], "8");
         assert_eq!(value["version"], "test");
         assert_eq!(value["elapsed_ms"], 17);
         assert!(value.get("config").is_some());

@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Type-aware public-signature scans no longer expand every property behind an
+  external generic constraint**
+  (Closes [#2269](https://github.com/fallow-rs/fallow/issues/2269)). A public
+  generic such as `T extends z.ZodTypeAny` made the checker walk the constraint's
+  complete structural graph even when it contained no project-local coupling.
+  Type parameters now follow only their explicit constraint, preserving local
+  constraint edges while keeping external named types bounded.
+- **Type-aware analysis no longer claims complete evidence when the raw
+  TypeScript-Go host cannot resolve named Svelte virtual-module exports**
+  (Closes [#2270](https://github.com/fallow-rs/fallow/issues/2270)). Named
+  imports, named re-exports, and wildcard re-exports from `.svelte` modules now
+  return the stable `svelte-virtual-module-exports` gap reason with guidance to
+  validate framework diagnostics through `svelte-check`. Default-only imports
+  and declaration-backed named exports remain supported.
 - **Windows: `--gate new-only` no longer reports pre-existing findings as
   introduced.** The base-snapshot focus set is built from
   `git rev-parse --show-toplevel`, whose spelling can differ from the

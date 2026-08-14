@@ -33,13 +33,13 @@ import type { SecurityFinding, SecurityOutput } from "../src/types.js";
 describe("generated/output-contract.d.ts", () => {
   it("pins each independently versioned envelope from JSON Schema", () => {
     expectTypeOf<SchemaVersion>().toEqualTypeOf<CheckSchemaVersion>();
-    expectTypeOf<SchemaVersion>().toEqualTypeOf<8>();
-    expectTypeOf<AuditSchemaVersion>().toEqualTypeOf<9>();
-    expectTypeOf<CheckSchemaVersion>().toEqualTypeOf<8>();
-    expectTypeOf<CombinedSchemaVersion>().toEqualTypeOf<10>();
-    expectTypeOf<DupesSchemaVersion>().toEqualTypeOf<2 | 8>();
+    expectTypeOf<SchemaVersion>().toEqualTypeOf<9>();
+    expectTypeOf<AuditSchemaVersion>().toEqualTypeOf<10>();
+    expectTypeOf<CheckSchemaVersion>().toEqualTypeOf<9>();
+    expectTypeOf<CombinedSchemaVersion>().toEqualTypeOf<11>();
+    expectTypeOf<DupesSchemaVersion>().toEqualTypeOf<3 | 9>();
     expectTypeOf<FeatureFlagsSchemaVersion>().toEqualTypeOf<8>();
-    expectTypeOf<HealthSchemaVersion>().toEqualTypeOf<10>();
+    expectTypeOf<HealthSchemaVersion>().toEqualTypeOf<11>();
     expectTypeOf<TypeAwareStatusSchemaVersion>().toEqualTypeOf<8>();
   });
 
@@ -70,7 +70,7 @@ describe("generated/output-contract.d.ts", () => {
 
   it("exposes CombinedOutput with optional check/dupes/health branches", () => {
     const sample: CombinedOutput = {
-      schema_version: 10,
+      schema_version: 11,
       version: "0.0.0-test",
       elapsed_ms: 0,
     };
@@ -81,7 +81,7 @@ describe("generated/output-contract.d.ts", () => {
 
   it("requires the schema_version / version / elapsed_ms / total_issues envelope on CheckOutput", () => {
     const sample: CheckOutput = {
-      schema_version: 8,
+      schema_version: 9,
       version: "0.0.0-test",
       elapsed_ms: 0,
       total_issues: 0,

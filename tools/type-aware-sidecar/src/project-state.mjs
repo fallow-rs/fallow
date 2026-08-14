@@ -2,18 +2,107 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { SymbolFlags } from "typescript/unstable/sync";
+import {
+  isExportDeclaration,
+  isImportDeclaration,
+  isNamedExports,
+  isNamedImports,
+} from "typescript/unstable/ast/is";
+
 import { canonicalFileIdentity } from "./file-identity.mjs";
-import { relativePath } from "./semantic-identity.mjs";
+import { projectSourceFiles, relativePath } from "./semantic-identity.mjs";
 
 const INFERRED_PROJECT = "<inferred>";
 const compareText = (left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right));
 const slash = (value) => value.split(path.sep).join("/");
 
-const blockingDiagnosticCount = (project) =>
-  project.program.getConfigFileParsingDiagnostics().length +
-  project.program.getProgramDiagnostics().length +
-  project.program.getSyntacticDiagnostics().length +
-  project.program.getBindDiagnostics().length;
+const structuralDiagnostics = (project) => [
+  ...project.program.getConfigFileParsingDiagnostics(),
+  ...project.program.getProgramDiagnostics(),
+  ...project.program.getSyntacticDiagnostics(),
+  ...project.program.getBindDiagnostics(),
+];
+
+const isProjectLocalDiagnostic = (project, diagnostic) => {
+  if (!diagnostic.fileName) return true;
+  const sourceFile = project.program.getSourceFile(diagnostic.fileName);
+  if (!sourceFile) return true;
+  return (
+    !project.program.isSourceFileDefaultLibrary(sourceFile) &&
+    !project.program.isSourceFileFromExternalLibrary(sourceFile)
+  );
+};
+
+const isSvelteSpecifier = (node) =>
+  typeof node.moduleSpecifier?.text === "string" && node.moduleSpecifier.text.endsWith(".svelte");
+
+const isUnknownAlias = (checker, specifier) => {
+  const symbol = checker.getSymbolAtLocation(specifier.name);
+  if (!symbol) return true;
+  return checker.isUnknownSymbol(checker.getAliasedSymbol(symbol));
+};
+
+const concreteExportSymbol = (checker, symbol) => {
+  const target =
+    (symbol.flags & SymbolFlags.Alias) === 0 ? symbol : checker.getAliasedSymbol(symbol);
+  return !checker.isUnknownSymbol(target) && (target.declarations?.length ?? 0) > 0;
+};
+
+const hasProvableNamedExports = (project, declaration) => {
+  const moduleSymbol = project.checker.getSymbolAtLocation(declaration.moduleSpecifier);
+  if (!moduleSymbol) return false;
+  const hasConcreteModuleDeclaration = moduleSymbol.declarations?.some((moduleDeclaration) => {
+    const declarationPath =
+      moduleDeclaration.path ??
+      moduleDeclaration.fileName ??
+      moduleDeclaration.getSourceFile?.().fileName ??
+      "";
+    return declarationPath.endsWith(".d.svelte") || declarationPath.endsWith(".d.svelte.ts");
+  });
+  if (!hasConcreteModuleDeclaration) return false;
+  const namedExports = project.checker
+    .getExportsOfModule(moduleSymbol)
+    .filter((symbol) => symbol.name !== "default");
+  return namedExports.every((symbol) => concreteExportSymbol(project.checker, symbol));
+};
+
+const svelteDeclarationHasGap = (project, node) => {
+  if (!isSvelteSpecifier(node)) return false;
+  if (isImportDeclaration(node)) {
+    const bindings = node.importClause?.namedBindings;
+    return (
+      bindings !== undefined &&
+      isNamedImports(bindings) &&
+      bindings.elements.some((item) => isUnknownAlias(project.checker, item))
+    );
+  }
+  if (!isExportDeclaration(node)) return false;
+  if (!node.exportClause) return !hasProvableNamedExports(project, node);
+  if (!isNamedExports(node.exportClause)) return !hasProvableNamedExports(project, node);
+  return node.exportClause.elements.some((item) => isUnknownAlias(project.checker, item));
+};
+
+const sourceHasSvelteVirtualModuleGap = (project, sourceFile) => {
+  let gap = false;
+  const visit = (node) => {
+    if (gap) return;
+    gap = svelteDeclarationHasGap(project, node);
+    if (gap) return;
+    node.forEachChild((child) => {
+      visit(child);
+      return undefined;
+    });
+  };
+  visit(sourceFile);
+  return gap;
+};
+
+const hasSvelteVirtualModuleGap = (project) =>
+  projectSourceFiles(project).some(
+    (sourceFile) =>
+      sourceFile.text.includes(".svelte") && sourceHasSvelteVirtualModuleGap(project, sourceFile),
+  );
 
 const configPath = (root, project) => {
   const normalized = slash(project.configFileName);
@@ -173,15 +262,27 @@ const effectiveProjectConfigHash = (root, project) => {
 };
 
 export const projectState = (root, project, source) => {
-  const diagnosticCount = blockingDiagnosticCount(project);
+  const diagnostics = structuralDiagnostics(project);
+  const localDiagnosticCount = diagnostics.filter((diagnostic) =>
+    isProjectLocalDiagnostic(project, diagnostic),
+  ).length;
+  const hasLocalDiagnostics = localDiagnosticCount > 0;
+  const svelteVirtualModuleGap = !hasLocalDiagnostics && hasSvelteVirtualModuleGap(project);
+  const reasonCode = hasLocalDiagnostics
+    ? "blocking-diagnostics"
+    : svelteVirtualModuleGap
+      ? "svelte-virtual-module-exports"
+      : diagnostics.length > 0
+        ? "blocking-diagnostics"
+        : null;
   return {
     project,
     config: configPath(root, project),
     effective_config_hash: effectiveProjectConfigHash(root, project),
     source,
-    status: diagnosticCount === 0 ? "complete" : "unavailable",
-    reason_code: diagnosticCount === 0 ? null : "blocking-diagnostics",
-    blocking_diagnostic_count: diagnosticCount,
+    status: reasonCode === null ? "complete" : "unavailable",
+    reason_code: reasonCode,
+    blocking_diagnostic_count: reasonCode === "blocking-diagnostics" ? diagnostics.length : 0,
     source_file_count: project.program.getSourceFileNames().length,
     program_reused: false,
     candidate_count: 0,

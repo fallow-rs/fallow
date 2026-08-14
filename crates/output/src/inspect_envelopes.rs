@@ -382,7 +382,7 @@ mod tests {
             warnings: Vec::new(),
             meta: Some(fallow_types::envelope::Meta {
                 type_aware: Some(fallow_types::envelope::TypeAwareMeta {
-                    protocol_version: 6,
+                    protocol_version: 7,
                     backend: "typescript-go".to_string(),
                     ..fallow_types::envelope::TypeAwareMeta::default()
                 }),
@@ -399,7 +399,7 @@ mod tests {
             value["_meta"]["telemetry"]["analysis_run_id"],
             "run-inspect"
         );
-        assert_eq!(value["_meta"]["type_aware"]["protocol_version"], 6);
+        assert_eq!(value["_meta"]["type_aware"]["protocol_version"], 7);
         assert_eq!(value["_meta"]["type_aware"]["backend"], "typescript-go");
         assert!(value["evidence"].get("churn").is_none());
     }

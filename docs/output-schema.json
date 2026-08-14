@@ -1822,7 +1822,7 @@
       "type": "object",
       "properties": {
         "schema_version": {
-          "description": "Analyze output schema version; serialized as the string `\"1\"`.",
+          "description": "Analyze output schema version; currently serialized as the string `\"2\"`.",
           "$ref": "#/definitions/CoverageAnalyzeSchemaVersion"
         },
         "version": {
@@ -8841,7 +8841,7 @@
           ]
         },
         {
-          "description": "`fallow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
+          "description": "`fallow coverage analyze --format json`. Required current\n`schema_version: \"2\"` plus `version`, `elapsed_ms`, `runtime_coverage`.",
           "allOf": [
             {
               "$ref": "#/definitions/CoverageAnalyzeOutput"
@@ -11166,6 +11166,11 @@
           "type": "string",
           "const": "1",
           "description": "First release of the coverage analyze format."
+        },
+        {
+          "type": "string",
+          "const": "2",
+          "description": "Expands the required semantic omission reason-code enum."
         }
       ],
       "description": "Schema-version discriminator for [`CoverageAnalyzeOutput`]."
@@ -12142,6 +12147,11 @@
           "type": "string",
           "const": "1",
           "description": "First release of the `fallow impact --format json` shape."
+        },
+        {
+          "type": "string",
+          "const": "2",
+          "description": "Expands the required semantic omission reason-code enum."
         }
       ],
       "description": "Wire-version discriminator for [`ImpactReport`]. Independent from the global\n`SchemaVersion` (the impact report versions on its own cadence) and from the\non-disk `STORE_SCHEMA_VERSION` (the persisted store shape versions\nseparately). Serializes as a string `const` so JSON consumers can switch on\nit, matching the other independently-versioned envelopes (e.g.\n`CoverageAnalyzeSchemaVersion`)."
@@ -12323,6 +12333,11 @@
           "type": "string",
           "const": "7",
           "description": "Adds the server-only-import category on client-server-leak findings."
+        },
+        {
+          "type": "string",
+          "const": "8",
+          "description": "Expands the required semantic omission reason-code enum."
         }
       ],
       "description": "The `fallow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
@@ -14569,7 +14584,7 @@
       "type": "object",
       "properties": {
         "schema_version": {
-          "description": "Cross-repo output schema version; serialized as the string `\"1\"`.",
+          "description": "Cross-repo output schema version; currently serialized as the string `\"2\"`.",
           "$ref": "#/definitions/CrossRepoImpactSchemaVersion"
         },
         "project_count": {
@@ -14613,6 +14628,11 @@
           "type": "string",
           "const": "1",
           "description": "First release of the `fallow impact --all --format json` shape."
+        },
+        {
+          "type": "string",
+          "const": "2",
+          "description": "Expands the required semantic omission reason-code enum in embedded reports."
         }
       ],
       "description": "Independent wire-version for the cross-repo report, on its own cadence (it\nversions separately from the per-project `ImpactReportSchemaVersion` and the\non-disk `STORE_SCHEMA_VERSION`)."
@@ -17516,6 +17536,7 @@
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
+      "const": 7,
       "description": "Independently-versioned wire-version newtype for the brief envelope.\nSerializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`."
     },
     "RiskClass": {
@@ -20473,6 +20494,10 @@
           "type": "integer",
           "description": "Candidates retained because structural diagnostics block scanning."
         },
+        "svelte_virtual_module_exports": {
+          "type": "integer",
+          "description": "Candidates retained because the raw TypeScript-Go host cannot expose\nnamed exports from Svelte virtual modules."
+        },
         "unknown_symbol": {
           "type": "integer",
           "description": "Candidates whose exact declaration identity could not be resolved."
@@ -20490,6 +20515,7 @@
         "no_project",
         "ambiguous_project",
         "blocking_diagnostics",
+        "svelte_virtual_module_exports",
         "unknown_symbol",
         "unsupported_syntax",
         "capacity"
@@ -20836,6 +20862,11 @@
           "type": "string",
           "const": "blocking-diagnostics",
           "description": "Structural diagnostics make the selected project unsafe to query."
+        },
+        {
+          "type": "string",
+          "const": "svelte-virtual-module-exports",
+          "description": "Named exports from a Svelte virtual module are unavailable without a\nframework-aware TypeScript-Go host."
         },
         {
           "type": "string",
@@ -22534,29 +22565,29 @@
     },
     "HealthSchemaVersion": {
       "type": "integer",
-      "const": 10,
+      "const": 11,
       "description": "Exact schema version for [`HealthOutput`]."
     },
     "AuditSchemaVersion": {
       "type": "integer",
-      "const": 9,
+      "const": 10,
       "description": "Schema projection for the audit envelope's exact version."
     },
     "CheckSchemaVersion": {
       "type": "integer",
-      "const": 8,
+      "const": 9,
       "description": "Schema projection for the dead-code envelope's exact version."
     },
     "CombinedSchemaVersion": {
       "type": "integer",
-      "const": 10,
+      "const": 11,
       "description": "Schema projection for the combined envelope's exact version."
     },
     "DupesSchemaVersion": {
       "type": "integer",
       "enum": [
-        2,
-        8
+        3,
+        9
       ],
       "description": "Schema projection for the duplication envelope's CLI and programmatic\nversion lineages."
     },

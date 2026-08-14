@@ -1086,7 +1086,7 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     (
         "coverage-analyze",
         &["CoverageAnalyzeOutput"],
-        "`fallow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
+        "`fallow coverage analyze --format json`. Required current\n`schema_version: \"2\"` plus `version`, `elapsed_ms`, `runtime_coverage`.",
     ),
     (
         "list-boundaries",
@@ -1517,6 +1517,10 @@ mod drift_tests {
             ),
             ("HealthSchemaVersion", fallow_output::HEALTH_SCHEMA_VERSION),
             (
+                "ReviewBriefSchemaVersion",
+                fallow_output::REVIEW_BRIEF_SCHEMA_VERSION,
+            ),
+            (
                 "TypeAwareStatusSchemaVersion",
                 fallow_output::TYPE_AWARE_STATUS_SCHEMA_VERSION,
             ),
@@ -1539,14 +1543,38 @@ mod drift_tests {
             ])),
             "DupesSchemaVersion must cover its CLI and programmatic lineages"
         );
+        let current_string_versions = [
+            ("CoverageAnalyzeSchemaVersion", "2"),
+            ("CrossRepoImpactSchemaVersion", "2"),
+            ("ImpactReportSchemaVersion", "2"),
+            ("SecuritySchemaVersion", "8"),
+        ];
+        for (name, version) in current_string_versions {
+            assert!(
+                derived
+                    .get(name)
+                    .and_then(|schema| schema.get("oneOf"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|variants| variants.iter().any(|variant| {
+                        variant.get("const").and_then(Value::as_str) == Some(version)
+                    })),
+                "{name} must include current version {version}"
+            );
+        }
         let envelope_refs = [
             ("AuditOutput", "AuditSchemaVersion"),
             ("CheckGroupedOutput", "CheckSchemaVersion"),
             ("CheckOutput", "CheckSchemaVersion"),
             ("CombinedOutput", "CombinedSchemaVersion"),
+            ("CoverageAnalyzeOutput", "CoverageAnalyzeSchemaVersion"),
+            ("CrossRepoImpactReport", "CrossRepoImpactSchemaVersion"),
             ("DupesOutput", "DupesSchemaVersion"),
             ("FeatureFlagsOutput", "FeatureFlagsSchemaVersion"),
             ("HealthOutput", "HealthSchemaVersion"),
+            ("ImpactReport", "ImpactReportSchemaVersion"),
+            ("ReviewBriefWireOutput", "ReviewBriefSchemaVersion"),
+            ("SecurityOutput", "SecuritySchemaVersion"),
+            ("SecuritySummaryOutput", "SecuritySchemaVersion"),
             ("TypeAwareStatusOutput", "TypeAwareStatusSchemaVersion"),
         ];
         for (envelope, version_type) in envelope_refs {

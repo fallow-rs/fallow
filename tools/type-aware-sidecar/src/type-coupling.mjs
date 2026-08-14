@@ -118,7 +118,6 @@ export const analyzeTypeCoupling = ({ root, query, states, evidenceLimit }, serv
   const highCouplingThreshold = percentile(degrees, 0.9);
   const topContributors = topCouplingContributors(perFile);
   const cycles = query.includeCycles ? findCycles(edges) : [];
-  const unavailableProjectCount = states.length - readiness.ready.length;
   const missingEntryPointCount = services.missingEntryPoints(query, resolvedEntryPoints);
   const nestedFileOmissionCount = nestedCouplingOmissionCount(perFile, evidenceLimit);
   const boundFile = (entry) => boundCoupledFile(entry, evidenceLimit);
@@ -159,7 +158,7 @@ export const analyzeTypeCoupling = ({ root, query, states, evidenceLimit }, serv
           Math.max(0, cycles.length - evidenceLimit) +
           nestedFileOmissionCount,
       },
-      { reason_code: "blocking-diagnostics", count: unavailableProjectCount },
+      ...services.unavailableProjectOmissions(states),
       { reason_code: "unknown-entry-point", count: missingEntryPointCount },
     ],
   });

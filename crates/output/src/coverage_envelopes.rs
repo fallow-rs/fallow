@@ -157,6 +157,9 @@ pub enum CoverageAnalyzeSchemaVersion {
     /// First release of the coverage analyze format.
     #[serde(rename = "1")]
     V1,
+    /// Expands the required semantic omission reason-code enum.
+    #[serde(rename = "2")]
+    V2,
 }
 
 /// Envelope emitted by `fallow coverage analyze --format json`.
@@ -167,7 +170,7 @@ pub enum CoverageAnalyzeSchemaVersion {
     schemars(title = "fallow coverage analyze --format json")
 )]
 pub struct CoverageAnalyzeOutput {
-    /// Analyze output schema version; serialized as the string `"1"`.
+    /// Analyze output schema version; currently serialized as the string `"2"`.
     pub schema_version: CoverageAnalyzeSchemaVersion,
     /// Fallow CLI version that produced this output.
     pub version: ToolVersion,
@@ -204,7 +207,7 @@ pub fn build_coverage_analyze_output(
     version: impl Into<String>,
 ) -> CoverageAnalyzeOutput {
     CoverageAnalyzeOutput {
-        schema_version: CoverageAnalyzeSchemaVersion::V1,
+        schema_version: CoverageAnalyzeSchemaVersion::V2,
         version: ToolVersion(version.into()),
         elapsed_ms: ElapsedMs(u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)),
         runtime_coverage: report.clone(),
@@ -282,7 +285,7 @@ mod tests {
         .expect("coverage analyze should serialize");
 
         assert_eq!(value["kind"], "coverage-analyze");
-        assert_eq!(value["schema_version"], "1");
+        assert_eq!(value["schema_version"], "2");
         assert_eq!(value["elapsed_ms"], 7);
         assert_eq!(value["_meta"]["docs"], "coverage");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-2");

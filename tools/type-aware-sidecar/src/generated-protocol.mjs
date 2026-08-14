@@ -1,8 +1,8 @@
 // Generated from crates/api/type-aware-protocol.json. Do not edit.
 export const TYPE_AWARE_PROTOCOL = Object.freeze({
   schema_version: 1,
-  wire_protocol_version: 6,
-  semantic_schema_version: 2,
+  wire_protocol_version: 7,
+  semantic_schema_version: 3,
   analysis_operation: "semantic-queries",
   status_operation: "status",
   query_operations: ["symbol-use", "symbol-trace", "api-surface", "symbol-impact", "type-coupling"],

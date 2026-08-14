@@ -1813,7 +1813,7 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
 
     let (enabled, enabled_source) = resolve_enabled(store);
     ImpactReport {
-        schema_version: ImpactReportSchemaVersion::V1,
+        schema_version: ImpactReportSchemaVersion::V2,
         enabled,
         enabled_source,
         record_count: store.records.len(),
@@ -1929,7 +1929,7 @@ pub fn build_aggregate_report(
     }
     sort_cross_repo(&mut projects, sort);
     CrossRepoImpactReport {
-        schema_version: CrossRepoImpactSchemaVersion::V1,
+        schema_version: CrossRepoImpactSchemaVersion::V2,
         project_count,
         tracked_count: projects.len(),
         unreadable_count: unreadable,
@@ -3242,11 +3242,11 @@ mod tests {
     #[test]
     fn report_always_carries_schema_version() {
         let empty = build_report(&ImpactStore::default());
-        assert_eq!(empty.schema_version, ImpactReportSchemaVersion::V1);
+        assert_eq!(empty.schema_version, ImpactReportSchemaVersion::V2);
         let json = render_json(&empty);
         let value: serde_json::Value = serde_json::from_str(&json).expect("impact JSON must parse");
         assert_eq!(
-            value["schema_version"], "1",
+            value["schema_version"], "2",
             "schema_version must be present even when disabled: {json}"
         );
 
@@ -3264,7 +3264,7 @@ mod tests {
         });
         assert_eq!(
             build_report(&store).schema_version,
-            ImpactReportSchemaVersion::V1
+            ImpactReportSchemaVersion::V2
         );
     }
 

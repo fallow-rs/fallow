@@ -26,7 +26,7 @@ const baseAuditArgsOptions = {
  * dropped; nothing under test reads them.
  */
 const passAudit: AuditOutput = {
-  schema_version: 9,
+  schema_version: 10,
   version: "2.88.3",
   command: "audit",
   verdict: "pass",
@@ -59,7 +59,7 @@ const passAudit: AuditOutput = {
  * (one changed file with a dead-code finding, exit code 1).
  */
 const failAudit: AuditOutput = {
-  schema_version: 9,
+  schema_version: 10,
   version: "2.88.3",
   command: "audit",
   verdict: "fail",

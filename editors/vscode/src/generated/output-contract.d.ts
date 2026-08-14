@@ -102,7 +102,7 @@ kind: "type-aware-status"
 /**
  * Schema projection for the audit envelope's exact version.
  */
-export type AuditSchemaVersion = 9
+export type AuditSchemaVersion = 10
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -144,7 +144,7 @@ export type SemanticCompletenessRequirement = ("best-effort" | "complete")
 /**
  * Stable reason why semantic evidence is partial or unavailable.
  */
-export type SemanticGapReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "virtual-dispatch" | "dynamic-member-access" | "decorated-declaration" | "optional-contract" | "accessor-pair" | "overload-set" | "attached-comment" | "abstract-declaration" | "incomplete-project-coverage" | "framework-contract-provenance" | "capacity" | "unsupported-syntax")
+export type SemanticGapReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics" | "svelte-virtual-module-exports" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "virtual-dispatch" | "dynamic-member-access" | "decorated-declaration" | "optional-contract" | "accessor-pair" | "overload-set" | "attached-comment" | "abstract-declaration" | "incomplete-project-coverage" | "framework-contract-provenance" | "capacity" | "unsupported-syntax")
 /**
  * Value or type namespace for one exact declaration or reference.
  */
@@ -184,7 +184,7 @@ export type TypeAwareAbstentionReason = ("no-project" | "ambiguous-project" | "b
 /**
  * Schema projection for the dead-code envelope's exact version.
  */
-export type CheckSchemaVersion = 8
+export type CheckSchemaVersion = 9
 /**
  * A suggested action attached to a finding in the JSON output. Each finding
  * carries an `actions` array; consumers (agents, IDE clients, CI bots) can
@@ -821,7 +821,7 @@ export type CoverageSetupRuntimeTarget = ("node" | "browser")
 /**
  * Schema-version discriminator for [`CoverageAnalyzeOutput`].
  */
-export type CoverageAnalyzeSchemaVersion = "1"
+export type CoverageAnalyzeSchemaVersion = ("1" | "2")
 /**
  * Discovery outcome for a [`LogicalGroup`].
  */
@@ -829,7 +829,7 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 /**
  * Exact schema version for [`HealthOutput`].
  */
-export type HealthSchemaVersion = 10
+export type HealthSchemaVersion = 11
 /**
  * Resolver mode label for grouped envelopes (dead-code, dupes, health).
  *
@@ -842,7 +842,7 @@ export type GroupByMode = ("owner" | "directory" | "package" | "section")
  * Schema projection for the duplication envelope's CLI and programmatic
  * version lineages.
  */
-export type DupesSchemaVersion = (2 | 8)
+export type DupesSchemaVersion = (3 | 9)
 /**
  * Wire-version discriminator for [`ImpactReport`]. Independent from the global
  * `SchemaVersion` (the impact report versions on its own cadence) and from the
@@ -851,7 +851,7 @@ export type DupesSchemaVersion = (2 | 8)
  * it, matching the other independently-versioned envelopes (e.g.
  * `CoverageAnalyzeSchemaVersion`).
  */
-export type ImpactReportSchemaVersion = "1"
+export type ImpactReportSchemaVersion = ("1" | "2")
 /**
  * Why Impact tracking is (or is not) active for a project. `Project` = an
  * explicit per-repo `enable`; `User` = the user-global default with no per-repo
@@ -867,12 +867,12 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  * versions separately from the per-project `ImpactReportSchemaVersion` and the
  * on-disk `STORE_SCHEMA_VERSION`).
  */
-export type CrossRepoImpactSchemaVersion = "1"
+export type CrossRepoImpactSchemaVersion = ("1" | "2")
 /**
  * The `fallow security --format json` schema version. Independently versioned
  * from the main contract, mirroring `ImpactReportSchemaVersion`.
  */
-export type SecuritySchemaVersion = ("1" | "2" | "3" | "4" | "5" | "6" | "7")
+export type SecuritySchemaVersion = ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8")
 /**
  * Severity level for rules.
  *
@@ -954,7 +954,7 @@ export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Schema projection for the combined envelope's exact version.
  */
-export type CombinedSchemaVersion = 10
+export type CombinedSchemaVersion = 11
 /**
  * Schema projection for the feature-flags envelope's exact version.
  */
@@ -975,7 +975,7 @@ export type FeatureFlagActionType = ("investigate-flag" | "suppress-line")
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
-export type ReviewBriefSchemaVersion = number
+export type ReviewBriefSchemaVersion = 7
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
  * (abstraction / deletion / convention / irreversibility) is representable: this
@@ -1940,6 +1940,11 @@ ambiguous_project: number
  * Candidates retained because structural diagnostics block scanning.
  */
 blocking_diagnostics: number
+/**
+ * Candidates retained because the raw TypeScript-Go host cannot expose
+ * named exports from Svelte virtual modules.
+ */
+svelte_virtual_module_exports: number
 /**
  * Candidates whose exact declaration identity could not be resolved.
  */

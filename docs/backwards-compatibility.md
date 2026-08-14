@@ -116,6 +116,7 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
 
 - **Stable starting point**: wire protocol version 6 is the first stable
   contract between Fallow and the optional `fallow-type-aware` companion.
+  Version 7 adds the closed `svelte-virtual-module-exports` semantic gap reason.
 - **Exact-version pairing**: the native binary and companion package must have
   the same Fallow version. The backend version and supported operations come
   from `crates/api/type-aware-protocol.json`.
@@ -157,6 +158,8 @@ When a stable interface needs to change:
 ## Notable behavior changes within v3
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
+
+- **Type-aware semantic gap reasons use wire protocol 7 and semantic schema version 3.** The new required `SemanticOmission.reason_code` enum value is not ignorable by a protocol 6 reader, so exact-version companion pairing now uses wire protocol 7. Every versioned JSON root that can embed that contract also bumps: audit 9 to 10, coverage analyze 1 to 2, health 10 to 11, duplication CLI 8 to 9 and programmatic 2 to 3, dead-code flat and grouped 8 to 9, per-project and cross-repo impact 1 to 2, security full and summary 7 to 8, combined 10 to 11, and audit brief 6 to 7. Unversioned trace and inspect roots are unchanged.
 
 - **Export traces select namespaces deterministically.** `trace_export` now selects the Value namespace when a module exposes the same name as both a value and a type, falling back to Type only when no Value binding exists. Produced JSON carries the additive `namespace` field (`"value"` or `"type"`), including through the API and MCP adapters; the schema keeps it optional so consumers can still accept older payloads. Previously selection could depend on reference counts and named re-export declaration order, and consumers could not identify which namespace was traced.
 

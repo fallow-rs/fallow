@@ -6281,7 +6281,7 @@ mod tests {
                 discovery_source: Some("environment-override"),
                 companion_path: Some(PathBuf::from("/private/tools/fallow-type-aware")),
                 package_version: None,
-                protocol_version: 6,
+                protocol_version: 7,
                 backend_family: None,
                 backend_version: None,
                 remediation: Some(

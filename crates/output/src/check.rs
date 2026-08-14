@@ -16,7 +16,7 @@ use crate::HealthReport;
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 
 /// Current schema version for the dead-code/check JSON envelope.
-pub const CHECK_SCHEMA_VERSION: u32 = 8;
+pub const CHECK_SCHEMA_VERSION: u32 = 9;
 
 /// Schema projection for the dead-code envelope's exact version.
 #[cfg(feature = "schema")]

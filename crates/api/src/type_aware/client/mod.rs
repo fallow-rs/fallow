@@ -1887,6 +1887,7 @@ const fn unresolved_gap(reason: Option<SemanticGapReason>) -> bool {
             SemanticGapReason::NoProject
                 | SemanticGapReason::AmbiguousProject
                 | SemanticGapReason::BlockingDiagnostics
+                | SemanticGapReason::SvelteVirtualModuleExports
                 | SemanticGapReason::UnknownSymbol
                 | SemanticGapReason::IncompleteProjectCoverage
                 | SemanticGapReason::FrameworkContractProvenance
@@ -2084,6 +2085,9 @@ const fn gap_reason_phrase(reason: Option<SemanticGapReason>) -> &'static str {
         Some(SemanticGapReason::NoProject) => "no owning TypeScript project",
         Some(SemanticGapReason::AmbiguousProject) => "ambiguous owning projects",
         Some(SemanticGapReason::BlockingDiagnostics) => "blocking structural diagnostics",
+        Some(SemanticGapReason::SvelteVirtualModuleExports) => {
+            "unavailable Svelte virtual-module exports"
+        }
         Some(SemanticGapReason::UnknownSymbol) => "an unresolved exact declaration",
         Some(SemanticGapReason::UnknownEntryPoint) => "an unresolved public entry point",
         Some(SemanticGapReason::EvidenceLimit) => "the configured evidence limit",
@@ -2132,6 +2136,9 @@ fn record_candidate_decision(
                 Some(SemanticGapReason::BlockingDiagnostics) => {
                     stats.abstention_reasons.blocking_diagnostics += 1;
                 }
+                Some(SemanticGapReason::SvelteVirtualModuleExports) => {
+                    stats.abstention_reasons.svelte_virtual_module_exports += 1;
+                }
                 Some(SemanticGapReason::UnknownSymbol) => {
                     stats.abstention_reasons.unknown_symbol += 1;
                 }
@@ -2147,6 +2154,9 @@ fn record_candidate_decision(
                 Some(SemanticGapReason::NoProject) => stats.abstention_reasons.no_project += 1,
                 Some(SemanticGapReason::BlockingDiagnostics) => {
                     stats.abstention_reasons.blocking_diagnostics += 1;
+                }
+                Some(SemanticGapReason::SvelteVirtualModuleExports) => {
+                    stats.abstention_reasons.svelte_virtual_module_exports += 1;
                 }
                 Some(SemanticGapReason::UnknownSymbol) => {
                     stats.abstention_reasons.unknown_symbol += 1;
@@ -3838,6 +3848,37 @@ mod tests {
         assert_eq!(stats.contract_preserved, 1);
         assert_eq!(stats.no_static_references, 1);
         assert_eq!(stats.fix_eligible, 1);
+    }
+
+    #[test]
+    fn svelte_virtual_module_gaps_have_a_dedicated_abstention_count() {
+        let decision = SemanticCandidateDecision {
+            query_id: 0,
+            subject: symbol(),
+            decision: SemanticCandidateDecisionKind::RetainedUnresolved,
+            status: SemanticCompleteness::Unavailable,
+            owning_projects: vec!["tsconfig.json".to_string()],
+            evidence: Vec::new(),
+            contract: None,
+            framework_contract: None,
+            closed_world_eligible: false,
+            edit_guard: None,
+            reason_code: Some(SemanticGapReason::SvelteVirtualModuleExports),
+            explanation: "test decision".to_string(),
+            actions: Vec::new(),
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: Vec::new(),
+        };
+        let mut removed = BTreeSet::new();
+        let mut stats = CandidateDecisionStats::default();
+
+        record_candidate_decision(&decision, 0, &mut removed, &mut stats);
+
+        assert!(removed.is_empty());
+        assert_eq!(stats.unresolved, 1);
+        assert_eq!(stats.abstention_reasons.svelte_virtual_module_exports, 1);
+        assert_eq!(stats.abstention_reasons.blocking_diagnostics, 0);
     }
 
     #[test]

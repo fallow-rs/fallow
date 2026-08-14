@@ -158,6 +158,25 @@ declaration cannot be attributed to an exact package, Fallow records
 `framework-contract-provenance` and keeps the candidate. Warnings and stable
 reason codes explain each abstention class.
 
+### Svelte virtual-module exports
+
+TypeScript-Go's raw project host does not currently expose the virtual
+TypeScript modules that Svelte language tooling creates for `.svelte` files.
+When project source imports, re-exports, or star-exports named bindings from a
+`.svelte` module and the checker cannot resolve those names to declarations,
+Fallow marks the semantic project unavailable with
+`svelte-virtual-module-exports`. It does not claim complete exact-symbol or
+type-coupling evidence for a program that cannot see the component's
+module-script exports.
+
+Treat `svelte-check` as the framework authority for Svelte compiler
+diagnostics. Do not move valid component-owned exports into a `.ts` file solely
+to satisfy Fallow. Use `best-effort` to keep the semantic gap advisory, or omit
+the type-aware capability for that run. Default-only `.svelte` imports and
+named exports backed by real checker declarations remain supported. A complete
+framework-aware path remains dependent on a supported TypeScript-Go host seam
+that preserves virtual-file identity and source maps.
+
 Use repeatable `--type-aware-project PATH` options when automatic project
 selection does not include a consumer project. Every healthy explicit project
 is scanned, so a member declared in one referenced package can be confirmed by

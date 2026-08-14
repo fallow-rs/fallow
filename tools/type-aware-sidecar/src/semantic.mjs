@@ -158,6 +158,10 @@ const REASON_ACTIONS = new Map([
     "Repair structural TypeScript diagnostics in every selected project and retry.",
   ],
   [
+    "svelte-virtual-module-exports",
+    "Run svelte-check for framework diagnostics. See https://docs.fallow.tools/analysis/type-aware#svelte-virtual-module-exports for supported Svelte project setup.",
+  ],
+  [
     "unknown-entry-point",
     "Refresh the package entry points or pass project-relative source entry points.",
   ],
@@ -166,21 +170,22 @@ const DEFAULT_REASON_ACTION =
   "Narrow the query to a specific symbol, entry point, or healthy TypeScript project and retry.";
 const REASON_PRIORITY = new Map([
   ["blocking-diagnostics", 0],
-  ["incomplete-project-coverage", 1],
-  ["framework-contract-provenance", 2],
-  ["ambiguous-project", 3],
-  ["unknown-symbol", 4],
-  ["unknown-entry-point", 5],
-  ["decorated-declaration", 6],
-  ["optional-contract", 7],
-  ["accessor-pair", 8],
-  ["overload-set", 9],
-  ["attached-comment", 10],
-  ["abstract-declaration", 11],
-  ["dynamic-member-access", 12],
-  ["virtual-dispatch", 13],
-  ["dynamic-behavior", 14],
-  ["evidence-limit", 15],
+  ["svelte-virtual-module-exports", 1],
+  ["incomplete-project-coverage", 2],
+  ["framework-contract-provenance", 3],
+  ["ambiguous-project", 4],
+  ["unknown-symbol", 5],
+  ["unknown-entry-point", 6],
+  ["decorated-declaration", 7],
+  ["optional-contract", 8],
+  ["accessor-pair", 9],
+  ["overload-set", 10],
+  ["attached-comment", 11],
+  ["abstract-declaration", 12],
+  ["dynamic-member-access", 13],
+  ["virtual-dispatch", 14],
+  ["dynamic-behavior", 15],
+  ["evidence-limit", 16],
 ]);
 
 const actionForReason = (reasonCode) => REASON_ACTIONS.get(reasonCode) ?? DEFAULT_REASON_ACTION;
@@ -199,6 +204,22 @@ const combineOmissions = (omissions) => {
     counts.set(omission.reason_code, (counts.get(omission.reason_code) ?? 0) + omission.count);
   }
   return [...counts].map(([reason_code, count]) => ({ reason_code, count }));
+};
+
+const projectStateReason = (state) => state.reason_code ?? "blocking-diagnostics";
+
+const unavailableProjectOmissions = (states) =>
+  combineOmissions(
+    states
+      .filter((state) => state.status !== "complete")
+      .map((state) => ({ reason_code: projectStateReason(state), count: 1 })),
+  );
+
+const unavailableProjectReason = (states) => {
+  if (states.length === 0) return "no-project";
+  return (
+    unavailableProjectOmissions(states).toSorted(compareOmissions)[0]?.reason_code ?? "no-project"
+  );
 };
 
 const resultStatus = (partial) => (partial ? "partial" : "complete");
@@ -681,8 +702,6 @@ const symbolResolutionError = (query, reasonCode, action) => ({
 });
 
 const isCompleteProjectState = (state) => state?.status === "complete";
-const selectedProjectName = (state) => state?.config ?? "the selected project";
-
 const owningProjectContexts = (statesByProject, absolutePath) =>
   [...statesByProject.entries()]
     .filter(([project]) => project.program.getSourceFile(absolutePath))
@@ -722,13 +741,16 @@ const selectSymbolContext = (
   }
   const completeOwners = owners.filter(({ state }) => isCompleteProjectState(state));
   if (completeOwners.length === 0) {
-    return {
-      ...owners[0],
-      ...symbolResolutionError(
-        query,
-        "blocking-diagnostics",
-        `Repair structural diagnostics in ${selectedProjectName(owners[0].state)} and retry.`,
+    const selectedOwner = [...owners].toSorted((left, right) =>
+      compareOmissions(
+        { reason_code: projectStateReason(left.state) },
+        { reason_code: projectStateReason(right.state) },
       ),
+    )[0];
+    const reasonCode = projectStateReason(selectedOwner.state);
+    return {
+      ...selectedOwner,
+      ...symbolResolutionError(query, reasonCode, actionForReason(reasonCode)),
     };
   }
   return { owners, completeOwners };
@@ -1377,6 +1399,13 @@ const signatureTypes = (project, type, anchor) =>
   );
 
 const checkerTypeChildren = (project, type, anchor, hasNamedDeclaration) => {
+  if (type.isTypeParameter()) {
+    const constraint = safeCheckerValue(
+      () => project.checker.getConstraintOfTypeParameter(type),
+      undefined,
+    );
+    return constraint ? [constraint] : [];
+  }
   const structural = [
     ...(type.getTypes() ?? []),
     ...safeCheckerValue(() => type.getAliasTypeArguments(), []),
@@ -1547,12 +1576,9 @@ const graphProjects = (snapshot, explicitProjects) =>
 const readyProjectStates = (query, states) => {
   const ready = states.filter((state) => state.status === "complete");
   if (ready.length > 0) return { ready };
+  const reasonCode = unavailableProjectReason(states);
   return {
-    error: unavailable(
-      query,
-      states.length === 0 ? "no-project" : "blocking-diagnostics",
-      "Pass a healthy tsconfig containing the package entry points and retry.",
-    ),
+    error: unavailable(query, reasonCode, actionForReason(reasonCode)),
   };
 };
 
@@ -1684,7 +1710,7 @@ const analyzeApiSurface = (root, query, states, evidenceLimit) => {
         reason_code: "evidence-limit",
         count: omissionCount,
       },
-      { reason_code: "blocking-diagnostics", count: unavailableProjectCount },
+      ...unavailableProjectOmissions(states),
       { reason_code: "unknown-entry-point", count: missingEntryPointCount },
     ],
   });
@@ -1763,6 +1789,7 @@ const analyzeGraphSemanticQuery = (root, query, graphStates, evidenceLimit) => {
       missingEntryPoints,
       publicApiGraph,
       readyProjectStates,
+      unavailableProjectOmissions,
       uniqueSorted,
     },
   );
@@ -1842,6 +1869,7 @@ const recordAbstainedProjectOutcome = (state, result) => {
     "no-project",
     "ambiguous-project",
     "blocking-diagnostics",
+    "svelte-virtual-module-exports",
     "unknown-symbol",
     "incomplete-project-coverage",
   ]);

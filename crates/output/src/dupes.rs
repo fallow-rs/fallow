@@ -15,10 +15,10 @@ use crate::GroupByMode;
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 
 /// Current schema version for `fallow dupes --format json`.
-pub const DUPES_SCHEMA_VERSION: u32 = 8;
+pub const DUPES_SCHEMA_VERSION: u32 = 9;
 
 /// Current schema version for programmatic duplication JSON.
-pub const DUPES_PROGRAMMATIC_SCHEMA_VERSION: u32 = 2;
+pub const DUPES_PROGRAMMATIC_SCHEMA_VERSION: u32 = 3;
 
 /// Schema projection for the duplication envelope's CLI and programmatic
 /// version lineages.

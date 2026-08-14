@@ -5,14 +5,13 @@ use fallow_types::output::NextStep;
 use serde::Serialize;
 
 /// Current schema version for `fallow audit --format json`.
-pub const AUDIT_SCHEMA_VERSION: u32 = 9;
+pub const AUDIT_SCHEMA_VERSION: u32 = 10;
 
 /// Current schema version for bare combined JSON output.
 ///
-/// Version 10 tracks the embedded health contract: `threshold_overrides[]`
-/// rows gained the required `dimension` field and the `insufficient` status
-/// (issue #2163), and an envelope embedding a changed contract bumps with it.
-pub const COMBINED_SCHEMA_VERSION: u32 = 10;
+/// Version 11 tracks the expanded required semantic omission reason-code enum
+/// embedded by its analysis subreports.
+pub const COMBINED_SCHEMA_VERSION: u32 = 11;
 
 /// Schema projection for the audit envelope's exact version.
 #[cfg(feature = "schema")]

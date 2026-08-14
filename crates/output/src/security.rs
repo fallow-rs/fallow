@@ -36,6 +36,9 @@ pub enum SecuritySchemaVersion {
     /// Adds the server-only-import category on client-server-leak findings.
     #[serde(rename = "7")]
     V7,
+    /// Expands the required semantic omission reason-code enum.
+    #[serde(rename = "8")]
+    V8,
 }
 
 /// Gate verdict on the wire. `fail` is the CI-state token; human output renders
@@ -658,7 +661,7 @@ mod tests {
     #[test]
     fn security_summary_json_output_uses_security_root_contract() {
         let output = SecurityOutput {
-            schema_version: SecuritySchemaVersion::V7,
+            schema_version: SecuritySchemaVersion::V8,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(12),
             config: json!({"rules": {}}),
@@ -675,7 +678,7 @@ mod tests {
             .expect("security summary should serialize");
 
         assert_eq!(value["kind"], "security");
-        assert_eq!(value["schema_version"], "7");
+        assert_eq!(value["schema_version"], "8");
         assert_eq!(value["summary"]["security_findings"], 0);
         assert_eq!(value["summary"]["unresolved_edge_files"], 2);
         assert_eq!(value["summary"]["unresolved_callee_sites"], 3);

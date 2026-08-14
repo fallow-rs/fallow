@@ -165,7 +165,7 @@ test(
           "    evidence: [{ path: query.symbol.path, line: 99, col: 7 }],",
           "  }));",
           "  process.stdout.write(JSON.stringify({",
-          "    protocol_version: 6,",
+          "    protocol_version: 7,",
           '    operation: "semantic-queries",',
           '    sidecar_version: "sentinel",',
           '    backend: "typescript-go",',
@@ -179,7 +179,7 @@ test(
       const stdoutPath = resolve(root, "raw", "stdout.json");
       const stderrPath = resolve(root, "raw", "stderr.txt");
       const request = {
-        protocol_version: 6,
+        protocol_version: 7,
         operation: "semantic-queries",
         root,
         projects: [],
@@ -214,7 +214,7 @@ test(
   () => {
     const root = mkdtempSync(resolve(tmpdir(), "fallow-invalid-sidecar-"));
     const request = {
-      protocol_version: 6,
+      protocol_version: 7,
       operation: "semantic-queries",
       root,
       projects: [],
@@ -247,14 +247,14 @@ test(
       const duplicate = writeExecutable(
         root,
         "duplicate.mjs",
-        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => { const result={query_id:0,operation:"symbol-use",evidence:[]}; process.stdout.write(JSON.stringify({protocol_version:6,operation:"semantic-queries",sidecar_version:"x",backend:"typescript-go",backend_version:"x",results:[result,result]})); });\n',
+        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => { const result={query_id:0,operation:"symbol-use",evidence:[]}; process.stdout.write(JSON.stringify({protocol_version:7,operation:"semantic-queries",sidecar_version:"x",backend:"typescript-go",backend_version:"x",results:[result,result]})); });\n',
       );
       assert.throws(() => invoke(duplicate, "duplicate"), /invalid query identity/);
 
       const invalidEvidence = writeExecutable(
         root,
         "invalid-evidence.mjs",
-        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write(JSON.stringify({protocol_version:6,operation:"semantic-queries",sidecar_version:"x",backend:"typescript-go",backend_version:"x",results:[{query_id:0,operation:"symbol-use",status:"complete",evidence:[{path:"../escape.ts",line:0,col:-1}]}]})));\n',
+        '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write(JSON.stringify({protocol_version:7,operation:"semantic-queries",sidecar_version:"x",backend:"typescript-go",backend_version:"x",results:[{query_id:0,operation:"symbol-use",status:"complete",evidence:[{path:"../escape.ts",line:0,col:-1}]}]})));\n',
       );
       assert.throws(
         () => invoke(invalidEvidence, "invalid-evidence"),
@@ -313,7 +313,7 @@ test("ledger producer binds protocol, sidecar, and request-set provenance", () =
   const sidecarHash = "a".repeat(64);
   const discovery = { provenance: { sidecar: { sha256: sidecarHash } } };
   const producer = {
-    protocol_version: 6,
+    protocol_version: 7,
     sidecar_sha256: sidecarHash,
     request_set_sha256: "b".repeat(64),
     response_set_sha256: "c".repeat(64),
@@ -328,7 +328,7 @@ test("ledger producer binds protocol, sidecar, and request-set provenance", () =
     [],
   );
   assert.deepEqual(evidenceProducerErrors(discovery, { ...producer, protocol_version: 3 }), [
-    "ledger evidence producer must use protocol 6",
+    "ledger evidence producer must use protocol 7",
   ]);
   assert.deepEqual(
     evidenceProducerErrors(discovery, {
