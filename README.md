@@ -138,7 +138,7 @@ Adopting on an existing codebase? `fallow audit` fails only on findings a change
 | `fallow config` | Resolved configuration and which file provided it |
 | `fallow decision-surface` | Ranked structural decisions a change embeds |
 | `fallow impact` | Opt-in, local-only report of what fallow caught; `--all` spans repos |
-| `fallow report --from results.json` | Re-render a saved JSON result in another output format |
+| `fallow report --from results.json` | Re-render saved JSON as SARIF, CodeClimate, GitHub output, or GitHub/GitLab PR feedback without re-analyzing |
 | `fallow ci ...` | PR/MR feedback helpers (comments, reviews, check runs) |
 | `fallow ci-template gitlab --vendor` | Vendor the GitLab CI template for offline runners |
 | `fallow hooks install --target git` | Managed pre-commit hook; `--target agent` writes agent-gate hooks |
@@ -189,10 +189,16 @@ For machine consumption, add `--format json --quiet` to any command, parse the J
 | `codeclimate` (aliases `gitlab-codequality`, `gitlab-code-quality`) | GitLab Code Quality report |
 | `github-annotations` | Workflow-command annotations; render on fork PRs without a write token |
 | `github-summary` | Job-summary markdown for `$GITHUB_STEP_SUMMARY` |
-| `pr-comment-github`, `pr-comment-gitlab`, `review-github`, `review-gitlab` | Typed CI feedback envelopes for the bundled CI scripts |
+| `pr-comment-github`, `pr-comment-gitlab`, `review-github`, `review-gitlab` | Typed CI feedback from final refined findings; supported by type-aware `check` and `audit` runs |
 | `badge` | shields.io-compatible SVG health badge; `fallow health` only (`fallow health --format badge > badge.svg`) |
 
 `human`, `json`, `sarif`, `compact`, and `markdown` apply to every analysis command; the CI envelopes and `badge` belong to the command that produces them, as documented per format in the [CI guide](https://docs.fallow.tools/integrations/ci).
+
+In CI, keep JSON as the provenance-bearing artifact and render presentation
+surfaces from it. For example, analyze once with `--format json -o results.json`,
+then run `fallow report --from results.json --format pr-comment-gitlab` and
+`fallow report --from results.json --format review-gitlab`. This preserves
+type-aware refinement, audit verdicts, and one authoritative finding set.
 
 | Exit code | Meaning |
 |---|---|

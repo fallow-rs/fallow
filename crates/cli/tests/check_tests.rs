@@ -150,27 +150,96 @@ fn focused_type_aware_trace_rejects_unsupported_output_formats() {
 }
 
 #[test]
-fn environment_enabled_type_aware_rejects_renderer_without_semantic_provenance() {
-    let root = fixture_path("basic-project");
+fn configured_type_aware_accepts_gitlab_review_renderer() {
+    let root = fixture_path("type-aware-unused-export-refinement");
     let root_arg = root.to_string_lossy();
+    let config_dir = tempfile::tempdir().expect("type-aware config directory");
+    let config_path = config_dir.path().join("fallow.json");
+    std::fs::write(&config_path, r#"{"typeAware":{"enabled":true}}"#)
+        .expect("write type-aware config");
+    let config_arg = config_path.to_string_lossy();
+    let output = run_fallow_raw_with_type_aware_sidecar(&[
+        "dead-code",
+        "--root",
+        &root_arg,
+        "--config",
+        &config_arg,
+        "--unused-exports",
+        "--unused-types",
+        "--format",
+        "review-gitlab",
+        "--quiet",
+    ]);
+
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    let envelope = parse_json(&output);
+    assert_eq!(envelope["meta"]["schema"], "fallow-review-envelope/v2");
+    let rendered = output.stdout;
+    assert!(
+        !rendered.contains("PublicApi")
+            && !rendered.contains("PublicComplex")
+            && !rendered.contains("PublicMerged"),
+        "semantically used findings leaked into the review: {rendered}"
+    );
+    assert!(rendered.contains("actuallyUnused"), "review: {rendered}");
+}
+
+#[test]
+fn explicit_type_aware_accepts_gitlab_sticky_comment_renderer() {
+    let root = fixture_path("type-aware-unused-export-refinement");
+    let root_arg = root.to_string_lossy();
+    let output = run_fallow_raw_with_type_aware_sidecar(&[
+        "dead-code",
+        "--root",
+        &root_arg,
+        "--type-aware",
+        "--unused-exports",
+        "--unused-types",
+        "--format",
+        "pr-comment-gitlab",
+        "--quiet",
+    ]);
+
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    assert!(output.stdout.contains("<!-- fallow-id: fallow-results -->"));
+    for suppressed in ["PublicApi", "PublicComplex", "PublicMerged"] {
+        assert!(
+            !output.stdout.contains(suppressed),
+            "{suppressed} leaked into the sticky comment: {}",
+            output.stdout
+        );
+    }
+    assert_eq!(output.stdout.matches("actuallyUnused").count(), 1);
+}
+
+#[test]
+fn required_type_aware_review_fails_closed_when_companion_is_missing() {
+    let root = fixture_path("type-aware-unused-export-refinement");
+    let root_arg = root.to_string_lossy();
+    let missing = root.join("missing-type-aware-companion");
+    let missing_arg = missing.to_string_lossy();
     let output = run_fallow_raw_with_env(
         &[
             "dead-code",
             "--root",
             &root_arg,
+            "--type-aware",
+            "--type-aware-require",
+            "complete",
+            "--unused-exports",
             "--format",
-            "review-github",
+            "review-gitlab",
             "--quiet",
         ],
-        &[("FALLOW_TYPE_AWARE", "1")],
+        &[("FALLOW_TYPE_AWARE_BIN", &missing_arg)],
     );
 
     assert_eq!(output.code, 2);
+    assert!(output.stdout.is_empty(), "stdout: {}", output.stdout);
     assert!(
-        format!("{}{}", output.stdout, output.stderr)
-            .contains("type-aware analysis supports human, JSON, SARIF"),
-        "stdout: {}\nstderr: {}",
-        output.stdout,
+        output.stderr.contains("Type-aware analysis failed")
+            && !output.stderr.contains("Quality gate passed"),
+        "stderr: {}",
         output.stderr
     );
 }

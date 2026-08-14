@@ -1119,10 +1119,14 @@ fn validate_effective_type_aware_output(
                 | fallow_config::OutputFormat::Compact
                 | fallow_config::OutputFormat::Markdown
                 | fallow_config::OutputFormat::CodeClimate
+                | fallow_config::OutputFormat::PrCommentGithub
+                | fallow_config::OutputFormat::PrCommentGitlab
+                | fallow_config::OutputFormat::ReviewGithub
+                | fallow_config::OutputFormat::ReviewGitlab
         )
     {
         return Err(emit_error(
-            "type-aware analysis supports human, JSON, SARIF, compact, markdown, and CodeClimate output; pair CodeClimate with the JSON artifact to preserve semantic provenance",
+            "type-aware analysis supports human, JSON, SARIF, compact, markdown, CodeClimate, PR-comment, and review output; pair presentation formats with the JSON artifact to preserve semantic provenance",
             2,
             output,
         ));
@@ -1228,12 +1232,7 @@ fn type_aware_completeness_failed(result: &CheckResult, quiet: bool) -> bool {
     let Some(meta) = &result.type_aware_meta else {
         return false;
     };
-    let incomplete = meta.identity.as_ref().is_some_and(|identity| {
-        identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
-    }) || meta
-        .queries
-        .iter()
-        .any(|query| query.status != fallow_types::semantic::SemanticCompleteness::Complete);
+    let incomplete = crate::report::ci::required_type_aware_incomplete(Some(meta));
     if !incomplete {
         return false;
     }

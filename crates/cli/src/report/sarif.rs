@@ -500,7 +500,11 @@ fn saved_dead_code_results(
     if kind != EnvelopeKind::DeadCode {
         return None;
     }
-    serde_json::from_value(envelope.clone()).ok()
+    let mut results = serde_json::from_value::<AnalysisResults>(envelope.clone()).ok()?;
+    // Grouped saved envelopes are flattened in group order. Match the
+    // analyzer's canonical ordering before rendering the typed SARIF path.
+    results.sort();
+    Some(results)
 }
 
 pub(super) fn saved_report_rules(root: &Path, config_path: Option<&Path>) -> RulesConfig {

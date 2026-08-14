@@ -2640,20 +2640,7 @@ fn audit_type_aware_completeness_failed(result: &AuditResult) -> bool {
 fn type_aware_meta_completeness_failed(
     meta: Option<&fallow_types::envelope::TypeAwareMeta>,
 ) -> bool {
-    let Some(meta) = meta else {
-        return false;
-    };
-    if meta.required_completeness
-        != Some(fallow_types::semantic::SemanticCompletenessRequirement::Complete)
-    {
-        return false;
-    }
-    meta.identity.as_ref().is_some_and(|identity| {
-        identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
-    }) || meta
-        .queries
-        .iter()
-        .any(|query| query.status != fallow_types::semantic::SemanticCompleteness::Complete)
+    crate::report::ci::required_type_aware_incomplete(meta)
 }
 
 fn record_audit_impact(

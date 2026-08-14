@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::RulesConfig;
 #[cfg(test)]
 use fallow_config::Severity;
+use fallow_config::{OutputFormat, RulesConfig};
 use fallow_output::{
     CodeClimateAnnotationField, CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines,
     CodeClimateLocation, CodeClimateSeverity, HealthReport, annotate_codeclimate_issues,
@@ -57,13 +57,24 @@ pub fn print_envelope_codeclimate_with_config(
     config_path: Option<&Path>,
     resolver: Option<&OwnershipResolver>,
 ) -> ExitCode {
-    emit_codeclimate(envelope_codeclimate_issues_with_context(
+    let issues = match envelope_codeclimate_issues_with_config(
         kind,
         envelope,
         root,
         config_path,
         resolver,
-    ))
+    ) {
+        Ok(issues) => issues,
+        Err(error) => {
+            return crate::emit_known_failure(
+                &error,
+                2,
+                OutputFormat::CodeClimate,
+                crate::telemetry::FailureReason::Validation,
+            );
+        }
+    };
+    emit_codeclimate(issues)
 }
 
 #[cfg(test)]
@@ -72,37 +83,57 @@ fn envelope_codeclimate_issues(
     envelope: &serde_json::Value,
     root: &Path,
 ) -> Vec<CodeClimateIssue> {
-    envelope_codeclimate_issues_with_config(kind, envelope, root, None)
+    envelope_codeclimate_issues_with_config(kind, envelope, root, None, None)
+        .expect("test envelope should reconstruct as CodeClimate issues")
 }
 
-#[cfg(test)]
-fn envelope_codeclimate_issues_with_config(
+/// Reconstruct the typed CodeClimate issues stored in a saved native envelope.
+///
+/// Paths remain analysis-root-relative here. Presentation renderers apply the
+/// repository prefix once at their existing output boundary.
+pub fn envelope_codeclimate_issues_with_config(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
     config_path: Option<&Path>,
-) -> Vec<CodeClimateIssue> {
-    envelope_codeclimate_issues_with_context(kind, envelope, root, config_path, None)
+    resolver: Option<&OwnershipResolver>,
+) -> Result<Vec<CodeClimateIssue>, String> {
+    validate_saved_schema(kind, envelope)?;
+    match saved_native_codeclimate_issues(kind, envelope, root, config_path, resolver) {
+        Ok(issues) => Ok(issues),
+        Err(native_error)
+            if matches!(
+                kind,
+                EnvelopeKind::DeadCode
+                    | EnvelopeKind::Dupes
+                    | EnvelopeKind::Health
+                    | EnvelopeKind::Audit
+                    | EnvelopeKind::Combined
+            ) && saved_schema_is_legacy(kind, envelope) =>
+        {
+            let issues =
+                saved_annotation_codeclimate_issues(kind, envelope, root, config_path, resolver);
+            if issues.is_empty() {
+                Err(native_error)
+            } else {
+                Ok(issues)
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
-fn envelope_codeclimate_issues_with_context(
+fn saved_annotation_codeclimate_issues(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
     config_path: Option<&Path>,
     resolver: Option<&OwnershipResolver>,
 ) -> Vec<CodeClimateIssue> {
-    if let Some(issues) =
-        saved_native_codeclimate_issues(kind, envelope, root, config_path, resolver)
-    {
-        return issues;
-    }
     let options = resolve_render_options(root);
     let mut issues = collect_annotations(kind, envelope, options.pm)
         .into_iter()
         .map(|annotation| {
-            // Keep the analysis-root-relative path here. `emit_codeclimate`
-            // applies the process-wide report prefix exactly once.
             let path = annotation.path;
             let line = annotation.line.unwrap_or(1).clamp(1, u64::from(u32::MAX)) as u32;
             let rule_id = super::sarif::native_rule_id(&annotation.title);
@@ -131,7 +162,7 @@ fn envelope_codeclimate_issues_with_context(
                 kind: CodeClimateIssueKind::Issue,
                 check_name: rule_id.clone(),
                 description,
-                categories: vec![native_category(&rule_id).to_string()],
+                categories: vec![native_category(&rule_id).to_owned()],
                 severity,
                 fingerprint,
                 location: CodeClimateLocation {
@@ -143,9 +174,7 @@ fn envelope_codeclimate_issues_with_context(
             }
         })
         .collect::<Vec<_>>();
-    if resolver.is_some() {
-        annotate_saved_fallback_grouping(&mut issues, kind, resolver);
-    }
+    annotate_saved_fallback_grouping(&mut issues, kind, resolver);
     issues
 }
 
@@ -155,26 +184,49 @@ fn saved_native_codeclimate_issues(
     root: &Path,
     config_path: Option<&Path>,
     resolver: Option<&OwnershipResolver>,
-) -> Option<Vec<CodeClimateIssue>> {
+) -> Result<Vec<CodeClimateIssue>, String> {
     let rules = super::sarif::saved_report_rules(root, config_path);
     match kind {
         EnvelopeKind::DeadCode => {
-            let results = serde_json::from_value::<AnalysisResults>(envelope.clone()).ok()?;
+            let mut results =
+                parse_saved_section::<AnalysisResults>(envelope, "dead-code envelope")?;
+            if !saved_schema_is_legacy(kind, envelope) {
+                let declared_total = envelope
+                    .get("total_issues")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| {
+                        "saved dead-code envelope is missing a non-negative integer `total_issues`"
+                            .to_owned()
+                    })?;
+                let actual_total = u64::try_from(results.total_issues()).unwrap_or(u64::MAX);
+                if declared_total != actual_total {
+                    return Err(format!(
+                        "saved dead-code envelope declares {declared_total} findings but contains {actual_total}"
+                    ));
+                }
+            }
+            // Grouped saved envelopes are flattened in group order. Restore the
+            // analyzer's canonical order before building any presentation surface
+            // so owner/section grouping cannot reorder otherwise identical findings.
+            results.sort();
             let mut issues = api_codeclimate_issues(&results, root, &rules);
             annotate_dead_code_owner(&mut issues, resolver);
-            Some(issues)
+            Ok(issues)
         }
         EnvelopeKind::Dupes => {
-            let report = serde_json::from_value::<DuplicationReport>(envelope.clone()).ok()?;
+            let report = parse_saved_section::<DuplicationReport>(envelope, "dupes envelope")?;
             let mut issues = api_duplication_codeclimate_issues(&report, root);
             annotate_duplication_groups(&mut issues, &report, root, resolver);
-            Some(issues)
+            Ok(issues)
         }
         EnvelopeKind::Health => {
-            let report = fallow_output::health_report_from_saved_value(envelope)?;
+            let report =
+                fallow_output::health_report_from_saved_value(envelope).ok_or_else(|| {
+                    "saved health envelope is incompatible with this Fallow version".to_owned()
+                })?;
             let mut issues = api_health_codeclimate_issues(&report, root);
             annotate_health_groups(&mut issues, resolver);
-            Some(issues)
+            Ok(issues)
         }
         EnvelopeKind::Audit => saved_multi_analysis_codeclimate(
             envelope,
@@ -183,12 +235,279 @@ fn saved_native_codeclimate_issues(
             "/dead_code",
             "/duplication",
             "/complexity",
+            resolver,
         ),
-        EnvelopeKind::Combined => {
-            saved_multi_analysis_codeclimate(envelope, root, &rules, "/check", "/dupes", "/health")
+        EnvelopeKind::Combined => saved_multi_analysis_codeclimate(
+            envelope, root, &rules, "/check", "/dupes", "/health", resolver,
+        ),
+        EnvelopeKind::Fix => Ok(Vec::new()),
+        EnvelopeKind::Security => Err(format!(
+            "saved {} envelopes cannot be rendered as CodeClimate issues",
+            envelope_kind_label(kind)
+        )),
+    }
+}
+
+fn validate_saved_schema(kind: EnvelopeKind, envelope: &serde_json::Value) -> Result<(), String> {
+    let Some(value) = envelope.get("schema_version") else {
+        // Early Fallow envelopes did not consistently carry a schema version.
+        // Their typed shape remains the compatibility check below.
+        return Ok(());
+    };
+    let Some(version) = value.as_u64() else {
+        return Err(format!(
+            "saved {} envelope has a non-numeric `schema_version`",
+            envelope_kind_label(kind)
+        ));
+    };
+    let Some(current) = current_schema_version(kind) else {
+        return Ok(());
+    };
+    if version == 0 || version > u64::from(current) {
+        return Err(format!(
+            "unsupported saved {} schema version {version}; this Fallow version supports versions 1 through {current}",
+            envelope_kind_label(kind)
+        ));
+    }
+    if version == u64::from(current) {
+        validate_current_saved_envelope(kind, envelope)?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum SavedFieldType {
+    Array,
+    Boolean,
+    Object,
+    String,
+    UnsignedInteger,
+}
+
+impl SavedFieldType {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Array => "an array",
+            Self::Boolean => "a boolean",
+            Self::Object => "an object",
+            Self::String => "a string",
+            Self::UnsignedInteger => "a non-negative integer",
         }
+    }
+
+    fn matches(self, value: &serde_json::Value) -> bool {
+        match self {
+            Self::Array => value.is_array(),
+            Self::Boolean => value.is_boolean(),
+            Self::Object => value.is_object(),
+            Self::String => value.is_string(),
+            Self::UnsignedInteger => value.as_u64().is_some(),
+        }
+    }
+}
+
+fn require_saved_field<'a>(
+    kind: EnvelopeKind,
+    object: &'a serde_json::Value,
+    field: &str,
+    field_type: SavedFieldType,
+) -> Result<&'a serde_json::Value, String> {
+    let Some(value) = object.get(field) else {
+        return Err(format!(
+            "saved {} envelope is missing required field `{field}`",
+            envelope_kind_label(kind)
+        ));
+    };
+    if !field_type.matches(value) {
+        return Err(format!(
+            "saved {} envelope field `{field}` must be {}",
+            envelope_kind_label(kind),
+            field_type.label()
+        ));
+    }
+    Ok(value)
+}
+
+fn require_saved_nested_field(
+    kind: EnvelopeKind,
+    object: &serde_json::Value,
+    object_name: &str,
+    field: &str,
+    field_type: SavedFieldType,
+) -> Result<(), String> {
+    let Some(value) = object.get(field) else {
+        return Err(format!(
+            "saved {} envelope is missing required field `{object_name}.{field}`",
+            envelope_kind_label(kind)
+        ));
+    };
+    if !field_type.matches(value) {
+        return Err(format!(
+            "saved {} envelope field `{object_name}.{field}` must be {}",
+            envelope_kind_label(kind),
+            field_type.label()
+        ));
+    }
+    Ok(())
+}
+
+fn validate_current_saved_envelope(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+) -> Result<(), String> {
+    require_saved_field(kind, envelope, "version", SavedFieldType::String)?;
+    require_saved_field(
+        kind,
+        envelope,
+        "elapsed_ms",
+        SavedFieldType::UnsignedInteger,
+    )?;
+
+    match kind {
+        EnvelopeKind::DeadCode => {
+            require_saved_field(
+                kind,
+                envelope,
+                "total_issues",
+                SavedFieldType::UnsignedInteger,
+            )?;
+            if envelope
+                .get(crate::cli_report::NORMALIZED_GROUPED_DEAD_CODE_MARKER)
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+            {
+                require_saved_field(kind, envelope, "summary", SavedFieldType::Object)?;
+            }
+        }
+        EnvelopeKind::Dupes => {
+            require_saved_field(kind, envelope, "clone_groups", SavedFieldType::Array)?;
+            require_saved_field(kind, envelope, "clone_families", SavedFieldType::Array)?;
+            require_saved_field(kind, envelope, "stats", SavedFieldType::Object)?;
+        }
+        EnvelopeKind::Health => {
+            require_saved_field(kind, envelope, "findings", SavedFieldType::Array)?;
+            require_saved_field(kind, envelope, "summary", SavedFieldType::Object)?;
+        }
+        EnvelopeKind::Audit => validate_current_audit_envelope(kind, envelope)?,
+        EnvelopeKind::Combined | EnvelopeKind::Security | EnvelopeKind::Fix => {}
+    }
+    Ok(())
+}
+
+fn validate_current_audit_envelope(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+) -> Result<(), String> {
+    let command = require_saved_field(kind, envelope, "command", SavedFieldType::String)?;
+    if command.as_str() != Some("audit") {
+        return Err("saved audit envelope field `command` must be `audit`".to_owned());
+    }
+    let verdict = require_saved_field(kind, envelope, "verdict", SavedFieldType::String)?;
+    if !matches!(verdict.as_str(), Some("pass" | "warn" | "fail")) {
+        return Err(
+            "saved audit envelope field `verdict` must be `pass`, `warn`, or `fail`".to_owned(),
+        );
+    }
+    require_saved_field(
+        kind,
+        envelope,
+        "changed_files_count",
+        SavedFieldType::UnsignedInteger,
+    )?;
+    require_saved_field(kind, envelope, "base_ref", SavedFieldType::String)?;
+
+    let summary = require_saved_field(kind, envelope, "summary", SavedFieldType::Object)?;
+    for field in [
+        "dead_code_issues",
+        "complexity_findings",
+        "duplication_clone_groups",
+    ] {
+        require_saved_nested_field(
+            kind,
+            summary,
+            "summary",
+            field,
+            SavedFieldType::UnsignedInteger,
+        )?;
+    }
+    require_saved_nested_field(
+        kind,
+        summary,
+        "summary",
+        "dead_code_has_errors",
+        SavedFieldType::Boolean,
+    )?;
+
+    let attribution = require_saved_field(kind, envelope, "attribution", SavedFieldType::Object)?;
+    let gate = attribution.get("gate").ok_or_else(|| {
+        "saved audit envelope is missing required field `attribution.gate`".to_owned()
+    })?;
+    if !matches!(gate.as_str(), Some("new-only" | "all")) {
+        return Err(
+            "saved audit envelope field `attribution.gate` must be `new-only` or `all`".to_owned(),
+        );
+    }
+    for field in [
+        "dead_code_introduced",
+        "dead_code_inherited",
+        "complexity_introduced",
+        "complexity_inherited",
+        "duplication_introduced",
+        "duplication_inherited",
+        "styling_introduced",
+        "styling_inherited",
+        "duplication_demoted",
+    ] {
+        require_saved_nested_field(
+            kind,
+            attribution,
+            "attribution",
+            field,
+            SavedFieldType::UnsignedInteger,
+        )?;
+    }
+    Ok(())
+}
+
+fn saved_schema_is_legacy(kind: EnvelopeKind, envelope: &serde_json::Value) -> bool {
+    let Some(version) = envelope
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return true;
+    };
+    current_schema_version(kind).is_some_and(|current| version < u64::from(current))
+}
+
+fn current_schema_version(kind: EnvelopeKind) -> Option<u32> {
+    match kind {
+        EnvelopeKind::DeadCode => Some(fallow_output::CHECK_SCHEMA_VERSION),
+        EnvelopeKind::Dupes => Some(fallow_output::DUPES_SCHEMA_VERSION),
+        EnvelopeKind::Health => Some(fallow_output::HEALTH_SCHEMA_VERSION),
+        EnvelopeKind::Audit => Some(fallow_output::AUDIT_SCHEMA_VERSION),
+        EnvelopeKind::Combined => Some(fallow_output::COMBINED_SCHEMA_VERSION),
         EnvelopeKind::Security | EnvelopeKind::Fix => None,
     }
+}
+
+const fn envelope_kind_label(kind: EnvelopeKind) -> &'static str {
+    match kind {
+        EnvelopeKind::DeadCode => "dead-code",
+        EnvelopeKind::Dupes => "dupes",
+        EnvelopeKind::Health => "health",
+        EnvelopeKind::Audit => "audit",
+        EnvelopeKind::Security => "security",
+        EnvelopeKind::Combined => "combined",
+        EnvelopeKind::Fix => "fix",
+    }
+}
+
+fn parse_saved_section<T: serde::de::DeserializeOwned>(
+    value: &serde_json::Value,
+    label: &str,
+) -> Result<T, String> {
+    serde_json::from_value(value.clone())
+        .map_err(|error| format!("saved {label} is incompatible with this Fallow version: {error}"))
 }
 
 fn annotate_dead_code_owner(issues: &mut [CodeClimateIssue], resolver: Option<&OwnershipResolver>) {
@@ -245,6 +564,10 @@ fn annotate_saved_fallback_grouping(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "audit and combined envelopes supply three named native section pointers"
+)]
 fn saved_multi_analysis_codeclimate(
     envelope: &serde_json::Value,
     root: &Path,
@@ -252,36 +575,64 @@ fn saved_multi_analysis_codeclimate(
     dead_code_pointer: &str,
     duplication_pointer: &str,
     health_pointer: &str,
-) -> Option<Vec<CodeClimateIssue>> {
-    let dead_code = parse_optional_section::<AnalysisResults>(envelope, dead_code_pointer).ok()?;
-    let duplication =
-        parse_optional_section::<DuplicationReport>(envelope, duplication_pointer).ok()?;
+    resolver: Option<&OwnershipResolver>,
+) -> Result<Vec<CodeClimateIssue>, String> {
+    let dead_code = parse_optional_section::<AnalysisResults>(envelope, dead_code_pointer)?;
+    let duplication = parse_optional_section::<DuplicationReport>(envelope, duplication_pointer)?;
     let health = match envelope.pointer(health_pointer) {
-        Some(value) => Some(fallow_output::health_report_from_saved_value(value)?),
+        Some(value) => Some(
+            fallow_output::health_report_from_saved_value(value).ok_or_else(|| {
+                format!("saved section `{health_pointer}` is incompatible with this Fallow version")
+            })?,
+        ),
         None => None,
     };
 
     let mut issues = Vec::new();
     if let Some(results) = dead_code {
-        issues.extend(api_codeclimate_issues(&results, root, rules));
+        let mut dead_code_issues = api_codeclimate_issues(&results, root, rules);
+        annotate_dead_code_owner(&mut dead_code_issues, resolver);
+        issues.extend(dead_code_issues);
     }
     if let Some(report) = duplication {
-        issues.extend(api_duplication_codeclimate_issues(&report, root));
+        let mut duplication_issues = api_duplication_codeclimate_issues(&report, root);
+        annotate_duplication_groups(&mut duplication_issues, &report, root, resolver);
+        issues.extend(duplication_issues);
     }
     if let Some(report) = health {
-        issues.extend(api_health_codeclimate_issues(&report, root));
+        let mut health_issues = api_health_codeclimate_issues(&report, root);
+        annotate_health_groups(&mut health_issues, resolver);
+        issues.extend(health_issues);
     }
-    Some(issues)
+    Ok(issues)
 }
 
 fn parse_optional_section<T: serde::de::DeserializeOwned>(
     envelope: &serde_json::Value,
     pointer: &str,
-) -> Result<Option<T>, serde_json::Error> {
+) -> Result<Option<T>, String> {
     let Some(value) = envelope.pointer(pointer) else {
         return Ok(None);
     };
-    serde_json::from_value(value.clone()).map(Some)
+    serde_json::from_value(value.clone())
+        .map(Some)
+        .map_err(|error| {
+            format!("saved section `{pointer}` is incompatible with this Fallow version: {error}")
+        })
+}
+
+fn native_category(rule_id: &str) -> &'static str {
+    if rule_id == "fallow/code-duplication" {
+        "Duplication"
+    } else if rule_id.starts_with("fallow/high-") || rule_id == "fallow/complexity" {
+        "Complexity"
+    } else if rule_id.starts_with("fallow/css-") {
+        "Style"
+    } else if rule_id.contains("untested") {
+        "Coverage"
+    } else {
+        "Bug Risk"
+    }
 }
 
 const fn annotation_codeclimate_severity(level: AnnotationLevel) -> CodeClimateSeverity {
@@ -297,20 +648,6 @@ fn sarif_level_to_codeclimate(level: &str) -> CodeClimateSeverity {
         "error" => CodeClimateSeverity::Major,
         "warning" => CodeClimateSeverity::Minor,
         _ => CodeClimateSeverity::Info,
-    }
-}
-
-fn native_category(rule_id: &str) -> &'static str {
-    if rule_id == "fallow/code-duplication" {
-        "Duplication"
-    } else if rule_id.starts_with("fallow/high-") || rule_id == "fallow/complexity" {
-        "Complexity"
-    } else if rule_id.starts_with("fallow/css-") {
-        "Style"
-    } else if rule_id.contains("untested") {
-        "Coverage"
-    } else {
-        "Bug Risk"
     }
 }
 
@@ -600,6 +937,98 @@ mod tests {
     }
 
     #[test]
+    fn malformed_current_dead_code_envelope_does_not_fall_back_to_partial_issues() {
+        let envelope = serde_json::json!({
+            "kind": "dead-code",
+            "schema_version": fallow_output::CHECK_SCHEMA_VERSION,
+            "version": env!("CARGO_PKG_VERSION"),
+            "elapsed_ms": 0,
+            "total_issues": 1,
+            "summary": {},
+            "unused_files": [{ "path": "src/dead.ts" }],
+            "unused_exports": "invalid"
+        });
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
+
+        let error = envelope_codeclimate_issues_with_config(
+            EnvelopeKind::DeadCode,
+            &envelope,
+            root,
+            None,
+            None,
+        )
+        .expect_err("current malformed envelope must fail closed");
+        assert!(error.contains("incompatible with this Fallow version"));
+    }
+
+    #[test]
+    fn current_dead_code_envelope_rejects_an_inconsistent_finding_total() {
+        let mut envelope = serde_json::to_value(AnalysisResults::default())
+            .expect("serialize empty analysis results");
+        envelope["schema_version"] = serde_json::json!(fallow_output::CHECK_SCHEMA_VERSION);
+        envelope["version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
+        envelope["elapsed_ms"] = serde_json::json!(0);
+        envelope["total_issues"] = serde_json::json!(1);
+        envelope["summary"] = serde_json::json!({});
+
+        let error = envelope_codeclimate_issues_with_config(
+            EnvelopeKind::DeadCode,
+            &envelope,
+            Path::new("/project"),
+            None,
+            None,
+        )
+        .expect_err("inconsistent current finding total must fail closed");
+        assert_eq!(
+            error,
+            "saved dead-code envelope declares 1 findings but contains 0"
+        );
+    }
+
+    #[test]
+    fn every_current_saved_analysis_envelope_requires_its_root_header() {
+        for (kind, schema_version) in [
+            (EnvelopeKind::DeadCode, fallow_output::CHECK_SCHEMA_VERSION),
+            (EnvelopeKind::Dupes, fallow_output::DUPES_SCHEMA_VERSION),
+            (EnvelopeKind::Health, fallow_output::HEALTH_SCHEMA_VERSION),
+            (EnvelopeKind::Audit, fallow_output::AUDIT_SCHEMA_VERSION),
+            (
+                EnvelopeKind::Combined,
+                fallow_output::COMBINED_SCHEMA_VERSION,
+            ),
+        ] {
+            let error = validate_saved_schema(
+                kind,
+                &serde_json::json!({ "schema_version": schema_version }),
+            )
+            .expect_err("current envelope without its root header must fail closed");
+            assert_eq!(
+                error,
+                format!(
+                    "saved {} envelope is missing required field `version`",
+                    envelope_kind_label(kind)
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn saved_fix_envelope_preserves_empty_codeclimate_compatibility() {
+        let issues = envelope_codeclimate_issues_with_config(
+            EnvelopeKind::Fix,
+            &serde_json::json!({ "actions": [] }),
+            Path::new("/project"),
+            None,
+            None,
+        )
+        .expect("saved fix CodeClimate compatibility");
+        assert!(issues.is_empty());
+    }
+
+    #[test]
     fn stored_codeclimate_uses_native_health_categories() {
         assert_eq!(
             native_category("fallow/high-cyclomatic-complexity"),
@@ -726,13 +1155,14 @@ mod tests {
         envelope["kind"] = serde_json::json!("dead-code");
         fallow_output::strip_root_prefix(&mut envelope, &format!("{}/", root.path().display()));
 
-        let saved = envelope_codeclimate_issues_with_context(
+        let saved = envelope_codeclimate_issues_with_config(
             EnvelopeKind::DeadCode,
             &envelope,
             root.path(),
             None,
             Some(&resolver),
-        );
+        )
+        .expect("saved envelope should reconstruct");
 
         assert_eq!(
             codeclimate_issues_to_value(&saved),

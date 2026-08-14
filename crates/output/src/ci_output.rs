@@ -463,7 +463,17 @@ pub fn markdown_table_text(value: &str) -> String {
 /// Render a provider-specific review envelope from typed CI issues.
 #[must_use]
 pub fn render_review_envelope(input: &ReviewEnvelopeRenderInput<'_>) -> ReviewEnvelopeRenderResult {
-    render_review_envelope_with_id(input, None)
+    render_review_envelope_with_id(input, None, None, None)
+}
+
+/// Render a review envelope with an explicit gate conclusion and status.
+#[must_use]
+pub fn render_review_envelope_with_conclusion(
+    input: &ReviewEnvelopeRenderInput<'_>,
+    conclusion: ReviewCheckConclusion,
+    status_message: Option<&str>,
+) -> ReviewEnvelopeRenderResult {
+    render_review_envelope_with_id(input, None, Some(conclusion), status_message)
 }
 
 /// Render a review envelope whose bodies carry the supplied review scope.
@@ -472,12 +482,25 @@ pub fn render_scoped_review_envelope(
     input: &ReviewEnvelopeRenderInput<'_>,
     review_id: &ReviewId,
 ) -> ReviewEnvelopeRenderResult {
-    render_review_envelope_with_id(input, Some(review_id))
+    render_review_envelope_with_id(input, Some(review_id), None, None)
+}
+
+/// Render a scoped review envelope with an explicit gate conclusion and status.
+#[must_use]
+pub fn render_scoped_review_envelope_with_conclusion(
+    input: &ReviewEnvelopeRenderInput<'_>,
+    review_id: &ReviewId,
+    conclusion: ReviewCheckConclusion,
+    status_message: Option<&str>,
+) -> ReviewEnvelopeRenderResult {
+    render_review_envelope_with_id(input, Some(review_id), Some(conclusion), status_message)
 }
 
 fn render_review_envelope_with_id(
     input: &ReviewEnvelopeRenderInput<'_>,
     review_id: Option<&ReviewId>,
+    conclusion: Option<ReviewCheckConclusion>,
+    status_message: Option<&str>,
 ) -> ReviewEnvelopeRenderResult {
     let grouped = group_review_issues_by_path_line(input.issues, input.max_comments);
 
@@ -501,8 +524,14 @@ fn render_review_envelope_with_id(
         })
         .collect();
 
-    let summary_text =
-        review_summary_text(input.command, input.provider, comments.len(), input.issues);
+    let conclusion = conclusion.unwrap_or_else(|| github_check_conclusion(input.issues));
+    let summary_text = review_summary_text(
+        input.command,
+        input.provider,
+        comments.len(),
+        conclusion,
+        status_message,
+    );
     let summary_fp = summary_fingerprint(&summary_text);
     let summary_marker = review_markers(&summary_fp, review_id);
     let body = format!("{summary_text}{summary_marker}");
@@ -517,13 +546,7 @@ fn render_review_envelope_with_id(
     };
 
     ReviewEnvelopeRenderResult {
-        envelope: build_review_envelope_output(
-            input.provider,
-            body,
-            summary,
-            comments,
-            input.issues,
-        ),
+        envelope: build_review_envelope_output(input.provider, body, summary, comments, conclusion),
         truncation,
     }
 }
@@ -532,21 +555,24 @@ fn review_summary_text(
     command: &str,
     provider: CiProvider,
     comment_count: usize,
-    issues: &[CiIssue],
+    conclusion: ReviewCheckConclusion,
+    status_message: Option<&str>,
 ) -> String {
-    let verdict = review_summary_verdict(issues);
+    let verdict = review_summary_verdict(conclusion);
+    let status = status_message.map_or_else(String::new, |message| format!("\n\n> {message}"));
     format!(
-        "### Fallow {}\n\n**{}**\n\n{} inline finding{} selected for {} review.\n\n<!-- fallow-review -->",
+        "### Fallow {}\n\n**{}**{}\n\n{} inline finding{} selected for {} review.\n\n<!-- fallow-review -->",
         command_title(command),
         verdict,
+        status,
         comment_count,
         if comment_count == 1 { "" } else { "s" },
         provider.name(),
     )
 }
 
-fn review_summary_verdict(issues: &[CiIssue]) -> &'static str {
-    match github_check_conclusion(issues) {
+fn review_summary_verdict(conclusion: ReviewCheckConclusion) -> &'static str {
+    match conclusion {
         ReviewCheckConclusion::Failure => "Quality gate failed",
         ReviewCheckConclusion::Neutral => "Review needed",
         ReviewCheckConclusion::Success => "Quality gate passed",
@@ -812,7 +838,7 @@ fn build_review_envelope_output(
     body: String,
     summary: ReviewEnvelopeSummary,
     comments: Vec<ReviewComment>,
-    issues: &[CiIssue],
+    conclusion: ReviewCheckConclusion,
 ) -> ReviewEnvelopeOutput {
     match provider {
         CiProvider::Github => ReviewEnvelopeOutput {
@@ -825,7 +851,7 @@ fn build_review_envelope_output(
             meta: ReviewEnvelopeMeta {
                 schema: ReviewEnvelopeSchema::V2,
                 provider: ReviewProvider::Github,
-                check_conclusion: Some(github_check_conclusion(issues)),
+                check_conclusion: Some(conclusion),
             },
         },
         CiProvider::Gitlab => ReviewEnvelopeOutput {

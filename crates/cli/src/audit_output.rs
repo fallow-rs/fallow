@@ -144,11 +144,23 @@ fn print_audit_pr_comment(
     provider: report::ci::pr_comment::Provider,
 ) -> ExitCode {
     let value = build_audit_codeclimate(result);
-    report::ci::pr_comment::print_pr_comment_with_conclusion(
+    let incomplete = report::ci::required_type_aware_incomplete(
+        result
+            .check
+            .as_ref()
+            .and_then(|check| check.type_aware_meta.as_ref()),
+    );
+    let conclusion = if incomplete {
+        PrDecisionConclusion::Failure
+    } else {
+        audit_decision_conclusion(result.verdict)
+    };
+    report::ci::pr_comment::print_pr_comment_with_status(
         "audit",
         provider,
         &value,
-        audit_decision_conclusion(result.verdict),
+        conclusion,
+        incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
     )
 }
 
@@ -157,7 +169,24 @@ fn print_audit_review(
     provider: report::ci::pr_comment::Provider,
 ) -> ExitCode {
     let value = build_audit_codeclimate(result);
-    report::ci::review::print_review_envelope("audit", provider, &value)
+    let incomplete = report::ci::required_type_aware_incomplete(
+        result
+            .check
+            .as_ref()
+            .and_then(|check| check.type_aware_meta.as_ref()),
+    );
+    let conclusion = if incomplete {
+        PrDecisionConclusion::Failure
+    } else {
+        audit_decision_conclusion(result.verdict)
+    };
+    report::ci::review::print_review_envelope_with_conclusion(
+        "audit",
+        provider,
+        &value,
+        conclusion,
+        incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+    )
 }
 
 fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: OutputFormat) {

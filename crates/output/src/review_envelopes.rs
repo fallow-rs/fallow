@@ -422,11 +422,11 @@ pub enum ReviewProvider {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ReviewCheckConclusion {
-    /// No findings.
+    /// The gate passed, whether or not inline findings were selected.
     Success,
     /// Findings but none gated as failure.
     Neutral,
-    /// At least one finding gated as failure.
+    /// The gate failed, including failures without an inline finding.
     Failure,
 }
 

@@ -10,8 +10,8 @@ pub struct PrCommentEnvelope {
     pub marker_id: String,
     /// Full rendered comment body, marker included.
     pub body: String,
-    /// True when the run produced no review-visible findings; adapters skip
-    /// creating a first comment for clean runs.
+    /// True when the run produced no review-visible findings and its gate
+    /// passed; adapters skip creating a first comment only for clean runs.
     pub is_clean: bool,
     /// Link to hosted report output, when available.
     pub details_url: Option<String>,

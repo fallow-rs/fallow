@@ -426,10 +426,14 @@ fn print_results_ci_comment(
     // prefix twice and key the filter in the wrong namespace.
     let issues = codeclimate::api_codeclimate_issues(results, ctx.root, ctx.rules);
     let value = fallow_output::codeclimate_issues_to_value(&issues);
-    print_ci_comment_format("dead-code", &value, output).unwrap_or_else(|| {
-        eprintln!("Error: badge format is only supported for the health command");
-        ExitCode::from(2)
-    })
+    let incomplete = ci::required_type_aware_incomplete(ctx.type_aware);
+    let conclusion = incomplete.then_some(fallow_output::PrDecisionConclusion::Failure);
+    let status_message = incomplete.then_some(ci::TYPE_AWARE_INCOMPLETE_MESSAGE);
+    print_ci_comment_format_with_status("dead-code", &value, output, conclusion, status_message)
+        .unwrap_or_else(|| {
+            eprintln!("Error: badge format is only supported for the health command");
+            ExitCode::from(2)
+        })
 }
 
 /// Render grouped results across all output formats.
@@ -652,19 +656,65 @@ fn print_ci_comment_format(
     value: &serde_json::Value,
     output: OutputFormat,
 ) -> Option<ExitCode> {
+    print_ci_comment_format_with_status(analysis, value, output, None, None)
+}
+
+fn print_ci_comment_format_with_status(
+    analysis: &str,
+    value: &serde_json::Value,
+    output: OutputFormat,
+    conclusion: Option<fallow_output::PrDecisionConclusion>,
+    status_message: Option<&str>,
+) -> Option<ExitCode> {
     let exit = match output {
-        OutputFormat::PrCommentGithub => {
-            ci::pr_comment::print_pr_comment(analysis, ci::pr_comment::Provider::Github, value)
-        }
-        OutputFormat::PrCommentGitlab => {
-            ci::pr_comment::print_pr_comment(analysis, ci::pr_comment::Provider::Gitlab, value)
-        }
-        OutputFormat::ReviewGithub => {
-            ci::review::print_review_envelope(analysis, ci::pr_comment::Provider::Github, value)
-        }
-        OutputFormat::ReviewGitlab => {
-            ci::review::print_review_envelope(analysis, ci::pr_comment::Provider::Gitlab, value)
-        }
+        OutputFormat::PrCommentGithub => conclusion.map_or_else(
+            || ci::pr_comment::print_pr_comment(analysis, ci::pr_comment::Provider::Github, value),
+            |conclusion| {
+                ci::pr_comment::print_pr_comment_with_status(
+                    analysis,
+                    ci::pr_comment::Provider::Github,
+                    value,
+                    conclusion,
+                    status_message,
+                )
+            },
+        ),
+        OutputFormat::PrCommentGitlab => conclusion.map_or_else(
+            || ci::pr_comment::print_pr_comment(analysis, ci::pr_comment::Provider::Gitlab, value),
+            |conclusion| {
+                ci::pr_comment::print_pr_comment_with_status(
+                    analysis,
+                    ci::pr_comment::Provider::Gitlab,
+                    value,
+                    conclusion,
+                    status_message,
+                )
+            },
+        ),
+        OutputFormat::ReviewGithub => conclusion.map_or_else(
+            || ci::review::print_review_envelope(analysis, ci::pr_comment::Provider::Github, value),
+            |conclusion| {
+                ci::review::print_review_envelope_with_conclusion(
+                    analysis,
+                    ci::pr_comment::Provider::Github,
+                    value,
+                    conclusion,
+                    status_message,
+                )
+            },
+        ),
+        OutputFormat::ReviewGitlab => conclusion.map_or_else(
+            || ci::review::print_review_envelope(analysis, ci::pr_comment::Provider::Gitlab, value),
+            |conclusion| {
+                ci::review::print_review_envelope_with_conclusion(
+                    analysis,
+                    ci::pr_comment::Provider::Gitlab,
+                    value,
+                    conclusion,
+                    status_message,
+                )
+            },
+        ),
         _ => return None,
     };
     Some(exit)

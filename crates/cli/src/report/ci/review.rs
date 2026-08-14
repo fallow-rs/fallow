@@ -5,10 +5,11 @@ use serde_json::Value;
 
 use super::diff_filter::DiffIndex;
 use crate::report::emit_json;
+use fallow_output::PrDecisionConclusion;
 use fallow_output::{
-    CiIssue, CiProvider as Provider, ReviewEnvelopeOutput, ReviewEnvelopeRenderInput,
-    ReviewEnvelopeTruncation, ReviewGitlabDiffRefs as GitlabDiffRefs, ReviewId,
-    issues_from_codeclimate_issues,
+    CiIssue, CiProvider as Provider, ReviewCheckConclusion, ReviewEnvelopeOutput,
+    ReviewEnvelopeRenderInput, ReviewEnvelopeTruncation, ReviewGitlabDiffRefs as GitlabDiffRefs,
+    ReviewId, issues_from_codeclimate_issues,
 };
 
 #[must_use]
@@ -23,6 +24,8 @@ pub fn render_review_envelope(
         issues,
         super::diff_filter::shared_diff_index(),
         None,
+        None,
+        None,
     )
 }
 
@@ -31,12 +34,18 @@ pub fn render_review_envelope(
 /// cache (which is `OnceLock`-bounded and not reentrant under cargo test's
 /// parallel runner).
 #[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the private render seam keeps test-injected diff and optional gate state explicit"
+)]
 fn render_review_envelope_with_diff(
     command: &str,
     provider: Provider,
     issues: &[CiIssue],
     diff_index: Option<&DiffIndex>,
     review_id: Option<&ReviewId>,
+    conclusion: Option<ReviewCheckConclusion>,
+    status_message: Option<&str>,
 ) -> ReviewEnvelopeOutput {
     let max = std::env::var("FALLOW_MAX_COMMENTS")
         .ok()
@@ -59,9 +68,22 @@ fn render_review_envelope_with_diff(
         suggestion_block: &super::suggestion::suggestion_block,
         guidance_block: &review_guidance_block,
     };
-    let rendered = match review_id {
-        Some(review_id) => fallow_output::render_scoped_review_envelope(&input, review_id),
-        None => fallow_output::render_review_envelope(&input),
+    let rendered = match (review_id, conclusion) {
+        (Some(review_id), Some(conclusion)) => {
+            fallow_output::render_scoped_review_envelope_with_conclusion(
+                &input,
+                review_id,
+                conclusion,
+                status_message,
+            )
+        }
+        (Some(review_id), None) => fallow_output::render_scoped_review_envelope(&input, review_id),
+        (None, Some(conclusion)) => fallow_output::render_review_envelope_with_conclusion(
+            &input,
+            conclusion,
+            status_message,
+        ),
+        (None, None) => fallow_output::render_review_envelope(&input),
     };
     note_review_truncation(rendered.truncation);
     rendered.envelope
@@ -96,7 +118,27 @@ pub(crate) fn print_review_envelope(
     let issues = super::diff_filter::filter_issues_from_env(
         super::pr_comment::issues_from_codeclimate(codeclimate),
     );
-    print_review_envelope_from_ci_issues(command, provider, &issues)
+    print_review_envelope_from_ci_issues(command, provider, &issues, None, None)
+}
+
+#[must_use]
+pub(crate) fn print_review_envelope_with_conclusion(
+    command: &str,
+    provider: Provider,
+    codeclimate: &Value,
+    conclusion: PrDecisionConclusion,
+    status_message: Option<&str>,
+) -> ExitCode {
+    let issues = super::diff_filter::filter_issues_from_env(
+        super::pr_comment::issues_from_codeclimate(codeclimate),
+    );
+    print_review_envelope_from_ci_issues(
+        command,
+        provider,
+        &issues,
+        Some(review_conclusion(conclusion)),
+        status_message,
+    )
 }
 
 #[must_use]
@@ -107,7 +149,26 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues(
 ) -> ExitCode {
     let issues =
         super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
-    print_review_envelope_from_ci_issues(command, provider, &issues)
+    print_review_envelope_from_ci_issues(command, provider, &issues, None, None)
+}
+
+#[must_use]
+pub(crate) fn print_review_envelope_from_codeclimate_issues_with_conclusion(
+    command: &str,
+    provider: Provider,
+    codeclimate: &[CodeClimateIssue],
+    conclusion: PrDecisionConclusion,
+    status_message: Option<&str>,
+) -> ExitCode {
+    let issues =
+        super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
+    print_review_envelope_from_ci_issues(
+        command,
+        provider,
+        &issues,
+        Some(review_conclusion(conclusion)),
+        status_message,
+    )
 }
 
 #[must_use]
@@ -115,6 +176,8 @@ fn print_review_envelope_from_ci_issues(
     command: &str,
     provider: Provider,
     issues: &[CiIssue],
+    conclusion: Option<ReviewCheckConclusion>,
+    status_message: Option<&str>,
 ) -> ExitCode {
     let review_id = match review_id_from_env() {
         Ok(review_id) => review_id,
@@ -129,6 +192,8 @@ fn print_review_envelope_from_ci_issues(
         issues,
         super::diff_filter::shared_diff_index(),
         review_id.as_ref(),
+        conclusion,
+        status_message,
     );
     let mode = crate::output_runtime::current_root_envelope_mode();
     let analysis_run_id = crate::output_runtime::telemetry_analysis_run_id();
@@ -154,6 +219,16 @@ fn print_review_envelope_from_ci_issues(
         }
     };
     emit_json(&value, "review envelope")
+}
+
+const fn review_conclusion(conclusion: PrDecisionConclusion) -> ReviewCheckConclusion {
+    match conclusion {
+        PrDecisionConclusion::Success => ReviewCheckConclusion::Success,
+        PrDecisionConclusion::Failure => ReviewCheckConclusion::Failure,
+        PrDecisionConclusion::Neutral | PrDecisionConclusion::Skipped => {
+            ReviewCheckConclusion::Neutral
+        }
+    }
 }
 
 fn review_id_from_env() -> Result<Option<ReviewId>, String> {
@@ -293,6 +368,8 @@ mod tests {
             &[issue],
             None,
             Some(&review_id),
+            None,
+            None,
         );
         let envelope = fallow_output::serialize_scoped_review_envelope_json_output(
             &envelope,
@@ -641,6 +718,8 @@ rename to src/new.ts
             &[issue],
             Some(&diff_index),
             None,
+            None,
+            None,
         ));
         let position = &envelope["comments"][0]["position"];
         assert_eq!(position["old_path"], "src/old.ts");
@@ -654,6 +733,8 @@ rename to src/new.ts
             "check",
             Provider::Gitlab,
             &[issue],
+            None,
+            None,
             None,
             None,
         ));

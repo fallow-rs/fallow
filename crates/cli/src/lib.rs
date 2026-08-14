@@ -459,7 +459,8 @@ struct Cli {
 
     /// Prefix prepended to every path in the CI-facing formats
     /// (`github-annotations`, `github-summary`, `codeclimate`,
-    /// `review-github`, `review-gitlab`). CI platforms address files by
+    /// `pr-comment-github`, `pr-comment-gitlab`, `review-github`,
+    /// `review-gitlab`). CI platforms address files by
     /// repository-root-relative path, so when the analyzed project lives in a
     /// subdirectory (e.g. `packages/app/`), paths need that offset. fallow
     /// detects the offset via the git toplevel automatically; this flag
@@ -1630,9 +1631,9 @@ enum Command {
     },
 
     /// Render a saved `--format json` results file in another format without
-    /// re-running analysis (analyze once, render annotations and the job
-    /// summary from the same file). Supports `github-annotations`,
-    /// `github-summary`, `codeclimate`, and `sarif`.
+    /// re-running analysis (analyze once, then render every CI surface from
+    /// the same file). Supports GitHub annotations/summary, CodeClimate,
+    /// SARIF, and GitHub/GitLab PR-comment and review formats.
     Report {
         /// Path to a fallow JSON results file produced by `--format json`
         /// (dead-code, dupes, health, audit, security, or bare combined).
@@ -4896,10 +4897,14 @@ fn validate_type_aware_check_options(
                 | fallow_config::OutputFormat::Compact
                 | fallow_config::OutputFormat::Markdown
                 | fallow_config::OutputFormat::CodeClimate
+                | fallow_config::OutputFormat::PrCommentGithub
+                | fallow_config::OutputFormat::PrCommentGitlab
+                | fallow_config::OutputFormat::ReviewGithub
+                | fallow_config::OutputFormat::ReviewGitlab
         )
     {
         return Some(emit_error(
-            "--type-aware supports human, JSON, SARIF, compact, markdown, and CodeClimate output; pair CodeClimate with the JSON artifact to preserve semantic provenance",
+            "--type-aware supports human, JSON, SARIF, compact, markdown, CodeClimate, PR-comment, and review output; pair presentation formats with the JSON artifact to preserve semantic provenance",
             2,
             output,
         ));

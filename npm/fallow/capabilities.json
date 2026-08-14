@@ -302,7 +302,7 @@
       "name": "--report-path-prefix",
       "type": "string",
       "required": false,
-      "description": "Prefix prepended to every path in the CI-facing formats (`github-annotations`, `github-summary`, `codeclimate`, `review-github`, `review-gitlab`). CI platforms address files by repository-root-relative path, so when the analyzed project lives in a subdirectory (e.g. `packages/app/`), paths need that offset. fallow detects the offset via the git toplevel automatically; this flag overrides the detection. Pass an empty string to disable rebasing and emit paths relative to `--root`"
+      "description": "Prefix prepended to every path in the CI-facing formats (`github-annotations`, `github-summary`, `codeclimate`, `pr-comment-github`, `pr-comment-gitlab`, `review-github`, `review-gitlab`). CI platforms address files by repository-root-relative path, so when the analyzed project lives in a subdirectory (e.g. `packages/app/`), paths need that offset. fallow detects the offset via the git toplevel automatically; this flag overrides the detection. Pass an empty string to disable rebasing and emit paths relative to `--root`"
     },
     {
       "name": "--fail-on-regression",
@@ -1897,7 +1897,7 @@
     },
     {
       "name": "report",
-      "description": "Render a saved `--format json` results file in another format without re-running analysis (analyze once, render annotations and the job summary from the same file). Supports `github-annotations`, `github-summary`, `codeclimate`, and `sarif`",
+      "description": "Render a saved `--format json` results file in another format without re-running analysis (analyze once, then render every CI surface from the same file). Supports GitHub annotations/summary, CodeClimate, SARIF, and GitHub/GitLab PR-comment and review formats",
       "flags": [
         {
           "name": "--from",

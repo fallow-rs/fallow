@@ -613,6 +613,41 @@ if [ -n "${INPUT_ARGS:-}" ]; then
   read -ra EXTRA_ARGS <<< "$INPUT_ARGS"
 fi
 
+# Path prefixes affect only repository-facing presentation formats. Pull them
+# out of the analysis invocation (whose primary format is JSON) and propagate
+# the explicit override to later composite-action steps via GITHUB_ENV.
+FALLOW_RENDER_PATH_PREFIX_SET=0
+FALLOW_RENDER_PATH_PREFIX=""
+FILTERED_EXTRA_ARGS=()
+for ((i = 0; i < ${#EXTRA_ARGS[@]}; i++)); do
+  arg="${EXTRA_ARGS[$i]}"
+  case "$arg" in
+    --report-path-prefix|--annotations-path-prefix)
+      if [ $((i + 1)) -ge "${#EXTRA_ARGS[@]}" ]; then
+        echo "::error::${arg} requires a prefix value"
+        exit 2
+      fi
+      i=$((i + 1))
+      FALLOW_RENDER_PATH_PREFIX="${EXTRA_ARGS[$i]}"
+      FALLOW_RENDER_PATH_PREFIX_SET=1
+      ;;
+    --report-path-prefix=*|--annotations-path-prefix=*)
+      FALLOW_RENDER_PATH_PREFIX="${arg#*=}"
+      FALLOW_RENDER_PATH_PREFIX_SET=1
+      ;;
+    *) FILTERED_EXTRA_ARGS+=("$arg") ;;
+  esac
+done
+EXTRA_ARGS=()
+if [ "${#FILTERED_EXTRA_ARGS[@]}" -gt 0 ]; then
+  EXTRA_ARGS=("${FILTERED_EXTRA_ARGS[@]}")
+fi
+if [ -n "${GITHUB_ENV:-}" ]; then
+  printf '%s\n' \
+    "FALLOW_RENDER_PATH_PREFIX_SET=${FALLOW_RENDER_PATH_PREFIX_SET}" \
+    "FALLOW_RENDER_PATH_PREFIX=${FALLOW_RENDER_PATH_PREFIX}" >> "$GITHUB_ENV"
+fi
+
 # Run analysis — no --fail-on-issues so subsequent steps always run.
 # Bare invocations may emit an error JSON (e.g., health on a non-git repo)
 # followed by the actual combined results. Use jq -s 'last' to extract only

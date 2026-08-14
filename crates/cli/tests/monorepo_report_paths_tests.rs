@@ -180,6 +180,102 @@ fn report_path_prefix_overrides_the_detected_offset() {
 }
 
 #[test]
+fn saved_review_rebases_monorepo_paths_once_and_preserves_gitlab_diff_refs() {
+    let dir = monorepo();
+    let root = dir.path();
+    let analysis = run(
+        root,
+        &[
+            "health",
+            "--root",
+            "packages/pkg",
+            "--complexity",
+            "--quiet",
+            "--format",
+            "json",
+        ],
+    );
+    assert!(matches!(analysis.code, 0 | 1), "{}", analysis.stderr);
+    let results = root.join("fallow-results.json");
+    std::fs::write(&results, &analysis.stdout).expect("write saved results");
+    let diff = root.join("saved.diff");
+    std::fs::write(
+        &diff,
+        "diff --git a/packages/pkg/src/complex.js b/packages/pkg/src/complex.js\n\
+         --- a/packages/pkg/src/complex.js\n\
+         +++ b/packages/pkg/src/complex.js\n\
+         @@ -0,0 +1,13 @@\n\
+         +export function complex() {}\n",
+    )
+    .expect("write diff");
+
+    let saved = run_with_env(
+        root,
+        &[
+            "report",
+            "--from",
+            results.to_str().expect("utf8"),
+            "--root",
+            "packages/pkg",
+            "--quiet",
+            "--format",
+            "review-gitlab",
+        ],
+        &[
+            ("FALLOW_DIFF_FILE", diff.to_str().expect("utf8")),
+            ("FALLOW_DIFF_FILTER", "file"),
+            ("FALLOW_GITLAB_BASE_SHA", "base"),
+            ("FALLOW_GITLAB_START_SHA", "start"),
+            ("FALLOW_GITLAB_HEAD_SHA", "head"),
+        ],
+    );
+    assert_eq!(saved.code, 0, "{}", saved.stderr);
+    let json = parse_json(&saved);
+    let comments = json["comments"].as_array().expect("review comments");
+    assert!(!comments.is_empty(), "{}", saved.stdout);
+    for comment in comments {
+        let position = &comment["position"];
+        let path = position["new_path"].as_str().expect("new_path");
+        assert!(path.starts_with("packages/pkg/"), "{path}");
+        assert!(!path.starts_with("packages/pkg/packages/pkg/"), "{path}");
+        assert_eq!(position["base_sha"], "base");
+        assert_eq!(position["start_sha"], "start");
+        assert_eq!(position["head_sha"], "head");
+    }
+
+    for args in [
+        vec![
+            "health",
+            "--root",
+            "packages/pkg",
+            "--complexity",
+            "--quiet",
+            "--format",
+            "pr-comment-gitlab",
+        ],
+        vec![
+            "report",
+            "--from",
+            results.to_str().expect("utf8"),
+            "--root",
+            "packages/pkg",
+            "--quiet",
+            "--format",
+            "pr-comment-gitlab",
+        ],
+    ] {
+        let comment = run(root, &args);
+        assert!(matches!(comment.code, 0 | 1), "{}", comment.stderr);
+        assert!(comment.stdout.contains("packages/pkg/src/complex.js"));
+        assert!(
+            !comment
+                .stdout
+                .contains("packages/pkg/packages/pkg/src/complex.js")
+        );
+    }
+}
+
+#[test]
 fn empty_report_path_prefix_disables_rebasing() {
     let dir = monorepo();
     let out = run(

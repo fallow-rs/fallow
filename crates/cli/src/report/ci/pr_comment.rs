@@ -4,16 +4,16 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
+use fallow_output::issues_from_codeclimate_issues;
 pub use fallow_output::{
-    CiIssue, CiProvider as Provider, PR_DECISION_SCHEMA, PR_DETAILS_SCHEMA, PrCommentEnvelope,
-    PrCommentLayout, PrCommentTruncation, PrDecisionAnnotation, PrDecisionAnnotationLevel,
-    PrDecisionConclusion, PrDecisionDetails, PrDecisionGate, PrDecisionSurface, PrDetailsArtifact,
-    PrDetailsRow, PrDetailsSection, command_title, issues_from_codeclimate,
+    CiIssue, CiProvider as Provider, CodeClimateIssue, PR_DECISION_SCHEMA, PR_DETAILS_SCHEMA,
+    PrCommentEnvelope, PrCommentLayout, PrCommentTruncation, PrDecisionAnnotation,
+    PrDecisionAnnotationLevel, PrDecisionConclusion, PrDecisionDetails, PrDecisionGate,
+    PrDecisionSurface, PrDetailsArtifact, PrDetailsRow, PrDetailsSection, command_title,
+    issues_from_codeclimate,
 };
 #[cfg(test)]
-use fallow_output::{
-    CodeClimateIssue, escape_md, is_project_level_rule, issues_from_codeclimate_issues,
-};
+use fallow_output::{escape_md, is_project_level_rule};
 
 /// Workspace name, set once by `main()` when the binary is invoked with
 /// `--workspace <name>`. Read by `sticky_marker_id` to auto-suffix the
@@ -159,22 +159,50 @@ fn sanitize_marker_segment(value: &str) -> String {
 
 #[must_use]
 pub(crate) fn print_pr_comment(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
-    let issues =
-        super::diff_filter::filter_issues_for_summary(issues_from_codeclimate(codeclimate));
+    let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
+        issues_from_codeclimate(codeclimate),
+    ));
     let conclusion = issue_decision_conclusion(issues.is_empty());
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion)
+    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, None)
 }
 
 #[must_use]
-pub(crate) fn print_pr_comment_with_conclusion(
+pub(crate) fn print_pr_comment_with_status(
     command: &str,
     provider: Provider,
     codeclimate: &Value,
     conclusion: PrDecisionConclusion,
+    status_message: Option<&str>,
 ) -> ExitCode {
-    let issues =
-        super::diff_filter::filter_issues_for_summary(issues_from_codeclimate(codeclimate));
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion)
+    let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
+        issues_from_codeclimate(codeclimate),
+    ));
+    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status_message)
+}
+
+#[must_use]
+pub(crate) fn print_pr_comment_from_codeclimate_issues(
+    command: &str,
+    provider: Provider,
+    codeclimate: &[CodeClimateIssue],
+    conclusion: Option<PrDecisionConclusion>,
+    status_message: Option<&str>,
+) -> ExitCode {
+    let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
+        issues_from_codeclimate_issues(codeclimate),
+    ));
+    let conclusion = conclusion.unwrap_or_else(|| issue_decision_conclusion(issues.is_empty()));
+    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status_message)
+}
+
+fn rebase_issue_paths(mut issues: Vec<CiIssue>) -> Vec<CiIssue> {
+    let prefix = crate::report::github::report_prefix();
+    if !prefix.is_empty() {
+        for issue in &mut issues {
+            issue.path = fallow_output::apply_path_prefix(prefix, &issue.path);
+        }
+    }
+    issues
 }
 
 #[must_use]
@@ -183,13 +211,18 @@ fn print_pr_comment_from_ci_issues(
     provider: Provider,
     issues: &[CiIssue],
     conclusion: PrDecisionConclusion,
+    status_message: Option<&str>,
 ) -> ExitCode {
-    let body = render_pr_comment(command, provider, issues);
+    let mut body = render_pr_comment(command, provider, issues);
+    if let Some(message) = status_message {
+        body.push_str("\n\n> ");
+        body.push_str(message);
+    }
     let max_comments = max_comments();
     let envelope = PrCommentEnvelope {
         marker_id: sticky_marker_id(),
         body,
-        is_clean: issues.is_empty(),
+        is_clean: issues.is_empty() && conclusion == PrDecisionConclusion::Success,
         details_url: None,
         check_summary: Some(decision_summary_label(conclusion).to_owned()),
         truncation: PrCommentTruncation {
@@ -198,7 +231,8 @@ fn print_pr_comment_from_ci_issues(
             total_findings: issues.len(),
         },
     };
-    let decision = build_issue_decision_surface(command, issues, &envelope, conclusion);
+    let decision =
+        build_issue_decision_surface(command, issues, &envelope, conclusion, status_message);
     let details = build_pr_details_artifact(command, issues);
     write_pr_comment_envelope_sidecar(&envelope);
     write_pr_decision_sidecar(&decision);
@@ -213,20 +247,16 @@ fn build_issue_decision_surface(
     issues: &[CiIssue],
     envelope: &PrCommentEnvelope,
     conclusion: PrDecisionConclusion,
+    status_message: Option<&str>,
 ) -> PrDecisionSurface {
-    let effective_conclusion = if issues.is_empty() {
-        PrDecisionConclusion::Success
-    } else {
-        conclusion
-    };
     PrDecisionSurface {
         schema: PR_DECISION_SCHEMA.to_owned(),
         title: "Fallow".to_owned(),
-        conclusion: effective_conclusion,
+        conclusion,
         gates: vec![PrDecisionGate {
             id: command.to_owned(),
             label: command_title(command).to_owned(),
-            status: effective_conclusion,
+            status: conclusion,
             observed: count_label(issues.len(), "finding", "findings"),
             threshold: None,
             scope: "new code".to_owned(),
@@ -237,7 +267,7 @@ fn build_issue_decision_surface(
             .map(decision_annotation_from_issue)
             .collect(),
         details: PrDecisionDetails {
-            summary_markdown: decision_summary_markdown(effective_conclusion, issues.len()),
+            summary_markdown: decision_summary_markdown(conclusion, issues.len(), status_message),
             full_report_path: None,
             details_url: envelope.details_url.clone(),
         },
@@ -261,17 +291,38 @@ fn decision_summary_label(conclusion: PrDecisionConclusion) -> &'static str {
     }
 }
 
-fn decision_summary_markdown(conclusion: PrDecisionConclusion, issue_count: usize) -> String {
-    if issue_count == 0 {
-        return "Fallow found no actionable PR findings.".to_owned();
-    }
-    let findings = count_label(issue_count, "finding", "findings");
-    match conclusion {
-        PrDecisionConclusion::Failure => format!("Fallow quality gates failed with {findings}."),
-        PrDecisionConclusion::Neutral => format!("Fallow found {findings} for review."),
-        PrDecisionConclusion::Success | PrDecisionConclusion::Skipped => {
-            format!("Fallow found {findings}.")
+fn decision_summary_markdown(
+    conclusion: PrDecisionConclusion,
+    issue_count: usize,
+    status_message: Option<&str>,
+) -> String {
+    let summary = if issue_count == 0 {
+        match conclusion {
+            PrDecisionConclusion::Failure => {
+                "Fallow quality gates failed without renderable findings.".to_owned()
+            }
+            PrDecisionConclusion::Neutral => {
+                "Fallow needs review without renderable findings.".to_owned()
+            }
+            PrDecisionConclusion::Success | PrDecisionConclusion::Skipped => {
+                "Fallow found no actionable PR findings.".to_owned()
+            }
         }
+    } else {
+        let findings = count_label(issue_count, "finding", "findings");
+        match conclusion {
+            PrDecisionConclusion::Failure => {
+                format!("Fallow quality gates failed with {findings}.")
+            }
+            PrDecisionConclusion::Neutral => format!("Fallow found {findings} for review."),
+            PrDecisionConclusion::Success | PrDecisionConclusion::Skipped => {
+                format!("Fallow found {findings}.")
+            }
+        }
+    };
+    match status_message {
+        Some(message) => format!("{summary}\n\n> {message}"),
+        None => summary,
     }
 }
 
@@ -594,10 +645,12 @@ mod tests {
             &issues,
             &envelope,
             PrDecisionConclusion::Failure,
+            Some(crate::report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
         );
 
         assert_eq!(decision.conclusion, PrDecisionConclusion::Failure);
         assert_eq!(decision.gates[0].status, PrDecisionConclusion::Failure);
+        assert!(decision.details.summary_markdown.contains("incomplete"));
         assert!(
             decision
                 .details

@@ -10,21 +10,20 @@ FALLOW_RENDER_ARGS=()
 
 prepare_fallow_render_args() {
   local format=$1
-  [ -f fallow-analysis-args.sh ] || return 1
-  # shellcheck disable=SC1091
-  source fallow-analysis-args.sh
-  FALLOW_RENDER_ARGS=("${FALLOW_ANALYSIS_ARGS[@]}")
-  local replaced=false
-  for i in "${!FALLOW_RENDER_ARGS[@]}"; do
-    if [ "${FALLOW_RENDER_ARGS[$i]}" = "--format" ] && [ $((i + 1)) -lt "${#FALLOW_RENDER_ARGS[@]}" ]; then
-      FALLOW_RENDER_ARGS[$((i + 1))]="$format"
-      replaced=true
-      break
-    fi
-  done
-  if [ "$replaced" != "true" ]; then
-    FALLOW_RENDER_ARGS+=(--format "$format")
-  fi
+  local results_file="${FALLOW_RESULTS_FILE:-fallow-results.json}"
+  local root="${FALLOW_ROOT:-${INPUT_ROOT:-.}}"
+  [ -s "$results_file" ] || return 1
+  FALLOW_RENDER_ARGS=(
+    report
+    --from "$results_file"
+    --root "$root"
+    --quiet
+    --format "$format"
+  )
+  [ -n "${FALLOW_CONFIG:-}" ] && FALLOW_RENDER_ARGS+=(--config "$FALLOW_CONFIG")
+  [ -n "${FALLOW_WORKSPACE:-}" ] && FALLOW_RENDER_ARGS+=(--workspace "$FALLOW_WORKSPACE")
+  [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
+    && FALLOW_RENDER_ARGS+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
   if [ -z "${FALLOW_DIFF_FILE:-}" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
     if git diff "${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD" > fallow-mr.diff 2>fallow-mr-diff-stderr.log; then
       export FALLOW_DIFF_FILE="$PWD/fallow-mr.diff"

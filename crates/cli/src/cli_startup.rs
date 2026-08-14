@@ -372,13 +372,16 @@ pub fn run_pre_dispatch_checks(
             fallow_config::OutputFormat::GithubAnnotations
                 | fallow_config::OutputFormat::GithubSummary
                 | fallow_config::OutputFormat::CodeClimate
+                | fallow_config::OutputFormat::PrCommentGithub
+                | fallow_config::OutputFormat::PrCommentGitlab
                 | fallow_config::OutputFormat::ReviewGithub
                 | fallow_config::OutputFormat::ReviewGitlab
         )
     {
         let code = emit_known_failure_with_style(
             "--report-path-prefix is only valid with --format github-annotations, \
-             github-summary, codeclimate, review-github, or review-gitlab",
+             github-summary, codeclimate, pr-comment-github, pr-comment-gitlab, \
+             review-github, or review-gitlab",
             2,
             output,
             json_style,
@@ -396,6 +399,8 @@ pub fn run_pre_dispatch_checks(
     if matches!(
         output,
         fallow_config::OutputFormat::CodeClimate
+            | fallow_config::OutputFormat::PrCommentGithub
+            | fallow_config::OutputFormat::PrCommentGitlab
             | fallow_config::OutputFormat::ReviewGithub
             | fallow_config::OutputFormat::ReviewGitlab
     ) {

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Type-aware `check` and `audit` results now render directly as GitHub or
+  GitLab PR comments and inline-review envelopes.** The four CI presentation
+  formats consume the final semantically refined findings, while JSON remains
+  the provenance-bearing artifact. Required incomplete semantic analysis fails
+  closed instead of producing an apparently clean comment.
+- **`fallow report --from <results.json>` now renders
+  `pr-comment-github`, `pr-comment-gitlab`, `review-github`, and
+  `review-gitlab`.** Saved audit pass/warn/fail conclusions, diff positions,
+  ownership grouping, and repository path prefixes survive the round trip.
+  The bundled GitHub Action and GitLab CI helpers now analyze once and render
+  comment/review surfaces from the saved JSON artifact.
+
 ## [3.16.0] - 2026-08-13
 
 ### Fixed

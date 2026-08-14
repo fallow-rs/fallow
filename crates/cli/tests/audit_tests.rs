@@ -5093,6 +5093,10 @@ fn audit_new_only_inherits_pre_existing_findings_across_rename_with_edit() {
 /// so the audit degrades to syntactic attribution with a warning instead of
 /// exiting 2, while a genuinely new unused export still fails the gate.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the regression fixture builds both audit sides and verifies JSON plus CI rendering"
+)]
 fn audit_new_only_degrades_to_syntactic_attribution_on_type_aware_identity_mismatch() {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let dir = tmp.path();
@@ -5194,6 +5198,28 @@ fn audit_new_only_degrades_to_syntactic_attribution_on_type_aware_identity_misma
             .any(|finding| finding["export_name"] == "unusedBase" && finding["introduced"] == false),
         "pre-existing export should stay inherited: {unused_exports:#?}"
     );
+
+    let comment = common::run_fallow_raw_with_type_aware_sidecar(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "pr-comment-gitlab",
+        "--quiet",
+    ]);
+    assert_eq!(
+        comment.code, 1,
+        "type-aware audit comment should preserve the failing verdict: {}",
+        comment.stderr
+    );
+    assert!(
+        comment
+            .stdout
+            .contains("<!-- fallow-id: fallow-results -->")
+    );
+    assert!(comment.stdout.contains("unusedNew"), "{}", comment.stdout);
 }
 
 /// Regression test for #2102: with `typeAware.enabled`, a diff that only adds

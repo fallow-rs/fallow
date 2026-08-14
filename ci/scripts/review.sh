@@ -80,11 +80,21 @@ render_with_fallow() {
   local output=$2
   prepare_fallow_render_args "$format" || return 1
   load_gitlab_diff_refs
-  FALLOW_MAX_COMMENTS="$MAX" fallow "${FALLOW_RENDER_ARGS[@]}" > "$output" 2> fallow-review-stderr.log || true
+  local render_status=0
+  FALLOW_MAX_COMMENTS="$MAX" fallow "${FALLOW_RENDER_ARGS[@]}" > "$output" 2> fallow-review-stderr.log || render_status=$?
   # Surface fallow's structured-error envelope before the schema check so the
   # CLI message lands in the GitLab job log rather than a generic warning.
   if jq -e '.error == true' "$output" > /dev/null 2>&1; then
     echo "WARNING: fallow render failed: $(jq -r '.message // "unknown error"' "$output")"
+    return 1
+  fi
+  if [ "$render_status" -ne 0 ]; then
+    echo "WARNING: fallow render failed (exit ${render_status})"
+    if [ -s fallow-review-stderr.log ]; then
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf 'fallow: %s\n' "$line"
+      done < fallow-review-stderr.log
+    fi
     return 1
   fi
   # Accept both v1 (historical) and v2 (issue #528) schema markers so a

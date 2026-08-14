@@ -35,22 +35,14 @@ artifact_path() {
 render_with_fallow() {
   local format=$1
   local output=$2
-  local analysis_args_file="${FALLOW_ANALYSIS_ARGS_FILE:-fallow-analysis-args.sh}"
-  [ -f "$analysis_args_file" ] || return 1
-  # shellcheck disable=SC1091
-  source "$analysis_args_file"
-  local args=("${FALLOW_ANALYSIS_ARGS[@]}")
-  local replaced=false
-  for i in "${!args[@]}"; do
-    if [ "${args[$i]}" = "--format" ] && [ $((i + 1)) -lt "${#args[@]}" ]; then
-      args[$((i + 1))]="$format"
-      replaced=true
-      break
-    fi
-  done
-  if [ "$replaced" != "true" ]; then
-    args+=(--format "$format")
-  fi
+  local results_file="${FALLOW_RESULTS_FILE:-fallow-results.json}"
+  local root="${FALLOW_ROOT:-${INPUT_ROOT:-.}}"
+  [ -s "$results_file" ] || return 1
+  local args=(report --from "$results_file" --root "$root" --quiet --format "$format")
+  [ -n "${INPUT_CONFIG:-}" ] && args+=(--config "$INPUT_CONFIG")
+  [ -n "${INPUT_WORKSPACE:-}" ] && args+=(--workspace "$INPUT_WORKSPACE")
+  [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
+    && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
   if [ -z "${FALLOW_DIFF_FILE:-}" ] && [ -n "${GH_REPO:-}" ] && [ -n "${PR_NUMBER:-}" ]; then
     diff_file=$(artifact_path fallow-pr.diff)
     diff_stderr_file=$(artifact_path fallow-pr-diff-stderr.log)
@@ -71,7 +63,10 @@ render_with_fallow() {
       export FALLOW_SUMMARY_SCOPE="all"
       ;;
   esac
-  FALLOW_COMMENT_ID="${FALLOW_COMMENT_ID:-fallow-results}" fallow "${args[@]}" > "$output" 2> "$(artifact_path fallow-comment-stderr.log)" || true
+  local render_stderr
+  local render_status=0
+  render_stderr=$(artifact_path fallow-comment-stderr.log)
+  FALLOW_COMMENT_ID="${FALLOW_COMMENT_ID:-fallow-results}" fallow "${args[@]}" > "$output" 2> "$render_stderr" || render_status=$?
   # Surface fallow's structured-error envelope before the marker check, so the
   # actual CLI message lands in the workflow log instead of a generic "Failed
   # to render typed PR comment" warning. The envelope is JSON; if the file
@@ -79,6 +74,15 @@ render_with_fallow() {
   # echo the message.
   if jq -e '.error == true' "$output" > /dev/null 2>&1; then
     echo "::warning::fallow render failed: $(jq -r '.message // "unknown error"' "$output")"
+    return 1
+  fi
+  if [ "$render_status" -ne 0 ]; then
+    echo "::warning::fallow render failed (exit ${render_status})"
+    if [ -s "$render_stderr" ]; then
+      while IFS= read -r line || [ -n "$line" ]; do
+        printf 'fallow: %s\n' "$line"
+      done < "$render_stderr"
+    fi
     return 1
   fi
   grep -q "^<!-- fallow-id: ${FALLOW_COMMENT_ID:-fallow-results} -->" "$output" \

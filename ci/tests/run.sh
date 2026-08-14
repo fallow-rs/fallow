@@ -1066,6 +1066,8 @@ assert_contains "$(cat "$CI_YAML")" 'FALLOW_TYPE_AWARE: ""' "GitLab defaults def
 assert_contains "$(cat "$CI_YAML")" 'FALLOW_TYPE_AWARE_REQUIRE: ""' "GitLab defaults defer completeness policy to repository config"
 assert_contains "$(cat "$CI_YAML")" 'unset FALLOW_TYPE_AWARE_PROJECTS FALLOW_TYPE_AWARE_REQUIRE' "GitLab removes empty env overrides before analysis"
 assert_contains "$(cat "$CI_YAML")" 'Type-aware completeness gate failed' "GitLab preserves semantic completeness failures from valid JSON"
+assert_contains "$(cat "$CI_YAML")" 'FALLOW_RENDER_PATH_PREFIX_SET' "GitLab separates renderer path prefixes from JSON analysis"
+assert_contains "$(cat "$CI_YAML")" 'FILTERED_EXTRA_ARGS' "GitLab preserves non-presentation extra arguments"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW" "has FALLOW_REVIEW variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW_GUIDANCE" "has FALLOW_REVIEW_GUIDANCE variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW_ID" "has FALLOW_REVIEW_ID variable"
@@ -1202,6 +1204,10 @@ if [ "${1:-}" = "ci" ]; then
   fi
   exit 0
 fi
+if [ "${MOCK_RENDER_FAILURE:-}" = "1" ]; then
+  echo 'saved audit envelope is missing required field `version`' >&2
+  exit 2
+fi
 format=""
 previous=""
 for arg in "$@"; do
@@ -1267,6 +1273,7 @@ esac
 SH
 chmod +x "$CI_TYPED_BIN/curl"
 
+printf '{"kind":"dead-code","schema_version":9}\n' > "$CI_TYPED_WORK/fallow-results.json"
 printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK/fallow-analysis-args.sh"
 (
   cd "$CI_TYPED_WORK"
@@ -1277,6 +1284,8 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
     CI_PROJECT_ID="18" \
     CI_MERGE_REQUEST_IID="123" \
     FALLOW_COMMAND="check" \
+    FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    FALLOW_RENDER_PATH_PREFIX="custom/base" \
     FALLOW_SUMMARY_SCOPE="diff" \
     bash "$SCRIPTS_DIR/comment.sh" > /dev/null
   PATH="$CI_TYPED_BIN:$PATH" \
@@ -1287,6 +1296,8 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
     CI_MERGE_REQUEST_IID="123" \
     CI_COMMIT_SHA="abcdef1234567890" \
     FALLOW_COMMAND="check" \
+    FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    FALLOW_RENDER_PATH_PREFIX="custom/base" \
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > "$CI_TYPED_WORK/review-clean.out"
@@ -1327,10 +1338,32 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > "$CI_TYPED_WORK/review-post-error.out"
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_TYPED_LOG" \
+    MOCK_RENDER_FAILURE="1" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    FALLOW_COMMAND="check" \
+    bash "$SCRIPTS_DIR/comment.sh" > "$CI_TYPED_WORK/comment-render-failure.out"
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_TYPED_LOG" \
+    MOCK_RENDER_FAILURE="1" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    CI_COMMIT_SHA="abcdef1234567890" \
+    FALLOW_COMMAND="check" \
+    FALLOW_DIFF_FILE="$CI_TYPED_WORK/fallow-mr.diff" \
+    bash "$SCRIPTS_DIR/review.sh" > "$CI_TYPED_WORK/review-render-failure.out"
 )
 CI_TYPED_OUT=$(cat "$CI_TYPED_LOG")
 assert_contains "$CI_TYPED_OUT" "--format pr-comment-gitlab" "comment.sh invokes typed MR comment format"
 assert_contains "$CI_TYPED_OUT" "--format review-gitlab" "review.sh invokes typed GitLab review format"
+assert_contains "$CI_TYPED_OUT" "report --from fallow-results.json" "GitLab renderers reuse the saved analysis envelope"
+assert_contains "$CI_TYPED_OUT" "--report-path-prefix custom/base" "GitLab renderers preserve presentation path prefixes"
 assert_contains "$CI_TYPED_OUT" "fallow ci post-pr-comment --provider gitlab" "comment.sh invokes GitLab MR comment post command"
 assert_contains "$CI_TYPED_OUT" "summary_scope=diff" "comment.sh passes FALLOW_SUMMARY_SCOPE to typed MR comment render"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DECISION_FILE" "comment.sh asks fallow for typed MR decision sidecar"
@@ -1353,6 +1386,12 @@ assert_contains "$(cat "$CI_TYPED_WORK/review-apply-error.out")" \
 assert_contains "$(cat "$CI_TYPED_WORK/review-post-error.out")" \
   "WARNING: fallow post-review incomplete: rerun the job" \
   "review.sh warns when posting review comments is incomplete"
+assert_contains "$(cat "$CI_TYPED_WORK/comment-render-failure.out")" \
+  'saved audit envelope is missing required field `version`' \
+  "comment.sh surfaces saved-render stderr"
+assert_contains "$(cat "$CI_TYPED_WORK/review-render-failure.out")" \
+  'saved audit envelope is missing required field `version`' \
+  "review.sh surfaces saved-render stderr"
 rm -rf "$CI_TYPED_WORK"
 
 # =========================================================================
@@ -1469,7 +1508,7 @@ ci_api_fail_review_run() {
   local stderr_var=$3
   local mock_zero=$4   # "1" for summary-only path
   write_ci_api_fail_mocks
-  printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
+  printf '{"kind":"dead-code","schema_version":9}\n' > "$CI_API_FAIL_WORK/fallow-results.json"
   : > "$CI_API_FAIL_WORK/mock.log"
   rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt"
   local _stderr _status
@@ -1570,7 +1609,7 @@ esac
 SH
 chmod +x "$CI_API_FAIL_BIN/curl"
 
-printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
+printf '{"kind":"dead-code","schema_version":9}\n' > "$CI_API_FAIL_WORK/fallow-results.json"
 : > "$CI_API_FAIL_WORK/mock.log"
 R8B_STDERR=$(cd "$CI_API_FAIL_WORK" \
   && PATH="$CI_API_FAIL_BIN:$PATH" \
@@ -1592,7 +1631,7 @@ assert_contains "$(cat "$CI_API_FAIL_WORK/mock.log")" "fallow ci post-review --p
 # job step. comment.sh no longer writes this marker, but downstream jobs can
 # still create it before review.sh runs.
 write_ci_api_fail_mocks
-printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
+printf '{"kind":"dead-code","schema_version":9}\n' > "$CI_API_FAIL_WORK/fallow-results.json"
 : > "$CI_API_FAIL_WORK/mock.log"
 printf 'true\n' > "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"
 
@@ -1619,7 +1658,7 @@ fi
 # Test 9: comment.sh delegates sticky MR posting to Rust and leaves the dedup
 # marker false when the Rust post command succeeds.
 write_ci_api_fail_mocks
-printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
+printf '{"kind":"dead-code","schema_version":9}\n' > "$CI_API_FAIL_WORK/fallow-results.json"
 : > "$CI_API_FAIL_WORK/mock.log"
 rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"
 (cd "$CI_API_FAIL_WORK" \

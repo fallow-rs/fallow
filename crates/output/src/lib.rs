@@ -116,8 +116,10 @@ pub use ci_output::{
     composite_fingerprint, escape_md, github_check_conclusion, group_review_issues_by_path_line,
     is_project_level_rule, issues_from_codeclimate, issues_from_codeclimate_issues,
     markdown_code_span, markdown_table_code_span, markdown_table_text, render_pr_comment,
-    render_review_comment_for_group, render_review_envelope, render_scoped_review_envelope,
-    review_label_from_codeclimate, summary_fingerprint, summary_label,
+    render_review_comment_for_group, render_review_envelope,
+    render_review_envelope_with_conclusion, render_scoped_review_envelope,
+    render_scoped_review_envelope_with_conclusion, review_label_from_codeclimate,
+    summary_fingerprint, summary_label,
 };
 pub use codeclimate::{
     CodeClimateAnnotationField, CodeClimateIssue, CodeClimateIssueInput, CodeClimateIssueKind,

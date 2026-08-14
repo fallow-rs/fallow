@@ -1006,6 +1006,28 @@ ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
 assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "analyze: forwards coverage to default combined command"
 assert_contains "$ARGS" "--coverage-root /ci/workspace" "analyze: forwards coverage-root to default combined command"
 
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output" "$ANALYZE_TMP/github-env"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  GITHUB_ENV="$ANALYZE_TMP/github-env" INPUT_ROOT="." INPUT_COMMAND="dead-code" \
+  INPUT_FORMAT="json" INPUT_ARGS="--report-path-prefix custom/base --unused-files" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
+RENDER_ENV=$(cat "$ANALYZE_TMP/github-env")
+assert_not_contains "$ARGS" "--report-path-prefix" "analyze: keeps renderer prefix out of JSON analysis args"
+assert_contains "$ARGS" "--unused-files" "analyze: preserves non-presentation extra args"
+assert_contains "$RENDER_ENV" "FALLOW_RENDER_PATH_PREFIX_SET=1" "analyze: marks explicit renderer prefix"
+assert_contains "$RENDER_ENV" "FALLOW_RENDER_PATH_PREFIX=custom/base" "analyze: propagates renderer prefix"
+
+cd "$ANALYZE_TMP/work"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  GITHUB_ENV="$ANALYZE_TMP/github-env" INPUT_ROOT="." INPUT_COMMAND="dead-code" \
+  INPUT_FORMAT="json" bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+RENDER_ENV_TAIL=$(tail -2 "$ANALYZE_TMP/github-env")
+assert_contains "$RENDER_ENV_TAIL" "FALLOW_RENDER_PATH_PREFIX_SET=0" "analyze: clears a prior renderer prefix on the next invocation"
+assert_contains "$RENDER_ENV_TAIL" "FALLOW_RENDER_PATH_PREFIX=" "analyze: clears the prior renderer prefix value"
+
 cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
@@ -1989,6 +2011,10 @@ if [ "${1:-}" = "ci" ]; then
   printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
   exit 0
 fi
+if [ "${MOCK_RENDER_FAILURE:-}" = "1" ]; then
+  echo 'saved audit envelope is missing required field `version`' >&2
+  exit 2
+fi
 format=""
 previous=""
 for arg in "$@"; do
@@ -2048,6 +2074,7 @@ fi
 SH
 chmod +x "$ACTION_TYPED_BIN/gh"
 
+printf '{"kind":"dead-code","schema_version":9}\n' > "$ACTION_TYPED_WORK/fallow-results.json"
 printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_WORK/fallow-analysis-args.sh"
 (
   cd "$ACTION_TYPED_WORK"
@@ -2059,6 +2086,8 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     GITHUB_SHA="abc123" \
     PR_HEAD_SHA="head456" \
     FALLOW_COMMAND="check" \
+    FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    FALLOW_RENDER_PATH_PREFIX="custom/base" \
     FALLOW_SUMMARY_SCOPE="diff" \
     bash "$SCRIPTS_DIR/comment.sh" > /dev/null
   PATH="$ACTION_TYPED_BIN:$PATH" \
@@ -2067,6 +2096,8 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     PR_NUMBER="123" \
     GH_REPO="owner/repo" \
     FALLOW_COMMAND="check" \
+    FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    FALLOW_RENDER_PATH_PREFIX="custom/base" \
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > /dev/null
@@ -2081,10 +2112,29 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > /dev/null
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
+    MOCK_RENDER_FAILURE="1" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    FALLOW_COMMAND="check" \
+    bash "$SCRIPTS_DIR/comment.sh" > "$ACTION_TYPED_WORK/comment-render-failure.out"
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
+    MOCK_RENDER_FAILURE="1" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    FALLOW_COMMAND="check" \
+    FALLOW_DIFF_FILE="$ACTION_TYPED_WORK/fallow-pr.diff" \
+    bash "$SCRIPTS_DIR/review.sh" > "$ACTION_TYPED_WORK/review-render-failure.out"
 )
 ACTION_TYPED_OUT=$(cat "$ACTION_TYPED_LOG")
 assert_contains "$ACTION_TYPED_OUT" "--format pr-comment-github" "comment.sh invokes typed PR comment format"
 assert_contains "$ACTION_TYPED_OUT" "--format review-github" "review.sh invokes typed GitHub review format"
+assert_contains "$ACTION_TYPED_OUT" "report --from fallow-results.json" "GitHub renderers reuse the saved analysis envelope"
+assert_contains "$ACTION_TYPED_OUT" "--report-path-prefix custom/base" "GitHub renderers preserve presentation path prefixes"
 assert_contains "$ACTION_TYPED_OUT" "summary_scope=diff" "comment.sh passes FALLOW_SUMMARY_SCOPE to typed PR comment render"
 ACTION_BLANK_SUMMARY_SCOPE_COUNT=$(printf '%s\n' "$ACTION_TYPED_OUT" | grep -c '^summary_scope=$' || true)
 if [ "$ACTION_BLANK_SUMMARY_SCOPE_COUNT" -ge 1 ]; then
@@ -2096,6 +2146,12 @@ assert_contains "$ACTION_TYPED_OUT" "fallow ci post-review --provider github" "r
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-pr-comment --provider github" "comment.sh invokes GitHub PR comment post command"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-check-run --provider github" "comment.sh invokes GitHub Check Run post command"
 assert_contains "$ACTION_TYPED_OUT" "--head-sha head456" "comment.sh posts Check Run against the PR head SHA"
+assert_contains "$(cat "$ACTION_TYPED_WORK/comment-render-failure.out")" \
+  'saved audit envelope is missing required field `version`' \
+  "comment.sh surfaces saved-render stderr"
+assert_contains "$(cat "$ACTION_TYPED_WORK/review-render-failure.out")" \
+  'saved audit envelope is missing required field `version`' \
+  "review.sh surfaces saved-render stderr"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_COMMENT_ENVELOPE_FILE" "comment.sh asks fallow for typed PR comment envelope"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DECISION_FILE" "comment.sh asks fallow for typed PR decision sidecar"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DETAILS_FILE" "comment.sh asks fallow for typed PR details artifact"
@@ -2370,7 +2426,7 @@ SH
 
   : > "$API_FAIL_OUTPUT"
   : > "$API_FAIL_WORK/mock.log"
-  printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$API_FAIL_WORK/fallow-analysis-args.sh"
+  printf '{"kind":"dead-code","schema_version":9}\n' > "$API_FAIL_WORK/fallow-results.json"
   local _stderr _status
   _stderr=$(cd "$API_FAIL_WORK" \
     && PATH="$API_FAIL_BIN:$PATH" \
