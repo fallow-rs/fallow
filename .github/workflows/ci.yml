@@ -468,6 +468,10 @@ jobs:
           FALLOW_DOCS_DIR: ${{ github.workspace }}/.companion/fallow-docs
           FALLOW_SKILLS_DIR: ${{ github.workspace }}/.companion/fallow-skills
         run: python3 scripts/check_telemetry_doc_sync.py
+      - name: Audit schema documentation parity
+        env:
+          FALLOW_DOCS_DIR: ${{ github.workspace }}/.companion/fallow-docs
+        run: node scripts/check-audit-schema-doc-sync.mjs
       - name: Agent adapter drift
         run: npm run check:agent-adapters
 

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::discover::FileId;
 use crate::extract::{MemberInfo, MemberKind, ModuleInfo};
-use crate::graph::ModuleGraph;
+use crate::graph::{AmbiguityParticipants, ModuleGraph};
 use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
@@ -787,6 +787,7 @@ pub(super) struct UnusedMemberScanInput<'a> {
 }
 
 struct PreparedMemberScan<'a> {
+    ambiguity: AmbiguityParticipants,
     heritage_context: MemberHeritageContext<'a>,
     accessed_members: FxHashMap<ExportKey, FxHashSet<String>>,
     self_accessed_members: FxHashMap<FileId, FxHashSet<String>>,
@@ -879,11 +880,11 @@ impl MemberReportContext<'_, '_> {
         store_only_scan: bool,
         buckets: &mut MemberScanBuckets,
     ) {
-        if self.export_member_scan_skipped(module, export, store_only_scan) {
+        let export_name = export.name.to_string();
+        if self.export_member_scan_skipped(module, export, &export_name, store_only_scan) {
             return;
         }
 
-        let export_name = export.name.to_string();
         let export_key = ExportKey::new(module.file_id, export_name.clone());
         if self
             .prepared
@@ -911,8 +912,16 @@ impl MemberReportContext<'_, '_> {
         &self,
         module: &crate::graph::ModuleNode,
         export: &crate::graph::ExportSymbol,
+        export_name: &str,
         store_only_scan: bool,
     ) -> bool {
+        if self.prepared.ambiguity.contains_declaration(
+            module.file_id,
+            export_name,
+            export.is_type_only,
+        ) {
+            return true;
+        }
         if should_skip_export_member_scan(self.input.graph, module, export) {
             return true;
         }
@@ -1054,6 +1063,7 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
         build_ol_interaction_subclass_keys(input.resolved_modules, &parent_to_children);
 
     PreparedMemberScan {
+        ambiguity: input.graph.ambiguity_participants(),
         heritage_context,
         accessed_members,
         self_accessed_members,

@@ -44,10 +44,16 @@ fn flags_dead_vue_inject_and_credits_matched_pairs() {
         names.contains(&"THEME_KEY"),
         "THEME_KEY should be flagged: {found:?}"
     );
-    // SHARED_KEY (direct provide), GLOBAL_KEY (app.provide), and BARREL_KEY
-    // (provider imports it directly, consumer through a barrel) are all
-    // provided somewhere and must NOT be flagged.
-    for credited in ["SHARED_KEY", "GLOBAL_KEY", "BARREL_KEY"] {
+    // The ordinary direct, app-level, and barrel-asymmetric pairs are credited.
+    // The two star-collision keys exercise both asymmetric directions: direct
+    // provide with barrel inject, and barrel provide with direct inject.
+    for credited in [
+        "SHARED_KEY",
+        "GLOBAL_KEY",
+        "BARREL_KEY",
+        "DIRECT_PROVIDE_KEY",
+        "DIRECT_INJECT_KEY",
+    ] {
         assert!(
             !names.contains(&credited),
             "{credited} is provided and must be credited, not flagged: {found:?}"

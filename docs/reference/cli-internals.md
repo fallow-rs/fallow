@@ -57,16 +57,16 @@ an exit code.
   LSP, VS Code, GitHub Action, and GitLab consumers together.
 - New-only duplication demotion (issues #2164, #2220): under `--gate new-only`
   an introduced clone group none of whose instances overlap an added line is
-  demoted to inherited. On the CLI path the opt-in shared diff index
-  (`--diff-file`, `--diff-stdin`, or `$FALLOW_DIFF_FILE`) takes precedence
-  over the merge-base worktree diff for that decision
-  (`crates/cli/src/audit.rs`, `demote_preexisting_dupe_introductions`); the
-  programmatic runtime path (`crates/api/src/runtime/audit.rs`) uses only the
-  merge-base worktree diff. A supplied diff derived from a narrower base than
-  the merge base (for example a last-commit-only diff on a multi-commit
-  branch) can therefore over-demote: duplication the branch genuinely wrote
-  earlier shows no added lines in that diff and passes the gate. Demoted
-  groups stay counted as inherited and additionally surface via
+  demoted to inherited. Without an opt-in shared diff, the CLI uses the
+  merge-base worktree diff for that decision (`crates/cli/src/audit.rs`,
+  `demote_preexisting_dupe_introductions`); the programmatic runtime path
+  (`crates/api/src/runtime/audit.rs`) also uses its merge-base worktree diff.
+  When an opt-in shared diff (`--diff-file`, `--diff-stdin`, or
+  `$FALLOW_DIFF_FILE`) is active, it has already filtered the head duplication
+  report with the same added-line overlap predicate. Every retained clone group
+  therefore vetoes demotion, so a shared diff can prevent a demotion but cannot
+  produce a rendered shared-source demotion note. Demoted groups stay counted
+  as inherited and additionally surface via
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
 
@@ -86,11 +86,12 @@ garbage-collects. Two subcommands with distinct semantics:
   failures. Machine consumers gate on the envelope's `complete` field.
   Defaults to the current directory as root. A pre-#1815 registration at the
   current cache path is only deregistered and stays warm on disk: it reports
-  as kept with reason `legacy-deregistered`, counts in the envelope's
-  additive `deregistered` field and the matching human summary line, and
-  never adds its size to `reclaimed_bytes`. Released SHA-keyed registrations
-  are genuinely removed (reason `legacy-registered`) and stay counted as
-  reclaimed.
+  as kept with reason `legacy-deregistered`. The envelope's `deregistered`
+  field is an informational subset of `kept`, not a fifth member of the
+  `removed + kept + skipped + failed == found` partition. It also appears in
+  the matching human summary line and never adds its size to
+  `reclaimed_bytes`. Released SHA-keyed registrations are genuinely removed
+  (reason `legacy-registered`) and stay counted as reclaimed.
 
 Shared invariants (`crates/cli/src/base_worktree.rs`):
 

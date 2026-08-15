@@ -114,11 +114,6 @@ const generateSchemaFiles = (stagingRoot) => {
 };
 
 const generateExtensionContracts = (stagingRoot) => {
-  assertLocalResolution({
-    dependency: "json-schema-to-typescript",
-    resolveFrom: join(REPO_ROOT, EXTENSION_CODEGEN_PATH),
-    installCommand: "pnpm --dir editors/vscode install",
-  });
   run("node", [EXTENSION_CODEGEN_PATH], {
     env: {
       FALLOW_CODEGEN_CAPABILITY_SCHEMA: join(stagingRoot, CAPABILITY_SCHEMA_PATH),
@@ -267,6 +262,12 @@ export const main = (argv = process.argv.slice(2)) => {
     console.log("Usage: node scripts/generate-all.mjs [--check]");
     return 0;
   }
+
+  assertLocalResolution({
+    dependency: "json-schema-to-typescript",
+    resolveFrom: join(REPO_ROOT, EXTENSION_CODEGEN_PATH),
+    installCommand: "pnpm --dir editors/vscode install",
+  });
 
   const { driftedPaths } = runGenerationTransaction({
     check,

@@ -34,9 +34,25 @@ const commandScopes = (command) =>
     .slice(1)
     .filter((token) => !token.startsWith("-"));
 
+const guardedToolCommand = (script, dependency, executable) => {
+  const segments = script.split("&&").map((segment) => segment.trim());
+  assert.deepEqual(
+    segments.slice(0, 1),
+    [`node scripts/assert-local-resolution.mjs ${dependency}`],
+    `${executable} must assert local resolution in its main script body`,
+  );
+  assert.equal(segments.length, 2, `${executable} must have one guarded tool command`);
+  assert.match(segments[1], new RegExp(`^${executable}(?:\\s|$)`, "u"));
+  return segments[1];
+};
+
 const assertPreCommitCoversJavaScriptScopes = (hook, packageJson) => {
-  const lintScopes = commandScopes(packageJson.scripts["lint:js"]);
-  const formatScopes = commandScopes(packageJson.scripts["fmt:js:check"]);
+  const lintScopes = commandScopes(
+    guardedToolCommand(packageJson.scripts["lint:js"], "oxlint", "oxlint"),
+  );
+  const formatScopes = commandScopes(
+    guardedToolCommand(packageJson.scripts["fmt:js:check"], "oxfmt", "oxfmt"),
+  );
   assert.deepEqual(lintScopes, formatScopes, "root JavaScript lint and format scopes must agree");
 
   const pathExpression = hook.match(/grep -E '(\^\([^']+\))'/u)?.[1];
@@ -162,6 +178,17 @@ test("pre-commit JavaScript gate covers the root lint and format scopes", () => 
     () => assertPreCommitCoversJavaScriptScopes(hook.replace("|scripts/|", "|"), packageJson),
     /missing scripts/u,
   );
+});
+
+test("root tool scripts do not rely on skippable npm lifecycle guards", () => {
+  const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+  guardedToolCommand(packageJson.scripts.commitlint, "@commitlint/cli", "commitlint");
+  guardedToolCommand(packageJson.scripts["lint:js"], "oxlint", "oxlint");
+  guardedToolCommand(packageJson.scripts["fmt:js"], "oxfmt", "oxfmt");
+  guardedToolCommand(packageJson.scripts["fmt:js:check"], "oxfmt", "oxfmt");
+  assert.equal(packageJson.scripts["prelint:js"], undefined);
+  assert.equal(packageJson.scripts["prefmt:js"], undefined);
+  assert.equal(packageJson.scripts["prefmt:js:check"], undefined);
 });
 
 test("normal test guidance never executes benchmark targets", () => {

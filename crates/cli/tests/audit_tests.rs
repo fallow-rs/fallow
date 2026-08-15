@@ -2409,13 +2409,10 @@ fn audit_demotion_shared_diff_source_takes_precedence_over_worktree_diff() {
 
 /// When no diff can be obtained at all the demotion check is skipped, every
 /// introduced clone group keeps gating, and `--explain` says so (issue #2220,
-/// `DupeDemotionDiffSource::Skipped`). An unreadable untracked file makes the
-/// merge-base worktree diff fail while the rest of the audit still runs.
-#[cfg(unix)]
+/// `DupeDemotionDiffSource::Skipped`). A missing external diff command makes
+/// the merge-base worktree diff fail while changed-file discovery still runs.
 #[test]
 fn audit_demotion_skipped_diff_source_prints_explain_line() {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let tmp = TempDir::new().expect("failed to create temp dir");
     let dir = tmp.path();
     fs::create_dir_all(dir.join("src")).unwrap();
@@ -2447,23 +2444,25 @@ fn audit_demotion_skipped_diff_source_prints_explain_line() {
         "import { selfTest as a } from './a';\nimport { selfTest as b } from './b';\na();\nb();\n",
     )
     .unwrap();
-    // An unreadable untracked file fails the worktree diff's untracked-file
-    // pass (`git diff --no-index`) without disturbing changed-file discovery.
-    let blocked = dir.join("blocked.txt");
-    fs::write(&blocked, "unreadable").unwrap();
-    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+    // `--name-only` does not invoke an external diff, so changed-file
+    // discovery succeeds. Reading the actual diff does invoke it and fails.
+    let missing_external_diff = dir.join("missing-external-diff");
+    let diff_env = [("GIT_EXTERNAL_DIFF", missing_external_diff.as_path())];
 
-    let output = run_fallow_raw(&[
-        "audit",
-        "--root",
-        dir.to_str().unwrap(),
-        "--base",
-        "HEAD",
-        "--gate",
-        "new-only",
-        "--no-cache",
-        "--explain",
-    ]);
+    let output = run_fallow_raw_with_env(
+        &[
+            "audit",
+            "--root",
+            dir.to_str().unwrap(),
+            "--base",
+            "HEAD",
+            "--gate",
+            "new-only",
+            "--no-cache",
+            "--explain",
+        ],
+        &diff_env,
+    );
 
     assert_eq!(
         output.code, 1,
@@ -2478,19 +2477,22 @@ fn audit_demotion_skipped_diff_source_prints_explain_line() {
         output.stdout
     );
 
-    let json_run = run_fallow_raw(&[
-        "audit",
-        "--root",
-        dir.to_str().unwrap(),
-        "--base",
-        "HEAD",
-        "--gate",
-        "new-only",
-        "--no-cache",
-        "--format",
-        "json",
-        "--quiet",
-    ]);
+    let json_run = run_fallow_raw_with_env(
+        &[
+            "audit",
+            "--root",
+            dir.to_str().unwrap(),
+            "--base",
+            "HEAD",
+            "--gate",
+            "new-only",
+            "--no-cache",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &diff_env,
+    );
     assert_eq!(json_run.code, 1);
     let json = parse_json(&json_run);
     assert_eq!(json["attribution"]["duplication_demoted"], 0);

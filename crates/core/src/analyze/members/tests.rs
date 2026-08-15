@@ -2893,9 +2893,9 @@ fn same_named_exports_do_not_share_member_usage() {
 }
 
 #[test]
-fn ambiguous_star_re_exports_have_no_unique_member_origin() {
+fn ambiguous_star_re_exports_suppress_only_participating_member_exports() {
     let mut graph = build_graph(&[
-        ("/src/barrel.ts", false),
+        ("/src/barrel.ts", true),
         ("/src/left.ts", false),
         ("/src/right.ts", false),
     ]);
@@ -2905,17 +2905,24 @@ fn ambiguous_star_re_exports_have_no_unique_member_origin() {
         &[make_export_with_members(
             "Widget",
             vec![make_member("left", MemberKind::ClassMethod)],
-            None,
+            Some(0),
         )],
     );
     set_exports(
         &mut graph,
         2,
-        &[make_export_with_members(
-            "Widget",
-            vec![make_member("right", MemberKind::ClassMethod)],
-            None,
-        )],
+        &[
+            make_export_with_members(
+                "Widget",
+                vec![make_member("right", MemberKind::ClassMethod)],
+                Some(0),
+            ),
+            make_export_with_members(
+                "Other",
+                vec![make_member("unused", MemberKind::ClassMethod)],
+                Some(0),
+            ),
+        ],
     );
     graph.set_re_exports(
         0,
@@ -2938,6 +2945,29 @@ fn ambiguous_star_re_exports_have_no_unique_member_origin() {
     );
 
     assert!(walk_re_export_origins(&graph, FileId(0), "Widget").is_empty());
+
+    let (_, class_members) = find_unused_members(
+        &graph,
+        &graph.resolved_modules,
+        &[],
+        &SuppressionContext::empty(),
+        &FxHashMap::default(),
+        &[],
+        &[],
+    );
+
+    assert!(
+        class_members
+            .iter()
+            .all(|member| member.parent_name != "Widget"),
+        "members behind the colliding export must abstain: {class_members:?}"
+    );
+    assert!(
+        class_members
+            .iter()
+            .any(|member| member.parent_name == "Other" && member.member_name == "unused"),
+        "an unrelated export in a contributor file must still report: {class_members:?}"
+    );
 }
 
 #[test]

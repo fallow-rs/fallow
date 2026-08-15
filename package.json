@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "commitlint": "commitlint",
+    "commitlint": "node scripts/assert-local-resolution.mjs @commitlint/cli && commitlint",
     "verify": "node scripts/verify-repo.mjs --fast",
     "verify:fast": "node scripts/verify-repo.mjs --fast",
     "verify:full": "node scripts/verify-repo.mjs --full",
@@ -23,12 +23,9 @@
     "test:type-aware-corpus": "node --test scripts/type-aware-corpus.test.mjs",
     "smoke:styling-corpus": "node scripts/styling-corpus-smoke.mjs",
     "smoke:styling-prs": "node scripts/styling-pr-smoke.mjs",
-    "prelint:js": "node scripts/assert-local-resolution.mjs oxlint",
-    "lint:js": "oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
-    "prefmt:js": "node scripts/assert-local-resolution.mjs oxfmt",
-    "fmt:js": "oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
-    "prefmt:js:check": "node scripts/assert-local-resolution.mjs oxfmt",
-    "fmt:js:check": "oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs"
+    "lint:js": "node scripts/assert-local-resolution.mjs oxlint && oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
+    "fmt:js": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
+    "fmt:js:check": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

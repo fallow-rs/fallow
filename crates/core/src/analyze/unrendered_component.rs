@@ -32,16 +32,9 @@
 //!   framework, not flagged.
 //! - **Public-API abstain**: a component re-exported from a non-private package
 //!   entry point is rendered by a downstream consumer, not flagged.
-//!
-//! The remaining way this detector can flag a rendered component is
-//! UNDER-crediting on an ambiguous name. When two different `export *` sources
-//! of a barrel supply the same name, that name exports nothing (ECMA-262
-//! ResolveExport) and `resolve_export` answers `Ambiguous`; the crediting walks
-//! abstain there, so a component reached only through the colliding name is
-//! credited by nobody and stays eligible. The finding then names the component
-//! while the fault is in the barrel. The unused-export surface suppresses its
-//! own findings for names lost to such a collision; this detector does not, so
-//! the carve-out is real until the barrel collision is resolved.
+//! - **Star-collision abstain**: when an ambiguous `export *` name loses the
+//!   component's render credit, the component is unknown rather than unrendered.
+//!   The barrel is faulty, so this detector does not blame the source file.
 
 use std::path::Path;
 
@@ -54,7 +47,8 @@ use fallow_types::extract::{
 
 use crate::discover::FileId;
 use crate::graph::{
-    EffectiveExportBinding, EffectiveExportResolution, ExportNamespace, ModuleGraph, ModuleNode,
+    AmbiguityParticipants, EffectiveExportBinding, EffectiveExportResolution, ExportNamespace,
+    ModuleGraph, ModuleNode,
 };
 use crate::resolve::{ResolvedImport, ResolvedModule};
 use crate::results::UnrenderedComponent;
@@ -141,6 +135,7 @@ pub fn find_unrendered_components(
 
     let used = build_rendered_sfc_used_set(graph, resolved_modules, &modules_by_id);
     let reexported = build_barrel_reexported_sfcs(graph);
+    let ambiguity = graph.ambiguity_participants();
     // Public-API abstain set: every SFC binding effectively exposed by a
     // non-private package entry point. The graph owns shadowing, ambiguity,
     // namespace, and multi-hop resolution; this analysis only classifies the
@@ -150,6 +145,7 @@ pub fn find_unrendered_components(
     // Pass 3: emit.
     let scan = SfcScanContext {
         graph,
+        ambiguity: &ambiguity,
         used: &used,
         reexported: &reexported,
         public_api: &public_api,
@@ -217,6 +213,7 @@ fn build_barrel_reexported_sfcs(graph: &ModuleGraph) -> FxHashMap<FileId, FileId
 /// Shared read-only state threaded through the SFC emit (Pass 3) scan.
 struct SfcScanContext<'a> {
     graph: &'a ModuleGraph,
+    ambiguity: &'a AmbiguityParticipants,
     used: &'a FxHashSet<FileId>,
     reexported: &'a FxHashMap<FileId, FileId>,
     public_api: &'a FxHashSet<FileId>,
@@ -240,6 +237,12 @@ fn evaluate_unrendered_sfc(
     }
     // Not kept alive by a barrel: `unused-file` / `unused-import` owns it.
     let &barrel_id = scan.reexported.get(&module.file_id)?;
+    if scan
+        .ambiguity
+        .contains_in_namespace(module.file_id, "default", ExportNamespace::Value)
+    {
+        return None;
+    }
     if scan.public_api.contains(&module.file_id)
         || scan.public_api_entry_points.contains(&module.file_id)
     {

@@ -47,11 +47,13 @@ pnpm --dir editors/vscode install
 ```
 
 `scripts/assert-local-resolution.mjs` enforces the invariant for the
-entrypoints that load third-party modules. It runs before the JavaScript lint
-and format scripts, and before contract generation reaches the extension
-codegen. When it fires it names the foreign path it resolved and the install
-command that fixes it. Entrypoints that import only `node:` builtins cannot
-escape and need no guard. The type-aware sidecar keeps its own preflight in
+entrypoints that load third-party modules. The JavaScript lint, format, and
+commitlint commands run it in their main script bodies, so npm's
+`--ignore-scripts` option cannot skip the guard. Contract generation runs its
+extension dependency preflight before any Cargo schema generation. When the
+guard fires it names the foreign path it resolved and the install command that
+fixes it. Entrypoints that import only `node:` builtins cannot escape and need
+no guard. The type-aware sidecar keeps its own preflight in
 `tools/type-aware-sidecar/src/backend-preflight.mjs` because it also checks the
 backend version.
 
@@ -86,6 +88,8 @@ Focused integration checks:
 - `npm run check:agent-adapters` for skill or adapter changes.
 - `python3 scripts/check_telemetry_doc_sync.py` when telemetry agent-source
   guidance or a public companion contract changes.
+- `node scripts/check-audit-schema-doc-sync.mjs` when audit or dead-code JSON
+  envelope versions or the public audit example change.
 
 ## Rust conventions
 

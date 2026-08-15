@@ -22,24 +22,22 @@
 //!   loop/parameter local), the whole project abstains, because a surviving
 //!   inject finding could be falsely flagged. Mirrors the Pinia spread-return
 //!   whole-object abstain.
+//! - **Star-collision abstain**: a key supplied by ambiguous `export *` sources
+//!   is unknown rather than unprovided, whether the provide or inject reaches it
+//!   through the broken barrel.
 //!
 //! The provided set is built LIBERALLY (the composable `provide(KEY, _)` plus
 //! app-level `*.provide(KEY, _)`): over-crediting a provided key can only
 //! suppress a finding, never create one. The inject side emits conservatively.
 //!
-//! One direction can still create a finding: a key name supplied by two
-//! different `export *` sources of a barrel exports nothing (ECMA-262
-//! ResolveExport), so `resolve_key` cannot walk it to its defining site. A
-//! provide and an inject that reach such a key by different paths (one through
-//! the barrel, one through the origin module) then no longer share an identity,
-//! and the inject is reported as unprovided even though a provide exists.
-
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{DiFramework, DiRole, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
+use crate::graph::{
+    AmbiguityParticipants, EffectiveExportResolution, ExportNamespace, ModuleGraph,
+};
 use crate::resolve::ResolvedModule;
 use crate::results::UnprovidedInject;
 use crate::suppress::{IssueKind, SuppressionContext};
@@ -95,6 +93,7 @@ pub fn find_unprovided_injects(input: UnprovidedInjectInput<'_>) -> Vec<Unprovid
     let provided = build_provided_key_set(input, &modules_by_id);
     let public_export_origins =
         public_export_origin_keys(input.graph, input.public_api_entry_points);
+    let ambiguity = input.graph.ambiguity_participants();
 
     let scan = InjectScanContext {
         input,
@@ -102,6 +101,7 @@ pub fn find_unprovided_injects(input: UnprovidedInjectInput<'_>) -> Vec<Unprovid
         path_by_id: &path_by_id,
         provided: &provided,
         public_export_origins: &public_export_origins,
+        ambiguity: &ambiguity,
     };
     collect_unprovided_inject_findings(&scan)
 }
@@ -170,6 +170,7 @@ struct InjectScanContext<'a> {
     path_by_id: &'a FxHashMap<FileId, &'a std::path::Path>,
     provided: &'a FxHashSet<ExportKey>,
     public_export_origins: &'a FxHashSet<ExportKey>,
+    ambiguity: &'a AmbiguityParticipants,
 }
 
 /// Pass 2: emit a finding for each inject site whose key is provided nowhere.
@@ -244,6 +245,12 @@ fn inject_site_has_unprovided_key(
     if canonical.is_empty() {
         return false;
     }
+    if canonical
+        .iter()
+        .any(|key| key_is_ambiguity_affected(scan, key))
+    {
+        return false;
+    }
     // Angular InjectionToken FP gate: only a USER `InjectionToken` is in scope. A
     // class / framework token (`inject(MyService)`) is FP-prone via
     // `providedIn: 'root'` and third-party `provideX()`, so abstain unless at
@@ -269,6 +276,17 @@ fn inject_site_has_unprovided_key(
     }
 
     true
+}
+
+fn key_is_ambiguity_affected(scan: &InjectScanContext<'_>, key: &ExportKey) -> bool {
+    scan.ambiguity
+        .contains_in_namespace(key.file_id, &key.export_name, ExportNamespace::Value)
+        || matches!(
+            scan.input
+                .graph
+                .resolve_export(key.file_id, &key.export_name, ExportNamespace::Value,),
+            EffectiveExportResolution::Ambiguous
+        )
 }
 
 fn inject_site_suppressed(scan: &InjectScanContext<'_>, file_id: FileId, line: u32) -> bool {

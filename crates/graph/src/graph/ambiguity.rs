@@ -12,7 +12,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::FileId;
 
-use super::{EffectiveExportResolution, ExportNamespace, ModuleGraph};
+use super::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace, ModuleGraph};
 
 /// One `export *` collision on a barrel module.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +32,8 @@ pub struct AmbiguousStarExport {
 /// A participant is neither used nor provably dead: the barrel that would carry
 /// its credit exports nothing under that name. Detectors abstain from reporting
 /// participants rather than attributing a barrel mistake to the source files.
+/// Names identify the canonical defining declaration, so a re-export alias such
+/// as `default as Widget` records `default` on the component file.
 #[derive(Debug, Default)]
 pub struct AmbiguityParticipants {
     names_by_file: FxHashMap<(FileId, ExportNamespace), FxHashSet<Box<str>>>,
@@ -40,7 +42,13 @@ pub struct AmbiguityParticipants {
 impl AmbiguityParticipants {
     /// Whether this declaration lost its credit to a star-export collision in
     /// one specific namespace.
-    fn contains(&self, file_id: FileId, name: &str, namespace: ExportNamespace) -> bool {
+    #[must_use]
+    pub fn contains_in_namespace(
+        &self,
+        file_id: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+    ) -> bool {
         self.names_by_file
             .get(&(file_id, namespace))
             .is_some_and(|names| names.contains(name))
@@ -55,8 +63,8 @@ impl AmbiguityParticipants {
     /// has lost its credit just as thoroughly as a value-space participant.
     #[must_use]
     pub fn contains_declaration(&self, file_id: FileId, name: &str, is_type_only: bool) -> bool {
-        self.contains(file_id, name, ExportNamespace::Type)
-            || (!is_type_only && self.contains(file_id, name, ExportNamespace::Value))
+        self.contains_in_namespace(file_id, name, ExportNamespace::Type)
+            || (!is_type_only && self.contains_in_namespace(file_id, name, ExportNamespace::Value))
     }
 }
 
@@ -82,14 +90,34 @@ impl ModuleGraph {
     /// Declarations that lost export credit to a collision anywhere in the project.
     #[must_use]
     pub fn ambiguity_participants(&self) -> AmbiguityParticipants {
+        if !self.has_star_re_exports() {
+            return AmbiguityParticipants::default();
+        }
+
         let mut participants = AmbiguityParticipants::default();
-        for collision in self.ambiguous_star_exports() {
-            for contributor in collision.contributors {
+        for (barrel, name, namespace) in self.effective_exports.ambiguous_names() {
+            for binding in self.star_contributor_bindings(barrel, name, namespace) {
+                let declaration = self
+                    .export_binding_origin(binding)
+                    .map(|origin| {
+                        (
+                            origin.file_id(),
+                            Box::<str>::from(origin.export().name.to_string()),
+                        )
+                    })
+                    .or_else(|| {
+                        binding
+                            .is_implicit_default()
+                            .then(|| (binding.origin_file(), Box::<str>::from("default")))
+                    });
+                let Some((file_id, declaration_name)) = declaration else {
+                    continue;
+                };
                 participants
                     .names_by_file
-                    .entry((contributor, collision.namespace))
+                    .entry((file_id, namespace))
                     .or_default()
-                    .insert(collision.name.clone());
+                    .insert(declaration_name);
             }
         }
         participants
@@ -138,10 +166,27 @@ impl ModuleGraph {
         name: &str,
         namespace: ExportNamespace,
     ) -> Box<[FileId]> {
+        let mut contributors: Vec<FileId> = self
+            .star_contributor_bindings(barrel, name, namespace)
+            .into_iter()
+            .map(|binding| binding.origin_file())
+            .collect();
+        contributors.sort_unstable_by_key(|file_id| file_id.0);
+        contributors.dedup();
+        contributors.into_boxed_slice()
+    }
+
+    /// Canonical bindings supplied by the star sources for one ambiguous name.
+    fn star_contributor_bindings(
+        &self,
+        barrel: FileId,
+        name: &str,
+        namespace: ExportNamespace,
+    ) -> FxHashSet<EffectiveExportBinding> {
         if name == "default" {
-            return Box::default();
+            return FxHashSet::default();
         }
-        let mut contributors: Vec<FileId> = Vec::new();
+        let mut contributors: FxHashSet<EffectiveExportBinding> = FxHashSet::default();
         let mut visited: FxHashSet<FileId> = FxHashSet::from_iter([barrel]);
         let mut pending = vec![barrel];
         while let Some(current) = pending.pop() {
@@ -158,16 +203,14 @@ impl ModuleGraph {
                 }
                 match self.resolve_export(source, name, namespace) {
                     EffectiveExportResolution::Unique(binding) => {
-                        contributors.push(binding.origin_file());
+                        contributors.insert(binding);
                     }
                     EffectiveExportResolution::Ambiguous => pending.push(source),
                     EffectiveExportResolution::Missing => {}
                 }
             }
         }
-        contributors.sort_unstable_by_key(|file_id| file_id.0);
-        contributors.dedup();
-        contributors.into_boxed_slice()
+        contributors
     }
 }
 
@@ -206,6 +249,20 @@ mod tests {
         }
     }
 
+    fn default_export() -> ExportInfo {
+        ExportInfo {
+            name: ExportName::Default,
+            local_name: Some("Component".to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::default(),
+            members: vec![],
+            is_side_effect_used: false,
+            super_class: None,
+        }
+    }
+
     fn star_re_export(target: u32) -> ResolvedReExport {
         ResolvedReExport {
             info: ReExportInfo {
@@ -225,6 +282,21 @@ mod tests {
         let mut re_export = star_re_export(target);
         re_export.info.is_type_only = true;
         re_export
+    }
+
+    fn named_re_export(target: u32, imported_name: &str, exported_name: &str) -> ResolvedReExport {
+        ResolvedReExport {
+            info: ReExportInfo {
+                source: format!("./module-{target}"),
+                imported_name: imported_name.to_string(),
+                exported_name: exported_name.to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(target)),
+        }
     }
 
     /// Barrel 0 `export type *`s 1 and 2, which both export `class Foo`.
@@ -344,6 +416,60 @@ mod tests {
         assert!(!participants.contains_declaration(FileId(1), "Bar", false));
     }
 
+    #[test]
+    fn aliased_default_origins_are_participants_under_their_declaration_name() {
+        let files: Vec<_> = (0..5)
+            .map(|index| DiscoveredFile {
+                id: FileId(index),
+                path: PathBuf::from(format!("/project/module-{index}.ts")),
+                size_bytes: 10,
+            })
+            .collect();
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                re_exports: vec![star_re_export(1), star_re_export(2)],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![named_re_export(3, "default", "Widget")],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                re_exports: vec![named_re_export(4, "default", "Widget")],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(3),
+                path: files[3].path.clone(),
+                exports: vec![default_export()].into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(4),
+                path: files[4].path.clone(),
+                exports: vec![default_export()].into(),
+                ..Default::default()
+            },
+        ];
+        let graph = ModuleGraph::build(&modules, &[], &files);
+
+        let participants = graph.ambiguity_participants();
+
+        assert!(participants.contains_declaration(FileId(3), "default", false));
+        assert!(participants.contains_declaration(FileId(4), "default", false));
+        assert!(!participants.contains_declaration(FileId(1), "Widget", false));
+        assert_eq!(
+            graph.ambiguous_star_exports()[0].contributors.as_ref(),
+            &[FileId(3), FileId(4)]
+        );
+    }
+
     /// A value star collision on a barrel that also takes part in the
     /// type-fallback lane, because a type-only re-export reads the barrel.
     ///
@@ -408,10 +534,10 @@ mod tests {
     fn participants_cover_only_the_colliding_name() {
         let participants = colliding_star_graph(false).ambiguity_participants();
 
-        assert!(participants.contains(FileId(1), "foo", ExportNamespace::Value));
-        assert!(participants.contains(FileId(2), "foo", ExportNamespace::Value));
-        assert!(!participants.contains(FileId(2), "bar", ExportNamespace::Value));
-        assert!(!participants.contains(FileId(1), "foo", ExportNamespace::Type));
+        assert!(participants.contains_in_namespace(FileId(1), "foo", ExportNamespace::Value));
+        assert!(participants.contains_in_namespace(FileId(2), "foo", ExportNamespace::Value));
+        assert!(!participants.contains_in_namespace(FileId(2), "bar", ExportNamespace::Value));
+        assert!(!participants.contains_in_namespace(FileId(1), "foo", ExportNamespace::Type));
     }
 
     #[test]

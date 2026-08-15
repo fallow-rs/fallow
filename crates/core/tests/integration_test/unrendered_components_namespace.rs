@@ -61,8 +61,8 @@ fn credits_components_rendered_through_namespace_reexport() {
         "the shadowed star binding must not be credited: {flagged:?}"
     );
     assert!(
-        flagged.contains(&"Left") && flagged.contains(&"Right"),
-        "an ambiguous star binding must not credit either component: {flagged:?}"
+        !flagged.contains(&"Left") && !flagged.contains(&"Right"),
+        "a component behind an ambiguous star binding must abstain: {flagged:?}"
     );
     assert!(
         flagged.contains(&"TypeOnly"),
