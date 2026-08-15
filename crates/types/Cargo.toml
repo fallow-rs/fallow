@@ -32,6 +32,7 @@ schemars = { workspace = true, optional = true }
 # longer feature-gated (typed action wrappers in `output_dead_code` use
 # `IssueAction` at runtime), so `serde_json` ships unconditionally.
 serde_json = { workspace = true }
+rustc-hash = { workspace = true }
 
 [features]
 # Adds `#[derive(schemars::JsonSchema)]` to result and extract types so the

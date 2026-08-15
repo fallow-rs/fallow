@@ -1,8 +1,10 @@
 //! Shared duplicate-code output contracts.
 
 use std::cmp::{Ordering, Reverse};
+use std::collections::hash_map::Entry;
 use std::path::{Component, Path, PathBuf};
 
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::serde_path;
@@ -115,55 +117,65 @@ pub fn clone_group_spread(instances: &[CloneInstance]) -> usize {
 pub fn clone_location_spread<'a>(
     locations: impl IntoIterator<Item = (&'a Path, usize, usize)>,
 ) -> usize {
-    let mut by_file = locations
-        .into_iter()
-        .map(|(file, start_line, end_line)| CloneLocation {
-            file,
-            start_line,
-            end_line,
-        })
-        .collect::<Vec<_>>();
-    if by_file.len() < 2 {
+    let mut location_count = 0;
+    let mut file_indices: FxHashMap<&'a Path, usize> = FxHashMap::default();
+    let mut by_file: Vec<FileSpread<'a>> = Vec::new();
+
+    for (file, start_line, end_line) in locations {
+        location_count += 1;
+        let next_index = by_file.len();
+        match file_indices.entry(file) {
+            Entry::Occupied(entry) => by_file[*entry.get()].include(start_line, end_line),
+            Entry::Vacant(entry) => {
+                entry.insert(next_index);
+                by_file.push(FileSpread::new(file, start_line, end_line));
+            }
+        }
+    }
+
+    if location_count < 2 {
         return 0;
     }
 
-    by_file.sort_unstable_by(|left, right| left.file.cmp(right.file));
+    let same_file_max = by_file
+        .iter()
+        .filter(|file| file.occurrences >= 2)
+        .map(FileSpread::same_file_spread)
+        .max()
+        .unwrap_or(0);
 
-    let mut same_file_max = 0;
-    let mut parent_components = Vec::new();
-    let mut start = 0;
-    while start < by_file.len() {
-        let mut end = start + 1;
-        while end < by_file.len() && by_file[end].file == by_file[start].file {
-            end += 1;
-        }
-
-        parent_components.push(path_parent_components(by_file[start].file));
-        if end - start >= 2 {
-            let min_end = by_file[start..end]
-                .iter()
-                .map(|instance| instance.end_line)
-                .min()
-                .unwrap_or(0);
-            let max_start = by_file[start..end]
-                .iter()
-                .map(|instance| instance.start_line)
-                .max()
-                .unwrap_or(0);
-            let gap = max_start.saturating_sub(min_end).saturating_sub(1);
-            same_file_max = same_file_max.max(gap.div_ceil(SAME_FILE_SPREAD_STEP));
-        }
-        start = end;
-    }
-
-    same_file_max.max(directory_tree_diameter(&parent_components))
+    same_file_max.max(directory_tree_diameter(&by_file))
 }
 
-#[derive(Clone, Copy)]
-struct CloneLocation<'a> {
-    file: &'a Path,
-    start_line: usize,
-    end_line: usize,
+struct FileSpread<'a> {
+    parent_components: Vec<Component<'a>>,
+    min_end: usize,
+    max_start: usize,
+    occurrences: usize,
+}
+
+impl<'a> FileSpread<'a> {
+    fn new(file: &'a Path, start_line: usize, end_line: usize) -> Self {
+        Self {
+            parent_components: path_parent_components(file),
+            min_end: end_line,
+            max_start: start_line,
+            occurrences: 1,
+        }
+    }
+
+    fn include(&mut self, start_line: usize, end_line: usize) {
+        self.min_end = self.min_end.min(end_line);
+        self.max_start = self.max_start.max(start_line);
+        self.occurrences += 1;
+    }
+
+    fn same_file_spread(&self) -> usize {
+        self.max_start
+            .saturating_sub(self.min_end)
+            .saturating_sub(1)
+            .div_ceil(SAME_FILE_SPREAD_STEP)
+    }
 }
 
 /// Compare clone groups in shared spread-aware priority order.
@@ -204,7 +216,7 @@ fn path_parent_components(path: &Path) -> Vec<Component<'_>> {
         .collect()
 }
 
-fn directory_tree_diameter(paths: &[Vec<Component<'_>>]) -> usize {
+fn directory_tree_diameter(paths: &[FileSpread<'_>]) -> usize {
     if paths.len() < 2 {
         return 0;
     }
@@ -213,11 +225,16 @@ fn directory_tree_diameter(paths: &[Vec<Component<'_>>]) -> usize {
     farthest_path(paths, endpoint).1
 }
 
-fn farthest_path(paths: &[Vec<Component<'_>>], origin: usize) -> (usize, usize) {
+fn farthest_path(paths: &[FileSpread<'_>], origin: usize) -> (usize, usize) {
     paths
         .iter()
         .enumerate()
-        .map(|(index, path)| (index, component_distance(&paths[origin], path)))
+        .map(|(index, path)| {
+            (
+                index,
+                component_distance(&paths[origin].parent_components, &path.parent_components),
+            )
+        })
         .max_by_key(|&(index, distance)| (distance, index))
         .unwrap_or((origin, 0))
 }
@@ -460,9 +477,9 @@ mod tests {
         spread
     }
 
-    fn instance(file: &str, start_line: usize, end_line: usize) -> CloneInstance {
+    fn instance(file: impl Into<PathBuf>, start_line: usize, end_line: usize) -> CloneInstance {
         CloneInstance {
-            file: PathBuf::from(file),
+            file: file.into(),
             start_line,
             end_line,
             start_col: 0,
@@ -556,6 +573,43 @@ mod tests {
             instance("packages/a/b.ts", 1, 10),
             instance("packages/c/d.ts", 1, 10),
             instance("/repo/src/e.ts", 1, 10),
+        ];
+
+        assert_eq!(
+            clone_group_spread(&instances),
+            pairwise_clone_group_spread(&instances)
+        );
+    }
+
+    #[test]
+    fn spread_matches_reference_for_repeated_mixed_and_nested_files() {
+        let instances = vec![
+            instance("src/a.ts", 900, 920),
+            instance("packages/a/src/nested/b.ts", 40, 60),
+            instance("src/a.ts", 1, 20),
+            instance("/repo/apps/web/c.ts", 300, 325),
+            instance("packages/b/test/d.ts", 70, 90),
+            instance("/repo/apps/web/c.ts", 1, 25),
+        ];
+
+        assert_eq!(
+            clone_group_spread(&instances),
+            pairwise_clone_group_spread(&instances)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spread_matches_reference_for_non_utf8_paths() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let first = PathBuf::from(OsString::from_vec(b"/repo/packages/\x80/src/a.ts".to_vec()));
+        let second = PathBuf::from(OsString::from_vec(b"/repo/packages/\x81/src/b.ts".to_vec()));
+        let instances = vec![
+            instance(first.clone(), 1, 20),
+            instance(second, 100, 120),
+            instance(first, 800, 820),
         ];
 
         assert_eq!(
