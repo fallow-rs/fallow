@@ -181,17 +181,27 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn record_local_type_declaration(&mut self, name: &str, span: Span) {
-        if self
-            .local_type_declarations
-            .iter()
-            .any(|decl| decl.name == name)
-        {
-            return;
-        }
         self.local_type_declarations.push(LocalTypeDeclaration {
             name: name.to_string(),
             span,
         });
+    }
+
+    /// Keep the first declaration and source order while avoiding a growing
+    /// linear scan for every declaration visited in large type-heavy modules.
+    pub(crate) fn deduplicate_local_type_declarations(
+        declarations: &mut Vec<LocalTypeDeclaration>,
+    ) {
+        let keep = {
+            let mut seen = FxHashSet::default();
+            seen.reserve(declarations.len());
+            declarations
+                .iter()
+                .map(|declaration| seen.insert(declaration.name.as_str()))
+                .collect::<Vec<_>>()
+        };
+        let mut keep = keep.into_iter();
+        declarations.retain(|_| keep.next().unwrap_or(false));
     }
 
     pub(super) fn record_local_signature_refs(

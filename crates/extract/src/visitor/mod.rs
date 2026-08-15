@@ -2635,6 +2635,7 @@ impl ModuleInfoExtractor {
         let exported_factory_return_object_shapes =
             self.collect_exported_factory_return_object_shapes();
         let type_member_types = self.collect_type_member_types();
+        Self::deduplicate_local_type_declarations(&mut self.local_type_declarations);
         ModuleInfo {
             file_id,
             exports: self.exports.into(),
@@ -2795,6 +2796,7 @@ impl ModuleInfoExtractor {
         info.injection_tokens.append(&mut self.injection_tokens);
         info.local_type_declarations
             .append(&mut self.local_type_declarations);
+        Self::deduplicate_local_type_declarations(&mut info.local_type_declarations);
         info.public_signature_type_references
             .append(&mut self.public_signature_type_references);
         info.namespace_object_aliases

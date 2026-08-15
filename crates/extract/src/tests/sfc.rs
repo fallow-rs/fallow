@@ -14,6 +14,42 @@ fn parse_sfc_with_complexity(source: &str, filename: &str) -> ModuleInfo {
 }
 
 #[test]
+fn vue_scripts_stably_deduplicate_local_type_declarations() {
+    let source = r#"
+<script lang="ts">
+interface Shared {}
+namespace Scope {}
+type Alias = string;
+</script>
+<script setup lang="ts">
+interface Shared { value: string }
+namespace Scope { export const value = 1 }
+type Alias = number;
+</script>
+"#;
+    let info = parse_sfc(source, "Merged.vue");
+
+    let declarations: Vec<(&str, Option<usize>)> = info
+        .local_type_declarations
+        .iter()
+        .map(|declaration| {
+            (
+                declaration.name.as_str(),
+                usize::try_from(declaration.span.start).ok(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        declarations,
+        [
+            ("Shared", source.find("Shared")),
+            ("Scope", source.find("Scope")),
+            ("Alias", source.find("Alias")),
+        ]
+    );
+}
+
+#[test]
 fn extracts_vue_script_imports() {
     let info = parse_sfc(
         r#"

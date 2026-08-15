@@ -21,6 +21,38 @@ fn into_module_info_transfers_exports() {
     assert_eq!(info.file_id, FileId(0));
 }
 
+#[test]
+fn local_type_declarations_stably_deduplicate_merged_declarations() {
+    let source = r"
+        interface Shared {}
+        interface Shared { value: string }
+        namespace Scope {}
+        namespace Scope { export const value = 1 }
+        type Alias = string;
+        type Alias = number;
+    ";
+    let info = parse(source);
+
+    let declarations: Vec<(&str, Option<usize>)> = info
+        .local_type_declarations
+        .iter()
+        .map(|declaration| {
+            (
+                declaration.name.as_str(),
+                usize::try_from(declaration.span.start).ok(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        declarations,
+        [
+            ("Shared", source.find("Shared")),
+            ("Scope", source.find("Scope")),
+            ("Alias", source.find("Alias")),
+        ]
+    );
+}
+
 fn store_member_names(info: &crate::ModuleInfo, export: &str) -> Vec<String> {
     info.exports
         .iter()
