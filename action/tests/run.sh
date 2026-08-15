@@ -220,6 +220,12 @@ fi
 echo ""
 echo "=== Install script ==="
 
+if node --test "$DIR/install-verification-timeout.test.mjs"; then
+  pass "install: binary verification is supervised"
+else
+  fail "install: binary verification is supervised" "regression test failed"
+fi
+
 INSTALL_TMP=$(mktemp -d)
 trap 'rm -rf "$INSTALL_TMP"' EXIT
 mkdir -p "$INSTALL_TMP/pinned" "$INSTALL_TMP/range" "$INSTALL_TMP/unsafe" "$INSTALL_TMP/empty"

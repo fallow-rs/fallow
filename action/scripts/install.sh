@@ -220,10 +220,15 @@ npm install -g --ignore-scripts "$install_arg"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 action_root="${GITHUB_ACTION_PATH:-$(cd "$script_dir/../.." && pwd)}"
 verify_script="$action_root/npm/fallow/scripts/verify-binary.js"
+verify_runner="$action_root/action/scripts/verify-installed.mjs"
 global_root="$(npm root -g)"
 global_fallow_root="$global_root/fallow"
 if [ ! -f "$verify_script" ]; then
   echo "::error::Verifier script not found at ${verify_script}; cannot verify fallow binaries"
+  exit 1
+fi
+if [ ! -f "$verify_runner" ]; then
+  echo "::error::Verifier runner not found at ${verify_runner}; cannot verify fallow binaries"
   exit 1
 fi
 
@@ -237,33 +242,20 @@ fi
 installed_fallow_version="$(node -p "require('${global_fallow_root}/package.json').version" 2>/dev/null | tr -d '\r\n' || true)"
 [ -n "$installed_fallow_version" ] || installed_fallow_version="unknown"
 
-if ! ACTION_VERIFY_SCRIPT="$verify_script" FALLOW_VERIFY_RESOLVE_FROM="$global_fallow_root" node <<'NODE'
-(async () => {
-  const { verifyInstalled, SKIP_ENV } = require(process.env.ACTION_VERIFY_SCRIPT);
-  const result = await verifyInstalled({ resolveFrom: process.env.FALLOW_VERIFY_RESOLVE_FROM });
-  if (result.skipped) {
-    console.log('::warning::Binary verification skipped because ' + SKIP_ENV + ' is set. Only use this when deliberately replacing the published binary.');
-    process.exit(0);
-  }
-  if (!result.ok) {
-    const where = result.binary ? ' ' + result.binary : '';
-    console.error('::error::fallow binary verification failed' + where + ' (' + result.code + '): ' + result.message);
-    process.exit(1);
-  }
-  console.log('Verified Ed25519 signatures and SHA-256 digests on fallow binaries (package ' + result.package + '@' + result.version + ')');
-})().catch((err) => {
-  console.error('::error::fallow binary verification failed (internal-error): ' + err.message);
-  process.exit(1);
-});
-NODE
-then
+if ACTION_VERIFY_SCRIPT="$verify_script" FALLOW_VERIFY_RESOLVE_FROM="$global_fallow_root" node "$verify_runner"; then
+  :
+else
+  verify_status=$?
+  if [ "$verify_status" -eq 124 ]; then
+    exit "$verify_status"
+  fi
   # The verifier above printed the version-aware fix (bump the pin for a
   # pre-signing version, or treat a missing signature on a signed-era package
   # as tampering). Add the locate-the-knob context: which version was installed
   # and from where, since the Action ref is a different knob from the CLI
   # version. Neutral wording so it stays correct for both failure causes.
   echo "::error::Verification ran against fallow ${installed_fallow_version}, installed from ${version_source}. The Action ref (${GITHUB_ACTION_REF:-see your workflow}) selects the Action code, not the CLI version. Apply the recommended fix in the verification error above."
-  exit 1
+  exit "$verify_status"
 fi
 
 installed_version="$(fallow --version 2>/dev/null || echo 'unknown version')"
