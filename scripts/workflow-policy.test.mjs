@@ -294,6 +294,13 @@ test("Rust walltime benchmarks use CodSpeed macro runners", () => {
   assert.match(job, /case "\$WALLTIME_WORKLOAD" in/);
   assert.match(workflow, /- component-output/);
   assert.match(job, /component-output\)[\s\S]*bench=component_output/);
+  assert.match(workflow, /- dupes-detect/);
+  assert.match(job, /dupes-detect\)[\s\S]*package=fallow-engine[\s\S]*bench=dupes_detect/);
+  assert.match(workflow, /- representative-sources/);
+  assert.match(
+    job,
+    /representative-sources\)[\s\S]*package=fallow-benchmarks[\s\S]*bench=representative_sources/,
+  );
   assert.doesNotMatch(job, /run:.*\$\{\{ inputs\.workload \}\}/);
 });
 

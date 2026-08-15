@@ -13,10 +13,11 @@ persistent-session reuse as distinct benchmarks.
 
 Rust walltime retain gates run through the separate, manual
 `.github/workflows/bench-rust-walltime.yml` workflow. Its fixed suite choices
-cover core analysis, stable programmatic sessions, and engine and output
-components without accepting arbitrary commands. Keeping it manual avoids adding
-release-LTO builds to every pull request while preserving comparable Linux
-base/head evidence on CodSpeed's dedicated macro runners:
+cover core analysis, stable programmatic sessions, duplicate detection, focused
+source extraction, and engine and output components without accepting arbitrary
+commands. Keeping it manual avoids adding release-LTO builds to every pull
+request while preserving comparable Linux base/head evidence on CodSpeed's
+dedicated macro runners:
 
 ```bash
 gh workflow run bench-rust-walltime.yml \

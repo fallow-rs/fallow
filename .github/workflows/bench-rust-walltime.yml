@@ -16,6 +16,8 @@ on:
           - programmatic-stable
           - component-engine
           - component-output
+          - dupes-detect
+          - representative-sources
 
 permissions:
   contents: read
@@ -68,6 +70,14 @@ jobs:
             component-output)
               echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
               echo "bench=component_output" >> "$GITHUB_OUTPUT"
+              ;;
+            dupes-detect)
+              echo "package=fallow-engine" >> "$GITHUB_OUTPUT"
+              echo "bench=dupes_detect" >> "$GITHUB_OUTPUT"
+              ;;
+            representative-sources)
+              echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
+              echo "bench=representative_sources" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "Unsupported walltime workload: $WALLTIME_WORKLOAD" >&2
