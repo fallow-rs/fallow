@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 
 const PREACT_COMMIT = "055cc5b8c62326fbb0fcaccb9816504e82f121b8";
 const COMMAND_TIMEOUT_MS = 180_000;
+const SUCCESS_OR_FINDINGS_EXIT_CODES = [0, 1];
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const candidateBinary = process.env.FALLOW_CANDIDATE_BIN;
 const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
@@ -19,7 +20,7 @@ if (process.platform !== "win32") throw new Error("Windows candidate smoke requi
 if (!candidateBinary) throw new Error("FALLOW_CANDIDATE_BIN is required");
 accessSync(npmCli);
 
-const run = (command, args, options = {}) => {
+const run = (command, args, { acceptedExitCodes = [0], ...options } = {}) => {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
     encoding: "utf8",
@@ -27,9 +28,8 @@ const run = (command, args, options = {}) => {
     timeout: COMMAND_TIMEOUT_MS,
     ...options,
   });
-  assert.equal(
-    result.status,
-    0,
+  assert.ok(
+    acceptedExitCodes.includes(result.status),
     `${command} ${args.join(" ")} failed\n${result.stdout ?? ""}\n${result.stderr ?? ""}`,
   );
   return result.stdout;
@@ -116,7 +116,7 @@ try {
         "json",
         "--quiet",
       ],
-      { env: environment },
+      { acceptedExitCodes: SUCCESS_OR_FINDINGS_EXIT_CODES, env: environment },
     ),
   );
   const metadata = result._meta?.type_aware ?? result._meta?.check?.type_aware;
