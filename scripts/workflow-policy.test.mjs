@@ -273,10 +273,10 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsTypeAwareJob, /cargo test -p fallow-api type_aware::transport/);
   assert.match(windowsTypeAwareJob, /type-aware-windows-candidate-smoke\.mjs/);
   assert.match(windowsTypeAwareJob, /FALLOW_LSP_BIN:/);
-  assert.match(windowsTypeAwareJob, /verify-packaged-type-aware\.mjs/);
+  assert.match(windowsTypeAwareJob, /verify:vsix/);
   assert.match(windowsTypeAwareJob, /pnpm package/);
   assert.match(windowsTypeAwareJob, /test:integration:real/);
-  assert.match(vscodeJob, /verify-packaged-type-aware\.mjs/);
+  assert.match(vscodeJob, /verify:vsix/);
   assert.match(vscodeJob, /FALLOW_EXTENSION_PATH=/);
   assert.match(vscodeJob, /name: Run extracted production VSIX host smoke/);
   assert.match(zedJob, /runs-on: ubuntu-latest/);
@@ -353,7 +353,7 @@ test("release runs Windows correctness and lifecycle verification without creden
   assert.match(job, /cargo fmt --all -- --check/);
   assert.match(job, /npm run publish:prepare/);
   assert.match(job, /cd crates\/napi && npm test/);
-  assert.match(job, /verify-packaged-type-aware\.mjs/);
+  assert.match(job, /verify:vsix/);
   assert.match(job, /FALLOW_LSP_BIN:/);
   assert.match(job, /type-aware-windows-candidate-smoke\.mjs/);
   assert.match(job, /FALLOW_CANDIDATE_BIN:/);
@@ -421,7 +421,7 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(releaseAssets, /needs: release-verified/);
   assert.match(releaseAssets, /permissions:\n\s+contents: read/);
   assert.match(npmPublish, /needs: \[npm-prep, release-assets\]/);
-  assert.match(vscodePrep, /verify-packaged-type-aware\.mjs/);
+  assert.match(vscodePrep, /verify:vsix/);
   assert.match(vscodePublish, /needs: \[vscode-prep, release-assets\]/);
   assert.match(
     releaseReady,

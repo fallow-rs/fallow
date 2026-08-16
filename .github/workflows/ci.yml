@@ -431,7 +431,7 @@ jobs:
           $destination = Join-Path $env:RUNNER_TEMP "fallow-vsix"
           Copy-Item $vsix.FullName $archive
           Expand-Archive -Path $archive -DestinationPath $destination
-          node editors/vscode/scripts/verify-packaged-type-aware.mjs "$destination\extension" $vsix.FullName
+          pnpm --dir editors/vscode verify:vsix "$destination\extension" $vsix.FullName
           "FALLOW_EXTENSION_PATH=$destination\extension" >> $env:GITHUB_ENV
       - name: Run isolated VSIX type-aware host smoke
         env:
@@ -814,11 +814,12 @@ jobs:
           pnpm --dir editors/vscode package
           vsix="$(find editors/vscode -maxdepth 1 -name '*.vsix' -print -quit)"
           test -n "$vsix"
+          vsix="$(realpath "$vsix")"
           archive="$RUNNER_TEMP/fallow-vsix.zip"
           destination="$RUNNER_TEMP/fallow-vsix-ubuntu"
           cp "$vsix" "$archive"
           unzip -q "$archive" -d "$destination"
-          node editors/vscode/scripts/verify-packaged-type-aware.mjs "$destination/extension" "$vsix"
+          pnpm --dir editors/vscode verify:vsix "$destination/extension" "$vsix"
           echo "FALLOW_EXTENSION_PATH=$destination/extension" >> "$GITHUB_ENV"
       - name: Run extracted production VSIX host smoke
         env:

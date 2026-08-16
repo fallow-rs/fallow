@@ -910,8 +910,9 @@
     "test:unit": "vitest run",
     "test:integration": "pnpm run build && tsc -p tsconfig.test.json && node ./.test-dist/test/integration/runTest.js",
     "test:integration:real": "pnpm run build && tsc -p tsconfig.test.json && node ./.test-dist/test/integration/real/runTest.js",
-    "prepackage": "pnpm run codegen:contracts && pnpm run build && node -e \"require('node:fs').copyFileSync('../../LICENSE', './LICENSE')\"",
+    "prepackage": "pnpm run codegen:contracts && pnpm run build && node ./scripts/copy-license.mjs",
     "package": "vsce package --no-dependencies",
+    "verify:vsix": "node ./scripts/verify-packaged-type-aware.mjs",
     "publish": "vsce publish --no-dependencies",
     "publish:ovsx": "ovsx publish --no-dependencies"
   },

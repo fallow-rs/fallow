@@ -88,7 +88,7 @@ jobs:
           $destination = Join-Path $env:RUNNER_TEMP "fallow-vsix"
           Copy-Item $vsix.FullName $archive
           Expand-Archive -Path $archive -DestinationPath $destination
-          node editors/vscode/scripts/verify-packaged-type-aware.mjs "$destination\extension" $vsix.FullName
+          pnpm --dir editors/vscode verify:vsix "$destination\extension" $vsix.FullName
           "FALLOW_EXTENSION_PATH=$destination\extension" >> $env:GITHUB_ENV
 
       - name: Run isolated VSIX type-aware host smoke

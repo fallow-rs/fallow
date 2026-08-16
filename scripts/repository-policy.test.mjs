@@ -182,6 +182,8 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.equal(sidecarLock.packages[""].version, workspaceVersion);
   assert.equal(sidecarPackage.dependencies.typescript, manifest.backend.version);
   assert.equal(vscodePackage.devDependencies.typescript, manifest.backend.version);
+  assert.match(vscodePackage.scripts.prepackage, /scripts\/copy-license\.mjs/u);
+  assert.match(vscodePackage.scripts["verify:vsix"], /verify-packaged-type-aware\.mjs/u);
   assert.equal(sidecarLock.packages[""].dependencies.typescript, manifest.backend.version);
   assert.equal(sidecarLock.packages["node_modules/typescript"].version, manifest.backend.version);
   assert.deepEqual(sidecarPackage.bin, {

@@ -1130,11 +1130,12 @@ jobs:
         run: |
           vsix="$(find editors/vscode -maxdepth 1 -name '*.vsix' -print -quit)"
           test -n "$vsix"
+          vsix="$(realpath "$vsix")"
           archive="$RUNNER_TEMP/fallow-vsix.zip"
           destination="$RUNNER_TEMP/fallow-vsix-release"
           cp "$vsix" "$archive"
           unzip -q "$archive" -d "$destination"
-          node editors/vscode/scripts/verify-packaged-type-aware.mjs "$destination/extension" "$vsix"
+          pnpm --dir editors/vscode verify:vsix "$destination/extension" "$vsix"
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
