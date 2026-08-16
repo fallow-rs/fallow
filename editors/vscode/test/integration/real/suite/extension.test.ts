@@ -41,9 +41,7 @@ const testContext = (): vscode.ExtensionContext =>
     workspaceState: inMemoryMemento(),
   }) as vscode.ExtensionContext;
 
-const fallowDiagnostics = async (
-  uri: vscode.Uri,
-): Promise<readonly vscode.Diagnostic[]> => {
+const fallowDiagnostics = async (uri: vscode.Uri): Promise<readonly vscode.Diagnostic[]> => {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     const diagnostics = vscode.languages
@@ -58,7 +56,7 @@ const fallowDiagnostics = async (
 };
 
 describe("Fallow VS Code real-process contracts", () => {
-  it("parses the current CLI envelope and receives current LSP diagnostics", async () => {
+  it("parses the current CLI envelope with complete type-aware evidence", async () => {
     const extension = vscode.extensions.getExtension("fallow-rs.fallow-vscode");
     assert.ok(extension, "extension should be discoverable");
     const api = (await extension.activate()) as ExtensionApi;
@@ -76,7 +74,10 @@ describe("Fallow VS Code real-process contracts", () => {
     assert.ok(unusedExport, "current CLI should report the fixture's unused export");
     assert.equal(unusedExport.semantic?.status, "complete");
     assert.equal(unusedExport.semantic?.decision, "confirmed-no-static-references");
+  });
 
+  const lspTest = process.platform === "win32" ? it.skip : it;
+  lspTest("receives current LSP diagnostics", async () => {
     const orphanUri = vscode.Uri.joinPath(workspaceFolder().uri, "src", "orphan.ts");
     const document = await vscode.workspace.openTextDocument(orphanUri);
     await vscode.window.showTextDocument(document);
