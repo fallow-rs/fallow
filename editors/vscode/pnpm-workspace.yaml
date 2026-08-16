@@ -6,3 +6,12 @@ minimumReleaseAgeExclude:
 
 overrides:
   "brace-expansion@5": 5.0.9
+
+supportedArchitectures:
+  os:
+    - darwin
+    - linux
+    - win32
+  cpu:
+    - arm64
+    - x64

@@ -9,6 +9,8 @@ tsconfig.test.json
 vitest.config.mts
 rolldown.config.mjs
 pnpm-lock.yaml
+pnpm-workspace.yaml
+scripts/**
 .fallowrc.json
 **/*.map
 .gitignore

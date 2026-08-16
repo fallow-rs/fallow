@@ -162,15 +162,31 @@ test("resolveTypeAwareCompanion accepts only an exact matching package", (t) => 
 test("childEnvironment marks launcher-wired companions as npm-wrapper", (t) => {
   const { childEnvironment } = require(RUN_BINARY);
   const previousBin = process.env.FALLOW_TYPE_AWARE_BIN;
+  const previousScript = process.env.FALLOW_TYPE_AWARE_SCRIPT;
   delete process.env.FALLOW_TYPE_AWARE_BIN;
+  delete process.env.FALLOW_TYPE_AWARE_SCRIPT;
   t.after(() => {
     if (previousBin === undefined) delete process.env.FALLOW_TYPE_AWARE_BIN;
     else process.env.FALLOW_TYPE_AWARE_BIN = previousBin;
+    if (previousScript === undefined) delete process.env.FALLOW_TYPE_AWARE_SCRIPT;
+    else process.env.FALLOW_TYPE_AWARE_SCRIPT = previousScript;
   });
 
-  const env = childEnvironment("3.8.0", () => "/tmp/fallow-type-aware.mjs");
+  const env = childEnvironment("3.8.0", () => "/tmp/fallow-type-aware.mjs", {
+    platform: "linux",
+    execPath: "/usr/bin/node",
+  });
   assert.equal(env.FALLOW_TYPE_AWARE_BIN, "/tmp/fallow-type-aware.mjs");
+  assert.equal(env.FALLOW_TYPE_AWARE_SCRIPT, undefined);
   assert.equal(env.FALLOW_TYPE_AWARE_BIN_SOURCE, "npm-wrapper");
+
+  const windowsEnv = childEnvironment("3.8.0", () => "C:\\pkg\\fallow-type-aware.mjs", {
+    platform: "win32",
+    execPath: "C:\\Program Files\\nodejs\\node.exe",
+  });
+  assert.equal(windowsEnv.FALLOW_TYPE_AWARE_BIN, "C:\\Program Files\\nodejs\\node.exe");
+  assert.equal(windowsEnv.FALLOW_TYPE_AWARE_SCRIPT, "C:\\pkg\\fallow-type-aware.mjs");
+  assert.equal(windowsEnv.FALLOW_TYPE_AWARE_BIN_SOURCE, "npm-wrapper");
 
   // No resolvable companion: the environment passes through untouched.
   const untouched = childEnvironment("3.8.0", () => undefined);
@@ -181,14 +197,19 @@ test("childEnvironment marks launcher-wired companions as npm-wrapper", (t) => {
 test("childEnvironment leaves a user-set override unmarked", (t) => {
   const { childEnvironment } = require(RUN_BINARY);
   const previousBin = process.env.FALLOW_TYPE_AWARE_BIN;
+  const previousScript = process.env.FALLOW_TYPE_AWARE_SCRIPT;
   process.env.FALLOW_TYPE_AWARE_BIN = "/opt/custom-sidecar";
+  process.env.FALLOW_TYPE_AWARE_SCRIPT = "/opt/custom-sidecar.mjs";
   t.after(() => {
     if (previousBin === undefined) delete process.env.FALLOW_TYPE_AWARE_BIN;
     else process.env.FALLOW_TYPE_AWARE_BIN = previousBin;
+    if (previousScript === undefined) delete process.env.FALLOW_TYPE_AWARE_SCRIPT;
+    else process.env.FALLOW_TYPE_AWARE_SCRIPT = previousScript;
   });
 
   const env = childEnvironment("3.8.0", () => "/tmp/fallow-type-aware.mjs");
   assert.equal(env, process.env);
+  assert.equal(env.FALLOW_TYPE_AWARE_SCRIPT, "/opt/custom-sidecar.mjs");
   assert.equal(env.FALLOW_TYPE_AWARE_BIN_SOURCE, undefined);
 });
 

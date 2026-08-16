@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The bundled GitHub Action and GitLab CI helpers now analyze once and render
   comment/review surfaces from the saved JSON artifact.
 
+### Fixed
+
+- **Type-aware analysis now starts reliably from npm and VS Code on Windows**
+  (Closes [#2284](https://github.com/fallow-rs/fallow/issues/2284)). The npm
+  launcher invokes the companion through Node instead of asking Windows to
+  execute its `.mjs` file directly. The VS Code package now includes every
+  supported TypeScript-Go backend, and Windows child processes stay hidden
+  while preserving the existing process-tree controls.
+
 ## [3.16.0] - 2026-08-13
 
 ### Fixed

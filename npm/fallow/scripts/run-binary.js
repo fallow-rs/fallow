@@ -145,18 +145,38 @@ function resolveTypeAwareCompanion(
   }
 }
 
-function childEnvironment(resolvedVersion, resolveCompanion = resolveTypeAwareCompanion) {
+function typeAwareCommand(
+  companion,
+  { platform = process.platform, execPath = process.execPath } = {},
+) {
+  return platform === "win32"
+    ? { binary: execPath, script: companion }
+    : { binary: companion, script: undefined };
+}
+
+function childEnvironment(
+  resolvedVersion,
+  resolveCompanion = resolveTypeAwareCompanion,
+  commandOptions,
+) {
   if (process.env.FALLOW_TYPE_AWARE_BIN) return process.env;
   const companion = resolveCompanion(resolvedVersion);
-  return companion === undefined
-    ? process.env
-    : {
-        ...process.env,
-        FALLOW_TYPE_AWARE_BIN: companion,
-        // Marks the wiring as launcher-provided node_modules resolution so
-        // `type-aware status` does not report it as a user-set override.
-        FALLOW_TYPE_AWARE_BIN_SOURCE: "npm-wrapper",
-      };
+  if (companion === undefined) return process.env;
+
+  const command = typeAwareCommand(companion, commandOptions);
+  const environment = {
+    ...process.env,
+    FALLOW_TYPE_AWARE_BIN: command.binary,
+    // Marks the wiring as launcher-provided node_modules resolution so
+    // `type-aware status` does not report it as a user-set override.
+    FALLOW_TYPE_AWARE_BIN_SOURCE: "npm-wrapper",
+  };
+  if (command.script) {
+    environment.FALLOW_TYPE_AWARE_SCRIPT = command.script;
+  } else {
+    delete environment.FALLOW_TYPE_AWARE_SCRIPT;
+  }
+  return environment;
 }
 
 // Swallow EPIPE on stdout. When fallow's output is piped into a reader that

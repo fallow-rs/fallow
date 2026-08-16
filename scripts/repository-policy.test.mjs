@@ -147,6 +147,20 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   const sidecarLock = readJson("tools/type-aware-sidecar/package-lock.json");
   const generated = readFileSync("tools/type-aware-sidecar/src/generated-protocol.mjs", "utf8");
   const vscodePackager = readFileSync("editors/vscode/scripts/package-type-aware.mjs", "utf8");
+  const vscodePackageVerifier = readFileSync(
+    "editors/vscode/scripts/verify-packaged-type-aware.mjs",
+    "utf8",
+  );
+  const vscodeWorkspace = readFileSync("editors/vscode/pnpm-workspace.yaml", "utf8");
+  const vscodePackage = readJson("editors/vscode/package.json");
+  const bundledBackends = [
+    "@typescript/typescript-darwin-arm64",
+    "@typescript/typescript-darwin-x64",
+    "@typescript/typescript-linux-arm64",
+    "@typescript/typescript-linux-x64",
+    "@typescript/typescript-win32-arm64",
+    "@typescript/typescript-win32-x64",
+  ];
 
   assert.equal(manifest.schema_version, 1);
   assert.equal(manifest.wire_protocol_version, 7);
@@ -167,6 +181,7 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.equal(sidecarLock.version, workspaceVersion);
   assert.equal(sidecarLock.packages[""].version, workspaceVersion);
   assert.equal(sidecarPackage.dependencies.typescript, manifest.backend.version);
+  assert.equal(vscodePackage.devDependencies.typescript, manifest.backend.version);
   assert.equal(sidecarLock.packages[""].dependencies.typescript, manifest.backend.version);
   assert.equal(sidecarLock.packages["node_modules/typescript"].version, manifest.backend.version);
   assert.deepEqual(sidecarPackage.bin, {
@@ -177,6 +192,16 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.ok(sidecarPackage.files.includes("src"));
   assert.match(generated, /Generated from crates\/api\/type-aware-protocol\.json/u);
   assert.match(vscodePackager, /cpSync\(join\(sourceRoot, "src"\)/u);
+  for (const packageName of bundledBackends) {
+    assert.match(vscodePackager, new RegExp(packageName.replace("/", "\\/"), "u"));
+    assert.match(vscodePackageVerifier, new RegExp(packageName.replace("@typescript/", ""), "u"));
+  }
+  assert.match(vscodePackager, /tsc(?:\\\\\.exe)?/u);
+  assert.match(vscodePackageVerifier, /MAX_VSIX_BYTES/u);
+  assert.match(vscodeWorkspace, /supportedArchitectures:/u);
+  assert.match(vscodeWorkspace, /- win32/u);
+  assert.match(vscodeWorkspace, /- darwin/u);
+  assert.match(vscodeWorkspace, /- linux/u);
 });
 
 test("type-aware public surfaces expose only the stable protocol", () => {

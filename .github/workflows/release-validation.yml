@@ -50,6 +50,12 @@ jobs:
       - name: Install type-aware sidecar dependencies
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
 
+      - name: Test Windows npm and child-process wiring
+        run: >
+          node --test
+          npm/fallow/scripts/run-binary.test.js
+          tools/type-aware-sidecar/test/windows-child-process.test.mjs
+
       - name: Run workspace tests
         run: cargo test --workspace --lib --bins --tests --examples
 
@@ -61,6 +67,35 @@ jobs:
 
       - name: Install contract bundle dependencies
         run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Build current CLI and LSP binaries
+        run: cargo build -p fallow-cli --bin fallow -p fallow-lsp --bin fallow-lsp
+
+      - name: Run installed npm candidate against pinned Preact
+        env:
+          FALLOW_CANDIDATE_BIN: ${{ github.workspace }}\target\debug\fallow.exe
+        run: node scripts/type-aware-windows-candidate-smoke.mjs
+
+      - name: Package universal VSIX
+        run: cd editors/vscode && pnpm package
+
+      - name: Extract VSIX outside the repository
+        shell: pwsh
+        run: |
+          $vsix = Get-ChildItem editors/vscode/*.vsix | Select-Object -First 1
+          if (-not $vsix) { throw "VSIX package was not created" }
+          $archive = Join-Path $env:RUNNER_TEMP "fallow-vsix.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "fallow-vsix"
+          Copy-Item $vsix.FullName $archive
+          Expand-Archive -Path $archive -DestinationPath $destination
+          node editors/vscode/scripts/verify-packaged-type-aware.mjs "$destination\extension" $vsix.FullName
+          "FALLOW_EXTENSION_PATH=$destination\extension" >> $env:GITHUB_ENV
+
+      - name: Run isolated VSIX type-aware host smoke
+        env:
+          FALLOW_BIN: ${{ github.workspace }}\target\debug\fallow.exe
+          FALLOW_LSP_BIN: ${{ github.workspace }}\target\debug\fallow-lsp.exe
+        run: pnpm --dir editors/vscode run test:integration:real
 
       - name: Run staged subgenerator integration tests
         run: node --test scripts/subgenerator-staging.test.mjs

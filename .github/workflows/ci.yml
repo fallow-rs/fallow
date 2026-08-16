@@ -28,6 +28,7 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       windows-rust: ${{ steps.filter.outputs.windows-rust }}
+      windows-type-aware: ${{ steps.filter.outputs.windows-type-aware }}
       vscode: ${{ steps.filter.outputs.vscode }}
       zed: ${{ steps.filter.outputs.zed }}
       npm: ${{ steps.filter.outputs.npm }}
@@ -121,6 +122,27 @@ jobs:
               - 'Cargo.lock'
               - '.clippy.toml'
               - 'rust-toolchain.toml'
+            windows-type-aware:
+              - 'npm/fallow/scripts/run-binary.js'
+              - 'npm/fallow/scripts/run-binary.test.js'
+              - 'npm/fallow/package.json'
+              - 'npm/fallow/bin/**'
+              - 'tools/type-aware-sidecar/**'
+              - 'editors/vscode/package.json'
+              - 'editors/vscode/pnpm-lock.yaml'
+              - 'editors/vscode/pnpm-workspace.yaml'
+              - 'editors/vscode/.vscodeignore'
+              - 'editors/vscode/scripts/package-type-aware.mjs'
+              - 'editors/vscode/scripts/verify-packaged-type-aware.mjs'
+              - 'editors/vscode/src/typeAwareCompanion.ts'
+              - 'editors/vscode/test/integration/fixtures/real-workspace/**'
+              - 'editors/vscode/test/integration/real/**'
+              - 'crates/api/src/type_aware/transport/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release-validation.yml'
+              - 'scripts/repository-policy.test.mjs'
+              - 'scripts/type-aware-windows-candidate-smoke.mjs'
+              - 'scripts/workflow-policy.test.mjs'
             vscode:
               - 'editors/vscode/**'
               - 'crates/**'
@@ -359,6 +381,65 @@ jobs:
         run: cargo test -p fallow-cli windows_job_object_terminates_descendants_without_taskkill_lookup
       - name: Clippy platform-specific paths
         run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
+
+  windows-type-aware:
+    name: Windows type-aware package and VS Code host
+    needs: changes
+    if: needs.changes.outputs.windows-type-aware == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: pr-windows-type-aware
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.10.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - name: Test Windows npm and child-process wiring
+        run: >
+          node --test
+          npm/fallow/scripts/run-binary.test.js
+          tools/type-aware-sidecar/test/windows-child-process.test.mjs
+      - name: Test Rust type-aware transport
+        run: cargo test -p fallow-api type_aware::transport
+      - name: Install VS Code dependencies
+        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build current CLI and LSP binaries
+        run: cargo build -p fallow-cli --bin fallow -p fallow-lsp --bin fallow-lsp
+      - name: Run installed npm candidate against pinned Preact
+        env:
+          FALLOW_CANDIDATE_BIN: ${{ github.workspace }}\target\debug\fallow.exe
+        run: node scripts/type-aware-windows-candidate-smoke.mjs
+      - name: Package universal VSIX
+        run: cd editors/vscode && pnpm package
+      - name: Extract VSIX outside the repository
+        shell: pwsh
+        run: |
+          $vsix = Get-ChildItem editors/vscode/*.vsix | Select-Object -First 1
+          if (-not $vsix) { throw "VSIX package was not created" }
+          $archive = Join-Path $env:RUNNER_TEMP "fallow-vsix.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "fallow-vsix"
+          Copy-Item $vsix.FullName $archive
+          Expand-Archive -Path $archive -DestinationPath $destination
+          node editors/vscode/scripts/verify-packaged-type-aware.mjs "$destination\extension" $vsix.FullName
+          "FALLOW_EXTENSION_PATH=$destination\extension" >> $env:GITHUB_ENV
+      - name: Run isolated VSIX type-aware host smoke
+        env:
+          FALLOW_BIN: ${{ github.workspace }}\target\debug\fallow.exe
+          FALLOW_LSP_BIN: ${{ github.workspace }}\target\debug\fallow-lsp.exe
+        run: pnpm --dir editors/vscode run test:integration:real
+      - name: Check for uncommitted changes
+        run: git diff --exit-code
 
   skills-vendor:
     name: Public skills contract
@@ -693,7 +774,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.vscode == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -728,7 +809,21 @@ jobs:
           FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow-multicall
         run: xvfb-run -a pnpm --dir editors/vscode run test:integration:real
       - run: cd editors/vscode && pnpm test:unit
-      - run: cd editors/vscode && pnpm package
+      - name: Package and verify the production VSIX shape
+        run: |
+          pnpm --dir editors/vscode package
+          vsix="$(find editors/vscode -maxdepth 1 -name '*.vsix' -print -quit)"
+          test -n "$vsix"
+          archive="$RUNNER_TEMP/fallow-vsix.zip"
+          destination="$RUNNER_TEMP/fallow-vsix-ubuntu"
+          cp "$vsix" "$archive"
+          unzip -q "$archive" -d "$destination"
+          node editors/vscode/scripts/verify-packaged-type-aware.mjs "$destination/extension" "$vsix"
+          echo "FALLOW_EXTENSION_PATH=$destination/extension" >> "$GITHUB_ENV"
+      - name: Run extracted production VSIX host smoke
+        env:
+          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow-multicall
+        run: xvfb-run -a pnpm --dir editors/vscode run test:integration:real
 
   zed:
     name: Zed Extension
@@ -942,7 +1037,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [check, windows-rust, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
+    needs: [check, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

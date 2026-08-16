@@ -70,6 +70,12 @@ describe("Fallow VS Code real-process contracts", () => {
       result.check.unused_files.some((finding) => finding.path === "src/orphan.ts"),
       "current CLI should report the real fixture's unused file",
     );
+    const unusedExport = result.check.unused_exports.find(
+      (finding) => finding.path === "src/used.ts" && finding.export_name === "unused",
+    );
+    assert.ok(unusedExport, "current CLI should report the fixture's unused export");
+    assert.equal(unusedExport.semantic?.status, "complete");
+    assert.equal(unusedExport.semantic?.decision, "confirmed-no-static-references");
 
     const orphanUri = vscode.Uri.joinPath(workspaceFolder().uri, "src", "orphan.ts");
     const document = await vscode.workspace.openTextDocument(orphanUri);

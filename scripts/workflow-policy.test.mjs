@@ -210,13 +210,18 @@ test("binary-size workflow isolates incompatible release builds", () => {
 test("regular CI keeps affected checks on Ubuntu", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const windowsRustPaths = listedPaths(indentedBlock(workflow, "windows-rust", 12));
+  const windowsTypeAwarePaths = listedPaths(indentedBlock(workflow, "windows-type-aware", 12));
   const checkJob = indentedBlock(workflow, "check", 2);
   const windowsRustJob = indentedBlock(workflow, "windows-rust", 2);
+  const windowsTypeAwareJob = indentedBlock(workflow, "windows-type-aware", 2);
+  const vscodeJob = indentedBlock(workflow, "vscode", 2);
   const zedJob = indentedBlock(workflow, "zed", 2);
   const aggregateJob = indentedBlock(workflow, "ci-ok", 2);
-  const workflowWithoutWindowsRust = workflow.replace(windowsRustJob, "");
+  const workflowWithoutWindowsJobs = workflow
+    .replace(windowsRustJob, "")
+    .replace(windowsTypeAwareJob, "");
 
-  assert.doesNotMatch(workflowWithoutWindowsRust, /windows-latest|windows-11-arm|macos-latest/);
+  assert.doesNotMatch(workflowWithoutWindowsJobs, /windows-latest|windows-11-arm|macos-latest/);
   assert.match(checkJob, /runs-on: ubuntu-latest/);
   assert.match(checkJob, /timeout-minutes: 20/);
   assert.doesNotMatch(checkJob, /matrix\.|windows-latest|macos-latest/);
@@ -252,6 +257,28 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     windowsRustJob,
     /^[ \t]+run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings$/m,
   );
+  assert.match(windowsTypeAwareJob, /needs: changes/);
+  assert.match(windowsTypeAwareJob, /if: needs\.changes\.outputs\.windows-type-aware == 'true'/);
+  assert.match(windowsTypeAwareJob, /runs-on: windows-latest/);
+  assert.ok(windowsTypeAwarePaths.includes("npm/fallow/scripts/run-binary.js"));
+  assert.ok(windowsTypeAwarePaths.includes("npm/fallow/package.json"));
+  assert.ok(windowsTypeAwarePaths.includes("npm/fallow/bin/**"));
+  assert.ok(windowsTypeAwarePaths.includes("tools/type-aware-sidecar/**"));
+  assert.ok(windowsTypeAwarePaths.includes("editors/vscode/scripts/package-type-aware.mjs"));
+  assert.ok(
+    windowsTypeAwarePaths.includes("editors/vscode/scripts/verify-packaged-type-aware.mjs"),
+  );
+  assert.ok(windowsTypeAwarePaths.includes("crates/api/src/type_aware/transport/**"));
+  assert.match(windowsTypeAwareJob, /npm\/fallow\/scripts\/run-binary\.test\.js/);
+  assert.match(windowsTypeAwareJob, /cargo test -p fallow-api type_aware::transport/);
+  assert.match(windowsTypeAwareJob, /type-aware-windows-candidate-smoke\.mjs/);
+  assert.match(windowsTypeAwareJob, /FALLOW_LSP_BIN:/);
+  assert.match(windowsTypeAwareJob, /verify-packaged-type-aware\.mjs/);
+  assert.match(windowsTypeAwareJob, /pnpm package/);
+  assert.match(windowsTypeAwareJob, /test:integration:real/);
+  assert.match(vscodeJob, /verify-packaged-type-aware\.mjs/);
+  assert.match(vscodeJob, /FALLOW_EXTENSION_PATH=/);
+  assert.match(vscodeJob, /name: Run extracted production VSIX host smoke/);
   assert.match(zedJob, /runs-on: ubuntu-latest/);
   assert.doesNotMatch(zedJob, /matrix\.|windows-latest|macos-latest/);
   assert.throws(() => indentedBlock(workflow, "windows-arm64", 2), /missing windows-arm64 block/);
@@ -260,6 +287,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     /missing windows-audit-smoke block/,
   );
   assert.match(aggregateJob, /windows-rust/);
+  assert.match(aggregateJob, /windows-type-aware/);
   assert.match(aggregateJob, /needs: \[[^\n]*\bzed\b[^\n]*\]/);
   assert.doesNotMatch(aggregateJob, /windows-audit-smoke|windows-arm64/);
 });
@@ -325,6 +353,10 @@ test("release runs Windows correctness and lifecycle verification without creden
   assert.match(job, /cargo fmt --all -- --check/);
   assert.match(job, /npm run publish:prepare/);
   assert.match(job, /cd crates\/napi && npm test/);
+  assert.match(job, /verify-packaged-type-aware\.mjs/);
+  assert.match(job, /FALLOW_LSP_BIN:/);
+  assert.match(job, /type-aware-windows-candidate-smoke\.mjs/);
+  assert.match(job, /FALLOW_CANDIDATE_BIN:/);
   assert.match(job, /audit_orphan_sweep_removes_dead_pid_worktree/);
   assert.match(job, /run_fallow_timeout_terminates_and_reaps_windows_job_tree/);
 });
@@ -373,6 +405,7 @@ test("release publication waits for the aggregate verification gate", () => {
   const releaseAssets = indentedBlock(workflow, "release-assets", 2);
   const releaseReady = indentedBlock(workflow, "release-ready", 2);
   const npmPublish = indentedBlock(workflow, "npm-publish", 2);
+  const vscodePrep = indentedBlock(workflow, "vscode-prep", 2);
   const vscodePublish = indentedBlock(workflow, "vscode-publish", 2);
 
   assert.match(context, /permissions:\n\s+contents: read/);
@@ -388,6 +421,7 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(releaseAssets, /needs: release-verified/);
   assert.match(releaseAssets, /permissions:\n\s+contents: read/);
   assert.match(npmPublish, /needs: \[npm-prep, release-assets\]/);
+  assert.match(vscodePrep, /verify-packaged-type-aware\.mjs/);
   assert.match(vscodePublish, /needs: \[vscode-prep, release-assets\]/);
   assert.match(
     releaseReady,
