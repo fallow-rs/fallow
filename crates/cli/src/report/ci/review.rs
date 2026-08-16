@@ -405,7 +405,7 @@ mod tests {
         )];
         let envelope = to_value(&render_review_envelope("check", Provider::Github, &issues));
         assert_eq!(envelope["event"], "COMMENT");
-        assert_eq!(envelope["meta"]["schema"], "fallow-review-envelope/v2");
+        assert_eq!(envelope["meta"]["schema"], "fallow-review-envelope/v3");
         assert_eq!(envelope["comments"][0]["path"], "src/a.ts");
         assert!(
             envelope["comments"][0]["body"]

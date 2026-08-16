@@ -35,6 +35,41 @@ prepare_fallow_render_args() {
   export FALLOW_DIFF_FILTER="${FALLOW_DIFF_FILTER:-added}"
 }
 
+saved_render_is_unsupported() {
+  local stderr_file=$1
+  [ -s "$stderr_file" ] || return 1
+  grep -Fq \
+    'fallow report supports --format github-annotations, github-summary, codeclimate, or sarif only' \
+    "$stderr_file" \
+    || grep -Eq "unrecognized subcommand ['\"]?report" "$stderr_file"
+}
+
+prepare_fallow_direct_render_args() {
+  local format=$1
+  local args_file="${FALLOW_ANALYSIS_ARGS_FILE:-fallow-analysis-args.bin}"
+  [ -s "$args_file" ] || return 1
+  FALLOW_RENDER_ARGS=()
+  local arg
+  while IFS= read -r -d '' arg; do
+    FALLOW_RENDER_ARGS+=("$arg")
+  done < "$args_file"
+  [ "${#FALLOW_RENDER_ARGS[@]}" -gt 0 ] || return 1
+  local replaced=false
+  local i
+  for i in "${!FALLOW_RENDER_ARGS[@]}"; do
+    if [ "${FALLOW_RENDER_ARGS[$i]}" = "--format" ] \
+        && [ $((i + 1)) -lt "${#FALLOW_RENDER_ARGS[@]}" ]; then
+      FALLOW_RENDER_ARGS[i + 1]="$format"
+      replaced=true
+      break
+    fi
+  done
+  [ "$replaced" = "true" ] || FALLOW_RENDER_ARGS+=(--format "$format")
+  [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
+    && FALLOW_RENDER_ARGS+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+  return 0
+}
+
 curl_retry() {
   local attempts="${FALLOW_API_RETRIES:-3}"
   local delay="${FALLOW_API_RETRY_DELAY:-2}"

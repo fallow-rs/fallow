@@ -14,7 +14,8 @@ set -eo pipefail
 # Required env: FALLOW_COMMAND, MAX_ANNOTATIONS, ACTION_JQ_DIR
 # Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
 #   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE,
-#   FALLOW_PR_DECISION_FILE, HAS_NATIVE_REPORT, FALLOW_BIN
+#   FALLOW_PR_DECISION_FILE, HAS_NATIVE_REPORT, FALLOW_BIN,
+#   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX
 
 MAX="${MAX_ANNOTATIONS:-50}"
 if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
@@ -71,7 +72,10 @@ emit_native_annotations_if_available() {
   native_file=$(mktemp)
   _FALLOW_TMPS+=("$native_file")
 
-  if ! "${FALLOW_BIN:-fallow}" report --from "$input_file" --format github-annotations > "$native_file" 2>/dev/null; then
+  local args=(report --from "$input_file" --root "${INPUT_ROOT:-.}" --format github-annotations)
+  [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
+    && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+  if ! "${FALLOW_BIN:-fallow}" "${args[@]}" > "$native_file" 2>/dev/null; then
     echo "::warning::fallow native annotation render failed; falling back to jq"
     return 1
   fi

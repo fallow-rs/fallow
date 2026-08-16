@@ -403,6 +403,9 @@ pub enum ReviewEnvelopeSchema {
     /// Issue #528 review envelope format.
     #[serde(rename = "fallow-review-envelope/v2")]
     V2,
+    /// Gate-aware conclusion semantics, including failures without findings.
+    #[serde(rename = "fallow-review-envelope/v3")]
+    V3,
 }
 
 /// Review-envelope provider tag.

@@ -643,9 +643,13 @@ if [ "${#FILTERED_EXTRA_ARGS[@]}" -gt 0 ]; then
   EXTRA_ARGS=("${FILTERED_EXTRA_ARGS[@]}")
 fi
 if [ -n "${GITHUB_ENV:-}" ]; then
+  # Preserve exact argv for pinned-CLI compatibility as inert runner-owned
+  # data. Later steps parse this JSON instead of executing a workspace file.
+  ANALYSIS_ARGS_JSON=$(jq -cn --args '$ARGS.positional' -- "${ARGS[@]}" "${EXTRA_ARGS[@]}")
   printf '%s\n' \
     "FALLOW_RENDER_PATH_PREFIX_SET=${FALLOW_RENDER_PATH_PREFIX_SET}" \
-    "FALLOW_RENDER_PATH_PREFIX=${FALLOW_RENDER_PATH_PREFIX}" >> "$GITHUB_ENV"
+    "FALLOW_RENDER_PATH_PREFIX=${FALLOW_RENDER_PATH_PREFIX}" \
+    "FALLOW_ANALYSIS_ARGS_JSON=${ANALYSIS_ARGS_JSON}" >> "$GITHUB_ENV"
 fi
 
 # Run analysis — no --fail-on-issues so subsequent steps always run.

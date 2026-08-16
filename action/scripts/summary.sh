@@ -16,7 +16,8 @@ set -eo pipefail
 # Required env: FALLOW_COMMAND, ACTION_JQ_DIR
 # Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
 #   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE,
-#   FALLOW_PR_COMMENT_ENVELOPE_FILE, HAS_NATIVE_REPORT, FALLOW_BIN
+#   FALLOW_PR_COMMENT_ENVELOPE_FILE, HAS_NATIVE_REPORT, FALLOW_BIN,
+#   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX
 
 select_summary_script() {
   case "$FALLOW_COMMAND" in
@@ -77,8 +78,11 @@ emit_native_summary_if_available() {
   local input_file
   input_file=$(resolve_results_file)
 
+  local args=(report --from "$input_file" --root "${INPUT_ROOT:-.}" --format github-summary)
+  [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
+    && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
   local rendered
-  if ! rendered=$("${FALLOW_BIN:-fallow}" report --from "$input_file" --format github-summary 2>/dev/null); then
+  if ! rendered=$("${FALLOW_BIN:-fallow}" "${args[@]}" 2>/dev/null); then
     echo "::warning::fallow native summary render failed; falling back to jq"
     return 1
   fi

@@ -40,6 +40,14 @@ render_with_fallow() {
   esac
   local render_status=0
   FALLOW_COMMENT_ID="${FALLOW_COMMENT_ID:-fallow-results}" fallow "${FALLOW_RENDER_ARGS[@]}" > "$output" 2> fallow-comment-stderr.log || render_status=$?
+  if [ "$render_status" -ne 0 ] \
+      && saved_render_is_unsupported fallow-comment-stderr.log \
+      && prepare_fallow_direct_render_args "$format"; then
+    echo "WARNING: Installed fallow does not support saved ${format} rendering; using compatible direct rendering"
+    render_status=0
+    FALLOW_COMMENT_ID="${FALLOW_COMMENT_ID:-fallow-results}" fallow "${FALLOW_RENDER_ARGS[@]}" > "$output" 2> fallow-comment-stderr.log || render_status=$?
+    [ "$render_status" -eq 1 ] && render_status=0
+  fi
   # Surface fallow's structured-error envelope before the marker check so the
   # CLI message lands in the GitLab job log rather than a generic warning.
   if jq -e '.error == true' "$output" > /dev/null 2>&1; then

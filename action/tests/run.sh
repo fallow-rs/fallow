@@ -1018,13 +1018,15 @@ assert_not_contains "$ARGS" "--report-path-prefix" "analyze: keeps renderer pref
 assert_contains "$ARGS" "--unused-files" "analyze: preserves non-presentation extra args"
 assert_contains "$RENDER_ENV" "FALLOW_RENDER_PATH_PREFIX_SET=1" "analyze: marks explicit renderer prefix"
 assert_contains "$RENDER_ENV" "FALLOW_RENDER_PATH_PREFIX=custom/base" "analyze: propagates renderer prefix"
+assert_contains "$RENDER_ENV" "FALLOW_ANALYSIS_ARGS_JSON=[" "analyze: propagates safe JSON fallback arguments"
+assert_contains "$RENDER_ENV" '"--unused-files"' "analyze: JSON fallback arguments preserve non-presentation flags"
 
 cd "$ANALYZE_TMP/work"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   GITHUB_ENV="$ANALYZE_TMP/github-env" INPUT_ROOT="." INPUT_COMMAND="dead-code" \
   INPUT_FORMAT="json" bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-RENDER_ENV_TAIL=$(tail -2 "$ANALYZE_TMP/github-env")
+RENDER_ENV_TAIL=$(tail -3 "$ANALYZE_TMP/github-env")
 assert_contains "$RENDER_ENV_TAIL" "FALLOW_RENDER_PATH_PREFIX_SET=0" "analyze: clears a prior renderer prefix on the next invocation"
 assert_contains "$RENDER_ENV_TAIL" "FALLOW_RENDER_PATH_PREFIX=" "analyze: clears the prior renderer prefix value"
 
@@ -2011,6 +2013,10 @@ if [ "${1:-}" = "ci" ]; then
   printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
   exit 0
 fi
+if [ "${1:-}" = "report" ] && [ "${MOCK_LEGACY_REPORT_TARGETS:-}" = "1" ]; then
+  echo 'fallow report supports --format github-annotations, github-summary, codeclimate, or sarif only' >&2
+  exit 2
+fi
 if [ "${MOCK_RENDER_FAILURE:-}" = "1" ]; then
   echo 'saved audit envelope is missing required field `version`' >&2
   exit 2
@@ -2045,10 +2051,19 @@ JSON
 {"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
 JSON
     ;;
+  github-annotations)
+    printf '::notice file=src/a.ts,line=1::smoke\n'
+    ;;
+  github-summary)
+    printf '# Fallow smoke\n'
+    ;;
   *)
     printf '{}\n'
     ;;
 esac
+if [ "${MOCK_LEGACY_FINDINGS_EXIT:-}" = "1" ] && [ "${1:-}" != "report" ]; then
+  exit 1
+fi
 SH
 chmod +x "$ACTION_TYPED_BIN/fallow"
 
@@ -2152,6 +2167,79 @@ assert_contains "$(cat "$ACTION_TYPED_WORK/comment-render-failure.out")" \
 assert_contains "$(cat "$ACTION_TYPED_WORK/review-render-failure.out")" \
   'saved audit envelope is missing required field `version`' \
   "review.sh surfaces saved-render stderr"
+assert_not_contains "$ACTION_TYPED_OUT" "fallow check " "malformed saved artifacts do not trigger direct-analysis fallback"
+
+: > "$ACTION_TYPED_LOG"
+(
+  cd "$ACTION_TYPED_WORK"
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
+    MOCK_LEGACY_REPORT_TARGETS="1" \
+    MOCK_LEGACY_FINDINGS_EXIT="1" \
+    HAS_NATIVE_REPORT="true" \
+    FALLOW_ANALYSIS_ARGS_JSON='["check","--root","packages/app one","--quiet","--format","json"]' \
+    FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    FALLOW_RENDER_PATH_PREFIX="custom/base" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    FALLOW_COMMAND="check" \
+    bash "$SCRIPTS_DIR/comment.sh" > /dev/null
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
+    MOCK_LEGACY_REPORT_TARGETS="1" \
+    MOCK_LEGACY_FINDINGS_EXIT="1" \
+    HAS_NATIVE_REPORT="true" \
+    FALLOW_ANALYSIS_ARGS_JSON='["check","--root","packages/app one","--quiet","--format","json"]' \
+    FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    FALLOW_RENDER_PATH_PREFIX="custom/base" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    FALLOW_COMMAND="check" \
+    FALLOW_DIFF_FILE="$ACTION_TYPED_WORK/fallow-pr.diff" \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > /dev/null
+)
+ACTION_LEGACY_OUT=$(cat "$ACTION_TYPED_LOG")
+assert_contains "$ACTION_LEGACY_OUT" "fallow report --from fallow-results.json" "pinned CLI compatibility probes saved rendering first"
+assert_contains "$ACTION_LEGACY_OUT" "fallow check --root packages/app one --quiet --format pr-comment-github" "comment.sh falls back to direct rendering for pinned CLIs"
+assert_contains "$ACTION_LEGACY_OUT" "fallow check --root packages/app one --quiet --format review-github" "review.sh falls back to direct rendering for pinned CLIs"
+assert_contains "$ACTION_LEGACY_OUT" "--report-path-prefix custom/base" "pinned CLI fallback preserves presentation path prefixes"
+assert_contains "$ACTION_LEGACY_OUT" "fallow ci post-pr-comment --provider github" "comment.sh posts valid pinned-CLI findings output"
+assert_contains "$ACTION_LEGACY_OUT" "fallow ci post-review --provider github" "review.sh posts valid pinned-CLI findings output"
+assert_not_contains "$(cat "$SCRIPTS_DIR/comment.sh")$(cat "$SCRIPTS_DIR/review.sh")" "source \"\$FALLOW_ANALYSIS_ARGS_FILE\"" "pinned CLI fallback does not source workspace shell"
+
+: > "$ACTION_TYPED_LOG"
+(
+  cd "$ACTION_TYPED_WORK"
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
+    HAS_NATIVE_REPORT="true" \
+    FALLOW_BIN="$ACTION_TYPED_BIN/fallow" \
+    FALLOW_COMMAND="dead-code" \
+    INPUT_ROOT="packages/app" \
+    MAX_ANNOTATIONS="5" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    FALLOW_RESULTS_FILE="$ACTION_TYPED_WORK/fallow-results.json" \
+    FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    FALLOW_RENDER_PATH_PREFIX="custom/base" \
+    bash "$SCRIPTS_DIR/annotate.sh" > /dev/null
+  HAS_NATIVE_REPORT="true" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
+    FALLOW_BIN="$ACTION_TYPED_BIN/fallow" \
+    FALLOW_COMMAND="dead-code" \
+    INPUT_ROOT="packages/app" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    GITHUB_STEP_SUMMARY="$ACTION_TYPED_WORK/summary.md" \
+    FALLOW_RESULTS_FILE="$ACTION_TYPED_WORK/fallow-results.json" \
+    FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    FALLOW_RENDER_PATH_PREFIX="custom/base" \
+    bash "$SCRIPTS_DIR/summary.sh" > /dev/null
+)
+ACTION_NATIVE_OUT=$(cat "$ACTION_TYPED_LOG")
+assert_contains "$ACTION_NATIVE_OUT" "--root packages/app --format github-annotations --report-path-prefix custom/base" "annotation saved renderer preserves root and path prefix"
+assert_contains "$ACTION_NATIVE_OUT" "--root packages/app --format github-summary --report-path-prefix custom/base" "summary saved renderer preserves root and path prefix"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_COMMENT_ENVELOPE_FILE" "comment.sh asks fallow for typed PR comment envelope"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DECISION_FILE" "comment.sh asks fallow for typed PR decision sidecar"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DETAILS_FILE" "comment.sh asks fallow for typed PR details artifact"

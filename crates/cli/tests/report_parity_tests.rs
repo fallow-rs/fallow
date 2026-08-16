@@ -413,7 +413,10 @@ fn truncated_current_audit_envelope_fails_closed_for_every_ci_surface() {
     .expect("write truncated audit envelope");
 
     for format in [
+        "github-annotations",
+        "github-summary",
         "codeclimate",
+        "sarif",
         "pr-comment-github",
         "pr-comment-gitlab",
         "review-github",
@@ -549,5 +552,46 @@ fn saved_security_report_preserves_native_sarif_and_rejects_codeclimate() {
             "{format}: {}",
             String::from_utf8_lossy(&saved_ci.stderr)
         );
+    }
+}
+
+#[test]
+fn malformed_current_security_report_fails_closed_for_saved_renderers() {
+    let root = workspace_fixture("tests/fixtures/security-dangerous-html");
+    let json = run(&root, &analysis_args(Some("security"), &root, "json", &[]));
+    assert!(matches!(json.status.code(), Some(0 | 1)));
+    let mut envelope: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("security JSON envelope");
+    envelope["security_findings"] = serde_json::json!("not-an-array");
+
+    let saved_dir = tempfile::tempdir().expect("malformed security tempdir");
+    let saved_path = saved_dir.path().join("malformed-security.json");
+    std::fs::write(
+        &saved_path,
+        serde_json::to_vec(&envelope).expect("serialize malformed security envelope"),
+    )
+    .expect("write malformed security envelope");
+
+    for format in ["github-annotations", "github-summary", "sarif"] {
+        let rendered = run(
+            &root,
+            &[
+                "report".to_string(),
+                "--from".to_string(),
+                saved_path.display().to_string(),
+                "--root".to_string(),
+                root.display().to_string(),
+                "--quiet".to_string(),
+                "--format".to_string(),
+                format.to_string(),
+            ],
+        );
+        assert_eq!(rendered.status.code(), Some(2), "{format}");
+        let stderr = String::from_utf8_lossy(&rendered.stderr);
+        assert!(
+            stderr.contains("saved security full payload is incompatible"),
+            "{format}: {stderr}"
+        );
+        assert!(stderr.contains("invalid type"), "{format}: {stderr}");
     }
 }

@@ -648,10 +648,8 @@ variables:
 
       # ── Run analysis ─────────────────────────────────────────────────
       {
-        printf 'FALLOW_ANALYSIS_ARGS=('
-        printf '%q ' "${RUN_ARGS[@]}"
-        printf ')\n'
-      } > fallow-analysis-args.sh
+        printf '%s\0' "${RUN_ARGS[@]}"
+      } > fallow-analysis-args.bin
 
       echo "Running: fallow ${RUN_ARGS[*]}"
       set +e
@@ -672,6 +670,7 @@ variables:
         exit "$EXIT_CODE"
       fi
 
+      TYPE_AWARE_COMPLETENESS_FAILED=false
       if [ "$FALLOW_EXIT_CODE" -ne 0 ] && jq -e '
         (
           ._meta.type_aware
@@ -686,8 +685,7 @@ variables:
             or ([ $type_aware.queries[]? | select(.status != "complete") ] | length > 0)
           )
       ' fallow-results.json > /dev/null 2>&1; then
-        echo "ERROR: Type-aware completeness gate failed because semantic analysis was unavailable or partial."
-        exit 1
+        TYPE_AWARE_COMPLETENESS_FAILED=true
       fi
 
       if [ -s fallow-stderr.log ]; then
@@ -728,6 +726,9 @@ variables:
         echo "Generating Code Quality report..."
         REPORT_ARGS=(report --from fallow-results.json --root "$FALLOW_ROOT" --format codeclimate --quiet)
         [ -n "$FALLOW_CONFIG" ] && REPORT_ARGS+=(--config "$FALLOW_CONFIG")
+        [ -n "$FALLOW_WORKSPACE" ] && REPORT_ARGS+=(--workspace "$FALLOW_WORKSPACE")
+        [ "$FALLOW_RENDER_PATH_PREFIX_SET" = "1" ] \
+          && REPORT_ARGS+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
         set +e
         fallow "${REPORT_ARGS[@]}" > gl-code-quality-report.json 2> fallow-codequality-stderr.log
         CODEQUALITY_EXIT=$?
@@ -766,6 +767,11 @@ variables:
         else
           echo "WARNING: review.sh not available, skipping MR review"
         fi
+      fi
+
+      if [ "$TYPE_AWARE_COMPLETENESS_FAILED" = "true" ]; then
+        echo "ERROR: Type-aware completeness gate failed because semantic analysis was unavailable or partial."
+        exit 1
       fi
 
       # ── Fail check ───────────────────────────────────────────────────
@@ -807,7 +813,7 @@ variables:
     when: always
     paths:
       - fallow-results.json
-      - fallow-analysis-args.sh
+      - fallow-analysis-args.bin
       - fallow-mr-comment.md
       - fallow-mr-comment-envelope.json
       - fallow-mr-comment-plan.json

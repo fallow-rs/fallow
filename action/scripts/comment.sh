@@ -32,17 +32,65 @@ artifact_path() {
   fi
 }
 
+LEGACY_RENDER_ARGS=()
+
+# Rebuild the direct-render argv from inert data written by the analyze step.
+# This avoids executing the legacy workspace shell artifact.
+build_legacy_render_args() {
+  local format=$1
+  local args_json="${FALLOW_ANALYSIS_ARGS_JSON:-}"
+  [ -n "$args_json" ] || return 1
+  jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' \
+    <<< "$args_json" > /dev/null 2>&1 || return 1
+
+  local args=()
+  local arg
+  while IFS= read -r -d '' arg; do
+    args+=("$arg")
+  done < <(jq -j '.[] | ., "\u0000"' <<< "$args_json")
+
+  local replaced=false
+  local index
+  for ((index = 0; index < ${#args[@]}; index++)); do
+    if [ "${args[$index]}" = "--format" ] && [ $((index + 1)) -lt "${#args[@]}" ]; then
+      args[index + 1]="$format"
+      replaced=true
+      break
+    fi
+  done
+  [ "$replaced" = "true" ] || args+=(--format "$format")
+  [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
+    && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+  LEGACY_RENDER_ARGS=("${args[@]}")
+}
+
+saved_target_is_unsupported() {
+  local output=$1
+  local stderr_file=$2
+  local old_error="fallow report supports --format github-annotations, github-summary, codeclimate, or sarif only"
+  grep -Fq "$old_error" "$output" 2>/dev/null \
+    || grep -Fq "$old_error" "$stderr_file" 2>/dev/null
+}
+
 render_with_fallow() {
   local format=$1
   local output=$2
   local results_file="${FALLOW_RESULTS_FILE:-fallow-results.json}"
   local root="${FALLOW_ROOT:-${INPUT_ROOT:-.}}"
   [ -s "$results_file" ] || return 1
-  local args=(report --from "$results_file" --root "$root" --quiet --format "$format")
-  [ -n "${INPUT_CONFIG:-}" ] && args+=(--config "$INPUT_CONFIG")
-  [ -n "${INPUT_WORKSPACE:-}" ] && args+=(--workspace "$INPUT_WORKSPACE")
-  [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
-    && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+  local args=()
+  local legacy_render=false
+  if [ "${HAS_NATIVE_REPORT:-}" = "false" ]; then
+    build_legacy_render_args "$format" || return 1
+    args=("${LEGACY_RENDER_ARGS[@]}")
+    legacy_render=true
+  else
+    args=(report --from "$results_file" --root "$root" --quiet --format "$format")
+    [ -n "${INPUT_CONFIG:-}" ] && args+=(--config "$INPUT_CONFIG")
+    [ -n "${INPUT_WORKSPACE:-}" ] && args+=(--workspace "$INPUT_WORKSPACE")
+    [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
+      && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+  fi
   if [ -z "${FALLOW_DIFF_FILE:-}" ] && [ -n "${GH_REPO:-}" ] && [ -n "${PR_NUMBER:-}" ]; then
     diff_file=$(artifact_path fallow-pr.diff)
     diff_stderr_file=$(artifact_path fallow-pr-diff-stderr.log)
@@ -67,6 +115,20 @@ render_with_fallow() {
   local render_status=0
   render_stderr=$(artifact_path fallow-comment-stderr.log)
   FALLOW_COMMENT_ID="${FALLOW_COMMENT_ID:-fallow-results}" fallow "${args[@]}" > "$output" 2> "$render_stderr" || render_status=$?
+  if [ "$legacy_render" = "false" ] && [ "$render_status" -ne 0 ] \
+      && saved_target_is_unsupported "$output" "$render_stderr"; then
+    if ! build_legacy_render_args "$format"; then
+      echo "::warning::Pinned fallow CLI cannot render saved PR comments and no safe fallback arguments are available"
+      return 1
+    fi
+    echo "::debug::Pinned fallow CLI lacks saved PR comment rendering; using compatibility renderer"
+    : > "$output"
+    : > "$render_stderr"
+    render_status=0
+    FALLOW_COMMENT_ID="${FALLOW_COMMENT_ID:-fallow-results}" fallow "${LEGACY_RENDER_ARGS[@]}" > "$output" 2> "$render_stderr" || render_status=$?
+    legacy_render=true
+  fi
+  [ "$legacy_render" = "true" ] && [ "$render_status" -eq 1 ] && render_status=0
   # Surface fallow's structured-error envelope before the marker check, so the
   # actual CLI message lands in the workflow log instead of a generic "Failed
   # to render typed PR comment" warning. The envelope is JSON; if the file

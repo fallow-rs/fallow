@@ -3,8 +3,9 @@
 //! flow: `fallow --format json -o results.json`, then one `report` call per
 //! rendered surface).
 //!
-//! Supports the GitHub-native text formats plus CodeClimate and SARIF. Dispatch is on
-//! the envelope's `kind` field, so any envelope produced by `--format json`
+//! Supports GitHub-native text, CodeClimate, SARIF, and GitHub/GitLab PR
+//! feedback formats. Dispatch is on the envelope's `kind` field, so any envelope
+//! produced by `--format json`
 //! (dead-code, dupes, health, audit, security, or the bare combined run)
 //! renders byte-identically to the direct `--format` run. The `fallow fix`
 //! envelope carries no `kind`; it is detected by its top-level fields and
@@ -68,27 +69,16 @@ pub fn run_report(
         Ok(kind) => kind,
         Err(code) => return code,
     };
-    if matches!(target, ReportTarget::CodeClimate) && kind == EnvelopeKind::Security {
+    if let Err(error) = validate_report_target(target, kind) {
         return crate::emit_known_failure(
-            "fallow security supports --format human, json, sarif, github-annotations, or github-summary only.",
+            &error,
             2,
             output,
             telemetry::FailureReason::UnsupportedFormat,
         );
     }
-    if matches!(target, ReportTarget::PrComment(_) | ReportTarget::Review(_))
-        && matches!(kind, EnvelopeKind::Security | EnvelopeKind::Fix)
-    {
-        return crate::emit_known_failure(
-            &format!(
-                "saved {} envelopes do not support --format {}",
-                command_label(kind),
-                report_target_label(target)
-            ),
-            2,
-            output,
-            telemetry::FailureReason::UnsupportedFormat,
-        );
+    if let Err(error) = validate_saved_report_envelope(kind, &saved.envelope) {
+        return crate::emit_known_failure(&error, 2, output, telemetry::FailureReason::Validation);
     }
     let resolver = match saved_group_resolver(saved.grouped_by, root, config_path, output) {
         Ok(resolver) => resolver,
@@ -127,6 +117,36 @@ pub fn run_report(
                 output,
             )
         }
+    }
+}
+
+fn validate_report_target(target: ReportTarget, kind: EnvelopeKind) -> Result<(), String> {
+    if matches!(target, ReportTarget::CodeClimate) && kind == EnvelopeKind::Security {
+        return Err(
+            "fallow security supports --format human, json, sarif, github-annotations, or github-summary only."
+                .to_owned(),
+        );
+    }
+    if matches!(target, ReportTarget::PrComment(_) | ReportTarget::Review(_))
+        && matches!(kind, EnvelopeKind::Security | EnvelopeKind::Fix)
+    {
+        return Err(format!(
+            "saved {} envelopes do not support --format {}",
+            command_label(kind),
+            report_target_label(target)
+        ));
+    }
+    Ok(())
+}
+
+fn validate_saved_report_envelope(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+) -> Result<(), String> {
+    match kind {
+        EnvelopeKind::Security => fallow_output::validate_saved_security_envelope(envelope),
+        EnvelopeKind::Fix => Ok(()),
+        _ => crate::report::codeclimate::validate_saved_schema(kind, envelope),
     }
 }
 
@@ -205,7 +225,11 @@ fn saved_ci_conclusion(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
 ) -> Result<(Option<PrDecisionConclusion>, Option<&'static str>), String> {
-    if saved_required_type_aware_incomplete(envelope) {
+    let type_aware = crate::report::ci::saved_type_aware_metadata(envelope)?;
+    if type_aware
+        .iter()
+        .any(|meta| crate::report::ci::required_type_aware_incomplete(Some(meta)))
+    {
         return Ok((
             Some(PrDecisionConclusion::Failure),
             Some(crate::report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
@@ -229,36 +253,6 @@ fn saved_ci_conclusion(
         }
     };
     Ok((Some(conclusion), None))
-}
-
-fn saved_required_type_aware_incomplete(envelope: &serde_json::Value) -> bool {
-    const META_POINTERS: [&str; 4] = [
-        "/_meta/type_aware",
-        "/_meta/check/type_aware",
-        "/check/_meta/type_aware",
-        "/dead_code/_meta/type_aware",
-    ];
-    META_POINTERS
-        .iter()
-        .filter_map(|pointer| envelope.pointer(pointer))
-        .any(|meta| {
-            meta.get("required_completeness")
-                .and_then(serde_json::Value::as_str)
-                == Some("complete")
-                && (meta
-                    .pointer("/identity/completeness")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("complete")
-                    || meta
-                        .get("queries")
-                        .and_then(serde_json::Value::as_array)
-                        .is_some_and(|queries| {
-                            queries.iter().any(|query| {
-                                query.get("status").and_then(serde_json::Value::as_str)
-                                    != Some("complete")
-                            })
-                        }))
-        })
 }
 
 const fn command_label(kind: EnvelopeKind) -> &'static str {
@@ -606,15 +600,20 @@ mod tests {
 
     #[test]
     fn saved_required_incomplete_type_aware_result_fails_closed() {
+        let identity = fallow_types::semantic::SemanticAnalysisIdentity {
+            completeness: fallow_types::semantic::SemanticCompleteness::Partial,
+            ..fallow_types::semantic::SemanticAnalysisIdentity::default()
+        };
+        let meta = fallow_types::envelope::TypeAwareMeta {
+            identity: Some(identity),
+            required_completeness: Some(
+                fallow_types::semantic::SemanticCompletenessRequirement::Complete,
+            ),
+            ..fallow_types::envelope::TypeAwareMeta::default()
+        };
         let envelope = serde_json::json!({
             "verdict": "pass",
-            "_meta": {
-                "type_aware": {
-                    "required_completeness": "complete",
-                    "identity": { "completeness": "partial" },
-                    "queries": []
-                }
-            }
+            "_meta": { "type_aware": meta }
         });
         let (conclusion, status) =
             saved_ci_conclusion(EnvelopeKind::Audit, &envelope).expect("type-aware gate");
@@ -627,13 +626,14 @@ mod tests {
 
     #[test]
     fn saved_required_type_aware_result_without_identity_fails_closed() {
+        let meta = fallow_types::envelope::TypeAwareMeta {
+            required_completeness: Some(
+                fallow_types::semantic::SemanticCompletenessRequirement::Complete,
+            ),
+            ..fallow_types::envelope::TypeAwareMeta::default()
+        };
         let envelope = serde_json::json!({
-            "_meta": {
-                "type_aware": {
-                    "required_completeness": "complete",
-                    "queries": []
-                }
-            }
+            "_meta": { "type_aware": meta }
         });
         let (conclusion, status) =
             saved_ci_conclusion(EnvelopeKind::DeadCode, &envelope).expect("missing identity gate");
@@ -642,6 +642,21 @@ mod tests {
             status,
             Some(crate::report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE)
         );
+    }
+
+    #[test]
+    fn malformed_saved_type_aware_metadata_is_rejected() {
+        let mut meta = serde_json::to_value(fallow_types::envelope::TypeAwareMeta::default())
+            .expect("serialize type-aware metadata");
+        meta["queries"] = serde_json::json!("not-an-array");
+        let envelope = serde_json::json!({
+            "_meta": { "type_aware": meta }
+        });
+
+        let error = saved_ci_conclusion(EnvelopeKind::DeadCode, &envelope)
+            .expect_err("malformed type-aware metadata must fail closed");
+        assert!(error.contains("saved type-aware metadata at `/_meta/type_aware`"));
+        assert!(error.contains("invalid type"));
     }
 
     #[test]

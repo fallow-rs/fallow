@@ -8186,6 +8186,11 @@
           "type": "string",
           "const": "fallow-review-envelope/v2",
           "description": "Issue #528 review envelope format."
+        },
+        {
+          "type": "string",
+          "const": "fallow-review-envelope/v3",
+          "description": "Gate-aware conclusion semantics, including failures without findings."
         }
       ],
       "description": "Schema-version discriminator for the review envelope."

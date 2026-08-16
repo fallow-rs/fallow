@@ -849,7 +849,7 @@ fn build_review_envelope_output(
             marker_regex: default_marker_regex(),
             marker_regex_flags: default_marker_regex_flags(),
             meta: ReviewEnvelopeMeta {
-                schema: ReviewEnvelopeSchema::V2,
+                schema: ReviewEnvelopeSchema::V3,
                 provider: ReviewProvider::Github,
                 check_conclusion: Some(conclusion),
             },
@@ -862,7 +862,7 @@ fn build_review_envelope_output(
             marker_regex: default_marker_regex(),
             marker_regex_flags: default_marker_regex_flags(),
             meta: ReviewEnvelopeMeta {
-                schema: ReviewEnvelopeSchema::V2,
+                schema: ReviewEnvelopeSchema::V3,
                 provider: ReviewProvider::Gitlab,
                 check_conclusion: None,
             },

@@ -283,7 +283,7 @@ expression: json_str
   "marker_regex": "^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$",
   "marker_regex_flags": "m",
   "meta": {
-    "schema": "fallow-review-envelope/v2",
+    "schema": "fallow-review-envelope/v3",
     "provider": "gitlab"
   }
 }

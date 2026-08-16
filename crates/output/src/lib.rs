@@ -311,17 +311,18 @@ pub use sarif::{
 };
 pub use saved_health::health_report_from_saved_value;
 pub use security::{
-    SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
-    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGate, SecurityGateVerdict,
-    SecurityOutput, SecurityOutputConfig, SecurityOutputRulesConfig, SecurityReachabilityCounts,
-    SecurityRuleSeverityConfig, SecurityRuntimeStateCounts, SecuritySchemaVersion,
-    SecuritySeverityCounts, SecuritySummary, SecuritySummaryOutput, SecuritySurvivor,
-    SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary,
-    SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
-    SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict,
-    SecurityVerifierVerdictStatus, build_security_summary,
-    serialize_security_blind_spots_json_output, serialize_security_json_output,
-    serialize_security_summary_json_output, serialize_security_survivors_json_output,
+    SECURITY_SCHEMA_VERSION, SecurityBlindSpotFile, SecurityBlindSpotGroup,
+    SecurityBlindSpotsOutput, SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary,
+    SecurityGate, SecurityGateVerdict, SecurityOutput, SecurityOutputConfig,
+    SecurityOutputRulesConfig, SecurityReachabilityCounts, SecurityRuleSeverityConfig,
+    SecurityRuntimeStateCounts, SecuritySchemaVersion, SecuritySeverityCounts, SecuritySummary,
+    SecuritySummaryOutput, SecuritySurvivor, SecuritySurvivorsOutput,
+    SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
+    SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
+    SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
+    build_security_summary, serialize_security_blind_spots_json_output,
+    serialize_security_json_output, serialize_security_summary_json_output,
+    serialize_security_survivors_json_output, validate_saved_security_envelope,
 };
 pub use suppressions::{
     SuppressionInventoryEntry, SuppressionInventoryFile, SuppressionInventoryLevel,

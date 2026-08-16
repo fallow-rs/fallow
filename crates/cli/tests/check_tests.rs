@@ -173,7 +173,7 @@ fn configured_type_aware_accepts_gitlab_review_renderer() {
 
     assert_eq!(output.code, 1, "stderr: {}", output.stderr);
     let envelope = parse_json(&output);
-    assert_eq!(envelope["meta"]["schema"], "fallow-review-envelope/v2");
+    assert_eq!(envelope["meta"]["schema"], "fallow-review-envelope/v3");
     let rendered = output.stdout;
     assert!(
         !rendered.contains("PublicApi")

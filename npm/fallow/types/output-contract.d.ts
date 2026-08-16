@@ -782,7 +782,7 @@ export type GitLabReviewPositionType = "text"
 /**
  * Schema-version discriminator for the review envelope.
  */
-export type ReviewEnvelopeSchema = ("fallow-review-envelope/v1" | "fallow-review-envelope/v2")
+export type ReviewEnvelopeSchema = ("fallow-review-envelope/v1" | "fallow-review-envelope/v2" | "fallow-review-envelope/v3")
 /**
  * Review-envelope provider tag.
  */

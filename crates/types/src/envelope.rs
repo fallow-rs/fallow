@@ -337,7 +337,7 @@ pub struct Meta {
 }
 
 /// Bounded provenance emitted when the opt-in type-aware pass runs.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TypeAwareMeta {
     /// Compatibility identity used by audit, baselines, snapshots, and stores.
@@ -421,7 +421,7 @@ pub enum TypeAwareAbstentionReason {
 }
 
 /// Closed abstention reason counts for stable machine consumption.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TypeAwareAbstentionCounts {
     /// Candidates not contained by a selected TypeScript project.
@@ -483,7 +483,7 @@ pub enum TypeAwareInvalidationKind {
 }
 
 /// Semantic sidecar timings, separated from Fallow's syntactic pipeline.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TypeAwarePhaseTimings {
     /// TypeScript API construction and project snapshot selection.
@@ -495,7 +495,7 @@ pub struct TypeAwarePhaseTimings {
 }
 
 /// Bounded provenance for one TypeScript project handled by the sidecar.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TypeAwareProjectMeta {
     /// Project config relative to the analysis root, or `<inferred>`.
