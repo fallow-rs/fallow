@@ -29,6 +29,12 @@ test("output-only changes select the output component and API stable surface", (
     "component_output",
     "programmatic_stable",
   ]);
+  assert.deepEqual(names(selectFastTargets(["crates/cli/src/cli_report.rs"])), [
+    "component_output",
+  ]);
+  assert.deepEqual(names(selectFastTargets(["crates/cli/src/report/github_summary.rs"])), [
+    "component_output",
+  ]);
 });
 
 test("graph changes select graph-sensitive targets", () => {

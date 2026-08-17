@@ -94,7 +94,13 @@ export const FAST_BENCHMARKS = [
     cache_key: "component-output",
     package: "fallow-benchmarks",
     bench: "component_output",
-    paths: ["crates/benchmarks/benches/component_output.rs", "crates/output/", "crates/types/"],
+    paths: [
+      "crates/benchmarks/benches/component_output.rs",
+      "crates/cli/src/cli_report.rs",
+      "crates/cli/src/report/",
+      "crates/output/",
+      "crates/types/",
+    ],
   },
 ];
 

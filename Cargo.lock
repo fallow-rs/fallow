@@ -1036,6 +1036,7 @@ version = "3.17.0"
 dependencies = [
  "codspeed-criterion-compat",
  "fallow-api",
+ "fallow-cli",
  "fallow-config",
  "fallow-engine",
  "fallow-extract",

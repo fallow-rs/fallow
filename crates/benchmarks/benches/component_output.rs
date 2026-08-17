@@ -8,6 +8,10 @@
 )]
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use fallow_cli::report::{
+    github_annotations::EnvelopeKind,
+    github_summary::{LinkContext, render_summary},
+};
 use fallow_output::{
     CiIssue, CiProvider, ExplainOutput, InspectEvidence, InspectEvidenceScope,
     InspectEvidenceSection, InspectFileIdentity, InspectIdentity, InspectOutput,
@@ -17,6 +21,7 @@ use fallow_output::{
 use serde_json::json;
 
 const ISSUE_COUNT: usize = 250;
+const SAVED_REPORT_FINDING_COUNT: usize = 1_000;
 
 fn create_ci_issues() -> Vec<CiIssue> {
     (0..ISSUE_COUNT)
@@ -92,6 +97,27 @@ fn create_inspect_output() -> InspectOutput {
     }
 }
 
+fn create_saved_dead_code_envelope() -> serde_json::Value {
+    let unused_exports = (0..SAVED_REPORT_FINDING_COUNT)
+        .map(|index| {
+            json!({
+                "path": format!("src/module-{}.ts", index % 200),
+                "line": index + 1,
+                "col": index % 80,
+                "export_name": format!("unusedExport{index}"),
+                "is_re_export": index % 5 == 0,
+                "is_type_only": index % 7 == 0,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "kind": "dead-code",
+        "elapsed_ms": 125,
+        "total_issues": SAVED_REPORT_FINDING_COUNT,
+        "unused_exports": unused_exports,
+    })
+}
+
 fn component_output_pr_comment_render(c: &mut Criterion) {
     c.bench_function("component_output_pr_comment_render", |bencher| {
         bencher.iter_batched_ref(
@@ -137,10 +163,34 @@ fn component_output_inspect_json_serialize(c: &mut Criterion) {
     });
 }
 
+fn component_output_saved_report_github_summary(c: &mut Criterion) {
+    let source = serde_json::to_string(&create_saved_dead_code_envelope()).unwrap();
+    let links = LinkContext::default();
+    c.bench_function("component_output_saved_report_github_summary", |bencher| {
+        bencher.iter(|| {
+            let envelope = serde_json::from_str(&source).unwrap();
+            render_summary(EnvelopeKind::DeadCode, &envelope, &links)
+        });
+    });
+}
+
+fn component_output_dead_code_github_summary_render(c: &mut Criterion) {
+    let envelope = create_saved_dead_code_envelope();
+    let links = LinkContext::default();
+    c.bench_function(
+        "component_output_dead_code_github_summary_render",
+        |bencher| {
+            bencher.iter(|| render_summary(EnvelopeKind::DeadCode, &envelope, &links));
+        },
+    );
+}
+
 criterion_group!(
     benches,
     component_output_pr_comment_render,
     component_output_explain_json_serialize,
-    component_output_inspect_json_serialize
+    component_output_inspect_json_serialize,
+    component_output_saved_report_github_summary,
+    component_output_dead_code_github_summary_render
 );
 criterion_main!(benches);
