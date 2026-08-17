@@ -1,7 +1,7 @@
 const MEBIBYTE = 1024 * 1024;
 
-export const VSIX_EXECUTABLE_MODE = 0o755;
-export const VSIX_REGULAR_FILE_MODE = 0o644;
+const VSIX_EXECUTABLE_MODE = 0o755;
+const VSIX_REGULAR_FILE_MODE = 0o644;
 
 export const TYPE_AWARE_SIDECAR_FILES = Object.freeze([
   Object.freeze({
@@ -67,14 +67,14 @@ const defineVariant = ({ target, targetPlatform, maxBytes, backends }) =>
 
 export const UNIVERSAL_VSIX_TARGET = "universal";
 
-export const UNIVERSAL_VSIX_VARIANT = defineVariant({
+const UNIVERSAL_VSIX_VARIANT = defineVariant({
   target: UNIVERSAL_VSIX_TARGET,
   targetPlatform: null,
   maxBytes: 70 * MEBIBYTE,
   backends: TYPE_AWARE_BACKENDS,
 });
 
-export const TARGETED_VSIX_VARIANTS = Object.freeze(
+const TARGETED_VSIX_VARIANTS = Object.freeze(
   TYPE_AWARE_BACKENDS.map((backend) =>
     defineVariant({
       target: backend.target,

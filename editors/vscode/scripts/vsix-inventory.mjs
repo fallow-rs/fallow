@@ -10,8 +10,8 @@ import {
 } from "./vsix-targets.mjs";
 
 export const INVENTORY_FILENAME = "inventory.json";
-export const CHECKSUMS_FILENAME = "SHA256SUMS";
-export const INVENTORY_SCHEMA_VERSION = 1;
+const CHECKSUMS_FILENAME = "SHA256SUMS";
+const INVENTORY_SCHEMA_VERSION = 1;
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 
@@ -114,7 +114,7 @@ export const createInventory = (extensionVersion, entries) =>
     entries: entries.map(({ file, ...entry }) => ({ file, ...entry })),
   });
 
-export const serializeInventory = (inventory) =>
+const serializeInventory = (inventory) =>
   `${JSON.stringify(validateInventory(inventory), null, 2)}\n`;
 
 export const writeInventory = (outputDirectory, inventory) => {
