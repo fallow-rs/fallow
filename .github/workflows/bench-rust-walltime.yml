@@ -15,6 +15,7 @@ on:
           - analysis
           - programmatic-stable
           - component-engine
+          - component-config
           - component-output
           - dupes-detect
           - representative-sources
@@ -66,6 +67,10 @@ jobs:
             component-engine)
               echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
               echo "bench=component_engine" >> "$GITHUB_OUTPUT"
+              ;;
+            component-config)
+              echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
+              echo "bench=component_config" >> "$GITHUB_OUTPUT"
               ;;
             component-output)
               echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
