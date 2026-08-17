@@ -220,12 +220,19 @@ test("resolveSentinelPath honors injected isWritable + ensureDir for full test i
 test("resolveSentinelPath skips cache-dir-env when ensureDir fails for it", () => {
   // FALLOW_VERIFY_CACHE_DIR points at a non-creatable path, XDG points at a
   // creatable one. Confirm the resolver moves past the env override.
+  //
+  // A directory nested under a regular FILE is the portable way to make mkdir
+  // fail: `/dev/null/inside/a/file` only refuses on POSIX, and on Windows the
+  // recursive mkdir succeeds against the current drive, which both defeats the
+  // assertion and creates C:\dev outside any temp directory.
   const homeDir = mkTmp();
+  const blocker = path.join(homeDir, "not-a-directory");
+  fs.writeFileSync(blocker, "");
   try {
     const result = resolveSentinelPath({
       platformPkgDir: undefined,
       packageName: "@fallow-cli/darwin-arm64",
-      env: { FALLOW_VERIFY_CACHE_DIR: "/dev/null/inside/a/file" },
+      env: { FALLOW_VERIFY_CACHE_DIR: path.join(blocker, "inside", "a", "file") },
       homedir: homeDir,
       platform: "darwin",
     });
