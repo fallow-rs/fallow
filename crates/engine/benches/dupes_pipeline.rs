@@ -158,16 +158,6 @@ fn create_dupes_input(name: &str, file_count: usize) -> DupesInput {
 fn bench_dupes_pipeline(c: &mut Criterion) {
     let mut group = c.benchmark_group("dupes_pipeline");
 
-    group.bench_function("scaling_dupes_full_pipeline_1000_files", |bencher| {
-        bencher.iter_batched_ref(
-            || create_dupes_input("1000", 1000),
-            |input| {
-                fallow_engine::duplicates::find_duplicates(&input.root, &input.files, &input.config)
-            },
-            BatchSize::LargeInput,
-        );
-    });
-
     group.bench_function("dupes_full_pipeline_1000_files", |bencher| {
         bencher.iter_batched_ref(
             || create_dupes_input("1000", 1000),

@@ -33,10 +33,12 @@ TYPE_AWARE_BENCH = REPO_ROOT / "tools" / "type-aware-sidecar" / "bench" / "sessi
 TYPE_AWARE_MANIFEST = REPO_ROOT / "tools" / "type-aware-sidecar" / "package.json"
 MAX_BENCHES_PER_SHARD = 1_000
 NOISY_FAST_TARGETS = {
-    ("fallow-benchmarks", "programmatic_commands"),
     ("fallow-core", "scaling_analysis"),
-    ("fallow-core", "large_analysis"),
     ("fallow-engine", "dupes_pipeline"),
+}
+LOCAL_ONLY_TARGETS = {
+    ("fallow-benchmarks", "programmatic_commands"),
+    ("fallow-core", "large_analysis"),
 }
 REQUIRED_FAST_TARGETS = {
     ("fallow-core", "analysis"),
@@ -50,7 +52,7 @@ REQUIRED_FAST_TARGETS = {
 }
 REQUIRED_FULL_TARGETS = {
     ("fallow-core", "scaling_analysis"),
-    ("fallow-core", "large_analysis"),
+    ("fallow-engine", "dupes_pipeline"),
 }
 
 
@@ -276,6 +278,9 @@ def validate_targets(targets: list[BenchTarget]) -> list[str]:
 
         if target.job == FAST_JOB and key in NOISY_FAST_TARGETS:
             errors.append(f"noisy target {target.package}/{target.bench} cannot run in fast PR job")
+
+        if key in LOCAL_ONLY_TARGETS:
+            errors.append(f"local-only target {target.package}/{target.bench} cannot run in CodSpeed CI")
 
         if target.bench == "programmatic_stable":
             unstable = [name for name in names if not name.startswith("stable_")]

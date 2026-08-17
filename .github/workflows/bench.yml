@@ -134,10 +134,6 @@ jobs:
             cache_key: full-scaling-analysis
             package: fallow-core
             bench: scaling_analysis
-          - label: large analysis
-            cache_key: full-large-analysis
-            package: fallow-core
-            bench: large_analysis
           - label: engine dupes pipeline
             cache_key: full-engine-dupes-pipeline
             package: fallow-engine

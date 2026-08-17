@@ -62,12 +62,13 @@ Fast PR shards:
 Full main/manual shards:
 
 - `fallow-core/scaling_analysis`: larger synthetic scaling probes.
-- `fallow-core/large_analysis`: broad high-cost analysis probes.
+- `fallow-engine/dupes_pipeline`: full duplicate-detection pipelines at large
+  project sizes.
 
 `programmatic_commands` still exists for local walltime investigation, but it
 contains git/audit scenarios and must not run in the fast CodSpeed matrix.
-`dupes_pipeline` in `crates/engine/benches/` is likewise a local-only bench
-outside the fast CodSpeed matrix.
+`large_analysis` likewise remains available as a local-only high-cost analysis
+suite; its archived identities no longer run in CodSpeed CI.
 
 ## Adding Benchmarks
 
