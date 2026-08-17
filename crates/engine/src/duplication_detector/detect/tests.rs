@@ -1146,6 +1146,45 @@ fn stats_multiple_groups_same_file() {
 }
 
 #[test]
+fn stats_coalesces_nested_adjacent_and_disjoint_ranges_per_file() {
+    use crate::duplicates::types::{CloneGroup, CloneInstance};
+
+    let instance = |file: &str, start_line, end_line| CloneInstance {
+        file: PathBuf::from(file),
+        start_line,
+        end_line,
+        start_col: 0,
+        end_col: 0,
+        fragment: String::new(),
+    };
+    let groups = vec![
+        CloneGroup {
+            instances: vec![
+                instance("a.ts", 10, 20),
+                instance("a.ts", 12, 15),
+                instance("a.ts", 21, 25),
+                instance("a.ts", 40, 42),
+            ],
+            token_count: 10,
+            line_count: 11,
+            similarity: None,
+        },
+        CloneGroup {
+            instances: vec![instance("b.ts", 5, 5), instance("b.ts", 9, 8)],
+            token_count: 5,
+            line_count: 1,
+            similarity: None,
+        },
+    ];
+
+    let stats = statistics::compute_stats(&groups, 2, 100, 100);
+
+    assert_eq!(stats.files_with_clones, 2);
+    assert_eq!(stats.clone_instances, 6);
+    assert_eq!(stats.duplicated_lines, 20);
+}
+
+#[test]
 fn stats_single_instance_no_duplicated_tokens() {
     use crate::duplicates::types::{CloneGroup, CloneInstance};
 
@@ -1391,8 +1430,42 @@ fn detector_groups_sorted_by_token_count_desc() {
 mod proptests {
     use super::*;
     use proptest::prelude::*;
+    use rustc_hash::FxHashSet;
 
     proptest! {
+        #[test]
+        fn stats_line_union_matches_set_reference(
+            ranges in prop::collection::vec((0usize..200, 0usize..50), 0..100)
+        ) {
+            use crate::duplicates::types::{CloneGroup, CloneInstance};
+
+            let instances = ranges
+                .iter()
+                .map(|&(start, len)| CloneInstance {
+                    file: PathBuf::from("a.ts"),
+                    start_line: start,
+                    end_line: start + len,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                })
+                .collect::<Vec<_>>();
+            let expected = ranges
+                .iter()
+                .flat_map(|&(start, len)| start..=start + len)
+                .collect::<FxHashSet<_>>()
+                .len();
+            let groups = vec![CloneGroup {
+                instances,
+                token_count: 1,
+                line_count: 1,
+                similarity: None,
+            }];
+
+            let stats = statistics::compute_stats(&groups, 1, 300, 300);
+            prop_assert_eq!(stats.duplicated_lines, expected);
+        }
+
         /// Suffix array is always a permutation of 0..n.
         #[test]
         fn suffix_array_is_permutation(values in prop::collection::vec(-100i64..100i64, 1..100)) {
