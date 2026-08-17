@@ -123,14 +123,7 @@ jobs:
               - '.clippy.toml'
               - 'rust-toolchain.toml'
             windows-type-aware:
-              - 'npm/fallow/scripts/run-binary.js'
-              - 'npm/fallow/scripts/run-binary.test.js'
-              - 'npm/fallow/scripts/verify-binary.js'
-              - 'npm/fallow/scripts/verify-binary.test.js'
-              - 'npm/fallow/scripts/sentinel-path.js'
-              - 'npm/fallow/scripts/sentinel-path.test.js'
-              - 'npm/fallow/scripts/platform-package.js'
-              - 'npm/fallow/scripts/platform-package.test.js'
+              - 'npm/fallow/scripts/**'
               - 'npm/fallow/package.json'
               - 'npm/fallow/bin/**'
               - 'tools/type-aware-sidecar/**'
@@ -411,14 +404,10 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
-      - name: Test Windows npm and child-process wiring
-        run: >
-          node --test
-          npm/fallow/scripts/run-binary.test.js
-          npm/fallow/scripts/verify-binary.test.js
-          npm/fallow/scripts/sentinel-path.test.js
-          npm/fallow/scripts/platform-package.test.js
-          tools/type-aware-sidecar/test/windows-child-process.test.mjs
+      - name: Test Windows npm launcher
+        run: npm --prefix npm/fallow test
+      - name: Test Windows child-process wiring
+        run: node --test tools/type-aware-sidecar/test/windows-child-process.test.mjs
       - name: Test Rust type-aware transport
         run: cargo test -p fallow-api type_aware::transport
       - name: Install VS Code dependencies

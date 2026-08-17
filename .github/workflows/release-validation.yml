@@ -50,11 +50,10 @@ jobs:
       - name: Install type-aware sidecar dependencies
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
 
-      - name: Test Windows npm and child-process wiring
-        run: >
-          node --test
-          npm/fallow/scripts/run-binary.test.js
-          tools/type-aware-sidecar/test/windows-child-process.test.mjs
+      - name: Test Windows npm launcher
+        run: npm --prefix npm/fallow test
+      - name: Test Windows child-process wiring
+        run: node --test tools/type-aware-sidecar/test/windows-child-process.test.mjs
 
       - name: Run workspace tests
         run: cargo test --workspace --lib --bins --tests --examples

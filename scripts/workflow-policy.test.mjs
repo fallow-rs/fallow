@@ -209,6 +209,7 @@ test("binary-size workflow isolates incompatible release builds", () => {
 
 test("regular CI keeps affected checks on Ubuntu", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
+  const npmPackage = JSON.parse(readFileSync("npm/fallow/package.json", "utf8"));
   const windowsRustPaths = listedPaths(indentedBlock(workflow, "windows-rust", 12));
   const windowsTypeAwarePaths = listedPaths(indentedBlock(workflow, "windows-type-aware", 12));
   const checkJob = indentedBlock(workflow, "check", 2);
@@ -260,7 +261,9 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsTypeAwareJob, /needs: changes/);
   assert.match(windowsTypeAwareJob, /if: needs\.changes\.outputs\.windows-type-aware == 'true'/);
   assert.match(windowsTypeAwareJob, /runs-on: windows-latest/);
-  assert.ok(windowsTypeAwarePaths.includes("npm/fallow/scripts/run-binary.js"));
+  assert.ok(windowsTypeAwarePaths.includes("npm/fallow/scripts/**"));
+  assert.equal(npmPackage.scripts.test, "node --test scripts/*.test.js");
+  assert.match(windowsTypeAwareJob, /npm --prefix npm\/fallow test/);
   assert.ok(windowsTypeAwarePaths.includes("npm/fallow/package.json"));
   assert.ok(windowsTypeAwarePaths.includes("npm/fallow/bin/**"));
   assert.ok(windowsTypeAwarePaths.includes("tools/type-aware-sidecar/**"));
@@ -269,7 +272,6 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     windowsTypeAwarePaths.includes("editors/vscode/scripts/verify-packaged-type-aware.mjs"),
   );
   assert.ok(windowsTypeAwarePaths.includes("crates/api/src/type_aware/transport/**"));
-  assert.match(windowsTypeAwareJob, /npm\/fallow\/scripts\/run-binary\.test\.js/);
   assert.match(windowsTypeAwareJob, /cargo test -p fallow-api type_aware::transport/);
   assert.match(windowsTypeAwareJob, /type-aware-windows-candidate-smoke\.mjs/);
   assert.match(windowsTypeAwareJob, /FALLOW_LSP_BIN:/);
@@ -344,6 +346,7 @@ test("release runs Windows correctness and lifecycle verification without creden
   assert.match(job, /runs-on: windows-latest/);
   assert.match(job, /permissions:\n\s+contents: read/);
   assert.doesNotMatch(job, /id-token: write|contents: write|secrets\./);
+  assert.match(job, /npm --prefix npm\/fallow test/);
   assert.match(
     job,
     /name: Install type-aware sidecar dependencies[\s\S]*npm ci --prefix tools\/type-aware-sidecar --no-audit --no-fund --ignore-scripts[\s\S]*name: Run workspace tests/,

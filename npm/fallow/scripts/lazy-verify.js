@@ -235,6 +235,9 @@ function isSkipRequested(env) {
 //                    production install path always has fallowDigests)
 //   env            - process.env (defaults to process.env)
 //   platform       - process.platform (defaults to process.platform)
+//   homedir        - os.homedir() override (tests only)
+//   isWritable     - sentinel directory probe override (tests only)
+//   ensureDir      - sentinel directory creation override (tests only)
 //   logger         - function (line: string) -> void (defaults to stderr)
 //
 // Returns one of:
@@ -250,6 +253,16 @@ function buildVerifyOptions(input, manifest) {
   };
   if (typeof input.verifyFn === "function") opts.verifyFn = input.verifyFn;
   if (typeof input.digestProvider === "function") opts.digestProvider = input.digestProvider;
+  return opts;
+}
+
+function buildSentinelOptions(input, platformPkgDir, packageName, env, platform) {
+  const opts = { platformPkgDir, packageName, env, platform };
+  for (const key of ["homedir", "isWritable", "ensureDir"]) {
+    if (Object.prototype.hasOwnProperty.call(input, key)) {
+      opts[key] = input[key];
+    }
+  }
   return opts;
 }
 
@@ -315,7 +328,9 @@ function ensureVerified(input) {
     };
   }
 
-  const sentinel = resolveSentinelPath({ platformPkgDir, packageName, env, platform });
+  const sentinel = resolveSentinelPath(
+    buildSentinelOptions(input || {}, platformPkgDir, packageName, env, platform),
+  );
 
   // Cache hit: sentinel exists, schema matches, mtimes match, version matches.
   if (sentinel.path && isSentinelValid(sentinel.path, platformPkgDir, manifest, platform)) {

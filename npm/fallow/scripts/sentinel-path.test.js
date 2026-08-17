@@ -77,7 +77,7 @@ test("resolveSentinelPath falls back to FALLOW_VERIFY_CACHE_DIR when platform pk
   const cacheDir = mkTmp();
   try {
     const result = resolveSentinelPath({
-      platformPkgDir: "/dev/null/not-a-dir",
+      platformPkgDir: path.join(cacheDir, "missing-platform-package"),
       packageName: "@fallow-cli/darwin-arm64",
       env: { FALLOW_VERIFY_CACHE_DIR: cacheDir },
     });
