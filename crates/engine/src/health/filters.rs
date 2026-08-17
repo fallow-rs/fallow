@@ -90,13 +90,17 @@ pub(super) fn collect_candidate_paths(
     ws_roots: Option<&[PathBuf]>,
     ignore_set: &globset::GlobSet,
 ) -> FxHashSet<PathBuf> {
-    files
-        .iter()
-        .filter(|file| {
-            path_in_health_scope(&file.path, config, changed_files, ws_roots, ignore_set)
-        })
-        .map(|file| file.path.clone())
-        .collect()
+    let capacity = changed_files.map_or(files.len(), |changed| files.len().min(changed.len()));
+    let mut candidates = FxHashSet::with_capacity_and_hasher(capacity, rustc_hash::FxBuildHasher);
+    candidates.extend(
+        files
+            .iter()
+            .filter(|file| {
+                path_in_health_scope(&file.path, config, changed_files, ws_roots, ignore_set)
+            })
+            .map(|file| file.path.clone()),
+    );
+    candidates
 }
 
 pub(super) fn filter_files_to_paths(
