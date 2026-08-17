@@ -280,6 +280,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.ok(windowsTypeAwarePaths.includes("crates/api/src/type_aware/transport/**"));
   assert.match(windowsTypeAwareJob, /cargo test -p fallow-api type_aware::transport/);
   assert.match(windowsTypeAwareJob, /type-aware-windows-candidate-smoke\.mjs/);
+  assert.doesNotMatch(windowsTypeAwareJob, /pnpm package|verify:vsix|FALLOW_EXTENSION_PATH/);
   assert.match(vscodePackageTargetsJob, /package:variants/);
   assert.match(vscodePackageTargetsJob, /test:packaging/);
   assert.ok(vscodePaths.includes(".github/workflows/release.yml"));

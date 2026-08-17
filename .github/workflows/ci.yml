@@ -384,7 +384,7 @@ jobs:
         run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
 
   windows-type-aware:
-    name: Windows type-aware package and VS Code host
+    name: Windows type-aware npm and transport
     needs: changes
     if: needs.changes.outputs.windows-type-aware == 'true'
     runs-on: windows-latest
@@ -398,46 +398,21 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: pr-windows-type-aware
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
-        with:
-          version: 11.10.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-          cache: pnpm
-          cache-dependency-path: editors/vscode/pnpm-lock.yaml
       - name: Test Windows npm launcher
         run: npm --prefix npm/fallow test
       - name: Test Windows child-process wiring
         run: node --test tools/type-aware-sidecar/test/windows-child-process.test.mjs
       - name: Test Rust type-aware transport
         run: cargo test -p fallow-api type_aware::transport
-      - name: Install VS Code dependencies
-        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
-      - name: Build current CLI and LSP binaries
-        run: cargo build -p fallow-cli --bin fallow -p fallow-lsp --bin fallow-lsp
+      - name: Build current CLI binary
+        run: cargo build -p fallow-cli --bin fallow
       - name: Run installed npm candidate against pinned Preact
         env:
           FALLOW_CANDIDATE_BIN: ${{ github.workspace }}\target\debug\fallow.exe
         run: node scripts/type-aware-windows-candidate-smoke.mjs
-      - name: Package universal VSIX
-        run: cd editors/vscode && pnpm package
-      - name: Extract VSIX outside the repository
-        shell: pwsh
-        run: |
-          $vsix = Get-ChildItem editors/vscode/*.vsix | Select-Object -First 1
-          if (-not $vsix) { throw "VSIX package was not created" }
-          $archive = Join-Path $env:RUNNER_TEMP "fallow-vsix.zip"
-          $destination = Join-Path $env:RUNNER_TEMP "fallow-vsix"
-          Copy-Item $vsix.FullName $archive
-          Expand-Archive -Path $archive -DestinationPath $destination
-          pnpm --dir editors/vscode verify:vsix "$destination\extension" $vsix.FullName
-          "FALLOW_EXTENSION_PATH=$destination\extension" >> $env:GITHUB_ENV
-      - name: Run isolated VSIX type-aware host smoke
-        env:
-          FALLOW_BIN: ${{ github.workspace }}\target\debug\fallow.exe
-          FALLOW_LSP_BIN: ${{ github.workspace }}\target\debug\fallow-lsp.exe
-        run: pnpm --dir editors/vscode run test:integration:real
       - name: Check for uncommitted changes
         run: git diff --exit-code
 
