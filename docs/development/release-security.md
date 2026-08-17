@@ -13,13 +13,16 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `build` | Build and sign release artifacts | Artifact signing only |
 | `validate` | Reusable release validation | Read only |
 | `release-verified` | Join build and validation | None |
-| `release-assets` | Flatten and store the complete GitHub asset bundle as a run artifact | Read only |
+| `release-assets` | Flatten and store the complete GitHub asset bundle, including all VSIX targets | Read only |
 | `release-ready` | Join publication jobs and prove the tag is still absent | Read only |
 | `publish-crates` | Publish prevalidated crates in dependency order | crates.io OIDC |
 | `npm-prep` | Install, assemble, and pack npm artifacts | Read only |
 | `npm-publish` | Publish downloaded tarballs | npm publication |
-| `vscode-prep` | Install, build, and package the extension | Read only |
-| `vscode-publish` | Publish the downloaded VSIX | Marketplace tokens |
+| `vscode-prep` | Build seven VSIX targets plus their inventory and checksums | Read only |
+| `vscode-host-smoke` | Run the exact prepared x64 target VSIX on Linux, Windows, and macOS with matching release binaries | Read only |
+| `vscode-publish-marketplace` | Publish the closed VSIX set to Visual Studio Marketplace | VSCE token only |
+| `vscode-publish-open-vsx` | Publish the closed VSIX set to Open VSX | OVSX token only |
+| `vscode-public-verify` | Verify exact public target payloads from both registries | Read only |
 
 Preparation jobs may execute dependency code because they have no publication
 credentials. Publication jobs must remain small. They must not install
@@ -30,10 +33,27 @@ globally with `--ignore-scripts`.
 ## Invariants
 
 - Keep every checkout at `persist-credentials: false`.
-- Keep repository dependency installation out of `npm-publish`,
-  `vscode-publish`, and `publish-crates`.
+- Keep repository dependency installation out of `npm-publish`, both VSIX
+  publisher jobs, and `publish-crates`.
 - Keep `--ignore-scripts` on every privileged `npm publish`.
 - Keep global publication tools pinned to reviewed versions.
+- Keep the VSIX artifact closed to the seven universal and platform-specific
+  packages, `inventory.json`, and `SHA256SUMS`. The inventory is universal
+  first and publication follows that order.
+- Make `vscode-host-smoke` download the exact `vscode-prep` artifact and the
+  matching release CLI and LSP artifacts. It must verify and load the exact
+  extracted `linux-x64`, `win32-x64`, and `darwin-x64` extension paths, preserve
+  archive executable modes on Unix, and never rebuild those release binaries.
+  Both VSIX publishers and `release-assets` must wait for this matrix.
+- Give each VSIX publisher only its matching token and pinned CLI. It must not
+  check out repository code or build packages. Publish every inventory entry
+  with `--skip-duplicate`, attempt the remaining entries after an unexpected
+  failure, and fail the job after the loop.
+- Gate `release-ready` directly on `vscode-public-verify`. The verifier has no
+  registry credentials. It waits for the exact version and target tuples with
+  bounded retries, downloads each exact registry asset, and compares its
+  normalized extension payload with the prepared inventory. Universal fallback
+  never satisfies a platform target.
 - Keep `cargo publish --no-verify` in the credential-bearing job. Compilation
   and validation happen before credentials are present.
 - Keep the publishable crate list in dependency order and aligned with the

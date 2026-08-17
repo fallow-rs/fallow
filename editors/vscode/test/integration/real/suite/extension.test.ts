@@ -1,4 +1,5 @@
 import * as assert from "node:assert/strict";
+import * as fs from "node:fs";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
@@ -56,6 +57,15 @@ const fallowDiagnostics = async (uri: vscode.Uri): Promise<readonly vscode.Diagn
 };
 
 describe("Fallow VS Code real-process contracts", () => {
+  it("runs the exact packaged extension requested by the host smoke", () => {
+    const expectedPath = process.env["FALLOW_EXTENSION_PATH"];
+    if (!expectedPath) return;
+
+    const extension = vscode.extensions.getExtension("fallow-rs.fallow-vscode");
+    assert.ok(extension, "extension should be discoverable");
+    assert.equal(fs.realpathSync(extension.extensionPath), fs.realpathSync(expectedPath));
+  });
+
   it("parses the current CLI envelope with complete type-aware evidence", async () => {
     const extension = vscode.extensions.getExtension("fallow-rs.fallow-vscode");
     assert.ok(extension, "extension should be discoverable");

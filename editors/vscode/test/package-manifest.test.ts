@@ -35,6 +35,7 @@ interface ConfigProperty {
 }
 
 interface ExtensionPackage {
+  readonly extensionKind: readonly string[];
   readonly contributes: {
     readonly commands: readonly CommandContribution[];
     readonly configuration: {
@@ -69,6 +70,12 @@ const viewTitleCommand = (id: string): MenuContribution | undefined =>
 
 const commandPaletteEntry = (id: string): MenuContribution | undefined =>
   pkg.contributes.menus.commandPalette.find((entry) => entry.command === id);
+
+describe("package.json extension host", () => {
+  it("runs beside the workspace so platform backends match local and remote hosts", () => {
+    expect(pkg.extensionKind).toEqual(["workspace"]);
+  });
+});
 
 describe("package.json command contributions", () => {
   it("uses search only for the initial analysis action", () => {

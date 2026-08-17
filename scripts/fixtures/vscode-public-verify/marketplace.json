@@ -1,0 +1,86 @@
+{
+  "results": [
+    {
+      "extensions": [
+        {
+          "publisher": {
+          "publisherName": "Fallow-rs"
+          },
+          "extensionName": "fallow-vscode",
+          "versions": [
+            {
+              "version": "3.17.0",
+              "targetPlatform": null,
+              "files": [
+                {
+                  "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                  "source": "https://example.invalid/universal.vsix"
+                }
+              ]
+            },
+            {
+              "version": "3.17.0",
+              "targetPlatform": "darwin-arm64",
+              "files": [
+                {
+                  "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                  "source": "https://example.invalid/darwin-arm64.vsix"
+                }
+              ]
+            },
+            {
+              "version": "3.17.0",
+              "targetPlatform": "darwin-x64",
+              "files": [
+                {
+                  "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                  "source": "https://example.invalid/darwin-x64.vsix"
+                }
+              ]
+            },
+            {
+              "version": "3.17.0",
+              "targetPlatform": "linux-arm64",
+              "files": [
+                {
+                  "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                  "source": "https://example.invalid/linux-arm64.vsix"
+                }
+              ]
+            },
+            {
+              "version": "3.17.0",
+              "targetPlatform": "linux-x64",
+              "files": [
+                {
+                  "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                  "source": "https://example.invalid/linux-x64.vsix"
+                }
+              ]
+            },
+            {
+              "version": "3.17.0",
+              "targetPlatform": "win32-arm64",
+              "files": [
+                {
+                  "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                  "source": "https://example.invalid/win32-arm64.vsix"
+                }
+              ]
+            },
+            {
+              "version": "3.17.0",
+              "targetPlatform": "win32-x64",
+              "files": [
+                {
+                  "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                  "source": "https://example.invalid/win32-x64.vsix"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

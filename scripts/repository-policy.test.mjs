@@ -151,6 +151,7 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
     "editors/vscode/scripts/verify-packaged-type-aware.mjs",
     "utf8",
   );
+  const vscodeTargets = readFileSync("editors/vscode/scripts/vsix-targets.mjs", "utf8");
   const vscodeWorkspace = readFileSync("editors/vscode/pnpm-workspace.yaml", "utf8");
   const vscodePackage = readJson("editors/vscode/package.json");
   const windowsCandidateSmoke = readFileSync(
@@ -199,17 +200,40 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.match(generated, /Generated from crates\/api\/type-aware-protocol\.json/u);
   assert.match(vscodePackager, /cpSync\(join\(sourceRoot, "src"\)/u);
   for (const packageName of bundledBackends) {
-    assert.match(vscodePackager, new RegExp(packageName.replace("/", "\\/"), "u"));
-    assert.match(vscodePackageVerifier, new RegExp(packageName.replace("@typescript/", ""), "u"));
+    assert.match(vscodeTargets, new RegExp(packageName.replace("/", "\\/"), "u"));
   }
-  assert.match(vscodePackager, /tsc(?:\\\\\.exe)?/u);
-  assert.match(vscodePackageVerifier, /MAX_VSIX_BYTES/u);
+  assert.match(vscodePackageVerifier, /getVsixVariant/u);
+  assert.match(vscodeTargets, /tsc(?:\\\\\.exe)?/u);
+  assert.match(vscodeTargets, /maxBytes/u);
   assert.match(vscodeWorkspace, /supportedArchitectures:/u);
   assert.match(vscodeWorkspace, /- win32/u);
   assert.match(vscodeWorkspace, /- darwin/u);
   assert.match(vscodeWorkspace, /- linux/u);
   assert.match(windowsCandidateSmoke, /platformPackage\.replace\("@fallow-cli\/", ""\)/u);
   assert.match(windowsCandidateSmoke, /join\(temporaryRoot, platformPack\)/u);
+});
+
+test("VS Code public release verification stays exact and credential-free", () => {
+  const vscodePackage = readJson("editors/vscode/package.json");
+  const verifier = readFileSync("scripts/vscode-public-verify.mjs", "utf8");
+  const verifierTests = readFileSync("scripts/vscode-public-verify.test.mjs", "utf8");
+  const releaseSecurity = readFileSync("docs/development/release-security.md", "utf8");
+  const releaseSkill = readFileSync(".agents/skills/release/SKILL.md", "utf8");
+  assert.equal(vscodePackage.devDependencies["@vscode/vsce"], "3.9.2");
+  assert.equal(vscodePackage.devDependencies.ovsx, "1.1.0");
+  assert.match(verifier, /from "\.\.\/editors\/vscode\/scripts\/vsix-targets\.mjs"/u);
+  assert.match(verifier, /VSIX_VARIANTS\.map\(\(\{ target \}\) => target\)/u);
+  assert.match(verifier, /marketplace\.visualstudio\.com\/.*extensionquery/u);
+  assert.match(verifier, /open-vsx\.org\/api/u);
+  assert.match(verifier, /target === "universal" \? version/u);
+  assert.match(verifier, /payload.*fileCount.*sha256/su);
+  assert.match(verifier, /DEFAULT_ATTEMPTS = 24/u);
+  assert.doesNotMatch(verifier, /VSCE_PAT|OVSX_PAT|secrets\./u);
+  assert.match(verifierTests, /missing[\s\S]*duplicate[\s\S]*stale/u);
+  assert.match(verifierTests, /universal fallback/u);
+  assert.match(verifierTests, /changed content/u);
+  assert.match(releaseSecurity, /vscode-public-verify/u);
+  assert.match(releaseSkill, /Verify public VS Code registry targets/u);
 });
 
 test("type-aware public surfaces expose only the stable protocol", () => {

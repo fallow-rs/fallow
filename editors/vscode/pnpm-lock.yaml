@@ -51,6 +51,9 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@types/node@26.1.2)(vite@8.0.8(@types/node@26.1.2))
+      yauzl:
+        specifier: 3.3.2
+        version: 3.3.2
 
 packages:
 

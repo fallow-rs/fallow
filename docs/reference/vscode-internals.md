@@ -38,6 +38,13 @@ Do not duplicate the full setting list in durable prose.
   synchronized with Rust sources.
 - Multi-root workspace selection remains explicit and paths stay scoped to the
   selected project.
+- The extension runs as a workspace extension. Local and remote extension hosts
+  therefore select binaries and platform-specific VSIX payloads for the machine
+  that owns the workspace, not the VS Code UI machine.
+- `editors/vscode/scripts/vsix-targets.mjs` is the closed source of truth for
+  VSIX targets and their TypeScript backend packages. Target packages contain
+  one matching backend; the untargeted universal fallback contains all
+  supported backends.
 - `dist/` is generated for packaging and remains untracked.
 
 ## Verification
@@ -46,7 +53,11 @@ Do not duplicate the full setting list in durable prose.
 pnpm --dir editors/vscode run lint
 pnpm --dir editors/vscode run check:contracts
 pnpm --dir editors/vscode run build
+pnpm --dir editors/vscode run test:packaging
 ```
 
 Run focused editor tests for command, configuration, download, or diagnostic
-changes.
+changes. Release packaging uses `package:variants` to build the universal
+fallback and every platform target from one build into an explicit output
+directory. Verify extracted artifacts with `verify:vsix` and the matching
+`--target` value.

@@ -565,7 +565,7 @@ jobs:
 
   release-assets:
     name: Stage GitHub Release assets
-    needs: release-verified
+    needs: [release-verified, vscode-prep, vscode-host-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -656,7 +656,7 @@ jobs:
   # bundle validates config/plugin/rule-pack schemas, output schema, npm
   # capability metadata, issue registry export, TS output contracts, NAPI types,
   # and agent docs.
-  # Failure here blocks `npm-publish` AND `vscode-publish`. Refs #416.
+  # Failure here blocks `npm-publish` and both VSIX publisher jobs. Refs #416.
   #
   # Prep-tier job: `contents: read` only, no publish tokens, so running
   # `pnpm install` here matches the release-workflow security boundary
@@ -1076,13 +1076,11 @@ jobs:
             exit 1
           fi
 
-  # Build the .vsix in a job with no marketplace tokens. The matching
-  # vscode-publish job below downloads the .vsix as an artifact and runs
-  # only `vsce publish --packagePath` / `ovsx publish <file>` so VSCE_PAT
-  # and OVSX_PAT are never co-resident with `pnpm install` / extension
-  # build steps that execute dependency code.
+  # Build all marketplace variants in a job with no marketplace tokens.
+  # Publisher jobs below receive only this closed artifact set. They never
+  # check out or build repository code while a registry token is present.
   vscode-prep:
-    name: Build VS Code .vsix
+    name: Build VS Code target VSIX files
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1120,90 +1118,340 @@ jobs:
       - name: Copy LICENSE into extension directory
         run: cp LICENSE editors/vscode/LICENSE
 
-      - name: Build and package extension
+      - name: Build and verify target packages
         run: |
-          cd editors/vscode
-          pnpm build
-          pnpm package
+          pnpm --dir editors/vscode package:variants -- \
+            --output-dir "$RUNNER_TEMP/fallow-vscode-targets"
 
-      - name: Verify packaged type-aware payload
+      - name: Require the closed target artifact set
+        shell: bash
         run: |
-          vsix="$(find editors/vscode -maxdepth 1 -name '*.vsix' -print -quit)"
-          test -n "$vsix"
-          vsix="$(realpath "$vsix")"
-          archive="$RUNNER_TEMP/fallow-vsix.zip"
-          destination="$RUNNER_TEMP/fallow-vsix-release"
-          cp "$vsix" "$archive"
-          unzip -q "$archive" -d "$destination"
-          pnpm --dir editors/vscode verify:vsix "$destination/extension" "$vsix"
+          set -euo pipefail
+          root="$RUNNER_TEMP/fallow-vscode-targets"
+          version="${RELEASE_TAG#v}"
+          targets=(
+            universal
+            darwin-arm64
+            darwin-x64
+            linux-arm64
+            linux-x64
+            win32-arm64
+            win32-x64
+          )
+          expected_files=(inventory.json SHA256SUMS)
+          for target in "${targets[@]}"; do
+            expected_files+=("fallow-vscode-${version}-${target}.vsix")
+          done
 
-      - name: Upload VSIX artifact
+          mapfile -t actual_files < <(find "$root" -maxdepth 1 -type f -printf '%f\n' | sort)
+          mapfile -t expected_sorted < <(printf '%s\n' "${expected_files[@]}" | sort)
+          if ! diff -u \
+            <(printf '%s\n' "${expected_sorted[@]}") \
+            <(printf '%s\n' "${actual_files[@]}"); then
+            echo "::error::VSIX target artifact contains missing or unexpected files"
+            exit 1
+          fi
+          jq -e \
+            --arg version "$version" \
+            --argjson targets '[["universal",null],["darwin-arm64","darwin-arm64"],["darwin-x64","darwin-x64"],["linux-arm64","linux-arm64"],["linux-x64","linux-x64"],["win32-arm64","win32-arm64"],["win32-x64","win32-x64"]]' \
+            '.schemaVersion == 1 and .extensionVersion == $version and ([.entries[] | [.target, .targetPlatform]] == $targets)' \
+            "$root/inventory.json"
+
+      - name: Upload VSIX target artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: fallow-vscode
-          path: editors/vscode/*.vsix
+          name: fallow-vscode-targets
+          path: ${{ runner.temp }}/fallow-vscode-targets/
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
 
-  vscode-publish:
-    name: Publish VS Code Extension
-    needs: [vscode-prep, release-assets]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  # Exercise the exact staged release packages with the matching release
+  # binaries before any registry token or GitHub release asset staging runs.
+  vscode-host-smoke:
+    name: VS Code release target host (${{ matrix.target }})
+    needs: vscode-prep
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            npm_dir: linux-x64-gnu
+            cli: fallow-linux-x64-gnu
+            lsp: fallow-lsp-linux-x64-gnu
+          - os: windows-latest
+            target: win32-x64
+            npm_dir: win32-x64-msvc
+            cli: fallow-win32-x64-msvc.exe
+            lsp: fallow-lsp-win32-x64-msvc.exe
+          - os: macos-15-intel
+            target: darwin-x64
+            npm_dir: darwin-x64
+            cli: fallow-darwin-x64
+            lsp: fallow-lsp-darwin-x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+
+      - name: Cache VS Code test download
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ${{ runner.temp }}/fallow-vscode-test-cache
+          key: release-vscode-host-${{ matrix.target }}-vscode-1.96.0
+
+      - name: Install VS Code dependencies
+        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Download exact prepared VSIX targets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fallow-vscode-targets
+          path: ${{ runner.temp }}/fallow-vscode-targets
+
+      - name: Download matching release CLI
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fallow-cli-${{ matrix.npm_dir }}
+          path: ${{ runner.temp }}/fallow-host-bin
+
+      - name: Download matching release LSP
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fallow-lsp-${{ matrix.npm_dir }}
+          path: ${{ runner.temp }}/fallow-host-bin
+
+      - name: Prepare exact release binaries on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          CLI_NAME: ${{ matrix.cli }}
+          LSP_NAME: ${{ matrix.lsp }}
+        run: |
+          set -euo pipefail
+          cli="$RUNNER_TEMP/fallow-host-bin/$CLI_NAME"
+          lsp="$RUNNER_TEMP/fallow-host-bin/$LSP_NAME"
+          test -f "$cli"
+          test -f "$lsp"
+          chmod +x "$cli" "$lsp"
+          echo "FALLOW_BIN=$(realpath "$cli")" >> "$GITHUB_ENV"
+          echo "FALLOW_LSP_BIN=$(realpath "$lsp")" >> "$GITHUB_ENV"
+
+      - name: Prepare exact release binaries on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CLI_NAME: ${{ matrix.cli }}
+          LSP_NAME: ${{ matrix.lsp }}
+        run: |
+          $cli = (Resolve-Path (Join-Path $env:RUNNER_TEMP "fallow-host-bin/$env:CLI_NAME")).Path
+          $lsp = (Resolve-Path (Join-Path $env:RUNNER_TEMP "fallow-host-bin/$env:LSP_NAME")).Path
+          "FALLOW_BIN=$cli" >> $env:GITHUB_ENV
+          "FALLOW_LSP_BIN=$lsp" >> $env:GITHUB_ENV
+
+      - name: Extract and verify the exact release VSIX on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          FALLOW_VSIX_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          vsix="$RUNNER_TEMP/fallow-vscode-targets/fallow-vscode-$version-$FALLOW_VSIX_TARGET.vsix"
+          test -f "$vsix"
+          destination="$RUNNER_TEMP/fallow-vscode-$FALLOW_VSIX_TARGET"
+          unzip -q "$vsix" -d "$destination"
+          pnpm --dir editors/vscode verify:vsix "$destination/extension" "$vsix" \
+            --target "$FALLOW_VSIX_TARGET" --version "$version"
+          echo "FALLOW_EXTENSION_PATH=$(realpath "$destination/extension")" >> "$GITHUB_ENV"
+
+      - name: Extract and verify the exact release VSIX on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          FALLOW_VSIX_TARGET: ${{ matrix.target }}
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $vsix = Join-Path $env:RUNNER_TEMP "fallow-vscode-targets/fallow-vscode-$version-$env:FALLOW_VSIX_TARGET.vsix"
+          if (-not (Test-Path -PathType Leaf $vsix)) { throw "Expected target VSIX was not downloaded: $vsix" }
+          $archive = Join-Path $env:RUNNER_TEMP "fallow-vscode-$env:FALLOW_VSIX_TARGET.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "fallow-vscode-$env:FALLOW_VSIX_TARGET"
+          Copy-Item $vsix $archive
+          Expand-Archive -Path $archive -DestinationPath $destination
+          pnpm --dir editors/vscode verify:vsix "$destination/extension" $vsix --target $env:FALLOW_VSIX_TARGET --version $version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $extensionPath = (Resolve-Path "$destination/extension").Path
+          "FALLOW_EXTENSION_PATH=$extensionPath" >> $env:GITHUB_ENV
+
+      - name: Run exact release target VSIX host smoke on Linux
+        if: runner.os == 'Linux'
+        env:
+          FALLOW_VSCODE_TEST_CACHE_PATH: ${{ runner.temp }}/fallow-vscode-test-cache
+        run: xvfb-run -a pnpm --dir editors/vscode run test:integration:real
+
+      - name: Run exact release target VSIX host smoke
+        if: runner.os != 'Linux'
+        env:
+          FALLOW_VSCODE_TEST_CACHE_PATH: ${{ runner.temp }}/fallow-vscode-test-cache
+        run: pnpm --dir editors/vscode run test:integration:real
+
+  vscode-publish-marketplace:
+    name: Publish VS Code Marketplace targets
+    needs: [vscode-prep, vscode-host-smoke, release-assets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: '22'
 
-      - name: Download VSIX
+      - name: Download closed VSIX target artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: fallow-vscode
-          path: vsix
+          name: fallow-vscode-targets
+          path: vscode-targets
 
-      - name: Locate VSIX
-        id: vsix
-        run: |
-          file_count=$(find vsix -maxdepth 1 -name '*.vsix' -type f | wc -l | tr -d ' ')
-          if [ "$file_count" -ne 1 ]; then
-            echo "::error::Expected exactly one .vsix file in artifact, found $file_count"
-            find vsix -maxdepth 1 -name '*.vsix' -type f | sort
-            exit 1
-          fi
-          file=$(find vsix -maxdepth 1 -name '*.vsix' -type f | sort | head -n1)
-          echo "path=$file" >> "$GITHUB_OUTPUT"
+      - name: Install VS Code Marketplace publisher
+        run: npm install -g --ignore-scripts @vscode/vsce@3.9.2
 
-      # Install the publisher CLIs with --ignore-scripts so any compromised
-      # install/postinstall script of @vscode/vsce or ovsx (or a transitive
-      # dependency) cannot execute with VSCE_PAT / OVSX_PAT in the
-      # environment. Versions are pinned to match the editor's pnpm-lock.
-      - name: Install publisher CLIs
-        run: npm install -g --ignore-scripts @vscode/vsce@3.9.1 ovsx@0.10.11
-
-      - name: Publish to VS Code Marketplace
-        # continue-on-error so a transient failure here does not skip Open VSX
-        # publish below. On a `gh run rerun --failed`, vsce will exit non-zero
-        # with version-exists, but the next step still runs.
-        continue-on-error: true
+      - name: Publish every target to VS Code Marketplace
+        shell: bash
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-          VSIX_PATH: ${{ steps.vsix.outputs.path }}
-        run: vsce publish --packagePath "$VSIX_PATH" --no-dependencies
+        run: |
+          set -u
+          version="${RELEASE_TAG#v}"
+          targets=(universal darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64)
+          mapfile -t files < <(jq -er '.entries[].file' vscode-targets/inventory.json)
+          if [ "${#files[@]}" -ne "${#targets[@]}" ]; then
+            echo "::error::Inventory does not contain the exact target count"
+            exit 1
+          fi
+          for index in "${!targets[@]}"; do
+            expected="fallow-vscode-${version}-${targets[$index]}.vsix"
+            if [ "${files[$index]}" != "$expected" ]; then
+              echo "::error::Unexpected inventory filename: ${files[$index]}"
+              exit 1
+            fi
+          done
+          failed=0
+          for file in "${files[@]}"; do
+            if [ ! -f "vscode-targets/$file" ]; then
+              echo "::error::Missing inventory file: $file"
+              failed=1
+              continue
+            fi
+            if ! vsce publish \
+              --packagePath "vscode-targets/$file" \
+              --no-dependencies \
+              --skip-duplicate; then
+              echo "::error::VS Code Marketplace publication failed for $file"
+              failed=1
+            fi
+          done
+          exit "$failed"
 
-      - name: Publish to Open VSX (Cursor, VSCodium)
-        # continue-on-error so a transient 502 from openvsx.org does not block
-        # an isolated re-run from succeeding. Without this, `gh run rerun
-        # --failed` re-runs the entire job, vsce publish then fails with
-        # version-exists, and Open VSX never gets retried.
-        continue-on-error: true
+  vscode-publish-open-vsx:
+    name: Publish Open VSX targets
+    needs: [vscode-prep, vscode-host-smoke, release-assets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '22'
+
+      - name: Download closed VSIX target artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fallow-vscode-targets
+          path: vscode-targets
+
+      - name: Install Open VSX publisher
+        run: npm install -g --ignore-scripts ovsx@1.1.0
+
+      - name: Publish every target to Open VSX
+        shell: bash
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-          VSIX_PATH: ${{ steps.vsix.outputs.path }}
-        run: ovsx publish "$VSIX_PATH" --no-dependencies
+        run: |
+          set -u
+          version="${RELEASE_TAG#v}"
+          targets=(universal darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64)
+          mapfile -t files < <(jq -er '.entries[].file' vscode-targets/inventory.json)
+          if [ "${#files[@]}" -ne "${#targets[@]}" ]; then
+            echo "::error::Inventory does not contain the exact target count"
+            exit 1
+          fi
+          for index in "${!targets[@]}"; do
+            expected="fallow-vscode-${version}-${targets[$index]}.vsix"
+            if [ "${files[$index]}" != "$expected" ]; then
+              echo "::error::Unexpected inventory filename: ${files[$index]}"
+              exit 1
+            fi
+          done
+          failed=0
+          for file in "${files[@]}"; do
+            if [ ! -f "vscode-targets/$file" ]; then
+              echo "::error::Missing inventory file: $file"
+              failed=1
+              continue
+            fi
+            if ! ovsx publish \
+              "vscode-targets/$file" \
+              --no-dependencies \
+              --skip-duplicate; then
+              echo "::error::Open VSX publication failed for $file"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  vscode-public-verify:
+    name: Verify public VS Code registry targets
+    needs: [vscode-prep, vscode-publish-marketplace, vscode-publish-open-vsx]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '22'
+
+      - name: Download closed VSIX target artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fallow-vscode-targets
+          path: vscode-targets
+
+      - name: Verify exact public registry payloads
+        run: node scripts/vscode-public-verify.mjs --artifact-dir vscode-targets
 
   release-ready:
     name: Release ready for signed tag
-    needs: [publish-crates, npm-publish, vscode-publish, release-assets]
+    needs: [publish-crates, npm-publish, vscode-public-verify, release-assets]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

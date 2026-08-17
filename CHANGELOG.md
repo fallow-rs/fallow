@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The VS Code extension now publishes platform-specific packages for macOS,
+  Linux, and Windows.** Each targeted VSIX carries only its matching semantic
+  backend, reducing normal extension downloads by roughly 82 to 84 percent.
+  The existing universal package remains available as a compatibility fallback.
+
+### Changed
+
+- **Extension publication now verifies every public target before a release can
+  complete.** Visual Studio Marketplace and Open VSX use isolated publisher
+  jobs, while a credential-free gate downloads and validates the exact
+  universal and platform-specific payloads from both registries.
+
 ## [3.17.0] - 2026-08-16
 
 ### Added

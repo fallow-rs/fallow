@@ -149,6 +149,8 @@ jobs:
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
+              - '.github/workflows/release-validation.yml'
             zed:
               - 'editors/zed/**'
             npm:
@@ -807,22 +809,136 @@ jobs:
           FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow-multicall
         run: xvfb-run -a pnpm --dir editors/vscode run test:integration:real
       - run: cd editors/vscode && pnpm test:unit
-      - name: Package and verify the production VSIX shape
-        run: |
-          pnpm --dir editors/vscode package
-          vsix="$(find editors/vscode -maxdepth 1 -name '*.vsix' -print -quit)"
-          test -n "$vsix"
-          vsix="$(realpath "$vsix")"
-          archive="$RUNNER_TEMP/fallow-vsix.zip"
-          destination="$RUNNER_TEMP/fallow-vsix-ubuntu"
-          cp "$vsix" "$archive"
-          unzip -q "$archive" -d "$destination"
-          pnpm --dir editors/vscode verify:vsix "$destination/extension" "$vsix"
-          echo "FALLOW_EXTENSION_PATH=$destination/extension" >> "$GITHUB_ENV"
-      - name: Run extracted production VSIX host smoke
+
+  vscode-package-targets:
+    name: Package VS Code target artifacts
+    needs: changes
+    if: needs.changes.outputs.vscode == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.10.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - name: Install VS Code dependencies
+        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
+      - name: Test target VSIX packaging contracts
+        run: pnpm --dir editors/vscode test:packaging
+      - name: Package target VSIX artifacts
+        run: pnpm --dir editors/vscode package:variants -- --output-dir "$RUNNER_TEMP/fallow-vscode-targets"
+      - name: Upload target VSIX artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fallow-vscode-targets
+          path: ${{ runner.temp }}/fallow-vscode-targets
+
+  vscode-target-host:
+    name: VS Code target host (${{ matrix.target }})
+    needs: [changes, vscode-package-targets]
+    if: needs.changes.outputs.vscode == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            cli: target/debug/fallow
+            lsp: target/debug/fallow-lsp
+          - os: windows-latest
+            target: win32-x64
+            cli: target/debug/fallow.exe
+            lsp: target/debug/fallow-lsp.exe
+          - os: macos-15-intel
+            target: darwin-x64
+            cli: target/debug/fallow
+            lsp: target/debug/fallow-lsp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: vscode-target-${{ matrix.target }}
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.10.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - name: Cache VS Code test download
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ${{ runner.temp }}/fallow-vscode-test-cache
+          key: vscode-target-${{ matrix.target }}-vscode-1.96.0
+      - name: Install VS Code dependencies
+        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build current CLI and LSP binaries
+        run: cargo build -p fallow-cli --bin fallow -p fallow-lsp --bin fallow-lsp
+      - name: Download Ubuntu-built target VSIX artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fallow-vscode-targets
+          path: ${{ runner.temp }}/fallow-vscode-targets
+      - name: Extract and verify the exact target VSIX on Unix
+        if: runner.os != 'Windows'
+        shell: bash
         env:
-          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow-multicall
+          FALLOW_VSIX_TARGET: ${{ matrix.target }}
+        run: |
+          version="$(node -p "require('./editors/vscode/package.json').version")"
+          vsix="$RUNNER_TEMP/fallow-vscode-targets/fallow-vscode-$version-$FALLOW_VSIX_TARGET.vsix"
+          test -f "$vsix"
+          destination="$RUNNER_TEMP/fallow-vscode-$FALLOW_VSIX_TARGET"
+          unzip -q "$vsix" -d "$destination"
+          pnpm --dir editors/vscode verify:vsix "$destination/extension" "$vsix" --target "$FALLOW_VSIX_TARGET"
+          echo "FALLOW_EXTENSION_PATH=$(realpath "$destination/extension")" >> "$GITHUB_ENV"
+      - name: Extract and verify the exact target VSIX on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          FALLOW_VSIX_TARGET: ${{ matrix.target }}
+        run: |
+          $version = (Get-Content editors/vscode/package.json | ConvertFrom-Json).version
+          $vsix = Join-Path $env:RUNNER_TEMP "fallow-vscode-targets/fallow-vscode-$version-$env:FALLOW_VSIX_TARGET.vsix"
+          if (-not (Test-Path -PathType Leaf $vsix)) { throw "Expected target VSIX was not downloaded: $vsix" }
+          $archive = Join-Path $env:RUNNER_TEMP "fallow-vscode-$env:FALLOW_VSIX_TARGET.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "fallow-vscode-$env:FALLOW_VSIX_TARGET"
+          Copy-Item $vsix $archive
+          Expand-Archive -Path $archive -DestinationPath $destination
+          pnpm --dir editors/vscode verify:vsix "$destination/extension" $vsix --target $env:FALLOW_VSIX_TARGET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $extensionPath = (Resolve-Path "$destination/extension").Path
+          "FALLOW_EXTENSION_PATH=$extensionPath" >> $env:GITHUB_ENV
+      - name: Run exact target VSIX host smoke on Linux
+        if: runner.os == 'Linux'
+        env:
+          FALLOW_BIN: ${{ github.workspace }}/${{ matrix.cli }}
+          FALLOW_LSP_BIN: ${{ github.workspace }}/${{ matrix.lsp }}
+          FALLOW_VSCODE_TEST_CACHE_PATH: ${{ runner.temp }}/fallow-vscode-test-cache
         run: xvfb-run -a pnpm --dir editors/vscode run test:integration:real
+      - name: Run exact target VSIX host smoke
+        if: runner.os != 'Linux'
+        env:
+          FALLOW_BIN: ${{ github.workspace }}/${{ matrix.cli }}
+          FALLOW_LSP_BIN: ${{ github.workspace }}/${{ matrix.lsp }}
+          FALLOW_VSCODE_TEST_CACHE_PATH: ${{ runner.temp }}/fallow-vscode-test-cache
+        run: pnpm --dir editors/vscode run test:integration:real
 
   zed:
     name: Zed Extension
@@ -1036,7 +1152,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [check, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
+    needs: [check, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

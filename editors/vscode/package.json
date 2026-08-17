@@ -57,6 +57,9 @@
     "workspaceContains:**/package.json"
   ],
   "main": "./dist/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
   "contributes": {
     "jsonValidation": [
       {
@@ -908,10 +911,12 @@
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm run test:unit && pnpm run test:integration",
     "test:unit": "vitest run",
+    "test:packaging": "node --test ./scripts/*.test.mjs",
     "test:integration": "pnpm run build && tsc -p tsconfig.test.json && node ./.test-dist/test/integration/runTest.js",
     "test:integration:real": "pnpm run build && tsc -p tsconfig.test.json && node ./.test-dist/test/integration/real/runTest.js",
     "prepackage": "pnpm run codegen:contracts && pnpm run build && node ./scripts/copy-license.mjs",
     "package": "vsce package --no-dependencies",
+    "package:variants": "pnpm run build && node ./scripts/copy-license.mjs && node ./scripts/package-vsix-variants.mjs",
     "verify:vsix": "node ./scripts/verify-packaged-type-aware.mjs",
     "publish": "vsce publish --no-dependencies",
     "publish:ovsx": "ovsx publish --no-dependencies"
@@ -931,6 +936,7 @@
     "rolldown": "1.2.2",
     "ovsx": "1.1.0",
     "typescript": "7.0.2",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "yauzl": "3.3.2"
   }
 }

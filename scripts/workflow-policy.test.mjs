@@ -212,20 +212,26 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   const npmPackage = JSON.parse(readFileSync("npm/fallow/package.json", "utf8"));
   const windowsRustPaths = listedPaths(indentedBlock(workflow, "windows-rust", 12));
   const windowsTypeAwarePaths = listedPaths(indentedBlock(workflow, "windows-type-aware", 12));
+  const vscodePaths = listedPaths(indentedBlock(workflow, "vscode", 12));
   const checkJob = indentedBlock(workflow, "check", 2);
   const windowsRustJob = indentedBlock(workflow, "windows-rust", 2);
   const windowsTypeAwareJob = indentedBlock(workflow, "windows-type-aware", 2);
-  const vscodeJob = indentedBlock(workflow, "vscode", 2);
+  const vscodePackageTargetsJob = indentedBlock(workflow, "vscode-package-targets", 2);
+  const vscodeTargetHostJob = indentedBlock(workflow, "vscode-target-host", 2);
   const zedJob = indentedBlock(workflow, "zed", 2);
   const aggregateJob = indentedBlock(workflow, "ci-ok", 2);
   const workflowWithoutWindowsJobs = workflow
     .replace(windowsRustJob, "")
-    .replace(windowsTypeAwareJob, "");
+    .replace(windowsTypeAwareJob, "")
+    .replace(vscodePackageTargetsJob, "")
+    .replace(vscodeTargetHostJob, "");
 
   assert.doesNotMatch(workflowWithoutWindowsJobs, /windows-latest|windows-11-arm|macos-latest/);
   assert.match(checkJob, /runs-on: ubuntu-latest/);
   assert.match(checkJob, /timeout-minutes: 20/);
   assert.doesNotMatch(checkJob, /matrix\.|windows-latest|macos-latest/);
+  assert.match(vscodePackageTargetsJob, /runs-on: ubuntu-latest/);
+  assert.match(vscodeTargetHostJob, /linux-x64[\s\S]*win32-x64[\s\S]*darwin-x64/u);
   assert.match(windowsRustJob, /needs: changes/);
   assert.match(windowsRustJob, /if: needs\.changes\.outputs\.windows-rust == 'true'/);
   assert.match(windowsRustJob, /runs-on: windows-latest/);
@@ -274,13 +280,15 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.ok(windowsTypeAwarePaths.includes("crates/api/src/type_aware/transport/**"));
   assert.match(windowsTypeAwareJob, /cargo test -p fallow-api type_aware::transport/);
   assert.match(windowsTypeAwareJob, /type-aware-windows-candidate-smoke\.mjs/);
-  assert.match(windowsTypeAwareJob, /FALLOW_LSP_BIN:/);
-  assert.match(windowsTypeAwareJob, /verify:vsix/);
-  assert.match(windowsTypeAwareJob, /pnpm package/);
-  assert.match(windowsTypeAwareJob, /test:integration:real/);
-  assert.match(vscodeJob, /verify:vsix/);
-  assert.match(vscodeJob, /FALLOW_EXTENSION_PATH=/);
-  assert.match(vscodeJob, /name: Run extracted production VSIX host smoke/);
+  assert.match(vscodePackageTargetsJob, /package:variants/);
+  assert.match(vscodePackageTargetsJob, /test:packaging/);
+  assert.ok(vscodePaths.includes(".github/workflows/release.yml"));
+  assert.ok(vscodePaths.includes(".github/workflows/release-validation.yml"));
+  assert.match(vscodeTargetHostJob, /verify:vsix/);
+  assert.match(vscodeTargetHostJob, /FALLOW_EXTENSION_PATH=/);
+  assert.match(vscodeTargetHostJob, /FALLOW_BIN:/);
+  assert.match(vscodeTargetHostJob, /FALLOW_LSP_BIN:/);
+  assert.match(vscodeTargetHostJob, /name: Run exact target VSIX host smoke/);
   assert.match(zedJob, /runs-on: ubuntu-latest/);
   assert.doesNotMatch(zedJob, /matrix\.|windows-latest|macos-latest/);
   assert.throws(() => indentedBlock(workflow, "windows-arm64", 2), /missing windows-arm64 block/);
@@ -338,6 +346,8 @@ test("release runs Windows correctness and lifecycle verification without creden
   const releaseWorkflow = readWorkflow(".github/workflows/release.yml");
   const validationWorkflow = readWorkflow(".github/workflows/release-validation.yml");
   const job = indentedBlock(validationWorkflow, "windows-verify", 2);
+  const vscodePackageJob = indentedBlock(validationWorkflow, "vscode-package-targets", 2);
+  const vscodeTargetJob = indentedBlock(validationWorkflow, "vscode-target-host", 2);
   const buildJob = indentedBlock(releaseWorkflow, "build", 2);
 
   assert.match(buildJob, /target: x86_64-pc-windows-msvc/);
@@ -356,8 +366,11 @@ test("release runs Windows correctness and lifecycle verification without creden
   assert.match(job, /cargo fmt --all -- --check/);
   assert.match(job, /npm run publish:prepare/);
   assert.match(job, /cd crates\/napi && npm test/);
-  assert.match(job, /verify:vsix/);
-  assert.match(job, /FALLOW_LSP_BIN:/);
+  assert.match(vscodeTargetJob, /verify:vsix/);
+  assert.match(vscodeTargetJob, /FALLOW_LSP_BIN:/);
+  assert.match(vscodePackageJob, /name: validation-vscode-targets/);
+  assert.match(vscodePackageJob, /test:packaging/);
+  assert.doesNotMatch(vscodePackageJob, /name: fallow-vscode-targets/);
   assert.match(job, /type-aware-windows-candidate-smoke\.mjs/);
   assert.match(job, /FALLOW_CANDIDATE_BIN:/);
   assert.match(job, /audit_orphan_sweep_removes_dead_pid_worktree/);
@@ -409,7 +422,11 @@ test("release publication waits for the aggregate verification gate", () => {
   const releaseReady = indentedBlock(workflow, "release-ready", 2);
   const npmPublish = indentedBlock(workflow, "npm-publish", 2);
   const vscodePrep = indentedBlock(workflow, "vscode-prep", 2);
-  const vscodePublish = indentedBlock(workflow, "vscode-publish", 2);
+  const vscodeHostSmoke = indentedBlock(workflow, "vscode-host-smoke", 2);
+  const vscodeMarketplace = indentedBlock(workflow, "vscode-publish-marketplace", 2);
+  const vscodeOpenVsx = indentedBlock(workflow, "vscode-publish-open-vsx", 2);
+  const vscodePublicVerify = indentedBlock(workflow, "vscode-public-verify", 2);
+  const vscodePackage = JSON.parse(readFileSync("editors/vscode/package.json", "utf8"));
 
   assert.match(context, /permissions:\n\s+contents: read/);
   assert.doesNotMatch(context, /^\s+\w+: write$/mu);
@@ -421,14 +438,75 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(gate, /needs: \[build, validate\]/);
   assert.match(gate, /permissions: \{\}/);
   assert.match(publishCrates, /needs: \[release-verified, release-assets\]/);
-  assert.match(releaseAssets, /needs: release-verified/);
+  assert.match(releaseAssets, /needs: \[release-verified, vscode-prep, vscode-host-smoke\]/);
   assert.match(releaseAssets, /permissions:\n\s+contents: read/);
+  assert.match(releaseAssets, /pattern: fallow-\*/);
   assert.match(npmPublish, /needs: \[npm-prep, release-assets\]/);
-  assert.match(vscodePrep, /verify:vsix/);
-  assert.match(vscodePublish, /needs: \[vscode-prep, release-assets\]/);
+  assert.match(vscodePrep, /package:variants --/);
+  assert.match(vscodePrep, /fallow-vscode-targets/);
+  assert.match(vscodePrep, /targets=\(\s+universal/su);
+  assert.match(vscodePrep, /inventory\.json SHA256SUMS/);
+  assert.match(vscodePrep, /\.entries\[\].*\.targetPlatform/su);
+  assert.match(vscodeHostSmoke, /needs: vscode-prep/);
+  assert.match(vscodeHostSmoke, /linux-x64[\s\S]*win32-x64[\s\S]*darwin-x64/u);
+  assert.match(vscodeHostSmoke, /name: fallow-vscode-targets/);
+  assert.match(vscodeHostSmoke, /name: fallow-cli-\$\{\{ matrix\.npm_dir \}\}/);
+  assert.match(vscodeHostSmoke, /name: fallow-lsp-\$\{\{ matrix\.npm_dir \}\}/);
+  assert.match(vscodeHostSmoke, /fallow-vscode-\$version-\$FALLOW_VSIX_TARGET\.vsix/);
+  assert.match(vscodeHostSmoke, /verify:vsix[\s\S]*--target[\s\S]*--version/u);
+  assert.match(vscodeHostSmoke, /FALLOW_EXTENSION_PATH=/);
+  assert.match(vscodeHostSmoke, /FALLOW_BIN=/);
+  assert.match(vscodeHostSmoke, /FALLOW_LSP_BIN=/);
+  assert.match(vscodeHostSmoke, /chmod \+x/);
+  assert.match(vscodeHostSmoke, /unzip -q/);
+  assert.match(vscodeHostSmoke, /test:integration:real/);
+  assert.match(vscodeHostSmoke, /persist-credentials: false/);
+  assert.doesNotMatch(vscodeHostSmoke, /secrets\.|cargo (?:build|install)/u);
+
+  for (const [job, registry, cli, pin, secret, otherSecret] of [
+    [
+      vscodeMarketplace,
+      "VS Code Marketplace",
+      "@vscode/vsce",
+      vscodePackage.devDependencies["@vscode/vsce"],
+      "VSCE_PAT",
+      "OVSX_PAT",
+    ],
+    [vscodeOpenVsx, "Open VSX", "ovsx", vscodePackage.devDependencies.ovsx, "OVSX_PAT", "VSCE_PAT"],
+  ]) {
+    assert.match(job, /needs: \[vscode-prep, vscode-host-smoke, release-assets\]/, registry);
+    assert.match(job, /permissions: \{\}/, registry);
+    assert.match(
+      job,
+      new RegExp(
+        `npm install -g --ignore-scripts ${cli.replace("/", "\\/")}@${pin.replaceAll(".", "\\.")}`,
+        "u",
+      ),
+      registry,
+    );
+    assert.match(job, new RegExp(`secrets\\.${secret}`, "u"), registry);
+    assert.doesNotMatch(job, new RegExp(`secrets\\.${otherSecret}`, "u"), registry);
+    assert.doesNotMatch(
+      job,
+      /actions\/checkout|pnpm|npm (?:ci|install)(?! -g)|\bbuild\b/u,
+      registry,
+    );
+    assert.doesNotMatch(job, /continue-on-error/u, registry);
+    assert.match(job, /\.entries\[\]\.file/u, registry);
+    assert.match(job, /--skip-duplicate/u, registry);
+    assert.match(job, /failed=1[\s\S]*exit "\$failed"/u, registry);
+  }
+
+  assert.match(
+    vscodePublicVerify,
+    /needs: \[vscode-prep, vscode-publish-marketplace, vscode-publish-open-vsx\]/,
+  );
+  assert.match(vscodePublicVerify, /persist-credentials: false/);
+  assert.match(vscodePublicVerify, /node scripts\/vscode-public-verify\.mjs --artifact-dir/);
+  assert.doesNotMatch(vscodePublicVerify, /secrets\.|_PAT|npm install|pnpm install/u);
   assert.match(
     releaseReady,
-    /needs: \[publish-crates, npm-publish, vscode-publish, release-assets\]/,
+    /needs: \[publish-crates, npm-publish, vscode-public-verify, release-assets\]/,
   );
   assert.match(releaseReady, /permissions:\n\s+contents: read/);
   assert.match(releaseReady, /Release tag .* appeared before the release workflow completed/u);

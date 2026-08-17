@@ -122,14 +122,20 @@ description: Prepare and publish a Fallow release with version, changelog, gener
     The workflow deliberately has no tag trigger and never creates a tag or
     GitHub Release. It validates and builds the release, stores the complete
     flattened GitHub asset bundle as the `release-assets` Actions artifact, and
-    publishes registries while the tag remains absent.
+    publishes registries while the tag remains absent. The VS Code release is
+    published by separate Marketplace and Open VSX jobs. A credential-free
+    public verifier checks every exact target before the final release gate.
 11. Monitor the specific workflow run through `status=completed` and
     `conclusion=success`; a successful watch command alone is not sufficient
-    evidence. Require the `Release ready for signed tag` job to pass, then
-    verify every registry and marketplace publication is live.
+    evidence. Require the `Publish VS Code Marketplace targets`, `Publish Open
+    VSX targets`, `Verify public VS Code registry targets`, and `Release ready
+    for signed tag` jobs to pass. The public verifier requires the exact
+    universal plus six platform tuples and normalized payloads from both
+    registries, without accepting a universal fallback.
     Download the `release-assets` artifact from that exact run and confirm it
-    is non-empty. Only then create and push the signed tag and create the
-    immutable GitHub Release:
+    is non-empty. Confirm it contains the seven target VSIX files,
+    `inventory.json`, and `SHA256SUMS`. Only then create and push the signed tag
+    and create the immutable GitHub Release:
 
     ```bash
     ASSET_DIR="$(mktemp -d)"
@@ -137,6 +143,9 @@ description: Prepare and publish a Fallow release with version, changelog, gener
       --name release-assets \
       --dir "$ASSET_DIR"
     test -n "$(find "$ASSET_DIR" -maxdepth 1 -type f -print -quit)"
+    test "$(find "$ASSET_DIR" -maxdepth 1 -name 'fallow-vscode-*.vsix' -type f | wc -l | tr -d ' ')" -eq 7
+    test -f "$ASSET_DIR/inventory.json"
+    test -f "$ASSET_DIR/SHA256SUMS"
 
     if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
       echo "release tag appeared before publication completed: ${TAG}" >&2
