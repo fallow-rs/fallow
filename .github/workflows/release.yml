@@ -1385,7 +1385,7 @@ jobs:
           path: vscode-targets
 
       - name: Install Open VSX publisher
-        run: npm install -g --ignore-scripts ovsx@1.1.0
+        run: npm install -g --ignore-scripts ovsx@1.1.1
 
       - name: Publish every target to Open VSX
         shell: bash
