@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_api::{
-    AnalysisOptions, CombinedOptions, ComplexityOptions, DuplicationMode, DuplicationOptions,
-    EditorAnalysisSession, EngineHealthRunner, run_combined, run_health_with_runner,
+    AnalysisOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode,
+    DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, run_circular_dependencies,
+    run_combined, run_health_with_runner,
 };
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
@@ -278,6 +279,62 @@ console.log(scoreOrder({ status: "open", amount: 10, flags: ["flag1"] }));
     }
 }
 
+fn create_circular_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-circulars",
+  "private": true,
+  "type": "module",
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "5.8.0"
+  }
+}"#,
+    );
+    for domain in ["orders", "billing", "users"] {
+        for index in 0..10 {
+            let next = (index + 1) % 10;
+            write_file(
+                &root,
+                &format!("src/domains/{domain}/node{index}.ts"),
+                format!(
+                    r#"
+import {{ value{next} }} from "./node{next}";
+
+export const value{index} = value{next} + {index};
+"#
+                ),
+            );
+        }
+        write_file(
+            &root,
+            &format!("src/domains/{domain}/index.ts"),
+            r#"export { value0 } from "./node0";"#,
+        );
+    }
+    write_file(
+        &root,
+        "src/index.ts",
+        r#"
+import { value0 as orderValue } from "./domains/orders";
+import { value0 as billingValue } from "./domains/billing";
+import { value0 as userValue } from "./domains/users";
+
+console.log(orderValue, billingValue, userValue);
+"#,
+    );
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
 fn create_warm_complexity_health_project() -> CommandInput {
     let input = create_health_project();
     let options = ComplexityOptions {
@@ -401,11 +458,31 @@ fn stable_health_complex_service_warm_complexity_hit(c: &mut Criterion) {
     );
 }
 
+fn stable_circular_dependencies_domain_cycles(c: &mut Criterion) {
+    c.bench_function("stable_circular_dependencies_domain_cycles", |bencher| {
+        bencher.iter_batched_ref(
+            create_circular_project,
+            |input| {
+                let options = DeadCodeOptions {
+                    analysis: analysis_options(&input.root, true),
+                    ..DeadCodeOptions::default()
+                };
+                let output = run_circular_dependencies(&options)
+                    .expect("circular-dependency benchmark succeeds");
+                assert!(!output.circular_dependencies().is_empty());
+                output
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 criterion_group!(
     benches,
     stable_combined_workspace_programmatic_session_reuse,
     stable_editor_workspace_repeated_session_analysis,
     stable_extract_workspace_monorepo_warm_hash_hit,
-    stable_health_complex_service_warm_complexity_hit
+    stable_health_complex_service_warm_complexity_hit,
+    stable_circular_dependencies_domain_cycles
 );
 criterion_main!(benches);

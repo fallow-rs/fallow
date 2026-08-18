@@ -67,6 +67,8 @@ Full main/manual shards:
 
 `programmatic_commands` still exists for local walltime investigation, but it
 contains git/audit scenarios and must not run in the fast CodSpeed matrix.
+Deterministic command paths, including circular-dependency analysis, belong in
+`programmatic_stable` so CodSpeed tracks them continuously.
 `large_analysis` likewise remains available as a local-only high-cost analysis
 suite; its archived identities no longer run in CodSpeed CI.
 

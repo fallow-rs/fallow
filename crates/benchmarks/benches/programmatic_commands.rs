@@ -17,8 +17,7 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_api::{
     AnalysisOptions, AuditOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions,
     DuplicationMode, DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, run_audit,
-    run_circular_dependencies, run_combined, run_dead_code, run_duplication,
-    run_health_with_runner,
+    run_combined, run_dead_code, run_duplication, run_health_with_runner,
 };
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
@@ -563,56 +562,6 @@ export const middleware = (request: Request): Response => {
   const tenant = request.headers.get("x-tenant") ?? "default";
   return Response.json({ tenant });
 };
-"#,
-    );
-
-    CommandInput {
-        _temp_dir: temp_dir,
-        root,
-    }
-}
-
-fn create_circular_project() -> CommandInput {
-    let temp_dir = TempDir::new().unwrap();
-    let root = temp_dir.path().to_path_buf();
-
-    write_file(
-        &root,
-        "package.json",
-        package_json("bench-circulars", &[], ""),
-    );
-    for domain in ["orders", "billing", "users"] {
-        for i in 0..10 {
-            let next = (i + 1) % 10;
-            write_file(
-                &root,
-                &format!("src/domains/{domain}/node{i}.ts"),
-                format!(
-                    r#"
-import {{ value{next} }} from "./node{next}";
-
-export const value{i} = value{next} + {i};
-"#
-                ),
-            );
-        }
-        write_file(
-            &root,
-            &format!("src/domains/{domain}/index.ts"),
-            r#"
-export { value0 } from "./node0";
-"#,
-        );
-    }
-    write_file(
-        &root,
-        "src/index.ts",
-        r#"
-import { value0 as orderValue } from "./domains/orders";
-import { value0 as billingValue } from "./domains/billing";
-import { value0 as userValue } from "./domains/users";
-
-console.log(orderValue, billingValue, userValue);
 "#,
     );
 
@@ -1250,22 +1199,6 @@ fn duplication_next_route_callbacks_repeated_auth(c: &mut Criterion) {
     );
 }
 
-fn circular_dependencies_domain_graph_cycles(c: &mut Criterion) {
-    c.bench_function("circular_dependencies_domain_graph_cycles", |bencher| {
-        bencher.iter_batched_ref(
-            create_circular_project,
-            |input| {
-                let options = DeadCodeOptions {
-                    analysis: analysis_options(&input.root, true),
-                    ..DeadCodeOptions::default()
-                };
-                run_circular_dependencies(&options)
-            },
-            BatchSize::LargeInput,
-        );
-    });
-}
-
 fn health_complex_service_scoring(c: &mut Criterion) {
     c.bench_function("health_complex_service_scoring", |bencher| {
         bencher.iter_batched_ref(
@@ -1339,7 +1272,6 @@ criterion_group!(
     combined_workspace_programmatic_session_reuse,
     editor_workspace_repeated_session_analysis,
     duplication_next_route_callbacks_repeated_auth,
-    circular_dependencies_domain_graph_cycles,
     health_complex_service_scoring,
     health_complex_service_warm_complexity_hit,
     health_css_tailwind_design_system
