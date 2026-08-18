@@ -934,7 +934,7 @@
     "json-schema-to-typescript": "15.0.4",
     "mocha": "11.8.0",
     "rolldown": "1.2.3",
-    "ovsx": "1.1.0",
+    "ovsx": "1.1.1",
     "typescript": "7.0.2",
     "vitest": "4.1.10",
     "yauzl": "3.4.0"
