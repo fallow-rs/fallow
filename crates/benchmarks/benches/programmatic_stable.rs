@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_api::{
     AnalysisOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode,
-    DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, run_circular_dependencies,
-    run_combined, run_health_with_runner,
+    DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, FeatureFlagsOptions,
+    run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
@@ -335,6 +335,67 @@ console.log(orderValue, billingValue, userValue);
     }
 }
 
+fn create_feature_flags_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-feature-flags",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "launchdarkly-node-server-sdk": "9.10.1"
+  }
+}"#,
+    );
+
+    let mut index_source = String::new();
+    for index in 0..32 {
+        writeln!(
+            &mut index_source,
+            "import {{ evaluate{index} }} from \"./features/feature{index}\";"
+        )
+        .unwrap();
+        write_file(
+            &root,
+            &format!("src/features/feature{index}.ts"),
+            format!(
+                r#"
+declare function useFlag(name: string): boolean;
+
+export function evaluate{index}(): boolean {{
+  const sdkEnabled = useFlag("checkout-{index}");
+  if (process.env.FEATURE_CHECKOUT_{index}) {{
+    return sdkEnabled;
+  }}
+  return false;
+}}
+
+export const unusedFallback{index} = (): boolean => false;
+"#
+            ),
+        );
+    }
+    index_source.push_str("\nconsole.log(");
+    for index in 0..32 {
+        if index > 0 {
+            index_source.push_str(", ");
+        }
+        write!(&mut index_source, "evaluate{index}").unwrap();
+    }
+    index_source.push_str(");\n");
+    write_file(&root, "src/index.ts", index_source);
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
 fn create_warm_complexity_health_project() -> CommandInput {
     let input = create_health_project();
     let options = ComplexityOptions {
@@ -477,12 +538,31 @@ fn stable_circular_dependencies_domain_cycles(c: &mut Criterion) {
     });
 }
 
+fn stable_feature_flags_workspace_analysis(c: &mut Criterion) {
+    c.bench_function("stable_feature_flags_workspace_analysis", |bencher| {
+        bencher.iter_batched_ref(
+            create_feature_flags_project,
+            |input| {
+                let options = FeatureFlagsOptions {
+                    analysis: analysis_options(&input.root, true),
+                    top: None,
+                };
+                let output = run_feature_flags(&options).expect("feature-flags benchmark succeeds");
+                assert_eq!(output.total_flags(), 64);
+                output
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 criterion_group!(
     benches,
     stable_combined_workspace_programmatic_session_reuse,
     stable_editor_workspace_repeated_session_analysis,
     stable_extract_workspace_monorepo_warm_hash_hit,
     stable_health_complex_service_warm_complexity_hit,
-    stable_circular_dependencies_domain_cycles
+    stable_circular_dependencies_domain_cycles,
+    stable_feature_flags_workspace_analysis
 );
 criterion_main!(benches);
