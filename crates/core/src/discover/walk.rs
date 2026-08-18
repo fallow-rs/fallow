@@ -577,22 +577,34 @@ fn has_source_extension(path: &Path) -> bool {
     reason = "source file globs are hard-coded compile-time constants"
 )]
 fn build_walk_types(capture_config: bool) -> ignore::types::Types {
-    let mut types_builder = ignore::types::TypesBuilder::new();
-    let source_glob = format!("*.{{{}}}", SOURCE_EXTENSIONS.join(","));
-    types_builder
-        .add("source", &source_glob)
-        .expect("valid glob");
-    types_builder.select("source");
-    if capture_config {
-        for glob in config_candidate_basename_globs() {
-            // Ignore individually-invalid plugin patterns rather than panicking;
-            // a malformed pattern simply fails to admit its config file (the
-            // pre-existing filesystem fallback still covers production mode).
-            let _ = types_builder.add("config", glob);
-        }
-        types_builder.select("config");
-    }
-    types_builder.build().expect("valid types")
+    static SOURCE_TYPES: OnceLock<ignore::types::Types> = OnceLock::new();
+    static SOURCE_AND_CONFIG_TYPES: OnceLock<ignore::types::Types> = OnceLock::new();
+
+    let cache = if capture_config {
+        &SOURCE_AND_CONFIG_TYPES
+    } else {
+        &SOURCE_TYPES
+    };
+    cache
+        .get_or_init(|| {
+            let mut types_builder = ignore::types::TypesBuilder::new();
+            let source_glob = format!("*.{{{}}}", SOURCE_EXTENSIONS.join(","));
+            types_builder
+                .add("source", &source_glob)
+                .expect("valid glob");
+            types_builder.select("source");
+            if capture_config {
+                for glob in config_candidate_basename_globs() {
+                    // Ignore individually-invalid plugin patterns rather than panicking;
+                    // a malformed pattern simply fails to admit its config file (the
+                    // pre-existing filesystem fallback still covers production mode).
+                    let _ = types_builder.add("config", glob);
+                }
+                types_builder.select("config");
+            }
+            types_builder.build().expect("valid types")
+        })
+        .clone()
 }
 
 /// Construct the parallel walker, applying the appropriate hidden-dir filter.
