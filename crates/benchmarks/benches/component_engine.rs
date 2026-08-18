@@ -13,8 +13,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use fallow_config::DuplicatesConfig;
+use fallow_config::{
+    DuplicatesConfig, EffectKind, FallowConfig, RulePackDef, RulePackRule, RulePackRuleKind,
+    RulesConfig, Severity,
+};
 use fallow_engine::{
+    guard::build_guard_report,
     health::{
         HealthCoverageInputs, HealthExecutionOptions, HealthGateOptions, HealthSort,
         HealthThresholdOverrides, run_ungrouped_health_with_session,
@@ -35,6 +39,8 @@ const WARM_CSS_TOKENS_PER_FILE: usize = 32;
 const CSS_DEEP_THEME_FILE_COUNT: usize = 16;
 const CSS_DEEP_COLORS_PER_FILE: usize = 12;
 const CSS_DEEP_CVA_FILE_COUNT: usize = 32;
+const GUARD_FILE_COUNT: usize = 32;
+const GUARD_RULE_COUNT: usize = 8;
 
 struct EngineFixture {
     _temp_dir: TempDir,
@@ -50,6 +56,12 @@ struct WarmEngineFixture {
 struct CssDeepEngineFixture {
     fixture: WarmEngineFixture,
     changed_files: Vec<PathBuf>,
+}
+
+struct GuardFixture {
+    _temp_dir: TempDir,
+    config: fallow_config::ResolvedConfig,
+    files: Vec<String>,
 }
 
 fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
@@ -109,6 +121,59 @@ export function compute{index}(input: number): number {{
     EngineFixture {
         _temp_dir: temp_dir,
         root,
+    }
+}
+
+fn create_guard_fixture() -> GuardFixture {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    let mut rules = Vec::with_capacity(GUARD_RULE_COUNT);
+    for rule_index in 0..GUARD_RULE_COUNT {
+        rules.push(RulePackRule {
+            id: format!("team-{rule_index}-network"),
+            kind: RulePackRuleKind::BannedEffect,
+            callees: Vec::new(),
+            specifiers: Vec::new(),
+            effects: vec![EffectKind::Network],
+            exports: Vec::new(),
+            ignore_type_only: false,
+            files: vec![format!("src/team-{rule_index}/**")],
+            exclude: vec![format!("src/team-{rule_index}/generated/**")],
+            zones: Vec::new(),
+            message: None,
+            severity: None,
+        });
+    }
+    let mut config = FallowConfig {
+        rules: RulesConfig {
+            policy_violation: Severity::Warn,
+            ..RulesConfig::default()
+        },
+        ..FallowConfig::default()
+    }
+    .resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
+    config.rule_packs = vec![RulePackDef {
+        schema: None,
+        version: 1,
+        name: "guard-benchmark".to_string(),
+        description: None,
+        rules,
+    }];
+
+    let mut files = Vec::with_capacity(GUARD_FILE_COUNT);
+    for file_index in 0..GUARD_FILE_COUNT {
+        let file = format!(
+            "src/team-{}/feature-{file_index}.ts",
+            file_index % GUARD_RULE_COUNT
+        );
+        write_file(&root, &file, "export const enabled = true;\n");
+        files.push(file);
+    }
+
+    GuardFixture {
+        _temp_dir: temp_dir,
+        config,
+        files,
     }
 }
 
@@ -504,6 +569,23 @@ fn component_engine_first_session_css_health_references_many_files(c: &mut Crite
     );
 }
 
+fn component_engine_guard_rule_scope_many_files(c: &mut Criterion) {
+    let fixture = create_guard_fixture();
+    let warmup = build_guard_report(&fixture.config, &fixture.files)
+        .expect("guard rule scope warm-up succeeds");
+    assert_eq!(warmup.files.len(), GUARD_FILE_COUNT);
+    assert!(
+        warmup.files.iter().all(|file| file.policy_rules.len() == 1),
+        "each guard target matches its team rule"
+    );
+    c.bench_function("component_engine_guard_rule_scope_many_files", |bencher| {
+        bencher.iter(|| {
+            build_guard_report(&fixture.config, &fixture.files)
+                .expect("guard rule scope analysis succeeds")
+        });
+    });
+}
+
 criterion_group!(
     benches,
     component_engine_session_load,
@@ -516,6 +598,7 @@ criterion_group!(
     component_engine_warm_session_css_health,
     component_engine_warm_session_css_health_many_files,
     component_engine_warm_session_css_deep_color_candidates,
-    component_engine_first_session_css_health_references_many_files
+    component_engine_first_session_css_health_references_many_files,
+    component_engine_guard_rule_scope_many_files
 );
 criterion_main!(benches);

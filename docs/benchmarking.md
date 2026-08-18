@@ -53,7 +53,7 @@ Fast PR shards:
 - `fallow-benchmarks/component_config`: config loading, resolution, workspace
   discovery, and workspace diagnostics.
 - `fallow-benchmarks/component_engine`: typed engine session loading, parser
-  reuse, and project-analysis artifacts.
+  reuse, project-analysis artifacts, and guard policy resolution.
 - `fallow-benchmarks/component_graph`: project-state file, stable-key, and
   workspace lookup operations.
 - `fallow-benchmarks/component_output`: output envelope serialization and CI
