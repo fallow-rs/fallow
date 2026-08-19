@@ -81,6 +81,72 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
     }
 }
 
+/// Benchmark hook for the production list inventory and JSON rendering
+/// pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_list_json(
+    root: &std::path::Path,
+    threads: usize,
+) -> Result<(usize, usize, usize, usize), ExitCode> {
+    let config_path = None;
+    let opts = ListOptions {
+        root,
+        config_path: &config_path,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        threads,
+        no_cache: true,
+        entry_points: false,
+        files: false,
+        plugins: false,
+        boundaries: false,
+        workspaces: false,
+        production: false,
+        allow_remote_extends: false,
+    };
+    let config = load_config(
+        root,
+        &config_path,
+        LoadConfigArgs {
+            output: opts.output,
+            no_cache: opts.no_cache,
+            threads: opts.threads,
+            production: opts.production,
+            quiet: true,
+            allow_remote_extends: opts.allow_remote_extends,
+        },
+    )?;
+    let data = collect_list_data(&opts, &config)?;
+    let file_count = data.discovered.as_deref().map_or(0, <[_]>::len);
+    let entry_point_count = data.entry_points.as_deref().map_or(0, <[_]>::len);
+    let workspace_count = data
+        .workspace_data
+        .as_ref()
+        .map_or(0, |data| data.workspaces.len());
+    let rendered = render_list_json(&ListJsonInput {
+        opts: &opts,
+        show_all: data.show_all,
+        plugin_result: data.plugin_result.as_ref(),
+        discovered: data.discovered.as_deref(),
+        entry_points: data.entry_points.as_deref(),
+        boundary_data: data.boundary_data.as_ref(),
+        workspace_data: data.workspace_data.as_ref(),
+    })
+    .map_err(|err| {
+        crate::error::emit_error(
+            &format!("failed to serialize list output: {err}"),
+            2,
+            OutputFormat::Json,
+        )
+    })?;
+    Ok((
+        file_count,
+        entry_point_count,
+        workspace_count,
+        rendered.len(),
+    ))
+}
+
 /// Collect plugins, files, entry points, boundary, and workspace data for a
 /// `fallow list` run, honoring which listing modes are active.
 fn collect_list_data(
@@ -289,6 +355,19 @@ struct ListJsonInput<'a> {
 }
 
 fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
+    match render_list_json(input) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Error: failed to serialize list output: {err}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn render_list_json(input: &ListJsonInput<'_>) -> Result<String, String> {
     let has_boundaries = input.boundary_data.is_some();
     let workspace_only = input.opts.workspaces
         && !input.opts.plugins
@@ -303,28 +382,18 @@ fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
         ListJsonEnvelope::Plain
     };
 
-    let output = match fallow_api::serialize_list_json_output(
+    let output = fallow_api::serialize_list_json_output(
         build_list_json_output_input(input),
         crate::output_runtime::current_root_envelope_mode(),
         envelope,
-    ) {
-        Ok(value) => value,
-        Err(err) => {
-            eprintln!("Error: failed to serialize list output: {err}");
-            return ExitCode::from(2);
-        }
-    };
+    )
+    .map_err(|err| err.to_string())?;
 
-    match input.opts.json_style.serialize(&output) {
-        Ok(json) => {
-            println!("{json}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("Error: failed to serialize list output: {e}");
-            ExitCode::from(2)
-        }
-    }
+    input
+        .opts
+        .json_style
+        .serialize(&output)
+        .map_err(|err| err.to_string())
 }
 
 /// Assemble the typed JSON body for a `fallow list` run, one section per

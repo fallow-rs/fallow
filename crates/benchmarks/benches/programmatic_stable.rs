@@ -18,7 +18,7 @@ use fallow_api::{
     DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, FeatureFlagsOptions,
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
-use fallow_cli::{benchmark_fix_dry_run, benchmark_security_json};
+use fallow_cli::{benchmark_fix_dry_run, benchmark_list_json, benchmark_security_json};
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
     parse_all_files, parse_single_file,
@@ -28,6 +28,11 @@ use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
 const FIX_FILE_COUNT: usize = 128;
+const LIST_FILE_COUNT: usize = 128;
+const LIST_WORKSPACE_COUNT: usize = 8;
+// Each workspace index is reported once as a default index and once from its
+// package metadata, preserving both production entry-point sources.
+const LIST_ENTRY_POINT_COUNT: usize = LIST_WORKSPACE_COUNT * 2;
 const SECURITY_FILE_COUNT: usize = 128;
 
 struct CommandInput {
@@ -481,6 +486,55 @@ app.post("/run/{index}", (req) => {{
     }
 }
 
+fn create_list_inventory_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-list-inventory",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"]
+}"#,
+    );
+
+    let files_per_workspace = LIST_FILE_COUNT / LIST_WORKSPACE_COUNT;
+    for workspace in 0..LIST_WORKSPACE_COUNT {
+        write_file(
+            &root,
+            &format!("packages/pkg{workspace}/package.json"),
+            format!(
+                r#"{{
+  "name": "@bench/pkg{workspace}",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}}"#
+            ),
+        );
+        for file in 0..files_per_workspace {
+            let name = if file == 0 {
+                "index.ts".to_string()
+            } else {
+                format!("module{file}.ts")
+            };
+            write_file(
+                &root,
+                &format!("packages/pkg{workspace}/src/{name}"),
+                format!("export const value{workspace}_{file} = {file};\n"),
+            );
+        }
+    }
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
 fn create_warm_complexity_health_project() -> CommandInput {
     let input = create_health_project();
     let options = ComplexityOptions {
@@ -691,6 +745,30 @@ fn stable_security_many_framework_sinks_json(c: &mut Criterion) {
     });
 }
 
+fn stable_list_workspace_inventory_json(c: &mut Criterion) {
+    let input = create_list_inventory_project();
+
+    let (status, file_count, entry_point_count, workspace_count, rendered_bytes) =
+        benchmark_list_json(&input.root, BENCH_THREADS);
+    assert_eq!(status, std::process::ExitCode::SUCCESS);
+    assert_eq!(file_count, LIST_FILE_COUNT);
+    assert_eq!(entry_point_count, LIST_ENTRY_POINT_COUNT);
+    assert_eq!(workspace_count, LIST_WORKSPACE_COUNT);
+    assert!(rendered_bytes > 0);
+
+    c.bench_function("stable_list_workspace_inventory_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_list_json(&input.root, BENCH_THREADS);
+            assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+            assert_eq!(result.1, LIST_FILE_COUNT);
+            assert_eq!(result.2, LIST_ENTRY_POINT_COUNT);
+            assert_eq!(result.3, LIST_WORKSPACE_COUNT);
+            assert!(result.4 > 0);
+            result
+        });
+    });
+}
+
 criterion_group!(
     benches,
     stable_combined_workspace_programmatic_session_reuse,
@@ -700,6 +778,7 @@ criterion_group!(
     stable_circular_dependencies_domain_cycles,
     stable_feature_flags_workspace_analysis,
     stable_fix_dry_run_many_exports,
-    stable_security_many_framework_sinks_json
+    stable_security_many_framework_sinks_json,
+    stable_list_workspace_inventory_json
 );
 criterion_main!(benches);
