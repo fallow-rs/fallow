@@ -1106,6 +1106,80 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     }))
 }
 
+pub fn benchmark_dead_code_json(
+    root: &std::path::Path,
+    threads: usize,
+) -> Result<(usize, usize), ExitCode> {
+    let config_path = None;
+    let filters = IssueFilters::default();
+    let trace_opts = TraceOptions {
+        trace_export: None,
+        trace_file: None,
+        trace_dependency: None,
+        impact_closure: None,
+        symbol_impact: None,
+        performance: false,
+    };
+    let result = execute_check(&CheckOptions {
+        root,
+        config_path: &config_path,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        no_cache: true,
+        threads,
+        quiet: true,
+        allow_remote_extends: false,
+        fail_on_issues: false,
+        filters: &filters,
+        changed_since: None,
+        diff_index: None,
+        use_shared_diff_index: true,
+        baseline: None,
+        save_baseline: None,
+        sarif_file: None,
+        production: false,
+        production_override: Some(false),
+        workspace: None,
+        changed_workspaces: None,
+        group_by: None,
+        include_dupes: false,
+        type_aware: None,
+        type_aware_config_override: None,
+        type_aware_projects: &[],
+        type_aware_require: None,
+        trace_opts: &trace_opts,
+        explain: false,
+        top: None,
+        file: &[],
+        include_entry_exports: false,
+        summary: false,
+        regression_opts: RegressionOpts {
+            fail_on_regression: false,
+            tolerance: crate::regression::Tolerance::Absolute(0),
+            regression_baseline_file: None,
+            save_target: crate::regression::SaveRegressionTarget::None,
+            scoped: false,
+            quiet: true,
+            output: OutputFormat::Json,
+        },
+        retain_modules_for_health: false,
+        defer_performance: false,
+        analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
+    })?;
+    let rendered = report::render_check_json(&report::CheckJsonRenderInput {
+        results: &result.results,
+        root: &result.config.root,
+        elapsed: result.elapsed,
+        type_aware: result.type_aware_meta.as_ref(),
+        regression: result.regression.as_ref(),
+        baseline_matched: result.baseline_matched,
+        config_fixable: result.config_fixable,
+        json_style: crate::json_style::JsonStyle::Compact,
+    })
+    .map_err(|_| ExitCode::from(2))?;
+    Ok((result.results.total_issues(), rendered.len()))
+}
+
 fn validate_effective_type_aware_output(
     output: fallow_config::OutputFormat,
     enabled: bool,

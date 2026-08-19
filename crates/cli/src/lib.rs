@@ -2941,6 +2941,16 @@ pub fn benchmark_fix_dry_run(root: &Path, threads: usize) -> (ExitCode, usize) {
     })
 }
 
+/// Benchmark hook for the production dead-code analysis and compact JSON
+/// rendering pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_dead_code_json(root: &Path, threads: usize) -> (ExitCode, usize, usize) {
+    match check::benchmark_dead_code_json(root, threads) {
+        Ok((issue_count, rendered_bytes)) => (ExitCode::SUCCESS, issue_count, rendered_bytes),
+        Err(code) => (code, 0, 0),
+    }
+}
+
 /// Benchmark hook for the production security analysis and JSON rendering
 /// pipeline. This is not a supported API.
 #[doc(hidden)]

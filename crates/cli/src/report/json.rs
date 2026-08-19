@@ -38,27 +38,28 @@ pub(super) struct PrintJsonInput<'a> {
 }
 
 pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
-    let results = input.results;
-    let root = input.root;
-    let elapsed = input.elapsed;
-    let explain = input.explain;
-    let regression = input.regression;
-    let baseline_matched = input.baseline_matched;
-    let config_fixable = input.config_fixable;
-    match api_check_json_document_with_config_fixable_meta_and_extras(
-        results,
-        root,
-        elapsed,
-        config_fixable,
-        check_output_meta(explain, input.type_aware),
-        check_json_extras(regression, None, baseline_matched),
-    ) {
-        Ok(output) => emit_report_json(&output, "JSON", input.json_style),
+    match render_json(input) {
+        Ok(output) => {
+            outln!("{output}");
+            ExitCode::SUCCESS
+        }
         Err(e) => {
             eprintln!("Error: failed to serialize results: {e}");
             ExitCode::from(2)
         }
     }
+}
+
+pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_json::Error> {
+    let output = api_check_json_document_with_config_fixable_meta_and_extras(
+        input.results,
+        input.root,
+        input.elapsed,
+        input.config_fixable,
+        check_output_meta(input.explain, input.type_aware),
+        check_json_extras(input.regression, None, input.baseline_matched),
+    )?;
+    input.json_style.serialize(&output)
 }
 
 #[must_use]

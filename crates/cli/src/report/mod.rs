@@ -235,6 +235,33 @@ pub(crate) fn emit_report_json(
     }
 }
 
+pub(crate) struct CheckJsonRenderInput<'a> {
+    pub(crate) results: &'a AnalysisResults,
+    pub(crate) root: &'a Path,
+    pub(crate) elapsed: Duration,
+    pub(crate) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
+    pub(crate) regression: Option<&'a crate::regression::RegressionOutcome>,
+    pub(crate) baseline_matched: Option<(usize, usize)>,
+    pub(crate) config_fixable: bool,
+    pub(crate) json_style: crate::json_style::JsonStyle,
+}
+
+pub(crate) fn render_check_json(
+    input: &CheckJsonRenderInput<'_>,
+) -> Result<String, serde_json::Error> {
+    json::render_json(&json::PrintJsonInput {
+        results: input.results,
+        root: input.root,
+        elapsed: input.elapsed,
+        explain: false,
+        type_aware: input.type_aware,
+        regression: input.regression,
+        baseline_matched: input.baseline_matched,
+        config_fixable: input.config_fixable,
+        json_style: input.json_style,
+    })
+}
+
 /// Elide the common directory prefix between a base path and a target path.
 /// Only strips complete directory segments (never partial filenames).
 /// Returns the remaining suffix of `target`.

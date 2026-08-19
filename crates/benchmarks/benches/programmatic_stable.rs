@@ -19,8 +19,8 @@ use fallow_api::{
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
 use fallow_cli::{
-    benchmark_fix_dry_run, benchmark_list_json, benchmark_rule_pack_test_json,
-    benchmark_security_json, benchmark_viz_html,
+    benchmark_dead_code_json, benchmark_fix_dry_run, benchmark_list_json,
+    benchmark_rule_pack_test_json, benchmark_security_json, benchmark_viz_html,
 };
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
@@ -30,6 +30,7 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
+const DEAD_CODE_FINDING_COUNT: usize = FIX_FILE_COUNT;
 const FIX_FILE_COUNT: usize = 128;
 const LIST_FILE_COUNT: usize = 128;
 const LIST_WORKSPACE_COUNT: usize = 8;
@@ -844,6 +845,26 @@ fn stable_fix_dry_run_many_exports(c: &mut Criterion) {
     );
 }
 
+fn stable_dead_code_many_exports_json(c: &mut Criterion) {
+    let input = create_fix_project();
+
+    let (status, issue_count, rendered_bytes) =
+        benchmark_dead_code_json(&input.root, BENCH_THREADS);
+    assert_eq!(status, std::process::ExitCode::SUCCESS);
+    assert_eq!(issue_count, DEAD_CODE_FINDING_COUNT);
+    assert!(rendered_bytes > 0);
+
+    c.bench_function("stable_dead_code_many_exports_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_dead_code_json(&input.root, BENCH_THREADS);
+            assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+            assert_eq!(result.1, DEAD_CODE_FINDING_COUNT);
+            assert!(result.2 > 0);
+            result
+        });
+    });
+}
+
 fn stable_security_many_framework_sinks_json(c: &mut Criterion) {
     let input = create_security_project();
     let expected_findings = SECURITY_FILE_COUNT * 2;
@@ -944,6 +965,7 @@ criterion_group!(
     stable_circular_dependencies_domain_cycles,
     stable_feature_flags_workspace_analysis,
     stable_fix_dry_run_many_exports,
+    stable_dead_code_many_exports_json,
     stable_security_many_framework_sinks_json,
     stable_rule_pack_policy_analysis_json,
     stable_list_workspace_inventory_json,
