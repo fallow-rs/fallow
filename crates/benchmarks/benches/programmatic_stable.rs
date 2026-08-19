@@ -18,6 +18,7 @@ use fallow_api::{
     DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, FeatureFlagsOptions,
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
+use fallow_cli::benchmark_fix_dry_run;
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
     parse_all_files, parse_single_file,
@@ -26,6 +27,7 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
+const FIX_FILE_COUNT: usize = 128;
 
 struct CommandInput {
     _temp_dir: TempDir,
@@ -396,6 +398,48 @@ export const unusedFallback{index} = (): boolean => false;
     }
 }
 
+fn create_fix_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-fix-preview",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}"#,
+    );
+
+    let mut index_source = String::new();
+    for index in 0..FIX_FILE_COUNT {
+        writeln!(
+            &mut index_source,
+            "import {{ used{index} }} from \"./features/feature{index}\";"
+        )
+        .unwrap();
+        writeln!(&mut index_source, "console.log(used{index});").unwrap();
+        write_file(
+            &root,
+            &format!("src/features/feature{index}.ts"),
+            format!(
+                r"
+export const used{index} = {index};
+export const unused{index} = {index} * 2;
+"
+            ),
+        );
+    }
+    write_file(&root, "src/index.ts", index_source);
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
 fn create_warm_complexity_health_project() -> CommandInput {
     let input = create_health_project();
     let options = ComplexityOptions {
@@ -556,6 +600,34 @@ fn stable_feature_flags_workspace_analysis(c: &mut Criterion) {
     });
 }
 
+fn stable_fix_dry_run_many_exports(c: &mut Criterion) {
+    let input = create_fix_project();
+    let representative_path = input.root.join("src/features/feature0.ts");
+    let original_source = fs::read_to_string(&representative_path).unwrap();
+
+    let (status, fix_count) = benchmark_fix_dry_run(&input.root, BENCH_THREADS);
+    assert_eq!(status, std::process::ExitCode::SUCCESS);
+    assert_eq!(fix_count, FIX_FILE_COUNT);
+    assert_eq!(
+        fs::read_to_string(&representative_path).unwrap(),
+        original_source
+    );
+
+    c.bench_function("stable_fix_dry_run_many_exports", |bencher| {
+        bencher.iter(|| {
+            let (status, fix_count) = benchmark_fix_dry_run(&input.root, BENCH_THREADS);
+            assert_eq!(status, std::process::ExitCode::SUCCESS);
+            assert_eq!(fix_count, FIX_FILE_COUNT);
+            (status, fix_count)
+        });
+    });
+
+    assert_eq!(
+        fs::read_to_string(representative_path).unwrap(),
+        original_source
+    );
+}
+
 criterion_group!(
     benches,
     stable_combined_workspace_programmatic_session_reuse,
@@ -563,6 +635,7 @@ criterion_group!(
     stable_extract_workspace_monorepo_warm_hash_hit,
     stable_health_complex_service_warm_complexity_hit,
     stable_circular_dependencies_domain_cycles,
-    stable_feature_flags_workspace_analysis
+    stable_feature_flags_workspace_analysis,
+    stable_fix_dry_run_many_exports
 );
 criterion_main!(benches);

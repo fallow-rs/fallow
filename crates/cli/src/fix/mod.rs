@@ -84,6 +84,7 @@ pub struct FixOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    pub emit_output: bool,
     pub allow_remote_extends: bool,
     pub dry_run: bool,
     pub yes: bool,
@@ -99,6 +100,16 @@ pub struct FixOptions<'a> {
 }
 
 pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
+    run_fix_with_count(opts).0
+}
+
+pub fn run_fix_with_count(opts: &FixOptions<'_>) -> (ExitCode, usize) {
+    let mut fix_count = 0;
+    let exit_code = run_fix_impl(opts, &mut fix_count);
+    (exit_code, fix_count)
+}
+
+fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
     if !opts.dry_run && !opts.yes && !std::io::stdin().is_terminal() {
         let msg = "fix command requires --yes (or --force) in non-interactive environments. \
                    Use --dry-run to preview changes first, then pass --yes to confirm.";
@@ -137,7 +148,11 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     };
 
     if results.total_issues() == 0 {
-        return emit_empty_fix_output(opts);
+        return if opts.emit_output {
+            emit_empty_fix_output(opts)
+        } else {
+            ExitCode::SUCCESS
+        };
     }
 
     let mut fixes: Vec<serde_json::Value> = Vec::new();
@@ -161,7 +176,9 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         fixes: &mut fixes,
     });
 
-    finalize_fix_run(opts, plan, &mut fixes, had_write_error, &catalog_totals)
+    let exit_code = finalize_fix_run(opts, plan, &mut fixes, had_write_error, &catalog_totals);
+    *fix_count = fixes.len();
+    exit_code
 }
 
 /// Commit the plan, emit output, and compute the exit code after every fixer ran.
@@ -192,19 +209,21 @@ fn finalize_fix_run(
         had_write_error = true;
     }
 
-    if let Err(code) = emit_fix_output(&FixOutputInput {
-        output: opts.output,
-        json_style: opts.json_style,
-        quiet: opts.quiet,
-        dry_run: opts.dry_run,
-        fixes,
-        catalog_applied: catalog_totals.applied,
-        catalog_skipped: catalog_totals.skipped,
-        catalog_comment_lines_removed: catalog_totals.comment_lines_removed,
-        content_changed_count: skip_counts.content_changed,
-        mixed_line_endings_count: skip_counts.mixed_line_endings,
-        low_confidence_count: skip_counts.low_confidence,
-    }) {
+    if opts.emit_output
+        && let Err(code) = emit_fix_output(&FixOutputInput {
+            output: opts.output,
+            json_style: opts.json_style,
+            quiet: opts.quiet,
+            dry_run: opts.dry_run,
+            fixes,
+            catalog_applied: catalog_totals.applied,
+            catalog_skipped: catalog_totals.skipped,
+            catalog_comment_lines_removed: catalog_totals.comment_lines_removed,
+            content_changed_count: skip_counts.content_changed,
+            mixed_line_endings_count: skip_counts.mixed_line_endings,
+            low_confidence_count: skip_counts.low_confidence,
+        })
+    {
         return code;
     }
 

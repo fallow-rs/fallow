@@ -2915,6 +2915,32 @@ pub fn run() -> ExitCode {
     record_run_epilogue(telemetry_run, exit_code, None, cli.parent_run.as_deref())
 }
 
+/// Benchmark hook for the production fix dry-run pipeline. This is not a
+/// supported API. Rendered output is disabled so the benchmark measures
+/// analysis and fix planning rather than terminal I/O.
+#[doc(hidden)]
+pub fn benchmark_fix_dry_run(root: &Path, threads: usize) -> (ExitCode, usize) {
+    let config_path = None;
+    fix::run_fix_with_count(&fix::FixOptions {
+        root,
+        config_path: &config_path,
+        output: fallow_config::OutputFormat::Json,
+        json_style: json_style::JsonStyle::Compact,
+        no_cache: true,
+        threads,
+        quiet: true,
+        emit_output: false,
+        allow_remote_extends: false,
+        dry_run: true,
+        yes: false,
+        production: false,
+        no_create_config: true,
+        type_aware: None,
+        type_aware_projects: &[],
+        type_aware_require: None,
+    })
+}
+
 /// Status bars refresh frequently, so their local read path bypasses telemetry,
 /// update checks, notices, and every other command epilogue.
 fn is_impact_statusline(cli: &Cli) -> bool {
@@ -4755,6 +4781,7 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCo
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
+        emit_output: true,
         allow_remote_extends: cli.allow_remote_extends,
         dry_run: args.dry_run,
         yes: args.yes,
