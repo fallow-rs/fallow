@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_config::{
-    DuplicatesConfig, EffectKind, FallowConfig, RulePackDef, RulePackRule, RulePackRuleKind,
-    RulesConfig, Severity,
+    DuplicatesConfig, EffectKind, EmailMode, FallowConfig, RulePackDef, RulePackRule,
+    RulePackRuleKind, RulesConfig, Severity,
 };
 use fallow_engine::{
     guard::build_guard_report,
@@ -37,6 +37,8 @@ use tempfile::TempDir;
 
 const FILE_COUNT: usize = 32;
 const WARM_FILE_COUNT: usize = 256;
+const CHURN_EVENTS_PER_FILE: usize = 4;
+const SECONDS_PER_DAY: u64 = 86_400;
 const COVERAGE_GAP_RUNTIME_FILE_COUNT: usize = 256;
 const COVERAGE_GAP_COVERED_FILE_COUNT: usize = COVERAGE_GAP_RUNTIME_FILE_COUNT / 2;
 const WARM_CSS_FILE_COUNT: usize = 96;
@@ -62,6 +64,11 @@ struct WarmEngineFixture {
     fixture: EngineFixture,
     session: AnalysisSession,
     config_path: Option<PathBuf>,
+}
+
+struct HotspotOwnershipFixture {
+    fixture: WarmEngineFixture,
+    churn_file: PathBuf,
 }
 
 struct CssDeepEngineFixture {
@@ -327,6 +334,51 @@ fn create_warm_engine_fixture() -> WarmEngineFixture {
     }
 }
 
+fn create_hotspot_ownership_fixture() -> HotspotOwnershipFixture {
+    let fixture = create_warm_engine_fixture();
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let event_shapes = [
+        (60, "alice@example.test", 12, 2),
+        (30, "bob@example.test", 8, 3),
+        (7, "alice@example.test", 6, 1),
+        (1, "alice@example.test", 4, 1),
+    ];
+    let mut events = Vec::with_capacity(WARM_FILE_COUNT * CHURN_EVENTS_PER_FILE);
+    for file_index in 0..WARM_FILE_COUNT {
+        for (days_ago, author, added, deleted) in event_shapes {
+            events.push(serde_json::json!({
+                "path": format!("src/module-{file_index}.ts"),
+                "timestamp": now_secs - days_ago * SECONDS_PER_DAY,
+                "author": author,
+                "added": added,
+                "deleted": deleted,
+            }));
+        }
+    }
+    let churn_file = fixture.fixture.root.join("benchmark-churn.json");
+    fs::write(
+        &churn_file,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": "fallow-churn/v1",
+            "events": events,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        !fixture.fixture.root.join(".git").exists(),
+        "the imported churn fixture must not depend on ambient git history"
+    );
+
+    HotspotOwnershipFixture {
+        fixture,
+        churn_file,
+    }
+}
+
 fn create_coverage_gap_engine_fixture() -> WarmEngineFixture {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
@@ -585,6 +637,18 @@ fn warm_css_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOption
     }
 }
 
+fn warm_hotspot_ownership_options(fixture: &HotspotOwnershipFixture) -> HealthExecutionOptions<'_> {
+    HealthExecutionOptions {
+        complexity: false,
+        hotspots: true,
+        ownership: true,
+        ownership_emails: Some(EmailMode::Raw),
+        min_commits: Some(3),
+        churn_file: Some(&fixture.churn_file),
+        ..warm_health_options(&fixture.fixture)
+    }
+}
+
 fn warm_coverage_gap_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_> {
     HealthExecutionOptions {
         complexity: false,
@@ -685,6 +749,45 @@ fn component_engine_warm_session_health(c: &mut Criterion) {
                 .expect("warm health analysis succeeds")
         });
     });
+}
+
+fn component_engine_warm_session_hotspots_ownership_imported_churn(c: &mut Criterion) {
+    let fixture = create_hotspot_ownership_fixture();
+    let options = warm_hotspot_ownership_options(&fixture);
+    let warmup = run_ungrouped_health_with_session(&options, None, &fixture.fixture.session, None)
+        .expect("hotspot ownership warm-up succeeds");
+    let summary = warmup
+        .report
+        .hotspot_summary
+        .expect("hotspot ownership warm-up produces a summary");
+    assert_eq!(summary.since, "imported churn");
+    assert_eq!(summary.min_commits, 3);
+    assert_eq!(summary.files_analyzed, WARM_FILE_COUNT);
+    assert_eq!(summary.files_excluded, 0);
+    assert!(!summary.shallow_clone);
+    assert_eq!(warmup.report.hotspots.len(), WARM_FILE_COUNT);
+    assert!(warmup.report.file_scores.is_empty());
+    assert!(warmup.report.targets.is_empty());
+    assert!(warmup.report.hotspots.iter().all(|hotspot| {
+        let ownership = hotspot
+            .ownership
+            .as_ref()
+            .expect("ownership metrics exist for every imported churn file");
+        hotspot.commits == CHURN_EVENTS_PER_FILE as u32
+            && ownership.bus_factor == 1
+            && ownership.contributor_count == 2
+            && ownership.top_contributor.identifier == "alice@example.test"
+    }));
+
+    c.bench_function(
+        "component_engine_warm_session_hotspots_ownership_imported_churn",
+        |bencher| {
+            bencher.iter(|| {
+                run_ungrouped_health_with_session(&options, None, &fixture.fixture.session, None)
+                    .expect("warm hotspot ownership analysis succeeds")
+            });
+        },
+    );
 }
 
 fn component_engine_warm_session_coverage_gaps_many_files(c: &mut Criterion) {
@@ -894,6 +997,7 @@ criterion_group!(
     component_engine_warm_session_complexity_owned,
     component_engine_warm_session_complexity_shared,
     component_engine_warm_session_health,
+    component_engine_warm_session_hotspots_ownership_imported_churn,
     component_engine_warm_session_coverage_gaps_many_files,
     component_engine_warm_session_css_health,
     component_engine_warm_session_css_health_many_files,
