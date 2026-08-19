@@ -2941,6 +2941,16 @@ pub fn benchmark_fix_dry_run(root: &Path, threads: usize) -> (ExitCode, usize) {
     })
 }
 
+/// Benchmark hook for the production security analysis and JSON rendering
+/// pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_security_json(root: &Path, threads: usize) -> (ExitCode, usize, usize) {
+    match security::benchmark_security_json(root, threads) {
+        Ok((finding_count, rendered_bytes)) => (ExitCode::SUCCESS, finding_count, rendered_bytes),
+        Err(code) => (code, 0, 0),
+    }
+}
+
 /// Status bars refresh frequently, so their local read path bypasses telemetry,
 /// update checks, notices, and every other command epilogue.
 fn is_impact_statusline(cli: &Cli) -> bool {

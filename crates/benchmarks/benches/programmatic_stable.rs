@@ -18,7 +18,7 @@ use fallow_api::{
     DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, FeatureFlagsOptions,
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
-use fallow_cli::benchmark_fix_dry_run;
+use fallow_cli::{benchmark_fix_dry_run, benchmark_security_json};
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
     parse_all_files, parse_single_file,
@@ -28,6 +28,7 @@ use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
 const FIX_FILE_COUNT: usize = 128;
+const SECURITY_FILE_COUNT: usize = 128;
 
 struct CommandInput {
     _temp_dir: TempDir,
@@ -440,6 +441,46 @@ export const unused{index} = {index} * 2;
     }
 }
 
+fn create_security_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-security-framework-sinks",
+  "private": true,
+  "type": "module",
+  "dependencies": { "express": "5.1.0" }
+}"#,
+    );
+
+    for index in 0..SECURITY_FILE_COUNT {
+        write_file(
+            &root,
+            &format!("src/routes/route{index}.ts"),
+            format!(
+                r#"
+declare const app: {{
+  post(path: string, handler: (req: unknown) => void): void;
+}};
+
+app.post("/run/{index}", (req) => {{
+  eval(req);
+  eval(req.body);
+}});
+"#
+            ),
+        );
+    }
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
 fn create_warm_complexity_health_project() -> CommandInput {
     let input = create_health_project();
     let options = ComplexityOptions {
@@ -628,6 +669,28 @@ fn stable_fix_dry_run_many_exports(c: &mut Criterion) {
     );
 }
 
+fn stable_security_many_framework_sinks_json(c: &mut Criterion) {
+    let input = create_security_project();
+    let expected_findings = SECURITY_FILE_COUNT * 2;
+
+    let (status, finding_count, rendered_bytes) =
+        benchmark_security_json(&input.root, BENCH_THREADS);
+    assert_eq!(status, std::process::ExitCode::SUCCESS);
+    assert_eq!(finding_count, expected_findings);
+    assert!(rendered_bytes > 0);
+
+    c.bench_function("stable_security_many_framework_sinks_json", |bencher| {
+        bencher.iter(|| {
+            let (status, finding_count, rendered_bytes) =
+                benchmark_security_json(&input.root, BENCH_THREADS);
+            assert_eq!(status, std::process::ExitCode::SUCCESS);
+            assert_eq!(finding_count, expected_findings);
+            assert!(rendered_bytes > 0);
+            (status, finding_count, rendered_bytes)
+        });
+    });
+}
+
 criterion_group!(
     benches,
     stable_combined_workspace_programmatic_session_reuse,
@@ -636,6 +699,7 @@ criterion_group!(
     stable_health_complex_service_warm_complexity_hit,
     stable_circular_dependencies_domain_cycles,
     stable_feature_flags_workspace_analysis,
-    stable_fix_dry_run_many_exports
+    stable_fix_dry_run_many_exports,
+    stable_security_many_framework_sinks_json
 );
 criterion_main!(benches);

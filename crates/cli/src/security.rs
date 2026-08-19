@@ -232,6 +232,41 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     security_exit_code(opts, &output, effective_severities)
 }
 
+/// Benchmark hook for the production security analysis and JSON rendering
+/// pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_security_json(root: &Path, threads: usize) -> Result<(usize, usize), ExitCode> {
+    let config_path = None;
+    let files: &[PathBuf] = &[];
+    let opts = SecurityOptions {
+        root,
+        config_path: &config_path,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        no_cache: true,
+        threads,
+        quiet: true,
+        allow_remote_extends: false,
+        fail_on_issues: false,
+        sarif_file: None,
+        summary: false,
+        changed_since: None,
+        use_shared_diff_index: true,
+        workspace: None,
+        changed_workspaces: None,
+        file: files,
+        surface: false,
+        gate: None,
+        runtime_coverage: None,
+        min_invocations_hot: crate::DEFAULT_MIN_INVOCATIONS_HOT,
+        explain: false,
+    };
+    let (output, _) = build_security_command_output(&opts, Instant::now())?;
+    let finding_count = output.security_findings.len();
+    let rendered = render_security_output(&opts, &output);
+    Ok((finding_count, rendered.len()))
+}
+
 fn build_security_command_output(
     opts: &SecurityOptions<'_>,
     started: Instant,

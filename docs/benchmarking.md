@@ -47,7 +47,8 @@ Fast PR shards:
 - `fallow-engine/dupes_detect`: duplicate-detection engine paths (triggered by
   `crates/engine/`, `crates/extract/`, and `crates/types/` changes).
 - `fallow-benchmarks/programmatic_stable`: deterministic programmatic API,
-  session reuse, warm parse-cache, health-cache, and fix dry-run planning paths.
+  session reuse, warm parse-cache, health-cache, fix dry-run planning, and
+  opt-in security candidate analysis paths.
 - `fallow-benchmarks/representative_sources`: focused source-shape extraction
   probes.
 - `fallow-benchmarks/component_config`: config loading, resolution, workspace
