@@ -2967,6 +2967,18 @@ pub fn benchmark_list_json(root: &Path, threads: usize) -> (ExitCode, usize, usi
     }
 }
 
+/// Benchmark hook for the production Viz analysis, payload, and HTML
+/// rendering pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_viz_html(root: &Path, threads: usize) -> (ExitCode, usize, usize, usize) {
+    match viz::benchmark_viz_html(root, threads) {
+        Ok((file_count, edge_count, rendered_bytes)) => {
+            (ExitCode::SUCCESS, file_count, edge_count, rendered_bytes)
+        }
+        Err(code) => (code, 0, 0, 0),
+    }
+}
+
 /// Status bars refresh frequently, so their local read path bypasses telemetry,
 /// update checks, notices, and every other command epilogue.
 fn is_impact_statusline(cli: &Cli) -> bool {

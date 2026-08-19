@@ -18,7 +18,9 @@ use fallow_api::{
     DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, FeatureFlagsOptions,
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
-use fallow_cli::{benchmark_fix_dry_run, benchmark_list_json, benchmark_security_json};
+use fallow_cli::{
+    benchmark_fix_dry_run, benchmark_list_json, benchmark_security_json, benchmark_viz_html,
+};
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
     parse_all_files, parse_single_file,
@@ -34,6 +36,7 @@ const LIST_WORKSPACE_COUNT: usize = 8;
 // package metadata, preserving both production entry-point sources.
 const LIST_ENTRY_POINT_COUNT: usize = LIST_WORKSPACE_COUNT * 2;
 const SECURITY_FILE_COUNT: usize = 128;
+const VIZ_MODULE_COUNT: usize = 64;
 
 struct CommandInput {
     _temp_dir: TempDir,
@@ -535,6 +538,47 @@ fn create_list_inventory_project() -> CommandInput {
     }
 }
 
+fn create_viz_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-viz-html",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}"#,
+    );
+
+    let mut index_source = String::new();
+    for index in 0..VIZ_MODULE_COUNT {
+        writeln!(
+            index_source,
+            "import {{ value{index} }} from './features/feature{index}.js';"
+        )
+        .unwrap();
+        write_file(
+            &root,
+            &format!("src/features/feature{index}.ts"),
+            format!("export const value{index} = {{ id: {index}, label: 'feature-{index}' }};\n"),
+        );
+    }
+    index_source.push_str("\nexport const features = [\n");
+    for index in 0..VIZ_MODULE_COUNT {
+        writeln!(index_source, "  value{index},").unwrap();
+    }
+    index_source.push_str("];\n");
+    write_file(&root, "src/index.ts", index_source);
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
 fn create_warm_complexity_health_project() -> CommandInput {
     let input = create_health_project();
     let options = ComplexityOptions {
@@ -769,6 +813,29 @@ fn stable_list_workspace_inventory_json(c: &mut Criterion) {
     });
 }
 
+fn stable_viz_project_html(c: &mut Criterion) {
+    let input = create_viz_project();
+    let expected_files = VIZ_MODULE_COUNT + 1;
+
+    let (status, file_count, edge_count, rendered_bytes) =
+        benchmark_viz_html(&input.root, BENCH_THREADS);
+    assert_eq!(status, std::process::ExitCode::SUCCESS);
+    assert_eq!(file_count, expected_files);
+    assert_eq!(edge_count, VIZ_MODULE_COUNT);
+    assert!(rendered_bytes > 0);
+
+    c.bench_function("stable_viz_project_html", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_viz_html(&input.root, BENCH_THREADS);
+            assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+            assert_eq!(result.1, expected_files);
+            assert_eq!(result.2, VIZ_MODULE_COUNT);
+            assert!(result.3 > 0);
+            result
+        });
+    });
+}
+
 criterion_group!(
     benches,
     stable_combined_workspace_programmatic_session_reuse,
@@ -779,6 +846,7 @@ criterion_group!(
     stable_feature_flags_workspace_analysis,
     stable_fix_dry_run_many_exports,
     stable_security_many_framework_sinks_json,
-    stable_list_workspace_inventory_json
+    stable_list_workspace_inventory_json,
+    stable_viz_project_html
 );
 criterion_main!(benches);

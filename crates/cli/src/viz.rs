@@ -59,7 +59,51 @@ pub struct VizOptions<'a> {
 pub fn run_viz(opts: &VizOptions<'_>) -> ExitCode {
     let start = Instant::now();
 
-    let config = match load_config(
+    let data = match build_viz_data_from_options(opts) {
+        Ok(data) => data,
+        Err(code) => return code,
+    };
+    let elapsed = start.elapsed();
+
+    match opts.format {
+        VizFormat::Html => write_html(opts, &data, elapsed),
+        VizFormat::Dot => write_text_format(opts, &generate_dot(&data)),
+        VizFormat::Mermaid => write_text_format(opts, &generate_mermaid(&data)),
+    }
+}
+
+/// Benchmark hook for the production Viz analysis, payload, and HTML
+/// rendering pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_viz_html(root: &Path, threads: usize) -> Result<(usize, usize, usize), ExitCode> {
+    let config_path = None;
+    let opts = VizOptions {
+        root,
+        config_path: &config_path,
+        no_cache: true,
+        threads,
+        quiet: true,
+        production: false,
+        allow_remote_extends: false,
+        output_path: None,
+        no_open: true,
+        format: VizFormat::Html,
+    };
+    let data = build_viz_data_from_options(&opts)?;
+    let file_count = data.files.len();
+    let edge_count = data.edges.len();
+    let html = render_html(&data).map_err(|message| {
+        emit_error(
+            &format!("Failed to serialize viz data: {message}"),
+            2,
+            OutputFormat::Human,
+        )
+    })?;
+    Ok((file_count, edge_count, html.len()))
+}
+
+fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCode> {
+    let config = load_config(
         opts.root,
         opts.config_path,
         LoadConfigArgs {
@@ -70,14 +114,17 @@ pub fn run_viz(opts: &VizOptions<'_>) -> ExitCode {
             quiet: opts.quiet,
             allow_remote_extends: opts.allow_remote_extends,
         },
-    ) {
-        Ok(c) => c,
-        Err(code) => return code,
-    };
+    )?;
 
     let session = match AnalysisSession::from_resolved_config(config) {
         Ok(session) => session,
-        Err(e) => return emit_error(&format!("Analysis error: {e}"), 2, OutputFormat::Human),
+        Err(e) => {
+            return Err(emit_error(
+                &format!("Analysis error: {e}"),
+                2,
+                OutputFormat::Human,
+            ));
+        }
     };
     let duplicates_config = session.config().duplicates.clone();
     let artifacts = match session.analyze_project_with_artifacts(
@@ -90,15 +137,19 @@ pub fn run_viz(opts: &VizOptions<'_>) -> ExitCode {
     ) {
         Ok(artifacts) => artifacts,
         Err(e) => {
-            return emit_error(&format!("Analysis error: {e}"), 2, OutputFormat::Human);
+            return Err(emit_error(
+                &format!("Analysis error: {e}"),
+                2,
+                OutputFormat::Human,
+            ));
         }
     };
 
     let Some(graph) = artifacts.dead_code.graph.as_ref() else {
-        return emit_error("Graph not available", 2, OutputFormat::Human);
+        return Err(emit_error("Graph not available", 2, OutputFormat::Human));
     };
 
-    let data = build_viz_data(&VizBuildInput {
+    Ok(build_viz_data(&VizBuildInput {
         results: &artifacts.dead_code.results,
         graph,
         modules: artifacts.dead_code.modules.as_deref(),
@@ -106,14 +157,7 @@ pub fn run_viz(opts: &VizOptions<'_>) -> ExitCode {
         duplication: &artifacts.duplication,
         workspaces: session.workspaces(),
         config: session.config(),
-    });
-    let elapsed = start.elapsed();
-
-    match opts.format {
-        VizFormat::Html => write_html(opts, &data, elapsed),
-        VizFormat::Dot => write_text_format(opts, &generate_dot(&data)),
-        VizFormat::Mermaid => write_text_format(opts, &generate_mermaid(&data)),
-    }
+    }))
 }
 
 /// Emit a DOT/Mermaid document: to `--out` when given (symlink-safe,
@@ -175,8 +219,8 @@ fn write_output(path: &Path, content: &str) -> Result<(), String> {
 }
 
 fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duration) -> ExitCode {
-    let json = match serde_json::to_string(data) {
-        Ok(j) => j,
+    let html = match render_html(data) {
+        Ok(html) => html,
         Err(e) => {
             return emit_error(
                 &format!("Failed to serialize viz data: {e}"),
@@ -185,28 +229,6 @@ fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duratio
             );
         }
     };
-
-    let json_safe = escape_payload_json(&json);
-    let title = html_escape(&data.root);
-
-    let css = VIZ_CSS;
-    let js = VIZ_JS;
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark light">
-<title>fallow map: {title}</title>
-<style>{css}</style>
-</head>
-<body>
-<script>window.__FALLOW_DATA__={json_safe};</script>
-<script>{js}</script>
-</body>
-</html>"#,
-    );
 
     let output_path = opts
         .output_path
@@ -240,6 +262,32 @@ fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duratio
     }
 
     ExitCode::SUCCESS
+}
+
+fn render_html(data: &VizData) -> Result<String, serde_json::Error> {
+    let json = serde_json::to_string(data)?;
+
+    let json_safe = escape_payload_json(&json);
+    let title = html_escape(&data.root);
+
+    let css = VIZ_CSS;
+    let js = VIZ_JS;
+    Ok(format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>fallow map: {title}</title>
+<style>{css}</style>
+</head>
+<body>
+<script>window.__FALLOW_DATA__={json_safe};</script>
+<script>{js}</script>
+</body>
+</html>"#,
+    ))
 }
 
 // ── DOT generation ──────────────────────────────────────────────
@@ -434,6 +482,17 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&escaped).expect("escaped payload stays valid JSON");
         assert_eq!(value["files"][0]["path"], "</script><!--<script>alert(1)");
+    }
+
+    #[test]
+    fn render_html_embeds_the_payload_and_static_assets() {
+        let html = render_html(&sample_data()).expect("render viz HTML");
+
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert!(html.contains("<script>window.__FALLOW_DATA__={"));
+        assert!(html.contains("\"files\":[{"));
+        assert!(html.contains("<style>"));
+        assert!(html.contains("</html>"));
     }
 
     #[test]
