@@ -207,6 +207,15 @@ test("binary-size workflow isolates incompatible release builds", () => {
   }
 });
 
+test("CodSpeed simulation jobs allow release LTO plus the tracked suites", () => {
+  const workflow = readWorkflow(".github/workflows/bench.yml");
+  const fastJob = indentedBlock(workflow, "benchmark", 2);
+  const fullJob = indentedBlock(workflow, "benchmark-full", 2);
+
+  assert.match(fastJob, /timeout-minutes: 45/);
+  assert.match(fullJob, /timeout-minutes: 45/);
+});
+
 test("regular CI keeps affected checks on Ubuntu", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const npmPackage = JSON.parse(readFileSync("npm/fallow/package.json", "utf8"));
