@@ -52,9 +52,10 @@ test("component bench file changes select the matching shard", () => {
   ]);
 });
 
-test("recommend production changes select the stable programmatic shard", () => {
+test("stable CLI production changes select the stable programmatic shard", () => {
   for (const file of [
     "crates/cli/src/init.rs",
+    "crates/cli/src/inspect.rs",
     "crates/cli/src/json_style.rs",
     "crates/cli/src/lib.rs",
     "crates/cli/src/onboarding.rs",

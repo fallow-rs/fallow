@@ -1,5 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 use fallow_config::OutputFormat;
 use fallow_types::envelope::Meta;
@@ -95,20 +96,30 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
     if !matches!(opts.output, OutputFormat::Json | OutputFormat::Human) {
         return emit_error("inspect supports --format json or human", 2, opts.output);
     }
-    let target = match NormalizedTarget::new(opts.root, &opts.target) {
-        Ok(target) => target,
+    let transport = ProcessChildJsonTransport;
+    let bundle = match build_inspect_bundle(opts, &transport) {
+        Ok(bundle) => bundle,
         Err(message) => return emit_error(&message, 2, opts.output),
     };
 
+    let completeness_failed = inspect_type_aware_completeness_failed(&bundle);
+    let emitted = emit_inspect_bundle(bundle, opts);
+    if emitted == ExitCode::SUCCESS && completeness_failed {
+        ExitCode::from(1)
+    } else {
+        emitted
+    }
+}
+
+fn build_inspect_bundle(
+    opts: &InspectOptions<'_>,
+    transport: &dyn ChildJsonTransport,
+) -> Result<InspectOutput, String> {
+    let target = NormalizedTarget::new(opts.root, &opts.target)?;
+
     let target_file = target.file.as_str();
-    let trace_file = match run_required_json(opts, trace_file_args(target_file)) {
-        Ok(value) => value,
-        Err(message) => return emit_error(&message, 2, opts.output),
-    };
-    let trace_export = match collect_trace_export(opts, &target) {
-        Ok(value) => value,
-        Err(message) => return emit_error(&message, 2, opts.output),
-    };
+    let trace_file = run_required_json(opts, trace_file_args(target_file), transport)?;
+    let trace_export = collect_trace_export(opts, &target, transport)?;
 
     let mut warnings = Vec::new();
     if target.export_name.is_some() {
@@ -119,13 +130,13 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
     }
 
     let (evidence, type_aware, semantic_warnings) =
-        build_inspect_evidence(opts, &target, &trace_file, trace_export.clone());
+        build_inspect_evidence(opts, &target, &trace_file, trace_export.clone(), transport);
     warnings.extend(semantic_warnings);
     push_inspect_warnings(&mut warnings, &evidence);
 
     let identity = build_inspect_identity(&target, &trace_file, trace_export.as_ref());
 
-    let bundle = InspectOutput {
+    Ok(InspectOutput {
         target: target.target_descriptor(),
         identity,
         evidence,
@@ -134,15 +145,7 @@ pub fn run_inspect(opts: &InspectOptions<'_>) -> ExitCode {
             type_aware: Some(type_aware),
             ..Meta::default()
         }),
-    };
-
-    let completeness_failed = inspect_type_aware_completeness_failed(&bundle);
-    let emitted = emit_inspect_bundle(bundle, opts);
-    if emitted == ExitCode::SUCCESS && completeness_failed {
-        ExitCode::from(1)
-    } else {
-        emitted
-    }
+    })
 }
 
 fn inspect_type_aware_completeness_failed(bundle: &InspectOutput) -> bool {
@@ -192,11 +195,17 @@ fn inspect_semantic_incomplete(evidence: &InspectEvidence) -> bool {
 fn collect_trace_export(
     opts: &InspectOptions<'_>,
     target: &NormalizedTarget,
+    transport: &dyn ChildJsonTransport,
 ) -> Result<Option<Value>, String> {
     let Some(export_name) = target.export_name.as_deref() else {
         return Ok(None);
     };
-    run_required_json(opts, trace_export_args(&target.file, export_name)).map(Some)
+    run_required_json(
+        opts,
+        trace_export_args(&target.file, export_name),
+        transport,
+    )
+    .map(Some)
 }
 
 /// Compose the evidence sections (trace, dead-code, duplication, complexity,
@@ -207,13 +216,14 @@ fn build_inspect_evidence(
     target: &NormalizedTarget,
     trace_file: &Value,
     trace_export: Option<Value>,
+    transport: &dyn ChildJsonTransport,
 ) -> (
     InspectEvidence,
     Option<fallow_types::envelope::TypeAwareMeta>,
     Vec<String>,
 ) {
     let optional_threads = parallel_child_threads(opts.threads);
-    let child_evidence = collect_inspect_child_evidence(opts, target, optional_threads);
+    let child_evidence = collect_inspect_child_evidence(opts, target, optional_threads, transport);
 
     let semantic = collect_semantic_evidence(opts, target);
     let evidence = InspectEvidence {
@@ -226,7 +236,7 @@ fn build_inspect_evidence(
         security: child_evidence.security,
         impact_closure: child_evidence.impact_closure,
         churn: child_evidence.churn,
-        symbol_chain: build_symbol_chain_section(opts, target, optional_threads),
+        symbol_chain: build_symbol_chain_section(opts, target, optional_threads, transport),
         semantic_trace: semantic.semantic_trace,
         api_surface: semantic.api_surface,
         symbol_impact: semantic.symbol_impact,
@@ -440,6 +450,7 @@ fn collect_inspect_child_evidence(
     opts: &InspectOptions<'_>,
     target: &NormalizedTarget,
     optional_threads: usize,
+    transport: &dyn ChildJsonTransport,
 ) -> InspectChildEvidence {
     let target_file = target.file.as_str();
 
@@ -450,6 +461,7 @@ fn collect_inspect_child_evidence(
                 dead_code_args(target_file),
                 InspectEvidenceScope::File,
                 optional_threads,
+                transport,
                 |value| value,
             )
         });
@@ -459,6 +471,7 @@ fn collect_inspect_child_evidence(
                 dupes_args(),
                 InspectEvidenceScope::ProjectFilteredToFile,
                 optional_threads,
+                transport,
                 |value| filter_path_array(&value, target_file, "clone_groups"),
             )
         });
@@ -468,6 +481,7 @@ fn collect_inspect_child_evidence(
                 health_args(),
                 InspectEvidenceScope::ProjectFilteredToFile,
                 optional_threads,
+                transport,
                 |value| filter_path_array(&value, target_file, "findings"),
             )
         });
@@ -477,6 +491,7 @@ fn collect_inspect_child_evidence(
                 security_args(target_file),
                 InspectEvidenceScope::File,
                 optional_threads,
+                transport,
                 |value| value,
             )
         });
@@ -486,6 +501,7 @@ fn collect_inspect_child_evidence(
                 impact_closure_args(target_file),
                 InspectEvidenceScope::ProjectFilteredToFile,
                 optional_threads,
+                transport,
                 |value| value,
             )
         });
@@ -622,6 +638,7 @@ fn build_symbol_chain_section(
     opts: &InspectOptions<'_>,
     target: &NormalizedTarget,
     threads: usize,
+    transport: &dyn ChildJsonTransport,
 ) -> Option<InspectEvidenceSection> {
     if !opts.symbol_chain {
         return None;
@@ -632,6 +649,7 @@ fn build_symbol_chain_section(
         symbol_chain_args(&target.file, export_name),
         InspectEvidenceScope::Symbol,
         threads,
+        transport,
         |value| value,
     ))
 }
@@ -784,8 +802,12 @@ fn evidence_detail(section: &InspectEvidenceSection) -> Option<String> {
     None
 }
 
-fn run_required_json(opts: &InspectOptions<'_>, args: Vec<String>) -> Result<Value, String> {
-    run_child_json(opts, args, opts.threads).and_then(|output| output.value)
+fn run_required_json(
+    opts: &InspectOptions<'_>,
+    args: Vec<String>,
+    transport: &dyn ChildJsonTransport,
+) -> Result<Value, String> {
+    run_child_json(opts, args, opts.threads, transport).and_then(|output| output.value)
 }
 
 fn optional_section<F>(
@@ -793,12 +815,13 @@ fn optional_section<F>(
     args: Vec<String>,
     scope: InspectEvidenceScope,
     threads: usize,
+    transport: &dyn ChildJsonTransport,
     filter: F,
 ) -> InspectEvidenceSection
 where
     F: FnOnce(Value) -> Value,
 {
-    match run_child_json(opts, args, threads) {
+    match run_child_json(opts, args, threads, transport) {
         Ok(output) => match output.value {
             Ok(value) => InspectEvidenceSection::ok(scope, filter(value)),
             Err(message) => InspectEvidenceSection::error(scope, message),
@@ -811,23 +834,46 @@ struct ChildJson {
     value: Result<Value, String>,
 }
 
+struct ChildProcessOutput {
+    code: i32,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+trait ChildJsonTransport: Sync {
+    fn run(&self, args: &[String]) -> Result<ChildProcessOutput, String>;
+}
+
+struct ProcessChildJsonTransport;
+
+impl ChildJsonTransport for ProcessChildJsonTransport {
+    fn run(&self, args: &[String]) -> Result<ChildProcessOutput, String> {
+        let binary = std::env::current_exe()
+            .map_err(|err| format!("failed to locate current fallow binary: {err}"))?;
+        let output = Command::new(binary)
+            .args(args)
+            .output()
+            .map_err(|err| format!("failed to run child analysis: {err}"))?;
+        Ok(ChildProcessOutput {
+            code: output.status.code().unwrap_or(2),
+            stdout: output.stdout,
+            stderr: output.stderr,
+        })
+    }
+}
+
 fn run_child_json(
     opts: &InspectOptions<'_>,
     args: Vec<String>,
     threads: usize,
+    transport: &dyn ChildJsonTransport,
 ) -> Result<ChildJson, String> {
-    let binary = std::env::current_exe()
-        .map_err(|err| format!("failed to locate current fallow binary: {err}"))?;
-    let mut command = Command::new(binary);
-    command.args(build_child_args(opts, args, threads));
-    let output = command
-        .output()
-        .map_err(|err| format!("failed to run child analysis: {err}"))?;
+    let args = build_child_args(opts, args, threads);
+    let output = transport.run(&args)?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let code = output.status.code().unwrap_or(2);
-    if code > 1 {
-        let message = child_error_message(code, &stdout, &stderr);
+    if output.code > 1 {
+        let message = child_error_message(output.code, &stdout, &stderr);
         return Err(message);
     }
     if stdout.trim().is_empty() {
@@ -1075,9 +1121,295 @@ fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+const INSPECT_BENCH_TARGET: &str = "src/target.ts";
+const INSPECT_BENCH_CALL_COUNT: usize = 6;
+const INSPECT_BENCH_EXPORT_COUNT: usize = 32;
+const INSPECT_BENCH_IMPORT_COUNT: usize = 16;
+const INSPECT_BENCH_IMPORTED_BY_COUNT: usize = 24;
+const INSPECT_BENCH_FILTERED_COUNT: usize = 64;
+
+struct InspectBenchmarkResponse {
+    args: Vec<String>,
+    slot: u8,
+    stdout: Vec<u8>,
+}
+
+struct InspectBenchmarkRawResponse {
+    command_args: Vec<String>,
+    required: bool,
+    stdout: Vec<u8>,
+}
+
+/// Prebuilt child-response corpus for the inspect benchmark. This is not a
+/// supported API.
+#[doc(hidden)]
+pub struct InspectBenchmarkCorpus {
+    responses: Vec<InspectBenchmarkResponse>,
+}
+
+struct InspectBenchmarkTransport<'a> {
+    corpus: &'a InspectBenchmarkCorpus,
+    calls: AtomicUsize,
+    seen: AtomicU8,
+}
+
+impl ChildJsonTransport for InspectBenchmarkTransport<'_> {
+    fn run(&self, args: &[String]) -> Result<ChildProcessOutput, String> {
+        let response = self
+            .corpus
+            .responses
+            .iter()
+            .find(|response| args == response.args)
+            .ok_or_else(|| format!("unexpected inspect benchmark child args: {args:?}"))?;
+        let bit = 1 << response.slot;
+        if self.seen.fetch_or(bit, Ordering::Relaxed) & bit != 0 {
+            return Err(format!("duplicate inspect benchmark child args: {args:?}"));
+        }
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        Ok(ChildProcessOutput {
+            code: 0,
+            stdout: response.stdout.clone(),
+            stderr: Vec::new(),
+        })
+    }
+}
+
+fn benchmark_json_response(
+    command_args: Vec<String>,
+    required: bool,
+    value: Value,
+) -> InspectBenchmarkRawResponse {
+    let stdout = value.to_string().into_bytes();
+    drop(value);
+    InspectBenchmarkRawResponse {
+        command_args,
+        required,
+        stdout,
+    }
+}
+
+/// Build the response corpus outside the timed inspect benchmark. This is not
+/// a supported API.
+#[doc(hidden)]
+pub fn create_inspect_benchmark_corpus(root: &Path, threads: usize) -> InspectBenchmarkCorpus {
+    let exports = (0..INSPECT_BENCH_EXPORT_COUNT)
+        .map(|index| json!({"name": format!("export_{index}")}))
+        .collect::<Vec<_>>();
+    let imports = (0..INSPECT_BENCH_IMPORT_COUNT)
+        .map(|index| format!("src/dependency_{index}.ts"))
+        .collect::<Vec<_>>();
+    let imported_by = (0..INSPECT_BENCH_IMPORTED_BY_COUNT)
+        .map(|index| format!("src/consumer_{index}.ts"))
+        .collect::<Vec<_>>();
+    let target_and_other = |key: &str| {
+        (0..INSPECT_BENCH_FILTERED_COUNT * 2)
+            .map(|index| {
+                let file = if index % 2 == 0 {
+                    INSPECT_BENCH_TARGET
+                } else {
+                    "src/unrelated.ts"
+                };
+                json!({key: file, "index": index})
+            })
+            .collect::<Vec<_>>()
+    };
+    let file_items = |kind: &str| {
+        (0..INSPECT_BENCH_FILTERED_COUNT)
+            .map(|index| json!({"file": INSPECT_BENCH_TARGET, "kind": kind, "index": index}))
+            .collect::<Vec<_>>()
+    };
+
+    let responses = vec![
+        benchmark_json_response(
+            trace_file_args(INSPECT_BENCH_TARGET),
+            true,
+            json!({
+                "is_reachable": true,
+                "is_entry_point": false,
+                "exports": exports,
+                "imports_from": imports,
+                "imported_by": imported_by,
+            }),
+        ),
+        benchmark_json_response(
+            dead_code_args(INSPECT_BENCH_TARGET),
+            false,
+            json!({"issues": file_items("unused_export"), "summary": {"total": INSPECT_BENCH_FILTERED_COUNT}}),
+        ),
+        benchmark_json_response(
+            dupes_args(),
+            false,
+            json!({"clone_groups": target_and_other("path"), "summary": {"groups": INSPECT_BENCH_FILTERED_COUNT * 2}, "stats": {"files": 2}}),
+        ),
+        benchmark_json_response(
+            health_args(),
+            false,
+            json!({"findings": target_and_other("file"), "summary": {"findings": INSPECT_BENCH_FILTERED_COUNT * 2}, "stats": {"files": 2}}),
+        ),
+        benchmark_json_response(
+            security_args(INSPECT_BENCH_TARGET),
+            false,
+            json!({"findings": file_items("security"), "summary": {"total": INSPECT_BENCH_FILTERED_COUNT}}),
+        ),
+        benchmark_json_response(
+            impact_closure_args(INSPECT_BENCH_TARGET),
+            false,
+            json!({"in_diff": [INSPECT_BENCH_TARGET], "affected_not_shown": imported_by}),
+        ),
+    ];
+    let opts = inspect_benchmark_options(root, threads);
+    let optional_threads = parallel_child_threads(threads);
+    InspectBenchmarkCorpus {
+        responses: responses
+            .into_iter()
+            .enumerate()
+            .map(|(slot, response)| InspectBenchmarkResponse {
+                args: build_child_args(
+                    &opts,
+                    response.command_args,
+                    if response.required {
+                        threads
+                    } else {
+                        optional_threads
+                    },
+                ),
+                slot: u8::try_from(slot).unwrap_or(u8::MAX),
+                stdout: response.stdout,
+            })
+            .collect(),
+    }
+}
+
+fn inspect_benchmark_options(root: &Path, threads: usize) -> InspectOptions<'_> {
+    InspectOptions {
+        root,
+        config_path: None,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        no_cache: true,
+        no_production: true,
+        max_file_size: None,
+        threads,
+        quiet: true,
+        production: false,
+        workspace: None,
+        target: InspectTarget::File {
+            file: INSPECT_BENCH_TARGET.to_string(),
+        },
+        churn_cache_dir: None,
+        symbol_chain: false,
+        type_aware: None,
+        type_aware_projects: &[],
+        type_aware_require: None,
+    }
+}
+
+fn validate_inspect_benchmark_bundle(bundle: &InspectOutput) -> Result<(), String> {
+    let InspectIdentity::File(identity) = &bundle.identity else {
+        return Err("inspect benchmark returned a symbol identity".to_string());
+    };
+    if identity.export_count != Some(INSPECT_BENCH_EXPORT_COUNT)
+        || identity.import_count != Some(INSPECT_BENCH_IMPORT_COUNT)
+        || identity.imported_by_count != Some(INSPECT_BENCH_IMPORTED_BY_COUNT)
+    {
+        return Err("inspect benchmark identity counts changed".to_string());
+    }
+    for (name, section) in [
+        ("trace_file", &bundle.evidence.trace_file),
+        ("dead_code", &bundle.evidence.dead_code),
+        ("duplication", &bundle.evidence.duplication),
+        ("complexity", &bundle.evidence.complexity),
+        ("security", &bundle.evidence.security),
+        ("impact_closure", &bundle.evidence.impact_closure),
+    ] {
+        if section.status != InspectSectionStatus::Ok {
+            return Err(format!("inspect benchmark {name} evidence was not ok"));
+        }
+    }
+    for (name, section) in [
+        ("duplication", &bundle.evidence.duplication),
+        ("complexity", &bundle.evidence.complexity),
+    ] {
+        let count = section
+            .data
+            .as_ref()
+            .and_then(|data| data.get("matched_count"))
+            .and_then(Value::as_u64);
+        if count != Some(INSPECT_BENCH_FILTERED_COUNT as u64) {
+            return Err(format!("inspect benchmark {name} filtering changed"));
+        }
+    }
+    if !bundle.warnings.is_empty() {
+        return Err("inspect benchmark unexpectedly emitted warnings".to_string());
+    }
+    Ok(())
+}
+
+/// Run file inspect orchestration with prebuilt child responses, including
+/// compact tagged JSON rendering. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_inspect_file_evidence_bundle_json(
+    root: &Path,
+    threads: usize,
+    corpus: &InspectBenchmarkCorpus,
+) -> Result<(usize, usize), String> {
+    let opts = inspect_benchmark_options(root, threads);
+    let transport = InspectBenchmarkTransport {
+        corpus,
+        calls: AtomicUsize::new(0),
+        seen: AtomicU8::new(0),
+    };
+    let bundle = build_inspect_bundle(&opts, &transport)?;
+    validate_inspect_benchmark_bundle(&bundle)?;
+    let value = fallow_output::serialize_inspect_json_output(
+        bundle,
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    )
+    .map_err(|error| format!("failed to serialize inspect benchmark output: {error}"))?;
+    if value.get("kind").and_then(Value::as_str) != Some("inspect_target") {
+        return Err("inspect benchmark output kind changed".to_string());
+    }
+    let rendered = serde_json::to_vec(&value)
+        .map_err(|error| format!("failed to render inspect benchmark JSON: {error}"))?;
+    let calls = transport.calls.load(Ordering::Relaxed);
+    let expected_seen = (1 << INSPECT_BENCH_CALL_COUNT) - 1;
+    if calls != INSPECT_BENCH_CALL_COUNT || transport.seen.load(Ordering::Relaxed) != expected_seen
+    {
+        return Err("inspect benchmark child calls changed".to_string());
+    }
+    Ok((calls, rendered.len()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    struct StubTransport {
+        calls: Mutex<Vec<Vec<String>>>,
+        fail_required: bool,
+        fail_optional: bool,
+    }
+
+    impl ChildJsonTransport for StubTransport {
+        fn run(&self, args: &[String]) -> Result<ChildProcessOutput, String> {
+            self.calls.lock().unwrap().push(args.to_vec());
+            let is_required = args.ends_with(&trace_file_args("src/api.ts"));
+            if (is_required && self.fail_required) || (!is_required && self.fail_optional) {
+                return Err("stub transport failed".to_string());
+            }
+            Ok(ChildProcessOutput {
+                code: 0,
+                stdout: if is_required {
+                    br#"{"is_reachable":true,"is_entry_point":false,"exports":[],"imports_from":[],"imported_by":[]}"#.to_vec()
+                } else {
+                    b"{}".to_vec()
+                },
+                stderr: Vec::new(),
+            })
+        }
+    }
 
     fn inspect_options<'a>(
         root: &'a Path,
@@ -1274,5 +1606,65 @@ mod tests {
                 Some("inspect evidence worker panicked")
             );
         });
+    }
+
+    #[test]
+    fn required_transport_failure_stops_before_optional_evidence() {
+        let root = PathBuf::from("/repo");
+        let opts = inspect_options(
+            &root,
+            None,
+            InspectTarget::File {
+                file: "src/api.ts".to_string(),
+            },
+        );
+        let transport = StubTransport {
+            calls: Mutex::new(Vec::new()),
+            fail_required: true,
+            fail_optional: false,
+        };
+
+        let error = build_inspect_bundle(&opts, &transport).unwrap_err();
+
+        assert_eq!(error, "stub transport failed");
+        let calls = transport.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0],
+            build_child_args(&opts, trace_file_args("src/api.ts"), opts.threads)
+        );
+        drop(calls);
+    }
+
+    #[test]
+    fn optional_transport_failures_remain_tagged_evidence_errors() {
+        let root = PathBuf::from("/repo");
+        let opts = inspect_options(
+            &root,
+            None,
+            InspectTarget::File {
+                file: "src/api.ts".to_string(),
+            },
+        );
+        let transport = StubTransport {
+            calls: Mutex::new(Vec::new()),
+            fail_required: false,
+            fail_optional: true,
+        };
+
+        let bundle = build_inspect_bundle(&opts, &transport).unwrap();
+
+        assert_eq!(bundle.evidence.trace_file.status, InspectSectionStatus::Ok);
+        for section in [
+            &bundle.evidence.dead_code,
+            &bundle.evidence.duplication,
+            &bundle.evidence.complexity,
+            &bundle.evidence.security,
+            &bundle.evidence.impact_closure,
+        ] {
+            assert_eq!(section.status, InspectSectionStatus::Error);
+            assert_eq!(section.message.as_deref(), Some("stub transport failed"));
+        }
+        assert_eq!(transport.calls.lock().unwrap().len(), 6);
     }
 }

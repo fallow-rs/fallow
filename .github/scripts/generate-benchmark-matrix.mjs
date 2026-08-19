@@ -38,6 +38,7 @@ export const FAST_BENCHMARKS = [
       "crates/cli/src/health/coverage.rs",
       "crates/cli/src/health/mod.rs",
       "crates/cli/src/init.rs",
+      "crates/cli/src/inspect.rs",
       "crates/cli/src/json_style.rs",
       "crates/cli/src/lib.rs",
       "crates/cli/src/onboarding.rs",

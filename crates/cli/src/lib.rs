@@ -2941,6 +2941,32 @@ pub fn benchmark_fix_dry_run(root: &Path, threads: usize) -> (ExitCode, usize) {
     })
 }
 
+#[doc(hidden)]
+pub use inspect::InspectBenchmarkCorpus;
+
+/// Build the child-response corpus outside the timed inspect benchmark. This
+/// is not a supported API.
+#[doc(hidden)]
+pub fn create_inspect_benchmark_corpus(root: &Path, threads: usize) -> InspectBenchmarkCorpus {
+    inspect::create_inspect_benchmark_corpus(root, threads)
+}
+
+/// Benchmark file inspect orchestration and compact tagged JSON rendering
+/// without process startup. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_inspect_file_evidence_bundle_json(
+    root: &Path,
+    threads: usize,
+    corpus: &InspectBenchmarkCorpus,
+) -> (ExitCode, usize, usize) {
+    match inspect::benchmark_inspect_file_evidence_bundle_json(root, threads, corpus) {
+        Ok((child_call_count, rendered_bytes)) => {
+            (ExitCode::SUCCESS, child_call_count, rendered_bytes)
+        }
+        Err(_) => (ExitCode::from(2), 0, 0),
+    }
+}
+
 /// Benchmark hook for the production dead-code analysis and compact JSON
 /// rendering pipeline. This is not a supported API.
 #[doc(hidden)]

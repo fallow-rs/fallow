@@ -19,9 +19,10 @@ use fallow_api::{
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
 use fallow_cli::{
-    benchmark_dead_code_json, benchmark_fix_dry_run, benchmark_list_json, benchmark_recommend_json,
+    InspectBenchmarkCorpus, benchmark_dead_code_json, benchmark_fix_dry_run,
+    benchmark_inspect_file_evidence_bundle_json, benchmark_list_json, benchmark_recommend_json,
     benchmark_rule_pack_test_json, benchmark_runtime_coverage_analyze_json,
-    benchmark_security_json, benchmark_viz_html,
+    benchmark_security_json, benchmark_viz_html, create_inspect_benchmark_corpus,
 };
 use fallow_engine::{module_graph::impact_closure_for_changed_paths, session::AnalysisSession};
 use fallow_extract::{
@@ -36,6 +37,7 @@ const DEAD_CODE_FINDING_COUNT: usize = FIX_FILE_COUNT;
 const FIX_FILE_COUNT: usize = 128;
 const IMPACT_LAYER_COUNT: usize = 32;
 const IMPACT_LAYER_WIDTH: usize = 16;
+const INSPECT_CHILD_CALL_COUNT: usize = 6;
 const LIST_FILE_COUNT: usize = 128;
 const LIST_WORKSPACE_COUNT: usize = 8;
 // Each workspace index is reported once as a default index and once from its
@@ -55,6 +57,12 @@ const VIZ_MODULE_COUNT: usize = 64;
 struct CommandInput {
     _temp_dir: TempDir,
     root: PathBuf,
+}
+
+struct InspectCommandInput {
+    _temp_dir: TempDir,
+    root: PathBuf,
+    corpus: InspectBenchmarkCorpus,
 }
 
 struct ExtractCacheInput {
@@ -79,6 +87,27 @@ fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
     let path = root.join(path);
     fs::create_dir_all(path.parent().expect("fixture file has parent")).unwrap();
     fs::write(path, source.as_ref()).unwrap();
+}
+
+fn create_inspect_project() -> InspectCommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"inspect-benchmark","type":"module"}"#,
+    );
+    write_file(
+        &root,
+        "src/target.ts",
+        "export const target = (value: number) => value + 1;\n",
+    );
+    let corpus = create_inspect_benchmark_corpus(&root, BENCH_THREADS);
+    InspectCommandInput {
+        _temp_dir: temp_dir,
+        root,
+        corpus,
+    }
 }
 
 fn analysis_options(root: &Path, no_cache: bool) -> AnalysisOptions {
@@ -1138,6 +1167,30 @@ fn stable_fix_dry_run_many_exports(c: &mut Criterion) {
     );
 }
 
+fn stable_inspect_file_evidence_bundle_json(c: &mut Criterion) {
+    let input = create_inspect_project();
+
+    let result =
+        benchmark_inspect_file_evidence_bundle_json(&input.root, BENCH_THREADS, &input.corpus);
+    assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+    assert_eq!(result.1, INSPECT_CHILD_CALL_COUNT);
+    assert!(result.2 > 0);
+
+    c.bench_function("stable_inspect_file_evidence_bundle_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_inspect_file_evidence_bundle_json(
+                &input.root,
+                BENCH_THREADS,
+                &input.corpus,
+            );
+            assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+            assert_eq!(result.1, INSPECT_CHILD_CALL_COUNT);
+            assert!(result.2 > 0);
+            result
+        });
+    });
+}
+
 fn stable_dead_code_many_exports_json(c: &mut Criterion) {
     let input = create_fix_project();
 
@@ -1326,6 +1379,7 @@ criterion_group!(
     stable_feature_flags_workspace_analysis,
     stable_audit_impact_closure_many_files,
     stable_fix_dry_run_many_exports,
+    stable_inspect_file_evidence_bundle_json,
     stable_dead_code_many_exports_json,
     stable_security_many_framework_sinks_json,
     stable_rule_pack_policy_analysis_json,
