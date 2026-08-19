@@ -27,6 +27,10 @@ use fallow_engine::{
     session::AnalysisSession,
     trace_chain::trace_symbol_chain_with_session,
 };
+use fallow_output::{
+    RootEnvelopeMode, SuppressionInventoryOutputInput, build_suppression_inventory_output,
+    serialize_suppression_inventory_json_output,
+};
 use fallow_types::output_format::OutputFormat;
 use fallow_types::trace_chain::{SymbolChainQuery, TraceDirections};
 use tempfile::TempDir;
@@ -44,6 +48,8 @@ const CSS_DEEP_CVA_FILE_COUNT: usize = 32;
 const GUARD_FILE_COUNT: usize = 32;
 const GUARD_RULE_COUNT: usize = 8;
 const TRACE_CALLER_COUNT: usize = 128;
+const SUPPRESSION_FILE_COUNT: usize = 128;
+const SUPPRESSIONS_PER_FILE: usize = 4;
 
 struct EngineFixture {
     _temp_dir: TempDir,
@@ -236,6 +242,57 @@ fn create_trace_engine_fixture() -> WarmEngineFixture {
         session,
         config_path: None,
     }
+}
+
+fn create_suppression_inventory_fixture() -> WarmEngineFixture {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"bench-suppressions","private":true,"type":"module","main":"src/index.ts","dependencies":{}}"#,
+    );
+    write_file(&root, "src/index.ts", "export const entry = true;\n");
+
+    for file_index in 0..SUPPRESSION_FILE_COUNT {
+        let mut source = String::new();
+        for marker_index in 0..SUPPRESSIONS_PER_FILE {
+            writeln!(
+                &mut source,
+                "// fallow-ignore-next-line unused-export -- benchmark migration\nexport const unused_{file_index}_{marker_index} = {marker_index};"
+            )
+            .unwrap();
+        }
+        write_file(&root, &format!("src/legacy/module-{file_index}.ts"), source);
+    }
+
+    let fixture = EngineFixture {
+        _temp_dir: temp_dir,
+        root,
+    };
+    let session = AnalysisSession::load_default(&fixture.root);
+    session
+        .analyze_dead_code_with_artifacts(false, false)
+        .expect("suppression inventory warm-up succeeds");
+    WarmEngineFixture {
+        fixture,
+        session,
+        config_path: None,
+    }
+}
+
+fn suppression_inventory_json(fixture: &WarmEngineFixture) -> serde_json::Value {
+    let analysis = fixture
+        .session
+        .analyze_dead_code_with_artifacts(false, false)
+        .expect("suppression inventory analysis succeeds");
+    let output = build_suppression_inventory_output(SuppressionInventoryOutputInput {
+        active: &analysis.results.active_suppressions,
+        stale: &analysis.results.stale_suppressions,
+        root: &fixture.fixture.root,
+    });
+    serialize_suppression_inventory_json_output(output, RootEnvelopeMode::Tagged, None)
+        .expect("suppression inventory JSON serialization succeeds")
 }
 
 fn trace_symbol_chain(fixture: &WarmEngineFixture) -> fallow_types::trace_chain::SymbolChainTrace {
@@ -686,6 +743,27 @@ fn component_engine_warm_session_trace_symbol_chain(c: &mut Criterion) {
     );
 }
 
+fn component_engine_warm_session_suppression_inventory_json(c: &mut Criterion) {
+    let fixture = create_suppression_inventory_fixture();
+    let warmup = suppression_inventory_json(&fixture);
+    assert_eq!(
+        warmup["summary"]["total"].as_u64(),
+        Some((SUPPRESSION_FILE_COUNT * SUPPRESSIONS_PER_FILE) as u64),
+        "inventory retains every suppression marker"
+    );
+    assert_eq!(
+        warmup["summary"]["files"].as_u64(),
+        Some(SUPPRESSION_FILE_COUNT as u64),
+        "inventory groups markers by source file"
+    );
+    c.bench_function(
+        "component_engine_warm_session_suppression_inventory_json",
+        |bencher| {
+            bencher.iter(|| suppression_inventory_json(&fixture));
+        },
+    );
+}
+
 criterion_group!(
     benches,
     component_engine_session_load,
@@ -700,6 +778,7 @@ criterion_group!(
     component_engine_warm_session_css_deep_color_candidates,
     component_engine_first_session_css_health_references_many_files,
     component_engine_guard_rule_scope_many_files,
-    component_engine_warm_session_trace_symbol_chain
+    component_engine_warm_session_trace_symbol_chain,
+    component_engine_warm_session_suppression_inventory_json
 );
 criterion_main!(benches);
