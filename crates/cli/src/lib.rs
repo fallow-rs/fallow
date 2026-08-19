@@ -2999,6 +2999,22 @@ pub fn benchmark_rule_pack_test_json(root: &Path, threads: usize) -> (ExitCode, 
     }
 }
 
+/// Benchmark hook for the production recommendation discovery and compact JSON
+/// rendering pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_recommend_json(root: &Path) -> (ExitCode, usize, usize, bool, usize) {
+    match onboarding::benchmark_recommend_json(root) {
+        Ok((decision_count, framework_count, heterogeneous, rendered_bytes)) => (
+            ExitCode::SUCCESS,
+            decision_count,
+            framework_count,
+            heterogeneous,
+            rendered_bytes,
+        ),
+        Err(_) => (ExitCode::from(2), 0, 0, false, 0),
+    }
+}
+
 /// Status bars refresh frequently, so their local read path bypasses telemetry,
 /// update checks, notices, and every other command epilogue.
 fn is_impact_statusline(cli: &Cli) -> bool {

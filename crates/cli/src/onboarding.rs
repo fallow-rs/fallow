@@ -648,6 +648,29 @@ pub fn run_recommend(
     }
 }
 
+/// Benchmark hook for the production recommendation discovery and compact JSON
+/// rendering path. This is not a supported API.
+pub fn benchmark_recommend_json(
+    root: &Path,
+) -> Result<(usize, usize, bool, usize), serde_json::Error> {
+    let recommendation = build_recommendation(root);
+    let decision_count = recommendation.decisions.len();
+    let framework_count = recommendation.detected["frameworks_present"]
+        .as_array()
+        .map_or(0, Vec::len);
+    let heterogeneous = recommendation.detected["heterogeneous_frameworks"]
+        .as_bool()
+        .unwrap_or(false);
+    let rendered =
+        render_recommendation_json(&recommendation, crate::json_style::JsonStyle::Compact)?;
+    Ok((
+        decision_count,
+        framework_count,
+        heterogeneous,
+        rendered.len(),
+    ))
+}
+
 fn render_recommendation_json(
     recommendation: &Recommendation,
     json_style: crate::json_style::JsonStyle,

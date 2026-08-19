@@ -19,7 +19,7 @@ use fallow_api::{
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
 use fallow_cli::{
-    benchmark_dead_code_json, benchmark_fix_dry_run, benchmark_list_json,
+    benchmark_dead_code_json, benchmark_fix_dry_run, benchmark_list_json, benchmark_recommend_json,
     benchmark_rule_pack_test_json, benchmark_security_json, benchmark_viz_html,
 };
 use fallow_engine::{module_graph::impact_closure_for_changed_paths, session::AnalysisSession};
@@ -40,6 +40,9 @@ const LIST_WORKSPACE_COUNT: usize = 8;
 // Each workspace index is reported once as a default index and once from its
 // package metadata, preserving both production entry-point sources.
 const LIST_ENTRY_POINT_COUNT: usize = LIST_WORKSPACE_COUNT * 2;
+const RECOMMEND_DECISION_COUNT: usize = 13;
+const RECOMMEND_FRAMEWORK_COUNT: usize = 5;
+const RECOMMEND_WORKSPACE_COUNT: usize = 64;
 const RULE_PACK_FILE_COUNT: usize = 64;
 const RULE_PACK_FINDINGS_PER_FILE: usize = 4;
 const SECURITY_FILE_COUNT: usize = 128;
@@ -629,6 +632,53 @@ export function run(): Promise<Response> {{
     }
 }
 
+fn create_recommend_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-recommend-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "workspaces": ["packages/*"]
+}"#,
+    );
+    write_file(
+        &root,
+        "pnpm-workspace.yaml",
+        "packages:\n  - \"packages/*\"\n",
+    );
+    write_file(&root, "tsconfig.json", "{}\n");
+    write_file(&root, ".storybook/main.ts", "export default {};\n");
+
+    let frameworks = ["next", "react", "vue", "svelte", "@angular/core"];
+    let test_frameworks = ["vitest", "jest", "@playwright/test"];
+    for index in 0..RECOMMEND_WORKSPACE_COUNT {
+        let framework = frameworks[index % frameworks.len()];
+        let test_framework = test_frameworks[index % test_frameworks.len()];
+        write_file(
+            &root,
+            &format!("packages/package{index}/package.json"),
+            format!(
+                r#"{{
+  "name": "@bench/package{index}",
+  "private": true,
+  "dependencies": {{ "{framework}": "1.0.0" }},
+  "devDependencies": {{ "{test_framework}": "1.0.0" }}
+}}"#,
+            ),
+        );
+    }
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
 fn create_list_inventory_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
@@ -999,6 +1049,29 @@ fn stable_rule_pack_policy_analysis_json(c: &mut Criterion) {
     });
 }
 
+fn stable_recommend_workspace_json(c: &mut Criterion) {
+    let input = create_recommend_project();
+
+    let result = benchmark_recommend_json(&input.root);
+    assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+    assert_eq!(result.1, RECOMMEND_DECISION_COUNT);
+    assert_eq!(result.2, RECOMMEND_FRAMEWORK_COUNT);
+    assert!(result.3);
+    assert!(result.4 > 0);
+
+    c.bench_function("stable_recommend_workspace_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_recommend_json(&input.root);
+            assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+            assert_eq!(result.1, RECOMMEND_DECISION_COUNT);
+            assert_eq!(result.2, RECOMMEND_FRAMEWORK_COUNT);
+            assert!(result.3);
+            assert!(result.4 > 0);
+            result
+        });
+    });
+}
+
 fn stable_list_workspace_inventory_json(c: &mut Criterion) {
     let input = create_list_inventory_project();
 
@@ -1059,6 +1132,7 @@ criterion_group!(
     stable_dead_code_many_exports_json,
     stable_security_many_framework_sinks_json,
     stable_rule_pack_policy_analysis_json,
+    stable_recommend_workspace_json,
     stable_list_workspace_inventory_json,
     stable_viz_project_html
 );

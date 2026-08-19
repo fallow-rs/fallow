@@ -33,6 +33,10 @@ export const FAST_BENCHMARKS = [
     paths: [
       "crates/api/",
       "crates/benchmarks/benches/programmatic_stable.rs",
+      "crates/cli/src/init.rs",
+      "crates/cli/src/json_style.rs",
+      "crates/cli/src/lib.rs",
+      "crates/cli/src/onboarding.rs",
       "crates/config/",
       "crates/core/",
       "crates/engine/",

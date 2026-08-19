@@ -52,6 +52,17 @@ test("component bench file changes select the matching shard", () => {
   ]);
 });
 
+test("recommend production changes select the stable programmatic shard", () => {
+  for (const file of [
+    "crates/cli/src/init.rs",
+    "crates/cli/src/json_style.rs",
+    "crates/cli/src/lib.rs",
+    "crates/cli/src/onboarding.rs",
+  ]) {
+    assert.deepEqual(names(selectFastTargets([file])), ["programmatic_stable"]);
+  }
+});
+
 test("unrelated files select no benchmark shards", () => {
   assert.deepEqual(names(selectFastTargets(["README.md"])), []);
 });
