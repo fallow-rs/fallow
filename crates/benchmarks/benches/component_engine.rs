@@ -37,6 +37,8 @@ use tempfile::TempDir;
 
 const FILE_COUNT: usize = 32;
 const WARM_FILE_COUNT: usize = 256;
+const COVERAGE_GAP_RUNTIME_FILE_COUNT: usize = 256;
+const COVERAGE_GAP_COVERED_FILE_COUNT: usize = COVERAGE_GAP_RUNTIME_FILE_COUNT / 2;
 const WARM_CSS_FILE_COUNT: usize = 96;
 const CSS_REFERENCE_PATTERNS_PER_CONSUMER: usize = 4;
 const WARM_CSS_CONSUMER_FILE_COUNT: usize =
@@ -325,6 +327,63 @@ fn create_warm_engine_fixture() -> WarmEngineFixture {
     }
 }
 
+fn create_coverage_gap_engine_fixture() -> WarmEngineFixture {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"bench-coverage-gaps","private":true,"type":"module","main":"src/index.ts","scripts":{"test":"vitest run"},"devDependencies":{"vitest":"2.1.0"}}"#,
+    );
+
+    let mut entry_imports = String::new();
+    let mut entry_uses = String::new();
+    for index in 0..COVERAGE_GAP_RUNTIME_FILE_COUNT {
+        write_file(
+            &root,
+            &format!("src/module-{index}.ts"),
+            format!(
+                "export const seed{index} = {index};\n\
+                 export function compute{index}(input: number): number {{ return input + seed{index}; }}\n"
+            ),
+        );
+        writeln!(
+            &mut entry_imports,
+            "import {{ compute{index} }} from './module-{index}';"
+        )
+        .unwrap();
+        writeln!(&mut entry_uses, "console.log(compute{index}({index}));").unwrap();
+
+        if index % 2 == 0 {
+            write_file(
+                &root,
+                &format!("tests/module-{index}.test.ts"),
+                format!(
+                    "import {{ compute{index} }} from '../src/module-{index}';\n\
+                     if (compute{index}(1) !== {}) throw new Error('unexpected result');\n",
+                    index + 1
+                ),
+            );
+        }
+    }
+    write_file(
+        &root,
+        "src/index.ts",
+        format!("{entry_imports}\n{entry_uses}"),
+    );
+
+    let fixture = EngineFixture {
+        _temp_dir: temp_dir,
+        root,
+    };
+    let session = AnalysisSession::load_default(&fixture.root);
+    WarmEngineFixture {
+        fixture,
+        session,
+        config_path: None,
+    }
+}
+
 fn create_warm_css_engine_fixture() -> WarmEngineFixture {
     let fixture = create_engine_fixture_with_file_count(WARM_FILE_COUNT);
     for file_index in 0..WARM_CSS_FILE_COUNT {
@@ -526,6 +585,15 @@ fn warm_css_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOption
     }
 }
 
+fn warm_coverage_gap_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_> {
+    HealthExecutionOptions {
+        complexity: false,
+        coverage_gaps: true,
+        enforce_coverage_gap_gate: false,
+        ..warm_health_options(fixture)
+    }
+}
+
 fn warm_css_deep_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_> {
     HealthExecutionOptions {
         css_deep: true,
@@ -617,6 +685,59 @@ fn component_engine_warm_session_health(c: &mut Criterion) {
                 .expect("warm health analysis succeeds")
         });
     });
+}
+
+fn component_engine_warm_session_coverage_gaps_many_files(c: &mut Criterion) {
+    let fixture = create_coverage_gap_engine_fixture();
+    let options = warm_coverage_gap_health_options(&fixture);
+    let warmup = run_ungrouped_health_with_session(&options, None, &fixture.session, None)
+        .expect("coverage gaps warm-up succeeds");
+    let gaps = warmup
+        .report
+        .coverage_gaps
+        .expect("coverage gaps warm-up produces the requested section");
+    assert_eq!(
+        gaps.summary.runtime_files,
+        COVERAGE_GAP_RUNTIME_FILE_COUNT + 1,
+        "runtime entry and every imported module remain in the runtime graph"
+    );
+    assert_eq!(
+        gaps.summary.covered_files, COVERAGE_GAP_COVERED_FILE_COUNT,
+        "every even-numbered module is reachable from a test root"
+    );
+    assert_eq!(
+        gaps.summary.untested_files,
+        COVERAGE_GAP_RUNTIME_FILE_COUNT + 1 - COVERAGE_GAP_COVERED_FILE_COUNT,
+        "the runtime entry and odd-numbered modules remain untested"
+    );
+    assert!(
+        gaps.files
+            .iter()
+            .any(|finding| finding.file.path.ends_with("src/index.ts")),
+        "the runtime-only entry remains an untested file"
+    );
+    assert!(
+        gaps.files
+            .iter()
+            .any(|finding| finding.file.path.ends_with("src/module-1.ts")),
+        "an odd-numbered runtime module remains untested"
+    );
+    assert!(
+        gaps.files
+            .iter()
+            .all(|finding| !finding.file.path.ends_with("src/module-0.ts")),
+        "an even-numbered runtime module is covered by its test root"
+    );
+
+    c.bench_function(
+        "component_engine_warm_session_coverage_gaps_many_files",
+        |bencher| {
+            bencher.iter(|| {
+                run_ungrouped_health_with_session(&options, None, &fixture.session, None)
+                    .expect("warm coverage gaps analysis succeeds")
+            });
+        },
+    );
 }
 
 fn component_engine_warm_session_css_health(c: &mut Criterion) {
@@ -773,6 +894,7 @@ criterion_group!(
     component_engine_warm_session_complexity_owned,
     component_engine_warm_session_complexity_shared,
     component_engine_warm_session_health,
+    component_engine_warm_session_coverage_gaps_many_files,
     component_engine_warm_session_css_health,
     component_engine_warm_session_css_health_many_files,
     component_engine_warm_session_css_deep_color_candidates,
