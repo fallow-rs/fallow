@@ -271,6 +271,16 @@ pub(super) fn analyze(
 ) -> Result<RuntimeCoverageReport, u8> {
     let sidecar = discover_sidecar(Some(input.root))
         .map_err(|message| emit_printed(&message, 4, input.output))?;
+    analyze_with_transport(options, input, |request, quiet, output| {
+        run_sidecar(&sidecar, request, quiet, output)
+    })
+}
+
+pub(super) fn analyze_with_transport(
+    options: &RuntimeCoverageOptions,
+    input: &RuntimeCoverageAnalysisInput<'_>,
+    transport: impl FnOnce(&Request, bool, OutputFormat) -> Result<Response, u8>,
+) -> Result<RuntimeCoverageReport, u8> {
     let prepared_sources = prepare_coverage_sources(&options.path)
         .map_err(|message| emit_printed(&message, 5, input.output))?;
     let static_signals =
@@ -278,7 +288,7 @@ pub(super) fn analyze(
             .map_err(|message| emit_printed(&message, 2, input.output))?;
     let (request, locations) =
         build_request(options, input, &static_signals, prepared_sources.sources);
-    let response = run_sidecar(&sidecar, &request, input.quiet, input.output)?;
+    let response = transport(&request, input.quiet, input.output)?;
     // Resolve the verdict thresholds with the SAME defaults the sidecar applies
     // when they are unset, so the discriminator block (#321) reports the values
     // that actually produced the verdicts.
@@ -1747,7 +1757,11 @@ fn run_sidecar(
 
     check_sidecar_exit_status(&output_data, output)?;
 
-    let response: Response = serde_json::from_slice(&output_data.stdout).map_err(|err| {
+    decode_sidecar_response(&output_data.stdout, output)
+}
+
+fn decode_sidecar_response(bytes: &[u8], output: OutputFormat) -> Result<Response, u8> {
+    let response: Response = serde_json::from_slice(bytes).map_err(|err| {
         emit_printed(
             &format!("failed to parse sidecar response: {err}"),
             4,
@@ -1758,6 +1772,18 @@ fn run_sidecar(
     check_response_protocol(&response, output)?;
 
     Ok(response)
+}
+
+pub fn in_process_response_transport(
+    request: &Request,
+    response_bytes: &[u8],
+    output: OutputFormat,
+) -> Result<(Response, usize), u8> {
+    let mut request_bytes = Vec::new();
+    write_sidecar_request(&mut request_bytes, request, output)?;
+    let request_len = request_bytes.len();
+    std::hint::black_box(request_bytes);
+    decode_sidecar_response(response_bytes, output).map(|response| (response, request_len))
 }
 
 /// Serialize and flush the protocol request onto the sidecar's stdin.

@@ -30,6 +30,7 @@ use crate::health::coverage as runtime_coverage;
 use crate::license;
 
 pub use analyze::AnalyzeArgs;
+pub use analyze::benchmark_local_json;
 pub use upload_inventory::UploadInventoryArgs;
 pub use upload_source_maps::UploadSourceMapsArgs;
 pub use upload_static_findings::UploadStaticFindingsArgs;

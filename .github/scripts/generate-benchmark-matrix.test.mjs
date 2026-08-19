@@ -63,6 +63,17 @@ test("recommend production changes select the stable programmatic shard", () => 
   }
 });
 
+test("local runtime coverage analysis changes select the stable programmatic shard", () => {
+  for (const file of [
+    "crates/cli/src/coverage/analyze.rs",
+    "crates/cli/src/coverage/mod.rs",
+    "crates/cli/src/health/coverage.rs",
+    "crates/cli/src/health/mod.rs",
+  ]) {
+    assert.deepEqual(names(selectFastTargets([file])), ["programmatic_stable"]);
+  }
+});
+
 test("unrelated files select no benchmark shards", () => {
   assert.deepEqual(names(selectFastTargets(["README.md"])), []);
 });

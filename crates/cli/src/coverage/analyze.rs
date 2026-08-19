@@ -149,6 +149,61 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
     print_runtime_report(&report, ctx, result.elapsed, args)
 }
 
+pub fn benchmark_local_json(
+    root: &Path,
+    runtime_coverage_path: &Path,
+    response_bytes: &[u8],
+    threads: usize,
+) -> Result<(usize, usize, usize, String), ExitCode> {
+    let args = AnalyzeArgs {
+        runtime_coverage: Some(runtime_coverage_path.to_path_buf()),
+        min_invocations_hot: 100,
+        ..AnalyzeArgs::default()
+    };
+    let config_path = None;
+    let ctx = RunContext {
+        root,
+        config_path: &config_path,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        quiet: true,
+        no_cache: true,
+        threads,
+        explain: false,
+        allow_remote_extends: false,
+    };
+    let runtime_coverage = fallow_engine::health::RuntimeCoverageOptions {
+        path: runtime_coverage_path.to_path_buf(),
+        min_invocations_hot: args.min_invocations_hot,
+        min_observation_volume: args.min_observation_volume,
+        low_traffic_threshold: args.low_traffic_threshold,
+        license_jwt: String::new(),
+        watermark: None,
+    };
+    let options = local_health_options(&args, &ctx, runtime_coverage);
+    let request_len = std::cell::Cell::new(0);
+    let result = crate::health::benchmark_execute_health_with_response(
+        &options,
+        response_bytes,
+        &request_len,
+    )?;
+    let report = result
+        .report
+        .runtime_coverage
+        .ok_or_else(|| ExitCode::from(2))?;
+    let output =
+        runtime_json_output(&report, result.elapsed, false).map_err(|_| ExitCode::from(2))?;
+    let rendered = crate::json_style::JsonStyle::Compact
+        .serialize(&output)
+        .map_err(|_| ExitCode::from(2))?;
+    Ok((
+        report.findings.len(),
+        report.hot_paths.len(),
+        request_len.get(),
+        rendered,
+    ))
+}
+
 /// Build the `HealthOptions` for a local `coverage analyze` run: complexity,
 /// hotspot, and gating features are off so the run focuses on the supplied
 /// runtime-coverage artifact.
@@ -1258,19 +1313,7 @@ fn print_runtime_json(
     explain: bool,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    debug_assert_eq!(
-        RUNTIME_COVERAGE_SCHEMA_VERSION, "1",
-        "the schema-version enum has one variant serialized as \"1\"; bump CoverageAnalyzeSchemaVersion if the constant moves"
-    );
-
-    let envelope =
-        fallow_output::build_coverage_analyze_output(report, elapsed, env!("CARGO_PKG_VERSION"));
-    let output = match fallow_output::serialize_coverage_analyze_json_output(
-        envelope,
-        crate::output_runtime::current_root_envelope_mode(),
-        explain.then(crate::explain::coverage_analyze_meta),
-        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    ) {
+    let output = match runtime_json_output(report, elapsed, explain) {
         Ok(value) => value,
         Err(err) => {
             eprintln!("Error: failed to serialize runtime coverage report: {err}");
@@ -1278,6 +1321,26 @@ fn print_runtime_json(
         }
     };
     crate::report::emit_report_json(&output, "runtime coverage JSON", json_style)
+}
+
+fn runtime_json_output(
+    report: &RuntimeCoverageReport,
+    elapsed: std::time::Duration,
+    explain: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    debug_assert_eq!(
+        RUNTIME_COVERAGE_SCHEMA_VERSION, "1",
+        "the schema-version enum has one variant serialized as \"1\"; bump CoverageAnalyzeSchemaVersion if the constant moves"
+    );
+
+    let envelope =
+        fallow_output::build_coverage_analyze_output(report, elapsed, env!("CARGO_PKG_VERSION"));
+    fallow_output::serialize_coverage_analyze_json_output(
+        envelope,
+        crate::output_runtime::current_root_envelope_mode(),
+        explain.then(crate::explain::coverage_analyze_meta),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    )
 }
 
 const HUMAN_DEFAULT_DISPLAY_LIMIT: usize = 10;

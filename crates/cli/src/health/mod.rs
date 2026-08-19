@@ -268,6 +268,18 @@ pub fn execute_health_with_config(
     config: fallow_config::ResolvedConfig,
     config_ms: f64,
 ) -> Result<HealthResult, ExitCode> {
+    let seams = health_seams();
+    let result = execute_health_with_config_and_seams(opts, config, config_ms, &seams)?;
+    record_health_telemetry(&result.report, result.coverage_gaps_has_findings);
+    Ok(result)
+}
+
+fn execute_health_with_config_and_seams(
+    opts: &HealthOptions<'_>,
+    config: fallow_config::ResolvedConfig,
+    config_ms: f64,
+    seams: &HealthSeams<'_>,
+) -> Result<HealthResult, ExitCode> {
     let t = Instant::now();
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config)
         .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, opts.output))?;
@@ -287,8 +299,7 @@ pub fn execute_health_with_config(
     let parse_cpu_ms = parts.parse_cpu_ms;
 
     let scope_inputs = build_health_scope_inputs(opts, &config)?;
-    let seams = health_seams();
-    let result = execute_health_inner(
+    execute_health_inner(
         opts,
         HealthPipelineInputs {
             config,
@@ -307,11 +318,48 @@ pub fn execute_health_with_config(
             workspace_diagnostics,
         },
         scope_inputs,
-        &seams,
+        seams,
     )
-    .map_err(|e| health_err_to_exit(e, opts.output))?;
-    record_health_telemetry(&result.report, result.coverage_gaps_has_findings);
-    Ok(result)
+    .map_err(|e| health_err_to_exit(e, opts.output))
+}
+
+pub fn benchmark_execute_health_with_response(
+    opts: &HealthOptions<'_>,
+    response_bytes: &[u8],
+    request_len: &std::cell::Cell<usize>,
+) -> Result<HealthResult, ExitCode> {
+    let analyzer = |options: &fallow_engine::health::RuntimeCoverageOptions,
+                    input: RuntimeCoverageSeamInput<'_>| {
+        coverage::analyze_with_transport(
+            options,
+            &coverage::RuntimeCoverageAnalysisInput {
+                root: input.root,
+                modules: input.modules,
+                analysis_output: input.analysis_output,
+                istanbul_coverage: input.istanbul_coverage,
+                file_paths: input.file_paths,
+                ignore_set: input.ignore_set,
+                changed_files: input.changed_files,
+                ws_roots: input.ws_roots,
+                top: input.top,
+                codeowners_path: input.codeowners_path,
+                quiet: input.quiet,
+                output: input.output,
+            },
+            |request, _quiet, output| {
+                let (response, len) =
+                    coverage::in_process_response_transport(request, response_bytes, output)?;
+                request_len.set(len);
+                Ok(response)
+            },
+        )
+    };
+    let seams = HealthSeams {
+        runtime_coverage_analyzer: &analyzer,
+        note_graph_structure: &|_module_count, _edge_count| {},
+    };
+    let (config, config_ms) = load_health_config(opts)?;
+    execute_health_with_config_and_seams(opts, config, config_ms, &seams)
 }
 
 pub fn run_health(

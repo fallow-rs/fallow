@@ -122,6 +122,21 @@ mod gated {
             ]
         }
 
+        fn coverage_analyze_args(&self) -> Vec<String> {
+            let fixture = fixture_path("coverage-gaps");
+            vec![
+                "coverage".to_owned(),
+                "analyze".to_owned(),
+                "--root".to_owned(),
+                fixture.to_string_lossy().into_owned(),
+                "--runtime-coverage".to_owned(),
+                self.coverage_file.to_string_lossy().into_owned(),
+                "--format".to_owned(),
+                "json".to_owned(),
+                "--quiet".to_owned(),
+            ]
+        }
+
         fn multi_capture_dir(&self) -> PathBuf {
             let dir = self.tmp.path().join("multi-capture");
             fs::create_dir_all(&dir).expect("create multi-capture dir");
@@ -255,6 +270,82 @@ mod gated {
             json.pointer("/runtime_coverage/schema_version"),
             Some(&serde_json::Value::String("1".to_owned())),
             "runtime_coverage schema_version must be stable for agent consumers"
+        );
+    }
+
+    #[test]
+    fn coverage_analyze_benchmark_transport_matches_signed_stub_output() {
+        let harness = Harness::new();
+        let root = fixture_path("coverage-gaps");
+        let response = serde_json::to_vec(&serde_json::json!({
+            "protocol_version": fallow_cov_protocol::PROTOCOL_VERSION,
+            "verdict": "clean",
+            "summary": {
+                "functions_tracked": 0,
+                "functions_hit": 0,
+                "functions_unhit": 0,
+                "functions_untracked": 0,
+                "coverage_percent": 0.0,
+                "trace_count": 0,
+                "period_days": 0,
+                "deployments_seen": 0,
+                "capture_quality": null
+            },
+            "findings": [],
+            "hot_paths": [],
+            "blast_radius": [],
+            "importance": [],
+            "watermark": null,
+            "errors": [],
+            "warnings": []
+        }))
+        .expect("serialize clean sidecar response");
+
+        let benchmark = fallow_cli::benchmark_runtime_coverage_analyze_json(
+            &root,
+            &harness.coverage_file,
+            &response,
+            1,
+        );
+        assert_eq!(benchmark.0, std::process::ExitCode::SUCCESS);
+        assert!(benchmark.3 > 0, "request JSON must be measured");
+        let benchmark_json: serde_json::Value =
+            serde_json::from_str(&benchmark.4).expect("benchmark JSON should parse");
+
+        let mut mismatched_response: serde_json::Value =
+            serde_json::from_slice(&response).expect("clean response should parse");
+        mismatched_response["protocol_version"] = serde_json::json!("99.0.0");
+        let mismatch = fallow_cli::benchmark_runtime_coverage_analyze_json(
+            &root,
+            &harness.coverage_file,
+            &serde_json::to_vec(&mismatched_response).expect("serialize mismatch response"),
+            1,
+        );
+        assert_eq!(
+            mismatch.0,
+            std::process::ExitCode::from(4),
+            "in-process response must pass through the production protocol gate"
+        );
+
+        let mut cmd = harness.fallow();
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("FALLOW_STUB_MODE", "enforce-license-gate");
+        for arg in harness.coverage_analyze_args() {
+            cmd.arg(arg);
+        }
+        let (stdout, stderr, code) = run_with(cmd);
+        assert_eq!(code, 0, "signed stub coverage analyze failed: {stderr}");
+        assert!(
+            !stdout.trim_end().contains('\n'),
+            "compact JSON should stay on one line"
+        );
+        let signed_json: serde_json::Value =
+            serde_json::from_str(&stdout).expect("signed stub JSON should parse");
+
+        assert_eq!(
+            benchmark_json.get("runtime_coverage"),
+            signed_json.get("runtime_coverage"),
+            "in-process benchmark transport must preserve signed sidecar semantics"
         );
     }
 

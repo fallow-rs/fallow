@@ -3015,6 +3015,27 @@ pub fn benchmark_recommend_json(root: &Path) -> (ExitCode, usize, usize, bool, u
     }
 }
 
+/// Benchmark hook for local runtime coverage analysis and compact JSON
+/// rendering with an in-process sidecar response. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_runtime_coverage_analyze_json(
+    root: &Path,
+    runtime_coverage_path: &Path,
+    response_bytes: &[u8],
+    threads: usize,
+) -> (ExitCode, usize, usize, usize, String) {
+    match coverage::benchmark_local_json(root, runtime_coverage_path, response_bytes, threads) {
+        Ok((finding_count, hot_path_count, request_bytes, rendered)) => (
+            ExitCode::SUCCESS,
+            finding_count,
+            hot_path_count,
+            request_bytes,
+            rendered,
+        ),
+        Err(code) => (code, 0, 0, 0, String::new()),
+    }
+}
+
 /// Status bars refresh frequently, so their local read path bypasses telemetry,
 /// update checks, notices, and every other command epilogue.
 fn is_impact_statusline(cli: &Cli) -> bool {

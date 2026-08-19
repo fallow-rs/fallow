@@ -20,7 +20,8 @@ use fallow_api::{
 };
 use fallow_cli::{
     benchmark_dead_code_json, benchmark_fix_dry_run, benchmark_list_json, benchmark_recommend_json,
-    benchmark_rule_pack_test_json, benchmark_security_json, benchmark_viz_html,
+    benchmark_rule_pack_test_json, benchmark_runtime_coverage_analyze_json,
+    benchmark_security_json, benchmark_viz_html,
 };
 use fallow_engine::{module_graph::impact_closure_for_changed_paths, session::AnalysisSession};
 use fallow_extract::{
@@ -45,6 +46,9 @@ const RECOMMEND_FRAMEWORK_COUNT: usize = 5;
 const RECOMMEND_WORKSPACE_COUNT: usize = 64;
 const RULE_PACK_FILE_COUNT: usize = 64;
 const RULE_PACK_FINDINGS_PER_FILE: usize = 4;
+const RUNTIME_COVERAGE_FILE_COUNT: usize = 128;
+const RUNTIME_COVERAGE_FINDING_COUNT: usize = RUNTIME_COVERAGE_FILE_COUNT;
+const RUNTIME_COVERAGE_HOT_PATH_COUNT: usize = RUNTIME_COVERAGE_FILE_COUNT / 2;
 const SECURITY_FILE_COUNT: usize = 128;
 const VIZ_MODULE_COUNT: usize = 64;
 
@@ -62,6 +66,13 @@ struct ExtractCacheInput {
 struct EditorSessionInput {
     _temp_dir: TempDir,
     session: EditorAnalysisSession,
+}
+
+struct RuntimeCoverageInput {
+    _temp_dir: TempDir,
+    root: PathBuf,
+    coverage_path: PathBuf,
+    response_bytes: Vec<u8>,
 }
 
 fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
@@ -679,6 +690,148 @@ fn create_recommend_project() -> CommandInput {
     }
 }
 
+fn create_runtime_coverage_project() -> RuntimeCoverageInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"bench-runtime-coverage","private":true,"type":"module","main":"src/index.ts"}"#,
+    );
+    let coverage_path = write_runtime_coverage_sources(&root);
+
+    RuntimeCoverageInput {
+        _temp_dir: temp_dir,
+        root,
+        coverage_path,
+        response_bytes: runtime_coverage_response_bytes(),
+    }
+}
+
+fn write_runtime_coverage_sources(root: &Path) -> PathBuf {
+    let mut index_source = String::new();
+    let mut scripts = Vec::with_capacity(RUNTIME_COVERAGE_FILE_COUNT);
+    for index in 0..RUNTIME_COVERAGE_FILE_COUNT {
+        writeln!(
+            &mut index_source,
+            "import {{ live_{index} }} from \"./module{index:03}\";"
+        )
+        .unwrap();
+        let source = format!(
+            "export function live_{index}(value: number): number {{ return value + {index}; }}\n\
+             export function cold_{index}(value: number): number {{ return value - {index}; }}\n"
+        );
+        let relative = format!("src/module{index:03}.ts");
+        write_file(root, &relative, &source);
+        scripts.push(serde_json::json!({
+            "scriptId": index.to_string(),
+            "url": format!("file://{}", root.join(&relative).to_string_lossy()),
+            "functions": [{
+                "functionName": format!("live_{index}"),
+                "ranges": [{
+                    "startOffset": 0,
+                    "endOffset": source.encode_utf16().count(),
+                    "count": index + 1
+                }],
+                "isBlockCoverage": false
+            }]
+        }));
+    }
+    index_source.push_str("\nexport const values = [\n");
+    for index in 0..RUNTIME_COVERAGE_FILE_COUNT {
+        writeln!(&mut index_source, "  live_{index}({index}),").unwrap();
+    }
+    index_source.push_str("];\n");
+    write_file(root, "src/index.ts", index_source);
+
+    let coverage_path = root.join("coverage-final-v8.json");
+    fs::write(
+        &coverage_path,
+        serde_json::to_vec(&serde_json::json!({"result": scripts})).unwrap(),
+    )
+    .unwrap();
+    coverage_path
+}
+
+fn runtime_coverage_response_bytes() -> Vec<u8> {
+    let findings = (0..RUNTIME_COVERAGE_FINDING_COUNT)
+        .rev()
+        .map(|index| {
+            let verdict = match index % 4 {
+                0 => "safe_to_delete",
+                1 => "review_required",
+                2 => "coverage_unavailable",
+                _ => "low_traffic",
+            };
+            serde_json::json!({
+                "id": format!("fallow:prod:{index:016x}"),
+                "file": format!("src/module{index:03}.ts"),
+                "function": format!("cold_{index}"),
+                "line": 2,
+                "verdict": verdict,
+                "invocations": if index % 4 == 2 { None } else { Some(index as u64) },
+                "confidence": if index % 2 == 0 { "high" } else { "medium" },
+                "evidence": {
+                    "static_status": if index % 4 == 0 { "unused" } else { "used" },
+                    "test_coverage": "not_covered",
+                    "v8_tracking": if index % 4 == 2 { "untracked" } else { "tracked" },
+                    "untracked_reason": if index % 4 == 2 { Some("lazy_parsed") } else { None },
+                    "observation_days": 14,
+                    "deployments_observed": 4
+                },
+                "actions": [{
+                    "kind": "review",
+                    "description": "Review runtime evidence before changing this function.",
+                    "auto_fixable": false
+                }]
+            })
+        })
+        .collect::<Vec<_>>();
+    let hot_paths = (0..RUNTIME_COVERAGE_HOT_PATH_COUNT)
+        .rev()
+        .map(|index| {
+            serde_json::json!({
+                "id": format!("fallow:hot:{index:016x}"),
+                "file": format!("src/module{index:03}.ts"),
+                "function": format!("live_{index}"),
+                "line": 1,
+                "end_line": 1,
+                "invocations": 10_000 + index,
+                "percentile": 100 - (index % 50),
+                "identity": null
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_vec(&serde_json::json!({
+        "protocol_version": "0.8.0",
+        "verdict": "cold-code-detected",
+        "summary": {
+            "functions_tracked": RUNTIME_COVERAGE_FILE_COUNT * 2,
+            "functions_hit": RUNTIME_COVERAGE_FILE_COUNT,
+            "functions_unhit": RUNTIME_COVERAGE_FILE_COUNT,
+            "functions_untracked": 0,
+            "coverage_percent": 50.0,
+            "trace_count": 1_000_000,
+            "period_days": 14,
+            "deployments_seen": 4,
+            "capture_quality": {
+                "window_seconds": 1_209_600,
+                "instances_observed": 4,
+                "lazy_parse_warning": false,
+                "untracked_ratio_percent": 0.0
+            }
+        },
+        "findings": findings,
+        "hot_paths": hot_paths,
+        "blast_radius": [],
+        "importance": [],
+        "watermark": null,
+        "errors": [],
+        "warnings": []
+    }))
+    .unwrap()
+}
+
 fn create_list_inventory_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
@@ -1072,6 +1225,50 @@ fn stable_recommend_workspace_json(c: &mut Criterion) {
     });
 }
 
+fn stable_coverage_analyze_local_runtime_json(c: &mut Criterion) {
+    let input = create_runtime_coverage_project();
+
+    let result = benchmark_runtime_coverage_analyze_json(
+        &input.root,
+        &input.coverage_path,
+        &input.response_bytes,
+        BENCH_THREADS,
+    );
+    assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+    assert_eq!(result.1, RUNTIME_COVERAGE_FINDING_COUNT);
+    assert_eq!(result.2, RUNTIME_COVERAGE_HOT_PATH_COUNT);
+    assert!(
+        result.3 > 50_000,
+        "request must include the broad static inventory"
+    );
+    let output: serde_json::Value = serde_json::from_str(&result.4).unwrap();
+    assert_eq!(
+        output["runtime_coverage"]["findings"][0]["path"],
+        "src/module000.ts"
+    );
+    assert_eq!(
+        output["runtime_coverage"]["hot_paths"][0]["path"],
+        "src/module063.ts"
+    );
+
+    c.bench_function("stable_coverage_analyze_local_runtime_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_runtime_coverage_analyze_json(
+                &input.root,
+                &input.coverage_path,
+                &input.response_bytes,
+                BENCH_THREADS,
+            );
+            assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+            assert_eq!(result.1, RUNTIME_COVERAGE_FINDING_COUNT);
+            assert_eq!(result.2, RUNTIME_COVERAGE_HOT_PATH_COUNT);
+            assert!(result.3 > 50_000);
+            assert!(!result.4.is_empty());
+            result
+        });
+    });
+}
+
 fn stable_list_workspace_inventory_json(c: &mut Criterion) {
     let input = create_list_inventory_project();
 
@@ -1133,6 +1330,7 @@ criterion_group!(
     stable_security_many_framework_sinks_json,
     stable_rule_pack_policy_analysis_json,
     stable_recommend_workspace_json,
+    stable_coverage_analyze_local_runtime_json,
     stable_list_workspace_inventory_json,
     stable_viz_project_html
 );
