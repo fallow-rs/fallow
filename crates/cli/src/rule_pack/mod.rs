@@ -10,6 +10,8 @@ mod list;
 mod templates;
 mod test;
 
+pub use test::benchmark_rule_pack_test_json;
+
 #[allow(
     dead_code,
     reason = "the command family is wired before every subcommand consumes all context fields"

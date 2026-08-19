@@ -19,7 +19,8 @@ use fallow_api::{
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
 use fallow_cli::{
-    benchmark_fix_dry_run, benchmark_list_json, benchmark_security_json, benchmark_viz_html,
+    benchmark_fix_dry_run, benchmark_list_json, benchmark_rule_pack_test_json,
+    benchmark_security_json, benchmark_viz_html,
 };
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
@@ -35,6 +36,8 @@ const LIST_WORKSPACE_COUNT: usize = 8;
 // Each workspace index is reported once as a default index and once from its
 // package metadata, preserving both production entry-point sources.
 const LIST_ENTRY_POINT_COUNT: usize = LIST_WORKSPACE_COUNT * 2;
+const RULE_PACK_FILE_COUNT: usize = 64;
+const RULE_PACK_FINDINGS_PER_FILE: usize = 4;
 const SECURITY_FILE_COUNT: usize = 128;
 const VIZ_MODULE_COUNT: usize = 64;
 
@@ -489,6 +492,80 @@ app.post("/run/{index}", (req) => {{
     }
 }
 
+fn create_rule_pack_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-rule-pack-test",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": { "moment": "2.30.1" }
+}"#,
+    );
+    write_file(
+        &root,
+        ".fallowrc.json",
+        r#"{
+  "rules": { "policy-violation": "warn" },
+  "rulePacks": ["rule-packs/benchmark.jsonc"]
+}"#,
+    );
+    write_file(
+        &root,
+        "rule-packs/benchmark.jsonc",
+        r#"{
+  "version": 1,
+  "name": "benchmark-policy",
+  "rules": [
+    { "id": "no-console", "kind": "banned-call", "callees": ["console.log"] },
+    { "id": "no-moment", "kind": "banned-import", "specifiers": ["moment"] },
+    { "id": "no-network", "kind": "banned-effect", "effects": ["network"] },
+    { "id": "no-legacy-api", "kind": "banned-export", "exports": ["legacyApi"] }
+  ]
+}"#,
+    );
+
+    let mut index_source = String::new();
+    for index in 0..RULE_PACK_FILE_COUNT {
+        writeln!(
+            &mut index_source,
+            "import {{ run as run{index} }} from \"./features/feature{index}\";"
+        )
+        .unwrap();
+        write_file(
+            &root,
+            &format!("src/features/feature{index}.ts"),
+            format!(
+                r#"
+import moment from "moment";
+
+export const legacyApi = moment;
+export function run(): Promise<Response> {{
+  console.log("feature-{index}");
+  return fetch("/api/feature-{index}");
+}}
+"#
+            ),
+        );
+    }
+    index_source.push_str("\nvoid Promise.all([\n");
+    for index in 0..RULE_PACK_FILE_COUNT {
+        writeln!(&mut index_source, "  run{index}(),").unwrap();
+    }
+    index_source.push_str("]);\n");
+    write_file(&root, "src/index.ts", index_source);
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
 fn create_list_inventory_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
@@ -789,6 +866,28 @@ fn stable_security_many_framework_sinks_json(c: &mut Criterion) {
     });
 }
 
+fn stable_rule_pack_policy_analysis_json(c: &mut Criterion) {
+    let input = create_rule_pack_project();
+    let expected_findings = RULE_PACK_FILE_COUNT * RULE_PACK_FINDINGS_PER_FILE;
+
+    let (status, finding_count, rendered_bytes) =
+        benchmark_rule_pack_test_json(&input.root, BENCH_THREADS);
+    assert_eq!(status, std::process::ExitCode::SUCCESS);
+    assert_eq!(finding_count, expected_findings);
+    assert!(rendered_bytes > 0);
+
+    c.bench_function("stable_rule_pack_policy_analysis_json", |bencher| {
+        bencher.iter(|| {
+            let (status, finding_count, rendered_bytes) =
+                benchmark_rule_pack_test_json(&input.root, BENCH_THREADS);
+            assert_eq!(status, std::process::ExitCode::SUCCESS);
+            assert_eq!(finding_count, expected_findings);
+            assert!(rendered_bytes > 0);
+            (status, finding_count, rendered_bytes)
+        });
+    });
+}
+
 fn stable_list_workspace_inventory_json(c: &mut Criterion) {
     let input = create_list_inventory_project();
 
@@ -846,6 +945,7 @@ criterion_group!(
     stable_feature_flags_workspace_analysis,
     stable_fix_dry_run_many_exports,
     stable_security_many_framework_sinks_json,
+    stable_rule_pack_policy_analysis_json,
     stable_list_workspace_inventory_json,
     stable_viz_project_html
 );

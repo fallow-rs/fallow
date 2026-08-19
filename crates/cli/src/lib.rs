@@ -2979,6 +2979,16 @@ pub fn benchmark_viz_html(root: &Path, threads: usize) -> (ExitCode, usize, usiz
     }
 }
 
+/// Benchmark hook for the production rule-pack analysis and JSON rendering
+/// pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_rule_pack_test_json(root: &Path, threads: usize) -> (ExitCode, usize, usize) {
+    match rule_pack::benchmark_rule_pack_test_json(root, threads) {
+        Ok((finding_count, rendered_bytes)) => (ExitCode::SUCCESS, finding_count, rendered_bytes),
+        Err(code) => (code, 0, 0),
+    }
+}
+
 /// Status bars refresh frequently, so their local read path bypasses telemetry,
 /// update checks, notices, and every other command epilogue.
 fn is_impact_statusline(cli: &Cli) -> bool {

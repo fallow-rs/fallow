@@ -48,8 +48,8 @@ Fast PR shards:
   `crates/engine/`, `crates/extract/`, and `crates/types/` changes).
 - `fallow-benchmarks/programmatic_stable`: deterministic programmatic API,
   session reuse, warm parse-cache, health-cache, fix dry-run planning, and
-  opt-in security candidate analysis, list inventory rendering, and Viz HTML
-  payload paths.
+  opt-in security and rule-pack policy analysis, list inventory rendering, and
+  Viz HTML payload paths.
 - `fallow-benchmarks/representative_sources`: focused source-shape extraction
   probes.
 - `fallow-benchmarks/component_config`: config loading, resolution, workspace
