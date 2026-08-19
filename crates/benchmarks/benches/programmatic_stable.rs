@@ -22,6 +22,7 @@ use fallow_cli::{
     benchmark_dead_code_json, benchmark_fix_dry_run, benchmark_list_json,
     benchmark_rule_pack_test_json, benchmark_security_json, benchmark_viz_html,
 };
+use fallow_engine::{module_graph::impact_closure_for_changed_paths, session::AnalysisSession};
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
     parse_all_files, parse_single_file,
@@ -32,6 +33,8 @@ use tempfile::TempDir;
 const BENCH_THREADS: usize = 4;
 const DEAD_CODE_FINDING_COUNT: usize = FIX_FILE_COUNT;
 const FIX_FILE_COUNT: usize = 128;
+const IMPACT_LAYER_COUNT: usize = 32;
+const IMPACT_LAYER_WIDTH: usize = 16;
 const LIST_FILE_COUNT: usize = 128;
 const LIST_WORKSPACE_COUNT: usize = 8;
 // Each workspace index is reported once as a default index and once from its
@@ -401,6 +404,65 @@ export const unusedFallback{index} = (): boolean => false;
             index_source.push_str(", ");
         }
         write!(&mut index_source, "evaluate{index}").unwrap();
+    }
+    index_source.push_str(");\n");
+    write_file(&root, "src/index.ts", index_source);
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
+fn create_impact_closure_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-impact-closure",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}"#,
+    );
+
+    for layer in 0..IMPACT_LAYER_COUNT {
+        for column in 0..IMPACT_LAYER_WIDTH {
+            let source = if layer == 0 {
+                format!("export const value{layer}_{column} = {column};\n")
+            } else {
+                let previous = layer - 1;
+                format!(
+                    "import {{ value{previous}_{column} }} from \"../layer{previous}/module{column}\";\n\
+                     export const value{layer}_{column} = value{previous}_{column} + {layer};\n"
+                )
+            };
+            write_file(
+                &root,
+                &format!("src/layer{layer}/module{column}.ts"),
+                source,
+            );
+        }
+    }
+
+    let final_layer = IMPACT_LAYER_COUNT - 1;
+    let mut index_source = String::new();
+    for column in 0..IMPACT_LAYER_WIDTH {
+        writeln!(
+            &mut index_source,
+            "import {{ value{final_layer}_{column} }} from \"./layer{final_layer}/module{column}\";"
+        )
+        .unwrap();
+    }
+    index_source.push_str("console.log(");
+    for column in 0..IMPACT_LAYER_WIDTH {
+        if column > 0 {
+            index_source.push_str(", ");
+        }
+        write!(&mut index_source, "value{final_layer}_{column}").unwrap();
     }
     index_source.push_str(");\n");
     write_file(&root, "src/index.ts", index_source);
@@ -817,6 +879,34 @@ fn stable_feature_flags_workspace_analysis(c: &mut Criterion) {
     });
 }
 
+fn stable_audit_impact_closure_many_files(c: &mut Criterion) {
+    let input = create_impact_closure_project();
+    let session = AnalysisSession::load(&input.root, None).expect("impact session loads");
+    let artifacts = session
+        .analyze_dead_code_with_artifacts(false, true)
+        .expect("impact graph analysis succeeds");
+    let graph = artifacts.graph.expect("impact graph is retained");
+    let changed_files = (0..IMPACT_LAYER_WIDTH)
+        .map(|column| input.root.join(format!("src/layer0/module{column}.ts")))
+        .collect();
+
+    let warmup = impact_closure_for_changed_paths(&graph, &input.root, &changed_files)
+        .expect("changed fixture paths resolve");
+    assert_eq!(warmup.in_diff.len(), IMPACT_LAYER_WIDTH);
+    assert_eq!(
+        warmup.affected_not_shown.len(),
+        (IMPACT_LAYER_COUNT - 1) * IMPACT_LAYER_WIDTH + 1
+    );
+    assert_eq!(warmup.coordination_gap.len(), IMPACT_LAYER_WIDTH);
+
+    c.bench_function("stable_audit_impact_closure_many_files", |bencher| {
+        bencher.iter(|| {
+            impact_closure_for_changed_paths(&graph, &input.root, &changed_files)
+                .expect("changed fixture paths resolve")
+        });
+    });
+}
+
 fn stable_fix_dry_run_many_exports(c: &mut Criterion) {
     let input = create_fix_project();
     let representative_path = input.root.join("src/features/feature0.ts");
@@ -964,6 +1054,7 @@ criterion_group!(
     stable_health_complex_service_warm_complexity_hit,
     stable_circular_dependencies_domain_cycles,
     stable_feature_flags_workspace_analysis,
+    stable_audit_impact_closure_many_files,
     stable_fix_dry_run_many_exports,
     stable_dead_code_many_exports_json,
     stable_security_many_framework_sinks_json,
