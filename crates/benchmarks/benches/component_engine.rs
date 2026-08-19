@@ -25,8 +25,10 @@ use fallow_engine::{
     },
     project_analysis::ProjectAnalysisArtifactOptions,
     session::AnalysisSession,
+    trace_chain::trace_symbol_chain_with_session,
 };
 use fallow_types::output_format::OutputFormat;
+use fallow_types::trace_chain::{SymbolChainQuery, TraceDirections};
 use tempfile::TempDir;
 
 const FILE_COUNT: usize = 32;
@@ -41,6 +43,7 @@ const CSS_DEEP_COLORS_PER_FILE: usize = 12;
 const CSS_DEEP_CVA_FILE_COUNT: usize = 32;
 const GUARD_FILE_COUNT: usize = 32;
 const GUARD_RULE_COUNT: usize = 8;
+const TRACE_CALLER_COUNT: usize = 128;
 
 struct EngineFixture {
     _temp_dir: TempDir,
@@ -175,6 +178,81 @@ fn create_guard_fixture() -> GuardFixture {
         config,
         files,
     }
+}
+
+fn create_trace_engine_fixture() -> WarmEngineFixture {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"bench-trace","private":true,"type":"module","main":"src/index.ts","dependencies":{}}"#,
+    );
+    write_file(
+        &root,
+        "src/leaf.ts",
+        "export function leaf(value: number): number { return value + 1; }\n",
+    );
+    write_file(
+        &root,
+        "src/shared.ts",
+        "import { leaf } from './leaf';\nexport function target(value: number): number { return leaf(value); }\n",
+    );
+
+    let mut entry_imports = String::new();
+    let mut entry_uses = String::from("console.log(");
+    for index in 0..TRACE_CALLER_COUNT {
+        write_file(
+            &root,
+            &format!("src/consumer-{index}.ts"),
+            format!(
+                "import {{ target }} from './shared';\nexport function consumer{index}(): number {{ return target({index}); }}\n"
+            ),
+        );
+        writeln!(
+            &mut entry_imports,
+            "import {{ consumer{index} }} from './consumer-{index}';"
+        )
+        .unwrap();
+        if index > 0 {
+            entry_uses.push_str(", ");
+        }
+        write!(&mut entry_uses, "consumer{index}()").unwrap();
+    }
+    entry_uses.push_str(");\n");
+    write_file(
+        &root,
+        "src/index.ts",
+        format!("{entry_imports}\n{entry_uses}"),
+    );
+
+    let fixture = EngineFixture {
+        _temp_dir: temp_dir,
+        root,
+    };
+    let session = AnalysisSession::load_default(&fixture.root);
+    WarmEngineFixture {
+        fixture,
+        session,
+        config_path: None,
+    }
+}
+
+fn trace_symbol_chain(fixture: &WarmEngineFixture) -> fallow_types::trace_chain::SymbolChainTrace {
+    trace_symbol_chain_with_session(
+        &fixture.session,
+        SymbolChainQuery {
+            file: "src/shared.ts",
+            symbol: "target",
+            depth: 2,
+            directions: TraceDirections {
+                callers: true,
+                callees: true,
+            },
+        },
+    )
+    .expect("trace analysis succeeds")
+    .expect("trace target exists")
 }
 
 fn create_warm_engine_fixture() -> WarmEngineFixture {
@@ -586,6 +664,28 @@ fn component_engine_guard_rule_scope_many_files(c: &mut Criterion) {
     });
 }
 
+fn component_engine_warm_session_trace_symbol_chain(c: &mut Criterion) {
+    let fixture = create_trace_engine_fixture();
+    let warmup = trace_symbol_chain(&fixture);
+    assert!(warmup.symbol_found, "trace target is exported");
+    assert_eq!(
+        warmup.callers.as_ref().map(Vec::len),
+        Some(TRACE_CALLER_COUNT),
+        "trace walks every direct caller"
+    );
+    assert_eq!(
+        warmup.callees.as_ref().map(Vec::len),
+        Some(1),
+        "trace resolves the imported leaf callee"
+    );
+    c.bench_function(
+        "component_engine_warm_session_trace_symbol_chain",
+        |bencher| {
+            bencher.iter(|| trace_symbol_chain(&fixture));
+        },
+    );
+}
+
 criterion_group!(
     benches,
     component_engine_session_load,
@@ -599,6 +699,7 @@ criterion_group!(
     component_engine_warm_session_css_health_many_files,
     component_engine_warm_session_css_deep_color_candidates,
     component_engine_first_session_css_health_references_many_files,
-    component_engine_guard_rule_scope_many_files
+    component_engine_guard_rule_scope_many_files,
+    component_engine_warm_session_trace_symbol_chain
 );
 criterion_main!(benches);
