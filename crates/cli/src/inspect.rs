@@ -1123,10 +1123,10 @@ fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
 
 const INSPECT_BENCH_TARGET: &str = "src/target.ts";
 const INSPECT_BENCH_CALL_COUNT: usize = 6;
-const INSPECT_BENCH_EXPORT_COUNT: usize = 32;
-const INSPECT_BENCH_IMPORT_COUNT: usize = 16;
-const INSPECT_BENCH_IMPORTED_BY_COUNT: usize = 24;
-const INSPECT_BENCH_FILTERED_COUNT: usize = 64;
+const INSPECT_BENCH_EXPORT_COUNT: usize = 8;
+const INSPECT_BENCH_IMPORT_COUNT: usize = 4;
+const INSPECT_BENCH_IMPORTED_BY_COUNT: usize = 6;
+const INSPECT_BENCH_FILTERED_COUNT: usize = 16;
 
 struct InspectBenchmarkResponse {
     args: Vec<String>,
