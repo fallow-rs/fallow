@@ -3022,6 +3022,28 @@ pub fn benchmark_list_boundaries_json(
     }
 }
 
+/// Opaque deterministic global matcher for the watch-filter benchmark. This is
+/// not a supported API.
+#[doc(hidden)]
+pub use watch::WatchFilterBenchmarkGlobalGitignore;
+
+/// Build a deterministic global gitignore matcher outside the timed watch
+/// benchmark. This is not a supported API.
+#[doc(hidden)]
+pub fn create_watch_filter_benchmark_global_gitignore() -> WatchFilterBenchmarkGlobalGitignore {
+    watch::create_benchmark_global_gitignore()
+}
+
+/// Benchmark hook for production watch-filter initialization and project
+/// gitignore discovery. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_watch_filter_initialization(
+    config: &fallow_config::ResolvedConfig,
+    global_gitignore: &WatchFilterBenchmarkGlobalGitignore,
+) -> (usize, usize) {
+    watch::benchmark_filter_initialization(config, global_gitignore)
+}
+
 /// Benchmark hook for the production Viz analysis, payload, and HTML
 /// rendering pipeline. This is not a supported API.
 #[doc(hidden)]

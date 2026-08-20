@@ -43,6 +43,7 @@ export const FAST_BENCHMARKS = [
       "crates/cli/src/lib.rs",
       "crates/cli/src/list.rs",
       "crates/cli/src/onboarding.rs",
+      "crates/cli/src/watch.rs",
       "crates/config/",
       "crates/core/",
       "crates/engine/",

@@ -100,8 +100,15 @@ struct WatchFilter {
 
 impl WatchFilter {
     fn new(config: &fallow_config::ResolvedConfig) -> Self {
-        let gitignores = build_project_gitignores(config);
         let (global_gitignore, _) = ignore::gitignore::Gitignore::global();
+        Self::new_with_global_gitignore(config, global_gitignore)
+    }
+
+    fn new_with_global_gitignore(
+        config: &fallow_config::ResolvedConfig,
+        global_gitignore: ignore::gitignore::Gitignore,
+    ) -> Self {
+        let gitignores = build_project_gitignores(config);
         Self {
             root: config.root.clone(),
             ignore_patterns: config.ignore_patterns.clone(),
@@ -156,6 +163,32 @@ impl WatchFilter {
         }
         ignored
     }
+}
+
+#[doc(hidden)]
+pub struct WatchFilterBenchmarkGlobalGitignore(ignore::gitignore::Gitignore);
+
+/// Build a deterministic global matcher outside the timed watch-filter
+/// benchmark. This is not a supported API.
+#[doc(hidden)]
+pub fn create_benchmark_global_gitignore() -> WatchFilterBenchmarkGlobalGitignore {
+    WatchFilterBenchmarkGlobalGitignore(ignore::gitignore::Gitignore::empty())
+}
+
+/// Benchmark hook for project gitignore discovery and watch-filter
+/// initialization. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_filter_initialization(
+    config: &fallow_config::ResolvedConfig,
+    global_gitignore: &WatchFilterBenchmarkGlobalGitignore,
+) -> (usize, usize) {
+    let filter = WatchFilter::new_with_global_gitignore(config, global_gitignore.0.clone());
+    let pattern_count = filter
+        .gitignores
+        .iter()
+        .map(|gitignore| gitignore.len())
+        .sum();
+    (filter.gitignores.len(), pattern_count)
 }
 
 fn build_project_gitignores(

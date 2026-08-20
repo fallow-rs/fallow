@@ -19,12 +19,14 @@ use fallow_api::{
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
 use fallow_cli::{
-    InspectBenchmarkCorpus, benchmark_dead_code_json, benchmark_fix_dry_run,
-    benchmark_inspect_file_evidence_bundle_json, benchmark_list_boundaries_json,
-    benchmark_list_json, benchmark_recommend_json, benchmark_rule_pack_test_json,
-    benchmark_runtime_coverage_analyze_json, benchmark_security_json, benchmark_viz_html,
-    create_inspect_benchmark_corpus,
+    InspectBenchmarkCorpus, WatchFilterBenchmarkGlobalGitignore, benchmark_dead_code_json,
+    benchmark_fix_dry_run, benchmark_inspect_file_evidence_bundle_json,
+    benchmark_list_boundaries_json, benchmark_list_json, benchmark_recommend_json,
+    benchmark_rule_pack_test_json, benchmark_runtime_coverage_analyze_json,
+    benchmark_security_json, benchmark_viz_html, benchmark_watch_filter_initialization,
+    create_inspect_benchmark_corpus, create_watch_filter_benchmark_global_gitignore,
 };
+use fallow_config::{FallowConfig, OutputFormat};
 use fallow_engine::{module_graph::impact_closure_for_changed_paths, session::AnalysisSession};
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
@@ -57,6 +59,10 @@ const RUNTIME_COVERAGE_FINDING_COUNT: usize = RUNTIME_COVERAGE_FILE_COUNT;
 const RUNTIME_COVERAGE_HOT_PATH_COUNT: usize = RUNTIME_COVERAGE_FILE_COUNT / 2;
 const SECURITY_FILE_COUNT: usize = 128;
 const VIZ_MODULE_COUNT: usize = 64;
+const WATCH_FILTER_FILES_PER_PACKAGE: usize = 16;
+const WATCH_FILTER_PACKAGE_COUNT: usize = 64;
+const WATCH_FILTER_PROJECT_MATCHER_COUNT: usize = WATCH_FILTER_PACKAGE_COUNT + 3;
+const WATCH_FILTER_PROJECT_PATTERN_COUNT: usize = WATCH_FILTER_PACKAGE_COUNT * 2 + 4;
 
 struct CommandInput {
     _temp_dir: TempDir,
@@ -85,6 +91,12 @@ struct RuntimeCoverageInput {
     root: PathBuf,
     coverage_path: PathBuf,
     response_bytes: Vec<u8>,
+}
+
+struct WatchFilterInput {
+    _temp_dir: TempDir,
+    config: fallow_config::ResolvedConfig,
+    global_gitignore: WatchFilterBenchmarkGlobalGitignore,
 }
 
 fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
@@ -972,6 +984,58 @@ fn create_list_boundaries_project() -> CommandInput {
     }
 }
 
+fn create_watch_filter_project() -> WatchFilterInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"bench-watch-filter","private":true,"type":"module"}"#,
+    );
+    write_file(&root, ".git/info/exclude", "scratch/**\n");
+    write_file(&root, ".gitignore", "dist/**\n*.log\n");
+    write_file(&root, ".storybook/.gitignore", "storybook-static/**\n");
+
+    // These matchers must not be discovered: one is in a disallowed hidden
+    // directory and one is pruned by the resolved user ignore patterns.
+    write_file(&root, ".cache/.gitignore", "generated/**\n");
+    write_file(&root, "vendor/ignored/.gitignore", "generated/**\n");
+
+    for package in 0..WATCH_FILTER_PACKAGE_COUNT {
+        let package_root = format!("packages/pkg-{package:02}");
+        write_file(
+            &root,
+            &format!("{package_root}/.gitignore"),
+            "generated/**\n!generated/keep.ts\n",
+        );
+        for file in 0..WATCH_FILTER_FILES_PER_PACKAGE {
+            let directory = if file % 2 == 0 { "src" } else { "generated" };
+            write_file(
+                &root,
+                &format!("{package_root}/{directory}/module-{file:02}.ts"),
+                format!("export const value_{package:02}_{file:02} = {file};\n"),
+            );
+        }
+    }
+
+    let config = FallowConfig {
+        ignore_patterns: vec![
+            "vendor/ignored".to_string(),
+            "vendor/ignored/**".to_string(),
+        ],
+        ..FallowConfig::default()
+    }
+    .resolve(root, OutputFormat::Json, BENCH_THREADS, false, true, None);
+    let global_gitignore = create_watch_filter_benchmark_global_gitignore();
+
+    WatchFilterInput {
+        _temp_dir: temp_dir,
+        config,
+        global_gitignore,
+    }
+}
+
 fn create_viz_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
@@ -1432,6 +1496,27 @@ fn stable_list_boundaries_many_zones_json(c: &mut Criterion) {
     });
 }
 
+fn stable_watch_filter_initialization_nested_gitignores(c: &mut Criterion) {
+    let input = create_watch_filter_project();
+
+    let result = benchmark_watch_filter_initialization(&input.config, &input.global_gitignore);
+    assert_eq!(result.0, WATCH_FILTER_PROJECT_MATCHER_COUNT);
+    assert_eq!(result.1, WATCH_FILTER_PROJECT_PATTERN_COUNT);
+
+    c.bench_function(
+        "stable_watch_filter_initialization_nested_gitignores",
+        |bencher| {
+            bencher.iter(|| {
+                let result =
+                    benchmark_watch_filter_initialization(&input.config, &input.global_gitignore);
+                assert_eq!(result.0, WATCH_FILTER_PROJECT_MATCHER_COUNT);
+                assert_eq!(result.1, WATCH_FILTER_PROJECT_PATTERN_COUNT);
+                result
+            });
+        },
+    );
+}
+
 fn stable_viz_project_html(c: &mut Criterion) {
     let input = create_viz_project();
     let expected_files = VIZ_MODULE_COUNT + 1;
@@ -1473,6 +1558,7 @@ criterion_group!(
     stable_coverage_analyze_local_runtime_json,
     stable_list_workspace_inventory_json,
     stable_list_boundaries_many_zones_json,
+    stable_watch_filter_initialization_nested_gitignores,
     stable_viz_project_html
 );
 criterion_main!(benches);
