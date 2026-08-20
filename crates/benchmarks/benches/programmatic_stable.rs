@@ -19,12 +19,14 @@ use fallow_api::{
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
 use fallow_cli::{
-    InspectBenchmarkCorpus, WatchFilterBenchmarkGlobalGitignore, benchmark_dead_code_json,
+    AuditReviewBenchmarkCorpus, InspectBenchmarkCorpus, WatchFilterBenchmarkGlobalGitignore,
+    benchmark_audit_review_brief_many_changed_files_json, benchmark_dead_code_json,
     benchmark_fix_dry_run, benchmark_inspect_file_evidence_bundle_json,
     benchmark_list_boundaries_json, benchmark_list_json, benchmark_recommend_json,
     benchmark_rule_pack_test_json, benchmark_runtime_coverage_analyze_json,
     benchmark_security_json, benchmark_viz_html, benchmark_watch_filter_initialization,
-    create_inspect_benchmark_corpus, create_watch_filter_benchmark_global_gitignore,
+    create_audit_review_benchmark_corpus, create_inspect_benchmark_corpus,
+    create_watch_filter_benchmark_global_gitignore,
 };
 use fallow_config::{FallowConfig, OutputFormat};
 use fallow_engine::{module_graph::impact_closure_for_changed_paths, session::AnalysisSession};
@@ -36,6 +38,11 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
+const AUDIT_REVIEW_CHANGED_FILE_COUNT: usize = 16;
+const AUDIT_REVIEW_INTRODUCED_COUNT: usize = AUDIT_REVIEW_CHANGED_FILE_COUNT / 2;
+const AUDIT_REVIEW_INHERITED_COUNT: usize = AUDIT_REVIEW_CHANGED_FILE_COUNT / 2;
+const AUDIT_REVIEW_PUBLIC_API_ADDED_COUNT: usize = AUDIT_REVIEW_CHANGED_FILE_COUNT;
+const AUDIT_REVIEW_DECISION_COUNT: usize = 4;
 const DEAD_CODE_FINDING_COUNT: usize = FIX_FILE_COUNT;
 const FIX_FILE_COUNT: usize = 128;
 const IMPACT_LAYER_COUNT: usize = 32;
@@ -73,6 +80,12 @@ struct InspectCommandInput {
     _temp_dir: TempDir,
     root: PathBuf,
     corpus: InspectBenchmarkCorpus,
+}
+
+struct AuditReviewCommandInput {
+    _temp_dir: TempDir,
+    root: PathBuf,
+    changed_files: Vec<PathBuf>,
 }
 
 struct ExtractCacheInput {
@@ -124,6 +137,52 @@ fn create_inspect_project() -> InspectCommandInput {
         root,
         corpus,
     }
+}
+
+fn create_audit_review_project() -> AuditReviewCommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"bench-audit-review","type":"module","main":"src/index.ts"}"#,
+    );
+
+    let mut changed_files = Vec::with_capacity(AUDIT_REVIEW_CHANGED_FILE_COUNT);
+    let mut index_source = String::new();
+    for index in 0..AUDIT_REVIEW_CHANGED_FILE_COUNT {
+        let changed_relative = format!("src/changed/module{index}.ts");
+        write_file(
+            &root,
+            &changed_relative,
+            format!("export const used{index} = {index};\nexport const unused{index} = {index};\n"),
+        );
+        write_file(
+            &root,
+            &format!("src/consumers/consumer{index}.ts"),
+            format!(
+                "import {{ used{index} }} from \"../changed/module{index}\";\nexport const result{index} = used{index};\n"
+            ),
+        );
+        writeln!(
+            &mut index_source,
+            "import {{ result{index} }} from \"./consumers/consumer{index}\";\nconsole.log(result{index});"
+        )
+        .unwrap();
+        changed_files.push(root.join(changed_relative));
+    }
+    write_file(&root, "src/index.ts", index_source);
+
+    AuditReviewCommandInput {
+        _temp_dir: temp_dir,
+        root,
+        changed_files,
+    }
+}
+
+fn create_audit_review_corpus(input: &AuditReviewCommandInput) -> AuditReviewBenchmarkCorpus {
+    create_audit_review_benchmark_corpus(&input.root, &input.changed_files, BENCH_THREADS)
+        .expect("audit review benchmark corpus builds")
 }
 
 fn analysis_options(root: &Path, no_cache: bool) -> AnalysisOptions {
@@ -1237,6 +1296,34 @@ fn stable_feature_flags_workspace_analysis(c: &mut Criterion) {
     });
 }
 
+fn stable_audit_review_brief_many_changed_files_json(c: &mut Criterion) {
+    let input = create_audit_review_project();
+    let mut corpus = create_audit_review_corpus(&input);
+    let warmup = benchmark_audit_review_brief_many_changed_files_json(&mut corpus);
+    assert_eq!(warmup.0, std::process::ExitCode::SUCCESS);
+    assert_eq!(warmup.1, AUDIT_REVIEW_INTRODUCED_COUNT);
+    assert_eq!(warmup.2, AUDIT_REVIEW_INHERITED_COUNT);
+    assert_eq!(warmup.3, AUDIT_REVIEW_PUBLIC_API_ADDED_COUNT);
+    assert_eq!(warmup.4, AUDIT_REVIEW_DECISION_COUNT);
+    assert!(warmup.5 > 0);
+
+    c.bench_function(
+        "stable_audit_review_brief_many_changed_files_json",
+        |bencher| {
+            bencher.iter(|| {
+                let result = benchmark_audit_review_brief_many_changed_files_json(&mut corpus);
+                assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+                assert_eq!(result.1, AUDIT_REVIEW_INTRODUCED_COUNT);
+                assert_eq!(result.2, AUDIT_REVIEW_INHERITED_COUNT);
+                assert_eq!(result.3, AUDIT_REVIEW_PUBLIC_API_ADDED_COUNT);
+                assert_eq!(result.4, AUDIT_REVIEW_DECISION_COUNT);
+                assert!(result.5 > 0);
+                result
+            });
+        },
+    );
+}
+
 fn stable_audit_impact_closure_many_files(c: &mut Criterion) {
     let input = create_impact_closure_project();
     let session = AnalysisSession::load(&input.root, None).expect("impact session loads");
@@ -1548,6 +1635,7 @@ criterion_group!(
     stable_health_complex_service_warm_complexity_hit,
     stable_circular_dependencies_domain_cycles,
     stable_feature_flags_workspace_analysis,
+    stable_audit_review_brief_many_changed_files_json,
     stable_audit_impact_closure_many_files,
     stable_fix_dry_run_many_exports,
     stable_inspect_file_evidence_bundle_json,

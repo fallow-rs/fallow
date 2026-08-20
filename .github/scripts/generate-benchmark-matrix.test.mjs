@@ -54,12 +54,22 @@ test("component bench file changes select the matching shard", () => {
 
 test("stable CLI production changes select the stable programmatic shard", () => {
   for (const file of [
+    "crates/cli/src/audit.rs",
+    "crates/cli/src/audit_brief.rs",
+    "crates/cli/src/audit_decision_surface.rs",
+    "crates/cli/src/audit_focus.rs",
+    "crates/cli/src/audit_review_deltas.rs",
+    "crates/cli/src/audit_routing.rs",
+    "crates/cli/src/audit_walkthrough.rs",
+    "crates/cli/src/audit_weakening.rs",
+    "crates/cli/src/check/mod.rs",
     "crates/cli/src/init.rs",
     "crates/cli/src/inspect.rs",
     "crates/cli/src/json_style.rs",
     "crates/cli/src/lib.rs",
     "crates/cli/src/list.rs",
     "crates/cli/src/onboarding.rs",
+    "crates/cli/src/output_runtime.rs",
     "crates/cli/src/watch.rs",
   ]) {
     assert.deepEqual(names(selectFastTargets([file])), ["programmatic_stable"]);

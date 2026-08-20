@@ -2941,6 +2941,41 @@ pub fn benchmark_fix_dry_run(root: &Path, threads: usize) -> (ExitCode, usize) {
     })
 }
 
+/// Owned production-analysis corpus for the stable audit review benchmark.
+/// This is not a supported API.
+#[doc(hidden)]
+pub use audit::AuditReviewBenchmarkCorpus;
+
+/// Build audit analysis and preload external review inputs outside the timed
+/// benchmark. This is not a supported API.
+#[doc(hidden)]
+pub fn create_audit_review_benchmark_corpus(
+    root: &Path,
+    changed_files: &[PathBuf],
+    threads: usize,
+) -> Result<AuditReviewBenchmarkCorpus, ExitCode> {
+    audit::create_audit_review_benchmark_corpus(root, changed_files, threads)
+}
+
+/// Benchmark production audit review assembly and compact tagged JSON without
+/// git, cache, worktree, or file I/O. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_audit_review_brief_many_changed_files_json(
+    corpus: &mut AuditReviewBenchmarkCorpus,
+) -> (ExitCode, usize, usize, usize, usize, usize) {
+    match audit::benchmark_audit_review_brief_many_changed_files_json(corpus) {
+        Ok(result) => (
+            ExitCode::SUCCESS,
+            result.introduced_count,
+            result.inherited_count,
+            result.public_api_added_count,
+            result.decision_count,
+            result.rendered_bytes,
+        ),
+        Err(code) => (code, 0, 0, 0, 0, 0),
+    }
+}
+
 #[doc(hidden)]
 pub use inspect::InspectBenchmarkCorpus;
 

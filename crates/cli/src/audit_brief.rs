@@ -475,7 +475,7 @@ fn build_brief_subtract_sections(
 /// Build the complete brief JSON value: the versioned brief header, the
 /// informational audit verdict header, the triage + graph-facts stages, and the
 /// reused subtract section.
-fn build_brief_json(
+pub fn build_brief_json(
     result: &AuditResult,
     diff_index: Option<&fallow_output::DiffIndex>,
 ) -> Result<serde_json::Value, ExitCode> {

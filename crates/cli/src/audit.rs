@@ -1046,6 +1046,31 @@ struct AuditBriefDataInput<'a> {
     head_sha: Option<&'a str>,
 }
 
+/// Owned production-analysis inputs for the stable review-brief benchmark.
+/// This is not a supported API.
+#[doc(hidden)]
+pub struct AuditReviewBenchmarkCorpus {
+    root: PathBuf,
+    state: Option<AuditReviewBenchmarkState>,
+    head_sources: FxHashMap<String, String>,
+}
+
+struct AuditReviewBenchmarkState {
+    head: HeadAnalyses,
+    base_snapshot: AuditKeySnapshot,
+    changed_files: FxHashSet<PathBuf>,
+    external: AuditBriefExternalData,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AuditReviewBenchmarkResult {
+    pub introduced_count: usize,
+    pub inherited_count: usize,
+    pub public_api_added_count: usize,
+    pub decision_count: usize,
+    pub rendered_bytes: usize,
+}
+
 /// Run the three HEAD-side analyses with intra-pipeline sharing intact:
 /// check first (so its parsed modules are available), then dupes (which can
 /// reuse check's discovered file list when production settings match), then
@@ -1326,6 +1351,7 @@ pub fn execute_audit_with_type_aware(
         rename_pairs,
         base_ref,
         base_description,
+        head_sha: AuditHeadSha::Production,
         start,
     })
 }
@@ -1342,16 +1368,29 @@ struct AuditAssemblyInput<'a> {
     rename_pairs: Vec<fallow_engine::changed_files::RenamedFile>,
     base_ref: String,
     base_description: Option<String>,
+    head_sha: AuditHeadSha,
     start: Instant,
+}
+
+enum AuditHeadSha {
+    Production,
+    Preloaded(Option<String>),
 }
 
 /// Resolve the base snapshot, compute attribution/verdict/summary, and build the
 /// final `AuditResult` from the HEAD-side analyses.
+fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, ExitCode> {
+    assemble_audit_result_with_brief_builder(input, compute_audit_brief_data)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "audit assembly keeps compatibility checks and final attribution in one transaction"
 )]
-fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, ExitCode> {
+fn assemble_audit_result_with_brief_builder(
+    input: AuditAssemblyInput<'_>,
+    build_brief: impl FnOnce(AuditBriefDataInput<'_>) -> AuditBriefData,
+) -> Result<AuditResult, ExitCode> {
     let opts = input.opts;
     let head = input.head_res?;
     let mut check_result = head.check;
@@ -1445,8 +1484,11 @@ audit.typeAware: false or pass --no-type-aware to keep the gate syntactic"
         }
     }
 
-    let head_sha = get_head_sha(opts.root);
-    let brief = compute_audit_brief_data(AuditBriefDataInput {
+    let head_sha = match input.head_sha {
+        AuditHeadSha::Production => get_head_sha(opts.root),
+        AuditHeadSha::Preloaded(head_sha) => head_sha,
+    };
+    let brief = build_brief(AuditBriefDataInput {
         opts,
         check: check_result.as_ref(),
         dupes: dupes_result.as_ref(),
@@ -1497,27 +1539,309 @@ fn compute_audit_brief_data(input: AuditBriefDataInput<'_>) -> AuditBriefData {
         return AuditBriefData::default();
     }
 
-    // Review-brief data: deltas, weakening, and ownership routing.
-    let (review_deltas, weakening_signals, routing) = compute_brief_e3_data(
-        input.opts,
-        input.check,
-        input.base_snapshot,
-        input.changed_files,
-        input.base_ref,
+    let root = input
+        .check
+        .map(|check| check.config.root.clone())
+        .unwrap_or_default();
+    let head_source = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
+    let rename_old_path = |rel: &str| -> Option<String> {
+        crate::report::ci::diff_filter::shared_diff_index()
+            .and_then(|index| index.old_path_for_root_relative(rel))
+            .map(std::borrow::Cow::into_owned)
+    };
+    compute_audit_brief_data_with_lookups(input, None, &head_source, &rename_old_path)
+}
+
+struct AuditBriefExternalData {
+    weakening_signals: Vec<weakening::WeakeningSignal>,
+    routing: Option<routing::RoutingFacts>,
+    diff_evidence: BriefDiffEvidence,
+}
+
+fn prepare_audit_brief_external_data(
+    opts: &AuditOptions<'_>,
+    check: Option<&CheckResult>,
+    changed_files: &FxHashSet<PathBuf>,
+    base_ref: &str,
+) -> AuditBriefExternalData {
+    let weakening_signals = compute_weakening_signals(opts.root, base_ref, changed_files);
+    let routing =
+        check.map(|check| routing::compute_routing(opts.root, &check.config, changed_files));
+    let diff_evidence = compute_brief_diff_evidence(opts.root, base_ref, opts.walkthrough_file);
+    AuditBriefExternalData {
+        weakening_signals,
+        routing,
+        diff_evidence,
+    }
+}
+
+#[expect(
+    clippy::ref_option,
+    reason = "the hidden benchmark options mirror the production AuditOptions contract"
+)]
+fn audit_review_benchmark_options<'a>(
+    root: &'a Path,
+    config_path: &'a Option<PathBuf>,
+    cache_dir: &'a Path,
+    threads: usize,
+) -> AuditOptions<'a> {
+    AuditOptions {
+        root,
+        config_path,
+        cache_dir,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        no_cache: true,
+        threads,
+        quiet: true,
+        allow_remote_extends: false,
+        changed_since: None,
+        production: false,
+        production_dead_code: Some(false),
+        production_health: Some(false),
+        production_dupes: Some(false),
+        workspace: None,
+        changed_workspaces: None,
+        explain: false,
+        explain_skipped: false,
+        performance: false,
+        group_by: None,
+        dead_code_baseline: None,
+        health_baseline: None,
+        dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+        max_crap: None,
+        coverage: None,
+        coverage_root: None,
+        gate: AuditGate::NewOnly,
+        include_entry_exports: false,
+        css: false,
+        css_deep: false,
+        runtime_coverage: None,
+        min_invocations_hot: 0,
+        brief: true,
+        max_decisions: 4,
+        walkthrough_guide: false,
+        walkthrough: false,
+        mark_viewed: &[],
+        show_cleared: false,
+        walkthrough_file: None,
+        show_deprioritized: false,
+    }
+}
+
+/// Build the analysis corpus and preload every external input used by the
+/// review-brief assembly benchmark. This is not a supported API.
+#[doc(hidden)]
+pub fn create_audit_review_benchmark_corpus(
+    root: &Path,
+    changed_files: &[PathBuf],
+    threads: usize,
+) -> Result<AuditReviewBenchmarkCorpus, ExitCode> {
+    let config_path = None;
+    let cache_dir = root.join(".fallow-cache-benchmark");
+    let opts = audit_review_benchmark_options(root, &config_path, &cache_dir, threads);
+    let changed_files = changed_files.iter().cloned().collect::<FxHashSet<_>>();
+    let mut head = run_audit_head_analyses(
+        &opts,
+        AuditTypeAwareOptions::default(),
+        None,
+        &changed_files,
+    )?;
+
+    // The benchmark targets review assembly. Keeping the duplication and health
+    // domains empty prevents their optional diff and snapshot side effects from
+    // entering the timed path while dead-code attribution remains scalable.
+    head.dupes = None;
+    head.health = None;
+    if let Some(check) = head.check.as_mut() {
+        check.public_api_keys = Some(
+            changed_files
+                .iter()
+                .filter_map(|path| {
+                    let relative = path.strip_prefix(root).ok()?;
+                    let index = path.file_stem()?.to_str()?.strip_prefix("module")?;
+                    let relative = relative.to_string_lossy().replace('\\', "/");
+                    Some([
+                        format!("{relative}::used{index}"),
+                        format!("{relative}::unused{index}"),
+                    ])
+                })
+                .flatten()
+                .collect(),
+        );
+    }
+    let mut base_snapshot = current_keys_as_base_keys(head.check.as_ref(), None, None);
+    let dead_code_keys = sorted_keys(&base_snapshot.dead_code);
+    for key in dead_code_keys.into_iter().step_by(2) {
+        base_snapshot.dead_code.remove(&key);
+    }
+    let public_api_keys = sorted_keys(&base_snapshot.public_api);
+    for key in public_api_keys.into_iter().step_by(2) {
+        base_snapshot.public_api.remove(&key);
+    }
+
+    let external = prepare_audit_brief_external_data(
+        &opts,
+        head.check.as_ref(),
+        &changed_files,
+        "benchmark-base",
     );
+    let head_sources = changed_files
+        .iter()
+        .filter_map(|path| {
+            let relative = path.strip_prefix(root).ok()?;
+            let source = std::fs::read_to_string(path).ok()?;
+            Some((relative.to_string_lossy().replace('\\', "/"), source))
+        })
+        .collect();
+
+    Ok(AuditReviewBenchmarkCorpus {
+        root: root.to_path_buf(),
+        state: Some(AuditReviewBenchmarkState {
+            head,
+            base_snapshot,
+            changed_files,
+            external,
+        }),
+        head_sources,
+    })
+}
+
+/// Run production audit assembly and compact tagged review-brief JSON rendering
+/// over a fully preloaded corpus. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_audit_review_brief_many_changed_files_json(
+    corpus: &mut AuditReviewBenchmarkCorpus,
+) -> Result<AuditReviewBenchmarkResult, ExitCode> {
+    let AuditReviewBenchmarkState {
+        head,
+        base_snapshot,
+        changed_files,
+        external,
+    } = corpus.state.take().ok_or_else(|| ExitCode::from(2))?;
+    let config_path = None;
+    let cache_dir = corpus.root.join(".fallow-cache-benchmark");
+    let opts = audit_review_benchmark_options(&corpus.root, &config_path, &cache_dir, 1);
+    let head_source = |relative: &str| corpus.head_sources.get(relative).cloned();
+    let rename_old_path = |_relative: &str| None;
+    let changed_files_count = changed_files.len();
+    let mut result = assemble_audit_result_with_brief_builder(
+        AuditAssemblyInput {
+            opts: &opts,
+            head_res: Ok(head),
+            base_res: None,
+            cached_base_snapshot: Some(base_snapshot),
+            base_cache_key: None,
+            changed_files,
+            changed_files_count,
+            rename_pairs: Vec::new(),
+            base_ref: "benchmark-base".to_owned(),
+            base_description: None,
+            head_sha: AuditHeadSha::Preloaded(Some("benchmark-head".to_owned())),
+            start: Instant::now(),
+        },
+        |input| {
+            compute_audit_brief_data_with_lookups(
+                input,
+                Some(external),
+                &head_source,
+                &rename_old_path,
+            )
+        },
+    )?;
+    if result.verdict != AuditVerdict::Fail {
+        return Err(ExitCode::from(2));
+    }
+    let decision_count = result
+        .decision_surface
+        .as_ref()
+        .map_or(0, |surface| surface.decisions.len());
+    let output = crate::audit_brief::build_brief_json(&result, result.diff_index.as_ref())?;
+    let value = fallow_output::serialize_review_brief_json_output(
+        output,
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    )
+    .map_err(|_| ExitCode::from(2))?;
+    if value.get("kind").and_then(serde_json::Value::as_str) != Some("audit-brief") {
+        return Err(ExitCode::from(2));
+    }
+    let rendered = crate::json_style::JsonStyle::Compact
+        .serialize(&value)
+        .map_err(|_| ExitCode::from(2))?;
+    let benchmark_result = AuditReviewBenchmarkResult {
+        introduced_count: result.attribution.dead_code_introduced,
+        inherited_count: result.attribution.dead_code_inherited,
+        public_api_added_count: result
+            .review_deltas
+            .as_ref()
+            .map_or(0, |deltas| deltas.public_api_added.len()),
+        decision_count,
+        rendered_bytes: rendered.len(),
+    };
+    corpus.state = Some(AuditReviewBenchmarkState {
+        head: HeadAnalyses {
+            check: result.check.take(),
+            dupes: result.dupes.take(),
+            health: result.health.take(),
+        },
+        base_snapshot: result
+            .base_snapshot
+            .take()
+            .ok_or_else(|| ExitCode::from(2))?,
+        changed_files: result.changed_files.drain(..).collect(),
+        external: AuditBriefExternalData {
+            weakening_signals: std::mem::take(&mut result.weakening_signals),
+            routing: result.routing.take(),
+            diff_evidence: BriefDiffEvidence {
+                change_anchors: std::mem::take(&mut result.change_anchors),
+                diff_index: result.diff_index.take(),
+            },
+        },
+    });
+    Ok(benchmark_result)
+}
+
+fn compute_audit_brief_data_with_lookups(
+    input: AuditBriefDataInput<'_>,
+    preloaded: Option<AuditBriefExternalData>,
+    head_source: &dyn Fn(&str) -> Option<String>,
+    rename_old_path: &dyn Fn(&str) -> Option<String>,
+) -> AuditBriefData {
+    if !input.opts.brief {
+        return AuditBriefData::default();
+    }
+
+    let review_deltas = compute_review_deltas(input.check, input.base_snapshot);
+    let (weakening_signals, routing, preloaded_diff_evidence) = match preloaded {
+        None => (
+            compute_weakening_signals(input.opts.root, input.base_ref, input.changed_files),
+            input.check.map(|check| {
+                routing::compute_routing(input.opts.root, &check.config, input.changed_files)
+            }),
+            None,
+        ),
+        Some(external) => (
+            external.weakening_signals,
+            external.routing,
+            Some(external.diff_evidence),
+        ),
+    };
 
     // Decision surface: classify the SOLID-3 candidates, rank, cap, and route.
-    let decision_surface = Some(compute_decision_surface(
+    let decision_surface = Some(compute_decision_surface_with_lookups(
         input.opts,
         input.check,
         review_deltas.as_ref(),
         routing.as_ref(),
+        head_source,
+        rename_old_path,
     ));
 
-    // Change anchors and triage metrics come from the same diff source as the
-    // audit run and are parsed together from one retained diff.
-    let diff_evidence =
-        compute_brief_diff_evidence(input.opts.root, input.base_ref, input.opts.walkthrough_file);
+    let diff_evidence = preloaded_diff_evidence.unwrap_or_else(|| {
+        compute_brief_diff_evidence(input.opts.root, input.base_ref, input.opts.walkthrough_file)
+    });
     let change_anchors = diff_evidence.change_anchors;
 
     // Graph-snapshot hash pins key sets, resolved base, head sha, and anchors.
@@ -1658,11 +1982,13 @@ fn walkthrough_file_relative_to_root(
 /// coordination gaps, and the impact-closure blast magnitude, then run the
 /// extractor. The cap is taken from the audit options (clamped to [3, 5] by the
 /// extractor). Returns an empty surface when no check result is available.
-fn compute_decision_surface(
+fn compute_decision_surface_with_lookups(
     opts: &AuditOptions<'_>,
     check: Option<&CheckResult>,
     review_deltas: Option<&crate::audit_brief::ReviewDeltas>,
     routing: Option<&routing::RoutingFacts>,
+    head_source: &dyn Fn(&str) -> Option<String>,
+    rename_old_path: &dyn Fn(&str) -> Option<String>,
 ) -> crate::audit_decision_surface::DecisionSurface {
     use crate::audit_decision_surface::{
         CoordinationAnchor, DecisionInputs, extract_decision_surface,
@@ -1687,12 +2013,6 @@ fn compute_decision_surface(
     let empty_routing = routing::RoutingFacts::default();
     let routing = routing.unwrap_or(&empty_routing);
 
-    // Head-source reader for suppression checks AND for resolving a contract
-    // symbol's declaration line: read the on-disk (head) content of an anchor file
-    // by its root-relative path. Best-effort; an unreadable file is not suppressed.
-    let root_owned = root.clone();
-    let head_source = move |rel: &str| std::fs::read_to_string(root_owned.join(rel)).ok();
-
     // Resolve a contract symbol's 1-based declaration line from the per-file
     // export-line map precomputed on the brief path (the graph is already dropped
     // by health here, so we cannot re-derive it now). Lets coordination /
@@ -1711,15 +2031,6 @@ fn compute_decision_surface(
         resolve_export_line(check.export_lines.as_ref(), path, &[name.to_string()])
     });
 
-    // Rename resolver: a head (post-rename) root-relative path -> its pre-rename
-    // path, from the diff's rename pairs. Best-effort (empty without a shared diff
-    // or renames); lets each decision carry a rename-durable `previous_signal_id`.
-    let rename_old_path = |rel: &str| -> Option<String> {
-        crate::report::ci::diff_filter::shared_diff_index()
-            .and_then(|idx| idx.old_path_for_root_relative(rel))
-            .map(std::borrow::Cow::into_owned)
-    };
-
     // Honest per-anchor consumer count, looked up from the map precomputed before
     // the graph drop. `0` for an anchor with no recorded importers (a new file).
     let internal_consumers_map = check.internal_consumers.as_ref();
@@ -1737,8 +2048,8 @@ fn compute_decision_surface(
         public_api_anchor_line,
         affected_not_shown,
         routing,
-        head_source: &head_source,
-        rename_old_path: &rename_old_path,
+        head_source,
+        rename_old_path,
         internal_consumers: &internal_consumers,
         cap: opts.max_decisions,
     })
@@ -1819,22 +2130,12 @@ fn aggregate_coordination_gaps(
     anchors
 }
 
-/// Compute the review-brief data: the diff-aware deltas (head sets vs base
-/// snapshot), the weakening-signal pass (base-vs-head diff over the changed
-/// files), and ownership routing. Pure-ish: weakening + routing shell out to git
-/// (via [`BaseFileReader`] / churn), so this runs only on the brief path.
-fn compute_brief_e3_data(
-    opts: &AuditOptions<'_>,
+/// Compute the review-brief deltas from already assembled head and base data.
+fn compute_review_deltas(
     check: Option<&CheckResult>,
     base_snapshot: Option<&AuditKeySnapshot>,
-    changed_files: &FxHashSet<PathBuf>,
-    base_ref: &str,
-) -> (
-    Option<crate::audit_brief::ReviewDeltas>,
-    Vec<weakening::WeakeningSignal>,
-    Option<routing::RoutingFacts>,
-) {
-    let deltas = check.zip(base_snapshot).map(|(check, base)| {
+) -> Option<crate::audit_brief::ReviewDeltas> {
+    check.zip(base_snapshot).map(|(check, base)| {
         let head_boundary = review_deltas::boundary_edge_keys(&check.results.boundary_violations);
         let head_cycles =
             review_deltas::cycle_keys(&check.results.circular_dependencies, &check.config.root);
@@ -1847,14 +2148,7 @@ fn compute_brief_e3_data(
             &head_public_api,
             &base.public_api,
         )
-    });
-
-    let weakening_signals = compute_weakening_signals(opts.root, base_ref, changed_files);
-
-    let routing =
-        check.map(|check| routing::compute_routing(opts.root, &check.config, changed_files));
-
-    (deltas, weakening_signals, routing)
+    })
 }
 
 /// Run the weakening-signal pass over the changed files: read each file's base

@@ -1,4 +1,60 @@
 use super::*;
+use std::fmt::Write as _;
+
+#[test]
+fn audit_review_benchmark_reuses_production_assembly_without_ambient_io() {
+    let temp = tempfile::TempDir::new().expect("temp dir should be created");
+    let root = temp.path().join("audit-review-benchmark");
+    fs::create_dir_all(root.join("src/changed")).expect("fixture directory should be created");
+    fs::create_dir_all(root.join("src/consumers")).expect("fixture directory should be created");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-review-benchmark","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("package fixture should be written");
+
+    let mut changed_files = Vec::new();
+    let mut index_source = String::new();
+    for index in 0..8 {
+        let relative = format!("src/changed/module{index}.ts");
+        let changed = root.join(&relative);
+        fs::write(
+            &changed,
+            format!("export const used{index} = {index};\nexport const unused{index} = {index};\n"),
+        )
+        .expect("changed fixture should be written");
+        fs::write(
+            root.join(format!("src/consumers/consumer{index}.ts")),
+            format!(
+                "import {{ used{index} }} from \"../changed/module{index}\";\nexport const result{index} = used{index};\n"
+            ),
+        )
+        .expect("consumer fixture should be written");
+        write!(
+            &mut index_source,
+            "import {{ result{index} }} from \"./consumers/consumer{index}\";\nconsole.log(result{index});\n"
+        )
+        .expect("entry fixture should be formatted");
+        changed_files.push(changed);
+    }
+    fs::write(root.join("src/index.ts"), index_source).expect("entry fixture should be written");
+
+    let mut corpus = create_audit_review_benchmark_corpus(&root, &changed_files, 2)
+        .expect("benchmark corpus should be created");
+    fs::remove_dir_all(&root).expect("fixture should be removable before the timed path");
+
+    let result = benchmark_audit_review_brief_many_changed_files_json(&mut corpus)
+        .expect("benchmark assembly should not read the removed fixture");
+    assert_eq!(result.introduced_count, 4);
+    assert_eq!(result.inherited_count, 4);
+    assert_eq!(result.public_api_added_count, 8);
+    assert_eq!(result.decision_count, 4);
+    assert!(result.rendered_bytes > 0);
+
+    let repeated = benchmark_audit_review_brief_many_changed_files_json(&mut corpus)
+        .expect("reused benchmark corpus should preserve production behavior");
+    assert_eq!(repeated, result);
+}
 
 #[test]
 fn completeness_gate_uses_effective_metadata_requirement() {
