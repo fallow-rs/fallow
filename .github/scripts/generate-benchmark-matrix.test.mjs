@@ -50,6 +50,22 @@ test("component bench file changes select the matching shard", () => {
   assert.deepEqual(names(selectFastTargets(["crates/benchmarks/benches/component_config.rs"])), [
     "component_config",
   ]);
+  assert.deepEqual(names(selectFastTargets(["crates/benchmarks/benches/component_engine.rs"])), [
+    "component_engine",
+  ]);
+});
+
+test("health ingestion and CRAP scoring changes select engine benchmark coverage", () => {
+  for (const file of [
+    "crates/engine/src/health/coverage_settings.rs",
+    "crates/engine/src/health/scoring.rs",
+  ]) {
+    assert.deepEqual(names(selectFastTargets([file])), [
+      "component_engine",
+      "dupes_detect",
+      "programmatic_stable",
+    ]);
+  }
 });
 
 test("stable CLI production changes select the stable programmatic shard", () => {

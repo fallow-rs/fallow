@@ -28,8 +28,8 @@ use fallow_engine::{
     trace_chain::trace_symbol_chain_with_session,
 };
 use fallow_output::{
-    RootEnvelopeMode, SuppressionInventoryOutputInput, build_suppression_inventory_output,
-    serialize_suppression_inventory_json_output,
+    CoverageSource, HealthReport, RootEnvelopeMode, SuppressionInventoryOutputInput,
+    build_suppression_inventory_output, serialize_suppression_inventory_json_output,
 };
 use fallow_types::output_format::OutputFormat;
 use fallow_types::trace_chain::{SymbolChainQuery, TraceDirections};
@@ -54,6 +54,14 @@ const GUARD_RULE_COUNT: usize = 8;
 const TRACE_CALLER_COUNT: usize = 128;
 const SUPPRESSION_FILE_COUNT: usize = 128;
 const SUPPRESSIONS_PER_FILE: usize = 4;
+const ISTANBUL_CRAP_FILE_COUNT: usize = 128;
+const ISTANBUL_FUNCTIONS_PER_FILE: usize = 2;
+const ISTANBUL_MATCHED_FUNCTION_COUNT: usize =
+    ISTANBUL_CRAP_FILE_COUNT * ISTANBUL_FUNCTIONS_PER_FILE;
+const ISTANBUL_CRAP_FINDING_COUNT: usize = ISTANBUL_CRAP_FILE_COUNT;
+const ISTANBUL_FALLBACK_DECL_LINE: u32 = 11;
+const ISTANBUL_FALLBACK_BODY_LINE: u32 = 12;
+const ISTANBUL_FALLBACK_PRODUCER_LINE: u32 = 14;
 
 struct EngineFixture {
     _temp_dir: TempDir,
@@ -69,6 +77,12 @@ struct WarmEngineFixture {
 struct HotspotOwnershipFixture {
     fixture: WarmEngineFixture,
     churn_file: PathBuf,
+}
+
+struct IstanbulCrapFixture {
+    fixture: WarmEngineFixture,
+    _coverage_temp_dir: TempDir,
+    coverage_path: PathBuf,
 }
 
 struct CssDeepEngineFixture {
@@ -331,6 +345,138 @@ fn create_warm_engine_fixture() -> WarmEngineFixture {
         fixture,
         session,
         config_path: None,
+    }
+}
+
+fn istanbul_crap_module_source(named: &str, fallback: &str) -> String {
+    format!(
+        "export function {named}(value: number): number {{\n\
+         \x20 let score = 0;\n\
+         \x20 if (value > 0) score += 1;\n\
+         \x20 if (value > 1) score += 1;\n\
+         \x20 if (value > 2) score += 1;\n\
+         \x20 if (value > 3) score += 1;\n\
+         \x20 if (value > 4) score += 1;\n\
+         \x20 return score;\n\
+         }}\n\n\
+         export const {fallback} = (value: number): number => {{\n\
+         \x20 let score = 0;\n\
+         \x20 if (value > 0) score += 1;\n\
+         \x20 if (value > 1) score += 1;\n\
+         \x20 if (value > 2) score += 1;\n\
+         \x20 if (value > 3) score += 1;\n\
+         \x20 if (value > 4) score += 1;\n\
+         \x20 return score;\n\
+         }};\n"
+    )
+}
+
+fn istanbul_crap_coverage_entry(
+    source_path: &Path,
+    named: &str,
+    arrow_col: usize,
+    named_hits: u32,
+    fallback_hits: u32,
+) -> serde_json::Value {
+    serde_json::json!({
+        "path": source_path.to_string_lossy().into_owned(),
+        "statementMap": {},
+        "fnMap": {
+            "0": {
+                "name": named,
+                "decl": { "start": { "line": 1, "column": 7 }, "end": { "line": 1, "column": 7 } },
+                "loc": { "start": { "line": 1, "column": 7 }, "end": { "line": 9, "column": 1 } },
+                "line": 1
+            },
+            "1": {
+                "name": "(anonymous_1)",
+                "decl": { "start": { "line": ISTANBUL_FALLBACK_DECL_LINE, "column": arrow_col }, "end": { "line": ISTANBUL_FALLBACK_DECL_LINE, "column": arrow_col } },
+                "loc": { "start": { "line": ISTANBUL_FALLBACK_BODY_LINE, "column": arrow_col }, "end": { "line": 19, "column": 1 } },
+                // The producer line is outside the anonymous lookup window, so
+                // matching the declaration requires the loader's decl alias.
+                "line": ISTANBUL_FALLBACK_PRODUCER_LINE
+            }
+        },
+        "branchMap": {},
+        "s": {},
+        "f": { "0": named_hits, "1": fallback_hits },
+        "b": {}
+    })
+}
+
+fn create_istanbul_crap_fixture() -> IstanbulCrapFixture {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"bench-istanbul-crap","private":true,"type":"module","main":"src/index.ts","dependencies":{}}"#,
+    );
+
+    let mut imports = String::new();
+    let mut uses = String::new();
+    let mut coverage = serde_json::Map::new();
+    for index in 0..ISTANBUL_CRAP_FILE_COUNT {
+        let named = format!("named{index}");
+        let fallback = format!("fallback{index}");
+        let source = istanbul_crap_module_source(&named, &fallback);
+        let relative_path = format!("src/module-{index}.ts");
+        write_file(&root, &relative_path, &source);
+        let source_path = root.join(&relative_path);
+        let arrow_col = source
+            .lines()
+            .nth(10)
+            .and_then(|line| line.find("(value"))
+            .expect("arrow function fixture has a stable declaration column");
+        let (named_hits, fallback_hits) = if index % 2 == 0 { (0, 1) } else { (1, 0) };
+        coverage.insert(
+            source_path.to_string_lossy().into_owned(),
+            istanbul_crap_coverage_entry(
+                &source_path,
+                &named,
+                arrow_col,
+                named_hits,
+                fallback_hits,
+            ),
+        );
+        writeln!(
+            &mut imports,
+            "import {{ {named}, {fallback} }} from './module-{index}';"
+        )
+        .unwrap();
+        writeln!(
+            &mut uses,
+            "console.log({named}({index}), {fallback}({index}));"
+        )
+        .unwrap();
+    }
+    write_file(&root, "src/index.ts", format!("{imports}\n{uses}"));
+
+    let fixture = EngineFixture {
+        _temp_dir: temp_dir,
+        root,
+    };
+    let session = AnalysisSession::load_default(&fixture.root);
+    session
+        .analyze_dead_code_with_complexity()
+        .expect("Istanbul CRAP fixture warm-up succeeds");
+    let fixture = WarmEngineFixture {
+        fixture,
+        session,
+        config_path: None,
+    };
+    let coverage_temp_dir = TempDir::new().unwrap();
+    let coverage_path = coverage_temp_dir.path().join("coverage-final.json");
+    fs::write(
+        &coverage_path,
+        serde_json::to_vec(&serde_json::Value::Object(coverage)).unwrap(),
+    )
+    .unwrap();
+
+    IstanbulCrapFixture {
+        fixture,
+        _coverage_temp_dir: coverage_temp_dir,
+        coverage_path,
     }
 }
 
@@ -637,6 +783,81 @@ fn warm_css_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOption
     }
 }
 
+fn warm_istanbul_crap_options(fixture: &IstanbulCrapFixture) -> HealthExecutionOptions<'_> {
+    HealthExecutionOptions {
+        file_scores: true,
+        thresholds: HealthThresholdOverrides {
+            max_crap: Some(30.0),
+            ..HealthThresholdOverrides::default()
+        },
+        coverage_inputs: HealthCoverageInputs {
+            coverage: Some(&fixture.coverage_path),
+            coverage_root: None,
+        },
+        ..warm_health_options(&fixture.fixture)
+    }
+}
+
+fn assert_istanbul_crap_ingestion_and_matching(report: &HealthReport) {
+    assert_eq!(
+        report.summary.istanbul_matched,
+        Some(ISTANBUL_MATCHED_FUNCTION_COUNT),
+        "every named exact and anonymous declaration-fallback entry matches"
+    );
+    assert_eq!(
+        report.summary.istanbul_total,
+        Some(ISTANBUL_MATCHED_FUNCTION_COUNT)
+    );
+    assert_eq!(
+        report.summary.functions_analyzed,
+        ISTANBUL_MATCHED_FUNCTION_COUNT
+    );
+    assert_eq!(report.summary.files_analyzed, ISTANBUL_CRAP_FILE_COUNT + 1);
+    assert_eq!(
+        report.summary.functions_above_threshold,
+        ISTANBUL_CRAP_FINDING_COUNT
+    );
+    assert_eq!(report.summary.files_scored, Some(ISTANBUL_CRAP_FILE_COUNT));
+    assert_eq!(report.findings.len(), ISTANBUL_CRAP_FINDING_COUNT);
+    assert_eq!(report.file_scores.len(), ISTANBUL_CRAP_FILE_COUNT);
+
+    let named_exact_findings = report
+        .findings
+        .iter()
+        .filter(|finding| finding.name.starts_with("named"))
+        .count();
+    let anonymous_fallback_findings = report
+        .findings
+        .iter()
+        .filter(|finding| finding.name.starts_with("fallback"))
+        .count();
+    assert_eq!(named_exact_findings, ISTANBUL_CRAP_FILE_COUNT / 2);
+    assert_eq!(anonymous_fallback_findings, ISTANBUL_CRAP_FILE_COUNT / 2);
+    assert!(report.findings.iter().any(|finding| {
+        finding.path.ends_with(Path::new("src/module-0.ts"))
+            && finding.name == "named0"
+            && finding.line == 1
+            && finding.col == 7
+    }));
+    assert!(report.findings.iter().any(|finding| {
+        finding.path.ends_with(Path::new("src/module-1.ts"))
+            && finding.name == "fallback1"
+            && finding.line == ISTANBUL_FALLBACK_DECL_LINE
+            && finding.col == 25
+    }));
+    assert!(report.findings.iter().all(|finding| {
+        finding.coverage_source == Some(CoverageSource::Istanbul)
+            && finding.coverage_pct == Some(0.0)
+            && finding.crap == Some(42.0)
+            && finding.cyclomatic == 6
+    }));
+    assert!(report.file_scores.iter().all(|score| {
+        score.function_count == ISTANBUL_FUNCTIONS_PER_FILE
+            && (score.crap_max - 42.0).abs() < f64::EPSILON
+            && score.crap_above_threshold == 1
+    }));
+}
+
 fn warm_hotspot_ownership_options(fixture: &HotspotOwnershipFixture) -> HealthExecutionOptions<'_> {
     HealthExecutionOptions {
         complexity: false,
@@ -749,6 +970,32 @@ fn component_engine_warm_session_health(c: &mut Criterion) {
                 .expect("warm health analysis succeeds")
         });
     });
+}
+
+fn component_engine_warm_session_istanbul_ingestion_crap_matching_many_functions(
+    c: &mut Criterion,
+) {
+    let fixture = create_istanbul_crap_fixture();
+    let options = warm_istanbul_crap_options(&fixture);
+    let warmup = run_ungrouped_health_with_session(&options, None, &fixture.fixture.session, None)
+        .expect("Istanbul CRAP ingestion and matching warm-up succeeds");
+    assert_istanbul_crap_ingestion_and_matching(&warmup.report);
+    c.bench_function(
+        "component_engine_warm_session_istanbul_ingestion_crap_matching_many_functions",
+        |bencher| {
+            bencher.iter(|| {
+                let result = run_ungrouped_health_with_session(
+                    &options,
+                    None,
+                    &fixture.fixture.session,
+                    None,
+                )
+                .expect("Istanbul CRAP ingestion and matching succeeds");
+                assert_istanbul_crap_ingestion_and_matching(&result.report);
+                result
+            });
+        },
+    );
 }
 
 fn component_engine_warm_session_hotspots_ownership_imported_churn(c: &mut Criterion) {
@@ -997,6 +1244,7 @@ criterion_group!(
     component_engine_warm_session_complexity_owned,
     component_engine_warm_session_complexity_shared,
     component_engine_warm_session_health,
+    component_engine_warm_session_istanbul_ingestion_crap_matching_many_functions,
     component_engine_warm_session_hotspots_ownership_imported_churn,
     component_engine_warm_session_coverage_gaps_many_files,
     component_engine_warm_session_css_health,
