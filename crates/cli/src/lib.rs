@@ -3003,6 +3003,25 @@ pub fn benchmark_list_json(root: &Path, threads: usize) -> (ExitCode, usize, usi
     }
 }
 
+/// Benchmark hook for the production boundaries listing and compact JSON
+/// rendering pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_list_boundaries_json(
+    root: &Path,
+    threads: usize,
+) -> (ExitCode, usize, usize, usize, usize) {
+    match list::benchmark_list_boundaries_json(root, threads) {
+        Ok((zone_count, rule_count, matched_file_count, rendered_bytes)) => (
+            ExitCode::SUCCESS,
+            zone_count,
+            rule_count,
+            matched_file_count,
+            rendered_bytes,
+        ),
+        Err(code) => (code, 0, 0, 0, 0),
+    }
+}
+
 /// Benchmark hook for the production Viz analysis, payload, and HTML
 /// rendering pipeline. This is not a supported API.
 #[doc(hidden)]

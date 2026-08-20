@@ -104,9 +104,61 @@ pub fn benchmark_list_json(
         production: false,
         allow_remote_extends: false,
     };
-    let config = load_config(
+    let (data, rendered_bytes) = benchmark_list_data_json(&opts)?;
+    let file_count = data.discovered.as_deref().map_or(0, <[_]>::len);
+    let entry_point_count = data.entry_points.as_deref().map_or(0, <[_]>::len);
+    let workspace_count = data
+        .workspace_data
+        .as_ref()
+        .map_or(0, |data| data.workspaces.len());
+    Ok((
+        file_count,
+        entry_point_count,
+        workspace_count,
+        rendered_bytes,
+    ))
+}
+
+/// Benchmark hook for the production boundaries listing and JSON rendering
+/// pipeline. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_list_boundaries_json(
+    root: &std::path::Path,
+    threads: usize,
+) -> Result<(usize, usize, usize, usize), ExitCode> {
+    let config_path = None;
+    let opts = ListOptions {
         root,
-        &config_path,
+        config_path: &config_path,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        threads,
+        no_cache: true,
+        entry_points: false,
+        files: false,
+        plugins: false,
+        boundaries: true,
+        workspaces: false,
+        production: false,
+        allow_remote_extends: false,
+    };
+    let (data, rendered_bytes) = benchmark_list_data_json(&opts)?;
+    let Some(boundary_data) = data.boundary_data else {
+        return Err(ExitCode::from(2));
+    };
+    let matched_file_count = boundary_data.zones.iter().map(|zone| zone.file_count).sum();
+    Ok((
+        boundary_data.zones.len(),
+        boundary_data.rules.len(),
+        matched_file_count,
+        rendered_bytes,
+    ))
+}
+
+fn benchmark_list_data_json(opts: &ListOptions<'_>) -> Result<(ListData, usize), ExitCode> {
+    let config = load_config(
+        opts.root,
+        opts.config_path,
         LoadConfigArgs {
             output: opts.output,
             no_cache: opts.no_cache,
@@ -116,15 +168,9 @@ pub fn benchmark_list_json(
             allow_remote_extends: opts.allow_remote_extends,
         },
     )?;
-    let data = collect_list_data(&opts, &config)?;
-    let file_count = data.discovered.as_deref().map_or(0, <[_]>::len);
-    let entry_point_count = data.entry_points.as_deref().map_or(0, <[_]>::len);
-    let workspace_count = data
-        .workspace_data
-        .as_ref()
-        .map_or(0, |data| data.workspaces.len());
+    let data = collect_list_data(opts, &config)?;
     let rendered = render_list_json(&ListJsonInput {
-        opts: &opts,
+        opts,
         show_all: data.show_all,
         plugin_result: data.plugin_result.as_ref(),
         discovered: data.discovered.as_deref(),
@@ -139,12 +185,7 @@ pub fn benchmark_list_json(
             OutputFormat::Json,
         )
     })?;
-    Ok((
-        file_count,
-        entry_point_count,
-        workspace_count,
-        rendered.len(),
-    ))
+    Ok((data, rendered.len()))
 }
 
 /// Collect plugins, files, entry points, boundary, and workspace data for a

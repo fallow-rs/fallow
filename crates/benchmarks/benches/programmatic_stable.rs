@@ -20,9 +20,10 @@ use fallow_api::{
 };
 use fallow_cli::{
     InspectBenchmarkCorpus, benchmark_dead_code_json, benchmark_fix_dry_run,
-    benchmark_inspect_file_evidence_bundle_json, benchmark_list_json, benchmark_recommend_json,
-    benchmark_rule_pack_test_json, benchmark_runtime_coverage_analyze_json,
-    benchmark_security_json, benchmark_viz_html, create_inspect_benchmark_corpus,
+    benchmark_inspect_file_evidence_bundle_json, benchmark_list_boundaries_json,
+    benchmark_list_json, benchmark_recommend_json, benchmark_rule_pack_test_json,
+    benchmark_runtime_coverage_analyze_json, benchmark_security_json, benchmark_viz_html,
+    create_inspect_benchmark_corpus,
 };
 use fallow_engine::{module_graph::impact_closure_for_changed_paths, session::AnalysisSession};
 use fallow_extract::{
@@ -38,6 +39,9 @@ const FIX_FILE_COUNT: usize = 128;
 const IMPACT_LAYER_COUNT: usize = 32;
 const IMPACT_LAYER_WIDTH: usize = 16;
 const INSPECT_CHILD_CALL_COUNT: usize = 6;
+const LIST_BOUNDARY_FILES_PER_ZONE: usize = 16;
+const LIST_BOUNDARY_ZONE_COUNT: usize = 32;
+const LIST_BOUNDARY_FILE_COUNT: usize = LIST_BOUNDARY_FILES_PER_ZONE * LIST_BOUNDARY_ZONE_COUNT;
 const LIST_FILE_COUNT: usize = 128;
 const LIST_WORKSPACE_COUNT: usize = 8;
 // Each workspace index is reported once as a default index and once from its
@@ -910,6 +914,64 @@ fn create_list_inventory_project() -> CommandInput {
     }
 }
 
+fn create_list_boundaries_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-list-boundaries",
+  "private": true,
+  "type": "module"
+}"#,
+    );
+
+    let zones = (0..LIST_BOUNDARY_ZONE_COUNT)
+        .map(|zone| {
+            serde_json::json!({
+                "name": format!("zone-{zone:02}"),
+                "patterns": [format!("src/zone-{zone:02}/*.ts")],
+            })
+        })
+        .collect::<Vec<_>>();
+    let rules = (0..LIST_BOUNDARY_ZONE_COUNT)
+        .map(|zone| {
+            serde_json::json!({
+                "from": format!("zone-{zone:02}"),
+                "allow": [format!("zone-{:02}", (zone + 1) % LIST_BOUNDARY_ZONE_COUNT)],
+            })
+        })
+        .collect::<Vec<_>>();
+    write_file(
+        &root,
+        ".fallowrc.json",
+        serde_json::to_string(&serde_json::json!({
+            "boundaries": {
+                "zones": zones,
+                "rules": rules,
+            }
+        }))
+        .unwrap(),
+    );
+
+    for zone in 0..LIST_BOUNDARY_ZONE_COUNT {
+        for file in 0..LIST_BOUNDARY_FILES_PER_ZONE {
+            write_file(
+                &root,
+                &format!("src/zone-{zone:02}/module-{file:02}.ts"),
+                format!("export const value_{zone:02}_{file:02} = {file};\n"),
+            );
+        }
+    }
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
 fn create_viz_project() -> CommandInput {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
@@ -1346,6 +1408,30 @@ fn stable_list_workspace_inventory_json(c: &mut Criterion) {
     });
 }
 
+fn stable_list_boundaries_many_zones_json(c: &mut Criterion) {
+    let input = create_list_boundaries_project();
+
+    let (status, zone_count, rule_count, matched_file_count, rendered_bytes) =
+        benchmark_list_boundaries_json(&input.root, BENCH_THREADS);
+    assert_eq!(status, std::process::ExitCode::SUCCESS);
+    assert_eq!(zone_count, LIST_BOUNDARY_ZONE_COUNT);
+    assert_eq!(rule_count, LIST_BOUNDARY_ZONE_COUNT);
+    assert_eq!(matched_file_count, LIST_BOUNDARY_FILE_COUNT);
+    assert!(rendered_bytes > 0);
+
+    c.bench_function("stable_list_boundaries_many_zones_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_list_boundaries_json(&input.root, BENCH_THREADS);
+            assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+            assert_eq!(result.1, LIST_BOUNDARY_ZONE_COUNT);
+            assert_eq!(result.2, LIST_BOUNDARY_ZONE_COUNT);
+            assert_eq!(result.3, LIST_BOUNDARY_FILE_COUNT);
+            assert!(result.4 > 0);
+            result
+        });
+    });
+}
+
 fn stable_viz_project_html(c: &mut Criterion) {
     let input = create_viz_project();
     let expected_files = VIZ_MODULE_COUNT + 1;
@@ -1386,6 +1472,7 @@ criterion_group!(
     stable_recommend_workspace_json,
     stable_coverage_analyze_local_runtime_json,
     stable_list_workspace_inventory_json,
+    stable_list_boundaries_many_zones_json,
     stable_viz_project_html
 );
 criterion_main!(benches);
