@@ -267,6 +267,178 @@ pub fn benchmark_security_json(root: &Path, threads: usize) -> Result<(usize, us
     Ok((finding_count, rendered.len()))
 }
 
+/// Self-contained candidate and verdict files for the survivors benchmark.
+/// This is not a supported API.
+#[doc(hidden)]
+pub struct SecuritySurvivorsBenchmarkCorpus {
+    _temp_dir: tempfile::TempDir,
+    candidates: PathBuf,
+    verdicts: PathBuf,
+}
+
+/// Build the security candidates and explicit verifier inputs outside the
+/// timed survivors benchmark. This is not a supported API.
+#[doc(hidden)]
+pub fn create_security_survivors_benchmark_corpus(
+    root: &Path,
+    threads: usize,
+) -> Result<SecuritySurvivorsBenchmarkCorpus, ExitCode> {
+    let config_path = None;
+    let files: &[PathBuf] = &[];
+    let opts = SecurityOptions {
+        root,
+        config_path: &config_path,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        no_cache: true,
+        threads,
+        quiet: true,
+        allow_remote_extends: false,
+        fail_on_issues: false,
+        sarif_file: None,
+        summary: false,
+        changed_since: None,
+        use_shared_diff_index: true,
+        workspace: None,
+        changed_workspaces: None,
+        file: files,
+        surface: false,
+        gate: None,
+        runtime_coverage: None,
+        min_invocations_hot: crate::DEFAULT_MIN_INVOCATIONS_HOT,
+        explain: false,
+    };
+    let (output, _) = build_security_command_output(&opts, Instant::now())?;
+    write_security_survivors_benchmark_corpus(&output)
+        .map_err(|message| emit_error(&message, 2, OutputFormat::Json))
+}
+
+fn write_security_survivors_benchmark_corpus(
+    output: &SecurityOutput,
+) -> Result<SecuritySurvivorsBenchmarkCorpus, String> {
+    let temp_dir = tempfile::tempdir()
+        .map_err(|err| format!("Failed to create survivors benchmark corpus: {err}"))?;
+    let candidates = temp_dir.path().join("candidates.json");
+    let verdicts = temp_dir.path().join("verdicts.json");
+    let candidate_json = render_json_with_style(output, crate::json_style::JsonStyle::Compact);
+    std::fs::write(&candidates, candidate_json)
+        .map_err(|err| format!("Failed to write survivors benchmark candidates: {err}"))?;
+
+    let verdicts_json: Vec<_> = output
+        .security_findings
+        .iter()
+        .enumerate()
+        .map(|(index, finding)| SecurityVerifierVerdict {
+            schema_version: "fallow-security-verdict/v1".to_owned(),
+            finding_id: finding.finding_id.clone(),
+            verdict: match index % 3 {
+                0 => SecurityVerifierVerdictStatus::Survivor,
+                1 => SecurityVerifierVerdictStatus::Dismissed,
+                _ => SecurityVerifierVerdictStatus::NeedsHumanReview,
+            },
+            reason: Some(format!("benchmark-verdict-{index}")),
+            rationale: Some("stable benchmark verifier rationale".to_owned()),
+            confidence: Some("high".to_owned()),
+            impact: Some("benchmark impact".to_owned()),
+            fix_direction: Some("benchmark fix direction".to_owned()),
+        })
+        .collect();
+    let verdicts_json = serde_json::to_vec(&serde_json::json!({
+        "schema_version": "fallow-security-verdicts/v1",
+        "verdicts": verdicts_json,
+    }))
+    .map_err(|err| format!("Failed to serialize survivors benchmark verdicts: {err}"))?;
+    std::fs::write(&verdicts, verdicts_json)
+        .map_err(|err| format!("Failed to write survivors benchmark verdicts: {err}"))?;
+
+    Ok(SecuritySurvivorsBenchmarkCorpus {
+        _temp_dir: temp_dir,
+        candidates,
+        verdicts,
+    })
+}
+
+/// Benchmark the production candidate/verdict loaders, join, and compact JSON
+/// serializer against a self-contained corpus. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_security_survivors_json(
+    corpus: &SecuritySurvivorsBenchmarkCorpus,
+) -> Result<(usize, usize, usize, usize, usize), String> {
+    let opts = SecuritySurvivorsOptions {
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        candidates: &corpus.candidates,
+        verdicts: &corpus.verdicts,
+        require_verdict_for_each_candidate: true,
+    };
+    let output = build_survivors_output(&opts, Instant::now())?;
+    let rendered = render_survivors_output(opts.output, opts.json_style, &output);
+    Ok((
+        output.summary.survivors,
+        output.summary.dismissed,
+        output.summary.needs_human_review,
+        output.summary.unverdicted,
+        rendered.len(),
+    ))
+}
+
+/// Production blind-spots output retained for benchmark contract assertions.
+/// This is not a supported API.
+#[doc(hidden)]
+pub struct SecurityBlindSpotsBenchmarkResult {
+    /// Derived production output before compact serialization.
+    pub output: SecurityBlindSpotsOutput,
+    /// Compact serialized output size.
+    pub rendered_bytes: usize,
+}
+
+/// Benchmark unresolved-callee normalization, blind-spot grouping, and compact
+/// JSON serialization without reading the project root. This is not a
+/// supported API.
+#[doc(hidden)]
+pub fn benchmark_security_blind_spots_json(
+    root: &Path,
+    diagnostics: &[SecurityUnresolvedCalleeDiagnostic],
+) -> SecurityBlindSpotsBenchmarkResult {
+    let normalized = unresolved_callee_diagnostics(diagnostics, root);
+    let output = SecurityOutput {
+        schema_version: SecuritySchemaVersion::V8,
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_owned()),
+        elapsed_ms: ElapsedMs(0),
+        config: SecurityOutputConfig {
+            rules: SecurityOutputRulesConfig {
+                security_client_server_leak: SecurityRuleSeverityConfig {
+                    configured: Severity::Off,
+                    effective: Severity::Warn,
+                },
+                security_sink: SecurityRuleSeverityConfig {
+                    configured: Severity::Off,
+                    effective: Severity::Warn,
+                },
+            },
+            categories_include: None,
+            categories_exclude: None,
+        },
+        meta: None,
+        gate: None,
+        security_findings: Vec::new(),
+        attack_surface: None,
+        unresolved_edge_files: 0,
+        unresolved_callee_sites: diagnostics.len(),
+        unresolved_callee_diagnostics: normalized,
+    };
+    let output = build_blind_spots_output(&output);
+    let rendered = render_blind_spots_output(
+        OutputFormat::Json,
+        crate::json_style::JsonStyle::Compact,
+        &output,
+    );
+    SecurityBlindSpotsBenchmarkResult {
+        output,
+        rendered_bytes: rendered.len(),
+    }
+}
+
 fn build_security_command_output(
     opts: &SecurityOptions<'_>,
     started: Instant,
@@ -3132,6 +3304,64 @@ mod tests {
             categories_include: None,
             categories_exclude: None,
         }
+    }
+
+    #[test]
+    fn survivors_benchmark_uses_only_its_explicit_corpus_files() {
+        let root = Path::new("/removed/security-benchmark-project");
+        let findings = ["sec-a", "sec-b", "sec-c"]
+            .into_iter()
+            .map(|finding_id| {
+                let mut finding = sample_finding(root);
+                finding.finding_id = finding_id.to_owned();
+                finding
+            })
+            .collect();
+        let corpus = write_security_survivors_benchmark_corpus(&output_with(findings, 0))
+            .expect("self-contained survivors corpus");
+
+        let result = benchmark_security_survivors_json(&corpus)
+            .expect("benchmark should only read the explicit corpus files");
+        assert_eq!(result.0, 1);
+        assert_eq!(result.1, 1);
+        assert_eq!(result.2, 1);
+        assert_eq!(result.3, 0);
+        assert!(result.4 > 0);
+    }
+
+    #[test]
+    fn blind_spots_benchmark_normalizes_without_project_io() {
+        let root = Path::new("/removed/security-benchmark-project");
+        let diagnostics: Vec<_> = (0..64)
+            .rev()
+            .map(|index| SecurityUnresolvedCalleeDiagnostic {
+                path: root.join(format!("src/module{}.ts", index % 8)),
+                line: index + 1,
+                col: index % 4,
+                reason: if index % 2 == 0 {
+                    fallow_types::extract::SkippedSecurityCalleeReason::ComputedMember
+                } else {
+                    fallow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch
+                },
+                expression_kind: if index % 2 == 0 {
+                    fallow_types::extract::SkippedSecurityCalleeExpressionKind::ComputedMemberExpression
+                } else {
+                    fallow_types::extract::SkippedSecurityCalleeExpressionKind::Other
+                },
+            })
+            .collect();
+
+        let result = benchmark_security_blind_spots_json(root, &diagnostics);
+        assert_eq!(
+            result.output.summary.unresolved_callee_sites,
+            diagnostics.len()
+        );
+        assert_eq!(
+            result.output.summary.sampled_callee_sites,
+            UNRESOLVED_CALLEE_SAMPLE_LIMIT
+        );
+        assert_eq!(result.output.groups.len(), 2);
+        assert!(result.rendered_bytes > 0);
     }
 
     #[test]

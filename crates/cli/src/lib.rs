@@ -3022,6 +3022,48 @@ pub fn benchmark_security_json(root: &Path, threads: usize) -> (ExitCode, usize,
     }
 }
 
+#[doc(hidden)]
+pub use security::{SecurityBlindSpotsBenchmarkResult, SecuritySurvivorsBenchmarkCorpus};
+
+/// Build the explicit candidate and verifier inputs outside the timed
+/// survivors benchmark. This is not a supported API.
+#[doc(hidden)]
+pub fn create_security_survivors_benchmark_corpus(
+    root: &Path,
+    threads: usize,
+) -> Result<SecuritySurvivorsBenchmarkCorpus, ExitCode> {
+    security::create_security_survivors_benchmark_corpus(root, threads)
+}
+
+/// Benchmark the production survivors loaders, candidate/verdict join, and
+/// compact JSON serializer. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_security_survivors_json(
+    corpus: &SecuritySurvivorsBenchmarkCorpus,
+) -> (ExitCode, usize, usize, usize, usize, usize) {
+    match security::benchmark_security_survivors_json(corpus) {
+        Ok((survivors, dismissed, needs_human_review, unverdicted, rendered_bytes)) => (
+            ExitCode::SUCCESS,
+            survivors,
+            dismissed,
+            needs_human_review,
+            unverdicted,
+            rendered_bytes,
+        ),
+        Err(_) => (ExitCode::from(2), 0, 0, 0, 0, 0),
+    }
+}
+
+/// Benchmark unresolved-callee normalization, blind-spot grouping, and compact
+/// JSON serialization without project I/O. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_security_blind_spots_json(
+    root: &Path,
+    diagnostics: &[fallow_types::results::SecurityUnresolvedCalleeDiagnostic],
+) -> SecurityBlindSpotsBenchmarkResult {
+    security::benchmark_security_blind_spots_json(root, diagnostics)
+}
+
 /// Benchmark hook for the production list inventory and JSON rendering
 /// pipeline. This is not a supported API.
 #[doc(hidden)]

@@ -20,14 +20,15 @@ use fallow_api::{
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
 use fallow_cli::{
-    AuditReviewBenchmarkCorpus, InspectBenchmarkCorpus, WatchFilterBenchmarkGlobalGitignore,
-    benchmark_audit_review_brief_many_changed_files_json, benchmark_dead_code_json,
-    benchmark_fix_dry_run, benchmark_inspect_file_evidence_bundle_json,
+    AuditReviewBenchmarkCorpus, InspectBenchmarkCorpus, SecurityBlindSpotsBenchmarkResult,
+    WatchFilterBenchmarkGlobalGitignore, benchmark_audit_review_brief_many_changed_files_json,
+    benchmark_dead_code_json, benchmark_fix_dry_run, benchmark_inspect_file_evidence_bundle_json,
     benchmark_list_boundaries_json, benchmark_list_json, benchmark_recommend_json,
     benchmark_rule_pack_test_json, benchmark_runtime_coverage_analyze_json,
-    benchmark_security_json, benchmark_viz_html, benchmark_watch_filter_initialization,
+    benchmark_security_blind_spots_json, benchmark_security_json,
+    benchmark_security_survivors_json, benchmark_viz_html, benchmark_watch_filter_initialization,
     create_audit_review_benchmark_corpus, create_inspect_benchmark_corpus,
-    create_watch_filter_benchmark_global_gitignore,
+    create_security_survivors_benchmark_corpus, create_watch_filter_benchmark_global_gitignore,
 };
 use fallow_config::{FallowConfig, OutputFormat};
 use fallow_engine::{
@@ -40,7 +41,11 @@ use fallow_extract::{
     cache::{CacheStore, module_to_cached},
     parse_all_files, parse_single_file,
 };
-use fallow_types::discover::{DiscoveredFile, FileId};
+use fallow_types::{
+    discover::{DiscoveredFile, FileId},
+    extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason},
+    results::SecurityUnresolvedCalleeDiagnostic,
+};
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
@@ -71,6 +76,13 @@ const RUNTIME_COVERAGE_FILE_COUNT: usize = 128;
 const RUNTIME_COVERAGE_FINDING_COUNT: usize = RUNTIME_COVERAGE_FILE_COUNT;
 const RUNTIME_COVERAGE_HOT_PATH_COUNT: usize = RUNTIME_COVERAGE_FILE_COUNT / 2;
 const SECURITY_FILE_COUNT: usize = 128;
+const SECURITY_SURVIVOR_COUNT: usize = 86;
+const SECURITY_DISMISSED_COUNT: usize = 85;
+const SECURITY_NEEDS_HUMAN_REVIEW_COUNT: usize = 85;
+const SECURITY_UNRESOLVED_CALLEE_COUNT: usize = 4_096;
+const SECURITY_UNRESOLVED_CALLEE_FILE_COUNT: usize = 512;
+const SECURITY_UNRESOLVED_CALLEE_GROUP_COUNT: usize = 10;
+const SECURITY_UNRESOLVED_CALLEE_SAMPLE_COUNT: usize = 25;
 const TRACE_CLONE_FILE_COUNT: usize = 64;
 const TRACE_GRAPH_IMPORTER_COUNT: usize = 128;
 const VIZ_MODULE_COUNT: usize = 64;
@@ -815,6 +827,33 @@ app.post("/run/{index}", (req) => {{
         _temp_dir: temp_dir,
         root,
     }
+}
+
+fn create_security_unresolved_callee_corpus(
+    root: &Path,
+) -> Vec<SecurityUnresolvedCalleeDiagnostic> {
+    (0..SECURITY_UNRESOLVED_CALLEE_COUNT)
+        .rev()
+        .map(|index| SecurityUnresolvedCalleeDiagnostic {
+            path: root.join(format!(
+                "src/routes/route{:03}.ts",
+                index % SECURITY_UNRESOLVED_CALLEE_FILE_COUNT
+            )),
+            line: u32::try_from(index % 400 + 1).unwrap(),
+            col: u32::try_from(index % 12).unwrap(),
+            reason: match index % 3 {
+                0 => SkippedSecurityCalleeReason::ComputedMember,
+                1 => SkippedSecurityCalleeReason::DynamicDispatch,
+                _ => SkippedSecurityCalleeReason::UnsupportedAssignmentObject,
+            },
+            expression_kind: match index % 4 {
+                0 => SkippedSecurityCalleeExpressionKind::StaticMemberExpression,
+                1 => SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+                2 => SkippedSecurityCalleeExpressionKind::Identifier,
+                _ => SkippedSecurityCalleeExpressionKind::Other,
+            },
+        })
+        .collect()
 }
 
 fn create_rule_pack_project() -> CommandInput {
@@ -1590,6 +1629,139 @@ fn stable_security_many_framework_sinks_json(c: &mut Criterion) {
     });
 }
 
+fn stable_security_survivors_verdict_join_json(c: &mut Criterion) {
+    let input = create_security_project();
+    let corpus = create_security_survivors_benchmark_corpus(&input.root, BENCH_THREADS)
+        .expect("security survivors benchmark corpus");
+    let result = benchmark_security_survivors_json(&corpus);
+    assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+    assert_eq!(result.1, SECURITY_SURVIVOR_COUNT);
+    assert_eq!(result.2, SECURITY_DISMISSED_COUNT);
+    assert_eq!(result.3, SECURITY_NEEDS_HUMAN_REVIEW_COUNT);
+    assert_eq!(result.4, 0);
+    assert!(result.5 > 0);
+
+    c.bench_function("stable_security_survivors_verdict_join_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_security_survivors_json(&corpus);
+            assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+            assert_eq!(result.1, SECURITY_SURVIVOR_COUNT);
+            assert_eq!(result.2, SECURITY_DISMISSED_COUNT);
+            assert_eq!(result.3, SECURITY_NEEDS_HUMAN_REVIEW_COUNT);
+            assert_eq!(result.4, 0);
+            assert!(result.5 > 0);
+            result
+        });
+    });
+}
+
+fn assert_security_blind_spots_benchmark_result(result: &SecurityBlindSpotsBenchmarkResult) {
+    let expected_groups = [
+        (
+            SkippedSecurityCalleeReason::ComputedMember,
+            SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+            3,
+            "src/routes/route001.ts",
+        ),
+        (
+            SkippedSecurityCalleeReason::ComputedMember,
+            SkippedSecurityCalleeExpressionKind::StaticMemberExpression,
+            3,
+            "src/routes/route000.ts",
+        ),
+        (
+            SkippedSecurityCalleeReason::DynamicDispatch,
+            SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+            3,
+            "src/routes/route001.ts",
+        ),
+        (
+            SkippedSecurityCalleeReason::DynamicDispatch,
+            SkippedSecurityCalleeExpressionKind::Identifier,
+            3,
+            "src/routes/route002.ts",
+        ),
+        (
+            SkippedSecurityCalleeReason::UnsupportedAssignmentObject,
+            SkippedSecurityCalleeExpressionKind::Identifier,
+            3,
+            "src/routes/route002.ts",
+        ),
+        (
+            SkippedSecurityCalleeReason::UnsupportedAssignmentObject,
+            SkippedSecurityCalleeExpressionKind::StaticMemberExpression,
+            3,
+            "src/routes/route000.ts",
+        ),
+        (
+            SkippedSecurityCalleeReason::ComputedMember,
+            SkippedSecurityCalleeExpressionKind::Identifier,
+            2,
+            "src/routes/route002.ts",
+        ),
+        (
+            SkippedSecurityCalleeReason::DynamicDispatch,
+            SkippedSecurityCalleeExpressionKind::StaticMemberExpression,
+            2,
+            "src/routes/route000.ts",
+        ),
+        (
+            SkippedSecurityCalleeReason::UnsupportedAssignmentObject,
+            SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+            2,
+            "src/routes/route001.ts",
+        ),
+        (
+            SkippedSecurityCalleeReason::ComputedMember,
+            SkippedSecurityCalleeExpressionKind::Other,
+            1,
+            "src/routes/route003.ts",
+        ),
+    ];
+
+    assert_eq!(
+        result.output.summary.unresolved_callee_sites,
+        SECURITY_UNRESOLVED_CALLEE_COUNT
+    );
+    assert_eq!(
+        result.output.summary.sampled_callee_sites,
+        SECURITY_UNRESOLVED_CALLEE_SAMPLE_COUNT
+    );
+    assert_eq!(
+        result.output.groups.len(),
+        SECURITY_UNRESOLVED_CALLEE_GROUP_COUNT
+    );
+    for (group, (reason, expression_kind, sampled_count, path)) in
+        result.output.groups.iter().zip(expected_groups)
+    {
+        assert_eq!(group.reason, reason);
+        assert_eq!(group.expression_kind, expression_kind);
+        assert_eq!(group.sampled_count, sampled_count);
+        assert_eq!(group.files.len(), 1);
+        assert_eq!(group.files[0].path, path);
+        assert_eq!(group.files[0].sampled_count, sampled_count);
+    }
+    assert!(result.rendered_bytes > 0);
+}
+
+fn stable_security_blind_spots_unresolved_callees_json(c: &mut Criterion) {
+    let input = create_security_project();
+    let diagnostics = create_security_unresolved_callee_corpus(&input.root);
+    let result = benchmark_security_blind_spots_json(&input.root, &diagnostics);
+    assert_security_blind_spots_benchmark_result(&result);
+
+    c.bench_function(
+        "stable_security_blind_spots_unresolved_callees_json",
+        |bencher| {
+            bencher.iter(|| {
+                let result = benchmark_security_blind_spots_json(&input.root, &diagnostics);
+                assert_security_blind_spots_benchmark_result(&result);
+                result
+            });
+        },
+    );
+}
+
 fn stable_rule_pack_policy_analysis_json(c: &mut Criterion) {
     let input = create_rule_pack_project();
     let expected_findings = RULE_PACK_FILE_COUNT * RULE_PACK_FINDINGS_PER_FILE;
@@ -1881,6 +2053,8 @@ criterion_group!(
     stable_inspect_file_evidence_bundle_json,
     stable_dead_code_many_exports_json,
     stable_security_many_framework_sinks_json,
+    stable_security_survivors_verdict_join_json,
+    stable_security_blind_spots_unresolved_callees_json,
     stable_rule_pack_policy_analysis_json,
     stable_recommend_workspace_json,
     stable_coverage_analyze_local_runtime_json,

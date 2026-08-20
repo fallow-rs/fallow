@@ -71,6 +71,7 @@ test("stable CLI production changes select the stable programmatic shard", () =>
     "crates/cli/src/list.rs",
     "crates/cli/src/onboarding.rs",
     "crates/cli/src/output_runtime.rs",
+    "crates/cli/src/security.rs",
     "crates/cli/src/watch.rs",
   ]) {
     assert.deepEqual(names(selectFastTargets([file])), ["programmatic_stable"]);
