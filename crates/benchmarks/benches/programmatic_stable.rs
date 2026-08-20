@@ -16,6 +16,7 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_api::{
     AnalysisOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode,
     DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, FeatureFlagsOptions,
+    benchmark_trace_clone_compact_json, benchmark_trace_graph_family_compact_json,
     run_circular_dependencies, run_combined, run_feature_flags, run_health_with_runner,
 };
 use fallow_cli::{
@@ -29,7 +30,12 @@ use fallow_cli::{
     create_watch_filter_benchmark_global_gitignore,
 };
 use fallow_config::{FallowConfig, OutputFormat};
-use fallow_engine::{module_graph::impact_closure_for_changed_paths, session::AnalysisSession};
+use fallow_engine::{
+    dead_code::DeadCodeAnalysisArtifacts,
+    duplicates::{CloneFingerprintSet, DuplicationReport},
+    module_graph::impact_closure_for_changed_paths,
+    session::AnalysisSession,
+};
 use fallow_extract::{
     cache::{CacheStore, module_to_cached},
     parse_all_files, parse_single_file,
@@ -65,6 +71,8 @@ const RUNTIME_COVERAGE_FILE_COUNT: usize = 128;
 const RUNTIME_COVERAGE_FINDING_COUNT: usize = RUNTIME_COVERAGE_FILE_COUNT;
 const RUNTIME_COVERAGE_HOT_PATH_COUNT: usize = RUNTIME_COVERAGE_FILE_COUNT / 2;
 const SECURITY_FILE_COUNT: usize = 128;
+const TRACE_CLONE_FILE_COUNT: usize = 64;
+const TRACE_GRAPH_IMPORTER_COUNT: usize = 128;
 const VIZ_MODULE_COUNT: usize = 64;
 const WATCH_FILTER_FILES_PER_PACKAGE: usize = 16;
 const WATCH_FILTER_PACKAGE_COUNT: usize = 64;
@@ -112,10 +120,146 @@ struct WatchFilterInput {
     global_gitignore: WatchFilterBenchmarkGlobalGitignore,
 }
 
+struct TraceGraphInput {
+    _temp_dir: TempDir,
+    root: PathBuf,
+    artifacts: DeadCodeAnalysisArtifacts,
+}
+
+struct TraceCloneInput {
+    _temp_dir: TempDir,
+    root: PathBuf,
+    report: DuplicationReport,
+    target_file: String,
+    target_line: usize,
+    expected_fingerprint: String,
+    expected_group_count: usize,
+    expected_instance_count: usize,
+}
+
 fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
     let path = root.join(path);
     fs::create_dir_all(path.parent().expect("fixture file has parent")).unwrap();
     fs::write(path, source.as_ref()).unwrap();
+}
+
+fn create_trace_graph_project() -> TraceGraphInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"bench-trace-graph","private":true,"type":"module","main":"src/index.ts","dependencies":{"trace-package":"1.0.0"}}"#,
+    );
+    write_file(
+        &root,
+        "src/000-shared.ts",
+        "export const sharedValue = 42;\n",
+    );
+
+    let mut index_source = String::new();
+    for index in 0..TRACE_GRAPH_IMPORTER_COUNT {
+        write_file(
+            &root,
+            &format!("src/consumers/consumer{index}.ts"),
+            format!(
+                "import {{ sharedValue }} from '../000-shared';\nimport {{ traceHelper }} from 'trace-package';\nexport const value{index} = traceHelper(sharedValue + {index});\n"
+            ),
+        );
+        writeln!(
+            index_source,
+            "import {{ value{index} }} from './consumers/consumer{index}';\nconsole.log(value{index});"
+        )
+        .unwrap();
+    }
+    write_file(&root, "src/index.ts", index_source);
+
+    let session = AnalysisSession::load(&root, None).expect("trace graph session loads");
+    let target = session
+        .files()
+        .iter()
+        .find(|file| file.path.ends_with("src/000-shared.ts"))
+        .expect("trace target is discovered");
+    assert_eq!(
+        target.id.0, 0,
+        "the retained trace target must precede every non-matching importer"
+    );
+    let trace_root = session.root().to_path_buf();
+    let artifacts = session
+        .analyze_dead_code_with_artifacts(false, true)
+        .expect("trace graph analysis succeeds");
+    assert!(artifacts.graph.is_some());
+
+    TraceGraphInput {
+        _temp_dir: temp_dir,
+        root: trace_root,
+        artifacts,
+    }
+}
+
+fn create_trace_clone_project() -> TraceCloneInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    write_file(
+        &root,
+        "package.json",
+        r#"{"name":"bench-trace-clone","private":true,"type":"module","main":"src/index.ts"}"#,
+    );
+
+    let mut index_source = String::new();
+    for index in 0..TRACE_CLONE_FILE_COUNT {
+        write_file(
+            &root,
+            &format!("src/clones/clone{index}.ts"),
+            format!(
+                "export function normalizeRecords(records: Array<{{ active: boolean; value: number }}>) {{\n  const active = records.filter((record) => record.active);\n  const values = active.map((record) => record.value);\n  const total = values.reduce((sum, value) => sum + value, 0);\n  const average = values.length === 0 ? 0 : total / values.length;\n  const maximum = values.reduce((current, value) => Math.max(current, value), 0);\n  return {{ total, average, maximum, count: values.length }};\n}}\n\nexport const cloneId = {index};\n"
+            ),
+        );
+        writeln!(
+            index_source,
+            "import {{ normalizeRecords as normalizeRecords{index} }} from './clones/clone{index}';\nvoid normalizeRecords{index};"
+        )
+        .unwrap();
+    }
+    write_file(&root, "src/index.ts", index_source);
+
+    let session = AnalysisSession::load(&root, None).expect("trace clone session loads");
+    let trace_root = session.root().to_path_buf();
+    let mut config = session.config().duplicates.clone();
+    config.min_tokens = 35;
+    config.min_lines = 5;
+    config.min_occurrences = TRACE_CLONE_FILE_COUNT;
+    let report = session.find_duplicates_with_defaults(&config, None).report;
+    let group = report
+        .clone_groups
+        .iter()
+        .max_by_key(|group| group.instances.len())
+        .expect("trace clone fixture produces a group");
+    let target = group
+        .instances
+        .last()
+        .expect("trace clone group has instances");
+    let target_file = target
+        .file
+        .strip_prefix(&trace_root)
+        .expect("trace clone path is project-relative")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let target_line = target.start_line;
+    let expected_fingerprint =
+        CloneFingerprintSet::from_groups(&report.clone_groups).fingerprint_for_group(group);
+    let expected_instance_count = group.instances.len();
+
+    TraceCloneInput {
+        _temp_dir: temp_dir,
+        root: trace_root,
+        report,
+        target_file,
+        target_line,
+        expected_fingerprint,
+        expected_group_count: 1,
+        expected_instance_count,
+    }
 }
 
 fn create_inspect_project() -> InspectCommandInput {
@@ -1604,6 +1748,102 @@ fn stable_watch_filter_initialization_nested_gitignores(c: &mut Criterion) {
     );
 }
 
+fn stable_trace_graph_family_compact_json(c: &mut Criterion) {
+    let input = create_trace_graph_project();
+    let expected = (
+        TRACE_GRAPH_IMPORTER_COUNT,
+        1,
+        TRACE_GRAPH_IMPORTER_COUNT,
+        TRACE_GRAPH_IMPORTER_COUNT,
+    );
+
+    let graph = input
+        .artifacts
+        .graph
+        .as_ref()
+        .expect("trace graph is retained");
+    let result = benchmark_trace_graph_family_compact_json(
+        graph,
+        &input.root,
+        &input.artifacts.script_used_packages,
+    )
+    .expect("trace graph family benchmark succeeds");
+    assert_eq!((result.0, result.1, result.2, result.3), expected);
+    assert!(result.4 > 0);
+
+    c.bench_function("stable_trace_graph_family_compact_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_trace_graph_family_compact_json(
+                graph,
+                &input.root,
+                &input.artifacts.script_used_packages,
+            )
+            .expect("trace graph family benchmark succeeds");
+            assert_eq!((result.0, result.1, result.2, result.3), expected);
+            assert!(result.4 > 0);
+            result
+        });
+    });
+}
+
+fn stable_trace_clone_compact_json(c: &mut Criterion) {
+    let input = create_trace_clone_project();
+    assert_eq!(input.expected_instance_count, TRACE_CLONE_FILE_COUNT);
+
+    let result = benchmark_trace_clone_compact_json(
+        &input.report,
+        &input.root,
+        &input.target_file,
+        input.target_line,
+        &input.expected_fingerprint,
+    )
+    .expect("trace clone benchmark succeeds");
+    assert_eq!(result.location_file, PathBuf::from(&input.target_file));
+    assert_eq!(result.location_line, input.target_line);
+    assert_eq!(result.location_fingerprint, input.expected_fingerprint);
+    assert_eq!(result.fingerprint_fingerprint, input.expected_fingerprint);
+    assert_eq!(result.location_group_count, input.expected_group_count);
+    assert_eq!(result.fingerprint_group_count, input.expected_group_count);
+    assert_eq!(
+        result.location_instance_count,
+        input.expected_instance_count
+    );
+    assert_eq!(
+        result.fingerprint_instance_count,
+        input.expected_instance_count
+    );
+    assert!(result.rendered_bytes > 0);
+
+    c.bench_function("stable_trace_clone_compact_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_trace_clone_compact_json(
+                &input.report,
+                &input.root,
+                &input.target_file,
+                input.target_line,
+                &input.expected_fingerprint,
+            )
+            .expect("trace clone benchmark succeeds");
+            assert_eq!(result.location_file, PathBuf::from(&input.target_file));
+            assert_eq!(result.location_line, input.target_line);
+            assert_eq!(result.location_fingerprint, input.expected_fingerprint);
+            assert_eq!(result.fingerprint_fingerprint, input.expected_fingerprint);
+            assert_eq!(result.location_group_count, input.expected_group_count);
+            assert_eq!(result.fingerprint_group_count, input.expected_group_count);
+            assert_eq!(
+                result.location_instance_count,
+                input.expected_instance_count
+            );
+            assert_eq!(
+                result.fingerprint_instance_count,
+                input.expected_instance_count
+            );
+            assert!(result.rendered_bytes > 0);
+            result
+        });
+    });
+}
+
 fn stable_viz_project_html(c: &mut Criterion) {
     let input = create_viz_project();
     let expected_files = VIZ_MODULE_COUNT + 1;
@@ -1647,6 +1887,8 @@ criterion_group!(
     stable_list_workspace_inventory_json,
     stable_list_boundaries_many_zones_json,
     stable_watch_filter_initialization_nested_gitignores,
+    stable_trace_graph_family_compact_json,
+    stable_trace_clone_compact_json,
     stable_viz_project_html
 );
 criterion_main!(benches);

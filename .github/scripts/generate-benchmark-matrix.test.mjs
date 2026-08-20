@@ -88,6 +88,16 @@ test("local runtime coverage analysis changes select the stable programmatic sha
   }
 });
 
+test("trace API and benchmark changes select the stable programmatic shard", () => {
+  for (const file of [
+    "crates/api/src/runtime/trace.rs",
+    "crates/api/src/runtime_json.rs",
+    "crates/benchmarks/benches/programmatic_stable.rs",
+  ]) {
+    assert.deepEqual(names(selectFastTargets([file])), ["programmatic_stable"]);
+  }
+});
+
 test("unrelated files select no benchmark shards", () => {
   assert.deepEqual(names(selectFastTargets(["README.md"])), []);
 });

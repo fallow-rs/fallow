@@ -36,7 +36,11 @@ pub use dead_code::{run_boundary_violations, run_circular_dependencies, run_dead
 pub use decision_surface::run_decision_surface;
 pub use duplication::run_duplication;
 pub use feature_flags::run_feature_flags;
-pub use trace::{run_trace_clone, run_trace_dependency, run_trace_export, run_trace_file};
+pub use trace::{
+    TraceCloneBenchmarkResult, benchmark_trace_clone_compact_json,
+    benchmark_trace_graph_family_compact_json, run_trace_clone, run_trace_dependency,
+    run_trace_export, run_trace_file,
+};
 
 use crate::{
     ComplexityOptions, ProgrammaticError,
