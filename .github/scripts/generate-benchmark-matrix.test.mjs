@@ -58,6 +58,7 @@ test("stable CLI production changes select the stable programmatic shard", () =>
     "crates/cli/src/audit_brief.rs",
     "crates/cli/src/audit_decision_surface.rs",
     "crates/cli/src/audit_focus.rs",
+    "crates/cli/src/audit_output.rs",
     "crates/cli/src/audit_review_deltas.rs",
     "crates/cli/src/audit_routing.rs",
     "crates/cli/src/audit_walkthrough.rs",
