@@ -1392,12 +1392,13 @@ enum Command {
 
         /// Path to Istanbul-format coverage data (coverage-final.json) for
         /// accurate per-function CRAP scores in the health sub-analysis. Also
-        /// configurable via FALLOW_COVERAGE.
+        /// configurable via FALLOW_COVERAGE or health.coverage.
         #[arg(long, value_name = "PATH")]
         coverage: Option<PathBuf>,
 
         /// Absolute prefix to strip from coverage data paths before CRAP matching.
         /// Use when coverage was generated under a different checkout root in CI or Docker.
+        /// Also configurable via FALLOW_COVERAGE_ROOT or health.coverageRoot.
         #[arg(long, value_name = "PATH")]
         coverage_root: Option<PathBuf>,
 
@@ -5295,7 +5296,11 @@ struct ResolvedAuditInputs {
     dead_code_baseline: Option<PathBuf>,
     health_baseline: Option<PathBuf>,
     dupes_baseline: Option<PathBuf>,
+    /// Istanbul coverage inputs resolved with the health precedence (flag,
+    /// env, then `health.coverage` / `health.coverageRoot`), so the head and
+    /// base passes score from the same map the standalone health run uses.
     coverage: Option<PathBuf>,
+    coverage_root: Option<PathBuf>,
 }
 
 fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> ExitCode {
@@ -5362,10 +5367,11 @@ fn resolve_audit_inputs(
         args.dupes_baseline.as_deref(),
         audit_cfg.dupes_baseline.as_deref(),
     );
-    let coverage = args
-        .coverage
-        .clone()
-        .or_else(|| std::env::var("FALLOW_COVERAGE").ok().map(PathBuf::from));
+    let coverage_inputs = resolve_coverage_inputs(
+        args.coverage.as_deref(),
+        args.coverage_root.as_deref(),
+        || Ok(config.health),
+    )?;
 
     Ok(ResolvedAuditInputs {
         audit_cfg,
@@ -5374,7 +5380,8 @@ fn resolve_audit_inputs(
         dead_code_baseline: resolved_dead_code_baseline,
         health_baseline: resolved_health_baseline,
         dupes_baseline: resolved_dupes_baseline,
-        coverage,
+        coverage: coverage_inputs.coverage,
+        coverage_root: coverage_inputs.coverage_root,
     })
 }
 
@@ -5422,7 +5429,7 @@ fn run_resolved_audit(
             health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
             max_crap: args.max_crap,
             coverage: inputs.coverage.as_deref(),
-            coverage_root: args.coverage_root.as_deref(),
+            coverage_root: inputs.coverage_root.as_deref(),
             gate: args.gate.map_or(inputs.audit_cfg.gate, Into::into),
             include_entry_exports: cli.include_entry_exports,
             // Styling analytics, including deep cross-file reachability, is on
@@ -5586,31 +5593,24 @@ struct ResolvedHealthCoverageInputs {
     coverage_root: Option<PathBuf>,
 }
 
-fn resolve_health_coverage_inputs(
-    dispatch: &DispatchContext<'_>,
+/// Resolve Istanbul coverage inputs for `health`, bare combined mode, and
+/// `audit` (#2359) with one precedence: the CLI flag, then `FALLOW_COVERAGE`
+/// / `FALLOW_COVERAGE_ROOT`, then `health.coverage` / `health.coverageRoot`.
+/// Auto-detection of `coverage/coverage-final.json` stays in the engine and
+/// only applies when every layer is empty. `config_health` is consulted only
+/// when both a flag and an env var are absent for at least one input, so a
+/// command that has not loaded config yet can defer that load.
+fn resolve_coverage_inputs(
     cli_coverage: Option<&std::path::Path>,
     cli_coverage_root: Option<&std::path::Path>,
+    config_health: impl FnOnce() -> Result<fallow_config::HealthConfig, ExitCode>,
 ) -> Result<ResolvedHealthCoverageInputs, ExitCode> {
     let env_coverage = path_from_env("FALLOW_COVERAGE");
     let env_coverage_root = path_from_env("FALLOW_COVERAGE_ROOT");
     let needs_config_coverage = cli_coverage.is_none() && env_coverage.is_none();
     let needs_config_coverage_root = cli_coverage_root.is_none() && env_coverage_root.is_none();
     let config_health = if needs_config_coverage || needs_config_coverage_root {
-        Some(
-            load_config(
-                dispatch.root,
-                &dispatch.cli.config,
-                LoadConfigArgs {
-                    output: dispatch.output,
-                    no_cache: dispatch.cli.no_cache,
-                    threads: dispatch.threads,
-                    production: dispatch.cli.production,
-                    quiet: dispatch.quiet,
-                    allow_remote_extends: dispatch.cli.allow_remote_extends,
-                },
-            )?
-            .health,
-        )
+        Some(config_health()?)
     } else {
         None
     };
@@ -5632,6 +5632,30 @@ fn resolve_health_coverage_inputs(
                     .as_ref()
                     .and_then(|health| health.coverage_root.clone())
             }),
+    })
+}
+
+/// [`resolve_coverage_inputs`] for commands that load config lazily: the
+/// config is read only when a flag and env var are both absent.
+fn resolve_health_coverage_inputs(
+    dispatch: &DispatchContext<'_>,
+    cli_coverage: Option<&std::path::Path>,
+    cli_coverage_root: Option<&std::path::Path>,
+) -> Result<ResolvedHealthCoverageInputs, ExitCode> {
+    resolve_coverage_inputs(cli_coverage, cli_coverage_root, || {
+        Ok(load_config(
+            dispatch.root,
+            &dispatch.cli.config,
+            LoadConfigArgs {
+                output: dispatch.output,
+                no_cache: dispatch.cli.no_cache,
+                threads: dispatch.threads,
+                production: dispatch.cli.production,
+                quiet: dispatch.quiet,
+                allow_remote_extends: dispatch.cli.allow_remote_extends,
+            },
+        )?
+        .health)
     })
 }
 

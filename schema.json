@@ -1028,7 +1028,7 @@
           "default": 60
         },
         "coverage": {
-          "description": "Path to Istanbul-format coverage data for accurate per-function CRAP\nscores. Relative paths resolve against the project root. The CLI\n`--coverage` flag and `FALLOW_COVERAGE` environment variable override\nthis value.",
+          "description": "Path to Istanbul-format coverage data for accurate per-function CRAP\nscores. Relative paths resolve against the project root. The CLI\n`--coverage` flag and `FALLOW_COVERAGE` environment variable override\nthis value. Consulted by `fallow health`, bare `fallow`, and\n`fallow audit`.",
           "type": [
             "string",
             "null"
@@ -1036,7 +1036,7 @@
           "default": null
         },
         "coverageRoot": {
-          "description": "Absolute prefix to strip from Istanbul file paths before CRAP matching.\nUse when coverage was generated under a different checkout root in CI\nor Docker. The CLI `--coverage-root` flag and `FALLOW_COVERAGE_ROOT`\nenvironment variable override this value.",
+          "description": "Absolute prefix to strip from Istanbul file paths before CRAP matching.\nUse when coverage was generated under a different checkout root in CI\nor Docker. The CLI `--coverage-root` flag and `FALLOW_COVERAGE_ROOT`\nenvironment variable override this value. Consulted by `fallow health`,\nbare `fallow`, and `fallow audit`.",
           "type": [
             "string",
             "null"

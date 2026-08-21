@@ -3696,6 +3696,305 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
     assert_eq!(json["verdict"].as_str(), Some("pass"));
 }
 
+/// Write `.fallowrc.json` with the given `health` section body.
+fn write_health_config(dir: &std::path::Path, health: &str) {
+    fs::write(
+        dir.join(".fallowrc.json"),
+        format!(r#"{{"health":{health}}}"#),
+    )
+    .unwrap();
+}
+
+/// Run `fallow audit --base HEAD~1 --max-crap 10 --format json --quiet` on
+/// `root` with extra arguments and path-typed env vars on the child process.
+fn run_gated_audit_with(
+    root: &std::path::Path,
+    extra_args: &[&str],
+    env: &[(&str, &std::path::Path)],
+) -> common::CommandOutput {
+    let mut args = vec![
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    args.extend_from_slice(extra_args);
+    run_fallow_raw_with_env(&args, env)
+}
+
+/// #2359: `health.coverage` / `health.coverageRoot` from config must feed the
+/// audit health sub-pass exactly like `--coverage` / `--coverage-root`. Audit
+/// previously never consulted the config keys and scored CRAP from the
+/// reachability estimate while `fallow health` scored from real coverage.
+#[test]
+fn audit_config_coverage_fallback_matches_cli_coverage_attribution() {
+    let dir = create_audit_fixture("coverage-config");
+    write_branchy_change(dir.path());
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    write_branchy_istanbul_coverage(&coverage_path, "/ci/workspace/src/index.ts");
+
+    write_health_config(
+        dir.path(),
+        r#"{"coverage":"artifacts/coverage-final.json","coverageRoot":"/ci/workspace"}"#,
+    );
+    let from_config = run_gated_audit_with(dir.path(), &[], &[]);
+    assert_eq!(
+        from_config.code, 0,
+        "health.coverage should feed audit's health sub-analysis. stderr: {}",
+        from_config.stderr
+    );
+    let config_json = parse_json(&from_config);
+    assert_eq!(config_json["verdict"].as_str(), Some("pass"));
+
+    write_health_config(dir.path(), "{}");
+    let from_flags = run_gated_audit_with(
+        dir.path(),
+        &[
+            "--coverage",
+            coverage_path.to_str().unwrap(),
+            "--coverage-root",
+            "/ci/workspace",
+        ],
+        &[],
+    );
+    assert_eq!(
+        from_flags.code, 0,
+        "the explicit flags are the reference run. stderr: {}",
+        from_flags.stderr
+    );
+    let flags_json = parse_json(&from_flags);
+    assert_eq!(
+        config_json["complexity"]["findings"], flags_json["complexity"]["findings"],
+        "config-sourced coverage must score the same findings as the flags"
+    );
+    assert_eq!(
+        config_json["attribution"], flags_json["attribution"],
+        "config-sourced coverage must attribute findings like the flags"
+    );
+}
+
+/// #2359 precedence: `--coverage` / `--coverage-root` win over the config
+/// keys, and each input resolves independently, so a CLI coverage path pairs
+/// with `health.coverageRoot` and a CLI root with `health.coverage`.
+#[test]
+fn audit_cli_coverage_flags_override_config_coverage() {
+    let dir = create_audit_fixture("coverage-config-cli-precedence");
+    write_branchy_change(dir.path());
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    write_branchy_istanbul_coverage(&coverage_path, "/ci/workspace/src/index.ts");
+    let stale_path = dir.path().join("artifacts/stale-coverage.json");
+    write_branchy_istanbul_coverage(&stale_path, "/ci/workspace/src/other.ts");
+
+    write_health_config(
+        dir.path(),
+        r#"{"coverage":"artifacts/stale-coverage.json","coverageRoot":"/ci/workspace"}"#,
+    );
+    let stale_config = run_gated_audit_with(dir.path(), &[], &[]);
+    assert_eq!(
+        stale_config.code, 1,
+        "a config map without an entry for the function falls back to the estimate. stderr: {}",
+        stale_config.stderr
+    );
+    let cli_coverage = run_gated_audit_with(
+        dir.path(),
+        &["--coverage", coverage_path.to_str().unwrap()],
+        &[],
+    );
+    assert_eq!(
+        cli_coverage.code, 0,
+        "--coverage must beat health.coverage while health.coverageRoot still applies. stderr: {}",
+        cli_coverage.stderr
+    );
+    assert_eq!(parse_json(&cli_coverage)["verdict"].as_str(), Some("pass"));
+
+    write_health_config(
+        dir.path(),
+        r#"{"coverage":"artifacts/coverage-final.json","coverageRoot":"/wrong/root"}"#,
+    );
+    let wrong_config_root = run_gated_audit_with(dir.path(), &[], &[]);
+    assert_eq!(
+        wrong_config_root.code, 1,
+        "a wrong config coverage root strips nothing and matches nothing. stderr: {}",
+        wrong_config_root.stderr
+    );
+    let cli_root = run_gated_audit_with(dir.path(), &["--coverage-root", "/ci/workspace"], &[]);
+    assert_eq!(
+        cli_root.code, 0,
+        "--coverage-root must beat health.coverageRoot while health.coverage still applies. stderr: {}",
+        cli_root.stderr
+    );
+    assert_eq!(parse_json(&cli_root)["verdict"].as_str(), Some("pass"));
+}
+
+/// #2359 precedence: `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT` win over the
+/// config keys, the same order `fallow health` uses. Audit previously read
+/// only `FALLOW_COVERAGE`, so the root half also pins that the env root is
+/// honored at all.
+#[test]
+fn audit_env_coverage_overrides_config_coverage() {
+    let dir = create_audit_fixture("coverage-config-env-precedence");
+    write_branchy_change(dir.path());
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    write_branchy_istanbul_coverage(&coverage_path, "/ci/workspace/src/index.ts");
+    let stale_path = dir.path().join("artifacts/stale-coverage.json");
+    write_branchy_istanbul_coverage(&stale_path, "/ci/workspace/src/other.ts");
+
+    write_health_config(
+        dir.path(),
+        r#"{"coverage":"artifacts/stale-coverage.json","coverageRoot":"/ci/workspace"}"#,
+    );
+    let env_coverage = run_gated_audit_with(
+        dir.path(),
+        &[],
+        &[("FALLOW_COVERAGE", coverage_path.as_path())],
+    );
+    assert_eq!(
+        env_coverage.code, 0,
+        "FALLOW_COVERAGE must beat health.coverage while health.coverageRoot still applies. stderr: {}",
+        env_coverage.stderr
+    );
+    assert_eq!(parse_json(&env_coverage)["verdict"].as_str(), Some("pass"));
+
+    write_health_config(
+        dir.path(),
+        r#"{"coverage":"artifacts/coverage-final.json","coverageRoot":"/wrong/root"}"#,
+    );
+    let env_root = run_gated_audit_with(
+        dir.path(),
+        &[],
+        &[("FALLOW_COVERAGE_ROOT", Path::new("/ci/workspace"))],
+    );
+    assert_eq!(
+        env_root.code, 0,
+        "FALLOW_COVERAGE_ROOT must beat health.coverageRoot while health.coverage still applies. stderr: {}",
+        env_root.stderr
+    );
+    assert_eq!(parse_json(&env_root)["verdict"].as_str(), Some("pass"));
+}
+
+/// #2359 through the #2347 base pass: a config-sourced map is rebased onto
+/// the base worktree exactly like `--coverage`, so a pre-existing high-CRAP
+/// function stays inherited when an unrelated edit touches its file.
+#[test]
+fn audit_config_coverage_keeps_unchanged_function_inherited_through_base_snapshot() {
+    let dir = create_audit_fixture("coverage-config-base-attribution");
+    let branchy_path = commit_branchy_with_test_reference(dir.path());
+
+    let mut source = fs::read_to_string(&branchy_path).unwrap();
+    source.push_str("branchy(-1);\n");
+    fs::write(&branchy_path, source).unwrap();
+    commit_all(dir.path(), "append an unrelated statement below branchy");
+
+    assert_branchy_below_threshold(&run_branchy_audit(dir.path(), None));
+
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    write_uncovered_branchy_coverage(&coverage_path, &branchy_path.to_string_lossy(), 1);
+    write_health_config(
+        dir.path(),
+        r#"{"coverage":"artifacts/coverage-final.json"}"#,
+    );
+
+    assert_branchy_inherited(&run_branchy_audit(dir.path(), None));
+}
+
+/// #2359 cache key: pointing `health.coverage` at a different map must not
+/// reuse the base snapshot computed from the previous map. The first run
+/// caches a base pass scored from the covered map; the second must rescore
+/// the base side from the uncovered one to keep the finding inherited.
+#[test]
+fn audit_config_coverage_change_invalidates_cached_base_snapshot() {
+    let dir = create_audit_fixture("coverage-config-cache-key");
+    let branchy_path = commit_branchy_with_test_reference(dir.path());
+
+    let mut source = fs::read_to_string(&branchy_path).unwrap();
+    source.push_str("branchy(-1);\n");
+    fs::write(&branchy_path, source).unwrap();
+    commit_all(dir.path(), "append an unrelated statement below branchy");
+
+    assert_branchy_below_threshold(&run_branchy_audit(dir.path(), None));
+
+    let covered_path = dir.path().join("artifacts/covered.json");
+    write_fns_coverage(
+        &covered_path,
+        &branchy_path.to_string_lossy(),
+        &[("branchy", 1)],
+        1,
+    );
+    write_health_config(dir.path(), r#"{"coverage":"artifacts/covered.json"}"#);
+    let covered = run_branchy_audit(dir.path(), None);
+    assert_eq!(
+        covered.code, 0,
+        "a fully covered config map scores branchy below the CRAP threshold on both sides. stderr: {}",
+        covered.stderr
+    );
+
+    let uncovered_path = dir.path().join("artifacts/uncovered.json");
+    write_uncovered_branchy_coverage(&uncovered_path, &branchy_path.to_string_lossy(), 1);
+    write_health_config(dir.path(), r#"{"coverage":"artifacts/uncovered.json"}"#);
+    assert_branchy_inherited(&run_branchy_audit(dir.path(), None));
+}
+
+/// #2359: a `health.coverage` path that does not exist fails audit with the
+/// same structured exit 2 as `fallow health` and an explicit `--coverage`.
+#[test]
+fn audit_missing_config_coverage_is_structured_exit_two() {
+    let dir = create_audit_fixture("coverage-config-missing");
+    write_branchy_change(dir.path());
+    write_health_config(dir.path(), r#"{"coverage":"artifacts/missing.json"}"#);
+
+    let output = run_gated_audit_with(dir.path(), &[], &[]);
+    assert_eq!(
+        output.code, 2,
+        "a missing health.coverage file must fail loudly like --coverage. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"], serde_json::json!(true));
+    let message = json["message"].as_str().expect("message should be present");
+    assert!(
+        message.starts_with("coverage:") && message.contains("missing.json"),
+        "unexpected error message: {message}"
+    );
+}
+
+/// #2359: a relative `health.coverageRoot` is rejected before analysis with
+/// the same structured exit 2 as a relative `--coverage-root`.
+#[test]
+fn audit_rejects_relative_config_coverage_root() {
+    let dir = create_audit_fixture("coverage-config-root-relative-rejected");
+    write_health_config(dir.path(), r#"{"coverageRoot":"src"}"#);
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 2,
+        "relative health.coverageRoot should be rejected before audit runs. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"], serde_json::json!(true));
+    let message = json["message"].as_str().expect("message should be present");
+    assert!(
+        message.contains("--coverage-root expects an absolute path")
+            && message.contains("got 'src'"),
+        "unexpected error message: {message}"
+    );
+}
+
 /// Run `fallow audit` against `root` with string env vars set on the child
 /// process. The path-typed `run_fallow_raw_with_env` cannot carry a git ref
 /// value, so this builds the command directly.

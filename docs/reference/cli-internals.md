@@ -56,6 +56,14 @@ an exit code.
   base is scored with the post-deletion map); coverage regressions belong to
   `rules.coverage-gaps` and health trends. The auto-detected map's content
   participates in the base-snapshot cache key exactly like `--coverage`.
+- Audit coverage inputs (#2359) resolve through the same precedence as
+  `fallow health` and bare `fallow`: `--coverage` / `--coverage-root`, then
+  `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT`, then `health.coverage` /
+  `health.coverageRoot`, then auto-detection. `resolve_coverage_inputs` in
+  `crates/cli/src/lib.rs` is the single owner of that order; the resolved
+  paths land in `AuditOptions`, so the head pass, the base-worktree rebase,
+  and the base-snapshot cache key all see the same map. A configured path
+  that does not exist fails audit with the same structured exit 2 as health.
 - Audit worktree cleanup must be scoped to Fallow-owned paths and registrations.
   Never prune unrelated user worktrees.
 - JSON mode emits structured errors on stdout and keeps progress off stdout.
