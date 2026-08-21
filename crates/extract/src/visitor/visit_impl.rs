@@ -2429,6 +2429,28 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             return;
         }
 
+        // Exports inside `declare module '<specifier>' { ... }` augment the
+        // named module; they are not exports of the containing file, so they
+        // must not feed unused-export/unused-type findings (issue #2349). The
+        // body is still walked so `typeof import()` references and type usage
+        // keep extracting (#396/#397). A named re-export's source still counts
+        // as a type-space reference so the target file stays reachable.
+        if self.ambient_module_depth > 0 {
+            if let Some(source) = &decl.source {
+                self.imports.push(ImportInfo {
+                    source: source.value.to_string(),
+                    imported_name: ImportedName::SideEffect,
+                    local_name: String::new(),
+                    is_type_only: true,
+                    from_style: false,
+                    span: decl.span,
+                    source_span: source.span,
+                });
+            }
+            walk::walk_export_named_declaration(self, decl);
+            return;
+        }
+
         let is_type_only = decl.export_kind.is_type();
 
         if let Some(source) = &decl.source {
@@ -2451,6 +2473,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
+        // See the ambient-module guard in `visit_export_named_declaration`:
+        // a default export declared inside `declare module '<specifier>'`
+        // belongs to the named module, not the containing file (issue #2349).
+        if self.ambient_module_depth > 0 {
+            walk::walk_export_default_declaration(self, decl);
+            return;
+        }
+
         let (members, super_class, implemented_interfaces, instance_bindings) =
             if let ExportDefaultDeclarationKind::ClassDeclaration(class) = &decl.declaration {
                 let is_angular = has_angular_class_decorator(class);
@@ -2520,6 +2550,23 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         });
 
         walk::walk_export_default_declaration(self, decl);
+    }
+
+    fn visit_ts_module_declaration(&mut self, decl: &TSModuleDeclaration<'a>) {
+        // A string-literal module name (`declare module './library'`,
+        // `declare module 'pkg'`) marks a module augmentation or ambient
+        // module declaration. Track the depth so export visitors skip
+        // file-level recording inside the body (issue #2349). Identifier-named
+        // declarations (`namespace Foo`, `declare global`) keep existing
+        // behavior.
+        let is_ambient_specifier = matches!(&decl.id, TSModuleDeclarationName::StringLiteral(_));
+        if is_ambient_specifier {
+            self.ambient_module_depth += 1;
+        }
+        walk::walk_ts_module_declaration(self, decl);
+        if is_ambient_specifier {
+            self.ambient_module_depth -= 1;
+        }
     }
 
     fn visit_export_all_declaration(&mut self, decl: &ExportAllDeclaration<'a>) {

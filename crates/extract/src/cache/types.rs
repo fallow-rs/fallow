@@ -934,7 +934,12 @@ use crate::MemberKind;
 /// its own `<snippet:NAME>` complexity unit and rebases the body's nesting to
 /// zero, changing the serialized `module.complexity` for snippet-using files.
 /// Warm 270 caches would keep the folded single-unit shape.
-pub(super) const CACHE_VERSION: u32 = 271;
+///
+/// Bumped to 272 for issue #2349: exports declared inside
+/// `declare module '<specifier>'` augmentation and ambient-module bodies are no
+/// longer recorded as file-level exports. Warm 271 caches would keep replaying
+/// augmentation-scoped declarations as unused exported types.
+pub(super) const CACHE_VERSION: u32 = 272;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

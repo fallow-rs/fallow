@@ -1,0 +1,8 @@
+{
+  "name": "issue-2349-module-augmentation",
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

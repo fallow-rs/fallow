@@ -75,6 +75,8 @@ mod html_entry;
 mod issue_1032_tsconfig_sibling_src_paths;
 #[path = "integration_test/issue_1304_effect_schema_same_name.rs"]
 mod issue_1304_effect_schema_same_name;
+#[path = "integration_test/issue_2349_module_augmentation.rs"]
+mod issue_2349_module_augmentation;
 #[path = "integration_test/issue_546_storybook_runtime_resources.rs"]
 mod issue_546_storybook_runtime_resources;
 #[path = "integration_test/issue_914_pnpm_bare_binary.rs"]
