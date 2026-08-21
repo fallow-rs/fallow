@@ -5197,7 +5197,7 @@ fn ambient_module_declaration_exports_are_not_file_exports() {
 fn ambient_module_named_re_export_keeps_reference_without_file_export() {
     let info = parse(
         "declare module 'pkg' {\n\
-           export { helper } from './impl';\n\
+           export { helper, other as renamed } from './impl';\n\
          }\n\
          export {};\n",
     );
@@ -5207,11 +5207,48 @@ fn ambient_module_named_re_export_keeps_reference_without_file_export() {
         info.exports,
         info.re_exports
     );
+    // One Named type-space import per specifier: the target file stays
+    // reachable and each re-exported symbol keeps its export credit.
+    let entries: Vec<_> = info
+        .imports
+        .iter()
+        .filter(|i| i.source == "./impl")
+        .collect();
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected one import per re-export specifier: {:?}",
+        info.imports
+    );
+    for entry in &entries {
+        assert!(entry.is_type_only);
+    }
+    assert!(
+        matches!(&entries[0].imported_name, ImportedName::Named(n) if n == "helper"),
+        "first specifier must credit `helper`: {:?}",
+        entries[0].imported_name
+    );
+    assert!(
+        matches!(&entries[1].imported_name, ImportedName::Named(n) if n == "other"),
+        "aliased specifier must credit the source-side name `other`: {:?}",
+        entries[1].imported_name
+    );
+}
+
+#[test]
+fn ambient_module_bare_re_export_keeps_side_effect_reference() {
+    let info = parse(
+        "declare module 'pkg' {\n\
+           export {} from './impl';\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(info.exports.is_empty() && info.re_exports.is_empty());
     let entry = info
         .imports
         .iter()
         .find(|i| i.source == "./impl")
-        .expect("re-export source inside an ambient module must stay referenced");
+        .expect("bare re-export source inside an ambient module must stay referenced");
     assert!(entry.is_type_only);
     assert!(matches!(entry.imported_name, ImportedName::SideEffect));
 }

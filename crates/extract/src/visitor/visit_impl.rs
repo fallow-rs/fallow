@@ -2433,19 +2433,36 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // named module; they are not exports of the containing file, so they
         // must not feed unused-export/unused-type findings (issue #2349). The
         // body is still walked so `typeof import()` references and type usage
-        // keep extracting (#396/#397). A named re-export's source still counts
-        // as a type-space reference so the target file stays reachable.
+        // keep extracting (#396/#397). A named re-export becomes one type-space
+        // import per specifier (mirroring `visit_ts_import_type`) so the target
+        // file stays reachable AND each re-exported symbol keeps its export
+        // credit; a bare `export {} from '...'` falls back to a side-effect
+        // reference for reachability alone.
         if self.ambient_module_depth > 0 {
             if let Some(source) = &decl.source {
-                self.imports.push(ImportInfo {
-                    source: source.value.to_string(),
-                    imported_name: ImportedName::SideEffect,
-                    local_name: String::new(),
-                    is_type_only: true,
-                    from_style: false,
-                    span: decl.span,
-                    source_span: source.span,
-                });
+                if decl.specifiers.is_empty() {
+                    self.imports.push(ImportInfo {
+                        source: source.value.to_string(),
+                        imported_name: ImportedName::SideEffect,
+                        local_name: String::new(),
+                        is_type_only: true,
+                        from_style: false,
+                        span: decl.span,
+                        source_span: source.span,
+                    });
+                } else {
+                    for spec in &decl.specifiers {
+                        self.imports.push(ImportInfo {
+                            source: source.value.to_string(),
+                            imported_name: ImportedName::Named(spec.local.name().to_string()),
+                            local_name: String::new(),
+                            is_type_only: true,
+                            from_style: false,
+                            span: spec.span,
+                            source_span: source.span,
+                        });
+                    }
+                }
             }
             walk::walk_export_named_declaration(self, decl);
             return;

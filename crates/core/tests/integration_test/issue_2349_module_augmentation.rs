@@ -35,4 +35,23 @@ fn module_augmentation_interface_is_not_reported_unused() {
         "a genuinely unused export outside the `declare module` body must keep \
          reporting; types: {unused_type_names:?}, exports: {unused_export_names:?}"
     );
+
+    // ambient.d.ts re-exports `helper` from ./impl inside a
+    // `declare module 'untyped-pkg'` body. Deleting `helper` would break tsc,
+    // so the re-export must both keep impl.ts reachable and keep `helper`
+    // credited as used.
+    assert!(
+        !unused_export_names.contains(&"helper") && !unused_type_names.contains(&"helper"),
+        "`helper` is re-exported from an ambient module body and must keep its \
+         export credit; types: {unused_type_names:?}, exports: {unused_export_names:?}"
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files.iter().any(|p| p.ends_with("impl.ts")),
+        "impl.ts is reachable via the ambient-module re-export: {unused_files:?}"
+    );
 }
