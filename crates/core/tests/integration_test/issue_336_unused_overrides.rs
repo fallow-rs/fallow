@@ -156,6 +156,143 @@ snapshots:
     );
 }
 
+// Trimmed from a real `bun install` run (bun 1.3.x); keeps bun's trailing
+// commas so the JSONC dialect is exercised end to end. `ws` is a transitive
+// dependency of `happy-dom`, declared in no dependency section.
+const BUN_LOCK_TRANSITIVE_WS: &str = r#"{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "issue-2341-bun-overrides",
+      "devDependencies": {
+        "happy-dom": "^20.10.6",
+      },
+    },
+  },
+  "overrides": {
+    "ws": "^8.21.0",
+  },
+  "packages": {
+    "@types/whatwg-mimetype": ["@types/whatwg-mimetype@3.0.2", "", {}, "sha512-c2"],
+    "happy-dom": ["happy-dom@20.11.6", "", { "dependencies": { "@types/whatwg-mimetype": "^3.0.2", "whatwg-mimetype": "^3.0.0", "ws": "^8.21.0" } }, "sha512-Hl"],
+    "whatwg-mimetype": ["whatwg-mimetype@3.0.0", "", {}, "sha512-nt"],
+    "ws": ["ws@8.21.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-20"],
+  }
+}
+"#;
+
+fn write_bun_repro_package_json(root: &std::path::Path, overrides: &str) {
+    fs::write(
+        root.join("package.json"),
+        format!(
+            r#"{{
+  "name": "issue-2341-bun-overrides",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "bun@1.3.2",
+  "devDependencies": {{ "happy-dom": "^20.10.6" }},
+  "overrides": {overrides}
+}}"#
+        ),
+    )
+    .expect("write root package.json");
+}
+
+/// Issue #2341 repro: bun declares overrides through the npm-style top-level
+/// `overrides` key, and transitive resolution lives in `bun.lock`. The
+/// override target must be credited from the bun lockfile instead of being
+/// flagged as unused.
+#[test]
+fn transitive_only_targets_in_bun_lockfile_are_used() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    write_bun_repro_package_json(root, r#"{ "ws": "^8.21.0" }"#);
+    fs::write(root.join("bun.lock"), BUN_LOCK_TRANSITIVE_WS).expect("write bun.lock");
+
+    let config = config_for_fixture(root.to_path_buf(), vec![]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_dependency_overrides.is_empty(),
+        "ws resolves in bun.lock as a transitive dependency of happy-dom; flagged: {:?}",
+        results.unused_dependency_overrides
+    );
+}
+
+#[test]
+fn unresolved_override_in_bun_repo_is_flagged_with_bun_hint() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    write_bun_repro_package_json(root, r#"{ "left-pad": "^1.3.0" }"#);
+    fs::write(root.join("bun.lock"), BUN_LOCK_TRANSITIVE_WS).expect("write bun.lock");
+
+    let config = config_for_fixture(root.to_path_buf(), vec![]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let flagged: Vec<&str> = results
+        .unused_dependency_overrides
+        .iter()
+        .map(|f| f.entry.target_package.as_str())
+        .collect();
+    assert_eq!(
+        flagged,
+        vec!["left-pad"],
+        "left-pad appears in no dep section and not in bun.lock"
+    );
+    let hint = results.unused_dependency_overrides[0]
+        .entry
+        .hint
+        .as_deref()
+        .expect("unused override carries a hint");
+    assert!(
+        hint.contains("bun install"),
+        "hint should name bun, not pnpm, in a bun repo; got {hint:?}"
+    );
+}
+
+/// bun's legacy binary lockfile cannot be parsed, so resolution ground truth
+/// is unavailable; the analysis must stay silent instead of flagging every
+/// transitive-only override.
+#[test]
+fn bun_lockb_without_text_lockfile_suppresses_unused_overrides() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    write_bun_repro_package_json(root, r#"{ "ws": "^8.21.0" }"#);
+    fs::write(root.join("bun.lockb"), b"\x00binary lockfile\x01\x02").expect("write bun.lockb");
+
+    let config = config_for_fixture(root.to_path_buf(), vec![]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_dependency_overrides.is_empty(),
+        "bun.lockb is unreadable; unused-override analysis must be skipped; flagged: {:?}",
+        results.unused_dependency_overrides
+    );
+}
+
+/// Misconfigured-override detection is static and does not depend on lockfile
+/// resolution, so it keeps reporting even when only `bun.lockb` exists.
+#[test]
+fn bun_lockb_does_not_suppress_misconfigured_overrides() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    write_bun_repro_package_json(root, r#"{ "ws": "" }"#);
+    fs::write(root.join("bun.lockb"), b"\x00binary lockfile\x01\x02").expect("write bun.lockb");
+
+    let config = config_for_fixture(root.to_path_buf(), vec![]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let any_empty_value = results.misconfigured_dependency_overrides.iter().any(|f| {
+        f.entry.raw_key == "ws" && f.entry.reason == DependencyOverrideMisconfigReason::EmptyValue
+    });
+    assert!(
+        any_empty_value,
+        "empty-value override must stay reported with bun.lockb present; got {:?}",
+        results.misconfigured_dependency_overrides
+    );
+}
+
 #[test]
 fn detects_misconfigured_overrides() {
     let root = fixture_path("issue-336-unused-overrides");

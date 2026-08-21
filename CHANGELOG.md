@@ -21,6 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jobs, while a credential-free gate downloads and validates the exact
   universal and platform-specific payloads from both registries.
 
+### Fixed
+
+- **`unused_dependency_overrides` no longer flags transitive-only overrides in
+  bun repositories.** bun declares overrides through the same top-level
+  `overrides` key as npm, but override resolution only consulted
+  `pnpm-lock.yaml` and `package-lock.json`, so every override targeting a
+  transitive dependency in a bun repo was reported as unused even though the
+  target resolved in `bun.lock`. These are commonly CVE-fix pins, so acting on
+  the finding would have been a security downgrade. `bun.lock` (a JSONC file)
+  is now parsed into the resolved-package set. When the only lockfile is bun's
+  legacy binary `bun.lockb`, resolution ground truth is unreadable and the
+  check emits nothing instead of degrading to declaration-only analysis. The
+  transitive hint also now names the package manager whose lockfile is present
+  (`bun install --frozen-lockfile` / `npm ci`) instead of always citing pnpm.
+  (Closes [#2341](https://github.com/fallow-rs/fallow/issues/2341).)
+
 ## [3.17.0] - 2026-08-16
 
 ### Added
