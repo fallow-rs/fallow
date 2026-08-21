@@ -248,6 +248,7 @@ struct AuditSubanalysisOptions {
 fn audit_subanalysis_options(
     options: &AuditOptions,
     analysis: &AnalysisOptions,
+    coverage_relocated: bool,
 ) -> AuditSubanalysisOptions {
     AuditSubanalysisOptions {
         dead_code: DeadCodeOptions {
@@ -268,6 +269,7 @@ fn audit_subanalysis_options(
             css_deep: options.css.unwrap_or(true) && options.css_deep.unwrap_or(true),
             coverage: options.coverage.clone(),
             coverage_root: options.coverage_root.clone(),
+            coverage_relocated,
             ..ComplexityOptions::default()
         },
     }
@@ -277,9 +279,16 @@ fn run_audit_subanalyses(
     options: &AuditOptions,
     analysis: &AnalysisOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
+    coverage_relocated: bool,
 ) -> ProgrammaticResult<AuditSubanalyses> {
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(analysis)?;
-    run_audit_subanalyses_with_context(options, analysis, &resolved, changed_files)
+    run_audit_subanalyses_in_context(
+        options,
+        analysis,
+        &resolved,
+        changed_files,
+        coverage_relocated,
+    )
 }
 
 fn run_audit_subanalyses_with_context(
@@ -288,7 +297,17 @@ fn run_audit_subanalyses_with_context(
     resolved: &ProgrammaticAnalysisContext,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
-    let subanalysis_options = audit_subanalysis_options(options, analysis);
+    run_audit_subanalyses_in_context(options, analysis, resolved, changed_files, false)
+}
+
+fn run_audit_subanalyses_in_context(
+    options: &AuditOptions,
+    analysis: &AnalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+    coverage_relocated: bool,
+) -> ProgrammaticResult<AuditSubanalyses> {
+    let subanalysis_options = audit_subanalysis_options(options, analysis, coverage_relocated);
     let production_modes = resolve_effective_production_modes(
         resolved,
         options.production_dead_code,
@@ -795,8 +814,36 @@ fn compute_base_snapshot(
         explain: false,
         ..options.analysis.clone()
     };
-    let base = run_audit_subanalyses(options, &base_analysis, None)?;
+    let base_options = base_snapshot_options(options, &current_root);
+    let base = run_audit_subanalyses(&base_options, &base_analysis, None, true)?;
     Ok(snapshot_from_analyses(&base))
+}
+
+/// Audit options for the base-worktree pass, with Istanbul coverage inputs
+/// remapped onto that worktree.
+///
+/// The coverage file lives in (and its recorded paths point at) the HEAD
+/// checkout, while the base pass analyzes a temporary worktree. The coverage
+/// path is resolved against the HEAD root so the base pass reads the same
+/// file, and when no explicit `coverage_root` exists the HEAD root becomes
+/// the strip prefix so every entry rebases onto the base worktree; otherwise
+/// base CRAP silently degrades to the reachability estimate and unchanged
+/// functions flip to `introduced` (#2347). An explicit `coverage_root` is
+/// forwarded unchanged: the base pass rebases it onto its own root.
+fn base_snapshot_options(options: &AuditOptions, current_root: &Path) -> AuditOptions {
+    let Some(coverage) = options.coverage.as_deref() else {
+        return options.clone();
+    };
+    let mut base_options = options.clone();
+    base_options.coverage = Some(fallow_engine::health::scoring::resolve_relative_to_root(
+        coverage,
+        Some(current_root),
+    ));
+    if base_options.coverage_root.is_none() {
+        base_options.coverage_root =
+            Some(dunce::canonicalize(current_root).unwrap_or_else(|_| current_root.to_path_buf()));
+    }
+    base_options
 }
 
 fn analysis_root_from_options(options: &AuditOptions) -> ProgrammaticResult<PathBuf> {
@@ -1072,6 +1119,102 @@ mod tests {
                 .iter()
                 .any(|finding| finding["line"] == 3 && finding["introduced"] == true)
         );
+    }
+
+    /// #2347: a pre-existing high-CRAP function must stay `introduced: false`
+    /// when Istanbul coverage is supplied and an unrelated edit touches its
+    /// file. The base snapshot analyzes a temporary worktree, so the coverage
+    /// entries (recorded against the HEAD checkout) must be rebased onto that
+    /// worktree; otherwise the base side falls back to the reachability
+    /// estimate, scores below threshold, and the unchanged finding flips the
+    /// new-only gate.
+    #[test]
+    fn run_audit_coverage_keeps_unchanged_function_inherited() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir_all(root.join("src")).expect("create src");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-api-coverage","type":"module","main":"src/index.ts","devDependencies":{"vitest":"^3.0.0"}}"#,
+        )
+        .expect("write package");
+        std::fs::write(root.join("src/index.ts"), "console.log('entry');\n").expect("write entry");
+        std::fs::write(
+            root.join("src/branchy.ts"),
+            "export function branchy(n: number): number {\n\
+             \x20 if (n < 0) return -1;\n\
+             \x20 if (n === 0) return 0;\n\
+             \x20 if (n < 10) return 1;\n\
+             \x20 if (n < 100) return 2;\n\
+             \x20 if (n < 1000) return 3;\n\
+             \x20 if (n < 10000) return 4;\n\
+             \x20 return 5;\n\
+             }\n",
+        )
+        .expect("write branchy");
+        std::fs::write(
+            root.join("src/branchy.test.ts"),
+            "import { branchy } from './branchy';\nbranchy(1);\n",
+        )
+        .expect("write test reference");
+        git(root, &["init"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        let mut source = std::fs::read_to_string(root.join("src/branchy.ts")).expect("branchy");
+        source.push_str("branchy(-1);\n");
+        std::fs::write(root.join("src/branchy.ts"), source).expect("append unrelated statement");
+
+        std::fs::create_dir_all(root.join("artifacts")).expect("create artifacts");
+        let recorded = root.join("src/branchy.ts");
+        let recorded = recorded.to_string_lossy().replace('\\', "\\\\");
+        std::fs::write(
+            root.join("artifacts/coverage-final.json"),
+            format!(
+                r#"{{"{recorded}":{{"path":"{recorded}","statementMap":{{}},"fnMap":{{"0":{{"name":"branchy","line":1,"decl":{{"start":{{"line":1,"column":16}},"end":{{"line":1,"column":23}}}},"loc":{{"start":{{"line":1,"column":44}},"end":{{"line":9,"column":1}}}}}}}},"branchMap":{{}},"s":{{}},"f":{{"0":0}},"b":{{}}}}}}"#
+            ),
+        )
+        .expect("write coverage");
+
+        let output = run_audit(&AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            base: Some("HEAD".to_string()),
+            gate: AuditGate::NewOnly,
+            max_crap: Some(10.0),
+            coverage: Some(root.join("artifacts/coverage-final.json")),
+            ..AuditOptions::default()
+        })
+        .expect("audit output");
+
+        assert_eq!(output.attribution.complexity_introduced, 0);
+        assert_eq!(output.attribution.complexity_inherited, 1);
+        assert_eq!(output.verdict, AuditVerdict::Pass);
+        let json = crate::serialize_audit_programmatic_json(output).expect("audit json");
+        let findings = json["complexity"]["findings"]
+            .as_array()
+            .expect("complexity findings");
+        let branchy = findings
+            .iter()
+            .find(|finding| finding["name"] == "branchy")
+            .expect("branchy reported above the CRAP threshold with 0% measured coverage");
+        assert_eq!(branchy["introduced"], false);
+        assert_eq!(branchy["coverage_source"], "istanbul");
     }
 
     #[test]

@@ -573,6 +573,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         coverage_inputs: fallow_engine::health::HealthCoverageInputs {
             coverage: opts.coverage,
             coverage_root: opts.coverage_root,
+            coverage_relocated: false,
         },
         performance: opts.performance,
         runtime_coverage: None,

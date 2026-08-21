@@ -42,6 +42,7 @@ fn load_health_coverage(
             coverage_path,
             opts.coverage_inputs.coverage_root,
             Some(&config.root),
+            opts.coverage_inputs.coverage_relocated,
         )
         .map(Some)
         .map_err(|e| HealthError::message(format!("coverage: {e}"), 2));
@@ -60,6 +61,7 @@ fn load_health_coverage(
         &auto_path,
         opts.coverage_inputs.coverage_root,
         Some(&config.root),
+        opts.coverage_inputs.coverage_relocated,
     )
     .ok())
 }

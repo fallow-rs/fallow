@@ -3323,6 +3323,177 @@ fn audit_coverage_relative_path_resolves_against_root_through_base_snapshot() {
     assert_eq!(json["verdict"].as_str(), Some("pass"));
 }
 
+/// Write an Istanbul map recording `branchy` (declared at 1-based `line` in
+/// `coverage_source_path`) as never executed (fn hit count 0, no statements),
+/// i.e. measured 0% coverage.
+fn write_uncovered_branchy_coverage(
+    coverage_path: &std::path::Path,
+    coverage_source_path: &str,
+    line: u32,
+) {
+    fs::create_dir_all(coverage_path.parent().unwrap()).unwrap();
+    let mut coverage = serde_json::Map::new();
+    coverage.insert(
+        coverage_source_path.to_string(),
+        serde_json::json!({
+            "path": coverage_source_path,
+            "statementMap": {},
+            "fnMap": {
+                "0": {
+                    "name": "branchy",
+                    "line": line,
+                    "decl": {
+                        "start": { "line": line, "column": 16 },
+                        "end": { "line": line, "column": 23 }
+                    },
+                    "loc": {
+                        "start": { "line": line, "column": 44 },
+                        "end": { "line": line + 8, "column": 1 }
+                    }
+                }
+            },
+            "branchMap": {},
+            "s": {},
+            "f": { "0": 0 },
+            "b": {}
+        }),
+    );
+    fs::write(coverage_path, serde_json::to_string(&coverage).unwrap()).unwrap();
+}
+
+/// The uncovered high-CRAP `branchy` function plus an external test reference,
+/// committed as the audit base state. Returns the path to `src/branchy.ts`.
+/// The vitest devDependency makes `src/branchy.test.ts` a test entry; without
+/// a test-runner plugin the graph estimate is 0% on both sides and the
+/// base/head divergence guarded by the #2347 tests never occurs.
+fn commit_branchy_with_test_reference(dir: &std::path::Path) -> std::path::PathBuf {
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "audit-test", "main": "src/index.ts", "devDependencies": {"vitest": "^3.0.0"}}"#,
+    )
+    .unwrap();
+    let branchy_path = dir.join("src/branchy.ts");
+    fs::write(
+        &branchy_path,
+        "export function branchy(n: number): number {\n\
+         \x20 if (n < 0) return -1;\n\
+         \x20 if (n === 0) return 0;\n\
+         \x20 if (n < 10) return 1;\n\
+         \x20 if (n < 100) return 2;\n\
+         \x20 if (n < 1000) return 3;\n\
+         \x20 if (n < 10000) return 4;\n\
+         \x20 return 5;\n\
+         }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/branchy.test.ts"),
+        "import { branchy } from './branchy';\nbranchy(1);\n",
+    )
+    .unwrap();
+    commit_all(dir, "add branchy with an external test reference");
+    branchy_path
+}
+
+/// Run `fallow audit --base HEAD~1 --max-crap 10` on `root`, optionally with
+/// `--coverage <path>`.
+fn run_branchy_audit(
+    root: &std::path::Path,
+    coverage_path: Option<&std::path::Path>,
+) -> common::CommandOutput {
+    let mut args = vec![
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+    ];
+    if let Some(coverage_path) = coverage_path {
+        args.push("--coverage");
+        args.push(coverage_path.to_str().unwrap());
+    }
+    args.extend(["--format", "json", "--quiet"]);
+    run_fallow_raw(&args)
+}
+
+/// Assert the audit passed with the `branchy` CRAP finding scored from
+/// Istanbul data and attributed `introduced: false`.
+fn assert_branchy_inherited(output: &common::CommandOutput) {
+    let json = parse_json(output);
+    let findings = json["complexity"]["findings"]
+        .as_array()
+        .expect("audit JSON should include complexity findings");
+    let branchy = findings
+        .iter()
+        .find(|f| f["name"].as_str() == Some("branchy"))
+        .expect("branchy should be reported above the CRAP threshold with 0% measured coverage");
+    assert_eq!(
+        branchy["introduced"].as_bool(),
+        Some(false),
+        "branchy is byte-identical on both sides; the base snapshot must score it with the same Istanbul data as HEAD. stderr: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "gate new-only must not fail on the inherited finding. stderr: {}",
+        output.stderr
+    );
+}
+
+/// #2347: a pre-existing high-CRAP function must stay `introduced: false` when
+/// `--coverage` is supplied and an unrelated edit touches its file. The base
+/// snapshot runs in a temporary worktree, so the Istanbul paths (which point
+/// at the HEAD checkout) must be rebased onto that worktree; otherwise the
+/// base side falls back to the reachability estimate, scores below threshold,
+/// and the unchanged head finding fails `--gate new-only`.
+#[test]
+fn audit_coverage_keeps_unchanged_function_inherited_through_base_snapshot() {
+    let dir = create_audit_fixture("coverage-base-attribution");
+    let branchy_path = commit_branchy_with_test_reference(dir.path());
+
+    let mut source = fs::read_to_string(&branchy_path).unwrap();
+    source.push_str("branchy(-1);\n");
+    fs::write(&branchy_path, source).unwrap();
+    commit_all(dir.path(), "append an unrelated statement below branchy");
+
+    let without_coverage = run_branchy_audit(dir.path(), None);
+    assert_eq!(
+        without_coverage.code, 0,
+        "the graph estimate must score branchy below the CRAP threshold, or this test no longer exercises the base/head divergence. stderr: {}",
+        without_coverage.stderr
+    );
+
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    write_uncovered_branchy_coverage(&coverage_path, &branchy_path.to_string_lossy(), 1);
+
+    let with_coverage = run_branchy_audit(dir.path(), Some(&coverage_path));
+    assert_branchy_inherited(&with_coverage);
+}
+
+/// #2347, line-shift variant: the unrelated edit prepends lines ABOVE the
+/// function, so the base worktree sees it far from where the HEAD-generated
+/// Istanbul map recorded it. The base pass must still match the function
+/// (relocated coverage tolerates line drift for unambiguous names) instead of
+/// degrading to the reachability estimate and flipping it to introduced.
+#[test]
+fn audit_coverage_keeps_line_shifted_function_inherited_through_base_snapshot() {
+    let dir = create_audit_fixture("coverage-base-line-shift");
+    let branchy_path = commit_branchy_with_test_reference(dir.path());
+
+    let source = fs::read_to_string(&branchy_path).unwrap();
+    let padding = "// padding\n".repeat(19);
+    fs::write(&branchy_path, format!("{padding}{source}")).unwrap();
+    commit_all(dir.path(), "prepend unrelated lines above branchy");
+
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    write_uncovered_branchy_coverage(&coverage_path, &branchy_path.to_string_lossy(), 20);
+
+    let with_coverage = run_branchy_audit(dir.path(), Some(&coverage_path));
+    assert_branchy_inherited(&with_coverage);
+}
+
 #[test]
 fn audit_coverage_env_fallback_feeds_crap_scoring() {
     let dir = create_audit_fixture("coverage-env");

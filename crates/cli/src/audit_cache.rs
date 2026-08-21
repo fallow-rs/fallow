@@ -13,7 +13,10 @@ use super::{AuditKeySnapshot, AuditOptions};
 use crate::base_worktree::{git_rev_parse, git_toplevel};
 use crate::error::emit_error;
 
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 6;
+/// Version 7: the base pass rebases Istanbul coverage paths onto the base
+/// worktree (#2347), so snapshots computed by the coverage-blind base pass
+/// must not be reused.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 7;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {

@@ -494,6 +494,7 @@ impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
             min_commits: value.min_commits,
             coverage: value.coverage.map(std::path::PathBuf::from),
             coverage_root: value.coverage_root.map(std::path::PathBuf::from),
+            coverage_relocated: false,
         })
     }
 }

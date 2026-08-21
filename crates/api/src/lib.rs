@@ -781,6 +781,11 @@ pub struct ComplexityOptions {
     pub coverage: Option<PathBuf>,
     /// Absolute path prefix the coverage report recorded its files under.
     pub coverage_root: Option<PathBuf>,
+    /// The coverage map was recorded against a different checkout of this
+    /// project, so function line numbers may have drifted arbitrarily.
+    /// Set internally by the audit base-worktree pass; leave `false` for
+    /// same-checkout coverage.
+    pub coverage_relocated: bool,
 }
 
 /// Health threshold overrides accepted by the programmatic API.
@@ -801,6 +806,9 @@ pub struct ComplexityCoverageInputs<'a> {
     pub coverage: Option<&'a Path>,
     /// Absolute path prefix the coverage report recorded its files under.
     pub coverage_root: Option<&'a Path>,
+    /// The coverage map was recorded against a different checkout of this
+    /// project; tolerate arbitrary line drift for unambiguous name matches.
+    pub coverage_relocated: bool,
 }
 
 /// Input for deriving effective health sections from API-owned flags.
@@ -1037,6 +1045,7 @@ pub fn derive_complexity_run_options(options: &ComplexityOptions) -> ComplexityR
         coverage_inputs: ComplexityCoverageInputs {
             coverage: options.coverage.as_deref(),
             coverage_root: options.coverage_root.as_deref(),
+            coverage_relocated: options.coverage_relocated,
         },
     }
 }
@@ -1123,6 +1132,7 @@ const fn coverage_inputs_to_engine(
     fallow_engine::health::HealthCoverageInputs {
         coverage: coverage_inputs.coverage,
         coverage_root: coverage_inputs.coverage_root,
+        coverage_relocated: coverage_inputs.coverage_relocated,
     }
 }
 
