@@ -5457,6 +5457,93 @@ fn declare_global_direct_body_exports_keep_file_level_recording() {
     );
 }
 
+/// The single import an ambient-body star re-export must produce: a type-space
+/// namespace import with no local binding, the shape the graph routes to its
+/// mark-all branch so every export of the target is credited (issue #2357).
+fn assert_ambient_star_credits_whole_module(info: &ModuleInfo, source: &str) {
+    assert!(
+        info.exports.is_empty() && info.re_exports.is_empty(),
+        "ambient-body star re-exports must not surface on the file: exports {:?}, re_exports {:?}",
+        info.exports,
+        info.re_exports
+    );
+    let entries: Vec<_> = info.imports.iter().filter(|i| i.source == source).collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected exactly one whole-module import for {source}: {:?}",
+        info.imports
+    );
+    let entry = entries[0];
+    assert!(
+        matches!(entry.imported_name, ImportedName::Namespace),
+        "the import must credit every target export: {:?}",
+        entry.imported_name
+    );
+    assert!(
+        entry.local_name.is_empty(),
+        "an ambient star re-export binds no local name: {:?}",
+        entry.local_name
+    );
+    assert!(entry.is_type_only, "ambient bodies are erased at runtime");
+}
+
+#[test]
+fn ambient_module_star_re_export_credits_whole_target_without_file_surface() {
+    // Issue #2357: `export *` inside `declare module 'pkg'` states that every
+    // export of `./impl` is reachable through `pkg`. It must credit the whole
+    // target without adding a star re-export to the declaring file, which
+    // laundered the target's unused exports into an entry point's surface.
+    let info = parse(
+        "declare module 'pkg' {\n\
+           export * from './impl';\n\
+         }\n\
+         export {};\n",
+    );
+    assert_ambient_star_credits_whole_module(&info, "./impl");
+}
+
+#[test]
+fn ambient_module_namespace_star_re_export_credits_whole_target_without_file_surface() {
+    let info = parse(
+        "declare module 'pkg' {\n\
+           export * as impl from './impl';\n\
+         }\n\
+         export {};\n",
+    );
+    assert_ambient_star_credits_whole_module(&info, "./impl");
+}
+
+#[test]
+fn ambient_module_bare_specifier_re_exports_are_type_only_usage() {
+    // Issue #2357: an ambient body is erased at runtime, so a re-export from a
+    // bare specifier inside one is type-only package usage for both the named
+    // (#2349) and the star form. A package referenced solely this way yields
+    // the type-only-dependency finding.
+    let info = parse(
+        "declare module 'typed-shim' {\n\
+           export { Named } from 'named-dep';\n\
+           export * from 'star-dep';\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(info.exports.is_empty() && info.re_exports.is_empty());
+    let named = info
+        .imports
+        .iter()
+        .find(|i| i.source == "named-dep")
+        .expect("named bare-specifier re-export must reference its package");
+    assert!(named.is_type_only);
+    assert!(matches!(&named.imported_name, ImportedName::Named(n) if n == "Named"));
+    let star = info
+        .imports
+        .iter()
+        .find(|i| i.source == "star-dep")
+        .expect("star bare-specifier re-export must reference its package");
+    assert!(star.is_type_only);
+    assert!(matches!(star.imported_name, ImportedName::Namespace));
+}
+
 #[test]
 fn re_export_named() {
     let info = parse("export { foo } from './bar';");

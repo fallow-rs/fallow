@@ -1,0 +1,13 @@
+{
+  "name": "issue-2357-ambient-star-reexport",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/ambient.d.ts",
+  "dependencies": {
+    "named-dep": "^1.0.0",
+    "star-dep": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

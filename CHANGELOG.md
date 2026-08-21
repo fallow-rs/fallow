@@ -44,7 +44,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jobs, while a credential-free gate downloads and validates the exact
   universal and platform-specific payloads from both registries.
 
+- **Re-exports from a bare specifier inside a `declare module '...'` body are
+  classified as type-only package usage.** An ambient body is erased at
+  runtime, so `declare module 'shim' { export { A } from 'some-dep' }` and
+  `declare module 'shim' { export * from 'some-dep' }` reference `some-dep`
+  in type space only. A production dependency referenced solely through such a
+  re-export now yields the existing type-only-dependency finding in
+  `--production` mode (the named form has done so since
+  [#2349](https://github.com/fallow-rs/fallow/issues/2349); the star form
+  previously counted as runtime usage). Move the package to
+  `devDependencies`, or add it to `ignoreDependencies` when the ambient
+  declaration intentionally describes a runtime package.
+
 ### Fixed
+
+- **Star re-exports inside `declare module '...'` bodies credit every export
+  of their target without adding to the declaring file's export surface**
+  (Closes [#2357](https://github.com/fallow-rs/fallow/issues/2357)).
+  `declare module 'pkg' { export * from './impl' }` and the
+  `export * as ns from './impl'` form were still recorded as file-level star
+  re-exports, so when the declaring `.d.ts` was an entry point every export of
+  `./impl` was laundered into that entry's public surface, and when it was
+  not, nothing in `./impl` was credited at all. The ambient declaration states
+  that all of `./impl` is reachable through `pkg`, so its exports are now
+  credited directly (following `./impl`'s own `export *` chain, the
+  barrel-of-barrels shape such declarations usually point at), the declaring
+  file exposes no star re-export (visible in `inspect --file` and
+  `dead-code --trace`), and genuinely unused exports in unrelated modules keep
+  reporting. The same chain crediting now applies to every whole-module
+  namespace edge, so a barrel matched by an `import()` or `import.meta.glob`
+  pattern no longer reports the exports it only exposes through `export *`.
+  Both the extraction and graph cache versions were bumped, so the first run
+  after upgrading performs one cold re-analysis.
 
 - **JSX member-expression tags (`<SC.Wrapper />`) now credit the referenced
   export** (Closes

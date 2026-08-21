@@ -57,6 +57,52 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
+/// The default config with production mode enabled, so dependency findings
+/// that only exist in production mode (type-only dependencies) are emitted.
+pub fn create_production_config(root: PathBuf) -> fallow_config::ResolvedConfig {
+    FallowConfig {
+        type_aware: fallow_config::TypeAwareConfig::default(),
+        schema: None,
+        extends: vec![],
+        entry: vec![],
+        ignore_patterns: vec![],
+        ignore_findings: vec![],
+        framework: vec![],
+        workspaces: None,
+        ignore_dependencies: vec![],
+        ignore_unresolved_imports: vec![],
+        ignore_exports: vec![],
+        ignore_catalog_references: vec![],
+        ignore_dependency_overrides: vec![],
+        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        used_class_members: vec![],
+        ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+        duplicates: fallow_config::DuplicatesConfig::default(),
+        health: fallow_config::HealthConfig::default(),
+        rules: RulesConfig::default(),
+        boundaries: fallow_config::BoundaryConfig::default(),
+        production: true.into(),
+        plugins: vec![],
+        rule_packs: vec![],
+        dynamically_loaded: vec![],
+        overrides: vec![],
+        regression: None,
+        audit: fallow_config::AuditConfig::default(),
+        codeowners: None,
+        public_packages: vec![],
+        flags: fallow_config::FlagsConfig::default(),
+        security: fallow_config::SecurityConfig::default(),
+        fix: fallow_config::FixConfig::default(),
+        resolve: fallow_config::ResolveConfig::default(),
+        sealed: false,
+        include_entry_exports: false,
+        auto_imports: false,
+        cache: fallow_config::CacheConfig::default(),
+    }
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
+}
+
 /// A config with `ignorePatterns` set, resolved through the same path a user's
 /// `fallow.toml` takes. Building the `GlobSet` this way keeps the default ignore
 /// set (`node_modules`, build output) that overwriting `ResolvedConfig::ignore_patterns`

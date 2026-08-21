@@ -79,6 +79,8 @@ mod issue_1304_effect_schema_same_name;
 mod issue_2349_module_augmentation;
 #[path = "integration_test/issue_2356_local_namespace.rs"]
 mod issue_2356_local_namespace;
+#[path = "integration_test/issue_2357_ambient_star_reexport.rs"]
+mod issue_2357_ambient_star_reexport;
 #[path = "integration_test/issue_546_storybook_runtime_resources.rs"]
 mod issue_546_storybook_runtime_resources;
 #[path = "integration_test/issue_914_pnpm_bare_binary.rs"]

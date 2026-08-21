@@ -41,7 +41,13 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   ambient module declaration) contributes no file-level export surface. Its
   body is still walked for `typeof import()` and type-space references, and a
   named re-export inside it becomes one type-space import per specifier so the
-  target keeps its export credit. Exported namespaces and `declare global`
+  target keeps its export credit. A star re-export inside it (`export *` or
+  `export * as ns`) becomes one type-space namespace import with an empty
+  local name, the whole-module shape the graph credits every target export
+  for (through the target's own `export *` chain as well), and never a
+  file-level star re-export. Because ambient bodies are
+  erased at runtime, a re-export from a bare specifier inside one counts as
+  type-only package usage. Exported namespaces and `declare global`
   keep their existing behavior.
 - A namespace declared without the `export` keyword (`namespace Foo {}`,
   `declare namespace Foo {}`, legacy `module Foo {}`, dotted

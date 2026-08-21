@@ -949,7 +949,14 @@ use crate::MemberKind;
 /// declared without the `export` keyword (`namespace Foo { export const x }`)
 /// are no longer recorded as file-level exports. Warm 273 caches would keep
 /// replaying those local namespace members as unused exports.
-pub(super) const CACHE_VERSION: u32 = 274;
+///
+/// Bumped to 275 for issue #2357 (274 was taken by issue #2356 while this
+/// change was in review): `export *` and `export * as ns` inside
+/// `declare module '<specifier>'` bodies are recorded as one type-space
+/// whole-module import instead of a file-level star re-export. Warm 274
+/// caches would keep replaying the star surface on the declaring file and
+/// would classify a bare-specifier ambient star re-export as runtime usage.
+pub(super) const CACHE_VERSION: u32 = 275;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

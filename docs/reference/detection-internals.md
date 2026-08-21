@@ -76,6 +76,12 @@ error by suppressing a downstream detector.
   `ModuleGraph::ambiguous_star_exports` exposes collisions for reporting, while
   `ModuleGraph::ambiguity_participants` identifies their canonical declarations
   for detector gates.
+- A whole-module namespace edge (a namespace import without a local binding,
+  emitted for dynamic-import patterns and for `export *` inside
+  `declare module '...'` bodies) credits every export of its target, including
+  names the target only exposes through its own `export *` chain. The graph
+  gives such targets the same star-chain treatment as entry-point barrels, so
+  a barrel-of-barrels behind the edge does not report its deep exports.
 - Styling and CSS-in-JS extraction must preserve source line mapping.
 - Duplication token or normalization changes require the duplication cache
   version to move with the changed semantics.
