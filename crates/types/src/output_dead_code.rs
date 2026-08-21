@@ -2515,10 +2515,10 @@ impl UnusedDependencyOverrideFinding {
         actions.push(IssueAction::Fix(FixAction {
             kind: FixActionType::RemoveDependencyOverride,
             auto_fixable: false,
-            description: "Remove the override entry from pnpm-workspace.yaml or pnpm.overrides"
+            description: "Remove the override entry from its declaration source (pnpm-workspace.yaml overrides, pnpm.overrides, or the package.json overrides object)"
                 .to_string(),
             note: Some(
-                "Conservative static check; verify against `pnpm install --frozen-lockfile` before removing in case the override targets a transitive dependency (CVE-fix pattern)"
+                "Conservative static check; verify against a frozen-lockfile install (`pnpm install --frozen-lockfile`, `npm ci`, or `bun install --frozen-lockfile`) before removing in case the override targets a transitive dependency (CVE-fix pattern)"
                     .to_string(),
             ),
             available_in_catalogs: None,
