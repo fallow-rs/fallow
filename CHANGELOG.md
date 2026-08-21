@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **JSX member-expression tags (`<SC.Wrapper />`) now credit the referenced
+  export** (Closes
+  [#2348](https://github.com/fallow-rs/fallow/issues/2348)). The syntactic
+  scan only recorded plain-expression member accesses, so a namespace import
+  rendered exclusively through JSX kept its exports reported as unused, and in
+  entry-point files every sibling export of the namespace target was falsely
+  flagged. Behavior change: namespace imports in non-entry consumers now
+  narrow to the members actually used instead of marking every export used, so
+  genuinely unused siblings surface for the first time. Both the extraction
+  and graph cache versions were bumped; the first run after upgrading performs
+  one cold re-analysis.
+
 - **Declarations inside `declare module '...'` augmentation and ambient-module
   bodies are no longer reported as unused exports of the containing file**
   (Closes [#2349](https://github.com/fallow-rs/fallow/issues/2349)). An
