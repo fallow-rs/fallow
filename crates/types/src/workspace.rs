@@ -90,6 +90,16 @@ pub enum WorkspaceDiagnosticKind {
         /// Filesystem or UTF-8 decoding error from `read_to_string`.
         error: String,
     },
+    /// Dependency-override resolution was skipped because the only lockfile
+    /// next to this `package.json` is bun's legacy binary `bun.lockb`, which
+    /// fallow cannot read. The manifest declares overrides, so the
+    /// `unused-dependency-overrides` check would otherwise have run; without
+    /// resolution ground truth it would flag every transitive-only pin, so no
+    /// unused-override findings are reported at all (issue #2358). Surfaced
+    /// by the override analysis, not workspace discovery, but shares this
+    /// channel so the skip is visible in `workspace_diagnostics[]` JSON and
+    /// as a stderr warning.
+    BunLockbOverrideResolutionSkipped,
 }
 
 impl WorkspaceDiagnosticKind {
@@ -106,6 +116,7 @@ impl WorkspaceDiagnosticKind {
             Self::SkippedLargeFile { .. } => "skipped-large-file",
             Self::SkippedMinifiedFile { .. } => "skipped-minified-file",
             Self::SourceReadFailure { .. } => "source-read-failure",
+            Self::BunLockbOverrideResolutionSkipped => "bun-lockb-override-resolution-skipped",
         }
     }
 
@@ -276,6 +287,12 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             "Could not read source '{display}' ({error}). Restore the file or its read permissions, \
              ensure it contains valid UTF-8 text, or add '{display}' to ignorePatterns."
         ),
+        WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped => format!(
+            "Skipped dependency-override resolution for '{display}': only bun.lockb was found \
+             next to it and fallow cannot read bun's binary lockfile, so unused-dependency-overrides \
+             findings are not reported. Run bun install --save-text-lockfile (bun 1.2 or newer) \
+             to write a text bun.lock."
+        ),
     }
 }
 
@@ -374,6 +391,34 @@ mod tests {
         let json = serde_json::to_string(&schema).expect("schema serializes");
         assert!(json.contains("source-read-failure"));
         assert!(json.contains("error"));
+    }
+
+    #[test]
+    fn bun_lockb_override_resolution_skipped_id_and_message() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join("package.json"),
+            WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+        );
+        assert_eq!(diag.kind.id(), "bun-lockb-override-resolution-skipped");
+        assert!(
+            diag.message.contains("'package.json'"),
+            "message names the project-relative manifest: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("only bun.lockb was found"),
+            "message states the cause: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("bun install --save-text-lockfile"),
+            "message ends with the text-lockfile next step: {}",
+            diag.message
+        );
+        let json = serde_json::to_value(&diag).expect("diagnostic serializes");
+        assert_eq!(json["kind"], "bun-lockb-override-resolution-skipped");
     }
 
     #[test]

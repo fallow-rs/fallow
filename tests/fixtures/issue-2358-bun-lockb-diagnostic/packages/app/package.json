@@ -1,0 +1,8 @@
+{
+  "name": "@issue-2358/app",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "happy-dom": "^20.10.6"
+  }
+}

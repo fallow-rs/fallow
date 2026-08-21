@@ -968,3 +968,60 @@ fn ignore_findings_note_stays_out_of_json_output() {
         output.stderr
     );
 }
+
+/// Issue #2358: a bun.lockb-only repo with overrides gets no unused-override
+/// findings (resolution is unreadable); the JSON envelope must explain the
+/// skip through `workspace_diagnostics[]` and the human run must warn.
+#[test]
+fn bun_lockb_only_override_skip_surfaces_in_json_and_human_output() {
+    let output = run_fallow(
+        "dead-code",
+        "issue-2358-bun-lockb-diagnostic",
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    assert!(
+        json["unused_dependency_overrides"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "the unused-override check must stay skipped: {}",
+        json["unused_dependency_overrides"]
+    );
+    let diagnostics = json["workspace_diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let skips: Vec<&serde_json::Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["kind"] == "bun-lockb-override-resolution-skipped")
+        .collect();
+    assert_eq!(
+        skips.len(),
+        1,
+        "exactly one skip diagnostic for the root manifest: {diagnostics:?}"
+    );
+    assert_eq!(skips[0]["path"], "package.json");
+    let message = skips[0]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("only bun.lockb was found")
+            && message.contains("bun install --save-text-lockfile"),
+        "message states the cause and the text-lockfile next step: {message}"
+    );
+
+    let root = fixture_path("issue-2358-bun-lockb-diagnostic");
+    let human = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            root.to_str().expect("fixture path is UTF-8"),
+            "--no-cache",
+        ],
+        &[("RUST_LOG", "warn")],
+    );
+    assert!(
+        human.stderr.contains("only bun.lockb was found")
+            && human.stderr.contains("bun install --save-text-lockfile"),
+        "human run warns about the skip on stderr; stderr: {}",
+        human.stderr
+    );
+}

@@ -1,0 +1,1 @@
+placeholder for bun's legacy binary lockfile; fallow only checks that it exists and never parses it

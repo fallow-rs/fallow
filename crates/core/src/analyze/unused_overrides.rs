@@ -24,7 +24,9 @@
 //!    When the only lockfile is bun's legacy binary `bun.lockb`, resolution
 //!    ground truth is unreadable, so no unused-override findings are emitted
 //!    at all rather than degrading to declaration-only analysis that would
-//!    flag every transitive-only pin.
+//!    flag every transitive-only pin. That skip is announced through a
+//!    `bun-lockb-override-resolution-skipped` workspace diagnostic anchored
+//!    at the root `package.json` (issue #2358).
 //!
 //! 2. **`misconfigured-dependency-overrides`**: an override whose key cannot
 //!    be parsed or whose value is empty. `pnpm install` refuses to honor
@@ -43,9 +45,10 @@
 
 use fallow_config::{
     CompiledIgnoreDependencyOverrideRule, PackageJson, PnpmOverrideData, ResolvedConfig,
-    WorkspaceInfo, override_misconfig_reason as parser_misconfig_reason,
-    parse_npm_package_json_overrides, parse_pnpm_package_json_overrides,
-    parse_pnpm_workspace_overrides,
+    WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
+    override_misconfig_reason as parser_misconfig_reason, parse_npm_package_json_overrides,
+    parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
+    record_workspace_diagnostics,
 };
 use fallow_types::results::{
     DependencyOverrideMisconfigReason, DependencyOverrideSource, MisconfiguredDependencyOverride,
@@ -104,7 +107,7 @@ pub struct PnpmOverrideState {
     /// True when the only resolution source is bun's binary `bun.lockb`,
     /// with no parseable text lockfile alongside it. Unused-override analysis
     /// is skipped in that case because transitive resolution cannot be
-    /// established.
+    /// established, and the skip is recorded as a workspace diagnostic.
     lockfile_resolution_unavailable: bool,
     /// Package-manager-appropriate hint attached to every unused-override
     /// finding, chosen from the root `package.json` `packageManager` field
@@ -475,9 +478,28 @@ fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
     Some(key[..name_end].to_string())
 }
 
+/// Record the skip diagnostic for a root whose only lockfile is bun's binary
+/// `bun.lockb`: the manifest declares overrides, but resolution ground truth
+/// is unreadable, so the unused-override check does not run. Reaches
+/// `workspace_diagnostics[]` JSON and one deduplicated stderr warning, the
+/// same channel as a malformed `pnpm-workspace.yaml`, so the absence of
+/// findings is explained instead of silent (issue #2358).
+fn report_bun_lockb_override_resolution_skipped(config: &ResolvedConfig) {
+    record_workspace_diagnostics(
+        &config.root,
+        vec![WorkspaceDiagnostic::new(
+            &config.root,
+            config.root.join(ROOT_PACKAGE_JSON),
+            WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+        )],
+    );
+}
+
 /// Emit one `UnusedDependencyOverride` for every parseable override whose
 /// target package (and parent, when present) is not declared in any workspace
-/// `package.json` or resolved in any recognized lockfile.
+/// `package.json` or resolved in any recognized lockfile. When resolution is
+/// unavailable (bun.lockb only), emits nothing and records the
+/// `bun-lockb-override-resolution-skipped` workspace diagnostic instead.
 #[must_use]
 #[deprecated(
     since = "2.76.0",
@@ -488,6 +510,7 @@ pub fn find_unused_dependency_overrides(
     config: &ResolvedConfig,
 ) -> Vec<UnusedDependencyOverride> {
     if state.lockfile_resolution_unavailable {
+        report_bun_lockb_override_resolution_skipped(config);
         return Vec::new();
     }
 
@@ -895,5 +918,170 @@ mod tests {
     fn collect_bun_lock_packages_malformed_returns_none() {
         assert!(collect_bun_lock_packages("not json {{{").is_none());
         assert!(collect_bun_lock_packages("").is_none());
+    }
+
+    // Issue #2358: the bun.lockb-only skip must announce itself through the
+    // workspace-diagnostics channel instead of silently emitting nothing.
+
+    const BUN_LOCKB_PLACEHOLDER: &[u8] = b"\x00binary lockfile\x01\x02";
+
+    fn write_bun_manifest(root: &std::path::Path, overrides: Option<&str>) {
+        let overrides_field = overrides
+            .map(|value| format!(",\n  \"overrides\": {value}"))
+            .unwrap_or_default();
+        std::fs::write(
+            root.join(ROOT_PACKAGE_JSON),
+            format!(
+                r#"{{
+  "name": "issue-2358-bun-lockb",
+  "private": true,
+  "packageManager": "bun@1.3.2",
+  "devDependencies": {{ "happy-dom": "^20.10.6" }}{overrides_field}
+}}"#
+            ),
+        )
+        .expect("write package.json");
+    }
+
+    fn resolve_config(root: &std::path::Path) -> ResolvedConfig {
+        fallow_config::FallowConfig::default().resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        )
+    }
+
+    #[expect(
+        deprecated,
+        reason = "the detector helper is deprecated for external callers; the unit test exercises the internal skip path"
+    )]
+    fn run_unused_override_detector(
+        config: &ResolvedConfig,
+    ) -> Option<Vec<UnusedDependencyOverride>> {
+        let state = gather_pnpm_override_state(config, &[])?;
+        Some(find_unused_dependency_overrides(&state, config))
+    }
+
+    fn bun_lockb_skip_diagnostics(
+        root: &std::path::Path,
+    ) -> Vec<fallow_config::WorkspaceDiagnostic> {
+        fallow_config::workspace_diagnostics_for(root)
+            .into_iter()
+            .filter(|diagnostic| {
+                matches!(
+                    diagnostic.kind,
+                    fallow_config::WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn bun_lockb_only_with_overrides_records_skip_diagnostic_once() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_bun_manifest(root, Some(r#"{ "ws": "^8.21.0" }"#));
+        std::fs::write(root.join(BUN_LOCKB_FILE), BUN_LOCKB_PLACEHOLDER).expect("write bun.lockb");
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config).expect("overrides are declared");
+        assert!(
+            findings.is_empty(),
+            "bun.lockb is unreadable; the check must stay skipped: {findings:?}"
+        );
+
+        let diagnostics = bun_lockb_skip_diagnostics(root);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "expected exactly one skip diagnostic: {diagnostics:?}"
+        );
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.path, root.join(ROOT_PACKAGE_JSON));
+        assert!(
+            diagnostic
+                .message
+                .contains("bun install --save-text-lockfile"),
+            "message carries the text-lockfile hint: {}",
+            diagnostic.message
+        );
+
+        // A second analysis on the same root (watch mode, combined mode) must
+        // not stack a duplicate entry.
+        let _ = run_unused_override_detector(&config);
+        assert_eq!(
+            bun_lockb_skip_diagnostics(root).len(),
+            1,
+            "the registry dedupes on kind + path"
+        );
+    }
+
+    #[test]
+    fn bun_lockb_only_without_overrides_records_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_bun_manifest(root, None);
+        std::fs::write(root.join(BUN_LOCKB_FILE), BUN_LOCKB_PLACEHOLDER).expect("write bun.lockb");
+        let config = resolve_config(root);
+
+        assert!(
+            run_unused_override_detector(&config).is_none(),
+            "no override entries means no override state at all"
+        );
+        assert!(
+            bun_lockb_skip_diagnostics(root).is_empty(),
+            "nothing was skipped, so nothing is announced"
+        );
+    }
+
+    #[test]
+    fn bun_lockb_next_to_text_bun_lock_resolves_and_records_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_bun_manifest(root, Some(r#"{ "ws": "^8.21.0", "left-pad": "^1.3.0" }"#));
+        std::fs::write(root.join(BUN_LOCKB_FILE), BUN_LOCKB_PLACEHOLDER).expect("write bun.lockb");
+        std::fs::write(root.join(BUN_LOCK_FILE), BUN_LOCK_REAL_SHAPE).expect("write bun.lock");
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config).expect("overrides are declared");
+        let flagged: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.target_package.as_str())
+            .collect();
+        assert_eq!(
+            flagged,
+            vec!["left-pad"],
+            "bun.lock resolves ws transitively; left-pad stays unresolved"
+        );
+        assert!(
+            bun_lockb_skip_diagnostics(root).is_empty(),
+            "a parseable bun.lock means resolution ran, so no skip diagnostic"
+        );
+    }
+
+    #[test]
+    fn no_lockfile_keeps_declaration_only_analysis_without_diagnostic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_bun_manifest(root, Some(r#"{ "ws": "^8.21.0" }"#));
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config).expect("overrides are declared");
+        let flagged: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.target_package.as_str())
+            .collect();
+        assert_eq!(
+            flagged,
+            vec!["ws"],
+            "without any lockfile the declaration-only fallback still reports"
+        );
+        assert!(
+            bun_lockb_skip_diagnostics(root).is_empty(),
+            "the diagnostic is specific to bun.lockb, not to a missing lockfile"
+        );
     }
 }

@@ -305,6 +305,8 @@ mod issue_195_non_source_entry_points;
 mod issue_2019_cli_flag_convention_table;
 #[path = "integration_test/issue_2069_npm_overrides.rs"]
 mod issue_2069_npm_overrides;
+#[path = "integration_test/issue_2358_bun_lockb_diagnostic.rs"]
+mod issue_2358_bun_lockb_diagnostic;
 #[path = "integration_test/issue_317_namespace_barrel_ignore_exports.rs"]
 mod issue_317_namespace_barrel_ignore_exports;
 #[path = "integration_test/issue_329_pnpm_catalog.rs"]

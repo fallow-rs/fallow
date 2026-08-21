@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A bun.lockb-only repo that declares overrides now explains why no
+  unused-override findings are reported**
+  ([#2358](https://github.com/fallow-rs/fallow/issues/2358)). Since the
+  bun.lock support the `unused-dependency-overrides` check skips silently
+  when the only lockfile next to the root `package.json` is bun's legacy
+  binary `bun.lockb`, because resolution ground truth is unreadable and
+  declaration-only analysis would flag every transitive-only pin. The skip
+  now records a `bun-lockb-override-resolution-skipped` workspace diagnostic
+  anchored at the root `package.json` (in the `dead-code` / `check`
+  `workspace_diagnostics[]` JSON plus one deduplicated stderr warning) with
+  the hint to run `bun install --save-text-lockfile` (bun 1.2 or newer) so a
+  text `bun.lock` exists. Manifests without overrides, repos with a parseable
+  lockfile, and repos without any lockfile are unaffected. The bare combined
+  `fallow` JSON envelope does not yet carry analysis-stage diagnostics (the
+  stderr warning still appears there). The diagnostic kind is additive on the
+  `workspace_diagnostics[].kind` union; consumers that exhaustively match on
+  `kind` should treat unknown kinds as informational.
+
 - **The VS Code extension now publishes platform-specific packages for macOS,
   Linux, and Windows.** Each targeted VSIX carries only its matching semantic
   backend, reducing normal extension downloads by roughly 82 to 84 percent.

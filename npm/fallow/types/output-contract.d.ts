@@ -441,6 +441,8 @@ kind: "skipped-minified-file"
  */
 error: string
 kind: "source-read-failure"
+} | {
+kind: "bun-lockb-override-resolution-skipped"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
