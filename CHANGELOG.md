@@ -21,6 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jobs, while a credential-free gate downloads and validates the exact
   universal and platform-specific payloads from both registries.
 
+### Fixed
+
+- **`fallow audit` now scores the base attribution pass with the same Istanbul
+  coverage map as the head pass.** The base worktree pass previously matched no
+  coverage entry (the map records head-checkout paths), silently fell back to
+  the reachability estimate, and flipped unchanged high-CRAP functions to
+  `introduced` (#2347). The rebase applies to `--coverage`, `FALLOW_COVERAGE`,
+  and auto-detected `coverage/coverage-final.json` maps; base functions shifted
+  by unrelated edits still match their coverage entry when the function name is
+  unambiguous in its file. Attribution can shift after upgrading: both sides
+  now score from the head-generated map, so complexity findings in files the
+  map reports as untested attribute as inherited once the base function also
+  exceeded the threshold, and coverage regressions surface through
+  `rules.coverage-gaps` and health trends rather than `introduced` complexity
+  findings.
+
 ## [3.17.0] - 2026-08-16
 
 ### Added
