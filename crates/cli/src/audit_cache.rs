@@ -129,11 +129,38 @@ pub(super) fn audit_base_snapshot_cache_file(
 
 pub(super) fn ensure_audit_base_snapshot_cache_dir(dir: &Path) -> Result<(), std::io::Error> {
     std::fs::create_dir_all(dir)?;
+    sweep_stale_snapshot_cache_versions(dir);
     let gitignore = dir.join(".gitignore");
     if std::fs::read_to_string(&gitignore).ok().as_deref() != Some("*\n") {
         std::fs::write(gitignore, "*\n")?;
     }
     Ok(())
+}
+
+/// Best-effort removal of lower-versioned `audit-base-v*` sibling directories.
+/// A cache version bump would otherwise strand every previous payload
+/// permanently: the age-based sweep governed by `audit.cacheMaxAgeDays`
+/// targets the reusable worktrees, not stale snapshot cache versions.
+fn sweep_stale_snapshot_cache_versions(current_dir: &Path) {
+    let Some(parent) = current_dir.parent() else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(version) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix("audit-base-v"))
+            .and_then(|v| v.parse::<u8>().ok())
+        else {
+            continue;
+        };
+        if version < AUDIT_BASE_SNAPSHOT_CACHE_VERSION {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 pub(super) fn load_cached_base_snapshot(
