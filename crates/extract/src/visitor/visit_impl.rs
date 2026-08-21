@@ -3162,6 +3162,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // non-JSX files (perf gate). The walk continues into children so nested
         // renders and host-element nesting depth are still visited.
         self.react_record_jsx_element(element);
+        // A member-expression tag (`<SC.UsedStyle />`) is the JSX spelling of
+        // `SC.UsedStyle`, so it must feed the same member-access stream that
+        // namespace-import narrowing consumes (issue #2348). Opening element
+        // only, so a paired closing tag does not double-record.
+        if let JSXElementName::MemberExpression(member) = &element.opening_element.name {
+            self.record_jsx_member_tag_accesses(member);
+        }
         walk::walk_jsx_element(self, element);
     }
 }

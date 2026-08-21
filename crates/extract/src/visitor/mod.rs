@@ -4,8 +4,8 @@ mod react;
 mod visit_impl;
 
 use oxc_ast::ast::{
-    Argument, BindingPattern, CallExpression, Expression, ImportExpression, ObjectPattern,
-    ObjectProperty, ObjectPropertyKind, Statement,
+    Argument, BindingPattern, CallExpression, Expression, ImportExpression, JSXMemberExpression,
+    JSXMemberExpressionObject, ObjectPattern, ObjectProperty, ObjectPropertyKind, Statement,
 };
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1035,6 +1035,30 @@ impl ModuleInfoExtractor {
                 class.clone(),
                 member.to_string(),
             ));
+        }
+    }
+
+    /// Record member accesses for a JSX member-expression tag (`<SC.UsedStyle />`,
+    /// `<A.B.C />`), mirroring the plain-expression walk of `A.B.C`: one access
+    /// per nesting level (`{A.B, C}` and `{A, B}`), so namespace-import
+    /// narrowing sees the same stream either way (issue #2348). `this` receivers
+    /// get the same class-scope qualifier as `visit_static_member_expression`.
+    pub(crate) fn record_jsx_member_tag_accesses(&mut self, member: &JSXMemberExpression<'_>) {
+        let mut current = member;
+        loop {
+            if let Some(object_name) = jsx_member_object_name(&current.object) {
+                let object = self.qualify_this_scope(&object_name);
+                self.record_walk_order_member_access(&object, current.property.name.as_str());
+                self.member_accesses.push(MemberAccess {
+                    object,
+                    member: current.property.name.to_string(),
+                });
+            }
+            match &current.object {
+                JSXMemberExpressionObject::MemberExpression(inner) => current = inner,
+                JSXMemberExpressionObject::IdentifierReference(_)
+                | JSXMemberExpressionObject::ThisExpression(_) => break,
+            }
         }
     }
 
@@ -2900,6 +2924,21 @@ fn strip_this_scope_qualifier(spelling: &mut String) {
         *spelling = rebuilt;
     } else {
         *spelling = "this".to_string();
+    }
+}
+
+/// Flatten a JSX member-expression object to its dotted receiver spelling
+/// (`SC`, `A.B`, `this.helpers`), the JSX counterpart of
+/// `static_member_object_name`.
+fn jsx_member_object_name(object: &JSXMemberExpressionObject<'_>) -> Option<String> {
+    match object {
+        JSXMemberExpressionObject::IdentifierReference(ident) => Some(ident.name.to_string()),
+        JSXMemberExpressionObject::ThisExpression(_) => Some("this".to_string()),
+        JSXMemberExpressionObject::MemberExpression(inner) => Some(format!(
+            "{}.{}",
+            jsx_member_object_name(&inner.object)?,
+            inner.property.name
+        )),
     }
 }
 

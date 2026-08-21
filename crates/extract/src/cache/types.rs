@@ -934,7 +934,12 @@ use crate::MemberKind;
 /// its own `<snippet:NAME>` complexity unit and rebases the body's nesting to
 /// zero, changing the serialized `module.complexity` for snippet-using files.
 /// Warm 270 caches would keep the folded single-unit shape.
-pub(super) const CACHE_VERSION: u32 = 271;
+///
+/// Bumped to 272 for issue #2348: JSX member-expression tags
+/// (`<SC.UsedStyle />`) now record member accesses like their plain-expression
+/// spelling. Warm 271 caches lack those accesses, so namespace-imported exports
+/// rendered only through JSX would stay reported as unused.
+pub(super) const CACHE_VERSION: u32 = 272;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

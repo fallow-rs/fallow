@@ -1,0 +1,4 @@
+{
+  "name": "issue-2348-jsx-namespace-member-fixture",
+  "main": "src/component.tsx"
+}

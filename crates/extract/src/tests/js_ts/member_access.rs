@@ -1,6 +1,6 @@
 use fallow_types::extract::ImportedName;
 
-use crate::tests::parse_ts as parse_source;
+use crate::tests::{parse_ts as parse_source, parse_tsx};
 
 #[test]
 fn detects_object_values_whole_use() {
@@ -124,6 +124,72 @@ fn namespace_destructuring_from_require() {
     assert!(
         has_y,
         "Should capture destructured 'y' from require namespace"
+    );
+}
+
+/// Regression test for issue #2348: rendering `<SC.UsedStyle />` through a
+/// namespace import must record the same member access as `SC.UsedStyle`
+/// in plain expression position.
+#[test]
+fn jsx_namespace_member_tag_generates_member_access() {
+    let info = parse_tsx(
+        "import * as SC from './style';\nexport const RenderedStyle = () => <SC.UsedStyle />;",
+    );
+    assert_eq!(info.imports.len(), 1);
+    assert_eq!(info.imports[0].imported_name, ImportedName::Namespace);
+    let has_access = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "SC" && a.member == "UsedStyle");
+    assert!(
+        has_access,
+        "<SC.UsedStyle /> should record SC.UsedStyle as a member access; got {:?}",
+        info.member_accesses
+    );
+}
+
+/// Issue #2348: a nested member tag `<A.B.C />` mirrors the plain-expression
+/// walk of `A.B.C`, recording both the innermost `A.B` access (namespace
+/// crediting) and the full-path `A.B.C` access.
+#[test]
+fn jsx_nested_namespace_member_tag_generates_member_accesses() {
+    let info = parse_tsx("import * as A from './widgets';\nexport const R = () => <A.B.C />;");
+    let has_inner = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "A" && a.member == "B");
+    let has_outer = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "A.B" && a.member == "C");
+    assert!(
+        has_inner,
+        "<A.B.C /> should record A.B for namespace crediting; got {:?}",
+        info.member_accesses
+    );
+    assert!(
+        has_outer,
+        "<A.B.C /> should record the full A.B.C path; got {:?}",
+        info.member_accesses
+    );
+}
+
+/// Issue #2348: the closing tag of a non-self-closing member-expression
+/// element must not double-record the access.
+#[test]
+fn jsx_namespace_member_tag_records_single_access_for_paired_tags() {
+    let info = parse_tsx(
+        "import * as SC from './style';\nexport const R = () => <SC.Layout>text</SC.Layout>;",
+    );
+    let count = info
+        .member_accesses
+        .iter()
+        .filter(|a| a.object == "SC" && a.member == "Layout")
+        .count();
+    assert_eq!(
+        count, 1,
+        "paired tags should record exactly one SC.Layout access; got {:?}",
+        info.member_accesses
     );
 }
 

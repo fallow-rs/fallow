@@ -249,6 +249,8 @@ mod issue_2006_cli_flag_value_dependency;
 mod issue_2213_jest_mock_phantom_package;
 #[path = "integration_test/issue_2225_root_manual_mocks.rs"]
 mod issue_2225_root_manual_mocks;
+#[path = "integration_test/issue_2348_jsx_namespace_member.rs"]
+mod issue_2348_jsx_namespace_member;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
