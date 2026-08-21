@@ -697,7 +697,7 @@
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml or package-lock.json. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
@@ -1187,7 +1187,7 @@
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml or package-lock.json. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
@@ -6406,7 +6406,7 @@
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml or package-lock.json. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",

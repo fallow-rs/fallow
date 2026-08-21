@@ -5154,6 +5154,106 @@ fn export_declare_namespace() {
 }
 
 #[test]
+fn module_augmentation_interface_is_not_a_file_export() {
+    // Issue #2349: `export interface Theme` inside `declare module './library'`
+    // augments `./library`; it is not an export of the containing file and must
+    // not surface as an unused exported type.
+    let info = parse(
+        "type AppTheme = { brand: string };\n\
+         declare module './library' {\n\
+           export interface Theme extends AppTheme {}\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(
+        !info
+            .exports
+            .iter()
+            .any(|e| matches!(&e.name, ExportName::Named(n) if n == "Theme")),
+        "augmentation-scoped interface must not be recorded as a file export: {:?}",
+        info.exports
+    );
+}
+
+#[test]
+fn ambient_module_declaration_exports_are_not_file_exports() {
+    // Same rule for package ambient declarations: `declare module 'pkg'` bodies
+    // describe `pkg`, not the declaring file.
+    let info = parse(
+        "declare module 'some-pkg' {\n\
+           export function helper(): void;\n\
+           export interface Options { flag: boolean }\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(
+        info.exports.is_empty(),
+        "ambient module member exports must not be recorded as file exports: {:?}",
+        info.exports
+    );
+}
+
+#[test]
+fn ambient_module_named_re_export_keeps_reference_without_file_export() {
+    let info = parse(
+        "declare module 'pkg' {\n\
+           export { helper, other as renamed } from './impl';\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(
+        info.exports.is_empty() && info.re_exports.is_empty(),
+        "ambient-module re-exports must not surface on the file: exports {:?}, re_exports {:?}",
+        info.exports,
+        info.re_exports
+    );
+    // One Named type-space import per specifier: the target file stays
+    // reachable and each re-exported symbol keeps its export credit.
+    let entries: Vec<_> = info
+        .imports
+        .iter()
+        .filter(|i| i.source == "./impl")
+        .collect();
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected one import per re-export specifier: {:?}",
+        info.imports
+    );
+    for entry in &entries {
+        assert!(entry.is_type_only);
+    }
+    assert!(
+        matches!(&entries[0].imported_name, ImportedName::Named(n) if n == "helper"),
+        "first specifier must credit `helper`: {:?}",
+        entries[0].imported_name
+    );
+    assert!(
+        matches!(&entries[1].imported_name, ImportedName::Named(n) if n == "other"),
+        "aliased specifier must credit the source-side name `other`: {:?}",
+        entries[1].imported_name
+    );
+}
+
+#[test]
+fn ambient_module_bare_re_export_keeps_side_effect_reference() {
+    let info = parse(
+        "declare module 'pkg' {\n\
+           export {} from './impl';\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(info.exports.is_empty() && info.re_exports.is_empty());
+    let entry = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./impl")
+        .expect("bare re-export source inside an ambient module must stay referenced");
+    assert!(entry.is_type_only);
+    assert!(matches!(entry.imported_name, ImportedName::SideEffect));
+}
+
+#[test]
 fn re_export_named() {
     let info = parse("export { foo } from './bar';");
     assert_eq!(info.re_exports.len(), 1);

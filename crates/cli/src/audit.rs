@@ -320,8 +320,14 @@ fn compute_base_snapshot(
         .config_path
         .clone()
         .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
-    let base_opts =
-        build_base_audit_options(opts, &base_root, &current_config_path, &base_cache_dir);
+    let base_coverage = base_worktree_coverage_inputs(opts);
+    let base_opts = build_base_audit_options(
+        opts,
+        &base_root,
+        &current_config_path,
+        &base_cache_dir,
+        &base_coverage,
+    );
 
     let base_changed_files = remap_focus_files(base_focus_files, opts.root, &base_root);
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
@@ -361,7 +367,7 @@ fn compute_base_snapshot(
     } else {
         None
     };
-    let health = run_audit_health(&base_opts, None, shared_parse)?;
+    let health = run_audit_health(&base_opts, None, shared_parse, true)?;
     if let Some(ref mut check) = check {
         check.shared_parse = None;
     }
@@ -499,6 +505,44 @@ fn public_api_keys_from_check(check: Option<&CheckResult>, root: &Path) -> FxHas
     review_deltas::public_export_keys_for(graph, &check.config, &check.workspaces, root)
 }
 
+/// Istanbul coverage inputs for the base-worktree analysis pass.
+struct BaseCoverageInputs {
+    coverage: Option<PathBuf>,
+    coverage_root: Option<PathBuf>,
+}
+
+/// Coverage inputs for the base-worktree analysis pass.
+///
+/// The Istanbul map records HEAD-checkout file paths, while the base pass
+/// analyzes a temporary worktree; without a rebase no coverage entry ever
+/// matches a base file and base CRAP silently degrades to the reachability
+/// estimate, splitting base/head attribution for unchanged functions (#2347).
+/// Without `--coverage`, the head pass auto-detects
+/// `coverage/coverage-final.json` against the head root, which the base
+/// worktree never materializes; the same auto-detection runs here against the
+/// head root so both passes score from the same map. When no
+/// `--coverage-root` was given, the HEAD project root becomes the strip
+/// prefix so `load_istanbul_coverage` remaps every entry onto the base
+/// worktree (the base pass's project root). An explicit `--coverage-root` is
+/// forwarded unchanged: the base pass already rebases it onto its own root.
+fn base_worktree_coverage_inputs(opts: &AuditOptions<'_>) -> BaseCoverageInputs {
+    let coverage = opts
+        .coverage
+        .map(Path::to_path_buf)
+        .or_else(|| fallow_engine::health::scoring::auto_detect_coverage(opts.root));
+    let coverage_root = match (&coverage, opts.coverage_root) {
+        (_, Some(root)) => Some(root.to_path_buf()),
+        (Some(_), None) => {
+            Some(dunce::canonicalize(opts.root).unwrap_or_else(|_| opts.root.to_path_buf()))
+        }
+        (None, None) => None,
+    };
+    BaseCoverageInputs {
+        coverage,
+        coverage_root,
+    }
+}
+
 /// Build the `AuditOptions` for the isolated base-worktree analysis pass.
 #[expect(
     clippy::ref_option,
@@ -509,6 +553,7 @@ fn build_base_audit_options<'a>(
     base_root: &'a Path,
     current_config_path: &'a Option<PathBuf>,
     base_cache_dir: &'a Path,
+    base_coverage: &'a BaseCoverageInputs,
 ) -> AuditOptions<'a> {
     AuditOptions {
         root: base_root,
@@ -536,8 +581,8 @@ fn build_base_audit_options<'a>(
         dupes_baseline: None,
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
         max_crap: opts.max_crap,
-        coverage: opts.coverage,
-        coverage_root: opts.coverage_root,
+        coverage: base_coverage.coverage.as_deref(),
+        coverage_root: base_coverage.coverage_root.as_deref(),
         gate: AuditGate::All,
         include_entry_exports: opts.include_entry_exports,
         // Base styling keys keep opt-in `rules.css-* = error` gated on
@@ -1126,7 +1171,7 @@ fn run_audit_head_analyses(
     } else {
         None
     };
-    let health = run_audit_health(opts, changed_since, shared_parse)?;
+    let health = run_audit_health(opts, changed_since, shared_parse, false)?;
     Ok(HeadAnalyses {
         check,
         dupes,
@@ -2780,10 +2825,14 @@ fn build_audit_dupes_options<'a>(
 }
 
 /// Run complexity analysis for the audit pipeline (findings only, no scores/hotspots/targets).
+///
+/// `coverage_relocated` marks the base-worktree pass, whose Istanbul map was
+/// recorded against the HEAD checkout; see `base_worktree_coverage_root`.
 fn run_audit_health<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
     shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
+    coverage_relocated: bool,
 ) -> Result<Option<HealthResult>, ExitCode> {
     let runtime_coverage = match opts.runtime_coverage {
         Some(path) => Some(crate::health::coverage::prepare_options(
@@ -2796,7 +2845,8 @@ fn run_audit_health<'a>(
         None => None,
     };
 
-    let health_opts = build_audit_health_options(opts, changed_since, runtime_coverage);
+    let health_opts =
+        build_audit_health_options(opts, changed_since, runtime_coverage, coverage_relocated);
     let health_run = if let Some(shared) = shared_parse {
         crate::health::execute_health_with_shared_parse(&health_opts, shared)
     } else {
@@ -2814,6 +2864,7 @@ fn build_audit_health_options<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
     runtime_coverage: Option<fallow_engine::health::RuntimeCoverageOptions>,
+    coverage_relocated: bool,
 ) -> HealthOptions<'a> {
     HealthOptions {
         root: opts.root,
@@ -2870,6 +2921,7 @@ fn build_audit_health_options<'a>(
         coverage_inputs: fallow_engine::health::HealthCoverageInputs {
             coverage: opts.coverage,
             coverage_root: opts.coverage_root,
+            coverage_relocated,
         },
         performance: opts.performance,
         runtime_coverage,

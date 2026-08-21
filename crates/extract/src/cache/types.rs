@@ -935,11 +935,16 @@ use crate::MemberKind;
 /// zero, changing the serialized `module.complexity` for snippet-using files.
 /// Warm 270 caches would keep the folded single-unit shape.
 ///
-/// Bumped to 272 for issue #2348: JSX member-expression tags
+/// Bumped to 272 for issue #2349: exports declared inside
+/// `declare module '<specifier>'` augmentation and ambient-module bodies are no
+/// longer recorded as file-level exports. Warm 271 caches would keep replaying
+/// augmentation-scoped declarations as unused exported types.
+///
+/// Bumped to 273 for issue #2348: JSX member-expression tags
 /// (`<SC.UsedStyle />`) now record member accesses like their plain-expression
-/// spelling. Warm 271 caches lack those accesses, so namespace-imported exports
+/// spelling. Warm 272 caches lack those accesses, so namespace-imported exports
 /// rendered only through JSX would stay reported as unused.
-pub(super) const CACHE_VERSION: u32 = 272;
+pub(super) const CACHE_VERSION: u32 = 273;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

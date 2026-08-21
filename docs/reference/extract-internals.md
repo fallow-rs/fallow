@@ -37,6 +37,12 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   cached fact or its meaning changes. Do not document the current numeric value
   as a durable contract.
 - Keep cache serialization deterministic and backwards failure safe.
+- A string-literal-named `TSModuleDeclaration` body (module augmentation or
+  ambient module declaration) contributes no file-level export surface. Its
+  body is still walked for `typeof import()` and type-space references, and a
+  named re-export inside it becomes one type-space import per specifier so the
+  target keeps its export credit. Identifier-named namespaces and
+  `declare global` keep their existing behavior.
 
 ## Verification
 

@@ -38,13 +38,21 @@ fn load_health_coverage(
     config: &ResolvedConfig,
 ) -> Result<Option<scoring::IstanbulCoverage>, HealthError> {
     if let Some(coverage_path) = opts.coverage_inputs.coverage {
-        return scoring::load_istanbul_coverage(
+        return match scoring::load_istanbul_coverage(
             coverage_path,
             opts.coverage_inputs.coverage_root,
             Some(&config.root),
-        )
-        .map(Some)
-        .map_err(|e| HealthError::message(format!("coverage: {e}"), 2));
+            opts.coverage_inputs.coverage_relocated,
+        ) {
+            Ok(coverage) => Ok(Some(coverage)),
+            // The relocated (audit base-worktree) pass may have been handed a
+            // file the head pass only auto-detected and loads leniently below;
+            // failing hard here would turn lenient auto-detection into an
+            // audit error. Explicit user coverage still fails loudly: the
+            // head pass loads the same file strictly.
+            Err(_) if opts.coverage_inputs.coverage_relocated => Ok(None),
+            Err(e) => Err(HealthError::message(format!("coverage: {e}"), 2)),
+        };
     }
 
     let Some(auto_path) = scoring::auto_detect_coverage(&config.root) else {
@@ -60,6 +68,7 @@ fn load_health_coverage(
         &auto_path,
         opts.coverage_inputs.coverage_root,
         Some(&config.root),
+        opts.coverage_inputs.coverage_relocated,
     )
     .ok())
 }

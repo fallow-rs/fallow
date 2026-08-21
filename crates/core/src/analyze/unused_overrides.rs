@@ -10,16 +10,21 @@
 //! npm supports the same mechanism through a top-level `overrides` object in
 //! the root `package.json`, with nesting instead of `parent>child` keys. The
 //! npm parser flattens nested objects into the shared entry shape, so all
-//! three sources run through one analysis path. yarn `resolutions` and bun
-//! overrides are out of scope.
+//! three sources run through one analysis path. bun declares overrides through
+//! the same top-level `overrides` key, so bun repos are analyzed via the npm
+//! parser and resolved against `bun.lock`. yarn `resolutions` is out of scope.
 //!
 //! Two findings are emitted:
 //!
 //! 1. **`unused-dependency-overrides`**: an override whose target package is
 //!    absent from both workspace `package.json` dep sections and the
-//!    lockfile (`pnpm-lock.yaml` or `package-lock.json`). Overrides targeting
-//!    resolved transitive packages are treated as used because CVE-fix pins
-//!    often exist only in the lockfile.
+//!    lockfile (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`,
+//!    or `bun.lock`). Overrides targeting resolved transitive packages are
+//!    treated as used because CVE-fix pins often exist only in the lockfile.
+//!    When the only lockfile is bun's legacy binary `bun.lockb`, resolution
+//!    ground truth is unreadable, so no unused-override findings are emitted
+//!    at all rather than degrading to declaration-only analysis that would
+//!    flag every transitive-only pin.
 //!
 //! 2. **`misconfigured-dependency-overrides`**: an override whose key cannot
 //!    be parsed or whose value is empty. `pnpm install` refuses to honor
@@ -51,12 +56,22 @@ use rustc_hash::FxHashSet;
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 const PNPM_LOCK_FILE: &str = "pnpm-lock.yaml";
 const NPM_LOCK_FILE: &str = "package-lock.json";
+const NPM_SHRINKWRAP_FILE: &str = "npm-shrinkwrap.json";
+const BUN_LOCK_FILE: &str = "bun.lock";
+const BUN_LOCKB_FILE: &str = "bun.lockb";
+const YARN_LOCK_FILE: &str = "yarn.lock";
 const NODE_MODULES_SEGMENT: &str = "node_modules/";
 const ROOT_PACKAGE_JSON: &str = "package.json";
 const SOURCE_LABEL_YAML: &str = "pnpm-workspace.yaml";
 const SOURCE_LABEL_JSON: &str = "package.json";
-const HINT_MAY_BE_TRANSITIVE: &str =
+const HINT_MAY_BE_TRANSITIVE_PNPM: &str =
     "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth";
+const HINT_MAY_BE_TRANSITIVE_BUN: &str =
+    "may target a transitive dependency; bun install --frozen-lockfile is the ground truth";
+const HINT_MAY_BE_TRANSITIVE_NPM: &str =
+    "may target a transitive dependency; npm ci is the ground truth";
+const HINT_OVERRIDES_IGNORED_BY_YARN: &str =
+    "yarn does not apply `overrides`; declare the pin under `resolutions` instead";
 const LOCKFILE_DEPENDENCY_SECTIONS: &[&str] = &[
     "dependencies",
     "optionalDependencies",
@@ -82,10 +97,19 @@ pub struct PnpmOverrideState {
     /// `package.json` (root + members).
     declared_packages: FxHashSet<String>,
     /// Every package name found in `pnpm-lock.yaml` package/snapshot keys,
-    /// `package-lock.json` package paths, or dependency sections of either
-    /// lockfile. Includes transitive dependencies resolved by the package
-    /// manager.
+    /// `package-lock.json` / `npm-shrinkwrap.json` package paths, `bun.lock`
+    /// package specifiers, or dependency sections of any of those lockfiles.
+    /// Includes transitive dependencies resolved by the package manager.
     lockfile_packages: FxHashSet<String>,
+    /// True when the only resolution source is bun's binary `bun.lockb`,
+    /// with no parseable text lockfile alongside it. Unused-override analysis
+    /// is skipped in that case because transitive resolution cannot be
+    /// established.
+    lockfile_resolution_unavailable: bool,
+    /// Package-manager-appropriate hint attached to every unused-override
+    /// finding, chosen from the root `package.json` `packageManager` field
+    /// first and the lockfiles present at the root as fallback.
+    transitive_hint: &'static str,
 }
 
 /// Read both override sources and walk workspace `package.json` files to build
@@ -130,14 +154,16 @@ pub fn gather_pnpm_override_state(
     }
 
     let declared_packages = collect_declared_packages(config, workspaces);
-    let lockfile_packages = collect_lockfile_packages(config);
+    let lockfile_resolution = collect_lockfile_packages(config, root_pkg_source.as_deref());
 
     Some(PnpmOverrideState {
         workspace_yaml_data,
         package_json_data,
         npm_package_json_data,
         declared_packages,
-        lockfile_packages,
+        lockfile_packages: lockfile_resolution.packages,
+        lockfile_resolution_unavailable: lockfile_resolution.resolution_unavailable,
+        transitive_hint: lockfile_resolution.transitive_hint,
     })
 }
 
@@ -179,21 +205,148 @@ fn collect_declared_packages(
     set
 }
 
-/// Parse `pnpm-lock.yaml` and `package-lock.json` and collect package names
-/// from resolved package keys plus dependency maps. Malformed or missing
-/// lockfiles degrade to an empty set, preserving the package.json-only
-/// fallback for projects without a lockfile.
-fn collect_lockfile_packages(config: &ResolvedConfig) -> FxHashSet<String> {
+/// Resolved-package set gathered from every recognized lockfile at the root,
+/// plus the derived analysis knobs that depend on which lockfiles exist.
+struct LockfileResolution {
+    packages: FxHashSet<String>,
+    resolution_unavailable: bool,
+    transitive_hint: &'static str,
+}
+
+/// Parse `pnpm-lock.yaml`, `package-lock.json` / `npm-shrinkwrap.json`, and
+/// `bun.lock` and collect package names from resolved package keys plus
+/// dependency maps. Malformed or missing lockfiles degrade to an empty set,
+/// preserving the package.json-only fallback for projects without a lockfile.
+/// The one exception is bun's binary `bun.lockb` without any parseable text
+/// lockfile alongside it: resolution exists but is unreadable, so
+/// `resolution_unavailable` is set and callers skip the unused analysis
+/// instead of flagging every transitive-only override.
+fn collect_lockfile_packages(
+    config: &ResolvedConfig,
+    root_pkg_source: Option<&str>,
+) -> LockfileResolution {
     let mut packages = FxHashSet::default();
 
+    let mut has_pnpm_lock = false;
     if let Ok(raw_source) = std::fs::read_to_string(config.root.join(PNPM_LOCK_FILE)) {
+        has_pnpm_lock = true;
         packages.extend(collect_pnpm_lock_packages(&raw_source));
     }
-    if let Ok(raw_source) = std::fs::read_to_string(config.root.join(NPM_LOCK_FILE)) {
-        packages.extend(collect_npm_lock_packages(&raw_source));
+    // npm renames package-lock.json to npm-shrinkwrap.json for publishable
+    // packages; the format is identical and a shrinkwrap repo usually carries
+    // no package-lock.json at all.
+    let mut has_npm_lock = false;
+    for npm_lock_file in [NPM_LOCK_FILE, NPM_SHRINKWRAP_FILE] {
+        if let Ok(raw_source) = std::fs::read_to_string(config.root.join(npm_lock_file)) {
+            has_npm_lock = true;
+            packages.extend(collect_npm_lock_packages(&raw_source));
+        }
     }
 
-    packages
+    let mut has_bun_lock = false;
+    let mut bun_lock_parsed = false;
+    if let Ok(raw_source) = std::fs::read_to_string(config.root.join(BUN_LOCK_FILE)) {
+        has_bun_lock = true;
+        if let Some(bun_packages) = collect_bun_lock_packages(&raw_source) {
+            packages.extend(bun_packages);
+            bun_lock_parsed = true;
+        }
+    }
+    let has_bun_lockb = config.root.join(BUN_LOCKB_FILE).exists();
+    let has_yarn_lock = config.root.join(YARN_LOCK_FILE).exists();
+
+    let transitive_hint = match declared_package_manager(root_pkg_source) {
+        Some(DeclaredPackageManager::Bun) => HINT_MAY_BE_TRANSITIVE_BUN,
+        Some(DeclaredPackageManager::Npm) => HINT_MAY_BE_TRANSITIVE_NPM,
+        Some(DeclaredPackageManager::Yarn) => HINT_OVERRIDES_IGNORED_BY_YARN,
+        None if has_pnpm_lock => HINT_MAY_BE_TRANSITIVE_PNPM,
+        None if has_bun_lock || has_bun_lockb => HINT_MAY_BE_TRANSITIVE_BUN,
+        None if has_npm_lock => HINT_MAY_BE_TRANSITIVE_NPM,
+        None if has_yarn_lock => HINT_OVERRIDES_IGNORED_BY_YARN,
+        Some(DeclaredPackageManager::Pnpm) | None => HINT_MAY_BE_TRANSITIVE_PNPM,
+    };
+
+    LockfileResolution {
+        packages,
+        // A parseable pnpm or npm lockfile is complete resolution ground
+        // truth on its own; a stale leftover bun.lockb must not silently
+        // disable the analysis when one is present.
+        resolution_unavailable: has_bun_lockb
+            && !bun_lock_parsed
+            && !has_pnpm_lock
+            && !has_npm_lock,
+        transitive_hint,
+    }
+}
+
+/// Package managers the corepack `packageManager` field can name.
+#[derive(Clone, Copy)]
+enum DeclaredPackageManager {
+    Npm,
+    Pnpm,
+    Yarn,
+    Bun,
+}
+
+/// Read the corepack `packageManager` field (`"bun@1.3.2"` names bun) from
+/// the root `package.json` source. Mirrors the packageManager-first probes in
+/// the CLI package-manager detectors so the transitive hint cannot name a
+/// package manager the repository does not use, for example a bun repo whose
+/// lockfile is not committed yet.
+fn declared_package_manager(root_pkg_source: Option<&str>) -> Option<DeclaredPackageManager> {
+    let value: serde_json::Value = serde_json::from_str(root_pkg_source?).ok()?;
+    let field = value.get("packageManager")?.as_str()?;
+    let name = field.split('@').next().unwrap_or(field);
+    match name {
+        "npm" => Some(DeclaredPackageManager::Npm),
+        "pnpm" => Some(DeclaredPackageManager::Pnpm),
+        "yarn" => Some(DeclaredPackageManager::Yarn),
+        "bun" => Some(DeclaredPackageManager::Bun),
+        _ => None,
+    }
+}
+
+/// Collect package names from bun's text lockfile (`bun.lock`, bun 1.2+).
+/// The file is JSONC (bun writes trailing commas); every entry in the
+/// `packages` map is keyed by dependency-tree path and holds a tuple whose
+/// first element is the resolved `name@version` specifier. Dependency
+/// sections under `workspaces` and inside package metadata are covered by the
+/// shared dependency-map walk. Returns `None` when the file does not parse,
+/// so callers can distinguish "no resolution data" from an empty project.
+///
+/// Known limitation: the dependency-map walk also credits `peerDependencies`
+/// entries that bun lists under `optionalPeers` without installing them,
+/// matching package-lock.json behavior. The collected set means "resolvable",
+/// not "actually installed", so an override targeting such a peer is
+/// conservatively treated as used (a false negative, never removal advice).
+fn collect_bun_lock_packages(source: &str) -> Option<FxHashSet<String>> {
+    let Ok(value) = fallow_config::jsonc::parse_to_value::<serde_json::Value>(source) else {
+        return None;
+    };
+    // Empty/whitespace input parses as `null`; a valid bun.lock is always an
+    // object, so anything else counts as unparseable.
+    if !value.is_object() {
+        return None;
+    }
+
+    let mut packages = FxHashSet::default();
+    if let Some(mapping) = value.get("packages").and_then(serde_json::Value::as_object) {
+        for entry in mapping.values() {
+            let Some(specifier) = entry
+                .as_array()
+                .and_then(|tuple| tuple.first())
+                .and_then(serde_json::Value::as_str)
+            else {
+                continue;
+            };
+            if let Some(package_name) = package_name_from_lock_key(specifier) {
+                packages.insert(package_name);
+            }
+        }
+    }
+
+    collect_json_dependency_map_names(&value, &mut packages);
+    Some(packages)
 }
 
 /// Collect package names from `package-lock.json`. Lockfile v2/v3 keys the
@@ -324,7 +477,7 @@ fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
 
 /// Emit one `UnusedDependencyOverride` for every parseable override whose
 /// target package (and parent, when present) is not declared in any workspace
-/// `package.json` or resolved in `pnpm-lock.yaml`.
+/// `package.json` or resolved in any recognized lockfile.
 #[must_use]
 #[deprecated(
     since = "2.76.0",
@@ -334,6 +487,10 @@ pub fn find_unused_dependency_overrides(
     state: &PnpmOverrideState,
     config: &ResolvedConfig,
 ) -> Vec<UnusedDependencyOverride> {
+    if state.lockfile_resolution_unavailable {
+        return Vec::new();
+    }
+
     let mut findings = Vec::new();
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
     let json_path = config.root.join(ROOT_PACKAGE_JSON);
@@ -343,6 +500,7 @@ pub fn find_unused_dependency_overrides(
         source_path: &yaml_path,
         declared: &state.declared_packages,
         resolved: &state.lockfile_packages,
+        hint: state.transitive_hint,
         ignore_rules: &config.compiled_ignore_dependency_overrides,
         findings: &mut findings,
     });
@@ -352,6 +510,7 @@ pub fn find_unused_dependency_overrides(
         source_path: &json_path,
         declared: &state.declared_packages,
         resolved: &state.lockfile_packages,
+        hint: state.transitive_hint,
         ignore_rules: &config.compiled_ignore_dependency_overrides,
         findings: &mut findings,
     });
@@ -361,6 +520,7 @@ pub fn find_unused_dependency_overrides(
         source_path: &json_path,
         declared: &state.declared_packages,
         resolved: &state.lockfile_packages,
+        hint: state.transitive_hint,
         ignore_rules: &config.compiled_ignore_dependency_overrides,
         findings: &mut findings,
     });
@@ -373,6 +533,7 @@ struct UnusedOverrideSourceInput<'a> {
     source_path: &'a std::path::Path,
     declared: &'a FxHashSet<String>,
     resolved: &'a FxHashSet<String>,
+    hint: &'static str,
     ignore_rules: &'a [CompiledIgnoreDependencyOverrideRule],
     findings: &'a mut Vec<UnusedDependencyOverride>,
 }
@@ -417,7 +578,7 @@ fn collect_unused_from_source(input: &mut UnusedOverrideSourceInput<'_>) {
             continue;
         }
 
-        let hint = Some(HINT_MAY_BE_TRANSITIVE.to_string());
+        let hint = Some(input.hint.to_string());
 
         input.findings.push(UnusedDependencyOverride {
             raw_key: entry.raw_key.clone(),
@@ -654,5 +815,85 @@ mod tests {
     #[test]
     fn collect_lock_packages_empty_yields_empty() {
         assert!(collect_pnpm_lock_packages("").is_empty());
+    }
+
+    // Trimmed from a real `bun install` (bun 1.3.x) run; keeps bun's trailing
+    // commas so the JSONC dialect is exercised.
+    const BUN_LOCK_REAL_SHAPE: &str = r#"{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "bun-repro",
+      "devDependencies": {
+        "happy-dom": "^20.10.6",
+      },
+    },
+  },
+  "overrides": {
+    "ws": "^8.21.0",
+  },
+  "packages": {
+    "@types/whatwg-mimetype": ["@types/whatwg-mimetype@3.0.2", "", {}, "sha512-c2"],
+    "happy-dom": ["happy-dom@20.11.6", "", { "dependencies": { "@types/whatwg-mimetype": "^3.0.2", "whatwg-mimetype": "^3.0.0", "ws": "^8.21.0" } }, "sha512-Hl"],
+    "whatwg-mimetype": ["whatwg-mimetype@3.0.0", "", {}, "sha512-nt"],
+    "ws": ["ws@8.21.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-20"],
+  }
+}
+"#;
+
+    #[test]
+    fn collect_bun_lock_packages_real_shape() {
+        let packages = collect_bun_lock_packages(BUN_LOCK_REAL_SHAPE).expect("bun.lock parses");
+        for name in [
+            "happy-dom",
+            "ws",
+            "@types/whatwg-mimetype",
+            "whatwg-mimetype",
+        ] {
+            assert!(packages.contains(name), "missing {name}: {packages:?}");
+        }
+        assert!(
+            !packages.contains("bun-repro"),
+            "workspace name is not a resolved package"
+        );
+    }
+
+    #[test]
+    fn collect_bun_lock_packages_override_keys_are_not_credited_as_resolved() {
+        // bun mirrors the `overrides` map into bun.lock; only the resolved
+        // package graph may credit a target, otherwise every override would
+        // trivially count as used.
+        let source = r#"{
+  "lockfileVersion": 1,
+  "workspaces": { "": { "name": "x" } },
+  "overrides": { "left-pad": "^1.3.0" },
+  "packages": {}
+}"#;
+        let packages = collect_bun_lock_packages(source).expect("parses");
+        assert!(!packages.contains("left-pad"), "got {packages:?}");
+    }
+
+    #[test]
+    fn collect_bun_lock_packages_nested_tree_path_uses_specifier_name() {
+        // Conflicting versions are keyed by tree path ("parent/child"); the
+        // resolved name comes from the tuple's first element.
+        let source = r#"{
+  "lockfileVersion": 1,
+  "workspaces": { "": { "name": "x", "dependencies": { "parent-pkg": "^1.0.0" } } },
+  "packages": {
+    "parent-pkg": ["parent-pkg@1.0.0", "", { "dependencies": { "shared-dep": "^1.0.0" } }, "sha512-a"],
+    "parent-pkg/shared-dep": ["shared-dep@1.2.3", "", {}, "sha512-b"],
+  }
+}"#;
+        let packages = collect_bun_lock_packages(source).expect("parses");
+        assert!(packages.contains("shared-dep"), "got {packages:?}");
+        assert!(packages.contains("parent-pkg"), "got {packages:?}");
+    }
+
+    #[test]
+    fn collect_bun_lock_packages_malformed_returns_none() {
+        assert!(collect_bun_lock_packages("not json {{{").is_none());
+        assert!(collect_bun_lock_packages("").is_none());
     }
 }

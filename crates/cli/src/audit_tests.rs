@@ -2635,6 +2635,40 @@ fn audit_base_snapshot_cache_dir_writes_gitignore() {
 }
 
 #[test]
+fn audit_base_snapshot_cache_dir_sweeps_lower_versions() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let cache_root = tmp.path().join(".custom-fallow-cache");
+    let cache_parent = cache_root.join("cache");
+    let stale = cache_parent.join(format!(
+        "audit-base-v{}",
+        AUDIT_BASE_SNAPSHOT_CACHE_VERSION - 1
+    ));
+    fs::create_dir_all(&stale).expect("stale dir should be created");
+    fs::write(stale.join("deadbeef.bin"), b"stale").expect("stale payload should write");
+    let newer = cache_parent.join(format!(
+        "audit-base-v{}",
+        AUDIT_BASE_SNAPSHOT_CACHE_VERSION + 1
+    ));
+    fs::create_dir_all(&newer).expect("newer dir should be created");
+    let unrelated = cache_parent.join("resolve");
+    fs::create_dir_all(&unrelated).expect("unrelated dir should be created");
+
+    let cache_dir = audit_base_snapshot_cache_dir(&cache_root);
+    ensure_audit_base_snapshot_cache_dir(&cache_dir).expect("cache dir should be created");
+
+    assert!(
+        !stale.exists(),
+        "lower-versioned snapshot cache directories should be swept"
+    );
+    assert!(
+        newer.exists(),
+        "an older binary must not delete a newer version's cache"
+    );
+    assert!(unrelated.exists(), "unrelated cache dirs must be untouched");
+    assert!(cache_dir.exists());
+}
+
+#[test]
 fn audit_base_snapshot_cache_roundtrips_from_disk() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let config_path = None;

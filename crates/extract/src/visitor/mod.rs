@@ -397,6 +397,12 @@ pub(crate) struct ModuleInfoExtractor {
     native_html_element_alias_candidates: FxHashSet<String>,
     structural_class_call_candidates: Vec<StructuralClassCallCandidate>,
     namespace_depth: u32,
+    /// Depth of `declare module '<specifier>' { ... }` ambient-module and
+    /// module-augmentation bodies currently being walked. Inner `export`
+    /// statements describe the named module, not the containing file, so
+    /// file-level export recording is suppressed while non-zero (issue #2349).
+    /// Transient visitor state; never persisted.
+    ambient_module_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
     class_heritage: Vec<ClassHeritageInfo>,
     /// `(token_export_name, interface_name)` for `new InjectionToken<I>(...)`

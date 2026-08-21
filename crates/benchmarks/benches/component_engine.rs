@@ -793,6 +793,7 @@ fn warm_istanbul_crap_options(fixture: &IstanbulCrapFixture) -> HealthExecutionO
         coverage_inputs: HealthCoverageInputs {
             coverage: Some(&fixture.coverage_path),
             coverage_root: None,
+            coverage_relocated: false,
         },
         ..warm_health_options(&fixture.fixture)
     }

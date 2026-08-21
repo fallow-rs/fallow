@@ -829,6 +829,10 @@ pub struct IstanbulFileCoverage {
     /// `decl.start`, so multiline TypeScript signatures still match the
     /// function start that fallow extracts.
     functions: rustc_hash::FxHashMap<(String, u32, u32), f64>,
+    /// The coverage map was recorded against a different checkout of the
+    /// project, so line numbers may have drifted beyond the bounded fuzz.
+    /// Enables the distance-free unambiguous-name fallback in [`Self::lookup`].
+    relocated: bool,
 }
 
 impl IstanbulFileCoverage {
@@ -848,6 +852,15 @@ impl IstanbulFileCoverage {
     /// Istanbul records the function as anonymous. `load_istanbul_coverage`
     /// indexes declaration aliases so standard Istanbul producers still
     /// participate in this fallback. See issues #155, #166, #181, and #370.
+    ///
+    /// When the map is `relocated` (recorded against a different checkout of
+    /// the project, as in the audit base-worktree pass), a distance-free
+    /// name match runs between steps 2 and 3: if every entry named `name`
+    /// carries the same coverage value, that value is returned regardless of
+    /// line drift. Unrelated edits can shift a function arbitrarily far
+    /// between the two checkouts, and when all same-named candidates agree
+    /// the choice among them cannot matter (#2347). Same-checkout lookups
+    /// keep the bounded fuzz, which protects against stale coverage data.
     pub fn lookup(&self, name: &str, line: u32, col: u32) -> Option<f64> {
         if let Some(&pct) = self.functions.get(&(name.to_string(), line, col)) {
             return Some(pct);
@@ -858,6 +871,11 @@ impl IstanbulFileCoverage {
             .filter(|((n, l, _), _)| n == name && l.abs_diff(line) <= 2)
             .min_by_key(|((_, l, c), _)| (l.abs_diff(line), c.abs_diff(col)))
             .map(|(_, &pct)| pct)
+        {
+            return Some(pct);
+        }
+        if self.relocated
+            && let Some(pct) = self.unambiguous_named_pct(name)
         {
             return Some(pct);
         }
@@ -893,6 +911,27 @@ impl IstanbulFileCoverage {
             }
         }
         if tied { None } else { nearest_pct }
+    }
+
+    /// The single coverage value shared by every entry named `name`, or
+    /// `None` when the name is absent or its entries disagree. Bit-exact
+    /// comparison: agreeing entries are either the primary/declaration alias
+    /// pair of one function (inserted with the identical value) or distinct
+    /// functions whose value coincides, in which case the choice among them
+    /// cannot change the result.
+    fn unambiguous_named_pct(&self, name: &str) -> Option<f64> {
+        let mut found: Option<f64> = None;
+        for ((n, _, _), &pct) in &self.functions {
+            if n != name {
+                continue;
+            }
+            match found {
+                None => found = Some(pct),
+                Some(prev) if prev.to_bits() == pct.to_bits() => {}
+                Some(_) => return None,
+            }
+        }
+        found
     }
 }
 
@@ -940,13 +979,14 @@ fn resolve_crap_coverage<'a>(
     }
 }
 
-/// Load Istanbul coverage data from a `coverage-final.json` file or directory.
-///
 /// Auto-detect a `coverage-final.json` file in common locations relative to the project root.
 ///
 /// Checks (in order): `coverage/coverage-final.json`, `.nyc_output/coverage-final.json`.
 /// Returns the first path found, or `None` if no coverage file exists.
-pub(super) fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::PathBuf> {
+/// The audit base-worktree pass uses the same detection against the head
+/// project root, so auto-detected coverage scores both attribution sides
+/// (#2347).
+pub fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::PathBuf> {
     let candidates = [
         root.join("coverage/coverage-final.json"),
         root.join(".nyc_output/coverage-final.json"),
@@ -983,10 +1023,14 @@ pub fn resolve_relative_to_root(
 /// `path` itself is resolved against `project_root` when relative, so callers
 /// can pass `--coverage coverage/foo.json` from a parent directory and have it
 /// land under the `--root` they configured.
+///
+/// `relocated` marks a map recorded against a different checkout of the
+/// project; see [`IstanbulFileCoverage::lookup`].
 pub(super) fn load_istanbul_coverage(
     path: &std::path::Path,
     coverage_root: Option<&std::path::Path>,
     project_root: Option<&std::path::Path>,
+    relocated: bool,
 ) -> Result<IstanbulCoverage, String> {
     super::validate_coverage_root_absolute(coverage_root)?;
     let resolved = resolve_relative_to_root(path, project_root);
@@ -1019,10 +1063,7 @@ pub(super) fn load_istanbul_coverage(
     for file_cov in raw.values() {
         let raw_path = std::path::PathBuf::from(&file_cov.path);
         let file_path = if let (Some(cov_root), Some(proj_root)) = (coverage_root, project_root) {
-            raw_path
-                .strip_prefix(cov_root)
-                .map(|rel| proj_root.join(rel))
-                .unwrap_or(raw_path)
+            rebase_coverage_path(raw_path, cov_root, proj_root)
         } else {
             raw_path
         };
@@ -1034,10 +1075,39 @@ pub(super) fn load_istanbul_coverage(
             insert_istanbul_function_coverage(&mut functions, fn_entry, coverage_pct);
         }
 
-        files.insert(canonical, IstanbulFileCoverage { functions });
+        files.insert(
+            canonical,
+            IstanbulFileCoverage {
+                functions,
+                relocated,
+            },
+        );
     }
 
     Ok(IstanbulCoverage { files })
+}
+
+/// Rebase one Istanbul file path from `coverage_root` onto `project_root`.
+///
+/// When the recorded path does not start with `coverage_root` verbatim, retry
+/// with its canonicalized form: coverage generated inside a symlinked
+/// directory (macOS `/var` vs `/private/var`) records the symlinked spelling
+/// while the rebase prefix is typically canonical. Paths under neither
+/// spelling are kept as-is, matching the previous behavior.
+fn rebase_coverage_path(
+    raw_path: std::path::PathBuf,
+    coverage_root: &std::path::Path,
+    project_root: &std::path::Path,
+) -> std::path::PathBuf {
+    if let Ok(rel) = raw_path.strip_prefix(coverage_root) {
+        return project_root.join(rel);
+    }
+    if let Ok(canonical) = dunce::canonicalize(&raw_path)
+        && let Ok(rel) = canonical.strip_prefix(coverage_root)
+    {
+        return project_root.join(rel);
+    }
+    raw_path
 }
 
 fn insert_istanbul_function_coverage(
@@ -4246,7 +4316,10 @@ mod tests {
         let funcs = vec![make_fn_complexity(10)];
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("test_fn".to_string(), 1, 0), 41.56);
-        let file_cov = IstanbulFileCoverage { functions };
+        let file_cov = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
 
         let result = istanbul_crap_default(&funcs, Some(&file_cov), false);
         assert!((result.per_function[0].crap - 30.0).abs() < f64::EPSILON);
@@ -4519,7 +4592,10 @@ mod tests {
         let funcs = vec![make_fn_complexity(10)];
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("test_fn".to_string(), 1, 0), 80.0);
-        let file_cov = IstanbulFileCoverage { functions };
+        let file_cov = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         let result = istanbul_crap_default(&funcs, Some(&file_cov), false);
         assert!((result.max_crap - 10.8).abs() < 0.1);
         assert_eq!(result.signals.above, 0);
@@ -4530,6 +4606,7 @@ mod tests {
         let funcs = vec![make_fn_complexity(6)];
         let file_cov = IstanbulFileCoverage {
             functions: rustc_hash::FxHashMap::default(),
+            relocated: false,
         };
         let result = istanbul_crap_default(&funcs, Some(&file_cov), false);
         assert!((result.max_crap - 42.0).abs() < f64::EPSILON);
@@ -4549,7 +4626,10 @@ mod tests {
         let funcs = vec![make_fn_complexity(5)];
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("test_fn".to_string(), 1, 0), 0.0);
-        let file_cov = IstanbulFileCoverage { functions };
+        let file_cov = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         let result = istanbul_crap_default(&funcs, Some(&file_cov), false);
         assert!((result.max_crap - 30.0).abs() < f64::EPSILON);
         assert_eq!(result.signals.above, 1);
@@ -4787,6 +4867,7 @@ mod tests {
             std::path::Path::new("coverage/coverage-final.json"),
             None,
             Some(temp.path()),
+            false,
         )
         .expect("relative path must resolve against project_root");
         assert!(
@@ -4837,7 +4918,7 @@ mod tests {
             }),
         );
 
-        let coverage = load_istanbul_coverage(&coverage_path, None, None).unwrap();
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
         let canonical_source = dunce::canonicalize(&source_path).unwrap();
         let file_coverage = coverage.get(&canonical_source).unwrap();
 
@@ -4875,7 +4956,7 @@ mod tests {
             }),
         );
 
-        let coverage = load_istanbul_coverage(&coverage_path, None, None).unwrap();
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
         let canonical_source = dunce::canonicalize(&source_path).unwrap();
         let file_coverage = coverage.get(&canonical_source).unwrap();
 
@@ -4917,7 +4998,7 @@ mod tests {
             }),
         );
 
-        let coverage = load_istanbul_coverage(&coverage_path, None, None).unwrap();
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
         let canonical_source = dunce::canonicalize(&source_path).unwrap();
         let file_coverage = coverage.get(&canonical_source).unwrap();
 
@@ -4928,7 +5009,10 @@ mod tests {
     fn istanbul_lookup_exact_match() {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("handleClick".to_string(), 10, 0), 85.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!((fc.lookup("handleClick", 10, 0).unwrap() - 85.0).abs() < f64::EPSILON);
     }
 
@@ -4936,7 +5020,10 @@ mod tests {
     fn istanbul_lookup_fuzzy_match_within_offset() {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("handleClick".to_string(), 10, 0), 72.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!((fc.lookup("handleClick", 11, 0).unwrap() - 72.0).abs() < f64::EPSILON);
         assert!((fc.lookup("handleClick", 12, 0).unwrap() - 72.0).abs() < f64::EPSILON);
     }
@@ -4945,15 +5032,68 @@ mod tests {
     fn istanbul_lookup_fuzzy_match_outside_offset() {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("handleClick".to_string(), 10, 0), 72.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!(fc.lookup("handleClick", 13, 0).is_none());
+    }
+
+    #[test]
+    fn istanbul_lookup_relocated_matches_unique_name_at_any_distance() {
+        let mut functions = rustc_hash::FxHashMap::default();
+        functions.insert(("handleClick".to_string(), 29, 0), 72.0);
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: true,
+        };
+        assert!((fc.lookup("handleClick", 10, 0).unwrap() - 72.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn istanbul_lookup_relocated_accepts_declaration_alias_pair() {
+        let mut functions = rustc_hash::FxHashMap::default();
+        functions.insert(("handleClick".to_string(), 29, 16), 72.0);
+        functions.insert(("handleClick".to_string(), 29, 0), 72.0);
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: true,
+        };
+        assert!((fc.lookup("handleClick", 10, 0).unwrap() - 72.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn istanbul_lookup_relocated_bails_on_disagreeing_same_name_entries() {
+        let mut functions = rustc_hash::FxHashMap::default();
+        functions.insert(("render".to_string(), 29, 0), 72.0);
+        functions.insert(("render".to_string(), 80, 0), 10.0);
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: true,
+        };
+        assert!(fc.lookup("render", 10, 0).is_none());
+    }
+
+    #[test]
+    fn istanbul_lookup_relocated_prefers_bounded_fuzzy_match() {
+        let mut functions = rustc_hash::FxHashMap::default();
+        functions.insert(("render".to_string(), 11, 0), 72.0);
+        functions.insert(("render".to_string(), 80, 0), 10.0);
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: true,
+        };
+        assert!((fc.lookup("render", 10, 0).unwrap() - 72.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn istanbul_lookup_name_mismatch() {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("handleClick".to_string(), 10, 0), 85.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!(fc.lookup("handleSubmit", 10, 0).is_none());
     }
 
@@ -4961,6 +5101,7 @@ mod tests {
     fn istanbul_lookup_empty() {
         let fc = IstanbulFileCoverage {
             functions: rustc_hash::FxHashMap::default(),
+            relocated: false,
         };
         assert!(fc.lookup("anything", 1, 0).is_none());
     }
@@ -4970,7 +5111,10 @@ mod tests {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("render".to_string(), 8, 0), 60.0);
         functions.insert(("render".to_string(), 12, 0), 90.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         let result = fc.lookup("render", 10, 0);
         assert!(result.is_some());
         let pct = result.unwrap();
@@ -4981,7 +5125,10 @@ mod tests {
     fn istanbul_lookup_anonymous_fallback_single_candidate() {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("(anonymous_0)".to_string(), 28, 0), 75.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!((fc.lookup("myHandler", 28, 0).unwrap() - 75.0).abs() < f64::EPSILON);
         assert!((fc.lookup("myHandler", 30, 0).unwrap() - 75.0).abs() < f64::EPSILON);
     }
@@ -4990,7 +5137,10 @@ mod tests {
     fn istanbul_lookup_anonymous_fallback_rejects_nearby_far_column() {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("(anonymous_0)".to_string(), 4, 28), 75.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
 
         assert!(fc.lookup("declaredHelper", 3, 0).is_none());
     }
@@ -5000,7 +5150,10 @@ mod tests {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("(anonymous_0)".to_string(), 28, 0), 75.0);
         functions.insert(("(anonymous_1)".to_string(), 29, 0), 50.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!((fc.lookup("myHandler", 28, 0).unwrap() - 75.0).abs() < f64::EPSILON);
     }
 
@@ -5009,7 +5162,10 @@ mod tests {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("(anonymous_0)".to_string(), 1, 23), 90.0); // outer
         functions.insert(("(anonymous_1)".to_string(), 1, 43), 10.0); // inner
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!((fc.lookup("<arrow>", 1, 43).unwrap() - 10.0).abs() < f64::EPSILON);
         assert!((fc.lookup("<arrow>", 1, 23).unwrap() - 90.0).abs() < f64::EPSILON);
     }
@@ -5019,7 +5175,10 @@ mod tests {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("(anonymous_0)".to_string(), 27, 0), 75.0);
         functions.insert(("(anonymous_1)".to_string(), 29, 0), 50.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!(fc.lookup("myHandler", 28, 0).is_none());
     }
 
@@ -5027,7 +5186,10 @@ mod tests {
     fn istanbul_lookup_anonymous_fallback_outside_offset() {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("(anonymous_0)".to_string(), 28, 0), 75.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!(fc.lookup("myHandler", 31, 0).is_none());
     }
 
@@ -5036,7 +5198,10 @@ mod tests {
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("handleClick".to_string(), 10, 0), 90.0);
         functions.insert(("(anonymous_7)".to_string(), 11, 0), 10.0);
-        let fc = IstanbulFileCoverage { functions };
+        let fc = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         assert!((fc.lookup("handleClick", 10, 0).unwrap() - 90.0).abs() < f64::EPSILON);
     }
 
@@ -5075,7 +5240,10 @@ mod tests {
         }];
         let mut functions = rustc_hash::FxHashMap::default();
         functions.insert(("test_fn".to_string(), 1, 0), 80.0);
-        let file_cov = IstanbulFileCoverage { functions };
+        let file_cov = IstanbulFileCoverage {
+            functions,
+            relocated: false,
+        };
         let result = istanbul_crap_default(&funcs, Some(&file_cov), true);
         assert_eq!(result.matched, 1);
         assert_eq!(result.total, 2);
