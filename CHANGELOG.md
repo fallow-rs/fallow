@@ -37,6 +37,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rules.coverage-gaps` and health trends rather than `introduced` complexity
   findings.
 
+- **`unused_dependency_overrides` no longer flags transitive-only overrides in
+  bun repositories.** bun declares overrides through the same top-level
+  `overrides` key as npm, but override resolution only consulted
+  `pnpm-lock.yaml` and `package-lock.json`, so every override targeting a
+  transitive dependency in a bun repo was reported as unused even though the
+  target resolved in `bun.lock`. These are commonly CVE-fix pins, so acting on
+  the finding would have been a security downgrade. `bun.lock` (a JSONC file)
+  is now parsed into the resolved-package set, and `npm-shrinkwrap.json` is
+  read alongside `package-lock.json` so shrinkwrap repos get the same
+  transitive crediting. When the only lockfile is bun's legacy binary
+  `bun.lockb`, resolution ground truth is unreadable and the check emits
+  nothing instead of degrading to declaration-only analysis; a stale
+  `bun.lockb` next to a parseable pnpm or npm lockfile does not disable the
+  check. The transitive hint now follows the root `package.json`
+  `packageManager` field first and the lockfiles present as fallback
+  (`bun install --frozen-lockfile` / `npm ci`), yarn repos are told that
+  `overrides` is inert and `resolutions` is the yarn mechanism, and the
+  finding's suggested actions no longer hardcode pnpm file names or commands.
+  (Closes [#2341](https://github.com/fallow-rs/fallow/issues/2341).)
+
 ## [3.17.0] - 2026-08-16
 
 ### Added

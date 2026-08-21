@@ -371,9 +371,11 @@ pub struct AnalysisResults {
     /// Entries in pnpm-workspace.yaml's overrides: section, package.json's
     /// pnpm.overrides block, or package.json's top-level npm overrides object,
     /// whose target package is not declared by any workspace package and is
-    /// not present in pnpm-lock.yaml or package-lock.json. Default severity
-    /// is warn because projects without a readable lockfile fall back to
-    /// manifest-only checks; the hint field flags those conservative cases.
+    /// not present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,
+    /// or bun.lock. Default severity is warn because projects without a
+    /// readable lockfile fall back to manifest-only checks; the hint field
+    /// flags those conservative cases. When the only lockfile is bun's binary
+    /// bun.lockb, resolution cannot be read and the check emits nothing.
     /// Wrapped in [`UnusedDependencyOverrideFinding`].
     #[serde(default)]
     pub unused_dependency_overrides: Vec<UnusedDependencyOverrideFinding>,
