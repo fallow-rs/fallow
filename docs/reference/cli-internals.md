@@ -43,6 +43,19 @@ an exit code.
 - Resolve user-provided file inputs against the user's project root before an
   audit switches to a base worktree. Prefix values such as `--coverage-root`
   remain absolute prefixes and must not be reinterpreted as input files.
+- Audit base coverage attribution (#2347): the base-worktree pass scores from
+  the same head-generated Istanbul map as the head pass, for explicit and
+  auto-detected coverage alike. When no `--coverage-root` was given, the
+  canonical head project root becomes the strip prefix so every recorded path
+  rebases onto the base worktree; an explicit prefix is forwarded unchanged.
+  Relocated base lookups (`coverage_relocated`) tolerate unbounded line drift
+  only when every same-named entry in the file agrees on one value.
+  Consequences: complexity growth in files the map reports as untested
+  attributes as inherited once the base function also exceeds the threshold,
+  and test deletions cannot surface as `introduced` complexity findings (the
+  base is scored with the post-deletion map); coverage regressions belong to
+  `rules.coverage-gaps` and health trends. The auto-detected map's content
+  participates in the base-snapshot cache key exactly like `--coverage`.
 - Audit worktree cleanup must be scoped to Fallow-owned paths and registrations.
   Never prune unrelated user worktrees.
 - JSON mode emits structured errors on stdout and keeps progress off stdout.

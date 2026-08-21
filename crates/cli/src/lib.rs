@@ -5789,6 +5789,7 @@ fn health_coverage_inputs(
     fallow_engine::health::HealthCoverageInputs {
         coverage: coverage_inputs.coverage.as_deref(),
         coverage_root: coverage_inputs.coverage_root.as_deref(),
+        coverage_relocated: false,
     }
 }
 

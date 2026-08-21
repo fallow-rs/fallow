@@ -275,6 +275,12 @@ pub struct HealthCoverageInputs<'a> {
     /// Absolute coverage-path prefix to strip before rebasing files onto the
     /// project root.
     pub coverage_root: Option<&'a Path>,
+    /// The coverage map was recorded against a different checkout of this
+    /// project (the audit base-worktree pass), so function line numbers may
+    /// have drifted arbitrarily. Enables the distance-free unambiguous-name
+    /// match in the Istanbul lookup; keep `false` for same-checkout coverage,
+    /// where the bounded fuzz protects against stale data (#2347).
+    pub coverage_relocated: bool,
 }
 
 /// Validate that a coverage-data root is absolute under Unix or Windows path

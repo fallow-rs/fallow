@@ -368,6 +368,7 @@ fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions
         min_commits: params.min_commits,
         coverage: non_empty_path(params.coverage.as_deref()),
         coverage_root: non_empty_path(params.coverage_root.as_deref()),
+        coverage_relocated: false,
     })
 }
 
