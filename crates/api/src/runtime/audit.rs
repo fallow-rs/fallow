@@ -824,24 +824,37 @@ fn compute_base_snapshot(
 ///
 /// The coverage file lives in (and its recorded paths point at) the HEAD
 /// checkout, while the base pass analyzes a temporary worktree. The coverage
-/// path is resolved against the HEAD root so the base pass reads the same
-/// file, and when no explicit `coverage_root` exists the HEAD root becomes
-/// the strip prefix so every entry rebases onto the base worktree; otherwise
-/// base CRAP silently degrades to the reachability estimate and unchanged
-/// functions flip to `introduced` (#2347). An explicit `coverage_root` is
-/// forwarded unchanged: the base pass rebases it onto its own root.
+/// path is resolved against the canonical HEAD root so the base pass reads
+/// the same file, and when no explicit `coverage_root` exists that root
+/// becomes the strip prefix so every entry rebases onto the base worktree;
+/// otherwise base CRAP silently degrades to the reachability estimate and
+/// unchanged functions flip to `introduced` (#2347). Without explicit
+/// coverage, the head pass auto-detects `coverage/coverage-final.json`
+/// against the HEAD root, which the base worktree never materializes; the
+/// same auto-detection runs here so both passes score from the same map. An
+/// explicit `coverage_root` is forwarded unchanged: the base pass rebases it
+/// onto its own root. The canonical root serves both the path resolution and
+/// the default prefix, so a relative `analysis.root` cannot make the two
+/// mechanisms disagree.
 fn base_snapshot_options(options: &AuditOptions, current_root: &Path) -> AuditOptions {
-    let Some(coverage) = options.coverage.as_deref() else {
+    let canonical_root =
+        dunce::canonicalize(current_root).unwrap_or_else(|_| current_root.to_path_buf());
+    let coverage = options.coverage.as_deref().map_or_else(
+        || fallow_engine::health::scoring::auto_detect_coverage(&canonical_root),
+        |coverage| {
+            Some(fallow_engine::health::scoring::resolve_relative_to_root(
+                coverage,
+                Some(&canonical_root),
+            ))
+        },
+    );
+    let Some(coverage) = coverage else {
         return options.clone();
     };
     let mut base_options = options.clone();
-    base_options.coverage = Some(fallow_engine::health::scoring::resolve_relative_to_root(
-        coverage,
-        Some(current_root),
-    ));
+    base_options.coverage = Some(coverage);
     if base_options.coverage_root.is_none() {
-        base_options.coverage_root =
-            Some(dunce::canonicalize(current_root).unwrap_or_else(|_| current_root.to_path_buf()));
+        base_options.coverage_root = Some(canonical_root);
     }
     base_options
 }

@@ -279,9 +279,13 @@ pub(super) fn audit_base_snapshot_cache_key(
         return Ok(None);
     };
     let config_file = config_file_fingerprint(opts)?;
+    // Auto-detected coverage feeds the base pass too (#2347), so its content
+    // must invalidate cached base snapshots exactly like explicit `--coverage`.
     let coverage_file = opts
         .coverage
-        .map(|p| coverage_file_fingerprint(p, opts.root));
+        .map(Path::to_path_buf)
+        .or_else(|| fallow_engine::health::scoring::auto_detect_coverage(opts.root))
+        .map(|p| coverage_file_fingerprint(&p, opts.root));
     let materialized_context =
         fallow_engine::repo_refs::audit_materialized_context_fingerprint(opts.root);
     let bytes = AuditCacheKeyBuilder::new(

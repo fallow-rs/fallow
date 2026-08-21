@@ -979,13 +979,14 @@ fn resolve_crap_coverage<'a>(
     }
 }
 
-/// Load Istanbul coverage data from a `coverage-final.json` file or directory.
-///
 /// Auto-detect a `coverage-final.json` file in common locations relative to the project root.
 ///
 /// Checks (in order): `coverage/coverage-final.json`, `.nyc_output/coverage-final.json`.
 /// Returns the first path found, or `None` if no coverage file exists.
-pub(super) fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::PathBuf> {
+/// The audit base-worktree pass uses the same detection against the head
+/// project root, so auto-detected coverage scores both attribution sides
+/// (#2347).
+pub fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::PathBuf> {
     let candidates = [
         root.join("coverage/coverage-final.json"),
         root.join(".nyc_output/coverage-final.json"),
