@@ -92,6 +92,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consults the config keys only when a call falls back to the CLI; routing
   that route through the same precedence is tracked as a follow-up.
 
+- **Inner `export` declarations of a namespace declared without the `export`
+  keyword are no longer reported as unused exports of the containing file**
+  (Closes [#2356](https://github.com/fallow-rs/fallow/issues/2356)). A
+  top-level `namespace Foo { export const inner = 1 }` (also
+  `declare namespace`, legacy `module Foo {}`, dotted `namespace A.B.C {}`,
+  and namespaces nested inside those or inside `declare global`) is a local
+  binding, so `inner` is a member of `Foo` rather than a file export, and
+  following the previous remove-export advice broke consumers of `Foo.inner`.
+  Imports referenced inside such a body keep their credit, and exported
+  namespaces keep their existing member extraction. Both the extraction and
+  graph cache versions were bumped; the first run after upgrading performs one
+  cold re-analysis. Existing `fallow-ignore` suppressions placed above these
+  declarations as a workaround now surface as stale-suppression findings (warn
+  by default) and can be removed.
+
 - **`fallow audit` now scores the base attribution pass with the same Istanbul
   coverage map as the head pass.** The base worktree pass previously matched no
   coverage entry (the map records head-checkout paths), silently fell back to

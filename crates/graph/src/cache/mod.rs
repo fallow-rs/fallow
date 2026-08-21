@@ -118,7 +118,13 @@ pub use store::GraphCacheStore;
 /// references into the persisted graph. Warm 34 caches carry the old empty
 /// accessed-members verdict, so exports rendered only through JSX would stay
 /// reported as unused on upgrade.
-pub const GRAPH_CACHE_VERSION: u32 = 35;
+///
+/// Bumped to 36 for issue #2356: `export` declarations inside a namespace
+/// declared without the `export` keyword no longer contribute file-level
+/// exports, and unused-export verdicts are read off the persisted export set.
+/// Warm 35 caches still carry those local namespace members as file exports
+/// and would keep reporting them as unused on upgrade.
+pub const GRAPH_CACHE_VERSION: u32 = 36;
 
 /// Cached form of a resolved target.
 ///

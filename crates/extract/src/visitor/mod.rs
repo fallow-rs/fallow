@@ -403,6 +403,17 @@ pub(crate) struct ModuleInfoExtractor {
     /// file-level export recording is suppressed while non-zero (issue #2349).
     /// Transient visitor state; never persisted.
     ambient_module_depth: u32,
+    /// Depth of namespace bodies declared without the `export` keyword
+    /// (`namespace Foo {}`, `declare namespace Foo {}`, legacy `module Foo {}`,
+    /// dotted `namespace A.B.C {}`, and namespaces nested in those or in
+    /// `declare global`) currently being walked. The namespace is a local
+    /// binding, so its inner `export` statements are members of that binding
+    /// rather than file-level exports; export recording is suppressed while
+    /// non-zero and nothing is queued in `pending_namespace_members` because
+    /// there is no exported owner to attach to (issue #2356). Kept separate
+    /// from `namespace_depth`, which only tracks exported namespace bodies.
+    /// Transient visitor state; never persisted.
+    local_namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
     class_heritage: Vec<ClassHeritageInfo>,
     /// `(token_export_name, interface_name)` for `new InjectionToken<I>(...)`

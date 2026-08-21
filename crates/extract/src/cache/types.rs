@@ -944,7 +944,12 @@ use crate::MemberKind;
 /// (`<SC.UsedStyle />`) now record member accesses like their plain-expression
 /// spelling. Warm 272 caches lack those accesses, so namespace-imported exports
 /// rendered only through JSX would stay reported as unused.
-pub(super) const CACHE_VERSION: u32 = 273;
+///
+/// Bumped to 274 for issue #2356: `export` declarations inside a namespace
+/// declared without the `export` keyword (`namespace Foo { export const x }`)
+/// are no longer recorded as file-level exports. Warm 273 caches would keep
+/// replaying those local namespace members as unused exports.
+pub(super) const CACHE_VERSION: u32 = 274;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

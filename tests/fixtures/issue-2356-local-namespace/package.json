@@ -1,0 +1,8 @@
+{
+  "name": "issue-2356-local-namespace",
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

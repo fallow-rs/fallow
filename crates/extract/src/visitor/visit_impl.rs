@@ -2415,6 +2415,19 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
         let is_namespace = matches!(&decl.declaration, Some(Declaration::TSModuleDeclaration(_)));
 
+        // Exports inside a namespace declared without the `export` keyword are
+        // members of that local binding, not exports of the containing file
+        // (issue #2356). TS2395 forbids merging a local namespace with an
+        // exported declaration of the same name, so there is no exported owner
+        // to attach members to: nothing is recorded here and nothing is queued
+        // in `pending_namespace_members`. The body is still walked so imports
+        // referenced inside it keep their credit and nested namespaces reach
+        // `visit_ts_module_declaration`.
+        if self.local_namespace_depth > 0 {
+            walk::walk_export_named_declaration(self, decl);
+            return;
+        }
+
         if self.namespace_depth > 0 {
             if let Some(declaration) = &decl.declaration {
                 self.extract_namespace_members(declaration);
@@ -2573,14 +2586,28 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // A string-literal module name (`declare module './library'`,
         // `declare module 'pkg'`) marks a module augmentation or ambient
         // module declaration. Track the depth so export visitors skip
-        // file-level recording inside the body (issue #2349). Identifier-named
-        // declarations (`namespace Foo`, `declare global`) keep existing
-        // behavior.
+        // file-level recording inside the body (issue #2349).
         let is_ambient_specifier = matches!(&decl.id, TSModuleDeclarationName::StringLiteral(_));
+        // An identifier-named namespace reached outside an exported namespace
+        // body (`export namespace Foo` raises `namespace_depth` before its
+        // declaration is walked) and outside an ambient module is a local
+        // binding: `namespace Foo {}`, `declare namespace Foo {}`, legacy
+        // `module Foo {}`, each segment of a dotted `namespace A.B.C {}`, and a
+        // namespace nested in one of those or in `declare global`. Its inner
+        // `export` statements are members of the local binding, not file
+        // exports (issue #2356).
+        let is_local_namespace =
+            !is_ambient_specifier && self.namespace_depth == 0 && self.ambient_module_depth == 0;
         if is_ambient_specifier {
             self.ambient_module_depth += 1;
         }
+        if is_local_namespace {
+            self.local_namespace_depth += 1;
+        }
         walk::walk_ts_module_declaration(self, decl);
+        if is_local_namespace {
+            self.local_namespace_depth -= 1;
+        }
         if is_ambient_specifier {
             self.ambient_module_depth -= 1;
         }

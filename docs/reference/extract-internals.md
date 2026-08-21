@@ -41,8 +41,16 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   ambient module declaration) contributes no file-level export surface. Its
   body is still walked for `typeof import()` and type-space references, and a
   named re-export inside it becomes one type-space import per specifier so the
-  target keeps its export credit. Identifier-named namespaces and
-  `declare global` keep their existing behavior.
+  target keeps its export credit. Exported namespaces and `declare global`
+  keep their existing behavior.
+- A namespace declared without the `export` keyword (`namespace Foo {}`,
+  `declare namespace Foo {}`, legacy `module Foo {}`, dotted
+  `namespace A.B.C {}`, and namespaces nested in those or in `declare global`)
+  is a local binding. Its inner `export` declarations are members of that
+  binding, not file-level exports, and are attached to no owner because a
+  local namespace cannot merge with an exported one. The body is still walked
+  so imports referenced inside it keep their credit. `export namespace Foo`
+  keeps recording one export with the inner declarations as members.
 
 ## Verification
 

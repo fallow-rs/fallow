@@ -5253,6 +5253,210 @@ fn ambient_module_bare_re_export_keeps_side_effect_reference() {
     assert!(matches!(entry.imported_name, ImportedName::SideEffect));
 }
 
+fn export_names(info: &crate::ModuleInfo) -> Vec<String> {
+    info.exports.iter().map(|e| e.name.to_string()).collect()
+}
+
+#[test]
+fn local_namespace_inner_exports_are_not_file_exports() {
+    // Issue #2356: `Foo` is a local binding, so `inner` is a member of `Foo`
+    // and not an export of the containing file. Recording it leaked a
+    // file-level `unused-export` finding whose remove-export advice broke
+    // consumers of `Foo.inner`.
+    let info = parse(
+        "namespace Foo {\n\
+           export const inner = 1;\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(
+        info.exports.is_empty(),
+        "local namespace members must not be recorded as file exports: {:?}",
+        export_names(&info)
+    );
+    // The body is still walked: both the namespace and its inner declarations
+    // keep feeding the local declaration registry.
+    let locals: Vec<&str> = info
+        .local_type_declarations
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect();
+    assert!(
+        locals.contains(&"Foo"),
+        "the local namespace itself must stay a local declaration: {locals:?}"
+    );
+}
+
+#[test]
+fn declare_namespace_inner_exports_are_not_file_exports() {
+    let info = parse(
+        "declare namespace Foo {\n\
+           export const inner: number;\n\
+           export interface Shape { a: number }\n\
+           export type Alias = string;\n\
+           export function helper(): void;\n\
+           export class Widget {}\n\
+           export enum Mode { A }\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(
+        info.exports.is_empty(),
+        "ambient local namespace members must not be recorded as file exports: {:?}",
+        export_names(&info)
+    );
+}
+
+#[test]
+fn legacy_module_keyword_namespace_inner_exports_are_not_file_exports() {
+    let info = parse(
+        "module Legacy {\n\
+           export const inner = 1;\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(
+        info.exports.is_empty(),
+        "legacy `module Foo {{}}` members must not be recorded as file exports: {:?}",
+        export_names(&info)
+    );
+}
+
+#[test]
+fn dotted_local_namespace_inner_exports_are_not_file_exports() {
+    let info = parse(
+        "namespace A.B.C {\n\
+           export const inner = 1;\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(
+        info.exports.is_empty(),
+        "dotted local namespace members must not be recorded as file exports: {:?}",
+        export_names(&info)
+    );
+}
+
+#[test]
+fn nested_exported_namespace_inside_local_namespace_stays_local() {
+    let info = parse(
+        "namespace A {\n\
+           export namespace B {\n\
+             export const c = 1;\n\
+           }\n\
+           export const d = 2;\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(
+        info.exports.is_empty(),
+        "a namespace exported from a local namespace is still local: {:?}",
+        export_names(&info)
+    );
+}
+
+#[test]
+fn local_namespace_body_references_keep_import_credit() {
+    let info = parse(
+        "import { helper } from './helper';\n\
+         import type { Shape } from './shape';\n\
+         namespace Foo {\n\
+           export const x = helper();\n\
+           export type Y = Shape;\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(info.exports.is_empty(), "{:?}", export_names(&info));
+    assert!(
+        !info.unused_import_bindings.iter().any(|b| b == "helper"),
+        "a value import referenced inside a local namespace body must stay credited: {:?}",
+        info.unused_import_bindings
+    );
+    assert!(
+        !info.unused_import_bindings.iter().any(|b| b == "Shape"),
+        "a type import referenced inside a local namespace body must stay credited: {:?}",
+        info.unused_import_bindings
+    );
+    assert!(
+        info.value_referenced_import_bindings
+            .iter()
+            .any(|b| b == "helper"),
+        "`helper` must be value-referenced: {:?}",
+        info.value_referenced_import_bindings
+    );
+    assert!(
+        info.type_referenced_import_bindings
+            .iter()
+            .any(|b| b == "Shape"),
+        "`Shape` must be type-referenced: {:?}",
+        info.type_referenced_import_bindings
+    );
+}
+
+#[test]
+fn namespace_nested_inside_declare_global_is_local() {
+    // `declare global { namespace NodeJS { ... } }` reaches the namespace arm
+    // with no exported owner, so its inner exports follow the local rule.
+    let info = parse(
+        "export {};\n\
+         declare global {\n\
+           namespace NodeJS {\n\
+             export interface ProcessEnv { FOO: string }\n\
+           }\n\
+         }\n",
+    );
+    assert!(
+        info.exports.is_empty(),
+        "members of a namespace nested in `declare global` must not be file exports: {:?}",
+        export_names(&info)
+    );
+}
+
+#[test]
+fn exported_namespace_member_extraction_is_unchanged() {
+    // Pin: an exported namespace still records one file export carrying its
+    // inner exported declarations as members (flattened through nesting).
+    let info = parse(
+        "export namespace Foo {\n\
+           export const x = 1;\n\
+           export namespace Bar {\n\
+             export const y = 2;\n\
+           }\n\
+         }\n",
+    );
+    assert_eq!(export_names(&info), ["Foo"]);
+    let members: Vec<&str> = info.exports[0]
+        .members
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    assert_eq!(members, ["x", "Bar", "y"]);
+    assert!(
+        info.exports[0]
+            .members
+            .iter()
+            .all(|m| m.kind == MemberKind::NamespaceMember)
+    );
+}
+
+#[test]
+fn declare_global_direct_body_exports_keep_file_level_recording() {
+    // Pin of today's behaviour for direct `declare global` bodies, written
+    // before the #2356 change so any drift there is visible.
+    let info = parse(
+        "export {};\n\
+         declare global {\n\
+           export const directGlobal: number;\n\
+           export interface DirectGlobalShape { a: number }\n\
+         }\n",
+    );
+    assert_eq!(
+        export_names(&info),
+        ["directGlobal", "DirectGlobalShape"],
+        "direct `declare global` body exports keep their existing recording"
+    );
+}
+
 #[test]
 fn re_export_named() {
     let info = parse("export { foo } from './bar';");
