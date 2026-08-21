@@ -112,7 +112,13 @@ pub use store::GraphCacheStore;
 /// type query reads the value lane where that lane is absent. A warm 33 payload
 /// is still read correctly, but a 33 reader would take an absent fallback lane
 /// for an absent type meaning and report consumed exports as unused.
-pub const GRAPH_CACHE_VERSION: u32 = 34;
+///
+/// Bumped to 35 for issue #2348: JSX member-expression tags (`<SC.UsedStyle />`)
+/// now record member accesses, and namespace narrowing bakes the credited
+/// references into the persisted graph. Warm 34 caches carry the old empty
+/// accessed-members verdict, so exports rendered only through JSX would stay
+/// reported as unused on upgrade.
+pub const GRAPH_CACHE_VERSION: u32 = 35;
 
 /// Cached form of a resolved target.
 ///
