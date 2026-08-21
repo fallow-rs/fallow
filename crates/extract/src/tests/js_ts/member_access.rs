@@ -174,6 +174,50 @@ fn jsx_nested_namespace_member_tag_generates_member_accesses() {
     );
 }
 
+/// Issue #2348: a `this` receiver in JSX tag position (`<this.Foo />`) records
+/// the same `this.Foo` access as the plain-expression spelling, and the
+/// internal `this@<id>` class-scope qualifier (issue #1821) never leaks into
+/// the emitted spellings.
+#[test]
+fn jsx_this_member_tag_generates_member_access() {
+    let info = parse_tsx(
+        "class Panel {\n  Foo = () => null;\n  render() {\n    return <this.Foo />;\n  }\n}\nexport const panel = new Panel();",
+    );
+    let has_access = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "this" && a.member == "Foo");
+    assert!(
+        has_access,
+        "<this.Foo /> should record this.Foo as a member access; got {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses.iter().all(|a| !a.object.contains('@')),
+        "no emitted spelling may keep the internal this@<id> qualifier; got {:?}",
+        info.member_accesses
+    );
+}
+
+/// Issue #2348: a class-instance receiver in JSX tag position (`<w.Card />`)
+/// records the same member access as the plain-expression spelling, feeding
+/// the bound-member resolution that credits local class members.
+#[test]
+fn jsx_class_instance_member_tag_generates_member_access() {
+    let info = parse_tsx(
+        "class Widgets {\n  Card = () => null;\n}\nconst w = new Widgets();\nexport const R = () => <w.Card />;",
+    );
+    let has_access = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "w" && a.member == "Card");
+    assert!(
+        has_access,
+        "<w.Card /> should record w.Card as a member access; got {:?}",
+        info.member_accesses
+    );
+}
+
 /// Issue #2348: the closing tag of a non-self-closing member-expression
 /// element must not double-record the access.
 #[test]
