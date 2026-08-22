@@ -549,6 +549,7 @@ fn propagate_namespace_references(
     graph: &mut ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     features: build::NamespaceFeatures,
+    whole_module_targets: &FxHashSet<FileId>,
     reference_paths: &mut ReferencePathInterner,
 ) {
     let indexes = namespace_indexes::NamespacePropagationIndexes::new(graph, module_by_id);
@@ -561,7 +562,12 @@ fn propagate_namespace_references(
         );
     }
     if features.has_re_exports {
-        namespace_re_exports::propagate_namespace_re_exports(graph, &indexes, reference_paths);
+        namespace_re_exports::propagate_namespace_re_exports(
+            graph,
+            &indexes,
+            whole_module_targets,
+            reference_paths,
+        );
     }
 }
 
@@ -671,13 +677,15 @@ impl ModuleGraph {
 
         let mut reference_paths =
             ReferencePathInterner::new(test_reachability_plan.requires_reference_provenance());
-        graph.populate_references(&module_by_id, &entry_point_ids, &mut reference_paths);
+        let whole_module_targets =
+            graph.populate_references(&module_by_id, &entry_point_ids, &mut reference_paths);
 
         if namespace_features.has_aliases || namespace_features.has_re_exports {
             propagate_namespace_references(
                 &mut graph,
                 &module_by_id,
                 namespace_features,
+                &whole_module_targets,
                 &mut reference_paths,
             );
         }
@@ -689,8 +697,11 @@ impl ModuleGraph {
             total_capacity,
         );
 
-        graph.re_export_cycles =
-            graph.resolve_re_export_chains(&module_by_id, &mut reference_paths);
+        graph.re_export_cycles = graph.resolve_re_export_chains(
+            &module_by_id,
+            &whole_module_targets,
+            &mut reference_paths,
+        );
         let finalized_paths = reference_paths.finalize(&mut graph.modules);
         graph.reference_paths = finalized_paths.paths;
         graph.reference_routes = finalized_paths.routes;

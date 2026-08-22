@@ -1,0 +1,8 @@
+{
+  "name": "issue-2373-entry-namespace-chain",
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

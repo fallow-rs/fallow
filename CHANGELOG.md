@@ -128,6 +128,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the environment-variable docs no longer tell MCP callers to pass the inputs
   explicitly.
 
+- **Whole-module consumers of a barrel now credit the exports the barrel only
+  exposes through its own `export *` and `export * as` chains** (Closes
+  [#2372](https://github.com/fallow-rs/fallow/issues/2372)). A namespace
+  import the graph cannot narrow to member accesses (`import * as ns from
+  './barrel'` used as a whole object in `Object.values(ns)`, a spread, or a
+  destructure with rest, handed on without any member access, or re-exported
+  from a non-entry module) and a dynamic-import pattern match (`import()` with
+  a template, `import.meta.glob`, `require.context`) credited the target's
+  direct exports only, so a name that reached the barrel through
+  `export * from './deep'` or `export * as sub from './sub'` was reported as
+  unused even though the consumer observes every name on the namespace
+  object. These consumers now seed the same closure the ambient-module star
+  form from [#2357](https://github.com/fallow-rs/fallow/issues/2357) uses:
+  the barrel's `export *` sources credit their named exports (never
+  `default`, which a plain `export *` does not forward), its `export * as sub`
+  sources credit every export (`default` included, because `sub.default` is
+  on the object), and both rules recurse through sub's own chains. A
+  member-narrowed namespace import (`ns.one()`) keeps narrowing to the
+  accessed members and credits nothing else. Fewer unused-export findings for
+  star barrels consumed as whole objects or through dynamic-import patterns.
+  The graph cache version was bumped, so the first run after upgrading
+  performs one cold re-analysis.
+
+- **`export * as sub` on the entry-point surface now credits sub's own
+  `export *` and `export * as` chains** (Closes
+  [#2373](https://github.com/fallow-rs/fallow/issues/2373)). For
+  `export * as sub from './sub'` on an entry point, or on a barrel the entry
+  reaches through plain `export *`, every direct export of `sub.ts` was
+  credited but neither its `export * from './deep'` sources nor its
+  `export * as sub2` sources were: the entry star closure walked plain
+  `export *` edges only, and only entry points counted as exposing a
+  namespace object. Every name on sub's namespace object is reachable through
+  the entry, so sub now joins the same closure: deep's named exports are
+  credited (never deep's `default`), every export of sub2 is credited
+  (`default` included), and the rules recurse through any further level. A
+  namespace re-export on a reachable non-entry barrel that is off the entry
+  surface and has no consumer still exposes nothing, and the entry's plain
+  `export *` still never forwards the barrel's own `default`. Fewer
+  unused-export findings for nested namespace re-exports behind an entry
+  point.
+
 - **Star re-exports inside `declare module '...'` bodies credit the full ES
   star surface of their target without adding to the declaring file's export
   surface** (Closes [#2357](https://github.com/fallow-rs/fallow/issues/2357)).

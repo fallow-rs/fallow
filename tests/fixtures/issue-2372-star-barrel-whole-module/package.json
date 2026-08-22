@@ -1,0 +1,9 @@
+{
+  "name": "issue-2372-star-barrel-whole-module",
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^6.0.0"
+  }
+}

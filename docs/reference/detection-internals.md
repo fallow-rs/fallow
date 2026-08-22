@@ -80,18 +80,34 @@ error by suppressing a downstream detector.
   `declare module '...'` body, recorded as a type-only namespace import
   without a local binding) credits the full ES star surface of its target:
   every named export in both the type and the value namespace, never the
-  target's `default`, and, through the ambient star closure
-  (`ModuleGraph::collect_ambient_star_targets`), the same surface of every
-  module the target reaches through its own `export *` chain plus every
-  export (`default` included) of each `export * as sub` source along that
-  chain, recursively. `export * as ns` adds a type-only default import for
-  `ns.default`. Every other type-only import credits type space only: a bound
-  `import type { x }`, the ambient named re-export (#2349), explicitly
-  type-only ambient re-exports, and `import()` type references in TypeScript
-  and JSDoc, so the value half of a same-name type and value pair reached only
-  that way still reports. Runtime whole-module edges (dynamic-import patterns)
-  credit the module namespace object, `default` included, and only the
-  target's direct exports.
+  target's `default`, and, through the exposed namespace closure below, the
+  same surface of every module the target reaches through its own `export *`
+  chain plus every export (`default` included) of each `export * as sub`
+  source along that chain, recursively. `export * as ns` adds a type-only
+  default import for `ns.default`. Every other type-only import credits type
+  space only: a bound `import type { x }`, the ambient named re-export
+  (#2349), explicitly type-only ambient re-exports, and `import()` type
+  references in TypeScript and JSDoc, so the value half of a same-name type
+  and value pair reached only that way still reports.
+- The exposed namespace closure
+  (`ModuleGraph::collect_exposed_namespace_targets`, issues #2357, #2372,
+  #2373) is seed-agnostic. Its seeds are every target whose whole namespace
+  object a consumer observes in Phase 2 (an ambient-module star, a
+  dynamic-import pattern match through `import()`, `import.meta.glob`, or
+  `require.context`, and a namespace import the graph cannot narrow: a
+  whole-object use, a binding handed on without member access, or a binding
+  re-exported from a non-entry module) plus the `export * as ns` sources on
+  the entry-point surface (entry points and every barrel they reach through
+  plain `export *`). The closure follows `export *` and `export * as` chains
+  from each member: star propagation treats a member like an entry barrel for
+  its `export *` sources (named exports in both namespaces, never `default`)
+  and namespace re-export propagation credits every export of its
+  `export * as` sources (`default` included). A member-narrowed namespace
+  import (`ns.one()`) never seeds it, and a namespace re-export on a barrel
+  off the entry surface with no consumer exposes nothing. The seed's own
+  credit keeps its shape: a runtime whole-module edge credits the namespace
+  object, `default` included; the ambient star form credits the star surface
+  without `default`.
 - Styling and CSS-in-JS extraction must preserve source line mapping.
 - Duplication token or normalization changes require the duplication cache
   version to move with the changed semantics.

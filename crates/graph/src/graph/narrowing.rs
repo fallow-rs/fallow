@@ -57,6 +57,13 @@ pub(super) struct AttachContext<'a> {
     pub(super) export_index: &'a ExportNameIndex,
     pub(super) effective_exports: &'a super::effective_exports::EffectiveExportIndex,
     pub(super) dedup: &'a mut ReferenceDedup,
+    /// Targets whose whole namespace object a consumer observed in this pass
+    /// (issues #2357, #2372, #2373): every site that credits all exports of a
+    /// namespace target instead of narrowing to accessed members. Seeds
+    /// `ModuleGraph::collect_exposed_namespace_targets`, which extends the
+    /// credit to the names the target only exposes through its own `export *`
+    /// and `export * as ns` chains.
+    pub(super) whole_module_targets: &'a mut FxHashSet<FileId>,
 }
 
 impl AttachContext<'_> {
@@ -67,6 +74,7 @@ impl AttachContext<'_> {
             export_index: self.export_index,
             effective_exports: self.effective_exports,
             dedup: self.dedup,
+            whole_module_targets: self.whole_module_targets,
         }
     }
 }
@@ -458,6 +466,19 @@ fn narrow_namespace_references(
         && !is_whole_object
         && ctx.entry_point_ids.contains(&site.from_file);
 
+    // The consumer observes the whole namespace object (a whole-object use,
+    // no member access the graph can narrow to, or a binding re-exported to
+    // consumers it cannot enumerate): every name on the object is credited,
+    // including the names the target only exposes through its own `export *`
+    // and `export * as ns` chains, which the exposed-namespace closure
+    // handles downstream (issue #2372).
+    let observes_whole_module = is_whole_object
+        || (!is_entry_with_no_access
+            && (accessed_members.is_empty() || is_re_exported_from_non_entry));
+    if observes_whole_module {
+        ctx.whole_module_targets.insert(module.file_id);
+    }
+
     for (namespace, is_used) in [
         (ExportNamespace::Type, namespaces.0),
         (ExportNamespace::Value, namespaces.1),
@@ -473,10 +494,7 @@ fn narrow_namespace_references(
             effective_exports: ctx.effective_exports,
             dedup: ctx.dedup,
         };
-        if is_whole_object
-            || (!is_entry_with_no_access
-                && (accessed_members.is_empty() || is_re_exported_from_non_entry))
-        {
+        if observes_whole_module {
             mark_all_exports_referenced_at_site(&mut module.exports, &mut mark);
         } else {
             let found_members = mark_member_exports_referenced_at_site(
@@ -745,6 +763,10 @@ pub(super) fn attach_symbol_reference(
             // (issue #2357), which forwards the ES star surface: every named
             // export and never `default`. The `export * as ns` form records
             // the namespace object's `default` member as a separate import.
+            // Both observe the whole module, so the target's own `export *`
+            // and `export * as ns` chains are credited downstream through the
+            // exposed-namespace closure (issue #2372 for the runtime form).
+            ctx.whole_module_targets.insert(target_module.file_id);
             let namespaces = desired_import_namespaces(sym, source_mod).namespaces();
             for (namespace, is_used) in [
                 (ExportNamespace::Type, namespaces.0),

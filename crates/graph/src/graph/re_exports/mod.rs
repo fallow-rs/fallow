@@ -16,7 +16,7 @@ use crate::resolve::ResolvedModule;
 use fallow_types::discover::FileId;
 
 use super::types::{ReferencePathInterner, RoutedReferenceKey};
-use super::{Edge, ImportedSymbol, ModuleGraph};
+use super::{Edge, ModuleGraph};
 
 use propagate::{
     EffectiveDeclarationRouteCache, ImportBindingUsageIndex, NamedPropagationScratch,
@@ -110,6 +110,25 @@ struct ReExportContext<'a> {
     reference_paths: &'a mut ReferencePathInterner,
 }
 
+/// Which re-export chains `ModuleGraph::extend_star_closure` follows.
+#[derive(Clone, Copy)]
+enum StarChains {
+    /// Plain `export *` only: the surface a star forwards by name.
+    Plain,
+    /// Plain `export *` and `export * as ns`: everything a namespace object
+    /// exposes, recursively.
+    PlainAndNamespace,
+}
+
+impl StarChains {
+    fn follows(self, re: &super::types::ReExportEdge) -> bool {
+        match self {
+            Self::Plain => re.exported_name == "*",
+            Self::PlainAndNamespace => re.imported_name == "*",
+        }
+    }
+}
+
 struct ReExportFixpointInput<'a> {
     re_export_info: &'a [ReExportTuple],
     entry_star_targets: &'a FxHashSet<FileId>,
@@ -190,6 +209,7 @@ impl ModuleGraph {
     pub(super) fn resolve_re_export_chains(
         &mut self,
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+        whole_module_targets: &FxHashSet<FileId>,
         reference_paths: &mut ReferencePathInterner,
     ) -> Vec<GraphReExportCycle> {
         let re_export_info = self.collect_re_export_tuples();
@@ -200,7 +220,7 @@ impl ModuleGraph {
 
         let cycles = find_re_export_cycles(&self.modules, &re_export_info);
 
-        let entry_star_targets = self.collect_entry_star_targets();
+        let entry_star_targets = self.collect_entry_star_targets(whole_module_targets);
         let edges_by_target = self.build_edges_by_target();
 
         self.run_re_export_fixpoint(ReExportFixpointInput {
@@ -231,10 +251,14 @@ impl ModuleGraph {
     }
 
     /// Compute the transitive closure of `export *` source files whose every
-    /// named export is credited: star sources of entry-point barrels, plus the
-    /// ambient star closure of `collect_ambient_star_targets`.
-    fn collect_entry_star_targets(&self) -> FxHashSet<FileId> {
-        let mut entry_star_targets = self.collect_ambient_star_targets();
+    /// named export is credited: star sources of entry-point barrels, closed
+    /// over plain `export *` chains, plus every member of the exposed
+    /// namespace closure (`collect_exposed_namespace_targets`).
+    fn collect_entry_star_targets(
+        &self,
+        whole_module_targets: &FxHashSet<FileId>,
+    ) -> FxHashSet<FileId> {
+        let mut entry_star_targets = self.collect_exposed_namespace_targets(whole_module_targets);
         entry_star_targets.extend(self.modules.iter().filter(|m| m.is_entry_point()).flat_map(
             |m| {
                 m.re_exports
@@ -243,64 +267,72 @@ impl ModuleGraph {
                     .map(|re| re.source_file)
             },
         ));
-        let mut entry_star_stack: Vec<FileId> = entry_star_targets.iter().copied().collect();
-        while let Some(file_id) = entry_star_stack.pop() {
-            let idx = file_id.0 as usize;
-            if idx >= self.modules.len() {
-                continue;
-            }
-
-            for re in self.modules[idx]
-                .re_exports
-                .iter()
-                .filter(|re| re.exported_name == "*")
-            {
-                if entry_star_targets.insert(re.source_file) {
-                    entry_star_stack.push(re.source_file);
-                }
-            }
-        }
+        self.extend_star_closure(&mut entry_star_targets, StarChains::Plain);
         entry_star_targets
     }
 
-    /// Every module whose full ES star surface an ambient-module star
-    /// re-export reaches (issue #2357).
+    /// Every module whose full namespace object is handed to consumers the
+    /// graph cannot enumerate per name (issues #2357, #2372, #2373).
     ///
-    /// `export *` and `export * as ns` inside a `declare module '...'` body
-    /// arrive as a type-only namespace symbol with no local binding. They state
-    /// that every name the target exposes is reachable through the declared
-    /// module, including names that only arrive through the target's own
-    /// `export *` and `export * as ns` chains, and per-name propagation cannot
-    /// credit those because the consumer never imports a name. The closure
-    /// therefore follows both chain forms: star propagation treats each member
-    /// like an entry barrel for its `export *` sources (named exports, never
-    /// `default`), and namespace re-export propagation credits every export of
-    /// each member's `export * as ns` sources (`default` included, because the
-    /// namespace object exposes it). Runtime whole-module edges (dynamic-import
-    /// patterns) are not seeds and keep their direct-export credit only.
-    pub(in crate::graph) fn collect_ambient_star_targets(&self) -> FxHashSet<FileId> {
-        let mut targets: FxHashSet<FileId> = self
-            .edges
+    /// The seeds are the targets whose whole namespace object Phase 2
+    /// observed (`whole_module_targets`: an ambient-module star, a
+    /// dynamic-import pattern match, or a namespace import the graph could not
+    /// narrow because it is used as a whole object, handed on without member
+    /// access, or re-exported from a non-entry module) plus the `export * as
+    /// ns` sources on the entry-point surface, meaning those of every entry
+    /// point and of every barrel an entry point reaches through plain
+    /// `export *`, because the entry's star surface forwards `ns` itself.
+    /// Every such consumer sees every name on the namespace object, including
+    /// the names that only arrive through the target's own `export *` and
+    /// `export * as ns` chains, and per-name propagation cannot credit those
+    /// because no name is ever imported. The closure therefore follows both
+    /// chain forms: star propagation treats each member like an entry barrel
+    /// for its `export *` sources (named exports, never `default`), and
+    /// namespace re-export propagation credits every export of each member's
+    /// `export * as ns` sources (`default` included, because the namespace
+    /// object exposes it).
+    pub(in crate::graph) fn collect_exposed_namespace_targets(
+        &self,
+        whole_module_targets: &FxHashSet<FileId>,
+    ) -> FxHashSet<FileId> {
+        let mut entry_surface: FxHashSet<FileId> = self
+            .modules
             .iter()
-            .filter(|edge| edge.symbols.iter().any(ImportedSymbol::is_ambient_star))
-            .map(|edge| edge.target)
+            .filter(|m| m.is_entry_point())
+            .map(|m| m.file_id)
             .collect();
+        self.extend_star_closure(&mut entry_surface, StarChains::Plain);
+
+        let mut targets = whole_module_targets.clone();
+        targets.extend(
+            entry_surface
+                .iter()
+                .filter_map(|file_id| self.modules.get(file_id.0 as usize))
+                .flat_map(|m| {
+                    m.re_exports
+                        .iter()
+                        .filter(|re| re.imported_name == "*" && re.exported_name != "*")
+                        .map(|re| re.source_file)
+                }),
+        );
+        self.extend_star_closure(&mut targets, StarChains::PlainAndNamespace);
+        targets
+    }
+
+    /// Extend `targets` with every module its members reach through the
+    /// selected re-export chains, transitively.
+    fn extend_star_closure(&self, targets: &mut FxHashSet<FileId>, chains: StarChains) {
         let mut stack: Vec<FileId> = targets.iter().copied().collect();
         while let Some(file_id) = stack.pop() {
             let Some(module) = self.modules.get(file_id.0 as usize) else {
                 continue;
             };
-            for re in module
-                .re_exports
-                .iter()
-                .filter(|re| re.imported_name == "*")
-            {
+            for re in module.re_exports.iter().filter(|re| chains.follows(re)) {
                 if targets.insert(re.source_file) {
                     stack.push(re.source_file);
                 }
             }
         }
-        targets
     }
 
     /// Index every edge by its target file for fast star-propagation lookups.
