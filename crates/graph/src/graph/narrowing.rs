@@ -659,12 +659,12 @@ impl ImportNamespaceUse {
 
 /// Decide which semantic namespaces the imported binding uses.
 ///
-/// `import type { x }` restricts its binding to type space. A type-only import
-/// without a binding (a re-export inside an ambient module body, an `import()`
-/// type) is erased at runtime but binds no name: nothing can narrow it to one
-/// meaning, and an ambient `export { Foo } from './impl'` forwards both
-/// `interface Foo` and `const Foo`, so it credits both namespaces (issue
-/// #2357).
+/// A type-only import credits type space: `import type { x }` narrows its
+/// binding with the `type` keyword, and a type-only import without a binding
+/// (an ambient named re-export, an `import()` type reference) stays there as
+/// well. The one exception is the ambient star form (issue #2357): `export *`
+/// inside a `declare module '...'` body forwards every export of the target in
+/// both meanings, so it credits both namespaces.
 fn desired_import_namespaces(
     sym: &ImportedSymbol,
     source_mod: Option<&&ResolvedModule>,
@@ -672,7 +672,7 @@ fn desired_import_namespaces(
     if sym.is_type_only {
         return ImportNamespaceUse {
             uses_type: true,
-            uses_value: sym.is_unbound_type_only(),
+            uses_value: sym.is_ambient_star(),
             classified: true,
         };
     }
@@ -759,7 +759,7 @@ pub(super) fn attach_symbol_reference(
                         effective_exports: ctx.effective_exports,
                         dedup: ctx.dedup,
                     };
-                    if sym.is_unbound_type_only() {
+                    if sym.is_ambient_star() {
                         mark_star_surface_referenced_at_site(&mut target_module.exports, &mut mark);
                     } else {
                         mark_all_exports_referenced_at_site(&mut target_module.exports, &mut mark);
@@ -1519,12 +1519,21 @@ mod tests {
     }
 
     #[test]
-    fn desired_import_namespaces_credits_both_lanes_without_a_binding() {
-        let unbound = unbound_type_only_symbol(ImportedName::Named("Foo".to_string()));
+    fn desired_import_namespaces_credits_both_lanes_only_for_the_ambient_star() {
+        for imported_name in [ImportedName::Namespace, ImportedName::Default] {
+            let star = unbound_type_only_symbol(imported_name.clone());
+            assert_eq!(
+                desired_import_namespaces(&star, None).namespaces(),
+                (true, true),
+                "the ambient star surface ({imported_name:?}) forwards both meanings"
+            );
+        }
+
+        let named = unbound_type_only_symbol(ImportedName::Named("Foo".to_string()));
         assert_eq!(
-            desired_import_namespaces(&unbound, None).namespaces(),
-            (true, true),
-            "an erased statement with no binding cannot be narrowed to one meaning"
+            desired_import_namespaces(&named, None).namespaces(),
+            (true, false),
+            "an ambient named re-export or an `import()` type reference stays in type space"
         );
 
         let bound = ImportedSymbol {
@@ -1670,6 +1679,27 @@ mod tests {
             lanes_of(&graph, "Foo", false),
             vec![(ReferenceKind::NamespaceImport, ExportNamespace::Value)],
             "the named surface is unchanged by the extra default import"
+        );
+    }
+
+    #[test]
+    fn attach_ref_unbound_named_type_only_import_credits_type_space_only() {
+        // `declare module 'pkg' { export { Foo } from './impl' }` (#2349) and
+        // `import('./impl').Foo` record an unbound type-only named import. It
+        // is not the star form, so it keeps its type-space credit: the
+        // interface half is referenced, the const half is not.
+        let graph =
+            ambient_star_graph(vec![ambient_import(ImportedName::Named("Foo".to_string()))]);
+
+        assert!(
+            lanes_of(&graph, "Foo", true)
+                .contains(&(ReferenceKind::NamedImport, ExportNamespace::Type)),
+            "the interface half is credited in the type namespace"
+        );
+        assert!(
+            !lanes_of(&graph, "Foo", false)
+                .contains(&(ReferenceKind::NamedImport, ExportNamespace::Value)),
+            "the const half must not be credited in the value namespace"
         );
     }
 

@@ -58,33 +58,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Star re-exports inside `declare module '...'` bodies credit every export
-  of their target without adding to the declaring file's export surface**
-  (Closes [#2357](https://github.com/fallow-rs/fallow/issues/2357)).
+- **Star re-exports inside `declare module '...'` bodies credit the full ES
+  star surface of their target without adding to the declaring file's export
+  surface** (Closes [#2357](https://github.com/fallow-rs/fallow/issues/2357)).
   `declare module 'pkg' { export * from './impl' }` and the
   `export * as ns from './impl'` form were still recorded as file-level star
   re-exports, so when the declaring `.d.ts` was an entry point every export of
   `./impl` was laundered into that entry's public surface, and when it was
   not, nothing in `./impl` was credited at all. The ambient declaration states
-  that all of `./impl` is reachable through `pkg`, so its named exports are
-  now credited directly (following `./impl`'s own `export *` chain, the
-  barrel-of-barrels shape such declarations usually point at), the declaring
-  file exposes no star re-export (visible in `inspect --file` and
-  `dead-code --trace`), and genuinely unused exports in unrelated modules keep
-  reporting. The credit follows ES star semantics: plain `export *` never
-  forwards `default`, so an otherwise unused default export of `./impl` keeps
-  reporting, while `export * as ns` exposes `ns.default` and credits it. An
-  ambient re-export is erased at runtime and binds no name, so it cannot be
-  narrowed to one meaning: a forwarded name now credits both the type and the
-  value declaration behind it (`interface User` plus `const User`, or a
-  zod-style `const User` plus `type User`). This also closes the same gap for
-  the named form `declare module 'pkg' { export { User } from './impl' }`
-  from [#2349](https://github.com/fallow-rs/fallow/issues/2349) and for
-  `import('./impl').User` type references, which credited only the type half
-  of such a pair: fewer unused-export findings for value declarations that
-  share their name with a type. Both the extraction and graph cache versions
-  were bumped, so the first run after upgrading performs one cold
-  re-analysis.
+  that all of `./impl` is reachable through `pkg`, so the two star forms now
+  credit `./impl`'s full ES star surface directly. That surface is every
+  named export of `./impl` in both the type and the value namespace (so
+  `interface User` plus `const User`, or a zod-style `const User` plus
+  `type User`, keep both halves), including names `./impl` only exposes
+  through its own `export *` and `export * as sub` chains, recursively, and
+  every export of such a `sub` namespace, `default` included, because
+  `sub.default` is reachable. Plain `export *` never forwards `default`, so an
+  otherwise unused default export of `./impl` or of one of its `export *`
+  sources keeps reporting, while `export * as ns` exposes `ns.default` and
+  credits it. The declaring file exposes no star re-export (visible in
+  `inspect --file` and `dead-code --trace`), and genuinely unused exports in
+  unrelated modules keep reporting. Every other ambient form is unchanged:
+  the named re-export from
+  [#2349](https://github.com/fallow-rs/fallow/issues/2349)
+  (`export { User } from './impl'`), explicitly type-only re-exports
+  (`export type { User } from`, `export { type User } from`,
+  `export type * from`), and `import('./impl').User` type references in
+  TypeScript and JSDoc keep crediting type space only. Both the extraction
+  and graph cache versions were bumped, so the first run after upgrading
+  performs one cold re-analysis.
 
 - **JSX member-expression tags (`<SC.Wrapper />`) now credit the referenced
   export** (Closes

@@ -2625,8 +2625,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // meanings, and a bare specifier counts as type-only package usage.
         // `export *` never forwards `default`; `export * as ns` forwards the
         // namespace object, whose `default` member is the target's default
-        // export, so that form records it as its own import.
-        if self.ambient_module_depth > 0 {
+        // export, so that form records it as its own import. `export type *`
+        // forwards type meanings only; the whole-module shape carries no type
+        // modifier, so it keeps the file-level type-only star re-export.
+        if self.ambient_module_depth > 0 && !decl.export_kind.is_type() {
             let source = decl.source.value.to_string();
             self.imports.push(ImportInfo {
                 source: source.clone(),

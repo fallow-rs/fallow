@@ -43,13 +43,15 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   named re-export inside it becomes one type-space import per specifier so the
   target keeps its export credit. A star re-export inside it (`export *` or
   `export * as ns`) becomes one type-space namespace import with an empty
-  local name, the star surface the graph credits every named target export
-  for (through the target's own `export *` chain as well, never `default`),
-  and never a file-level star re-export; the `export * as ns` form adds one
+  local name and never a file-level star re-export; the graph credits the
+  target's full ES star surface for that shape (see
+  `docs/reference/detection-internals.md`). The `export * as ns` form adds one
   type-space default import because `ns.default` reaches the target's default
-  export. Because ambient bodies are erased at runtime, a re-export from a
-  bare specifier inside one counts as type-only package usage. Exported
-  namespaces and `declare global` keep their existing behavior.
+  export. `export type *` inside the body keeps its file-level type-only star
+  re-export, because the whole-module import shape carries no type modifier.
+  Because ambient bodies are erased at runtime, a re-export from a bare
+  specifier inside one counts as type-only package usage. Exported namespaces
+  and `declare global` keep their existing behavior.
 - A namespace declared without the `export` keyword (`namespace Foo {}`,
   `declare namespace Foo {}`, legacy `module Foo {}`, dotted
   `namespace A.B.C {}`, and namespaces nested in those or in `declare global`)

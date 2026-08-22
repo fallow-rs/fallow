@@ -5525,6 +5525,41 @@ fn ambient_module_namespace_star_re_export_credits_whole_target_without_file_sur
 }
 
 #[test]
+fn ambient_module_type_only_star_re_export_keeps_file_level_shape() {
+    // `export type *` forwards type meanings only. The whole-module import
+    // shape carries no type modifier and the graph would credit the value
+    // meaning as well, so the type-only star keeps its pre-existing
+    // file-level type-only star re-export instead.
+    let info = parse(
+        "declare module 'pkg' {\n\
+           export type * from './impl';\n\
+         }\n\
+         export {};\n",
+    );
+    assert!(
+        info.imports.iter().all(|i| i.source != "./impl"),
+        "a type-only ambient star must not record the whole-module import shape: {:?}",
+        info.imports
+    );
+    let stars: Vec<_> = info
+        .re_exports
+        .iter()
+        .filter(|re| re.source == "./impl")
+        .collect();
+    assert_eq!(
+        stars.len(),
+        1,
+        "expected the file-level type-only star re-export: {:?}",
+        info.re_exports
+    );
+    assert!(
+        stars[0].is_type_only && stars[0].imported_name == "*" && stars[0].exported_name == "*",
+        "the star must stay a type-only `*` re-export: {:?}",
+        stars[0]
+    );
+}
+
+#[test]
 fn ambient_module_bare_specifier_re_exports_are_type_only_usage() {
     // Issue #2357: an ambient body is erased at runtime, so a re-export from a
     // bare specifier inside one is type-only package usage for both the named

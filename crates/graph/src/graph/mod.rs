@@ -227,17 +227,24 @@ pub struct ImportedSymbol {
 }
 
 impl ImportedSymbol {
-    /// Whether this symbol is type-only without binding a local name.
+    /// Whether this symbol is the whole-module shape of `export *` or
+    /// `export * as ns` inside a `declare module '...'` body (issue #2357):
+    /// type-only, bound to no local name, and naming the module namespace or
+    /// its `default` member (recorded for the `export * as ns` form).
     ///
-    /// A re-export inside a `declare module '...'` body and an `import()` type
-    /// record this shape: the statement is erased at runtime, so package usage
-    /// stays type-only, but no binding exists whose usage could narrow the
-    /// reference to one meaning. Such a symbol credits the target export in
-    /// both the type and the value namespace (issue #2357), unlike
-    /// `import type { x }`, which restricts the binding to type space.
+    /// The ambient body is erased at runtime, so package usage stays
+    /// type-only, but the star forwards every export of the target in both
+    /// meanings, so the graph credits the type and the value namespace. Every
+    /// other type-only symbol, bound (`import type { x }`) or not (an ambient
+    /// named re-export, an `import()` type reference), credits type space only.
     #[must_use]
-    pub(crate) fn is_unbound_type_only(&self) -> bool {
-        self.is_type_only && self.local_name.is_empty()
+    pub(crate) fn is_ambient_star(&self) -> bool {
+        self.is_type_only
+            && self.local_name.is_empty()
+            && matches!(
+                self.imported_name,
+                ImportedName::Namespace | ImportedName::Default
+            )
     }
 }
 
@@ -990,7 +997,7 @@ impl ModuleGraph {
                     symbol.import_span == reference.import_span
                         && (namespace == ExportNamespace::Type
                             || !symbol.is_type_only
-                            || symbol.is_unbound_type_only())
+                            || symbol.is_ambient_star())
                         && match &symbol.imported_name {
                             ImportedName::Named(imported) => names.contains(imported.as_str()),
                             ImportedName::Default => names.contains("default"),

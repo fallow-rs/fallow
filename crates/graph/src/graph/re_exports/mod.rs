@@ -16,7 +16,7 @@ use crate::resolve::ResolvedModule;
 use fallow_types::discover::FileId;
 
 use super::types::{ReferencePathInterner, RoutedReferenceKey};
-use super::{Edge, ModuleGraph};
+use super::{Edge, ImportedSymbol, ModuleGraph};
 
 use propagate::{
     EffectiveDeclarationRouteCache, ImportBindingUsageIndex, NamedPropagationScratch,
@@ -231,41 +231,18 @@ impl ModuleGraph {
     }
 
     /// Compute the transitive closure of `export *` source files whose every
-    /// export is credited: star sources of entry-point barrels, plus targets of
-    /// ambient-module star re-exports and their star sources.
-    ///
-    /// `export *` inside a `declare module '...'` body (issue #2357) arrives as
-    /// a type-only namespace symbol with no local binding. It states that every
-    /// name the target exposes is reachable through the declared module,
-    /// including names that only arrive through the target's own `export *`,
-    /// and per-name star propagation cannot credit those because the consumer
-    /// never imports a name. Runtime whole-module edges (dynamic-import
-    /// patterns) keep their direct-export credit only.
+    /// named export is credited: star sources of entry-point barrels, plus the
+    /// ambient star closure of `collect_ambient_star_targets`.
     fn collect_entry_star_targets(&self) -> FxHashSet<FileId> {
-        let mut entry_star_targets: FxHashSet<FileId> = self
-            .modules
-            .iter()
-            .filter(|m| m.is_entry_point())
-            .flat_map(|m| {
+        let mut entry_star_targets = self.collect_ambient_star_targets();
+        entry_star_targets.extend(self.modules.iter().filter(|m| m.is_entry_point()).flat_map(
+            |m| {
                 m.re_exports
                     .iter()
                     .filter(|re| re.exported_name == "*")
                     .map(|re| re.source_file)
-            })
-            .collect();
-        entry_star_targets.extend(
-            self.edges
-                .iter()
-                .filter(|edge| {
-                    edge.symbols.iter().any(|symbol| {
-                        matches!(
-                            symbol.imported_name,
-                            fallow_types::extract::ImportedName::Namespace
-                        ) && symbol.is_unbound_type_only()
-                    })
-                })
-                .map(|edge| edge.target),
-        );
+            },
+        ));
         let mut entry_star_stack: Vec<FileId> = entry_star_targets.iter().copied().collect();
         while let Some(file_id) = entry_star_stack.pop() {
             let idx = file_id.0 as usize;
@@ -284,6 +261,46 @@ impl ModuleGraph {
             }
         }
         entry_star_targets
+    }
+
+    /// Every module whose full ES star surface an ambient-module star
+    /// re-export reaches (issue #2357).
+    ///
+    /// `export *` and `export * as ns` inside a `declare module '...'` body
+    /// arrive as a type-only namespace symbol with no local binding. They state
+    /// that every name the target exposes is reachable through the declared
+    /// module, including names that only arrive through the target's own
+    /// `export *` and `export * as ns` chains, and per-name propagation cannot
+    /// credit those because the consumer never imports a name. The closure
+    /// therefore follows both chain forms: star propagation treats each member
+    /// like an entry barrel for its `export *` sources (named exports, never
+    /// `default`), and namespace re-export propagation credits every export of
+    /// each member's `export * as ns` sources (`default` included, because the
+    /// namespace object exposes it). Runtime whole-module edges (dynamic-import
+    /// patterns) are not seeds and keep their direct-export credit only.
+    pub(in crate::graph) fn collect_ambient_star_targets(&self) -> FxHashSet<FileId> {
+        let mut targets: FxHashSet<FileId> = self
+            .edges
+            .iter()
+            .filter(|edge| edge.symbols.iter().any(ImportedSymbol::is_ambient_star))
+            .map(|edge| edge.target)
+            .collect();
+        let mut stack: Vec<FileId> = targets.iter().copied().collect();
+        while let Some(file_id) = stack.pop() {
+            let Some(module) = self.modules.get(file_id.0 as usize) else {
+                continue;
+            };
+            for re in module
+                .re_exports
+                .iter()
+                .filter(|re| re.imported_name == "*")
+            {
+                if targets.insert(re.source_file) {
+                    stack.push(re.source_file);
+                }
+            }
+        }
+        targets
     }
 
     /// Index every edge by its target file for fast star-propagation lookups.

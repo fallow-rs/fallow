@@ -128,13 +128,13 @@ pub use store::GraphCacheStore;
 /// Bumped to 37 for issue #2357 (36 was taken by issue #2356 while this
 /// change was in review): a star re-export inside a
 /// `declare module '<specifier>'` body no longer becomes a `ReExportEdge` on
-/// the declaring module; the target's named exports are credited through a
-/// whole-module namespace edge instead, following the target's own `export *`
-/// chain, and a type-only import without a local binding now credits the
-/// value namespace as well as the type namespace. Warm 36 caches persist the
-/// old edge, the laundered re-export references, the runtime package usage
-/// for a bare-specifier ambient star, and type-only-lane credits that leave
-/// the value half of a same-name type and value pair unreferenced, and a
+/// the declaring module; the target's full ES star surface is credited
+/// through a whole-module namespace edge instead, in both the type and the
+/// value namespace and following the target's own `export *` and
+/// `export * as ns` chains. Warm 36 caches persist the old edge, the
+/// laundered re-export references, the runtime package usage for a
+/// bare-specifier ambient star, and type-lane-only credits that leave the
+/// value half of a same-name type and value pair unreferenced, and a
 /// graph-cache hit would replay all of them.
 pub const GRAPH_CACHE_VERSION: u32 = 37;
 

@@ -954,9 +954,10 @@ use crate::MemberKind;
 /// change was in review): `export *` and `export * as ns` inside
 /// `declare module '<specifier>'` bodies are recorded as type-space
 /// whole-module imports (a namespace import, plus a default import for the
-/// `export * as ns` form) instead of a file-level star re-export. Warm 274
-/// caches would keep replaying the star surface on the declaring file and
-/// would classify a bare-specifier ambient star re-export as runtime usage.
+/// `export * as ns` form) instead of a file-level star re-export; `export
+/// type *` keeps the file-level shape. Warm 274 caches would keep replaying
+/// the star surface on the declaring file and would classify a
+/// bare-specifier ambient star re-export as runtime usage.
 pub(super) const CACHE_VERSION: u32 = 275;
 
 /// Duplication token cache version. Bump when duplicate tokenization,

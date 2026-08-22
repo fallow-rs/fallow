@@ -1,4 +1,5 @@
 export * from './impl-deep';
+export * as sub from './sub';
 export const helperA = (): number => 1;
 export const helperB = (): number => 2;
 export interface Merged {
