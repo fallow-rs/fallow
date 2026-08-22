@@ -1,0 +1,19 @@
+---
+import * as StyleVars from '../shapes/na-style-vars';
+import * as ScriptVars from '../shapes/na-script-vars';
+import * as SetHtml from '../shapes/na-set-html';
+import * as WholeVars from '../shapes/na-whole-vars';
+import styles from '../shapes/na-card.module.css';
+---
+<StyleVars.Star />
+<ScriptVars.Star />
+<SetHtml.Star />
+<WholeVars.Star />
+<div class={styles.root}></div>
+<style define:vars={{ accent: StyleVars.accent }}>
+  div { color: var(--accent); }
+</style>
+<style define:vars={{ accentClass: styles.accent }}></style>
+<script define:vars={{ moon: ScriptVars.Moon }}>console.log(moon);</script>
+<script is:inline set:html={SetHtml.code}></script>
+<script define:vars={{ WholeVars }}>console.log(WholeVars);</script>

@@ -1,0 +1,25 @@
+import * as StmtWhole from '../shapes/nm-stmt-whole';
+import * as StmtAttr from '../shapes/nm-stmt-attr';
+import * as StmtDefault from '../shapes/nm-stmt-default';
+import * as StmtDotted from '../shapes/nm-stmt-dotted';
+import Callout from '../components/Callout.astro';
+
+export const all = StmtWhole;
+
+export const Demo = () => <Callout all={StmtAttr} />;
+
+export default (props) => <Callout all={StmtDefault} {...props} />;
+
+export const moon = StmtDotted.Moon;
+
+<StmtWhole.Star />
+
+<StmtAttr.Star />
+
+<StmtDefault.Star />
+
+<StmtDotted.Star />
+
+<Demo />
+
+{moon}

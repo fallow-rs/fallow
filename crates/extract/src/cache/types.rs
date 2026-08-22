@@ -958,7 +958,13 @@ use crate::MemberKind;
 /// type *` keeps the file-level shape. Warm 274 caches would keep replaying
 /// the star surface on the declaring file and would classify a
 /// bare-specifier ambient star re-export as runtime usage.
-pub(super) const CACHE_VERSION: u32 = 275;
+///
+/// Bumped to 276 for issue #2355 (275 was taken by issue #2357 while this
+/// change was in review): Astro markup and MDX bodies now record
+/// member accesses for member-expression component tags (`<SC.Card />`). Warm
+/// 275 caches lack those accesses, so namespace-imported exports rendered only
+/// in Astro or MDX markup would stay reported as unused.
+pub(super) const CACHE_VERSION: u32 = 276;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -2,12 +2,6 @@
 
 use oxc_span::Span;
 
-/// Extractor contract for container formats that feed extracted source to Oxc.
-pub trait SfcExtractor {
-    /// Return one or more source-mapped extracted fragments from `source`.
-    fn extract(&self, source: &str) -> Vec<ExtractionResult>;
-}
-
 #[derive(Debug, Clone)]
 struct FragmentMap {
     generated_start: u32,

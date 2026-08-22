@@ -1,0 +1,32 @@
+---
+import * as Alias from '../shapes/na-fm-alias';
+import * as AsCast from '../shapes/na-fm-as-cast';
+import * as CallArg from '../shapes/na-fm-call-arg';
+import * as Assign from '../shapes/na-fm-object-assign';
+import * as ArrayLit from '../shapes/na-fm-array-literal';
+import * as PropsPass from '../shapes/na-fm-props-pass';
+import * as Dotted from '../shapes/na-fm-dotted';
+import Callout from './Callout.astro';
+const N = Alias;
+const rec = AsCast as Record<string, unknown>;
+const pick = (o: object) => o;
+const picked = pick(CallArg);
+const merged = Object.assign({}, Assign);
+const list = [ArrayLit];
+const props = { all: PropsPass };
+const moon = Dotted.Moon;
+---
+<Alias.Star />
+<p>{N.Moon}</p>
+<AsCast.Star />
+<p>{rec.Moon}</p>
+<CallArg.Star />
+<p>{picked}</p>
+<Assign.Star />
+<p>{merged.Moon}</p>
+<ArrayLit.Star />
+<p>{list.length}</p>
+<PropsPass.Star />
+<Callout {...props} />
+<Dotted.Star />
+<p>{moon}</p>

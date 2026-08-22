@@ -60,6 +60,41 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   local namespace cannot merge with an exported one. The body is still walked
   so imports referenced inside it keep their credit. `export namespace Foo`
   keeps recording one export with the inner declarations as members.
+- A template pipeline that records member accesses for an import binding must
+  make narrowing safe structurally, not shape by shape. Namespace-import
+  narrowing (and CSS module, enum, and class member crediting) trusts the
+  stream: one recorded access from a non-entry consumer narrows the target to
+  the accessed members, so any mention the pipeline did not classify would
+  turn a used sibling into an `unused-export` finding. Astro and MDX apply a
+  completeness guard (`record_unexplained_mentions` in
+  `crates/extract/src/template_expression_scan.rs`): every structured pass
+  reports the byte spans it classified (Astro: component tag roots outside the
+  masked `<script>` / `<style>` / comment ranges, and `{ ... }` regions the
+  parser accepted; MDX: prose lines outside fenced code and inline code
+  spans), and every identifier-boundary mention of an import binding outside
+  those spans (a `define:vars` or `set:html` directive on a masked tag, an
+  HTML comment, an attribute string, text content, a rejected region, a code
+  sample, a template literal mistaken for a code span) records a whole-object
+  use, which keeps the graph on mark-all for entry-point and non-entry
+  consumers alike. The script side the visitor parsed (Astro frontmatter, MDX
+  `import` / `export` lines) is guarded too
+  (`record_unexplained_script_mentions`), because the visitor records a bare
+  identifier as a whole-object use only for an allow-list of positions: for
+  the bindings the graph narrows exports for (namespace imports and CSS
+  module default imports) a mention outside the import declaration is
+  explained only by a static dotted access whose `(root, member)` pair the
+  visitor recorded or by a JSX tag root, so `const N = NS`, `NS as T`,
+  `pick(NS)`, `Object.assign({}, NS)`, `[NS]`, `{ all: NS }`, and
+  `export const all = NS` record a whole-object use. Class and enum bindings
+  are not script-guarded (a type annotation or `new` expression names them
+  bare in ordinary code), so their member crediting stays at visitor parity
+  with `.tsx` on the script side while the markup guard covers them. Narrowing
+  applies only when every mention of the binding in the whole file was
+  structurally understood; otherwise every export is credited, which for the
+  dead-code crediting consumers degrades to over-credit. Member accesses also
+  feed the security secret-source index, so MDX prose records a dotted chain
+  only when its root is an import local of the file: prose never creates
+  member accesses on foreign roots such as `process.env`.
 
 ## Verification
 

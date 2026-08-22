@@ -19,8 +19,15 @@ use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
 use crate::sfc::{SfcScript, SourceRegion};
 use crate::source_map::ExtractionResult;
-use crate::visitor::ModuleInfoExtractor;
-use crate::{ImportInfo, ImportedName, ModuleInfo};
+use crate::template_expression_scan::{
+    TemplateScanMode, guarded_import_locals, import_declaration_ranges, merge_ranges,
+    narrowable_import_locals, pos_in_ranges, record_unexplained_mentions,
+    record_unexplained_script_mentions, recorded_member_pairs, scan_template_usage,
+};
+use crate::visitor::{
+    ModuleInfoExtractor, extend_member_accesses, extend_whole_object_uses, push_member_tag_accesses,
+};
+use crate::{ImportInfo, ImportedName, MemberAccess, ModuleInfo};
 use fallow_types::discover::FileId;
 
 /// Regex to extract Astro frontmatter (content between `---` delimiters at file start).
@@ -66,6 +73,15 @@ static TEMPLATE_IDENT_RE: LazyLock<regex::Regex> =
 static TEMPLATE_TAG_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"</?\s*([A-Za-z_$][A-Za-z0-9_$]*)"));
 
+/// Regex matching an opening member-expression component tag (`<SC.Card`,
+/// `<A.B.C`) and capturing its full dotted name. Opening tags only, so a paired
+/// closing tag does not double-record. The whitespace allowance after `<`
+/// mirrors `TEMPLATE_TAG_RE`, so every dotted tag whose root the used-name scan
+/// credits also feeds the member-access stream (issue #2355).
+static TEMPLATE_MEMBER_TAG_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(r"<\s*([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+)")
+});
+
 /// Regex matching the `define:vars=` directive prefix. The expression object
 /// that follows (`define:vars={{ a, b: c }}`) passes frontmatter values into a
 /// scoped `<style>` / `<script>` / element, so the identifiers it references are
@@ -74,11 +90,11 @@ static DEFINE_VARS_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"define:vars\s*="));
 
 /// Build the disjoint, ascending list of byte ranges to mask when scanning the
-/// Astro template: `<script>` / `<style>` block bodies and HTML comments. The
-/// three `find_iter` passes are concatenated (not globally sorted, and their
-/// ranges overlap when e.g. an HTML comment wraps a `<script>`), then sorted by
-/// start and merged into a non-overlapping ascending list so membership can be
-/// tested by binary search (`pos_in_masked_ranges`) instead of a linear scan
+/// Astro template: whole `<script>` / `<style>` blocks (opening tag included)
+/// and HTML comments. The three `find_iter` passes are concatenated (not
+/// globally sorted, and their ranges overlap when e.g. an HTML comment wraps a
+/// `<script>`), then merged into a non-overlapping ascending list so membership
+/// can be tested by binary search (`pos_in_ranges`) instead of a linear scan
 /// over every range per position. The merged union covers exactly the same byte
 /// positions as the raw ranges, so masking decisions are byte-identical.
 fn build_masked_ranges(template: &str) -> Vec<(usize, usize)> {
@@ -98,31 +114,7 @@ fn build_masked_ranges(template: &str) -> Vec<(usize, usize)> {
             .find_iter(template)
             .map(|m| (m.start(), m.end())),
     );
-    masked.sort_unstable_by_key(|&(start, _)| start);
-    // Merge overlapping / touching ranges so the result is disjoint and ascending,
-    // the invariant `pos_in_masked_ranges`'s binary search relies on.
-    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(masked.len());
-    for (start, end) in masked {
-        if let Some(last) = merged.last_mut()
-            && start <= last.1
-        {
-            last.1 = last.1.max(end);
-        } else {
-            merged.push((start, end));
-        }
-    }
-    merged
-}
-
-/// Test whether `pos` falls inside any masked range. `ranges` must be the disjoint
-/// ascending list produced by `build_masked_ranges`; membership is a binary search
-/// (`partition_point`) rather than a linear `.any()` scan, keeping the per-position
-/// cost logarithmic when a template carries many masked regions. Because the list
-/// is disjoint and ascending, only the last range with `start <= pos` can contain
-/// it, so a single bounds check on that candidate decides membership.
-fn pos_in_masked_ranges(ranges: &[(usize, usize)], pos: usize) -> bool {
-    let idx = ranges.partition_point(|&(start, _)| start <= pos);
-    idx > 0 && pos < ranges[idx - 1].1
+    merge_ranges(masked)
 }
 
 /// Collect the set of identifier names that appear USED in the Astro template
@@ -137,16 +129,18 @@ fn pos_in_masked_ranges(ranges: &[(usize, usize)], pos: usize) -> bool {
 /// credit a frontmatter import. The complement (a frontmatter import referenced
 /// in NEITHER the frontmatter script NOR a tag/expression position) is the
 /// genuinely-dead case the `unused-import` / `unrendered-component` arms surface.
-fn collect_astro_template_used_names(template: &str) -> FxHashSet<String> {
+/// `masked` is the template's `build_masked_ranges` result: positions inside it
+/// are skipped rather than mutating the source (mutation would corrupt
+/// multibyte UTF-8 inside a masked range).
+fn collect_astro_template_used_names(
+    template: &str,
+    masked: &[(usize, usize)],
+) -> FxHashSet<String> {
     let mut used = FxHashSet::default();
     if template.is_empty() {
         return used;
     }
-    // Byte ranges of `<script>` / `<style>` bodies and HTML comments. Positions
-    // inside any of these are skipped rather than mutating the source (mutation
-    // would corrupt multibyte UTF-8 inside a masked range).
-    let masked = build_masked_ranges(template);
-    let is_masked = |pos: usize| pos_in_masked_ranges(&masked, pos);
+    let is_masked = |pos: usize| pos_in_ranges(masked, pos);
 
     // Component tag roots.
     for cap in TEMPLATE_TAG_RE.captures_iter(template) {
@@ -259,77 +253,215 @@ fn collect_brace_expression_idents(
     }
 }
 
-/// Collect the body text of every top-level `{ ... }` expression region in the
-/// Astro markup, skipping `<script>` / `<style>` / HTML-comment ranges. Mirrors
-/// `collect_brace_expression_idents`'s scan but returns each region body verbatim
-/// (for re-parsing) instead of tokenizing identifiers. See issue #1713.
-fn collect_template_expression_regions(template: &str) -> Vec<String> {
+/// Collect the body byte range (`{` exclusive, `}` exclusive) of every
+/// top-level `{ ... }` expression region in the Astro markup, skipping
+/// `<script>` / `<style>` / HTML-comment ranges. Mirrors
+/// `collect_brace_expression_idents`'s scan but returns each region's position
+/// (for re-parsing and for the completeness guard) instead of tokenizing
+/// identifiers. See issues #1713 and #2355.
+fn collect_template_expression_regions(
+    template: &str,
+    masked: &[(usize, usize)],
+) -> Vec<(usize, usize)> {
     let mut regions = Vec::new();
     if template.is_empty() {
         return regions;
     }
-    let masked = build_masked_ranges(template);
-    let is_masked = |pos: usize| pos_in_masked_ranges(&masked, pos);
-
     let bytes = template.as_bytes();
     let len = bytes.len();
     let mut i = 0;
     while i < len {
-        if bytes[i] != b'{' || is_masked(i) {
+        if bytes[i] != b'{' || pos_in_ranges(masked, i) {
             i += 1;
             continue;
         }
         let start = i + 1;
         let region_end = brace_body_end(bytes, i);
-        if let Some(region) = template.get(start..region_end) {
-            let trimmed = region.trim();
-            if !trimmed.is_empty() {
-                regions.push(trimmed.to_string());
-            }
+        if region_end > start {
+            regions.push((start, region_end));
         }
         i = region_end.max(start);
     }
     regions
 }
 
-/// Run the member-recording visitor over each Astro template `{ ... }` expression
-/// region so `.map()` / `.forEach()` / `for...of` iteration bindings in the
-/// template body credit the element-class members the same way the frontmatter
-/// does (issue #1713). Each region is parsed as a standalone TSX expression
-/// (Astro template expressions contain JSX), visited with a fresh extractor
-/// seeded with the frontmatter's array element-type map so
-/// `bind_iterable_callback_parameter` can resolve the receiver's element class,
-/// and the re-emitted class-qualified member accesses are appended to `info`.
+/// Collect the member accesses implied by member-expression component tags in
+/// the Astro markup (`<SC.Card />` records `SC.Card`, `<A.B.C />` one access
+/// per nesting level), skipping the same `<script>` / `<style>` / HTML-comment
+/// ranges the used-name scan masks. The root credit from
+/// `collect_astro_template_used_names` keeps the import binding alive; this
+/// adds the member-level stream the JSX visitor records for `.tsx` (issue
+/// #2348), so a namespace import rendered only through dotted tags narrows to
+/// the members actually used instead of crediting nothing (entry files) or
+/// everything (non-entry files). See issue #2355.
+fn collect_template_member_tag_accesses(
+    template: &str,
+    masked: &[(usize, usize)],
+) -> Vec<MemberAccess> {
+    let mut accesses = Vec::new();
+    if template.is_empty() {
+        return accesses;
+    }
+    for cap in TEMPLATE_MEMBER_TAG_RE.captures_iter(template) {
+        if let Some(name) = cap.get(1)
+            && !pos_in_ranges(masked, name.start())
+        {
+            push_member_tag_accesses(&mut accesses, name.as_str());
+        }
+    }
+    accesses
+}
+
+/// Run the member-recording visitor over every Astro template `{ ... }`
+/// expression region and append what it records to `info`: the member accesses
+/// (`icon={SC.Moon}`, `{SC.helper()}`) and whole-object uses (`{...SC}`,
+/// `Object.keys(SC)`) the visitor records for `.tsx`, plus the class-qualified
+/// iteration credits (`{utils.map((util) => util.getter)}` resolves to
+/// `Util.getter` through the seeded frontmatter element types, issue #1713).
+/// Each region is parsed as a standalone TSX expression (Astro template
+/// expressions contain JSX) and visited by one extractor shared across the
+/// file's regions. A bare mention of a frontmatter import binding inside a
+/// parsed region (`all={SC}`) is the one shape the visitor does not record as
+/// a whole-object use, so the text scan adds it.
 ///
-/// Over-credit only: the drained accesses are span-less name pairs (`Util.getter`)
-/// that the analyze layer resolves through the frontmatter imports; they can only
-/// suppress a false `unused-class-member`, never introduce a finding. A region
-/// that fails to parse or resolves no element type contributes nothing.
-fn extend_template_expression_member_accesses(
+/// Returns the byte ranges of the regions the parser accepted. Inside those,
+/// every mention of an import binding is either a member access the visitor
+/// recorded or a whole-object use the text scan recorded, so they count as
+/// structurally understood for the completeness guard
+/// (`extend_unexplained_template_mentions`). A region the parser rejects is
+/// left out: its mentions stay unexplained and keep their bindings on the
+/// mark-all path. See issue #2355.
+fn extend_template_expression_usage(
     info: &mut ModuleInfo,
     template: &str,
+    regions: &[(usize, usize)],
     frontmatter_array_element_types: &rustc_hash::FxHashMap<String, String>,
-) {
-    if frontmatter_array_element_types.is_empty() {
-        return;
+) -> Vec<(usize, usize)> {
+    let mut parsed_regions = Vec::with_capacity(regions.len());
+    if regions.is_empty() {
+        return parsed_regions;
     }
-    for region in collect_template_expression_regions(template) {
+    let import_locals: FxHashSet<&str> = info
+        .imports
+        .iter()
+        .map(|import| import.local_name.as_str())
+        .collect();
+    let mut accesses = Vec::new();
+    let mut whole_object_uses = Vec::new();
+    let mut extractor = ModuleInfoExtractor::new();
+    extractor.seed_array_binding_element_types(frontmatter_array_element_types);
+    for &(start, end) in regions {
+        let Some(region) = template.get(start..end) else {
+            continue;
+        };
+        let region = region.trim();
+        if region.is_empty() {
+            continue;
+        }
         // Wrap as a parenthesized expression statement so the region parses as a
-        // valid TSX program. Spans are irrelevant: only span-less member accesses
-        // are drained.
+        // valid TSX program. Spans are irrelevant: only span-less name pairs are
+        // drained.
         let wrapped = format!("({region});");
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, &wrapped, SourceType::tsx()).parse();
-        if parser_return.panicked {
+        if parser_return.panicked || !parser_return.errors.is_empty() {
             continue;
         }
-        let mut extractor = ModuleInfoExtractor::new();
-        extractor.seed_array_binding_element_types(frontmatter_array_element_types);
         extractor.visit_program(&parser_return.program);
-        let mut member_accesses = std::mem::take(&mut info.member_accesses).to_vec();
-        member_accesses.extend(extractor.take_resolved_iteration_member_accesses());
-        info.member_accesses = member_accesses.into();
+        scan_template_usage(
+            region,
+            &import_locals,
+            TemplateScanMode::AstroParsedRegion,
+            &mut accesses,
+            &mut whole_object_uses,
+        );
+        parsed_regions.push((start, end));
     }
+    let (visited_accesses, visited_whole_object_uses) = extractor.take_template_expression_usage();
+    accesses.extend(visited_accesses);
+    whole_object_uses.extend(visited_whole_object_uses);
+    extend_member_accesses(info, accesses);
+    extend_whole_object_uses(info, whole_object_uses);
+    parsed_regions
+}
+
+/// Completeness guard for the template-sourced access stream (issue #2355).
+///
+/// Namespace-import (and CSS-module, enum, class member) narrowing trusts the
+/// member-access stream: one recorded access from a non-entry consumer narrows
+/// the target to the accessed members, so every mention of a binding the
+/// structured passes did not see would turn a used sibling into a finding. The
+/// structured passes cover exactly two kinds of span: component tag roots
+/// outside the masked ranges (the tag scans) and `{ ... }` regions the parser
+/// accepted (the region visitor plus the bare-mention scan). Every other
+/// mention of a frontmatter import binding in the raw template text, including
+/// the masked `<script>` / `<style>` blocks and their opening-tag directives
+/// (`define:vars={{ accent: NS.accent }}`, `set:html={NS.code}`), HTML
+/// comments, attribute strings, text content, and regions the parser rejected,
+/// records a whole-object use so the graph keeps mark-all crediting for that
+/// binding. Together with `extend_unexplained_frontmatter_mentions` this
+/// covers the whole file, so narrowing applies only when every mention was
+/// structurally understood; any unmodelled shape degrades to over-credit.
+fn extend_unexplained_template_mentions(
+    info: &mut ModuleInfo,
+    template: &str,
+    masked: &[(usize, usize)],
+    parsed_regions: Vec<(usize, usize)>,
+) {
+    let guarded = guarded_import_locals(&info.imports);
+    if guarded.is_empty() || template.is_empty() {
+        return;
+    }
+    let mut explained = parsed_regions;
+    explained.extend(
+        TEMPLATE_TAG_RE
+            .captures_iter(template)
+            .filter_map(|cap| cap.get(1))
+            .filter(|root| !pos_in_ranges(masked, root.start()))
+            .map(|root| (root.start(), root.end())),
+    );
+    let explained = merge_ranges(explained);
+    let mut whole_object_uses = Vec::new();
+    record_unexplained_mentions(template, &guarded, &explained, &mut whole_object_uses);
+    extend_whole_object_uses(info, whole_object_uses);
+}
+
+/// Script-side completeness guard (issue #2355), the frontmatter half of
+/// `extend_unexplained_template_mentions`. The visitor parsed the frontmatter,
+/// but it records a bare import binding as a whole-object use only for an
+/// allow-list of positions, so an alias (`const N = NS`), a cast (`NS as T`),
+/// a call argument (`pick(NS)`), `Object.assign({}, NS)`, an array literal
+/// (`[NS]`), or a props object (`{ all: NS }`) would leave the binding free to
+/// narrow to its dotted accesses and report the members reached through the
+/// copy. Every mention of a namespace or CSS-module binding (the bindings the
+/// graph narrows exports for) in the frontmatter outside its own import
+/// declaration that is not a dotted access the visitor recorded therefore
+/// records a whole-object use; class and enum bindings keep the visitor's
+/// member crediting, since a type annotation or `new` expression names them
+/// bare in ordinary code. Runs after the template passes so the recorded pairs
+/// cover the whole file.
+fn extend_unexplained_frontmatter_mentions(info: &mut ModuleInfo, frontmatter: Option<&SfcScript>) {
+    let Some(script) = frontmatter else {
+        return;
+    };
+    let mut whole_object_uses = Vec::new();
+    {
+        let guarded = narrowable_import_locals(&info.imports);
+        if guarded.is_empty() || script.body.is_empty() {
+            return;
+        }
+        let recorded = recorded_member_pairs(&info.member_accesses, &guarded);
+        let excluded = import_declaration_ranges(&info.imports);
+        record_unexplained_script_mentions(
+            &script.body,
+            script.byte_offset,
+            &guarded,
+            &excluded,
+            &recorded,
+            &mut whole_object_uses,
+        );
+    }
+    extend_whole_object_uses(info, whole_object_uses);
 }
 
 /// Extract frontmatter from an Astro component.
@@ -469,11 +601,14 @@ pub(crate) fn parse_astro_to_module(
         .as_ref()
         .map_or(0, |script| script.byte_offset + script.body.len());
     let template = source.get(template_offset..).unwrap_or("");
+    // `<script>` / `<style>` blocks and HTML comments, shared by every template
+    // scan below.
+    let masked = build_masked_ranges(template);
 
     // Names used in the template markup (rendered components, expression
     // bindings). Passed to the frontmatter semantic pass so a template-only-used
     // import is not falsely classified as an unused binding.
-    let template_used = collect_astro_template_used_names(template);
+    let template_used = collect_astro_template_used_names(template, &masked);
 
     let frontmatter_offset = frontmatter.as_ref().map_or(0, |script| script.byte_offset);
 
@@ -499,17 +634,25 @@ pub(crate) fn parse_astro_to_module(
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
 
-    // Run the member-recording visitor over the Astro template `{...}` expression
-    // regions so `.map()` / `.forEach()` / `for...of` iteration-binding member
-    // accesses in the TEMPLATE body are credited the same as the frontmatter
-    // (issue #1713). Over-credit only: it can only re-emit a class-qualified
-    // member access that later suppresses a false `unused-class-member`, never a
-    // new finding.
-    extend_template_expression_member_accesses(
+    // Member-expression component tags (`<SC.Card />`) feed the same
+    // member-access stream namespace narrowing reads for `.tsx` (issue #2355).
+    extend_member_accesses(
+        &mut info,
+        collect_template_member_tag_accesses(template, &masked),
+    );
+    // The `{ ... }` expression regions add the expression accesses (issue #2355)
+    // and carry the iteration credits of issue #1713; the pass is unconditional
+    // because narrowing on a partial stream turns used members into findings.
+    let parsed_regions = extend_template_expression_usage(
         &mut info,
         template,
+        &collect_template_expression_regions(template, &masked),
         &frontmatter_array_element_types,
     );
+    // Every mention the two passes above did not classify keeps its binding on
+    // the mark-all path (issue #2355), in the markup and in the frontmatter.
+    extend_unexplained_template_mentions(&mut info, template, &masked, parsed_regions);
+    extend_unexplained_frontmatter_mentions(&mut info, frontmatter.as_ref());
     // Astro-only: thread the frontmatter binding usage onto the module so
     // `referenced_import_bindings` (derived from `imports` minus
     // `unused_import_bindings` in `release_resolution_payload`) reflects ACTUAL
@@ -1243,7 +1386,7 @@ mod tests {
         );
         for pos in 0..template.len() {
             assert_eq!(
-                pos_in_masked_ranges(&merged, pos),
+                pos_in_ranges(&merged, pos),
                 linear(pos),
                 "masking decision differs at byte {pos}"
             );
@@ -1252,7 +1395,8 @@ mod tests {
 
     #[test]
     fn astro_template_used_names_masks_comments_credits_braces() {
-        let used = collect_astro_template_used_names(MASKED_MIX_TEMPLATE);
+        let masked = build_masked_ranges(MASKED_MIX_TEMPLATE);
+        let used = collect_astro_template_used_names(MASKED_MIX_TEMPLATE, &masked);
 
         // Credited: tag roots + brace-expression identifiers outside masked regions.
         for name in ["Header", "Footer", "fmt", "x", "items", "map", "i", "label"] {
@@ -1270,5 +1414,358 @@ mod tests {
                 "expected {name} to stay masked, got {used:?}"
             );
         }
+    }
+
+    fn template_member_accesses(source: &str) -> Vec<(String, String)> {
+        parse_astro_to_module(FileId(0), source, 0, false)
+            .member_accesses
+            .iter()
+            .map(|access| (access.object.clone(), access.member.clone()))
+            .collect()
+    }
+
+    /// Issue #2355: a member-expression component tag in the markup
+    /// (`<SC.Card />`) records the same `SC.Card` access the JSX visitor records
+    /// for `.tsx`, while the root credit that keeps `SC` a used import binding
+    /// stays in place.
+    #[test]
+    fn astro_template_member_tag_records_member_access() {
+        let source = "---\nimport * as SC from './style';\n---\n<SC.Card />\n";
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "SC" && access.member == "Card"),
+            "<SC.Card /> should record SC.Card; got {:?}",
+            info.member_accesses
+        );
+        assert!(
+            !info.unused_import_bindings.iter().any(|b| b == "SC"),
+            "the dotted tag root must still credit the SC import binding; got {:?}",
+            info.unused_import_bindings
+        );
+    }
+
+    /// Issue #2355: `<A.B.C />` records one access per nesting level, matching
+    /// the plain-expression walk of `A.B.C` (`{A, B}` and `{A.B, C}`).
+    #[test]
+    fn astro_template_nested_member_tag_records_each_level() {
+        let accesses = template_member_accesses(
+            "---\nimport * as A from './widgets';\n---\n<A.B.C label=\"x\" />\n",
+        );
+        assert!(
+            accesses.contains(&("A".to_string(), "B".to_string())),
+            "<A.B.C /> should record A.B for namespace crediting; got {accesses:?}"
+        );
+        assert!(
+            accesses.contains(&("A.B".to_string(), "C".to_string())),
+            "<A.B.C /> should record the full A.B.C path; got {accesses:?}"
+        );
+    }
+
+    /// Issue #2355: only the opening tag records, so a paired
+    /// `<SC.Layout>..</SC.Layout>` yields exactly one `SC.Layout` access.
+    #[test]
+    fn astro_template_paired_member_tag_records_single_access() {
+        let accesses = template_member_accesses(
+            "---\nimport * as SC from './style';\n---\n<SC.Layout>\n  <p>text</p>\n</SC.Layout>\n",
+        );
+        let count = accesses
+            .iter()
+            .filter(|(object, member)| object == "SC" && member == "Layout")
+            .count();
+        assert_eq!(
+            count, 1,
+            "paired tags should record exactly one SC.Layout access; got {accesses:?}"
+        );
+    }
+
+    fn template_whole_object_uses(source: &str) -> Vec<String> {
+        parse_astro_to_module(FileId(0), source, 0, false)
+            .whole_object_uses
+            .to_vec()
+    }
+
+    /// Issue #2355: member tags inside masked ranges (HTML comments,
+    /// `<script>` and `<style>` bodies) never record an access, mirroring the
+    /// root-credit masking, but the mention is unexplained, so the binding
+    /// keeps its mark-all crediting instead of narrowing to the visible tag.
+    #[test]
+    fn astro_template_member_tag_in_masked_region_records_no_access_but_keeps_mark_all() {
+        let source = "---\nimport * as SC from './style';\n---\n\
+             <!-- <SC.Commented /> -->\n\
+             <script>const x = '<SC.Scripted />';</script>\n\
+             <style>/* <SC.Styled /> */</style>\n\
+             <SC.Visible />\n";
+        let accesses = template_member_accesses(source);
+        assert_eq!(
+            accesses,
+            vec![("SC".to_string(), "Visible".to_string())],
+            "only the unmasked member tag should record; got {accesses:?}"
+        );
+        assert_eq!(
+            template_whole_object_uses(source),
+            vec!["SC".to_string()],
+            "a masked mention must keep SC on the mark-all path"
+        );
+    }
+
+    /// Issue #2355: a namespace member read inside a template expression
+    /// (attribute value or text expression) records the same access a dotted
+    /// tag does, so a component mixing `<NS.Star />` with `icon={NS.Moon}` and
+    /// `{NS.Moon()}` narrows to a complete member set.
+    #[test]
+    fn astro_template_expression_member_access_records() {
+        let accesses = template_member_accesses(
+            "---\nimport * as NS from './icons';\nimport Callout from './Callout.astro';\n---\n\
+             <NS.Star />\n<Callout icon={NS.Moon} />\n<p>{NS.Sun()}</p>\n",
+        );
+        for member in ["Star", "Moon", "Sun"] {
+            assert!(
+                accesses.contains(&("NS".to_string(), member.to_string())),
+                "NS.{member} should be recorded from the markup; got {accesses:?}"
+            );
+        }
+    }
+
+    /// Issue #2355: passing the namespace object whole through an expression
+    /// (`all={NS}`) records a whole-object use so narrowing falls back to
+    /// crediting every export, while a bare identifier that is not an import
+    /// binding records nothing.
+    #[test]
+    fn astro_template_whole_namespace_pass_records_whole_object_use() {
+        let info = parse_astro_to_module(
+            FileId(0),
+            "---\nimport * as NS from './icons';\nimport Callout from './Callout.astro';\n\
+             const local = 1;\n---\n<NS.Star />\n<Callout all={NS} count={local} />\n",
+            0,
+            false,
+        );
+        assert!(
+            info.whole_object_uses.iter().any(|name| name == "NS"),
+            "all={{NS}} should record a whole-object use; got {:?}",
+            info.whole_object_uses
+        );
+        assert!(
+            !info.whole_object_uses.iter().any(|name| name == "local"),
+            "a frontmatter local is not an import binding; got {:?}",
+            info.whole_object_uses
+        );
+    }
+
+    /// Issue #2355: a member tag nested inside an expression region
+    /// (`{flag && <EX.Cond />}`) is seen by both the masking-aware tag scan and
+    /// the region visitor, and still records once.
+    #[test]
+    fn astro_template_member_tag_inside_expression_records_once() {
+        let accesses = template_member_accesses(
+            "---\nimport * as EX from './ex';\nconst flag = true;\n---\n{flag && <EX.Cond />}\n",
+        );
+        let count = accesses
+            .iter()
+            .filter(|(object, member)| object == "EX" && member == "Cond")
+            .count();
+        assert_eq!(
+            count, 1,
+            "a tag inside an expression region should record exactly once; got {accesses:?}"
+        );
+    }
+
+    /// Issue #2355: a parsed expression region is read with the visitor's
+    /// expression semantics, so a dotted name inside a string literal is not an
+    /// access, while a reflective whole-object use (`Object.keys(NS)`) records
+    /// the same whole-object use it records for `.tsx`.
+    #[test]
+    fn astro_template_parsed_expression_uses_visitor_semantics() {
+        let info = parse_astro_to_module(
+            FileId(0),
+            "---\nimport * as NS from './icons';\n---\n\
+             <NS.Star />\n<p>{\"NS.Ghost\"}</p>\n<p>{Object.keys(NS).length}</p>\n",
+            0,
+            false,
+        );
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "NS" && access.member == "Ghost"),
+            "a string literal is not a member access; got {:?}",
+            info.member_accesses
+        );
+        assert!(
+            info.whole_object_uses.iter().any(|name| name == "NS"),
+            "Object.keys(NS) should record a whole-object use; got {:?}",
+            info.whole_object_uses
+        );
+    }
+
+    /// Issue #2355: a region the visitor cannot parse cleanly (`{NS.Moon(}`)
+    /// is not structurally understood, so its mention keeps the binding on the
+    /// mark-all path and narrowing never runs on a partial view.
+    #[test]
+    fn astro_template_unparsed_expression_region_keeps_binding_on_mark_all() {
+        let source = "---\nimport * as NS from './icons';\n---\n<NS.Star />\n<p>{NS.Moon(}</p>\n";
+        let accesses = template_member_accesses(source);
+        assert!(
+            !accesses.contains(&("NS".to_string(), "Moon".to_string())),
+            "an unparsed region records no access; got {accesses:?}"
+        );
+        assert_eq!(
+            template_whole_object_uses(source),
+            vec!["NS".to_string()],
+            "an unparsed region must keep NS on the mark-all path"
+        );
+    }
+
+    /// Issue #2355 completeness guard: `{ ... }` expressions on the opening tag
+    /// of a masked `<style>` / `<script>` block (`define:vars`, `set:html`)
+    /// never reach the region visitor, so the binding they mention must keep
+    /// its mark-all crediting rather than narrow to the dotted tag. The same
+    /// holds for a CSS module default import read through `define:vars`.
+    #[test]
+    fn astro_template_masked_tag_directive_mention_keeps_binding_on_mark_all() {
+        let source = "---\n\
+             import * as SV from './sv';\nimport * as SD from './sd';\n\
+             import * as SH from './sh';\nimport * as SW from './sw';\n\
+             import styles from './card.module.css';\n\
+             ---\n\
+             <SV.Star /><SD.Star /><SH.Star /><SW.Star />\n\
+             <div class={styles.root}></div>\n\
+             <style define:vars={{ accent: SV.accent }}>div { color: var(--accent); }</style>\n\
+             <script define:vars={{ moon: SD.Moon }}>console.log(moon);</script>\n\
+             <script is:inline set:html={SH.code}></script>\n\
+             <script define:vars={{ SW }}>console.log(SW);</script>\n\
+             <style define:vars={{ spare: styles.spare }}></style>\n";
+        let accesses = template_member_accesses(source);
+        for root in ["SV", "SD", "SH", "SW"] {
+            assert!(
+                accesses.contains(&(root.to_string(), "Star".to_string())),
+                "{root}.Star should still record from the dotted tag; got {accesses:?}"
+            );
+        }
+        assert!(
+            accesses.contains(&("styles".to_string(), "root".to_string())),
+            "styles.root should record from the markup expression; got {accesses:?}"
+        );
+        let mut whole = template_whole_object_uses(source);
+        whole.sort();
+        assert_eq!(
+            whole,
+            vec![
+                "SD".to_string(),
+                "SH".to_string(),
+                "SV".to_string(),
+                "SW".to_string(),
+                "styles".to_string(),
+            ],
+            "every binding mentioned on a masked opening tag must keep mark-all"
+        );
+    }
+
+    /// Issue #2355 completeness guard: mentions in an HTML comment, in text
+    /// content, in an attribute string, and in a `<script>` body are outside
+    /// every structured span, so each keeps its binding on the mark-all path.
+    #[test]
+    fn astro_template_unstructured_mention_keeps_binding_on_mark_all() {
+        let source = "---\n\
+             import * as CM from './cm';\nimport * as TX from './tx';\n\
+             import * as AT from './at';\nimport * as SB from './sb';\n\
+             ---\n\
+             <CM.Star /><TX.Star /><AT.Star /><SB.Star />\n\
+             <!-- {CM.Moon} -->\n\
+             <p>see TX.Moon for details</p>\n\
+             <div data-icon=\"AT.Moon\"></div>\n\
+             <script>SB.Moon();</script>\n";
+        let mut whole = template_whole_object_uses(source);
+        whole.sort();
+        assert_eq!(
+            whole,
+            vec![
+                "AT".to_string(),
+                "CM".to_string(),
+                "SB".to_string(),
+                "TX".to_string(),
+            ],
+            "got {whole:?}"
+        );
+    }
+
+    /// Issue #2355 precision: when every mention of a binding sits in a tag
+    /// root or a parsed expression region, no whole-object use is recorded and
+    /// narrowing stays precise. Paired tags, a dotted tag nested in an
+    /// expression, attribute and text expressions, a template literal inside an
+    /// expression, and a rendered default import all count as understood.
+    #[test]
+    fn astro_template_fully_understood_mentions_record_no_whole_object_use() {
+        let source = "---\n\
+             import * as NS from './icons';\nimport Card from './Card.astro';\n\
+             import styles from './card.module.css';\nconst flag = true;\n\
+             ---\n\
+             <NS.Star />\n<NS.Moon>\n  <Card icon={NS.Sun} class={styles.root} />\n</NS.Moon>\n\
+             {flag && <NS.Cond />}\n<p>{NS.helper()}</p>\n<p class={`x ${styles.spare}`}>{`${NS.Tpl}`}</p>\n";
+        let whole = template_whole_object_uses(source);
+        assert!(
+            whole.is_empty(),
+            "fully understood mentions must not record a whole-object use; got {whole:?}"
+        );
+        let accesses = template_member_accesses(source);
+        for member in ["Star", "Moon", "Sun", "Cond", "helper", "Tpl"] {
+            assert!(
+                accesses.contains(&("NS".to_string(), member.to_string())),
+                "NS.{member} should be recorded; got {accesses:?}"
+            );
+        }
+        for class in ["root", "spare"] {
+            assert!(
+                accesses.contains(&("styles".to_string(), class.to_string())),
+                "styles.{class} should be recorded; got {accesses:?}"
+            );
+        }
+    }
+
+    /// Issue #2355 script guard: a frontmatter mention of a namespace (or a
+    /// CSS module) the visitor does not record as a whole-object use, such as
+    /// an alias, a cast, a call argument, `Object.assign`, an array literal,
+    /// or a props object, keeps the binding on the mark-all path, while a
+    /// dotted-only frontmatter use (`const moon = FD.Moon`) records no
+    /// whole-object use and stays precise. A class named in a type annotation
+    /// and a `new` expression is not guarded: its members keep the visitor's
+    /// crediting. A binding the visitor already records whole
+    /// (`Object.keys(AL)`) is recorded once, not once per guard.
+    #[test]
+    fn astro_frontmatter_bare_mention_keeps_narrowable_binding_on_mark_all() {
+        let source = "---\n\
+             import * as AL from './al';\nimport * as AC from './ac';\n\
+             import * as CA from './ca';\nimport * as OA from './oa';\n\
+             import * as AR from './ar';\nimport * as PP from './pp';\n\
+             import * as FD from './fd';\nimport styles from './card.module.css';\n\
+             import { Util } from './util';\nimport Callout from './Callout.astro';\n\
+             const N = AL;\nconst keys = Object.keys(AL);\n\
+             const rec = AC as Record<string, unknown>;\n\
+             const pick = (o: object) => o;\nconst picked = pick(CA);\n\
+             const merged = Object.assign({}, OA);\n\
+             const list = [AR];\n\
+             const props = { all: PP, classes: styles };\n\
+             const moon = FD.Moon;\n\
+             const util: Util = new Util();\nconst value = util.getter;\n\
+             ---\n\
+             <AL.Star /><AC.Star /><CA.Star /><OA.Star /><AR.Star /><PP.Star /><FD.Star />\n\
+             <p class={styles.root}>{N.Moon}{keys.length}{rec.Moon}{picked}{merged.Moon}{list.length}{moon}{value}</p>\n\
+             <Callout {...props} />\n";
+        let mut whole = template_whole_object_uses(source);
+        whole.sort();
+        assert_eq!(
+            whole,
+            vec!["AC", "AL", "AR", "CA", "OA", "PP", "styles"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+            "every bare frontmatter mention of a narrowable binding must keep it on mark-all, once"
+        );
+        let accesses = template_member_accesses(source);
+        assert!(
+            accesses.contains(&("FD".to_string(), "Moon".to_string())),
+            "the dotted-only frontmatter access should be recorded; got {accesses:?}"
+        );
     }
 }

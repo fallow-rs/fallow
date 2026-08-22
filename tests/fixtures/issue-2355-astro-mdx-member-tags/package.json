@@ -1,0 +1,7 @@
+{
+  "name": "issue-2355-astro-mdx-member-tags-fixture",
+  "private": true,
+  "dependencies": {
+    "astro": "^4.0.0"
+  }
+}

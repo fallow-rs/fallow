@@ -1703,6 +1703,111 @@ mod tests {
         );
     }
 
+    /// Issue #2355: the template completeness guard records a whole-object use
+    /// for any binding mention it could not classify. On an entry-point
+    /// consumer that must still mean mark-all: the zero-access branch (an entry
+    /// file whose namespace import has no recorded access credits nothing) is
+    /// reserved for the case with no whole-object use either.
+    #[test]
+    fn attach_ref_namespace_whole_object_on_entry_point_marks_all_not_nothing() {
+        fn build(whole_object: bool) -> ModuleGraph {
+            let files = vec![
+                DiscoveredFile {
+                    id: FileId(0),
+                    path: std::path::PathBuf::from("/project/entry.ts"),
+                    size_bytes: 100,
+                },
+                DiscoveredFile {
+                    id: FileId(1),
+                    path: std::path::PathBuf::from("/project/utils.ts"),
+                    size_bytes: 50,
+                },
+            ];
+            let entry_points = vec![fallow_types::discover::EntryPoint {
+                path: std::path::PathBuf::from("/project/entry.ts"),
+                source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+            }];
+            let whole_object_uses: Vec<String> = if whole_object {
+                vec!["utils".to_string()]
+            } else {
+                vec![]
+            };
+            let resolved_modules = vec![
+                ResolvedModule {
+                    file_id: FileId(0),
+                    path: std::path::PathBuf::from("/project/entry.ts"),
+                    resolved_imports: vec![ResolvedImport {
+                        info: fallow_types::extract::ImportInfo {
+                            source: "./utils".to_string(),
+                            imported_name: ImportedName::Namespace,
+                            local_name: "utils".to_string(),
+                            is_type_only: false,
+                            from_style: false,
+                            span: oxc_span::Span::new(0, 10),
+                            source_span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(1)),
+                    }],
+                    whole_object_uses: whole_object_uses.into(),
+                    ..Default::default()
+                },
+                ResolvedModule {
+                    file_id: FileId(1),
+                    path: std::path::PathBuf::from("/project/utils.ts"),
+                    exports: vec![
+                        fallow_types::extract::ExportInfo {
+                            name: ExportName::Named("foo".to_string()),
+                            local_name: Some("foo".to_string()),
+                            is_type_only: false,
+                            visibility: VisibilityTag::None,
+                            expected_unused_reason: None,
+                            span: oxc_span::Span::new(0, 20),
+                            members: vec![],
+                            is_side_effect_used: false,
+                            super_class: None,
+                        },
+                        fallow_types::extract::ExportInfo {
+                            name: ExportName::Named("bar".to_string()),
+                            local_name: Some("bar".to_string()),
+                            is_type_only: false,
+                            visibility: VisibilityTag::None,
+                            expected_unused_reason: None,
+                            span: oxc_span::Span::new(25, 45),
+                            members: vec![],
+                            is_side_effect_used: false,
+                            super_class: None,
+                        },
+                    ]
+                    .into(),
+                    ..Default::default()
+                },
+            ];
+            ModuleGraph::build(&resolved_modules, &entry_points, &files)
+        }
+
+        let graph = build(true);
+        assert!(
+            graph.entry_points.contains(&FileId(0)),
+            "the consumer must be an entry point for this test to mean anything"
+        );
+        for export in &graph.modules[1].exports {
+            assert!(
+                !export.references.is_empty(),
+                "{} should be referenced when an entry-point consumer uses the namespace whole",
+                export.name
+            );
+        }
+
+        let graph = build(false);
+        for export in &graph.modules[1].exports {
+            assert!(
+                export.references.is_empty(),
+                "{} should stay unreferenced when an entry-point consumer records no access",
+                export.name
+            );
+        }
+    }
+
     #[test]
     fn attach_ref_css_module_narrows_to_member_accesses() {
         let files = vec![

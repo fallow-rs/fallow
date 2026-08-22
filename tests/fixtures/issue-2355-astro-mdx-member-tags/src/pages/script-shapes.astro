@@ -1,0 +1,32 @@
+---
+import * as Alias from '../shapes/ea-fm-alias';
+import * as AsCast from '../shapes/ea-fm-as-cast';
+import * as CallArg from '../shapes/ea-fm-call-arg';
+import * as Assign from '../shapes/ea-fm-object-assign';
+import * as ArrayLit from '../shapes/ea-fm-array-literal';
+import * as PropsPass from '../shapes/ea-fm-props-pass';
+import * as Dotted from '../shapes/ea-fm-dotted';
+import Callout from '../components/Callout.astro';
+const N = Alias;
+const rec = AsCast as Record<string, unknown>;
+const pick = (o: object) => o;
+const picked = pick(CallArg);
+const merged = Object.assign({}, Assign);
+const list = [ArrayLit];
+const props = { all: PropsPass };
+const moon = Dotted.Moon;
+---
+<Alias.Star />
+<p>{N.Moon}</p>
+<AsCast.Star />
+<p>{rec.Moon}</p>
+<CallArg.Star />
+<p>{picked}</p>
+<Assign.Star />
+<p>{merged.Moon}</p>
+<ArrayLit.Star />
+<p>{list.length}</p>
+<PropsPass.Star />
+<Callout {...props} />
+<Dotted.Star />
+<p>{moon}</p>

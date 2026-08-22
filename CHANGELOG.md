@@ -92,6 +92,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the extraction and graph cache versions were bumped, so the first run after
   upgrading performs one cold re-analysis.
 
+- **Member-expression component tags in Astro markup and MDX bodies
+  (`<SC.Card />`) now credit the referenced export** (Closes
+  [#2355](https://github.com/fallow-rs/fallow/issues/2355)). The Astro
+  template scan credited only the tag root, and the MDX extractor read only
+  `import` / `export` lines, so a namespace import rendered exclusively through
+  a dotted tag in `.astro` or `.mdx` markup kept its exports reported as
+  unused, and in entry-point pages every sibling export of the namespace
+  target was falsely flagged. Astro now records dotted tags from the markup
+  and runs every `{ ... }` expression region the parser accepts through the
+  same member-recording visitor `.tsx` uses (`icon={SC.Moon}`,
+  `{SC.helper()}`, `Object.keys(SC)`); MDX records dotted tags and dotted
+  chains from prose lines. Narrowing then applies under one structural
+  guarantee for Astro and MDX consumers: a namespace import (or a CSS module
+  default import, the other binding whose exports the graph narrows by member
+  access) narrows to the recorded members only when every mention of the
+  binding in the whole file was structurally understood: in Astro markup a
+  component tag root or a parsed `{ ... }` expression region, in MDX a prose
+  line outside code, and in the Astro frontmatter or on an MDX `import` /
+  `export` line a static dotted access the visitor recorded or a JSX tag root.
+  Every other mention records a whole-object use that keeps every export
+  credited, for entry-point pages as well: a `define:vars` or `set:html`
+  directive on a `<style>` / `<script>` tag, an HTML comment, text content, an
+  attribute string, an expression the parser rejects, an MDX fenced code block
+  or inline code span, a template literal the MDX line scanner cannot tell
+  apart from a code span, and a script-side alias, cast, call argument,
+  `Object.assign`, array or object literal element, or JSX attribute value
+  (`const N = NS`, `pick(NS)`, `export const all = NS`,
+  `<Callout all={NS} />`). Behavior change: a namespace import in a non-entry
+  Astro or MDX consumer whose every mention is a dotted tag, a parsed
+  expression, or a recorded dotted script access now narrows to the members
+  actually accessed instead of marking every export used, so genuinely unused
+  siblings surface for the first time; every other shape keeps the previous
+  mark-all crediting, which can hide an unused sibling but never reports a
+  used one. Astro expression accesses also reach the consumers that already
+  read frontmatter accesses (CSS module default-import narrowing, enum and
+  class member crediting), matching what `.tsx` records; the markup guard
+  covers those bindings too, so an enum or class mentioned in an HTML comment,
+  text content, or an attribute string of an Astro or MDX template credits
+  every member. MDX prose records dotted chains only for import locals of the
+  file, so a documentation sentence naming `process.env.API_KEY` never makes
+  the MDX module a secret source for `fallow security`. Both the extraction
+  and graph cache versions were bumped; the first run after upgrading performs
+  one cold re-analysis.
+
 - **JSX member-expression tags (`<SC.Wrapper />`) now credit the referenced
   export** (Closes
   [#2348](https://github.com/fallow-rs/fallow/issues/2348)). The syntactic

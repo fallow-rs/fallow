@@ -1,0 +1,23 @@
+import * as MdAttr from '../components/md-attr-icons';
+import * as MdCall from '../components/md-call-icons';
+import * as MdWhole from '../components/md-whole-icons';
+import * as MdMulti from '../components/md-multi-icons';
+import Callout from '../components/Callout.astro';
+
+<MdAttr.Star />
+
+<Callout icon={MdAttr.Moon}>attribute expression</Callout>
+
+<MdCall.Star />
+
+{MdCall.Moon()}
+
+<MdWhole.Star />
+
+<Callout all={MdWhole}>whole-object pass</Callout>
+
+<MdMulti.Star />
+
+{
+  MdMulti.Moon()
+}

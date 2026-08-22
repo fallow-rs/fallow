@@ -898,29 +898,27 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Run the bound-member resolution finalize and take the member accesses that
-    /// resolved onto a SEEDED element class. For the Astro template-expression
-    /// pass (issue #1713): a fresh extractor seeded with the frontmatter element
-    /// types visits the template `{...}` expression regions,
-    /// `bind_iterable_callback_parameter` types each `.map((util) => ...)` callback
-    /// param to its element class during the walk, and `resolve_bound_member_accesses`
-    /// re-emits the class-qualified access (`Util.getter`). This returns ONLY those
-    /// class-qualified accesses (object == a seeded element-class name), dropping
-    /// the raw `util.getter` / `utils.map` noise so nothing but the intended
-    /// element-class credit reaches the module. Accesses are span-less name pairs,
-    /// so no un-remapped template-region span ever leaks into the module.
-    pub(crate) fn take_resolved_iteration_member_accesses(&mut self) -> Vec<MemberAccess> {
+    /// Run the bound-member resolution finalize and take every member access and
+    /// whole-object use this extractor recorded. For the Astro template-expression
+    /// pass: a fresh extractor seeded with the frontmatter element types visits
+    /// the template `{...}` expression regions, `bind_iterable_callback_parameter`
+    /// types each `.map((util) => ...)` callback param to its element class during
+    /// the walk, and `resolve_bound_member_accesses` re-emits the class-qualified
+    /// access (`Util.getter`, issue #1713). The raw accesses (`NS.Moon`,
+    /// `utils.map`) are kept as well: namespace-import narrowing is only sound
+    /// when the stream holds every access of a binding, not just the tagged ones
+    /// (issue #2355), and they are the same pairs the visitor records for `.tsx`.
+    /// Accesses are span-less name pairs, so no un-remapped template-region span
+    /// ever leaks into the module, and `this@<id>` qualifiers are stripped exactly
+    /// as `finalize_resolution_phase` does before any spelling is emitted.
+    pub(crate) fn take_template_expression_usage(&mut self) -> (Vec<MemberAccess>, Vec<String>) {
         self.resolve_typed_destructure_bindings();
         self.resolve_bound_member_accesses();
-        let element_classes: FxHashSet<&str> = self
-            .array_binding_element_types
-            .values()
-            .map(String::as_str)
-            .collect();
-        self.member_accesses
-            .drain(..)
-            .filter(|access| element_classes.contains(access.object.as_str()))
-            .collect()
+        self.strip_this_scope_qualifiers();
+        (
+            std::mem::take(&mut self.member_accesses),
+            std::mem::take(&mut self.whole_object_uses),
+        )
     }
 
     /// Build the class-scoped `binding_target_names` key for a `this.<suffix>`
@@ -2957,6 +2955,69 @@ fn jsx_member_object_name(object: &JSXMemberExpressionObject<'_>) -> Option<Stri
             inner.property.name
         )),
     }
+}
+
+/// Record the member accesses a dotted component tag name implies, one per
+/// nesting level (`A.B.C` records `{A.B, C}` then `{A, B}`), for template
+/// pipelines that scan markup as text instead of visiting a JSX AST (Astro
+/// markup, MDX bodies; issue #2355). This is the text counterpart of
+/// `record_jsx_member_tag_accesses`, so namespace-import narrowing sees the
+/// same stream from every pipeline. A name without a dot records nothing.
+pub(crate) fn push_member_tag_accesses(accesses: &mut Vec<MemberAccess>, dotted_tag: &str) {
+    let mut end = dotted_tag.len();
+    while let Some(dot) = dotted_tag[..end].rfind('.') {
+        let object = &dotted_tag[..dot];
+        let member = &dotted_tag[dot + 1..end];
+        if object.is_empty() || member.is_empty() {
+            return;
+        }
+        accesses.push(MemberAccess {
+            object: object.to_string(),
+            member: member.to_string(),
+        });
+        end = dot;
+    }
+}
+
+/// Append template-scanned member accesses to a finished module record,
+/// skipping pairs the record already holds: a dotted tag inside an Astro
+/// expression region is seen by both the template tag scan and the region
+/// visitor, and no consumer counts repeats. The accesses live behind an
+/// `Arc<[_]>` once the extractor is consumed, so the slice is rebuilt only when
+/// there is something to add.
+pub(crate) fn extend_member_accesses(info: &mut ModuleInfo, extra: Vec<MemberAccess>) {
+    if extra.is_empty() {
+        return;
+    }
+    let mut accesses = std::mem::take(&mut info.member_accesses).to_vec();
+    let mut seen: FxHashSet<(String, String)> = accesses
+        .iter()
+        .map(|access| (access.object.clone(), access.member.clone()))
+        .collect();
+    for access in extra {
+        if seen.insert((access.object.clone(), access.member.clone())) {
+            accesses.push(access);
+        }
+    }
+    info.member_accesses = accesses.into();
+}
+
+/// Append template-scanned whole-object uses to a finished module record, the
+/// `whole_object_uses` counterpart of `extend_member_accesses`: names the
+/// record already holds are skipped, so the region pass, the template guard,
+/// and the script guard can each report the same binding without the
+/// persisted record growing duplicates.
+pub(crate) fn extend_whole_object_uses(info: &mut ModuleInfo, extra: Vec<String>) {
+    if extra.is_empty() {
+        return;
+    }
+    let mut uses = std::mem::take(&mut info.whole_object_uses).to_vec();
+    for name in extra {
+        if !uses.contains(&name) {
+            uses.push(name);
+        }
+    }
+    info.whole_object_uses = uses.into();
 }
 
 fn try_extract_require<'a, 'b>(

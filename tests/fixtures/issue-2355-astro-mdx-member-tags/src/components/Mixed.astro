@@ -1,0 +1,12 @@
+---
+import * as Attr from './attr-icons';
+import * as Call from './call-icons';
+import * as Whole from './whole-icons';
+import Callout from './Callout.astro';
+---
+<Attr.Star />
+<Callout icon={Attr.Moon} />
+<Call.Star />
+<p>{Call.Moon()}</p>
+<Whole.Star />
+<Callout all={Whole} />

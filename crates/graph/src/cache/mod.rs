@@ -136,7 +136,15 @@ pub use store::GraphCacheStore;
 /// bare-specifier ambient star, and type-lane-only credits that leave the
 /// value half of a same-name type and value pair unreferenced, and a
 /// graph-cache hit would replay all of them.
-pub const GRAPH_CACHE_VERSION: u32 = 37;
+///
+/// Bumped to 38 for issue #2355 (37 was taken by issue #2357 while this
+/// change was in review): Astro markup and MDX bodies now record member
+/// accesses for member-expression component tags (`<SC.Card />`), and namespace
+/// narrowing bakes the credited references into the persisted graph. Warm 37
+/// caches carry the old empty accessed-members verdict for those consumers, so
+/// exports rendered only in Astro or MDX markup would stay reported as unused
+/// on upgrade.
+pub const GRAPH_CACHE_VERSION: u32 = 38;
 
 /// Cached form of a resolved target.
 ///

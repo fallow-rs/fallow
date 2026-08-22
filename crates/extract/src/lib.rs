@@ -41,6 +41,7 @@ pub mod suppress;
 /// Tailwind CSS arbitrary-value detection.
 pub mod tailwind;
 pub(crate) mod template_complexity;
+mod template_expression_scan;
 mod template_usage;
 /// Visitor utilities for AST extraction.
 pub mod visitor;

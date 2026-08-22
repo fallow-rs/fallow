@@ -1,0 +1,28 @@
+import * as Literal from '../shapes/em-literal';
+import * as LiteralWhole from '../shapes/em-literal-whole';
+import * as Fenced from '../shapes/em-fenced';
+import * as Inline from '../shapes/em-inline';
+import styles from '../shapes/em-doc.module.css';
+import Callout from '../components/Callout.astro';
+
+<Literal.Star />
+
+<Callout title={`Moon: ${Literal.Moon}`}>template literal attribute</Callout>
+
+<LiteralWhole.Star />
+
+{`${JSON.stringify(LiteralWhole)}`}
+
+<div className={styles.root}></div>
+
+<div className={`${styles.spare} extra`}></div>
+
+<Fenced.Star />
+
+```tsx
+<Fenced.Foo />
+```
+
+<Inline.Star />
+
+Inline code keeps `<Inline.CodeOnly />` as documentation.
