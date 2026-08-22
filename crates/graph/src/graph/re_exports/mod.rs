@@ -231,15 +231,16 @@ impl ModuleGraph {
     }
 
     /// Compute the transitive closure of `export *` source files whose every
-    /// export is credited: star sources of entry-point barrels, plus modules
-    /// consumed through a whole-module namespace edge and their star sources.
+    /// export is credited: star sources of entry-point barrels, plus targets of
+    /// ambient-module star re-exports and their star sources.
     ///
-    /// A whole-module namespace edge (an `ImportedName::Namespace` symbol with
-    /// no local binding) is the shape dynamic-import patterns and
-    /// ambient-module star re-exports emit (issue #2357). Such a consumer sees
-    /// every name the module exposes, including names that only arrive through
-    /// the module's own `export *`, and per-name star propagation cannot credit
-    /// those because the consumer never imports a name.
+    /// `export *` inside a `declare module '...'` body (issue #2357) arrives as
+    /// a type-only namespace symbol with no local binding. It states that every
+    /// name the target exposes is reachable through the declared module,
+    /// including names that only arrive through the target's own `export *`,
+    /// and per-name star propagation cannot credit those because the consumer
+    /// never imports a name. Runtime whole-module edges (dynamic-import
+    /// patterns) keep their direct-export credit only.
     fn collect_entry_star_targets(&self) -> FxHashSet<FileId> {
         let mut entry_star_targets: FxHashSet<FileId> = self
             .modules
@@ -260,7 +261,7 @@ impl ModuleGraph {
                         matches!(
                             symbol.imported_name,
                             fallow_types::extract::ImportedName::Namespace
-                        ) && symbol.local_name.is_empty()
+                        ) && symbol.is_unbound_type_only()
                     })
                 })
                 .map(|edge| edge.target),

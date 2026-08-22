@@ -2620,12 +2620,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // re-export laundered the target's exports into the declaring file's
         // surface (see the ambient guard in `visit_export_named_declaration`),
         // while a bare side-effect edge would drop the credit entirely. A
-        // type-space namespace import with no local binding is the shape the
-        // graph routes to its mark-all branch, so the whole target is credited
-        // and a bare specifier counts as type-only package usage.
+        // type-space namespace import with no local binding is the star
+        // surface: the graph credits every named export of the target in both
+        // meanings, and a bare specifier counts as type-only package usage.
+        // `export *` never forwards `default`; `export * as ns` forwards the
+        // namespace object, whose `default` member is the target's default
+        // export, so that form records it as its own import.
         if self.ambient_module_depth > 0 {
+            let source = decl.source.value.to_string();
             self.imports.push(ImportInfo {
-                source: decl.source.value.to_string(),
+                source: source.clone(),
                 imported_name: ImportedName::Namespace,
                 local_name: String::new(),
                 is_type_only: true,
@@ -2633,6 +2637,17 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 span: decl.span,
                 source_span: decl.source.span,
             });
+            if decl.exported.is_some() {
+                self.imports.push(ImportInfo {
+                    source,
+                    imported_name: ImportedName::Default,
+                    local_name: String::new(),
+                    is_type_only: true,
+                    from_style: false,
+                    span: decl.span,
+                    source_span: decl.source.span,
+                });
+            }
             walk::walk_export_all_declaration(self, decl);
             return;
         }

@@ -5457,10 +5457,16 @@ fn declare_global_direct_body_exports_keep_file_level_recording() {
     );
 }
 
-/// The single import an ambient-body star re-export must produce: a type-space
-/// namespace import with no local binding, the shape the graph routes to its
-/// mark-all branch so every export of the target is credited (issue #2357).
-fn assert_ambient_star_credits_whole_module(info: &ModuleInfo, source: &str) {
+/// The imports an ambient-body star re-export must produce: a type-space
+/// namespace import with no local binding, the star surface the graph credits
+/// in both meanings with `default` excluded, plus one type-space default
+/// import for the `export * as ns` form, whose namespace object exposes the
+/// target's default export (issue #2357).
+fn assert_ambient_star_credits_whole_module(
+    info: &ModuleInfo,
+    source: &str,
+    forwards_default: bool,
+) {
     assert!(
         info.exports.is_empty() && info.re_exports.is_empty(),
         "ambient-body star re-exports must not surface on the file: exports {:?}, re_exports {:?}",
@@ -5468,50 +5474,54 @@ fn assert_ambient_star_credits_whole_module(info: &ModuleInfo, source: &str) {
         info.re_exports
     );
     let entries: Vec<_> = info.imports.iter().filter(|i| i.source == source).collect();
+    let expected: Vec<ImportedName> = if forwards_default {
+        vec![ImportedName::Namespace, ImportedName::Default]
+    } else {
+        vec![ImportedName::Namespace]
+    };
+    let kinds: Vec<ImportedName> = entries.iter().map(|i| i.imported_name.clone()).collect();
     assert_eq!(
-        entries.len(),
-        1,
-        "expected exactly one whole-module import for {source}: {:?}",
+        kinds, expected,
+        "the whole-module imports for {source} must match the ES star surface: {:?}",
         info.imports
     );
-    let entry = entries[0];
-    assert!(
-        matches!(entry.imported_name, ImportedName::Namespace),
-        "the import must credit every target export: {:?}",
-        entry.imported_name
-    );
-    assert!(
-        entry.local_name.is_empty(),
-        "an ambient star re-export binds no local name: {:?}",
-        entry.local_name
-    );
-    assert!(entry.is_type_only, "ambient bodies are erased at runtime");
+    for entry in entries {
+        assert!(
+            entry.local_name.is_empty(),
+            "an ambient star re-export binds no local name: {:?}",
+            entry.local_name
+        );
+        assert!(entry.is_type_only, "ambient bodies are erased at runtime");
+    }
 }
 
 #[test]
 fn ambient_module_star_re_export_credits_whole_target_without_file_surface() {
     // Issue #2357: `export *` inside `declare module 'pkg'` states that every
-    // export of `./impl` is reachable through `pkg`. It must credit the whole
-    // target without adding a star re-export to the declaring file, which
-    // laundered the target's unused exports into an entry point's surface.
+    // named export of `./impl` is reachable through `pkg`. It must credit the
+    // whole star surface without adding a star re-export to the declaring
+    // file, which laundered the target's unused exports into an entry point's
+    // surface. ES `export *` never forwards `default`, so no default import.
     let info = parse(
         "declare module 'pkg' {\n\
            export * from './impl';\n\
          }\n\
          export {};\n",
     );
-    assert_ambient_star_credits_whole_module(&info, "./impl");
+    assert_ambient_star_credits_whole_module(&info, "./impl", false);
 }
 
 #[test]
 fn ambient_module_namespace_star_re_export_credits_whole_target_without_file_surface() {
+    // `export * as impl` exposes the namespace object, whose `default` member
+    // is the target's default export, so that form records a default import.
     let info = parse(
         "declare module 'pkg' {\n\
            export * as impl from './impl';\n\
          }\n\
          export {};\n",
     );
-    assert_ambient_star_credits_whole_module(&info, "./impl");
+    assert_ambient_star_credits_whole_module(&info, "./impl", true);
 }
 
 #[test]

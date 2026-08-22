@@ -226,6 +226,21 @@ pub struct ImportedSymbol {
     mechanism: ModuleLoadMechanism,
 }
 
+impl ImportedSymbol {
+    /// Whether this symbol is type-only without binding a local name.
+    ///
+    /// A re-export inside a `declare module '...'` body and an `import()` type
+    /// record this shape: the statement is erased at runtime, so package usage
+    /// stays type-only, but no binding exists whose usage could narrow the
+    /// reference to one meaning. Such a symbol credits the target export in
+    /// both the type and the value namespace (issue #2357), unlike
+    /// `import type { x }`, which restricts the binding to type space.
+    #[must_use]
+    pub(crate) fn is_unbound_type_only(&self) -> bool {
+        self.is_type_only && self.local_name.is_empty()
+    }
+}
+
 /// Flat bitset index mapping files to the test profiles that reach them.
 ///
 /// Each file owns `words_per_file` contiguous reachable-profile words. Masks are
@@ -973,7 +988,9 @@ impl ModuleGraph {
                 };
                 symbols.iter().any(|symbol| {
                     symbol.import_span == reference.import_span
-                        && (namespace == ExportNamespace::Type || !symbol.is_type_only)
+                        && (namespace == ExportNamespace::Type
+                            || !symbol.is_type_only
+                            || symbol.is_unbound_type_only())
                         && match &symbol.imported_name {
                             ImportedName::Named(imported) => names.contains(imported.as_str()),
                             ImportedName::Default => names.contains("default"),

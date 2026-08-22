@@ -66,16 +66,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-exports, so when the declaring `.d.ts` was an entry point every export of
   `./impl` was laundered into that entry's public surface, and when it was
   not, nothing in `./impl` was credited at all. The ambient declaration states
-  that all of `./impl` is reachable through `pkg`, so its exports are now
-  credited directly (following `./impl`'s own `export *` chain, the
+  that all of `./impl` is reachable through `pkg`, so its named exports are
+  now credited directly (following `./impl`'s own `export *` chain, the
   barrel-of-barrels shape such declarations usually point at), the declaring
   file exposes no star re-export (visible in `inspect --file` and
   `dead-code --trace`), and genuinely unused exports in unrelated modules keep
-  reporting. The same chain crediting now applies to every whole-module
-  namespace edge, so a barrel matched by an `import()` or `import.meta.glob`
-  pattern no longer reports the exports it only exposes through `export *`.
-  Both the extraction and graph cache versions were bumped, so the first run
-  after upgrading performs one cold re-analysis.
+  reporting. The credit follows ES star semantics: plain `export *` never
+  forwards `default`, so an otherwise unused default export of `./impl` keeps
+  reporting, while `export * as ns` exposes `ns.default` and credits it. An
+  ambient re-export is erased at runtime and binds no name, so it cannot be
+  narrowed to one meaning: a forwarded name now credits both the type and the
+  value declaration behind it (`interface User` plus `const User`, or a
+  zod-style `const User` plus `type User`). This also closes the same gap for
+  the named form `declare module 'pkg' { export { User } from './impl' }`
+  from [#2349](https://github.com/fallow-rs/fallow/issues/2349) and for
+  `import('./impl').User` type references, which credited only the type half
+  of such a pair: fewer unused-export findings for value declarations that
+  share their name with a type. Both the extraction and graph cache versions
+  were bumped, so the first run after upgrading performs one cold
+  re-analysis.
 
 - **JSX member-expression tags (`<SC.Wrapper />`) now credit the referenced
   export** (Closes

@@ -76,12 +76,18 @@ error by suppressing a downstream detector.
   `ModuleGraph::ambiguous_star_exports` exposes collisions for reporting, while
   `ModuleGraph::ambiguity_participants` identifies their canonical declarations
   for detector gates.
-- A whole-module namespace edge (a namespace import without a local binding,
-  emitted for dynamic-import patterns and for `export *` inside
-  `declare module '...'` bodies) credits every export of its target, including
-  names the target only exposes through its own `export *` chain. The graph
-  gives such targets the same star-chain treatment as entry-point barrels, so
-  a barrel-of-barrels behind the edge does not report its deep exports.
+- A type-only import without a local binding (a re-export inside a
+  `declare module '...'` body, an `import()` type reference) is erased at
+  runtime but cannot be narrowed to one meaning, so it credits the target
+  export in both the type and the value namespace; `import type { x }`
+  restricts its binding to type space. The star form (`export *` inside an
+  ambient body, a type-only namespace import without a binding) credits the ES
+  star surface of its target: every named export, never `default`, including
+  names the target only exposes through its own `export *` chain, for which
+  the graph gives the target the same star-chain treatment as an entry-point
+  barrel. `export * as ns` adds a default import for `ns.default`. Runtime
+  whole-module edges (dynamic-import patterns) credit the module namespace
+  object, `default` included, and only the target's direct exports.
 - Styling and CSS-in-JS extraction must preserve source line mapping.
 - Duplication token or normalization changes require the duplication cache
   version to move with the changed semantics.
