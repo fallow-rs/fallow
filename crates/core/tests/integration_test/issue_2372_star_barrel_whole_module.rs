@@ -332,6 +332,37 @@ fn member_narrowed_namespace_imports_do_not_seed_the_closure() {
 }
 
 #[test]
+fn alias_sourced_namespace_bindings_do_not_seed_the_closure() {
+    // Regression pin: alias.ts places `aliasNs` in `export const aliasApi =
+    // { aliasNs }` without touching it otherwise. The direct-export mark-all
+    // still fires for that unnarrowed binding (as before), but the namespace
+    // object alias phase follows `aliasApi.aliasNs.aliasOne` precisely, so the
+    // star chain behind the aliased barrel stays narrowed.
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    assert_credited(
+        &unused,
+        "src/alias-barrel.ts",
+        "aliasDirect",
+        "a direct export behind an unnarrowed binding",
+    );
+    assert_credited(
+        &unused,
+        "src/alias-deep.ts",
+        "aliasOne",
+        "accessed as `aliasApi.aliasNs.aliasOne`",
+    );
+    assert_reported(
+        &unused,
+        "src/alias-deep.ts",
+        "aliasTwo",
+        "never accessed through the alias",
+    );
+}
+
+#[test]
 fn star_chains_that_re_export_themselves_terminate() {
     // cycle-a.ts `export * from './cycle-b'`; cycle-b.ts `export * as cycleNs
     // from './cycle-a'`. `Object.keys(cyc)` on cycle-a.ts sees `cycleA`,

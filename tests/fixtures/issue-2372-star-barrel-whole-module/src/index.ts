@@ -4,6 +4,7 @@ import * as cyc from './cycle-a';
 import { shimAll } from './shim';
 import { passedOn } from './passer';
 import { reNs } from './re-shim';
+import { aliasApi } from './alias';
 
 // Whole-object use of a namespace import observes every name on the barrel's
 // namespace object, including names that only arrive through the barrel's
@@ -12,6 +13,10 @@ export const all = Object.values(ns);
 
 // Member access only: narrowing credits `one` and nothing else.
 export const narrowOne = narrow.one();
+
+// Access through an object-literal alias: the alias phase credits `aliasOne`
+// and nothing else behind the aliased namespace.
+export const aliasOne = aliasApi.aliasNs.aliasOne;
 
 // Whole-object use of a barrel that re-exports itself through a chain.
 export const cycleAll = Object.keys(cyc);

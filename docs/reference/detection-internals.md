@@ -103,8 +103,12 @@ error by suppressing a downstream detector.
   its `export *` sources (named exports in both namespaces, never `default`)
   and namespace re-export propagation credits every export of its
   `export * as` sources (`default` included). A member-narrowed namespace
-  import (`ns.one()`) never seeds it, and a namespace re-export on a barrel
-  off the entry surface with no consumer exposes nothing. The seed's own
+  import (`ns.one()`) never seeds it, a binding placed in an exported object
+  literal (`export const API = { ns }`) seeds it only when it is also used as
+  a whole object (the namespace-object alias phase follows `API.ns.<member>`
+  precisely while the direct-export mark-all stays as before), and a
+  namespace re-export on a barrel off the entry surface with no consumer
+  exposes nothing. The seed's own
   credit keeps its shape: a runtime whole-module edge credits the namespace
   object, `default` included; the ambient star form credits the star surface
   without `default`.

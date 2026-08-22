@@ -146,7 +146,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sources credit every export (`default` included, because `sub.default` is
   on the object), and both rules recurse through sub's own chains. A
   member-narrowed namespace import (`ns.one()`) keeps narrowing to the
-  accessed members and credits nothing else. Fewer unused-export findings for
+  accessed members and credits nothing else, and a binding placed in an
+  exported object literal (`export const API = { ns }`) keeps the precise
+  `API.ns.<member>` crediting of the alias phase. Fewer unused-export findings for
   star barrels consumed as whole objects or through dynamic-import patterns.
   The graph cache version was bumped, so the first run after upgrading
   performs one cold re-analysis.
