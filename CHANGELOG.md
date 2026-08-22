@@ -60,9 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pass; its path and content participate in the base-snapshot cache key, so a
   config change invalidates cached base snapshots. Behavior change:
   `FALLOW_COVERAGE_ROOT` now applies to audit as well, an empty
-  `FALLOW_COVERAGE` is ignored instead of being read as a path, and a
+  `FALLOW_COVERAGE` is ignored instead of being read as a path, a
   configured coverage file that does not exist fails audit with the same
-  structured exit 2 as `fallow health`.
+  structured exit 2 as `fallow health`, and a relative `health.coverageRoot`
+  is rejected with the same `--coverage-root expects an absolute path`
+  exit 2. The MCP `audit` and `check_health` tools are unchanged: their typed
+  route reads only the explicit `coverage` / `coverage_root` parameters and
+  consults the config keys only when a call falls back to the CLI; routing
+  that route through the same precedence is tracked as a follow-up.
 
 - **`fallow audit` now scores the base attribution pass with the same Istanbul
   coverage map as the head pass.** The base worktree pass previously matched no

@@ -892,10 +892,16 @@ pub struct HealthParams {
 
     /// Path to Istanbul-format coverage data (coverage-final.json) for accurate per-function CRAP scores.
     /// Accepts a file path or a directory containing coverage-final.json.
+    /// Pass it explicitly: the typed route reads only this parameter, and
+    /// `FALLOW_COVERAGE` / the `health.coverage` config field apply only when
+    /// the call falls back to the CLI.
     pub coverage: Option<String>,
 
     /// Absolute prefix to strip from coverage data paths before prepending the project root.
     /// Use when coverage was generated in a different environment (CI runner, Docker).
+    /// Pass it explicitly: the typed route reads only this parameter, and
+    /// `FALLOW_COVERAGE_ROOT` / the `health.coverageRoot` config field apply
+    /// only when the call falls back to the CLI.
     pub coverage_root: Option<String>,
 
     /// Path to runtime coverage input. Accepts a V8 coverage directory
@@ -1124,12 +1130,17 @@ pub struct AuditParams {
 
     /// Path to Istanbul-format coverage data (coverage-final.json) for
     /// accurate per-function CRAP scores in audit's health sub-analysis.
-    /// Passed through to the CLI's `--coverage` flag.
+    /// Pass it explicitly: the typed route reads only this parameter, and
+    /// `FALLOW_COVERAGE` / the `health.coverage` config field apply only when
+    /// the call falls back to the CLI, where it is forwarded as `--coverage`.
     pub coverage: Option<String>,
 
     /// Absolute prefix to strip from coverage data paths before CRAP matching.
     /// Use when coverage was generated in a different checkout root in CI or Docker.
-    /// Passed through to the CLI's `--coverage-root` flag.
+    /// Pass it explicitly: the typed route reads only this parameter, and
+    /// `FALLOW_COVERAGE_ROOT` / the `health.coverageRoot` config field apply
+    /// only when the call falls back to the CLI, where it is forwarded as
+    /// `--coverage-root`.
     pub coverage_root: Option<String>,
 
     /// Report unused exports in entry files instead of auto-marking them as

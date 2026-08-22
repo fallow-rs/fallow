@@ -37,6 +37,15 @@ pub fn fixture_path(name: &str) -> PathBuf {
     path
 }
 
+/// Drop the Istanbul coverage variables a developer shell may export, so a
+/// test that exercises the `health.coverage` / `health.coverageRoot` config
+/// fallback cannot pass or fail because of ambient `FALLOW_COVERAGE` /
+/// `FALLOW_COVERAGE_ROOT` values. Call before applying a test's own env.
+pub fn scrub_coverage_env(cmd: &mut Command) {
+    cmd.env_remove("FALLOW_COVERAGE")
+        .env_remove("FALLOW_COVERAGE_ROOT");
+}
+
 /// Run an arbitrary fallow command against a fixture, returning structured output.
 ///
 /// Sets `NO_COLOR=1` and `RUST_LOG=""` for deterministic output.
@@ -91,6 +100,7 @@ pub fn run_fallow_raw(args: &[&str]) -> CommandOutput {
     let bin = fallow_bin();
     let mut cmd = Command::new(&bin);
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    scrub_coverage_env(&mut cmd);
     for arg in args {
         cmd.arg(arg);
     }
@@ -107,6 +117,7 @@ pub fn run_fallow_raw_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOu
     let bin = fallow_bin();
     let mut cmd = Command::new(&bin);
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    scrub_coverage_env(&mut cmd);
     for (key, value) in env {
         cmd.env(key, value);
     }

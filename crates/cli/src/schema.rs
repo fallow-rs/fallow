@@ -650,11 +650,11 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     ),
     (
         "FALLOW_COVERAGE",
-        "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this; it wins over the health.coverage config field. Honored by health, bare fallow, and audit.",
+        "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this; it wins over the health.coverage config field. Honored by the health, bare fallow, and audit CLI commands; the MCP audit and check_health tools read it only when they fall back to the CLI, so pass their coverage parameter explicitly.",
     ),
     (
         "FALLOW_COVERAGE_ROOT",
-        "Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. CLI --coverage-root flag overrides this; it wins over the health.coverageRoot config field. Honored by health, bare fallow, and audit.",
+        "Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. CLI --coverage-root flag overrides this; it wins over the health.coverageRoot config field. Honored by the health, bare fallow, and audit CLI commands; the MCP audit and check_health tools read it only when they fall back to the CLI, so pass their coverage_root parameter explicitly.",
     ),
     (
         "FALLOW_MAX_FILE_SIZE",

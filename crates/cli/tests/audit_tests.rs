@@ -218,6 +218,7 @@ fn run_fallow_raw_with_env(
 ) -> common::CommandOutput {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    common::scrub_coverage_env(&mut cmd);
     for (key, value) in env {
         cmd.env(key, value);
     }
@@ -4005,6 +4006,7 @@ fn run_audit_string_env(
 ) -> common::CommandOutput {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    common::scrub_coverage_env(&mut cmd);
     for (key, value) in env {
         cmd.env(key, value);
     }
