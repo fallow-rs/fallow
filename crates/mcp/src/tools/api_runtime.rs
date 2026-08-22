@@ -56,7 +56,7 @@ pub(super) fn env_diff_file() -> Option<PathBuf> {
 /// `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT` as the typed route's
 /// environment layer, read at the adapter boundary. Empty values count as
 /// unset, as they do for the CLI.
-pub(super) fn env_coverage_inputs() -> CoverageInputs {
+fn env_coverage_inputs() -> CoverageInputs {
     coverage_inputs_from(|name: &str| std::env::var_os(name))
 }
 
@@ -82,18 +82,25 @@ fn env_path(name: &str) -> Option<PathBuf> {
 }
 
 /// Resolve the typed route's Istanbul coverage inputs with the precedence the
-/// CLI uses (#2368): the explicit tool parameters, then `env`, then
-/// `health.coverage` / `health.coverageRoot` from the project config, which is
-/// loaded only when a higher layer leaves an input unset. Engine
+/// CLI uses (#2368): the explicit tool parameters, then the environment layer,
+/// then `health.coverage` / `health.coverageRoot` from the project config,
+/// which is loaded only when a higher layer leaves an input unset. Engine
 /// auto-detection still applies when every layer is empty.
 /// `explicit_root_context` names the tool's own parameter when the explicit
 /// root is rejected as relative.
+///
+/// `env` is [`None`] on every production call, which is the single place the
+/// typed route reads `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT` from the
+/// process environment; the typed-route tests pass [`Some`] so they stay
+/// deterministic under a shared environment. `crates/mcp/tests/typed_route_env_coverage.rs`
+/// covers the [`None`] path against the real server process.
 pub(super) fn resolve_typed_coverage_inputs(
     analysis: &AnalysisOptions,
     explicit: CoverageInputs,
-    env: CoverageInputs,
+    env: Option<CoverageInputs>,
     explicit_root_context: &str,
 ) -> Result<CoverageInputs, ProgrammaticError> {
+    let env = env.unwrap_or_else(env_coverage_inputs);
     let config_health = if CoverageInputs::needs_config_layer(&explicit, &env) {
         load_health_config(analysis)?
     } else {
@@ -189,9 +196,12 @@ mod tests {
         assert_eq!(workspace_patterns_from_param(None), None);
     }
 
-    /// #2368: the adapter reads both coverage variables and ignores empty
+    /// #2368: the adapter maps both coverage variables and ignores empty
     /// values, as the CLI does. The lookup is injected, so no typed-route
-    /// test in this binary can observe a mutated process environment.
+    /// test in this binary can observe a mutated process environment; that
+    /// the production reader passes the real environment through this mapping
+    /// is covered end to end by
+    /// `crates/mcp/tests/typed_route_env_coverage.rs`.
     #[test]
     fn env_coverage_inputs_read_both_variables_and_ignore_empty_values() {
         let inputs = coverage_inputs_from(|name| match name {
@@ -216,12 +226,6 @@ mod tests {
                 coverage: Some(PathBuf::from("artifacts/coverage-final.json")),
                 coverage_root: None,
             }
-        );
-
-        assert_eq!(
-            env_coverage_inputs(),
-            coverage_inputs_from(|name: &str| std::env::var_os(name)),
-            "the adapter's env layer reads the process environment"
         );
     }
 

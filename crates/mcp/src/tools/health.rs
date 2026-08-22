@@ -10,8 +10,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        changed_since_from_param, env_coverage_inputs, env_diff_file, json_success, non_empty_path,
-        non_empty_string, programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
+        changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
+        programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
         workspace_patterns_from_param,
     },
     fallback_policy::{
@@ -34,9 +34,8 @@ pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolRe
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
 
-    let env = env_coverage_inputs();
     let result = run_api_blocking("check_health", move || {
-        let options = with_resolved_coverage(options, env)?;
+        let options = with_resolved_coverage(options, None)?;
         run_api_health(&options).and_then(serialize_health_programmatic_json)
     })
     .await?
@@ -48,14 +47,15 @@ pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolRe
 }
 
 pub fn run_health_api_value(params: &HealthParams) -> Result<Option<serde_json::Value>, String> {
-    run_health_api_value_with_env(params, env_coverage_inputs())
+    run_health_api_value_with_env(params, None)
 }
 
 /// [`run_health_api_value`] with the environment coverage layer injected, so
 /// the typed route can be exercised without mutating the process environment.
+/// `None` reads the process environment, as the production entry points do.
 fn run_health_api_value_with_env(
     params: &HealthParams,
-    env: CoverageInputs,
+    env: Option<CoverageInputs>,
 ) -> Result<Option<serde_json::Value>, String> {
     if requires_cli_fallback(params) {
         return Ok(None);
@@ -74,7 +74,7 @@ fn run_health_api_value_with_env(
 /// environment, and the project config with the CLI's precedence (#2368).
 fn with_resolved_coverage(
     mut options: ComplexityOptions,
-    env: CoverageInputs,
+    env: Option<CoverageInputs>,
 ) -> Result<ComplexityOptions, ProgrammaticError> {
     let explicit = CoverageInputs {
         coverage: options.coverage.take(),
@@ -762,13 +762,13 @@ mod tests {
     }
 
     fn typed_route_json(params: &HealthParams, env: CoverageInputs) -> serde_json::Value {
-        run_health_api_value_with_env(params, env)
+        run_health_api_value_with_env(params, Some(env))
             .expect("typed route result")
             .expect("typed route")
     }
 
     fn typed_route_error(params: &HealthParams) -> serde_json::Value {
-        let body = run_health_api_value_with_env(params, CoverageInputs::default())
+        let body = run_health_api_value_with_env(params, Some(CoverageInputs::default()))
             .expect_err("the typed route rejects the inputs");
         serde_json::from_str(&body).expect("structured error body")
     }

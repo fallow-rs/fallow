@@ -10,8 +10,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_AUDIT_GATES,
     api_runtime::{
-        changed_since_from_param, env_coverage_inputs, env_diff_file, json_success, non_empty_path,
-        non_empty_string, programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
+        changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
+        programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
         workspace_patterns_from_param,
     },
     fallback_policy::{baseline_fallback_reason, filled, grouped_fallback_reason},
@@ -26,9 +26,8 @@ pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResu
             Ok(options) => options,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
-        let env = env_coverage_inputs();
         let result = run_api_blocking("audit", move || {
-            let options = with_resolved_coverage(options, env)?;
+            let options = with_resolved_coverage(options, None)?;
             run_audit_api(&options).and_then(serialize_audit_programmatic_json)
         })
         .await?
@@ -46,14 +45,15 @@ pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResu
 }
 
 pub fn run_audit_api_value(params: &AuditParams) -> Result<Option<serde_json::Value>, String> {
-    run_audit_api_value_with_env(params, env_coverage_inputs())
+    run_audit_api_value_with_env(params, None)
 }
 
 /// [`run_audit_api_value`] with the environment coverage layer injected, so
 /// the typed route can be exercised without mutating the process environment.
+/// `None` reads the process environment, as the production entry points do.
 fn run_audit_api_value_with_env(
     params: &AuditParams,
-    env: CoverageInputs,
+    env: Option<CoverageInputs>,
 ) -> Result<Option<serde_json::Value>, String> {
     if requires_cli_fallback(params) {
         return Ok(None);
@@ -70,7 +70,7 @@ fn run_audit_api_value_with_env(
 /// environment, and the project config with the CLI's precedence (#2368).
 fn with_resolved_coverage(
     mut options: AuditOptions,
-    env: CoverageInputs,
+    env: Option<CoverageInputs>,
 ) -> Result<AuditOptions, ProgrammaticError> {
     let explicit = CoverageInputs {
         coverage: options.coverage.take(),
@@ -293,7 +293,7 @@ mod tests {
             ..AuditParams::default()
         };
 
-        let from_config = run_audit_api_value_with_env(&params(), CoverageInputs::default())
+        let from_config = run_audit_api_value_with_env(&params(), Some(CoverageInputs::default()))
             .expect("config-only typed route result")
             .expect("typed route");
         assert_eq!(from_config["verdict"], "pass", "{from_config}");
@@ -304,7 +304,7 @@ mod tests {
                 coverage_root: Some(COVERAGE_ROOT.to_string()),
                 ..params()
             },
-            CoverageInputs::default(),
+            Some(CoverageInputs::default()),
         )
         .expect("explicit typed route result")
         .expect("typed route");
@@ -324,9 +324,10 @@ mod tests {
         let fixture = CoverageFixture::new(false);
         fixture.write_health_config(&CoverageFixture::config_health_section());
 
-        let json = run_audit_api_value_with_env(&gated_params(&fixture), CoverageInputs::default())
-            .expect("typed route result")
-            .expect("typed route");
+        let json =
+            run_audit_api_value_with_env(&gated_params(&fixture), Some(CoverageInputs::default()))
+                .expect("typed route result")
+                .expect("typed route");
 
         assert_eq!(json["verdict"], "fail", "{json}");
         let branchy =
@@ -345,7 +346,7 @@ mod tests {
         let fixture = CoverageFixture::new(true);
         fixture.write_stale_coverage("artifacts/stale.json");
         let verdict = |params: &AuditParams, env: CoverageInputs| {
-            let json = run_audit_api_value_with_env(params, env)
+            let json = run_audit_api_value_with_env(params, Some(env))
                 .expect("typed route result")
                 .expect("typed route");
             json["verdict"].as_str().map(str::to_string)
@@ -455,7 +456,7 @@ mod tests {
     }
 
     fn typed_route_error(params: &AuditParams) -> serde_json::Value {
-        let body = run_audit_api_value_with_env(params, CoverageInputs::default())
+        let body = run_audit_api_value_with_env(params, Some(CoverageInputs::default()))
             .expect_err("the typed route rejects the inputs");
         serde_json::from_str(&body).expect("structured error body")
     }
