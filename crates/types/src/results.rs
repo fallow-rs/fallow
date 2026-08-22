@@ -3109,7 +3109,8 @@ pub enum DependencyOverrideSource {
     /// Top-level `overrides:` key in `pnpm-workspace.yaml`.
     #[serde(rename = "pnpm-workspace.yaml")]
     PnpmWorkspaceYaml,
-    /// `pnpm.overrides` or the top-level npm `overrides` object in a root
+    /// `pnpm.overrides`, the top-level npm `overrides` object, or (in a bun
+    /// repository) the Yarn-style top-level `resolutions` object in a root
     /// `package.json`.
     #[serde(rename = "package.json")]
     PnpmPackageJson,
@@ -3134,11 +3135,13 @@ impl std::fmt::Display for DependencyOverrideSource {
 }
 
 /// An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in
-/// `package.json`), or in npm's top-level `overrides` object in
-/// `package.json`, whose target package is not declared in any workspace
-/// `package.json` and is not present in `pnpm-lock.yaml` or
-/// `package-lock.json`. Projects without a readable lockfile fall back to
-/// package manifest checks; the `hint` field flags that conservative mode.
+/// `package.json`), in npm's top-level `overrides` object in `package.json`,
+/// or (in a bun repository) in the Yarn-style top-level `resolutions` object
+/// in `package.json`, whose target package is not declared in any workspace
+/// `package.json` and is not present in `pnpm-lock.yaml`,
+/// `package-lock.json`, or `bun.lock`. Projects without a readable lockfile
+/// fall back to package manifest checks; the `hint` field flags that
+/// conservative mode.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedDependencyOverride {

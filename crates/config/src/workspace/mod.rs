@@ -25,7 +25,7 @@ pub use diagnostics::{
     stash_workspace_diagnostics, workspace_diagnostics_for,
 };
 use diagnostics::{emit_diagnostics, is_skip_listed_dir};
-pub use npm_overrides::parse_npm_package_json_overrides;
+pub use npm_overrides::{parse_bun_package_json_resolutions, parse_npm_package_json_overrides};
 pub use package_json::{NapiConfig, PackageJson};
 pub use parsers::parse_tsconfig_root_dir;
 use parsers::{

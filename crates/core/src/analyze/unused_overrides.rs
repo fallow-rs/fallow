@@ -12,7 +12,19 @@
 //! npm parser flattens nested objects into the shared entry shape, so all
 //! three sources run through one analysis path. bun declares overrides through
 //! the same top-level `overrides` key, so bun repos are analyzed via the npm
-//! parser and resolved against `bun.lock`. yarn `resolutions` is out of scope.
+//! parser and resolved against `bun.lock`.
+//!
+//! bun also honours Yarn's top-level `resolutions` object as an alias of
+//! `overrides` (issue #2367). In a bun repository (the root `packageManager`
+//! names bun, or no recognised `packageManager` is declared and a `bun.lock`
+//! or `bun.lockb` sits at the root) the `resolutions` entries run through the
+//! same two detectors, reported with `source: "package.json"`. bun reads
+//! `overrides` first and never consults `resolutions` once an `overrides` key
+//! exists, so a manifest carrying both is analyzed for `overrides` alone.
+//! yarn repositories stay out of scope: yarn never applies `overrides`, the
+//! inert entries keep the "declare the pin under `resolutions`" hint, and
+//! yarn's own `resolutions` semantics (glob paths, `yarn.lock`) are not
+//! modelled.
 //!
 //! Two findings are emitted:
 //!
@@ -46,9 +58,9 @@
 use fallow_config::{
     CompiledIgnoreDependencyOverrideRule, PackageJson, PnpmOverrideData, ResolvedConfig,
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
-    override_misconfig_reason as parser_misconfig_reason, parse_npm_package_json_overrides,
-    parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
-    record_workspace_diagnostics,
+    override_misconfig_reason as parser_misconfig_reason, parse_bun_package_json_resolutions,
+    parse_npm_package_json_overrides, parse_pnpm_package_json_overrides,
+    parse_pnpm_workspace_overrides, record_workspace_diagnostics,
 };
 use fallow_types::results::{
     DependencyOverrideMisconfigReason, DependencyOverrideSource, MisconfiguredDependencyOverride,
@@ -65,12 +77,14 @@ const BUN_LOCKB_FILE: &str = "bun.lockb";
 const YARN_LOCK_FILE: &str = "yarn.lock";
 const NODE_MODULES_SEGMENT: &str = "node_modules/";
 const ROOT_PACKAGE_JSON: &str = "package.json";
+const OVERRIDES_KEY: &str = "overrides";
 const SOURCE_LABEL_YAML: &str = "pnpm-workspace.yaml";
 const SOURCE_LABEL_JSON: &str = "package.json";
 const HINT_MAY_BE_TRANSITIVE_PNPM: &str =
     "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth";
 const HINT_MAY_BE_TRANSITIVE_BUN: &str =
     "may target a transitive dependency; bun install --frozen-lockfile is the ground truth";
+const HINT_MAY_BE_TRANSITIVE_BUN_RESOLUTIONS: &str = "declared under `resolutions`, which bun applies as an alias of `overrides`; may target a transitive dependency; bun install --frozen-lockfile is the ground truth";
 const HINT_MAY_BE_TRANSITIVE_NPM: &str =
     "may target a transitive dependency; npm ci is the ground truth";
 const HINT_OVERRIDES_IGNORED_BY_YARN: &str =
@@ -82,7 +96,7 @@ const LOCKFILE_DEPENDENCY_SECTIONS: &[&str] = &[
     "peerDependencies",
 ];
 
-/// Combined override state across both sources, plus the set of packages
+/// Combined override state across every source, plus the set of packages
 /// declared in any workspace `package.json` dep section.
 pub struct PnpmOverrideState {
     /// Entries from `pnpm-workspace.yaml`'s `overrides:` map. Empty when the
@@ -95,6 +109,11 @@ pub struct PnpmOverrideState {
     /// `overrides` object. Empty when the file is missing, has no overrides
     /// section, or fails to parse.
     npm_package_json_data: PnpmOverrideData,
+    /// Flat entries from `<root>/package.json`'s Yarn-style top-level
+    /// `resolutions` object. Populated only for bun repositories whose
+    /// manifest has no `overrides` key (bun ignores `resolutions` otherwise);
+    /// empty for every other package manager (issue #2367).
+    bun_resolutions_data: PnpmOverrideData,
     /// Every package name that appears in `dependencies` / `devDependencies` /
     /// `peerDependencies` / `optionalDependencies` of any workspace
     /// `package.json` (root + members).
@@ -115,8 +134,8 @@ pub struct PnpmOverrideState {
     transitive_hint: &'static str,
 }
 
-/// Read both override sources and walk workspace `package.json` files to build
-/// shared analysis state. Returns `None` when neither source carries any
+/// Read every override source and walk workspace `package.json` files to
+/// build shared analysis state. Returns `None` when no source carries any
 /// entries; callers should skip both override detectors in that case.
 #[must_use]
 pub fn gather_pnpm_override_state(
@@ -140,6 +159,9 @@ pub fn gather_pnpm_override_state(
 
     let root_pkg_path = config.root.join(ROOT_PACKAGE_JSON);
     let root_pkg_source = std::fs::read_to_string(&root_pkg_path).ok();
+    let root_manifest: Option<serde_json::Value> = root_pkg_source
+        .as_deref()
+        .and_then(|source| serde_json::from_str(source).ok());
     let package_json_data = root_pkg_source
         .as_deref()
         .map(parse_pnpm_package_json_overrides)
@@ -149,20 +171,39 @@ pub fn gather_pnpm_override_state(
         .map(parse_npm_package_json_overrides)
         .unwrap_or_default();
 
+    let declared_manager = declared_package_manager(root_manifest.as_ref());
+    // bun's `OverrideMap::parse_append` (src/install/lockfile/OverrideMap.rs)
+    // takes the `overrides` property when it exists, whatever its value, and
+    // falls through to `resolutions` only when `overrides` is absent, so a
+    // manifest with both keys is analyzed for `overrides` alone.
+    let manifest_declares_overrides = root_manifest
+        .as_ref()
+        .is_some_and(|manifest| manifest.get(OVERRIDES_KEY).is_some());
+    let bun_resolutions_data = match root_pkg_source.as_deref() {
+        Some(source)
+            if uses_bun(declared_manager, &config.root) && !manifest_declares_overrides =>
+        {
+            parse_bun_package_json_resolutions(source)
+        }
+        _ => PnpmOverrideData::default(),
+    };
+
     if workspace_yaml_data.entries.is_empty()
         && package_json_data.entries.is_empty()
         && npm_package_json_data.entries.is_empty()
+        && bun_resolutions_data.entries.is_empty()
     {
         return None;
     }
 
     let declared_packages = collect_declared_packages(config, workspaces);
-    let lockfile_resolution = collect_lockfile_packages(config, root_pkg_source.as_deref());
+    let lockfile_resolution = collect_lockfile_packages(config, declared_manager);
 
     Some(PnpmOverrideState {
         workspace_yaml_data,
         package_json_data,
         npm_package_json_data,
+        bun_resolutions_data,
         declared_packages,
         lockfile_packages: lockfile_resolution.packages,
         lockfile_resolution_unavailable: lockfile_resolution.resolution_unavailable,
@@ -226,7 +267,7 @@ struct LockfileResolution {
 /// instead of flagging every transitive-only override.
 fn collect_lockfile_packages(
     config: &ResolvedConfig,
-    root_pkg_source: Option<&str>,
+    declared_manager: Option<DeclaredPackageManager>,
 ) -> LockfileResolution {
     let mut packages = FxHashSet::default();
 
@@ -258,7 +299,7 @@ fn collect_lockfile_packages(
     let has_bun_lockb = config.root.join(BUN_LOCKB_FILE).exists();
     let has_yarn_lock = config.root.join(YARN_LOCK_FILE).exists();
 
-    let transitive_hint = match declared_package_manager(root_pkg_source) {
+    let transitive_hint = match declared_manager {
         Some(DeclaredPackageManager::Bun) => HINT_MAY_BE_TRANSITIVE_BUN,
         Some(DeclaredPackageManager::Npm) => HINT_MAY_BE_TRANSITIVE_NPM,
         Some(DeclaredPackageManager::Yarn) => HINT_OVERRIDES_IGNORED_BY_YARN,
@@ -292,13 +333,14 @@ enum DeclaredPackageManager {
 }
 
 /// Read the corepack `packageManager` field (`"bun@1.3.2"` names bun) from
-/// the root `package.json` source. Mirrors the packageManager-first probes in
+/// the parsed root `package.json`. Mirrors the packageManager-first probes in
 /// the CLI package-manager detectors so the transitive hint cannot name a
 /// package manager the repository does not use, for example a bun repo whose
 /// lockfile is not committed yet.
-fn declared_package_manager(root_pkg_source: Option<&str>) -> Option<DeclaredPackageManager> {
-    let value: serde_json::Value = serde_json::from_str(root_pkg_source?).ok()?;
-    let field = value.get("packageManager")?.as_str()?;
+fn declared_package_manager(
+    root_manifest: Option<&serde_json::Value>,
+) -> Option<DeclaredPackageManager> {
+    let field = root_manifest?.get("packageManager")?.as_str()?;
     let name = field.split('@').next().unwrap_or(field);
     match name {
         "npm" => Some(DeclaredPackageManager::Npm),
@@ -306,6 +348,20 @@ fn declared_package_manager(root_pkg_source: Option<&str>) -> Option<DeclaredPac
         "yarn" => Some(DeclaredPackageManager::Yarn),
         "bun" => Some(DeclaredPackageManager::Bun),
         _ => None,
+    }
+}
+
+/// Whether the repository installs with bun, which decides if the root
+/// manifest's `resolutions` object is an override source. The corepack
+/// `packageManager` field wins when it names a known manager; without one, a
+/// `bun.lock` or `bun.lockb` at the root counts. A manifest naming npm, pnpm,
+/// or yarn is never a bun repository, even next to a leftover bun lockfile,
+/// mirroring the packageManager-first rule the transitive hint uses.
+fn uses_bun(declared_manager: Option<DeclaredPackageManager>, root: &std::path::Path) -> bool {
+    match declared_manager {
+        Some(DeclaredPackageManager::Bun) => true,
+        Some(_) => false,
+        None => root.join(BUN_LOCK_FILE).exists() || root.join(BUN_LOCKB_FILE).exists(),
     }
 }
 
@@ -549,6 +605,16 @@ pub fn find_unused_dependency_overrides(
         ignore_rules: &config.compiled_ignore_dependency_overrides,
         findings: &mut findings,
     });
+    collect_unused_from_source(&mut UnusedOverrideSourceInput {
+        data: &state.bun_resolutions_data,
+        source: DependencyOverrideSource::PnpmPackageJson,
+        source_path: &json_path,
+        declared: &state.declared_packages,
+        resolved: &state.lockfile_packages,
+        hint: HINT_MAY_BE_TRANSITIVE_BUN_RESOLUTIONS,
+        ignore_rules: &config.compiled_ignore_dependency_overrides,
+        findings: &mut findings,
+    });
     findings
 }
 
@@ -649,6 +715,13 @@ pub fn find_misconfigured_dependency_overrides(
     );
     collect_misconfigured_from_source(
         &state.npm_package_json_data,
+        DependencyOverrideSource::PnpmPackageJson,
+        &json_path,
+        &config.compiled_ignore_dependency_overrides,
+        &mut findings,
+    );
+    collect_misconfigured_from_source(
+        &state.bun_resolutions_data,
         DependencyOverrideSource::PnpmPackageJson,
         &json_path,
         &config.compiled_ignore_dependency_overrides,
@@ -1122,6 +1195,288 @@ mod tests {
         assert!(
             bun_lockb_skip_diagnostics(root).is_empty(),
             "the diagnostic is specific to bun.lockb, not to a missing lockfile"
+        );
+    }
+
+    // Issue #2367: bun honours Yarn-style `resolutions` as an `overrides`
+    // alias, so a bun manifest that pins versions there must reach the same
+    // detectors and the same bun.lockb skip diagnostic.
+
+    fn write_manifest(
+        root: &std::path::Path,
+        package_manager: Option<&str>,
+        overrides: Option<&str>,
+        resolutions: Option<&str>,
+    ) {
+        let package_manager_field = package_manager
+            .map(|value| format!(",\n  \"packageManager\": \"{value}\""))
+            .unwrap_or_default();
+        let overrides_field = overrides
+            .map(|value| format!(",\n  \"overrides\": {value}"))
+            .unwrap_or_default();
+        let resolutions_field = resolutions
+            .map(|value| format!(",\n  \"resolutions\": {value}"))
+            .unwrap_or_default();
+        std::fs::write(
+            root.join(ROOT_PACKAGE_JSON),
+            format!(
+                r#"{{
+  "name": "issue-2367-bun-resolutions",
+  "private": true,
+  "devDependencies": {{ "happy-dom": "^20.10.6" }}{package_manager_field}{overrides_field}{resolutions_field}
+}}"#
+            ),
+        )
+        .expect("write package.json");
+    }
+
+    #[expect(
+        deprecated,
+        reason = "the detector helper is deprecated for external callers; the unit test exercises the internal resolutions path"
+    )]
+    fn run_misconfigured_override_detector(
+        config: &ResolvedConfig,
+    ) -> Option<Vec<MisconfiguredDependencyOverride>> {
+        let state = gather_pnpm_override_state(config, &[])?;
+        Some(find_misconfigured_dependency_overrides(&state, config))
+    }
+
+    fn flagged_targets(findings: &[UnusedDependencyOverride]) -> Vec<&str> {
+        findings
+            .iter()
+            .map(|finding| finding.target_package.as_str())
+            .collect()
+    }
+
+    const RESOLUTIONS_WS_AND_LEFT_PAD: &str = r#"{ "ws": "^8.21.0", "left-pad": "^1.3.0" }"#;
+    const RESOLUTIONS_LEFT_PAD: &str = r#"{ "left-pad": "^1.3.0" }"#;
+
+    #[test]
+    fn bun_resolutions_only_next_to_bun_lockb_records_skip_diagnostic_once() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_manifest(
+            root,
+            Some("bun@1.3.2"),
+            None,
+            Some(RESOLUTIONS_WS_AND_LEFT_PAD),
+        );
+        std::fs::write(root.join(BUN_LOCKB_FILE), BUN_LOCKB_PLACEHOLDER).expect("write bun.lockb");
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config)
+            .expect("resolutions are override state in a bun repository");
+        assert!(
+            findings.is_empty(),
+            "bun.lockb is unreadable; the check must stay skipped: {findings:?}"
+        );
+        let diagnostics = bun_lockb_skip_diagnostics(root);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "a resolutions-only manifest announces the skip like an overrides one: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].path, root.join(ROOT_PACKAGE_JSON));
+
+        let _ = run_unused_override_detector(&config);
+        assert_eq!(
+            bun_lockb_skip_diagnostics(root).len(),
+            1,
+            "the registry dedupes on kind + path"
+        );
+    }
+
+    #[test]
+    fn bun_resolutions_resolve_against_text_bun_lock() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_manifest(
+            root,
+            Some("bun@1.3.2"),
+            None,
+            Some(RESOLUTIONS_WS_AND_LEFT_PAD),
+        );
+        std::fs::write(root.join(BUN_LOCK_FILE), BUN_LOCK_REAL_SHAPE).expect("write bun.lock");
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config)
+            .expect("resolutions are override state in a bun repository");
+        assert_eq!(
+            flagged_targets(&findings),
+            vec!["left-pad"],
+            "bun.lock resolves ws transitively; left-pad stays unresolved"
+        );
+        let finding = &findings[0];
+        assert_eq!(finding.raw_key, "left-pad");
+        assert_eq!(finding.source, DependencyOverrideSource::PnpmPackageJson);
+        assert_eq!(finding.path, root.join(ROOT_PACKAGE_JSON));
+        assert_eq!(finding.line, 6, "the resolutions object sits on line 6");
+        let hint = finding.hint.as_deref().unwrap_or_default();
+        assert!(
+            hint.contains("resolutions") && hint.contains("bun install --frozen-lockfile"),
+            "the bun hint names the resolutions origin: {hint}"
+        );
+        assert!(
+            bun_lockb_skip_diagnostics(root).is_empty(),
+            "a parseable bun.lock means resolution ran"
+        );
+    }
+
+    #[test]
+    fn bun_overrides_key_shadows_resolutions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_manifest(
+            root,
+            Some("bun@1.3.2"),
+            Some(r#"{ "ws": "^8.21.0" }"#),
+            Some(RESOLUTIONS_LEFT_PAD),
+        );
+        std::fs::write(root.join(BUN_LOCK_FILE), BUN_LOCK_REAL_SHAPE).expect("write bun.lock");
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config).expect("overrides are declared");
+        assert!(
+            findings.is_empty(),
+            "bun never reads resolutions once an overrides key exists: {findings:?}"
+        );
+
+        let empty_dir = tempfile::tempdir().expect("tempdir");
+        let empty_root = empty_dir.path();
+        write_manifest(
+            empty_root,
+            Some("bun@1.3.2"),
+            Some("{}"),
+            Some(RESOLUTIONS_LEFT_PAD),
+        );
+        std::fs::write(empty_root.join(BUN_LOCK_FILE), BUN_LOCK_REAL_SHAPE)
+            .expect("write bun.lock");
+        let config = resolve_config(empty_root);
+        assert!(
+            run_unused_override_detector(&config).is_none(),
+            "an empty overrides object still shadows resolutions, so no override state exists"
+        );
+    }
+
+    #[derive(Debug)]
+    struct NonBunRepository {
+        package_manager: Option<&'static str>,
+        lockfile: Option<(&'static str, &'static str)>,
+    }
+
+    #[test]
+    fn resolutions_are_ignored_outside_bun_repositories() {
+        let cases = [
+            NonBunRepository {
+                package_manager: Some("yarn@4.5.0"),
+                lockfile: Some((YARN_LOCK_FILE, "# yarn lockfile v1\n")),
+            },
+            // A declared package manager wins over a leftover bun lockfile.
+            NonBunRepository {
+                package_manager: Some("npm@10.9.0"),
+                lockfile: Some((BUN_LOCK_FILE, BUN_LOCK_REAL_SHAPE)),
+            },
+            NonBunRepository {
+                package_manager: None,
+                lockfile: Some((PNPM_LOCK_FILE, "lockfileVersion: '9.0'\n")),
+            },
+            NonBunRepository {
+                package_manager: None,
+                lockfile: None,
+            },
+        ];
+        for case in cases {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let root = dir.path();
+            write_manifest(root, case.package_manager, None, Some(RESOLUTIONS_LEFT_PAD));
+            if let Some((name, content)) = case.lockfile {
+                std::fs::write(root.join(name), content).expect("write lockfile");
+            }
+            let config = resolve_config(root);
+            assert!(
+                run_unused_override_detector(&config).is_none(),
+                "{case:?}: resolutions are not an override source outside bun repositories"
+            );
+        }
+    }
+
+    #[test]
+    fn bun_lockfile_without_package_manager_field_enables_resolutions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_manifest(root, None, None, Some(RESOLUTIONS_WS_AND_LEFT_PAD));
+        std::fs::write(root.join(BUN_LOCK_FILE), BUN_LOCK_REAL_SHAPE).expect("write bun.lock");
+        let config = resolve_config(root);
+        let findings = run_unused_override_detector(&config)
+            .expect("a root bun.lock marks the repository as bun");
+        assert_eq!(flagged_targets(&findings), vec!["left-pad"]);
+
+        let lockb_dir = tempfile::tempdir().expect("tempdir");
+        let lockb_root = lockb_dir.path();
+        write_manifest(lockb_root, None, None, Some(RESOLUTIONS_WS_AND_LEFT_PAD));
+        std::fs::write(lockb_root.join(BUN_LOCKB_FILE), BUN_LOCKB_PLACEHOLDER)
+            .expect("write bun.lockb");
+        let config = resolve_config(lockb_root);
+        let findings = run_unused_override_detector(&config)
+            .expect("a root bun.lockb marks the repository as bun");
+        assert!(findings.is_empty(), "bun.lockb is unreadable: {findings:?}");
+        assert_eq!(
+            bun_lockb_skip_diagnostics(lockb_root).len(),
+            1,
+            "the skip is announced for the resolutions-only manifest"
+        );
+    }
+
+    #[test]
+    fn bun_resolutions_yarn_path_keys_credit_parents_and_flag_rejected_shapes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_manifest(
+            root,
+            Some("bun@1.3.2"),
+            None,
+            Some(
+                r#"{
+    "**/ws": "^8.21.0",
+    "happy-dom/left-pad": "^1.3.0",
+    "**/left-pad": "^1.3.0",
+    "a/b/c": "^1.0.0",
+    "nested": { "left-pad": "^1.3.0" }
+  }"#,
+            ),
+        );
+        std::fs::write(root.join(BUN_LOCK_FILE), BUN_LOCK_REAL_SHAPE).expect("write bun.lock");
+        let config = resolve_config(root);
+
+        let unused = run_unused_override_detector(&config).expect("resolutions are declared");
+        let flagged: Vec<(&str, &str)> = unused
+            .iter()
+            .map(|finding| (finding.raw_key.as_str(), finding.target_package.as_str()))
+            .collect();
+        assert_eq!(
+            flagged,
+            vec![("**/left-pad", "left-pad")],
+            "ws resolves through bun.lock, happy-dom/left-pad is credited through its declared parent, and the shapes bun rejects never reach the unused check"
+        );
+
+        let misconfigured =
+            run_misconfigured_override_detector(&config).expect("resolutions are declared");
+        let reasons: Vec<(&str, DependencyOverrideMisconfigReason)> = misconfigured
+            .iter()
+            .map(|finding| (finding.raw_key.as_str(), finding.reason))
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                ("a/b/c", DependencyOverrideMisconfigReason::UnparsableKey),
+                ("nested", DependencyOverrideMisconfigReason::EmptyValue),
+            ],
+            "a path deeper than one parent and a non-string value are the shapes bun warns about and skips"
+        );
+        assert!(
+            misconfigured
+                .iter()
+                .all(|finding| finding.source == DependencyOverrideSource::PnpmPackageJson)
         );
     }
 }

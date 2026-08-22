@@ -27,10 +27,23 @@
 //! shape the pnpm parser produces (joining nesting levels with `>`), so the
 //! unused-override and misconfigured-override detectors can analyze npm and
 //! pnpm overrides through one code path.
+//!
+//! bun reads the same top-level `overrides` object and, as a Yarn migration
+//! aid, a top-level `resolutions` object with flat string entries whose keys
+//! may use yarn's dependency-path spelling (`parent/child`, `**/child`).
+//! [`parse_bun_package_json_resolutions`] maps that dialect onto the shared
+//! entry shape so bun repositories get the same two findings for
+//! `resolutions` (issue #2367).
 
 use super::pnpm_overrides::{
-    ParsedOverrideKey, PnpmOverrideData, PnpmOverrideEntry, split_pkg_and_selector,
+    ParsedOverrideKey, PnpmOverrideData, PnpmOverrideEntry, parse_override_key,
+    split_pkg_and_selector,
 };
+
+const OVERRIDES_KEY: &str = "overrides";
+const RESOLUTIONS_KEY: &str = "resolutions";
+const YARN_GLOB_SEGMENT: &str = "**";
+const YARN_COMMENT_KEY_PREFIX: &str = "//";
 
 /// Parse the top-level `overrides` section of a root `package.json`. Returns
 /// an empty `PnpmOverrideData` when the file has no overrides, when the JSON
@@ -41,15 +54,133 @@ pub fn parse_npm_package_json_overrides(source: &str) -> PnpmOverrideData {
         Ok(v) => v,
         Err(_) => return PnpmOverrideData::default(),
     };
-    let Some(overrides) = value.get("overrides").and_then(|o| o.as_object()) else {
+    let Some(overrides) = value.get(OVERRIDES_KEY).and_then(|o| o.as_object()) else {
         return PnpmOverrideData::default();
     };
 
-    let mut line_index = NpmOverridesLineIndex::build(source);
+    let mut line_index = NpmOverridesLineIndex::build(source, OVERRIDES_KEY, true);
     let mut entries = Vec::new();
     let mut path: Vec<String> = Vec::new();
     flatten_overrides(overrides, &mut path, &mut line_index, &mut entries);
     PnpmOverrideData { entries }
+}
+
+/// Parse the Yarn-style top-level `resolutions` object of a root
+/// `package.json` the way bun reads it (issue #2367). bun treats
+/// `resolutions` as an alias of `overrides` with flat string entries: a key
+/// is a bare package (`left-pad`, `@scope/pkg`, `pkg@<2`), a yarn dependency
+/// path (`parent/child`, `**/child`, `parent/**/child`, where `@scope/name`
+/// spans two path segments), or the pnpm `parent>child` form. Paths deeper
+/// than one parent and non-string values are kept as entries without a
+/// parsed key or value so the misconfigured-override detector reports them,
+/// matching the warning bun prints before skipping such entries. Keys that
+/// start with `//` are comments and skipped. Returns empty data when the
+/// file has no `resolutions` object or the JSON is malformed. Callers decide
+/// whether the repository installs with bun and whether an `overrides` key
+/// shadows the section.
+#[must_use]
+pub fn parse_bun_package_json_resolutions(source: &str) -> PnpmOverrideData {
+    let value: serde_json::Value = match serde_json::from_str(source) {
+        Ok(v) => v,
+        Err(_) => return PnpmOverrideData::default(),
+    };
+    let Some(resolutions) = value.get(RESOLUTIONS_KEY).and_then(|o| o.as_object()) else {
+        return PnpmOverrideData::default();
+    };
+
+    let mut line_index = NpmOverridesLineIndex::build(source, RESOLUTIONS_KEY, false);
+    let mut entries = Vec::with_capacity(resolutions.len());
+    for (key, value) in resolutions {
+        let line = line_index.next_line_for(key);
+        if key.starts_with(YARN_COMMENT_KEY_PREFIX) {
+            continue;
+        }
+        let raw_value = match value {
+            serde_json::Value::String(s) => Some(s.clone()),
+            _ => None,
+        };
+        let Some(line) = line else {
+            continue;
+        };
+        entries.push(PnpmOverrideEntry {
+            raw_key: key.clone(),
+            parsed_key: parse_resolution_key(key),
+            raw_value,
+            line,
+        });
+    }
+    PnpmOverrideData { entries }
+}
+
+/// Parse a `resolutions` key into the shared override key shape. The pnpm
+/// `parent>child` spelling is delegated to the pnpm key parser; everything
+/// else is a yarn dependency path where `**` segments match any depth,
+/// `@scope/name` spans two segments, and at most one parent precedes the
+/// target. Returns `None` for the shapes bun rejects: an empty segment, a
+/// bare scope, a trailing `**`, or more than one parent level.
+fn parse_resolution_key(key: &str) -> Option<ParsedOverrideKey> {
+    let trimmed = key.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(delimiter) = pnpm_delimiter(trimmed) {
+        if pnpm_delimiter(&trimmed[delimiter + 1..]).is_some() {
+            return None;
+        }
+        return parse_override_key(trimmed);
+    }
+
+    let mut segments: Vec<String> = Vec::with_capacity(2);
+    let mut tokens = trimmed.split('/').peekable();
+    while let Some(token) = tokens.next() {
+        if token.is_empty() {
+            return None;
+        }
+        if token == YARN_GLOB_SEGMENT {
+            tokens.peek()?;
+            continue;
+        }
+        let segment = if token.starts_with('@') {
+            let name = tokens.next().filter(|name| !name.is_empty())?;
+            format!("{token}/{name}")
+        } else {
+            token.to_string()
+        };
+        if segments.len() == 2 {
+            return None;
+        }
+        segments.push(segment);
+    }
+
+    let (parent, target) = match segments.as_slice() {
+        [target] => (None, target),
+        [parent, target] => (Some(parent), target),
+        _ => return None,
+    };
+    let (target_package, target_version_selector) = split_pkg_and_selector(target)?;
+    let (parent_package, parent_version_selector) = match parent {
+        Some(parent) => {
+            let (package, selector) = split_pkg_and_selector(parent)?;
+            (Some(package), selector)
+        }
+        None => (None, None),
+    };
+    Some(ParsedOverrideKey {
+        parent_package,
+        parent_version_selector,
+        target_package,
+        target_version_selector,
+    })
+}
+
+/// Byte offset of the pnpm `parent>child` delimiter as bun recognises it:
+/// the first `>` past the first byte that is not preceded by a space, `|`,
+/// or `@`, so `pkg@>=1` keeps its version selector intact.
+fn pnpm_delimiter(key: &str) -> Option<usize> {
+    let bytes = key.as_bytes();
+    bytes.iter().enumerate().skip(1).find_map(|(index, byte)| {
+        (*byte == b'>' && !matches!(bytes[index - 1], b' ' | b'|' | b'@')).then_some(index)
+    })
 }
 
 /// Depth-first flattening of the (possibly nested) overrides object into flat
@@ -136,8 +267,9 @@ fn build_npm_key(path: &[String], key: &str) -> (String, Option<ParsedOverrideKe
     )
 }
 
-/// Ordered `(key, line)` pairs for every key inside the top-level `overrides`
-/// object, consumed by a forward-only cursor during flattening.
+/// Ordered `(key, line)` pairs for every key inside one top-level section
+/// object (`overrides` or `resolutions`), consumed by a forward-only cursor
+/// during flattening.
 struct NpmOverridesLineIndex {
     entries: Vec<(String, u32)>,
     cursor: usize,
@@ -157,10 +289,13 @@ impl NpmOverridesLineIndex {
     }
 
     /// Walk the raw source with a brace-depth scanner and record every key
-    /// (at any nesting depth) inside the top-level `overrides` object,
-    /// paired with its 1-based line number.
-    fn build(source: &str) -> Self {
-        let mut scan = NpmOverridesJsonScan::default();
+    /// inside the top-level `section` object, paired with its 1-based line
+    /// number. With `nested` set, keys at any depth inside the section are
+    /// recorded (npm scopes overrides by nesting); otherwise only the
+    /// section's direct keys are, so a nested object value bun rejects cannot
+    /// shift the cursor onto a later key of the same name.
+    fn build(source: &str, section: &'static str, nested: bool) -> Self {
+        let mut scan = NpmOverridesJsonScan::new(section, nested);
         let mut current_line = 1u32;
 
         for ch in source.chars() {
@@ -182,15 +317,16 @@ impl NpmOverridesLineIndex {
     }
 }
 
-/// Char-by-char brace-depth scanner state for the top-level `overrides` line
-/// index. Mirrors the pnpm `pnpm.overrides` scanner, but records keys at every
-/// nesting depth inside the overrides object because npm scopes overrides by
-/// nesting rather than by `parent>child` keys.
-#[derive(Default)]
+/// Char-by-char brace-depth scanner state for a top-level section line
+/// index. Mirrors the pnpm `pnpm.overrides` scanner, but can record keys at
+/// every nesting depth inside the section object because npm scopes
+/// overrides by nesting rather than by `parent>child` keys.
 struct NpmOverridesJsonScan {
+    section: &'static str,
+    nested: bool,
     entries: Vec<(String, u32)>,
     depth: i32,
-    overrides_depth: Option<i32>,
+    section_depth: Option<i32>,
     in_string: bool,
     escape: bool,
     last_key: Option<String>,
@@ -199,6 +335,21 @@ struct NpmOverridesJsonScan {
 }
 
 impl NpmOverridesJsonScan {
+    fn new(section: &'static str, nested: bool) -> Self {
+        Self {
+            section,
+            nested,
+            entries: Vec::new(),
+            depth: 0,
+            section_depth: None,
+            in_string: false,
+            escape: false,
+            last_key: None,
+            key_buf: String::new(),
+            collecting_key: false,
+        }
+    }
+
     fn consume_in_string_char(&mut self, ch: char) {
         if self.escape {
             if self.collecting_key {
@@ -236,10 +387,10 @@ impl NpmOverridesJsonScan {
             }
             '{' => self.depth += 1,
             '}' => {
-                // The overrides object closes when depth returns to the level
-                // where the `overrides` key was seen.
-                if self.overrides_depth == Some(self.depth - 1) {
-                    self.overrides_depth = None;
+                // The section object closes when depth returns to the level
+                // where its key was seen.
+                if self.section_depth == Some(self.depth - 1) {
+                    self.section_depth = None;
                 }
                 self.depth -= 1;
             }
@@ -255,10 +406,11 @@ impl NpmOverridesJsonScan {
         let Some(key) = self.last_key.take() else {
             return;
         };
-        if self.overrides_depth.is_none() && self.depth == 1 && key == "overrides" {
-            self.overrides_depth = Some(self.depth);
-        } else if let Some(d) = self.overrides_depth
+        if self.section_depth.is_none() && self.depth == 1 && key == self.section {
+            self.section_depth = Some(self.depth);
+        } else if let Some(d) = self.section_depth
             && self.depth > d
+            && (self.nested || self.depth == d + 1)
         {
             self.entries.push((key, current_line));
         }
@@ -409,5 +561,175 @@ mod tests {
     fn malformed_json_returns_no_entries() {
         let data = parse_npm_package_json_overrides("{not valid json");
         assert!(data.entries.is_empty());
+    }
+
+    // Issue #2367: bun reads Yarn-style `resolutions` as an `overrides` alias.
+
+    fn parsed(entry: &PnpmOverrideEntry) -> &ParsedOverrideKey {
+        entry
+            .parsed_key
+            .as_ref()
+            .unwrap_or_else(|| panic!("{} should parse", entry.raw_key))
+    }
+
+    #[test]
+    fn resolutions_flat_entries_parse_with_lines() {
+        let json = r#"{
+  "name": "root",
+  "resolutions": {
+    "ws": "^8.21.0",
+    "left-pad": "^1.3.0"
+  }
+}"#;
+        let data = parse_bun_package_json_resolutions(json);
+        assert_eq!(data.entries.len(), 2);
+        assert_eq!(data.entries[0].raw_key, "ws");
+        assert_eq!(data.entries[0].line, 4);
+        assert_eq!(data.entries[1].raw_key, "left-pad");
+        assert_eq!(data.entries[1].raw_value.as_deref(), Some("^1.3.0"));
+        assert_eq!(data.entries[1].line, 5);
+        let left_pad = parsed(&data.entries[1]);
+        assert_eq!(left_pad.target_package, "left-pad");
+        assert!(left_pad.parent_package.is_none());
+    }
+
+    #[test]
+    fn resolutions_yarn_path_keys_map_to_parent_and_target() {
+        let json = r#"{
+  "resolutions": {
+    "**/left-pad": "^1.3.0",
+    "react/left-pad": "^1.3.0",
+    "react/**/left-pad": "^1.3.0",
+    "@scope/parent/left-pad": "^1.3.0",
+    "@scope/parent/@scope/child": "^1.3.0",
+    "react@^18/left-pad": "^1.3.0",
+    "@types/react@<18": "18.0.0"
+  }
+}"#;
+        let data = parse_bun_package_json_resolutions(json);
+        assert_eq!(data.entries.len(), 7);
+
+        let glob = parsed(&data.entries[0]);
+        assert_eq!(data.entries[0].raw_key, "**/left-pad");
+        assert_eq!(glob.target_package, "left-pad");
+        assert!(glob.parent_package.is_none());
+        assert_eq!(data.entries[0].line, 3);
+
+        let scoped_parent = parsed(&data.entries[1]);
+        assert_eq!(scoped_parent.parent_package.as_deref(), Some("react"));
+        assert_eq!(scoped_parent.target_package, "left-pad");
+
+        let glob_between = parsed(&data.entries[2]);
+        assert_eq!(glob_between.parent_package.as_deref(), Some("react"));
+        assert_eq!(glob_between.target_package, "left-pad");
+
+        let scoped = parsed(&data.entries[3]);
+        assert_eq!(scoped.parent_package.as_deref(), Some("@scope/parent"));
+        assert_eq!(scoped.target_package, "left-pad");
+
+        let both_scoped = parsed(&data.entries[4]);
+        assert_eq!(both_scoped.parent_package.as_deref(), Some("@scope/parent"));
+        assert_eq!(both_scoped.target_package, "@scope/child");
+
+        let ranged_parent = parsed(&data.entries[5]);
+        assert_eq!(ranged_parent.parent_package.as_deref(), Some("react"));
+        assert_eq!(
+            ranged_parent.parent_version_selector.as_deref(),
+            Some("^18")
+        );
+        assert_eq!(ranged_parent.target_package, "left-pad");
+
+        let selector = parsed(&data.entries[6]);
+        assert_eq!(selector.target_package, "@types/react");
+        assert_eq!(selector.target_version_selector.as_deref(), Some("<18"));
+        assert_eq!(data.entries[6].line, 9);
+    }
+
+    #[test]
+    fn resolutions_pnpm_delimiter_keys_parse_like_overrides() {
+        let json = r#"{"resolutions": {"react>left-pad": "^1.3.0", "pkg@>=1": "^2.0.0"}}"#;
+        let data = parse_bun_package_json_resolutions(json);
+        assert_eq!(data.entries.len(), 2);
+        let chained = parsed(&data.entries[0]);
+        assert_eq!(chained.parent_package.as_deref(), Some("react"));
+        assert_eq!(chained.target_package, "left-pad");
+        // `@>` is a version selector, not the pnpm delimiter.
+        let selector = parsed(&data.entries[1]);
+        assert!(selector.parent_package.is_none());
+        assert_eq!(selector.target_package, "pkg");
+        assert_eq!(selector.target_version_selector.as_deref(), Some(">=1"));
+    }
+
+    #[test]
+    fn resolutions_shapes_bun_rejects_are_unparsable_or_valueless() {
+        let json = r#"{
+  "resolutions": {
+    "a/b/c": "^1.0.0",
+    "a>b>c": "^1.0.0",
+    "@scope": "^1.0.0",
+    "left-pad/**": "^1.0.0",
+    "nested": { "left-pad": "^1.3.0" },
+    "left-pad": "^1.3.0"
+  }
+}"#;
+        let data = parse_bun_package_json_resolutions(json);
+        assert_eq!(data.entries.len(), 6);
+        for entry in &data.entries[..4] {
+            assert!(
+                entry.parsed_key.is_none(),
+                "{} is deeper than one parent or malformed and must not parse",
+                entry.raw_key
+            );
+        }
+        assert_eq!(data.entries[4].raw_key, "nested");
+        assert!(data.entries[4].parsed_key.is_some());
+        assert!(
+            data.entries[4].raw_value.is_none(),
+            "bun only honours string resolution values"
+        );
+        // The nested object's inner key must not steal the line of the later
+        // top-level entry with the same name.
+        assert_eq!(data.entries[5].raw_key, "left-pad");
+        assert_eq!(data.entries[5].line, 8);
+    }
+
+    #[test]
+    fn resolutions_comment_keys_are_skipped_without_shifting_lines() {
+        let json = r#"{
+  "resolutions": {
+    "//": "pin for CVE-2024-0001",
+    "left-pad": "^1.3.0"
+  }
+}"#;
+        let data = parse_bun_package_json_resolutions(json);
+        assert_eq!(data.entries.len(), 1);
+        assert_eq!(data.entries[0].raw_key, "left-pad");
+        assert_eq!(data.entries[0].line, 4);
+    }
+
+    #[test]
+    fn resolutions_parser_ignores_overrides_and_nested_sections() {
+        assert!(
+            parse_bun_package_json_resolutions(r#"{"overrides": {"left-pad": "^1.3.0"}}"#)
+                .entries
+                .is_empty()
+        );
+        assert!(
+            parse_bun_package_json_resolutions(
+                r#"{"config": {"resolutions": {"left-pad": "^1.3.0"}}}"#
+            )
+            .entries
+            .is_empty()
+        );
+        assert!(
+            parse_npm_package_json_overrides(r#"{"resolutions": {"left-pad": "^1.3.0"}}"#)
+                .entries
+                .is_empty()
+        );
+        assert!(
+            parse_bun_package_json_resolutions("{not valid json")
+                .entries
+                .is_empty()
+        );
     }
 }

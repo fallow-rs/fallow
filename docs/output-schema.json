@@ -5147,7 +5147,7 @@
         "path",
         "line"
       ],
-      "description": "An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in\n`package.json`), or in npm's top-level `overrides` object in\n`package.json`, whose target package is not declared in any workspace\n`package.json` and is not present in `pnpm-lock.yaml` or\n`package-lock.json`. Projects without a readable lockfile fall back to\npackage manifest checks; the `hint` field flags that conservative mode."
+      "description": "An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in\n`package.json`), in npm's top-level `overrides` object in `package.json`,\nor (in a bun repository) in the Yarn-style top-level `resolutions` object\nin `package.json`, whose target package is not declared in any workspace\n`package.json` and is not present in `pnpm-lock.yaml`,\n`package-lock.json`, or `bun.lock`. Projects without a readable lockfile\nfall back to package manifest checks; the `hint` field flags that\nconservative mode."
     },
     "MisconfiguredDependencyOverride": {
       "type": "object",
@@ -6683,7 +6683,7 @@
         {
           "type": "string",
           "const": "package.json",
-          "description": "`pnpm.overrides` or the top-level npm `overrides` object in a root\n`package.json`."
+          "description": "`pnpm.overrides`, the top-level npm `overrides` object, or (in a bun\nrepository) the Yarn-style top-level `resolutions` object in a root\n`package.json`."
         }
       ],
       "description": "Where an override entry was declared. Serialized as the filename label\n(`\"pnpm-workspace.yaml\"` or `\"package.json\"`) so the value in JSON output\nmatches the value users write in `ignoreDependencyOverrides[].source`."

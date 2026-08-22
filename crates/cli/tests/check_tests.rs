@@ -1025,3 +1025,46 @@ fn bun_lockb_only_override_skip_surfaces_in_json_and_human_output() {
         human.stderr
     );
 }
+
+/// Issue #2367: a bun repo that pins versions under Yarn-style `resolutions`
+/// gets unused-override findings in JSON output, sourced to `package.json`
+/// with the bun hint naming `resolutions`.
+#[test]
+fn bun_resolutions_surface_as_unused_overrides_in_json_output() {
+    let output = run_fallow(
+        "dead-code",
+        "issue-2367-bun-resolutions",
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    let findings = json["unused_dependency_overrides"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut keys: Vec<&str> = findings
+        .iter()
+        .filter_map(|finding| finding["raw_key"].as_str())
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["**/trim-newlines", "left-pad"],
+        "the two unresolved resolutions pins are reported: {findings:?}"
+    );
+    for finding in &findings {
+        assert_eq!(finding["source"], "package.json");
+        assert_eq!(finding["path"], "package.json");
+        let hint = finding["hint"].as_str().unwrap_or_default();
+        assert!(
+            hint.contains("resolutions") && hint.contains("bun install --frozen-lockfile"),
+            "the bun hint names the resolutions origin: {hint}"
+        );
+    }
+    assert!(
+        json["workspace_diagnostics"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "a parseable bun.lock resolves normally: {}",
+        json["workspace_diagnostics"]
+    );
+}

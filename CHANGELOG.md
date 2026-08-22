@@ -32,6 +32,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `workspace_diagnostics[].kind` union; consumers that exhaustively match on
   `kind` should treat unknown kinds as informational.
 
+- **bun repositories that pin transitive versions under Yarn-style
+  `resolutions` now get `unused-dependency-overrides` and
+  `misconfigured-dependency-overrides` findings for those entries** (Closes
+  [#2367](https://github.com/fallow-rs/fallow/issues/2367)). bun reads
+  `resolutions` as an alias of `overrides`, but the override analyzer only
+  parsed the top-level `overrides` object and `pnpm.overrides`, so a bun
+  repository whose root `package.json` used `resolutions` was never
+  analyzed: no findings with any lockfile, and next to a `bun.lockb` no
+  `bun-lockb-override-resolution-skipped` diagnostic either, because no
+  override state was gathered. When the root `packageManager` names bun, or
+  no recognised `packageManager` is declared and a `bun.lock` or `bun.lockb`
+  sits at the root, the `resolutions` entries now run through the same
+  analysis as `overrides`: resolved against the text `bun.lock`, reported
+  with `source: "package.json"` and the entry's line, and carrying the bun
+  hint, which names `resolutions` so the entry is easy to locate. bun's key
+  dialect is honoured: `pkg`, `@scope/pkg`, `pkg@<2`, the yarn paths
+  `parent/child`, `**/child`, and `parent/**/child`, and the pnpm
+  `parent>child` form all parse; paths deeper than one parent and non-string
+  values, which bun warns about and skips, are reported as misconfigured.
+  bun consults `resolutions` only when the manifest has no `overrides` key,
+  so a manifest carrying both is analyzed for `overrides` alone. A
+  `resolutions`-only manifest next to a `bun.lockb` without a parseable text
+  lockfile now records the skip diagnostic. yarn, npm, and pnpm repositories
+  are unchanged: `resolutions` is not an override source there, and the yarn
+  hint for inert `overrides` entries stays as it was. Suppress an entry with
+  `ignoreDependencyOverrides: [{ "package": "...", "source": "package.json"
+  }]`. The JSON contract is unchanged; only the `source` field description
+  mentions the new origin.
+
 - **The VS Code extension now publishes platform-specific packages for macOS,
   Linux, and Windows.** Each targeted VSIX carries only its matching semantic
   backend, reducing normal extension downloads by roughly 82 to 84 percent.
