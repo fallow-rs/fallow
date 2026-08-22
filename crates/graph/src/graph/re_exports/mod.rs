@@ -7,6 +7,7 @@ mod tests;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
+use fixedbitset::FixedBitSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[cfg(test)]
@@ -110,21 +111,72 @@ struct ReExportContext<'a> {
     reference_paths: &'a mut ReferencePathInterner,
 }
 
-/// Which re-export chains `ModuleGraph::extend_star_closure` follows.
-#[derive(Clone, Copy)]
-enum StarChains {
-    /// Plain `export *` only: the surface a star forwards by name.
-    Plain,
-    /// Plain `export *` and `export * as ns`: everything a namespace object
-    /// exposes, recursively.
-    PlainAndNamespace,
+/// How much of a closure member the consumers that cannot be enumerated see.
+///
+/// The two differ on `default` alone, because a plain `export *` forwards
+/// every named export of its source and never the source's `default`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Exposure {
+    /// Reached through a plain `export *`: every export except `default`.
+    StarSurface,
+    /// The whole namespace object is observed: every export, `default`
+    /// included.
+    NamespaceObject,
 }
 
-impl StarChains {
-    fn follows(self, re: &super::types::ReExportEdge) -> bool {
-        match self {
-            Self::Plain => re.imported_name == "*" && re.exported_name == "*",
-            Self::PlainAndNamespace => re.imported_name == "*",
+/// The exposed namespace closure: every module whose names reach consumers
+/// the graph cannot enumerate, with the part of its export surface they see.
+///
+/// Built by [`ModuleGraph::collect_exposed_namespace_targets`], computed once
+/// per graph build and read by Phase 2c (namespace re-export propagation) and
+/// Phase 4 (the entry-star seed).
+pub(in crate::graph) struct ExposedNamespaceTargets {
+    members: FxHashMap<FileId, Exposure>,
+}
+
+impl ExposedNamespaceTargets {
+    /// Whether the closure has no members at all.
+    pub(in crate::graph) fn is_empty(&self) -> bool {
+        self.members.is_empty()
+    }
+
+    /// Whether the member exposes `exported_name`.
+    ///
+    /// A member reached through a plain `export *` does not expose `default`:
+    /// the star that carried its names onward never forwards it, so an
+    /// `export * as default` declared on such a member hands its target's
+    /// namespace object to nobody.
+    pub(in crate::graph) fn exposes_name(&self, file_id: FileId, exported_name: &str) -> bool {
+        match self.members.get(&file_id) {
+            Some(Exposure::NamespaceObject) => true,
+            Some(Exposure::StarSurface) => exported_name != "default",
+            None => false,
+        }
+    }
+
+    /// Every member, at either exposure.
+    ///
+    /// Phase 4 star propagation credits the named exports of a member's
+    /// `export *` sources and never their `default`, which both exposures
+    /// forward alike, so it reads the membership alone.
+    fn files(&self) -> impl Iterator<Item = FileId> + '_ {
+        self.members.keys().copied()
+    }
+
+    /// Record a member, re-walking it when a wider exposure than a previous
+    /// visit arrives. Each member is walked at most twice.
+    fn record(&mut self, stack: &mut Vec<(FileId, Exposure)>, file_id: FileId, exposure: Exposure) {
+        match self.members.entry(file_id) {
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                if *slot.get() == Exposure::StarSurface && exposure == Exposure::NamespaceObject {
+                    slot.insert(exposure);
+                    stack.push((file_id, exposure));
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(exposure);
+                stack.push((file_id, exposure));
+            }
         }
     }
 }
@@ -148,11 +200,29 @@ struct NameForwarders<'a> {
     stars: FxHashMap<FileId, Vec<FileId>>,
 }
 
-/// Reusable visited set and stack for [`NameForwarders::reaches_surface`].
+/// What [`NameForwarders::reaches_surface`] measures a state against.
+struct SurfaceReach {
+    /// Entry points plus every barrel they reach through plain `export *`.
+    star_surface: FxHashSet<FileId>,
+    /// Every module some star-surface module re-exports from, transitively,
+    /// names ignored.
+    ///
+    /// A name can only travel from a module to the entry surface along
+    /// forwarding edges, so a module outside this set answers the search in
+    /// constant time however deep its own chains run.
+    may_reach: FxHashSet<FileId>,
+}
+
+/// Reusable state for [`NameForwarders::reaches_surface`].
+///
+/// `failed` outlives a single search: an exhausted search proves that every
+/// state it visited fails too, so a forwarding chain shared by many namespace
+/// edges is walked once instead of once per edge.
 #[derive(Default)]
 struct NameSearchScratch<'a> {
     visited: FxHashSet<(FileId, &'a str)>,
     frontier: Vec<(FileId, &'a str)>,
+    failed: FxHashSet<(FileId, &'a str)>,
 }
 
 impl<'a> NameForwarders<'a> {
@@ -179,38 +249,64 @@ impl<'a> NameForwarders<'a> {
         Self { named, stars }
     }
 
-    /// Whether `name`, as exported by `file`, reaches a module on the entry
-    /// point's star surface through named and plain-star re-exports.
+    /// Whether `name`, as exported by `file`, reaches the entry point's own
+    /// export surface through named and plain-star re-exports.
+    ///
+    /// Each hop must really forward the binding: a barrel that declares its
+    /// own `name`, or that receives it from two stars at once, exports a
+    /// different binding under that name and the chain stops there. A plain
+    /// `export *` also never carries `default`, so a `default`-named state
+    /// takes named hops only.
     fn reaches_surface(
         &self,
+        graph: &ModuleGraph,
         file: FileId,
         name: &'a str,
-        star_surface: &FxHashSet<FileId>,
+        surfaces: &SurfaceReach,
         scratch: &mut NameSearchScratch<'a>,
     ) -> bool {
+        let SurfaceReach {
+            star_surface,
+            may_reach,
+        } = surfaces;
+        if !may_reach.contains(&file) || scratch.failed.contains(&(file, name)) {
+            return false;
+        }
         scratch.visited.clear();
         scratch.frontier.clear();
         scratch.visited.insert((file, name));
         scratch.frontier.push((file, name));
         while let Some((current, current_name)) = scratch.frontier.pop() {
-            if star_surface.contains(&current) {
+            if graph.surface_exposes(star_surface, current, current_name) {
                 return true;
             }
             if let Some(barrels) = self.named.get(&(current, current_name)) {
                 for &(barrel, exported_name) in barrels {
-                    if scratch.visited.insert((barrel, exported_name)) {
+                    if may_reach.contains(&barrel)
+                        && graph.forwards_binding(current, current_name, barrel, exported_name)
+                        && !scratch.failed.contains(&(barrel, exported_name))
+                        && scratch.visited.insert((barrel, exported_name))
+                    {
                         scratch.frontier.push((barrel, exported_name));
                     }
                 }
             }
+            if current_name == "default" {
+                continue;
+            }
             if let Some(barrels) = self.stars.get(&current) {
                 for &barrel in barrels {
-                    if scratch.visited.insert((barrel, current_name)) {
+                    if may_reach.contains(&barrel)
+                        && graph.forwards_binding(current, current_name, barrel, current_name)
+                        && !scratch.failed.contains(&(barrel, current_name))
+                        && scratch.visited.insert((barrel, current_name))
+                    {
                         scratch.frontier.push((barrel, current_name));
                     }
                 }
             }
         }
+        scratch.failed.extend(scratch.visited.iter().copied());
         false
     }
 }
@@ -295,7 +391,7 @@ impl ModuleGraph {
     pub(super) fn resolve_re_export_chains(
         &mut self,
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
-        exposed_namespace_targets: &FxHashSet<FileId>,
+        exposed_namespace_targets: &ExposedNamespaceTargets,
         reference_paths: &mut ReferencePathInterner,
     ) -> Vec<GraphReExportCycle> {
         let re_export_info = self.collect_re_export_tuples();
@@ -343,9 +439,9 @@ impl ModuleGraph {
     /// per build and threaded in).
     fn collect_entry_star_targets(
         &self,
-        exposed_namespace_targets: &FxHashSet<FileId>,
+        exposed_namespace_targets: &ExposedNamespaceTargets,
     ) -> FxHashSet<FileId> {
-        let mut entry_star_targets = exposed_namespace_targets.clone();
+        let mut entry_star_targets: FxHashSet<FileId> = exposed_namespace_targets.files().collect();
         entry_star_targets.extend(self.modules.iter().filter(|m| m.is_entry_point()).flat_map(
             |m| {
                 m.re_exports
@@ -354,7 +450,7 @@ impl ModuleGraph {
                     .map(|re| re.source_file)
             },
         ));
-        self.extend_star_closure(&mut entry_star_targets, StarChains::Plain);
+        self.extend_plain_star_closure(&mut entry_star_targets);
         entry_star_targets
     }
 
@@ -377,17 +473,55 @@ impl ModuleGraph {
     /// `export * as ns` sources (`default` included, because the namespace
     /// object exposes it).
     ///
+    /// A member reached through a plain `export *` carries the weaker
+    /// [`Exposure::StarSurface`]: the star forwarded its named exports and not
+    /// its `default`, so an `export * as default` declared on it exposes
+    /// nothing and stops the walk.
+    ///
+    /// `entry_reachable` is the entry-point reachability bitset. A module no
+    /// entry point reaches is already reported as an unused file, so crediting
+    /// its chain would only add unused-export rows underneath that row; the
+    /// only consumers left to observe it are unreachable themselves.
+    ///
     /// Computed once per graph build and threaded into both phases that read
-    /// it; it depends only on `re_exports` and the entry-point flags, which
-    /// no later phase mutates.
+    /// it; it depends only on `re_exports`, the entry-point flags, and
+    /// reachability, none of which any later phase mutates.
     pub(in crate::graph) fn collect_exposed_namespace_targets(
         &self,
         whole_module_targets: &FxHashSet<FileId>,
-    ) -> FxHashSet<FileId> {
-        let mut targets = whole_module_targets.clone();
-        self.seed_entry_exposed_namespaces(&mut targets);
-        self.extend_star_closure(&mut targets, StarChains::PlainAndNamespace);
-        targets
+        entry_reachable: &FixedBitSet,
+    ) -> ExposedNamespaceTargets {
+        let mut seeds = whole_module_targets.clone();
+        self.seed_entry_exposed_namespaces(&mut seeds);
+
+        let mut closure = ExposedNamespaceTargets {
+            members: FxHashMap::default(),
+        };
+        let mut stack: Vec<(FileId, Exposure)> = Vec::new();
+        for seed in seeds {
+            if entry_reachable.contains(seed.0 as usize) {
+                closure.record(&mut stack, seed, Exposure::NamespaceObject);
+            }
+        }
+        while let Some((file_id, exposure)) = stack.pop() {
+            let Some(module) = self.modules.get(file_id.0 as usize) else {
+                continue;
+            };
+            for re in &module.re_exports {
+                if re.imported_name != "*" || !entry_reachable.contains(re.source_file.0 as usize) {
+                    continue;
+                }
+                let next = if re.exported_name == "*" {
+                    Exposure::StarSurface
+                } else if exposure == Exposure::NamespaceObject || re.exported_name != "default" {
+                    Exposure::NamespaceObject
+                } else {
+                    continue;
+                };
+                closure.record(&mut stack, re.source_file, next);
+            }
+        }
+        closure
     }
 
     /// Add every `export * as ns` source whose namespace object an entry
@@ -401,7 +535,9 @@ impl ModuleGraph {
     /// point re-exports `ns` by name through a chain of named and star
     /// re-exports, renames included (`export { sub } from './barrel'`). All
     /// three hand `ns` to consumers the graph cannot enumerate, so the
-    /// target's own chains must be credited.
+    /// target's own chains must be credited. `export * as default` is the one
+    /// name a plain `export *` leaves behind, so it only counts on an entry
+    /// point itself or through a named hop that mentions it.
     ///
     /// The search runs outward from each namespace edge rather than inward
     /// from every entry-point export, so its cost scales with the number of
@@ -428,11 +564,11 @@ impl ModuleGraph {
             .filter(|m| m.is_entry_point())
             .map(|m| m.file_id)
             .collect();
-        self.extend_star_closure(&mut star_surface, StarChains::Plain);
+        self.extend_plain_star_closure(&mut star_surface);
 
         let mut off_surface: Vec<(FileId, &str, FileId)> = Vec::new();
         for (barrel, exported_name, source) in namespace_edges {
-            if star_surface.contains(&barrel) {
+            if self.surface_exposes(&star_surface, barrel, exported_name) {
                 targets.insert(source);
             } else {
                 off_surface.push((barrel, exported_name, source));
@@ -442,26 +578,112 @@ impl ModuleGraph {
             return;
         }
 
+        let surfaces = SurfaceReach {
+            may_reach: self.collect_surface_forwarding_sources(&star_surface),
+            star_surface,
+        };
         let forwarders = NameForwarders::build(&self.modules);
         let mut search = NameSearchScratch::default();
         for (barrel, exported_name, source) in off_surface {
             if !targets.contains(&source)
-                && forwarders.reaches_surface(barrel, exported_name, &star_surface, &mut search)
+                && forwarders.reaches_surface(self, barrel, exported_name, &surfaces, &mut search)
             {
                 targets.insert(source);
             }
         }
     }
 
-    /// Extend `targets` with every module its members reach through the
-    /// selected re-export chains, transitively.
-    fn extend_star_closure(&self, targets: &mut FxHashSet<FileId>, chains: StarChains) {
+    /// Every module a star-surface module re-exports from, transitively,
+    /// following named and plain-star edges and ignoring names.
+    ///
+    /// `export * as ns` is left out: it bundles its source's names into one
+    /// object instead of forwarding them, so it never carries a name outward.
+    fn collect_surface_forwarding_sources(
+        &self,
+        star_surface: &FxHashSet<FileId>,
+    ) -> FxHashSet<FileId> {
+        let mut may_reach = star_surface.clone();
+        let mut stack: Vec<FileId> = star_surface.iter().copied().collect();
+        while let Some(barrel) = stack.pop() {
+            let Some(module) = self.modules.get(barrel.0 as usize) else {
+                continue;
+            };
+            for re in &module.re_exports {
+                if !is_namespace_re_export(re) && may_reach.insert(re.source_file) {
+                    stack.push(re.source_file);
+                }
+            }
+        }
+        may_reach
+    }
+
+    /// Whether a module on the entry-point star surface really exposes `name`
+    /// on that surface.
+    ///
+    /// An entry point exposes every name it exports, `default` included: it is
+    /// the public API. A barrel an entry point only reaches through plain
+    /// `export *` exposes every name except `default`, which no plain
+    /// `export *` forwards.
+    fn surface_exposes(
+        &self,
+        star_surface: &FxHashSet<FileId>,
+        file_id: FileId,
+        name: &str,
+    ) -> bool {
+        star_surface.contains(&file_id) && (name != "default" || self.is_entry_point_file(file_id))
+    }
+
+    /// Whether `barrel` re-exports under `barrel_name` the very binding
+    /// `source` exports under `source_name`.
+    ///
+    /// A local declaration on the barrel, or the same name arriving from two
+    /// stars at once, shadows a star-forwarded name: the barrel then exports a
+    /// different binding and the name never travels further. The value
+    /// namespace decides whenever the source exports the name there (a
+    /// namespace object is a value binding); a type-only surface falls back to
+    /// the type namespace. Phase 2c's own walk applies the same rule through
+    /// `uniquely_forwards_binding`.
+    fn forwards_binding(
+        &self,
+        source: FileId,
+        source_name: &str,
+        barrel: FileId,
+        barrel_name: &str,
+    ) -> bool {
+        for namespace in [super::ExportNamespace::Value, super::ExportNamespace::Type] {
+            let super::EffectiveExportResolution::Unique(origin) =
+                self.resolve_export(source, source_name, namespace)
+            else {
+                continue;
+            };
+            return matches!(
+                self.resolve_export(barrel, barrel_name, namespace),
+                super::EffectiveExportResolution::Unique(forwarded) if forwarded == origin
+            );
+        }
+        false
+    }
+
+    /// Whether the file is an entry point of this graph.
+    fn is_entry_point_file(&self, file_id: FileId) -> bool {
+        self.modules
+            .get(file_id.0 as usize)
+            .is_some_and(super::types::ModuleNode::is_entry_point)
+    }
+
+    /// Extend `targets` with every module its members reach through plain
+    /// `export *` chains, transitively.
+    fn extend_plain_star_closure(&self, targets: &mut FxHashSet<FileId>) {
         let mut stack: Vec<FileId> = targets.iter().copied().collect();
         while let Some(file_id) = stack.pop() {
             let Some(module) = self.modules.get(file_id.0 as usize) else {
                 continue;
             };
-            for re in module.re_exports.iter().filter(|re| chains.follows(re)) {
+            for re in module
+                .re_exports
+                .iter()
+                .filter(|re| re.imported_name == "*" && re.exported_name == "*")
+            {
                 if targets.insert(re.source_file) {
                     stack.push(re.source_file);
                 }

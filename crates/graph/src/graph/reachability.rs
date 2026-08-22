@@ -306,7 +306,12 @@ impl ProfileWorklist {
 }
 
 impl ModuleGraph {
-    fn collect_reachable(
+    /// BFS over the edge list from `entry_points`.
+    ///
+    /// Reads edges only, so the result is stable from the moment
+    /// `populate_edges` finishes; the graph build calls it once and hands the
+    /// same bitset to the exposed namespace closure and to `mark_reachable`.
+    pub(super) fn collect_reachable(
         &self,
         entry_points: &FxHashSet<FileId>,
         total_capacity: usize,
@@ -375,15 +380,16 @@ impl ModuleGraph {
     /// Mark modules reachable from overall, runtime, and test entry points via BFS.
     ///
     /// Skips redundant BFS passes when entry point sets are identical or empty.
+    /// `visited` is the overall entry-point pass, already computed by the
+    /// caller through [`ModuleGraph::collect_reachable`].
     pub(super) fn mark_reachable(
         &mut self,
+        visited: &FixedBitSet,
         entry_points: &FxHashSet<FileId>,
         runtime_entry_points: &FxHashSet<FileId>,
         test_reachability_plan: TestReachabilityPlan<'_>,
         total_capacity: usize,
     ) {
-        let visited = self.collect_reachable(entry_points, total_capacity);
-
         let runtime_same = runtime_entry_points == entry_points;
         let runtime_visited = if runtime_same {
             None

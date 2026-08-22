@@ -94,19 +94,35 @@ error by suppressing a downstream detector.
   #2373) is seed-agnostic. Its seeds are every target whose whole namespace
   object a consumer observes in Phase 2 (an ambient-module star, a
   dynamic-import pattern match through `import()`, `import.meta.glob`, or
-  `require.context`, and a namespace import the graph cannot narrow: a
-  whole-object use, a binding handed on without member access, or a binding
-  re-exported from a non-entry module) plus the `export * as ns` sources an
-  entry point's own export surface exposes: on the entry point itself, on a
-  barrel the entry reaches through plain `export *`, or named by the entry
-  through a chain of named and star re-exports, renames included. That surface
-  is tracked by name, so a barrel an entry point reaches only through
-  `export { one } from './barrel'` exposes `one` and nothing else. The closure
-  follows `export *` and `export * as` chains from each member: star
-  propagation treats a member like an entry barrel for its `export *` sources
-  (named exports in both namespaces, never `default`) and namespace re-export
-  propagation credits every export of its `export * as` sources (`default`
-  included). A member-narrowed namespace import (`ns.one()`) never seeds it, a
+  `require.context`, a bare side-effect `require('./barrel')` with no binding,
+  and a namespace import the graph cannot narrow: a whole-object use, a
+  binding handed on without member access, or a binding re-exported from a
+  non-entry module) plus the `export * as ns` sources an entry point's own
+  export surface exposes: on the entry point itself, on a barrel the entry
+  reaches through plain `export *`, or named by the entry through a chain of
+  named and star re-exports, renames included. That surface is tracked by
+  name, so a barrel an entry point reaches only through
+  `export { one } from './barrel'` exposes `one` and nothing else. Every hop
+  of that name chain must uniquely forward the binding, the same rule the
+  Phase 2c walk applies, so a barrel that declares its own `ns` shadows a
+  star-forwarded `ns` and the chain stops there. That check reads the value
+  namespace whenever the source exports the name there and the type namespace
+  otherwise, so `export type { ns } from './barrel'` on an entry point does
+  not put the value namespace object on the surface. Plain-star hops and the
+  closure's own chain walk stay namespace-agnostic, like the pre-existing
+  entry-star closure.
+- The closure follows `export *` and `export * as` chains from each member,
+  and carries how much of each member is exposed. A member whose whole
+  namespace object is observed exposes every export; a member reached through
+  a plain `export *` exposes every export except `default`, which no plain
+  `export *` forwards. Star propagation treats a member like an entry barrel
+  for its `export *` sources (named exports in both namespaces, never
+  `default`) and namespace re-export propagation credits every export of its
+  `export * as` sources (`default` included) whenever the member exposes the
+  name that `export * as` uses. `export * as default` therefore only carries a
+  namespace object onward from an entry point itself or from a member whose
+  whole namespace object is observed.
+- A member-narrowed namespace import (`ns.one()`) never seeds the closure, a
   binding placed in an exported object literal (`export const API = { ns }`)
   seeds it only when it is also used as a whole object (the namespace-object
   alias phase follows `API.ns.<member>` precisely while the direct-export
@@ -114,15 +130,20 @@ error by suppressing a downstream detector.
   entry surface with no consumer exposes nothing. The seed's own credit keeps
   its shape: a runtime whole-module edge credits the namespace object,
   `default` included; the ambient star form credits the star surface without
-  `default`. Seeding runs before reachability, like the mark-all sites that
-  feed it, so a whole-object use inside a file the same report calls unused
-  still credits its target's chain; deleting that file is what re-reports the
-  chain.
+  `default`. A module no entry point reaches is never a member: the report
+  already calls it an unused file, and the only consumers left to observe it
+  are unreachable themselves, so crediting its chain would only stack
+  unused-export rows underneath the unused-file rows. The mark-all sites that
+  feed the closure keep crediting the target's own direct exports as before,
+  reachable or not; reference-level reachability filters those at reporting
+  time.
 - The exposed namespace closure is computed once per graph build, in
   `ModuleGraph::build`, and threaded into both phases that read it (Phase 2c
   namespace re-export propagation and the Phase 4 entry-star seed). It depends
-  only on `ModuleNode::re_exports` and the entry-point flags, neither of which
-  any phase after Phase 2 mutates.
+  only on `ModuleNode::re_exports`, the entry-point flags, and entry-point
+  reachability, none of which any phase after Phase 2 mutates. Reachability
+  reads the edge list alone, so the build computes it once, before the
+  closure, and hands the same bitset to `mark_reachable`.
 - Styling and CSS-in-JS extraction must preserve source line mapping.
 - Duplication token or normalization changes require the duplication cache
   version to move with the changed semantics.

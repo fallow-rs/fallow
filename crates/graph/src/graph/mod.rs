@@ -549,7 +549,7 @@ fn propagate_namespace_references(
     graph: &mut ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     features: build::NamespaceFeatures,
-    exposed_namespace_targets: &FxHashSet<FileId>,
+    exposed_namespace_targets: &re_exports::ExposedNamespaceTargets,
     reference_paths: &mut ReferencePathInterner,
 ) {
     let indexes = namespace_indexes::NamespacePropagationIndexes::new(graph, module_by_id);
@@ -679,8 +679,13 @@ impl ModuleGraph {
             ReferencePathInterner::new(test_reachability_plan.requires_reference_provenance());
         let whole_module_targets =
             graph.populate_references(&module_by_id, &entry_point_ids, &mut reference_paths);
+        // Entry-point reachability depends on edges alone, so it is available
+        // here and is reused verbatim by `mark_reachable` below. The exposed
+        // namespace closure needs it to stay off modules the report already
+        // calls unused files.
+        let entry_reachable = graph.collect_reachable(&entry_point_ids, total_capacity);
         let exposed_namespace_targets =
-            graph.collect_exposed_namespace_targets(&whole_module_targets);
+            graph.collect_exposed_namespace_targets(&whole_module_targets, &entry_reachable);
 
         if namespace_features.has_aliases || namespace_features.has_re_exports {
             propagate_namespace_references(
@@ -693,6 +698,7 @@ impl ModuleGraph {
         }
 
         graph.mark_reachable(
+            &entry_reachable,
             &entry_point_ids,
             &runtime_entry_point_ids,
             test_reachability_plan,

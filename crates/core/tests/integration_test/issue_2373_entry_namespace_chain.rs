@@ -339,3 +339,95 @@ fn entry_namespace_credit_is_routed_through_the_chain() {
         "deep.ts:default is not part of sub.ts's `export *` surface"
     );
 }
+
+#[test]
+fn a_default_named_namespace_reaches_the_surface_only_through_the_entry_itself() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    // index.ts `export * as default from './entry-default-sub'`: the entry
+    // point's own `default` is public API, so the chain behind it is credited.
+    assert_credited(
+        &unused,
+        "src/entry-default-sub.ts",
+        "entryDefaultSubOne",
+        "the entry point exposes its own `default`",
+    );
+    assert_credited(
+        &unused,
+        "src/entry-default-deep.ts",
+        "entryDefaultDeepX",
+        "forwarded by entry-default-sub.ts's `export *`",
+    );
+
+    // index.ts `export * from './star-default'`: the star leaves
+    // star-default.ts's `default` behind, so the namespace object it names is
+    // off the entry surface.
+    assert_credited(
+        &unused,
+        "src/star-default.ts",
+        "starDefaultOne",
+        "a plain `export *` forwards every named export",
+    );
+    assert_reported(
+        &unused,
+        "src/star-default.ts",
+        "default",
+        "a plain `export *` never forwards `default`",
+    );
+    for (path, name) in [
+        ("src/star-default-sub.ts", "starDefaultSubOne"),
+        ("src/star-default-deep.ts", "starDefaultDeepX"),
+    ] {
+        assert_reported(
+            &unused,
+            path,
+            name,
+            "the `default` namespace object never reaches the entry surface",
+        );
+    }
+
+    // index.ts `export * from './named-default-mid'`, whose named re-export
+    // renames the namespace to `default`: the same star drops it again.
+    assert_reported(
+        &unused,
+        "src/named-default-barrel.ts",
+        "defaultNs",
+        "the rename lands on a `default` the entry's star does not forward",
+    );
+    for (path, name) in [
+        ("src/named-default-sub.ts", "namedDefaultSubOne"),
+        ("src/named-default-deep.ts", "namedDefaultDeepX"),
+    ] {
+        assert_reported(
+            &unused,
+            path,
+            name,
+            "nothing behind the renamed `default` namespace object is reachable",
+        );
+    }
+}
+
+#[test]
+fn a_locally_shadowed_star_name_does_not_carry_a_namespace_to_the_surface() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    // shadow-barrel.ts declares its own `shadowNs`, which shadows the one
+    // shadow-source.ts star-forwards, so the entry's `shadowNs` is that number
+    // and shadow-target.ts's namespace object is unreachable.
+    for (path, name) in [
+        ("src/shadow-source.ts", "shadowNs"),
+        ("src/shadow-target.ts", "shadowTargetOne"),
+        ("src/shadow-deep.ts", "shadowDeepX"),
+    ] {
+        assert_reported(
+            &unused,
+            path,
+            name,
+            "a local declaration shadows the star-forwarded name",
+        );
+    }
+}

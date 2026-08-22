@@ -134,8 +134,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   import the graph cannot narrow to member accesses (`import * as ns from
   './barrel'` used as a whole object in `Object.values(ns)`, a spread, or a
   destructure with rest, handed on without any member access, or re-exported
-  from a non-entry module) and a dynamic-import pattern match (`import()` with
-  a template, `import.meta.glob`, `require.context`) credited the target's
+  from a non-entry module), a dynamic-import pattern match (`import()` with
+  a template, `import.meta.glob`, `require.context`), and a bare side-effect
+  `require('./barrel')` credited the target's
   direct exports only, so a name that reached the barrel through
   `export * from './deep'` or `export * as sub from './sub'` was reported as
   unused even though the consumer observes every name on the namespace
@@ -148,8 +149,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   member-narrowed namespace import (`ns.one()`) keeps narrowing to the
   accessed members and credits nothing else, and a binding placed in an
   exported object literal (`export const API = { ns }`) keeps the precise
-  `API.ns.<member>` crediting of the alias phase. Fewer unused-export findings for
-  star barrels consumed as whole objects or through dynamic-import patterns.
+  `API.ns.<member>` crediting of the alias phase. A barrel no entry point
+  reaches keeps reporting: it is already an unused file, so its chain is not
+  credited and no unused-export row is stacked underneath that row. Fewer
+  unused-export findings for
+  star barrels consumed as whole objects or through dynamic-import patterns,
+  and never more.
   The graph cache version was bumped, so the first run after upgrading
   performs one cold re-analysis.
 
@@ -168,9 +173,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sub2 is credited (`default` included), and the rules recurse through any
   further level. The entry surface is tracked by name, so a barrel the entry
   reaches only through `export { one } from './barrel'` still exposes `one`
-  and nothing else; a namespace re-export on a reachable non-entry barrel that
+  and nothing else; a barrel that declares its own `sub` shadows a
+  star-forwarded `sub` and stops the chain there; a namespace re-export on a
+  reachable non-entry barrel that
   is off the entry surface and has no consumer still exposes nothing; and the
-  entry's plain `export *` still never forwards the barrel's own `default`.
+  entry's plain `export *` still never forwards the barrel's own `default`,
+  so `export * as default` on such a barrel keeps reporting while the same
+  declaration on the entry point itself is credited.
   Fewer unused-export findings for nested namespace re-exports behind an entry
   point.
 

@@ -453,3 +453,78 @@ fn whole_module_credit_is_routed_through_the_chain() {
         "sub2-deep.ts:default is not part of sub2.ts's `export *` surface"
     );
 }
+
+#[test]
+fn plain_star_members_of_the_closure_do_not_forward_a_default_namespace() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    // barrel.ts `export * from './star-default'`: the star carries
+    // star-default.ts's named exports onto the observed namespace object and
+    // leaves its `default` behind, so `export * as default` there hands its
+    // target to nobody.
+    assert_credited(
+        &unused,
+        "src/star-default.ts",
+        "starDefaultOne",
+        "a plain `export *` forwards every named export",
+    );
+    assert_reported(
+        &unused,
+        "src/star-default.ts",
+        "default",
+        "a plain `export *` never forwards `default`",
+    );
+    assert_reported(
+        &unused,
+        "src/star-default-sub.ts",
+        "starDefaultSubOne",
+        "the namespace object named `default` is not on the barrel's namespace object",
+    );
+    assert_reported(
+        &unused,
+        "src/star-default-deep.ts",
+        "starDefaultDeepOne",
+        "nothing behind the `default` namespace object is reachable",
+    );
+}
+
+#[test]
+fn a_whole_object_use_in_an_unreachable_file_credits_no_chain() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+
+    // dead-consumer.ts observes dead-barrel.ts's whole namespace object, but
+    // no entry point reaches either file. The report already calls all four
+    // files unused, so crediting the chain would only stack unused-export
+    // rows underneath those rows.
+    for path in [
+        "src/dead-consumer.ts",
+        "src/dead-barrel.ts",
+        "src/dead-deep.ts",
+        "src/dead-sub.ts",
+    ] {
+        assert!(
+            unused_files.iter().any(|p| p.ends_with(path)),
+            "{path} must stay an unused file: {unused_files:?}"
+        );
+    }
+    for (path, name) in [
+        ("src/dead-deep.ts", "deadDeepOne"),
+        ("src/dead-sub.ts", "deadSubOne"),
+        ("src/dead-sub.ts", "default"),
+    ] {
+        assert!(
+            !is_reported(&unused, path, name),
+            "{path}:{name} must not be reported on top of the unused-file row; \
+             unused exports: {unused:?}"
+        );
+    }
+}

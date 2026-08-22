@@ -34,7 +34,7 @@
 //! (reachability) so credits attached here participate in reachability and
 //! Phase 4 chain propagation downstream. See issue #324.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use super::namespace_indexes::{
     NamespacePropagationIndexes, NamespaceReferenceRoutes, ReachableNamespaceExports,
@@ -44,6 +44,7 @@ use super::narrowing::{
     create_synthetic_exports_for_star_re_exports_at_site, mark_all_exports_referenced_at_site,
     mark_member_exports_referenced_at_site,
 };
+use super::re_exports::ExposedNamespaceTargets;
 use super::types::{ReferenceKind, ReferencePathId, ReferencePathInterner};
 use super::{ExportNamespace, ModuleGraph};
 use fallow_types::discover::FileId;
@@ -81,7 +82,7 @@ struct PendingCredit {
 pub(super) fn propagate_namespace_re_exports(
     graph: &mut ModuleGraph,
     indexes: &NamespacePropagationIndexes<'_>,
-    exposed_namespace_targets: &FxHashSet<FileId>,
+    exposed_namespace_targets: &ExposedNamespaceTargets,
     reference_paths: &mut ReferencePathInterner,
 ) {
     let ns_edges: Vec<(FileId, FileId, String, bool)> = graph
@@ -142,7 +143,12 @@ pub(super) fn propagate_namespace_re_exports(
             );
 
             for export in reachable.iter().filter(|export| {
-                exposes_namespace_object(graph, exposed_namespace_targets, export.file_id)
+                exposes_namespace_object(
+                    graph,
+                    exposed_namespace_targets,
+                    export.file_id,
+                    &export.exported_name,
+                )
             }) {
                 let path = routes.entry_path(export, reference_paths);
                 pending.push(PendingCredit {
@@ -168,17 +174,23 @@ pub(super) fn propagate_namespace_re_exports(
     apply_pending_credits(graph, &pending);
 }
 
-/// Whether a barrel hands its namespace re-export to consumers the graph
-/// cannot enumerate: an entry point, or a member of the exposed namespace
-/// closure (issues #2357, #2372, #2373), whose whole namespace object some
-/// consumer observes. Both credit every export of the namespace target,
-/// `default` included, because the namespace object exposes it.
+/// Whether a barrel hands the namespace re-export it exports under
+/// `exported_name` to consumers the graph cannot enumerate: an entry point, or
+/// a member of the exposed namespace closure (issues #2357, #2372, #2373)
+/// whose whole namespace object some consumer observes. Both credit every
+/// export of the namespace target, `default` included, because the namespace
+/// object exposes it.
+///
+/// The name matters for a closure member reached through a plain `export *`:
+/// that star never forwarded the member's `default`, so an
+/// `export * as default` on it reaches nobody.
 fn exposes_namespace_object(
     graph: &ModuleGraph,
-    exposed_namespace_targets: &FxHashSet<FileId>,
+    exposed_namespace_targets: &ExposedNamespaceTargets,
     file_id: FileId,
+    exported_name: &str,
 ) -> bool {
-    exposed_namespace_targets.contains(&file_id)
+    exposed_namespace_targets.exposes_name(file_id, exported_name)
         || graph
             .modules
             .get(file_id.0 as usize)
@@ -339,6 +351,8 @@ struct GroupState {
 
 #[cfg(test)]
 mod tests {
+    use rustc_hash::FxHashSet;
+
     use super::*;
     use crate::graph::ModuleGraph;
     use crate::resolve::{
