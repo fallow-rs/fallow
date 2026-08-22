@@ -5949,7 +5949,7 @@
     "FALLOW_PR_COMMENT_LAYOUT": "Sticky PR comment layout: default, compact, gate-only, or details.",
     "FALLOW_CONSOLIDATED_STATUS": "When split PR gate check runs are enabled, truthy values add one aggregate Fallow check alongside the per-gate checks.",
     "FALLOW_DIFF_CONTEXT": "Line radius around changed diff lines when scoping findings to a diff in the review/PR-comment formats (default 3).",
-    "FALLOW_BOT_LOGIN": "Bot or token username treated as fallow's own when reconciling existing PR/MR comments in review-github/review-gitlab. Required when posting with a personal access token (the author then carries a human identity).",
+    "FALLOW_BOT_LOGIN": "Allowlisted posting username used to recognize fallow-owned finding roots and resolution replies. When set, it narrows ownership to that exact username (an empty value matches nobody); when unset, provider-native bot metadata is trusted. This is an authorship control, not a lifecycle or deduplication token.",
     "FALLOW_API_RETRIES": "Maximum HTTP attempts for review-comment reconciliation API calls (default 3).",
     "FALLOW_API_RETRY_DELAY": "Floor delay in seconds between HTTP retry attempts (default 2); a server-supplied Retry-After overrides it on 429 responses.",
     "FALLOW_CACHE_DIR": "Directory for fallow's persistent analysis cache. Relative paths resolve from the project root and override cache.dir.",

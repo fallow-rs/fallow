@@ -181,7 +181,15 @@ if render_with_fallow review-github "$REVIEW_FILE"; then
     fi
     ACTION=$(jq -r '.action // "unknown"' "$POST_FILE")
     POSTED=$(jq -r '.comments_posted // 0' "$POST_FILE")
-    echo "Review action: ${ACTION} (${POSTED} inline comments posted)"
+    RESOLUTIONS=$(jq -r '.resolution_comments_posted // 0' "$POST_FILE")
+    THREADS=$(jq -r '.threads_resolved // 0' "$POST_FILE")
+    COMMENT_NOUN="inline comments"
+    RESOLUTION_NOUN="resolution replies"
+    THREAD_NOUN="threads"
+    if [ "$POSTED" = "1" ]; then COMMENT_NOUN="inline comment"; fi
+    if [ "$RESOLUTIONS" = "1" ]; then RESOLUTION_NOUN="resolution reply"; fi
+    if [ "$THREADS" = "1" ]; then THREAD_NOUN="thread"; fi
+    echo "Review action: ${ACTION} (${POSTED} ${COMMENT_NOUN} posted, ${RESOLUTIONS} ${RESOLUTION_NOUN} posted, ${THREADS} ${THREAD_NOUN} resolved)"
   else
     echo "::warning::Failed to post review comments"
   fi

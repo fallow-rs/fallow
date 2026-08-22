@@ -5966,7 +5966,7 @@
         },
         "existing_fingerprints": {
           "type": "integer",
-          "description": "Distinct fingerprints found in existing comments."
+          "description": "Distinct fingerprints with an open Fallow lifecycle, including\nprovider-resolved discussions not yet closed by a Fallow marker."
         },
         "new_fingerprints": {
           "type": "integer",
@@ -5974,7 +5974,7 @@
         },
         "stale_fingerprints": {
           "type": "integer",
-          "description": "Fingerprints commented earlier whose findings no longer exist."
+          "description": "Fingerprints with open Fallow lifecycles whose findings no longer exist."
         },
         "new": {
           "type": "array",
@@ -6003,7 +6003,7 @@
         },
         "threads_resolved": {
           "type": "integer",
-          "description": "Stale discussion threads resolved (GitLab)."
+          "description": "Provider discussion threads resolved or re-closed."
         },
         "apply_hint": {
           "type": [

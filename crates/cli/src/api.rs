@@ -757,7 +757,7 @@ mod tests {
 
         assert_eq!(
             count_occurrences(CI, ".header(\"Authorization\""),
-            3,
+            4,
             "update this guard when GitHub CI auth paths change"
         );
         assert_eq!(

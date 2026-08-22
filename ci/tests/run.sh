@@ -1231,6 +1231,8 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported FALLOW_SUMMARY_S
 echo "  review.sh:"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "review-gitlab" "renders typed GitLab review envelope"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow ci post-review" "delegates GitLab review posting to Rust"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "RESOLUTION_NOUN" "logs and pluralizes reconciliation reply counts"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "THREAD_NOUN" "logs and pluralizes resolved-thread counts"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "--provider gitlab" "uses GitLab post provider"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "suggestion" "adds suggestion blocks"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-review" "uses fallow-review marker"
@@ -1483,6 +1485,9 @@ else
   fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$CI_TYPED_OUT"
 fi
 assert_contains "$CI_TYPED_OUT" "fallow ci post-review --provider gitlab" "review.sh invokes GitLab review post command"
+assert_contains "$(cat "$CI_TYPED_WORK/review-clean.out")" \
+  "0 resolution replies posted, 0 threads resolved" \
+  "review.sh exposes successful reconciliation counters"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh checks reconcile apply errors"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
 assert_not_contains "$(cat "$CI_TYPED_WORK/review-clean.out")" "WARNING: fallow post-review incomplete" \

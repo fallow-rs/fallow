@@ -455,11 +455,12 @@ pub struct ReviewReconcileOutput {
     pub comments: u32,
     /// Distinct fingerprints in the current run's findings.
     pub current_fingerprints: u32,
-    /// Distinct fingerprints found in existing comments.
+    /// Distinct fingerprints with an open Fallow lifecycle, including
+    /// provider-resolved discussions not yet closed by a Fallow marker.
     pub existing_fingerprints: u32,
     /// Fingerprints present in the current run but not yet commented.
     pub new_fingerprints: u32,
-    /// Fingerprints commented earlier whose findings no longer exist.
+    /// Fingerprints with open Fallow lifecycles whose findings no longer exist.
     pub stale_fingerprints: u32,
     /// The new fingerprints themselves.
     pub new: Vec<String>,
@@ -469,7 +470,7 @@ pub struct ReviewReconcileOutput {
     pub provider_warning: Option<String>,
     /// Resolution replies posted to stale comment threads.
     pub resolution_comments_posted: u32,
-    /// Stale discussion threads resolved (GitLab).
+    /// Provider discussion threads resolved or re-closed.
     pub threads_resolved: u32,
     /// Remediation guidance when the apply loop stopped before finishing.
     #[serde(default, skip_serializing_if = "Option::is_none")]

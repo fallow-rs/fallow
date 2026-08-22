@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use crate::error::emit_error_with_style;
 
-use super::{emit_ci_command_json, github_post_json, github_token, read_text_file};
+use super::{emit_ci_command_json, github_create_json, github_token, read_text_file};
 
 #[derive(Clone, Copy)]
 pub(super) struct PostCheckRunInput<'a> {
@@ -61,7 +61,7 @@ pub(super) fn post_check_run(
     let url = format!("{api}/repos/{}/check-runs", input.repo);
     let mut results = Vec::new();
     for payload in &payloads {
-        match github_post_json(&agent, &url, &token, payload) {
+        match github_create_json(&agent, &url, &token, payload) {
             Ok(value) => results.push(value),
             Err(e) => {
                 return emit_error_with_style(

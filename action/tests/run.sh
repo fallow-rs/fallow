@@ -2126,7 +2126,7 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     FALLOW_COMMAND="check" \
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
-    bash "$SCRIPTS_DIR/review.sh" > /dev/null
+    bash "$SCRIPTS_DIR/review.sh" > "$ACTION_TYPED_WORK/review-clean.out"
   PATH="$ACTION_TYPED_BIN:$PATH" \
     MOCK_LOG="$ACTION_TYPED_LOG" \
     MOCK_RENDER_FAILURE="1" \
@@ -2158,6 +2158,9 @@ else
   fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$ACTION_TYPED_OUT"
 fi
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-review --provider github" "review.sh invokes GitHub review post command"
+assert_contains "$(cat "$ACTION_TYPED_WORK/review-clean.out")" \
+  "0 resolution replies posted, 0 threads resolved" \
+  "review.sh exposes successful reconciliation counters"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-pr-comment --provider github" "comment.sh invokes GitHub PR comment post command"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-check-run --provider github" "comment.sh invokes GitHub Check Run post command"
 assert_contains "$ACTION_TYPED_OUT" "--head-sha head456" "comment.sh posts Check Run against the PR head SHA"
@@ -2268,6 +2271,8 @@ else
   pass "Post review comments action env excludes FALLOW_SUMMARY_SCOPE"
 fi
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow ci post-review" "review.sh delegates retryable provider work to Rust"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "RESOLUTION_NOUN" "review.sh logs and pluralizes reconciliation reply counts"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "THREAD_NOUN" "review.sh logs and pluralizes resolved-thread counts"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "--input -" "review.sh does not retry with consumed stdin"
 if sed -n '/name: Post review comments/,/run: bash/p' "$DIR/../../action.yml" | /usr/bin/grep -q "steps.analyze.outputs.issues != '0'"; then
   fail "Post review comments action condition" "must run on zero-issue analyses so stale inline review threads can be resolved"

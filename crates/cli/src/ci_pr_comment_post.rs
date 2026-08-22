@@ -8,8 +8,8 @@ use crate::api::try_api_agent;
 use crate::error::emit_error_with_style;
 
 use super::{
-    CiProvider, emit_pr_comment_post_plan, github_get_json, github_post_json, github_token,
-    gitlab_get_json, gitlab_post_json, gitlab_put_json, read_text_file, require_target,
+    CiProvider, emit_pr_comment_post_plan, github_create_json, github_get_json, github_token,
+    gitlab_create_json, gitlab_get_json, gitlab_put_json, read_text_file, require_target,
     url_encode_path_segment,
 };
 
@@ -307,7 +307,7 @@ fn apply_github_pr_comment_plan(
                 .ok_or_else(|| "create plan did not include a body".to_owned())?;
             let url = format!("{api}/repos/{repo}/issues/{pr}/comments");
             let payload = serde_json::json!({ "body": body });
-            github_post_json(agent, &url, token, &payload).map(|_| ())
+            github_create_json(agent, &url, token, &payload).map(|_| ())
         }
         fallow_output::PrCommentPostAction::Update => {
             let body = plan
@@ -342,7 +342,7 @@ fn apply_gitlab_mr_comment_plan(
                 .ok_or_else(|| "create plan did not include a body".to_owned())?;
             let url = format!("{api}/projects/{encoded_project}/merge_requests/{mr}/notes");
             let payload = serde_json::json!({ "body": body });
-            gitlab_post_json(agent, &url, token, &payload).map(|_| ())
+            gitlab_create_json(agent, &url, token, &payload).map(|_| ())
         }
         fallow_output::PrCommentPostAction::Update => {
             let body = plan

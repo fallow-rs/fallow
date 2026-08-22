@@ -626,7 +626,7 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     ),
     (
         "FALLOW_BOT_LOGIN",
-        "Bot or token username treated as fallow's own when reconciling existing PR/MR comments in review-github/review-gitlab. Required when posting with a personal access token (the author then carries a human identity).",
+        "Allowlisted posting username used to recognize fallow-owned finding roots and resolution replies. When set, it narrows ownership to that exact username (an empty value matches nobody); when unset, provider-native bot metadata is trusted. This is an authorship control, not a lifecycle or deduplication token.",
     ),
     (
         "FALLOW_API_RETRIES",

@@ -11,8 +11,9 @@ use crate::error::emit_error_with_style;
 
 use super::{
     ApplyResult, CiProvider, PlannedReconcile, ReconcileOptions, apply_provider_reconcile,
-    emit_ci_command_json, github_post_json, github_token, gitlab_post_json, load_provider_state,
-    read_envelope, require_target, url_encode_path_segment, validate_envelope_review_scope,
+    emit_ci_command_json, github_create_json, github_token, gitlab_create_json,
+    load_provider_state, read_envelope, require_target, url_encode_path_segment,
+    validate_envelope_review_scope,
 };
 
 #[derive(Clone, Copy)]
@@ -138,7 +139,7 @@ fn post_github_review(
     }
     let payload = github_review_payload(envelope, &comments);
     let url = format!("{api}/repos/{repo}/pulls/{pr}/reviews");
-    match github_post_json(&agent, &url, &token, &payload) {
+    match github_create_json(&agent, &url, &token, &payload) {
         Ok(_) => {
             result.action = "post_review";
             result.comments_posted = comments.len();
@@ -234,7 +235,7 @@ fn post_gitlab_inline_comment(
     {
         let payload = serde_json::json!({ "body": body, "position": position });
         let url = format!("{api}/projects/{encoded_project}/merge_requests/{mr}/discussions");
-        return gitlab_post_json(agent, &url, token, &payload).map(|_| ());
+        return gitlab_create_json(agent, &url, token, &payload).map(|_| ());
     }
     let path = position
         .get("new_path")
@@ -247,7 +248,7 @@ fn post_gitlab_inline_comment(
     let fallback_body = format!("Warning: **{path}:{line}**\n\n{body}");
     let payload = serde_json::json!({ "body": fallback_body });
     let url = format!("{api}/projects/{encoded_project}/merge_requests/{mr}/notes");
-    gitlab_post_json(agent, &url, token, &payload).map(|_| ())
+    gitlab_create_json(agent, &url, token, &payload).map(|_| ())
 }
 
 fn attach_reconcile_result(result: &mut PostReviewResult, stale: &[String], applied: ApplyResult) {

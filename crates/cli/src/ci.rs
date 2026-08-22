@@ -585,12 +585,43 @@ fn envelope_fingerprints(value: &Value) -> BTreeSet<String> {
 
 #[derive(Debug, Default)]
 struct ProviderState {
+    /// Fingerprints whose latest owned lifecycle has not received a
+    /// Fallow-authored resolution marker. Provider resolution state alone is
+    /// not a lifecycle transition: a reviewer may resolve a still-current
+    /// finding manually.
     fingerprints: BTreeSet<String>,
-    github_comments_by_fingerprint: BTreeMap<String, Vec<u64>>,
-    github_threads_by_fingerprint: BTreeMap<String, Vec<String>>,
-    github_resolved_markers: BTreeSet<String>,
-    gitlab_discussions_by_fingerprint: BTreeMap<String, Vec<String>>,
-    gitlab_resolved_markers: BTreeSet<String>,
+    github_discussions_by_fingerprint: BTreeMap<String, Vec<GithubDiscussion>>,
+    github_unattached_resolved_markers: Vec<GithubUnattachedResolvedMarker>,
+    gitlab_discussions_by_fingerprint: BTreeMap<String, Vec<GitlabDiscussion>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum DiscussionStatus {
+    #[default]
+    Active,
+    Resolved,
+}
+
+#[derive(Debug)]
+struct GithubDiscussion {
+    comment_id: u64,
+    provider_position: usize,
+    thread_id: Option<String>,
+    status: DiscussionStatus,
+    has_resolution_marker: bool,
+}
+
+#[derive(Debug)]
+struct GithubUnattachedResolvedMarker {
+    fingerprint: String,
+    provider_position: usize,
+}
+
+#[derive(Debug)]
+struct GitlabDiscussion {
+    discussion_id: String,
+    status: DiscussionStatus,
+    has_resolution_marker: bool,
 }
 
 #[derive(Debug, Default)]
@@ -650,7 +681,7 @@ struct ApplyResult {
 impl ApplyResult {
     fn hint(&self) -> Option<String> {
         (!self.errors.is_empty()).then(|| {
-            "Reconcile apply stopped before all stale fingerprints were applied. Refresh provider state and rerun the job; fingerprints listed in unapplied_fingerprints were not fully applied.".to_owned()
+            "Reconcile apply stopped before all provider lifecycle operations were applied. Refresh provider state and rerun the job; fingerprints listed in unapplied_fingerprints were not fully applied.".to_owned()
         })
     }
 
@@ -700,9 +731,12 @@ fn load_github_state(
         .trim_end_matches('/');
     let agent = try_api_agent().map_err(|err| err.to_string())?;
     let mut state = ProviderState::default();
+    let mut review_comments = Vec::new();
 
     for page in 1..=100 {
-        let url = format!("{api}/repos/{repo}/pulls/{pr}/comments?per_page=100&page={page}");
+        let url = format!(
+            "{api}/repos/{repo}/pulls/{pr}/comments?per_page=100&page={page}&sort=created&direction=asc"
+        );
         let value = github_get_json(&agent, &url, &token)?;
         let comments = value
             .as_array()
@@ -710,12 +744,26 @@ fn load_github_state(
         if comments.is_empty() {
             break;
         }
-        for comment in comments {
-            record_github_review_comment(&mut state, comment, opts.review_id);
-        }
+        review_comments.extend(comments.iter().cloned());
         if comments.len() < 100 {
             break;
         }
+        if page == 100 {
+            return Err(
+                "GitHub review comments pagination exceeded 100 pages; refusing partial provider state"
+                    .to_owned(),
+            );
+        }
+    }
+
+    // Root comments establish lifecycle identity. Replies are processed only
+    // after every page is loaded so their markers can be tied to a root even
+    // if provider ordering or pagination places the reply first.
+    for (position, comment) in review_comments.iter().enumerate() {
+        record_github_review_root(&mut state, comment, opts.review_id, position)?;
+    }
+    for (position, comment) in review_comments.iter().enumerate() {
+        record_github_resolution_marker(&mut state, comment, opts.review_id, position)?;
     }
 
     load_github_review_threads(
@@ -729,35 +777,98 @@ fn load_github_state(
         },
         opts.review_id,
     )?;
+    finalize_github_state(&mut state);
     Ok(state)
 }
 
-fn record_github_review_comment(
+fn record_github_review_root(
     state: &mut ProviderState,
     comment: &Value,
     review_id: Option<&ReviewId>,
-) {
+    provider_position: usize,
+) -> Result<(), String> {
     let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-    let is_root = comment.get("in_reply_to_id").is_none_or(Value::is_null);
-    if is_root
-        && fallow_output::body_matches_review_id(body, review_id)
+    if is_github_bot_comment(comment)
         && let Some(fingerprint) = extract_fallow_fingerprint(body)
     {
-        state.fingerprints.insert(fingerprint.clone());
-        if let Some(id) = comment.get("id").and_then(Value::as_u64) {
-            state
-                .github_comments_by_fingerprint
-                .entry(fingerprint)
-                .or_default()
-                .push(id);
+        if fallow_output::parse_review_id_marker(body)?.as_ref() != review_id {
+            return Ok(());
+        }
+        match comment.get("in_reply_to_id") {
+            Some(Value::Null) | None => {}
+            Some(parent) if parent.as_u64().is_some() => return Ok(()),
+            Some(_) => {
+                return Err(format!(
+                    "GitHub owned review comment for {fingerprint} contained a nonnumeric in_reply_to_id"
+                ));
+            }
+        }
+        let comment_id = comment.get("id").and_then(Value::as_u64).ok_or_else(|| {
+            format!("GitHub owned review root for {fingerprint} did not contain a numeric id")
+        })?;
+        state
+            .github_discussions_by_fingerprint
+            .entry(fingerprint)
+            .or_default()
+            .push(GithubDiscussion {
+                comment_id,
+                provider_position,
+                thread_id: None,
+                status: DiscussionStatus::Active,
+                has_resolution_marker: false,
+            });
+    }
+    Ok(())
+}
+
+fn record_github_resolution_marker(
+    state: &mut ProviderState,
+    comment: &Value,
+    review_id: Option<&ReviewId>,
+    provider_position: usize,
+) -> Result<(), String> {
+    let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
+    if is_github_bot_comment(comment) {
+        let Some(marker) = parse_resolution_marker(body)? else {
+            return Ok(());
+        };
+        if fallow_output::parse_review_id_marker(body)?.as_ref() != review_id {
+            return Ok(());
+        }
+        let fingerprint = resolution_marker_fingerprint(&marker);
+        match comment.get("in_reply_to_id") {
+            Some(Value::Null) | None => {
+                comment.get("id").and_then(Value::as_u64).ok_or_else(|| {
+                    format!(
+                        "GitHub unattached resolution marker for {fingerprint} did not contain a numeric id"
+                    )
+                })?;
+                state
+                    .github_unattached_resolved_markers
+                    .push(GithubUnattachedResolvedMarker {
+                        fingerprint: fingerprint.to_owned(),
+                        provider_position,
+                    });
+            }
+            Some(parent) => {
+                let root_id = parent.as_u64().ok_or_else(|| {
+                    format!(
+                        "GitHub resolution marker for {fingerprint} contained a nonnumeric in_reply_to_id"
+                    )
+                })?;
+                if let Some(discussion) = state
+                    .github_discussions_by_fingerprint
+                    .get_mut(fingerprint)
+                    .into_iter()
+                    .flatten()
+                    .find(|discussion| discussion.comment_id == root_id)
+                {
+                    discussion.has_resolution_marker = true;
+                }
+            }
         }
     }
-    if fallow_output::body_matches_review_id(body, review_id)
-        && is_github_bot_comment(comment)
-        && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
-    {
-        state.github_resolved_markers.insert(fingerprint);
-    }
+    Ok(())
 }
 
 const GITHUB_REVIEW_THREADS_QUERY: &str = r"
@@ -768,9 +879,7 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
         nodes {
           id
           isResolved
-          comments(first:50) {
-            nodes { body }
-          }
+          comments(first:1) { nodes { databaseId } }
         }
         pageInfo { hasNextPage endCursor }
       }
@@ -797,7 +906,7 @@ fn load_github_review_threads(
         .parse::<u64>()
         .map_err(|_| format!("GitHub PR must be numeric, got '{pr}'"))?;
     let mut cursor: Option<String> = None;
-    for _ in 0..100 {
+    for page in 1..=100 {
         let payload = serde_json::json!({
             "query": GITHUB_REVIEW_THREADS_QUERY,
             "variables": {
@@ -818,60 +927,115 @@ fn load_github_review_threads(
             .and_then(Value::as_array)
             .ok_or_else(|| "GitHub reviewThreads response did not contain nodes".to_owned())?;
         for thread in threads {
-            collect_github_thread_fingerprints(state, thread, review_id);
+            collect_github_thread_fingerprints(state, thread, review_id)?;
         }
         let page_info = value
             .pointer("/data/repository/pullRequest/reviewThreads/pageInfo")
             .unwrap_or(&Value::Null);
-        if !page_info
+        let has_next_page = page_info
             .get("hasNextPage")
             .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
+            .ok_or_else(|| {
+                "GitHub reviewThreads pagination did not contain boolean hasNextPage".to_owned()
+            })?;
+        if !has_next_page {
             break;
         }
-        cursor = page_info
+        let next_cursor = page_info
             .get("endCursor")
             .and_then(Value::as_str)
-            .map(str::to_owned);
+            .filter(|next| Some(*next) != cursor.as_deref())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                "GitHub reviewThreads pagination returned a missing or non-advancing cursor"
+                    .to_owned()
+            })?;
+        if page == 100 {
+            return Err(
+                "GitHub reviewThreads pagination exceeded 100 pages; refusing partial provider state"
+                    .to_owned(),
+            );
+        }
+        cursor = Some(next_cursor);
     }
     Ok(())
 }
 
-/// Record fallow fingerprints found in an unresolved GitHub review thread's
-/// comment bodies, mapping each to the thread id for later resolution.
+/// Attach provider lifecycle state to a Fallow-owned GitHub review thread.
 fn collect_github_thread_fingerprints(
     state: &mut ProviderState,
     thread: &Value,
-    review_id: Option<&ReviewId>,
-) {
-    if thread
-        .get("isResolved")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return;
-    }
-    let Some(thread_id) = thread.get("id").and_then(Value::as_str) else {
-        return;
+    _review_id: Option<&ReviewId>,
+) -> Result<(), String> {
+    let status = if thread.get("isResolved").and_then(Value::as_bool) == Some(true) {
+        DiscussionStatus::Resolved
+    } else if thread.get("isResolved").and_then(Value::as_bool) == Some(false) {
+        DiscussionStatus::Active
+    } else {
+        return Err("GitHub review thread did not contain boolean isResolved".to_owned());
     };
+    let thread_id = thread
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "GitHub review thread did not contain a string id".to_owned())?;
     let root = thread
         .pointer("/comments/nodes")
         .and_then(Value::as_array)
-        .and_then(|comments| comments.first());
-    let Some(root) = root else {
-        return;
-    };
-    let body = root.get("body").and_then(Value::as_str).unwrap_or("");
-    if fallow_output::body_matches_review_id(body, review_id)
-        && let Some(fingerprint) = extract_fallow_fingerprint(body)
+        .and_then(|comments| comments.first())
+        .ok_or_else(|| {
+            format!("GitHub review thread {thread_id} did not contain a root comment")
+        })?;
+    let comment_id = root
+        .get("databaseId")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            format!("GitHub review thread {thread_id} root did not contain a numeric databaseId")
+        })?;
+    // Join GraphQL lifecycle metadata only to a root authenticated through
+    // the REST payload. A human-authored copied marker is not Fallow state.
+    if let Some(discussion) = state
+        .github_discussions_by_fingerprint
+        .values_mut()
+        .flatten()
+        .find(|discussion| discussion.comment_id == comment_id)
     {
-        state.fingerprints.insert(fingerprint.clone());
-        state
-            .github_threads_by_fingerprint
-            .entry(fingerprint)
-            .or_default()
-            .push(thread_id.to_owned());
+        discussion.thread_id = Some(thread_id.to_owned());
+        discussion.status = status;
+    }
+    Ok(())
+}
+
+fn finalize_github_state(state: &mut ProviderState) {
+    for (fingerprint, discussions) in &mut state.github_discussions_by_fingerprint {
+        // Legacy provider payloads can omit a reply's root id. The REST query
+        // requests creation order, so an unattached marker belongs to the
+        // nearest preceding still-open owned root for the same fingerprint.
+        // This closes the old generation without suppressing a recurrence.
+        for marker in state
+            .github_unattached_resolved_markers
+            .iter()
+            .filter(|marker| marker.fingerprint == *fingerprint)
+        {
+            let candidate = discussions
+                .iter()
+                .enumerate()
+                .filter(|(_, discussion)| !discussion.has_resolution_marker)
+                .filter(|(_, discussion)| discussion.provider_position < marker.provider_position)
+                .max_by_key(|(_, discussion)| discussion.provider_position)
+                .map(|(index, _)| index);
+            if let Some(index) = candidate {
+                discussions[index].has_resolution_marker = true;
+                if discussions[index].thread_id.is_none() {
+                    discussions[index].status = DiscussionStatus::Resolved;
+                }
+            }
+        }
+        if discussions
+            .iter()
+            .any(|discussion| !discussion.has_resolution_marker)
+        {
+            state.fingerprints.insert(fingerprint.clone());
+        }
     }
 }
 
@@ -1016,36 +1180,47 @@ fn stage_github_operations(
 ) -> Vec<GithubApplyOperation> {
     let mut operations = Vec::new();
     for fingerprint in &plan.plan.stale {
-        let marker_key = resolved_marker_key(fingerprint, sha);
-        let already_resolved = plan.state.github_resolved_markers.contains(&marker_key)
-            || plan.state.github_resolved_markers.contains(fingerprint);
-        if !already_resolved {
-            for comment_id in plan
-                .state
-                .github_comments_by_fingerprint
-                .get(fingerprint)
-                .into_iter()
-                .flatten()
-            {
-                let body = resolved_body(fingerprint, sha, review_id);
-                operations.push(GithubApplyOperation::Reply {
-                    fingerprint: fingerprint.clone(),
-                    comment_id: *comment_id,
-                    body,
-                });
-            }
-        }
-        for thread_id in plan
+        for discussion in plan
             .state
-            .github_threads_by_fingerprint
+            .github_discussions_by_fingerprint
             .get(fingerprint)
             .into_iter()
             .flatten()
+            .filter(|discussion| !discussion.has_resolution_marker)
         {
-            operations.push(GithubApplyOperation::ResolveThread {
+            // Resolve first. If the marker reply then fails, a later run sees
+            // a provider-resolved lifecycle without Fallow's marker and
+            // retries only that reply. The reverse order cannot distinguish a
+            // failed resolve from a genuinely reopened old lifecycle.
+            if discussion.status == DiscussionStatus::Active
+                && let Some(thread_id) = &discussion.thread_id
+            {
+                operations.push(GithubApplyOperation::ResolveThread {
+                    fingerprint: fingerprint.clone(),
+                    thread_id: thread_id.clone(),
+                });
+            }
+            let body = resolved_body(fingerprint, sha, review_id);
+            operations.push(GithubApplyOperation::Reply {
                 fingerprint: fingerprint.clone(),
-                thread_id: thread_id.clone(),
+                comment_id: discussion.comment_id,
+                body,
             });
+        }
+    }
+    // A resolution marker permanently closes its generation. Re-close a
+    // provider-reopened old thread without another reply; a current recurrence
+    // is represented by a fresh discussion.
+    for (fingerprint, discussions) in &plan.state.github_discussions_by_fingerprint {
+        for discussion in discussions.iter().filter(|discussion| {
+            discussion.has_resolution_marker && discussion.status == DiscussionStatus::Active
+        }) {
+            if let Some(thread_id) = &discussion.thread_id {
+                operations.push(GithubApplyOperation::ResolveThread {
+                    fingerprint: fingerprint.clone(),
+                    thread_id: thread_id.clone(),
+                });
+            }
         }
     }
     operations
@@ -1084,12 +1259,20 @@ fn preflight_github_operations(
 
     for (comment_id, fingerprint) in comment_ids {
         let url = format!("{api}/repos/{repo}/pulls/comments/{comment_id}");
-        github_get_json(agent, &url, token).map_err(|err| {
+        let value = github_get_json(agent, &url, token).map_err(|err| {
             ApplyFailure::new(
-                fingerprint,
+                fingerprint.clone(),
                 format!("GitHub preflight failed for review comment {comment_id}: {err}"),
             )
         })?;
+        if value.get("id").and_then(Value::as_u64) != Some(comment_id) {
+            return Err(ApplyFailure::new(
+                fingerprint,
+                format!(
+                    "GitHub preflight returned the wrong review comment for {comment_id}: {value}"
+                ),
+            ));
+        }
     }
 
     for (thread_id, fingerprint) in thread_ids {
@@ -1104,7 +1287,9 @@ fn preflight_github_operations(
                     format!("GitHub preflight failed for review thread {thread_id}: {err}"),
                 )
             })?;
-        if value.get("errors").is_some() || value.pointer("/data/node/id").is_none() {
+        if value.get("errors").is_some()
+            || value.pointer("/data/node/id").and_then(Value::as_str) != Some(thread_id.as_str())
+        {
             return Err(ApplyFailure::new(
                 fingerprint,
                 format!("GitHub preflight failed for review thread {thread_id}: {value}"),
@@ -1137,12 +1322,24 @@ fn apply_github_operation(input: &mut GithubOperationInput<'_>) -> Result<(), Ap
                 "{}/repos/{}/pulls/{}/comments/{comment_id}/replies",
                 input.api, input.repo, input.pr
             );
-            github_post_json(input.agent, &url, input.token, &payload).map_err(|err| {
-                ApplyFailure::new(
+            let value =
+                github_create_json(input.agent, &url, input.token, &payload).map_err(|err| {
+                    ApplyFailure::new(
+                        fingerprint.clone(),
+                        format!("GitHub failed to post resolution reply for {fingerprint}: {err}"),
+                    )
+                })?;
+            if value.get("id").and_then(Value::as_u64).is_none()
+                || value.get("in_reply_to_id").and_then(Value::as_u64) != Some(*comment_id)
+                || !response_confirms_resolution_body(&value, body)
+            {
+                return Err(ApplyFailure::new(
                     fingerprint.clone(),
-                    format!("GitHub failed to post resolution reply for {fingerprint}: {err}"),
-                )
-            })?;
+                    format!(
+                        "GitHub resolution response did not confirm the created reply for {fingerprint}: {value}"
+                    ),
+                ));
+            }
             input.result.resolution_comments_posted += 1;
         }
         GithubApplyOperation::ResolveThread {
@@ -1165,7 +1362,16 @@ fn apply_github_operation(input: &mut GithubOperationInput<'_>) -> Result<(), Ap
                     format!("GitHub failed to resolve review thread {thread_id}: {err}"),
                 )
             })?;
-            if value.get("errors").is_some() {
+            if value.get("errors").is_some()
+                || value
+                    .pointer("/data/resolveReviewThread/thread/id")
+                    .and_then(Value::as_str)
+                    != Some(thread_id.as_str())
+                || value
+                    .pointer("/data/resolveReviewThread/thread/isResolved")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+            {
                 return Err(ApplyFailure::new(
                     fingerprint.clone(),
                     format!("GitHub resolveReviewThread failed for {fingerprint}: {value}"),
@@ -1211,52 +1417,100 @@ fn load_gitlab_state(
             break;
         }
         for discussion in discussions {
-            collect_gitlab_discussion_fingerprints(&mut state, discussion, opts.review_id);
+            collect_gitlab_discussion_fingerprints(&mut state, discussion, opts.review_id)?;
         }
         if discussions.len() < 100 {
             break;
+        }
+        if page == 100 {
+            return Err(
+                "GitLab discussions pagination exceeded 100 pages; refusing partial provider state"
+                    .to_owned(),
+            );
         }
     }
     Ok(state)
 }
 
-/// Record fallow fingerprints and resolved markers found in a GitLab
-/// discussion's note bodies, mapping each fingerprint to the discussion id.
+/// Record one GitLab discussion lifecycle and its own resolution marker.
 fn collect_gitlab_discussion_fingerprints(
     state: &mut ProviderState,
     discussion: &Value,
     review_id: Option<&ReviewId>,
-) {
-    let Some(discussion_id) = discussion.get("id").and_then(Value::as_str) else {
-        return;
-    };
+) -> Result<(), String> {
+    let discussion_id = discussion
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "GitLab discussion did not contain a string id".to_owned())?;
     let notes = discussion
         .get("notes")
         .and_then(Value::as_array)
         .map(Vec::as_slice)
-        .unwrap_or_default();
-    if let Some(root) = notes.first() {
+        .ok_or_else(|| {
+            format!("GitLab discussion {discussion_id} did not contain a notes array")
+        })?;
+    let root = notes
+        .first()
+        .ok_or_else(|| format!("GitLab discussion {discussion_id} did not contain a root note"))?;
+    {
         let body = root.get("body").and_then(Value::as_str).unwrap_or("");
-        if fallow_output::body_matches_review_id(body, review_id)
+        if is_gitlab_bot_note(root)
             && let Some(fingerprint) = extract_fallow_fingerprint(body)
         {
-            state.fingerprints.insert(fingerprint.clone());
+            if fallow_output::parse_review_id_marker(body)?.as_ref() != review_id {
+                return Ok(());
+            }
+            let resolved = if let Some(value) = discussion.get("resolved") {
+                value.as_bool().ok_or_else(|| {
+                    format!(
+                        "GitLab discussion {discussion_id} contained a non-boolean resolved status"
+                    )
+                })?
+            } else {
+                root.get("resolved")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| {
+                        format!(
+                            "GitLab owned discussion {discussion_id} did not contain a boolean resolved status"
+                        )
+                    })?
+            };
+            let status = if resolved {
+                DiscussionStatus::Resolved
+            } else {
+                DiscussionStatus::Active
+            };
+            let mut has_resolution_marker = false;
+            for note in notes {
+                let note_body = note.get("body").and_then(Value::as_str).unwrap_or("");
+                if !is_gitlab_bot_note(note) {
+                    continue;
+                }
+                let Some(marker) = parse_resolution_marker(note_body)? else {
+                    continue;
+                };
+                if fallow_output::parse_review_id_marker(note_body)?.as_ref() == review_id
+                    && resolution_marker_fingerprint(&marker) == fingerprint
+                {
+                    has_resolution_marker = true;
+                    break;
+                }
+            }
+            if !has_resolution_marker {
+                state.fingerprints.insert(fingerprint.clone());
+            }
             state
                 .gitlab_discussions_by_fingerprint
                 .entry(fingerprint)
                 .or_default()
-                .push(discussion_id.to_owned());
+                .push(GitlabDiscussion {
+                    discussion_id: discussion_id.to_owned(),
+                    status,
+                    has_resolution_marker,
+                });
         }
     }
-    for note in notes {
-        let body = note.get("body").and_then(Value::as_str).unwrap_or("");
-        if fallow_output::body_matches_review_id(body, review_id)
-            && is_gitlab_bot_note(note)
-            && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
-        {
-            state.gitlab_resolved_markers.insert(fingerprint);
-        }
-    }
+    Ok(())
 }
 
 fn apply_gitlab_reconcile(
@@ -1401,27 +1655,35 @@ fn stage_gitlab_operations(
 ) -> Vec<GitlabApplyOperation> {
     let mut operations = Vec::new();
     for fingerprint in &plan.plan.stale {
-        let marker_key = resolved_marker_key(fingerprint, sha);
-        let already_resolved = plan.state.gitlab_resolved_markers.contains(&marker_key)
-            || plan.state.gitlab_resolved_markers.contains(fingerprint);
-        for discussion_id in plan
+        for discussion in plan
             .state
             .gitlab_discussions_by_fingerprint
             .get(fingerprint)
             .into_iter()
             .flatten()
+            .filter(|discussion| !discussion.has_resolution_marker)
         {
-            if !already_resolved {
-                let body = resolved_body(fingerprint, sha, review_id);
-                operations.push(GitlabApplyOperation::Note {
+            if discussion.status == DiscussionStatus::Active {
+                operations.push(GitlabApplyOperation::ResolveDiscussion {
                     fingerprint: fingerprint.clone(),
-                    discussion_id: discussion_id.clone(),
-                    body,
+                    discussion_id: discussion.discussion_id.clone(),
                 });
             }
+            let body = resolved_body(fingerprint, sha, review_id);
+            operations.push(GitlabApplyOperation::Note {
+                fingerprint: fingerprint.clone(),
+                discussion_id: discussion.discussion_id.clone(),
+                body,
+            });
+        }
+    }
+    for (fingerprint, discussions) in &plan.state.gitlab_discussions_by_fingerprint {
+        for discussion in discussions.iter().filter(|discussion| {
+            discussion.has_resolution_marker && discussion.status == DiscussionStatus::Active
+        }) {
             operations.push(GitlabApplyOperation::ResolveDiscussion {
                 fingerprint: fingerprint.clone(),
-                discussion_id: discussion_id.clone(),
+                discussion_id: discussion.discussion_id.clone(),
             });
         }
     }
@@ -1458,12 +1720,20 @@ fn preflight_gitlab_operations(
         let url = format!(
             "{api}/projects/{encoded_project}/merge_requests/{mr}/discussions/{discussion_id}"
         );
-        gitlab_get_json(agent, &url, token).map_err(|err| {
+        let value = gitlab_get_json(agent, &url, token).map_err(|err| {
             ApplyFailure::new(
-                fingerprint,
+                fingerprint.clone(),
                 format!("GitLab preflight failed for discussion {discussion_id}: {err}"),
             )
         })?;
+        if value.get("id").and_then(Value::as_str) != Some(discussion_id.as_str()) {
+            return Err(ApplyFailure::new(
+                fingerprint,
+                format!(
+                    "GitLab preflight returned the wrong discussion for {discussion_id}: {value}"
+                ),
+            ));
+        }
     }
     Ok(())
 }
@@ -1490,12 +1760,23 @@ fn apply_gitlab_operation(input: &mut GitlabOperationInput<'_>) -> Result<(), Ap
                 "{}/projects/{}/merge_requests/{}/discussions/{discussion_id}/notes",
                 input.api, input.encoded_project, input.mr
             );
-            gitlab_post_json(input.agent, &url, input.token, &payload).map_err(|err| {
-                ApplyFailure::new(
+            let value =
+                gitlab_create_json(input.agent, &url, input.token, &payload).map_err(|err| {
+                    ApplyFailure::new(
+                        fingerprint.clone(),
+                        format!("GitLab failed to post resolution note for {fingerprint}: {err}"),
+                    )
+                })?;
+            if value.get("id").and_then(Value::as_u64).is_none()
+                || !response_confirms_resolution_body(&value, body)
+            {
+                return Err(ApplyFailure::new(
                     fingerprint.clone(),
-                    format!("GitLab failed to post resolution note for {fingerprint}: {err}"),
-                )
-            })?;
+                    format!(
+                        "GitLab resolution response did not confirm the created note for {fingerprint}: {value}"
+                    ),
+                ));
+            }
             input.result.resolution_comments_posted += 1;
         }
         GitlabApplyOperation::ResolveDiscussion {
@@ -1507,12 +1788,23 @@ fn apply_gitlab_operation(input: &mut GitlabOperationInput<'_>) -> Result<(), Ap
                 "{}/projects/{}/merge_requests/{}/discussions/{discussion_id}",
                 input.api, input.encoded_project, input.mr
             );
-            gitlab_put_json(input.agent, &url, input.token, &payload).map_err(|err| {
-                ApplyFailure::new(
+            let value =
+                gitlab_put_json(input.agent, &url, input.token, &payload).map_err(|err| {
+                    ApplyFailure::new(
+                        fingerprint.clone(),
+                        format!("GitLab failed to resolve discussion {discussion_id}: {err}"),
+                    )
+                })?;
+            if value.get("id").and_then(Value::as_str) != Some(discussion_id.as_str())
+                || !gitlab_discussion_is_resolved(&value)
+            {
+                return Err(ApplyFailure::new(
                     fingerprint.clone(),
-                    format!("GitLab failed to resolve discussion {discussion_id}: {err}"),
-                )
-            })?;
+                    format!(
+                        "GitLab resolve discussion did not confirm resolution for {fingerprint}: {value}"
+                    ),
+                ));
+            }
             input.result.threads_resolved += 1;
         }
     }
@@ -1560,6 +1852,30 @@ fn github_post_json(
     })
 }
 
+/// POST a non-idempotent GitHub creation without retrying ambiguous gateway
+/// failures. A 429 is safe to retry because the provider rejected the request
+/// before applying it; a 502/503/504 may hide a committed mutation.
+fn github_create_json(
+    agent: &ureq::Agent,
+    url: &str,
+    token: &str,
+    payload: &Value,
+) -> Result<Value, String> {
+    with_retryable_status(
+        "GitHub",
+        |status| status == 429,
+        || {
+            agent
+                .post(url)
+                .header("Authorization", &format!("Bearer {token}"))
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "fallow-cli")
+                .send_json(payload)
+        },
+    )
+}
+
 fn github_patch_json(
     agent: &ureq::Agent,
     url: &str,
@@ -1587,20 +1903,26 @@ fn gitlab_get_json(agent: &ureq::Agent, url: &str, token: &str) -> Result<Value,
     })
 }
 
-fn gitlab_post_json(
+/// POST a non-idempotent GitLab creation without retrying ambiguous gateway
+/// failures. See [`github_create_json`] for the retry rationale.
+fn gitlab_create_json(
     agent: &ureq::Agent,
     url: &str,
     token: &str,
     payload: &Value,
 ) -> Result<Value, String> {
-    with_rate_limit_retry("GitLab", || {
-        agent
-            .post(url)
-            .header("PRIVATE-TOKEN", token)
-            .header("Content-Type", "application/json")
-            .header("User-Agent", "fallow-cli")
-            .send_json(payload)
-    })
+    with_retryable_status(
+        "GitLab",
+        |status| status == 429,
+        || {
+            agent
+                .post(url)
+                .header("PRIVATE-TOKEN", token)
+                .header("Content-Type", "application/json")
+                .header("User-Agent", "fallow-cli")
+                .send_json(payload)
+        },
+    )
 }
 
 fn gitlab_put_json(
@@ -1650,9 +1972,17 @@ const fn should_retry_status(status: u16) -> bool {
 /// `Retry-After` from the server when present, falling back to the floor;
 /// either way it's clamped to `RETRY_MAX_WAIT_SECONDS` so a runaway server
 /// can't strand the runner.
-fn with_rate_limit_retry<F>(provider: &str, mut op: F) -> Result<Value, String>
+fn with_rate_limit_retry<F>(provider: &str, op: F) -> Result<Value, String>
 where
     F: FnMut() -> Result<http::Response<ureq::Body>, ureq::Error>,
+{
+    with_retryable_status(provider, should_retry_status, op)
+}
+
+fn with_retryable_status<F, P>(provider: &str, should_retry: P, mut op: F) -> Result<Value, String>
+where
+    F: FnMut() -> Result<http::Response<ureq::Body>, ureq::Error>,
+    P: Fn(u16) -> bool,
 {
     let max_attempts = retries_from_env();
     let floor_delay = retry_delay_from_env();
@@ -1662,7 +1992,7 @@ where
         match op() {
             Ok(mut response) => {
                 let status = response.status().as_u16();
-                if should_retry_status(status) && attempt < max_attempts {
+                if should_retry(status) && attempt < max_attempts {
                     let wait = compute_retry_wait(response.headers(), floor_delay, provider);
                     let label = if status == 429 {
                         "rate-limited"
@@ -1755,58 +2085,60 @@ fn read_json_response(
 /// their own comment and trick the apply step into skipping a legitimate
 /// "Resolved in `<sha>`" reply on a stale finding.
 ///
-/// GitHub identifies bot identities through `user.type == "Bot"` (e.g.
-/// `github-actions[bot]`, `dependabot[bot]`, custom GitHub Apps). The
-/// fallback `FALLOW_BOT_LOGIN` env var lets self-hosted runners pin a
-/// specific human-account login that posts on behalf of fallow when no Bot
-/// type is available (uncommon but supported for legacy setups).
+/// Without an explicit login, GitHub's native `user.type == "Bot"` metadata
+/// is the compatibility trust boundary. Setting `FALLOW_BOT_LOGIN` narrows
+/// ownership to that exact posting login and also supports PAT-backed human
+/// accounts that lack native bot metadata.
 fn is_github_bot_comment(comment: &Value) -> bool {
     let user = comment.get("user");
-    let user_type = user.and_then(|u| u.get("type")).and_then(Value::as_str);
-    if user_type == Some("Bot") {
-        return true;
-    }
     let login = user.and_then(|u| u.get("login")).and_then(Value::as_str);
-    if let Some(login) = login
-        && let Ok(allow) = std::env::var("FALLOW_BOT_LOGIN")
-        && !allow.trim().is_empty()
-        && login == allow.trim()
-    {
-        return true;
+    match std::env::var("FALLOW_BOT_LOGIN") {
+        Ok(allow) => {
+            let allow = allow.trim();
+            return !allow.is_empty() && login == Some(allow);
+        }
+        Err(std::env::VarError::NotUnicode(_)) => return false,
+        Err(std::env::VarError::NotPresent) => {}
     }
-    false
+    user.and_then(|u| u.get("type")).and_then(Value::as_str) == Some("Bot")
 }
 
 /// Determine whether a GitLab MR discussion note was authored by a bot.
 ///
-/// GitLab marks bot-authored notes with `system: true` (system-generated)
-/// or, for project access tokens, the author's `bot: true` flag. Personal
-/// access tokens posting on behalf of a human carry the human's identity;
-/// callers that use a PAT must set `FALLOW_BOT_LOGIN` to the human's
-/// username (or the project access token's bot username) to opt in.
+/// Without an explicit login, GitLab's native `system: true` or `author.bot`
+/// metadata is the compatibility trust boundary. Setting `FALLOW_BOT_LOGIN`
+/// narrows ownership to that exact username and supports project/PAT notes
+/// that lack native bot metadata.
 fn is_gitlab_bot_note(note: &Value) -> bool {
-    if note.get("system").and_then(Value::as_bool).unwrap_or(false) {
-        return true;
-    }
     let author = note.get("author");
-    if author
-        .and_then(|a| a.get("bot"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return true;
-    }
     let username = author
         .and_then(|a| a.get("username"))
         .and_then(Value::as_str);
-    if let Some(username) = username
-        && let Ok(allow) = std::env::var("FALLOW_BOT_LOGIN")
-        && !allow.trim().is_empty()
-        && username == allow.trim()
-    {
-        return true;
+    match std::env::var("FALLOW_BOT_LOGIN") {
+        Ok(allow) => {
+            let allow = allow.trim();
+            return !allow.is_empty() && username == Some(allow);
+        }
+        Err(std::env::VarError::NotUnicode(_)) => return false,
+        Err(std::env::VarError::NotPresent) => {}
     }
-    false
+    note.get("system").and_then(Value::as_bool).unwrap_or(false)
+        || author.and_then(|a| a.get("bot")).and_then(Value::as_bool) == Some(true)
+}
+
+fn gitlab_discussion_is_resolved(discussion: &Value) -> bool {
+    discussion
+        .get("resolved")
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            discussion
+                .get("notes")
+                .and_then(Value::as_array)
+                .and_then(|notes| notes.first())
+                .and_then(|note| note.get("resolved"))
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false)
 }
 
 fn extract_marker(body: &str, marker: &str) -> Option<String> {
@@ -1817,6 +2149,53 @@ fn extract_marker(body: &str, marker: &str) -> Option<String> {
         .trim_matches('-')
         .trim();
     (!value.is_empty()).then(|| value.to_owned())
+}
+
+/// Return the lifecycle fingerprint encoded by either a legacy bare marker or
+/// a SHA-qualified marker. The SHA is presentation/idempotency metadata for a
+/// single discussion, never evidence that a new lifecycle began.
+fn resolution_marker_fingerprint(marker: &str) -> &str {
+    marker
+        .split_once('@')
+        .map_or(marker, |(fingerprint, _)| fingerprint)
+}
+
+fn response_confirms_resolution_body(value: &Value, expected_body: &str) -> bool {
+    let Some(response_body) = value.get("body").and_then(Value::as_str) else {
+        return false;
+    };
+    let Ok(expected_resolution) = parse_resolution_marker(expected_body) else {
+        return false;
+    };
+    let Ok(response_resolution) = parse_resolution_marker(response_body) else {
+        return false;
+    };
+    let Ok(expected_scope) = fallow_output::parse_review_id_marker(expected_body) else {
+        return false;
+    };
+    expected_resolution.is_some()
+        && response_resolution == expected_resolution
+        && fallow_output::validate_review_body_scope(response_body, expected_scope.as_ref()).is_ok()
+}
+
+fn parse_resolution_marker(body: &str) -> Result<Option<String>, String> {
+    const PREFIX: &str = "<!-- fallow-resolved-fingerprint: ";
+    const SUFFIX: &str = " -->";
+    let mut found = None;
+    for line in body.lines() {
+        if !line.contains("fallow-resolved-fingerprint") {
+            continue;
+        }
+        let value = line
+            .strip_prefix(PREFIX)
+            .and_then(|line| line.strip_suffix(SUFFIX))
+            .filter(|value| !value.is_empty() && !value.chars().any(char::is_whitespace))
+            .ok_or_else(|| "malformed fallow resolved-fingerprint marker".to_owned())?;
+        if found.replace(value.to_owned()).is_some() {
+            return Err("duplicate fallow resolved-fingerprint marker".to_owned());
+        }
+    }
+    Ok(found)
 }
 
 /// Extract a fallow fingerprint from any v1 or v2 marker shape in `body`.
@@ -1833,10 +2212,9 @@ fn extract_fallow_fingerprint(body: &str) -> Option<String> {
         .or_else(|| extract_marker(body, "fallow-fingerprint:"))
 }
 
-/// Compute the idempotency marker for a (fingerprint, sha) pair. The marker
-/// is what we look up to decide whether a resolution comment for this
-/// fingerprint at this commit already exists, so re-runs of the workflow on
-/// the same commit don't post duplicate "Resolved in `<sha>`" comments.
+/// Compute the compatibility marker rendered in a resolution reply. Provider
+/// state associates this marker with its root discussion; SHA inequality must
+/// not be interpreted as force-push or recurrence evidence.
 fn resolved_marker_key(fingerprint: &str, sha: Option<&str>) -> String {
     match sha.and_then(|value| value.get(..7)) {
         Some(short) => format!("{fingerprint}@{short}"),
@@ -1957,15 +2335,16 @@ mod tests {
             ..ReconcilePlan::default()
         };
         let mut state = ProviderState::default();
-        state
-            .github_comments_by_fingerprint
-            .insert("fp-a".to_owned(), vec![10, 11]);
-        state
-            .github_threads_by_fingerprint
-            .insert("fp-a".to_owned(), vec!["thread-a".to_owned()]);
-        state
-            .github_resolved_markers
-            .insert("fp-a@abcdef1".to_owned());
+        state.github_discussions_by_fingerprint.insert(
+            "fp-a".to_owned(),
+            vec![GithubDiscussion {
+                comment_id: 10,
+                provider_position: 0,
+                thread_id: Some("thread-a".to_owned()),
+                status: DiscussionStatus::Active,
+                has_resolution_marker: true,
+            }],
+        );
         let planned = PlannedReconcile {
             plan,
             state: &state,
@@ -1992,9 +2371,14 @@ mod tests {
             ..ReconcilePlan::default()
         };
         let mut state = ProviderState::default();
-        state
-            .gitlab_discussions_by_fingerprint
-            .insert("fp-a".to_owned(), vec!["discussion-a".to_owned()]);
+        state.gitlab_discussions_by_fingerprint.insert(
+            "fp-a".to_owned(),
+            vec![GitlabDiscussion {
+                discussion_id: "discussion-a".to_owned(),
+                status: DiscussionStatus::Active,
+                has_resolution_marker: false,
+            }],
+        );
         let planned = PlannedReconcile {
             plan,
             state: &state,
@@ -2003,26 +2387,26 @@ mod tests {
         let operations = stage_gitlab_operations(&planned, Some("1234567890"), None);
 
         assert_eq!(operations.len(), 2);
+        let GitlabApplyOperation::ResolveDiscussion {
+            fingerprint,
+            discussion_id,
+        } = &operations[0]
+        else {
+            panic!("expected the discussion to resolve before its marker reply");
+        };
+        assert_eq!(fingerprint, "fp-a");
+        assert_eq!(discussion_id, "discussion-a");
         let GitlabApplyOperation::Note {
             fingerprint,
             discussion_id,
             body,
-        } = &operations[0]
+        } = &operations[1]
         else {
-            panic!("expected a resolution note before resolving discussion");
+            panic!("expected a resolution marker after resolving the discussion");
         };
         assert_eq!(fingerprint, "fp-a");
         assert_eq!(discussion_id, "discussion-a");
         assert!(body.contains("fallow-resolved-fingerprint: fp-a@1234567"));
-        let GitlabApplyOperation::ResolveDiscussion {
-            fingerprint,
-            discussion_id,
-        } = &operations[1]
-        else {
-            panic!("expected stale fingerprint to resolve its GitLab discussion");
-        };
-        assert_eq!(fingerprint, "fp-a");
-        assert_eq!(discussion_id, "discussion-a");
     }
 
     #[test]
@@ -2038,6 +2422,9 @@ mod tests {
 
     #[test]
     fn github_bot_check_accepts_bot_user_type() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({
             "user": { "type": "Bot", "login": "github-actions[bot]" },
         });
@@ -2046,6 +2433,9 @@ mod tests {
 
     #[test]
     fn github_bot_check_rejects_human_user_type() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({
             "user": { "type": "User", "login": "alice" },
             "body": "<!-- fallow-resolved-fingerprint: abc123 -->",
@@ -2083,6 +2473,9 @@ mod tests {
 
     #[test]
     fn gitlab_bot_check_accepts_system_and_bot_flag() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let system_note = serde_json::json!({ "system": true });
         assert!(is_gitlab_bot_note(&system_note));
         let bot_author = serde_json::json!({
@@ -2094,6 +2487,9 @@ mod tests {
 
     #[test]
     fn gitlab_bot_check_rejects_human_author() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let human = serde_json::json!({
             "system": false,
             "author": { "bot": false, "username": "alice" },
@@ -2429,22 +2825,36 @@ mod tests {
     // --- collect_github_thread_fingerprints (lines 432-459) ---
 
     #[test]
-    fn collect_github_thread_fingerprints_skips_resolved_threads() {
+    fn collect_github_thread_fingerprints_keeps_manually_resolved_lifecycle_live() {
         let thread = serde_json::json!({
             "id": "thread-1",
             "isResolved": true,
             "comments": { "nodes": [
-                { "body": "<!-- fallow-fingerprint:v2: fp-should-skip -->" }
+                { "databaseId": 1 }
             ]}
         });
         let mut state = ProviderState::default();
-        collect_github_thread_fingerprints(&mut state, &thread, None);
-        assert!(state.fingerprints.is_empty());
-        assert!(state.github_threads_by_fingerprint.is_empty());
+        record_github_review_root(
+            &mut state,
+            &serde_json::json!({
+                "id": 1,
+                "body": "<!-- fallow-fingerprint:v2: fp-manual -->",
+                "user": { "type": "Bot", "login": "fallow[bot]" }
+            }),
+            None,
+            0,
+        )
+        .unwrap();
+        collect_github_thread_fingerprints(&mut state, &thread, None).unwrap();
+        finalize_github_state(&mut state);
+        assert!(state.fingerprints.contains("fp-manual"));
+        let discussion = &state.github_discussions_by_fingerprint["fp-manual"][0];
+        assert_eq!(discussion.status, DiscussionStatus::Resolved);
+        assert_eq!(discussion.thread_id.as_deref(), Some("thread-1"));
     }
 
     #[test]
-    fn collect_github_thread_fingerprints_skips_thread_without_id() {
+    fn collect_github_thread_fingerprints_rejects_thread_without_id() {
         let thread = serde_json::json!({
             "isResolved": false,
             "comments": { "nodes": [
@@ -2452,7 +2862,8 @@ mod tests {
             ]}
         });
         let mut state = ProviderState::default();
-        collect_github_thread_fingerprints(&mut state, &thread, None);
+        let error = collect_github_thread_fingerprints(&mut state, &thread, None).unwrap_err();
+        assert!(error.contains("string id"));
         assert!(state.fingerprints.is_empty());
     }
 
@@ -2462,16 +2873,102 @@ mod tests {
             "id": "thread-unresolved",
             "isResolved": false,
             "comments": { "nodes": [
-                { "body": "<!-- fallow-fingerprint:v2: fp-active -->" }
+                { "databaseId": 1 }
             ]}
         });
         let mut state = ProviderState::default();
-        collect_github_thread_fingerprints(&mut state, &thread, None);
+        record_github_review_root(
+            &mut state,
+            &serde_json::json!({
+                "id": 1,
+                "body": "<!-- fallow-fingerprint:v2: fp-active -->",
+                "user": { "type": "Bot", "login": "fallow[bot]" }
+            }),
+            None,
+            0,
+        )
+        .unwrap();
+        collect_github_thread_fingerprints(&mut state, &thread, None).unwrap();
+        finalize_github_state(&mut state);
         assert!(state.fingerprints.contains("fp-active"));
         assert_eq!(
-            state.github_threads_by_fingerprint.get("fp-active"),
-            Some(&vec!["thread-unresolved".to_owned()])
+            state.github_discussions_by_fingerprint["fp-active"][0]
+                .thread_id
+                .as_deref(),
+            Some("thread-unresolved")
         );
+    }
+
+    #[test]
+    fn github_explicit_marker_for_unowned_root_is_not_reassigned() {
+        let mut state = ProviderState::default();
+        record_github_review_root(
+            &mut state,
+            &serde_json::json!({
+                "id": 20,
+                "body": "<!-- fallow-fingerprint: fp-active -->",
+                "user": { "type": "Bot" }
+            }),
+            None,
+            0,
+        )
+        .unwrap();
+        record_github_resolution_marker(
+            &mut state,
+            &serde_json::json!({
+                "id": 30,
+                "in_reply_to_id": 1,
+                "body": "<!-- fallow-resolved-fingerprint: fp-active -->",
+                "user": { "type": "Bot" }
+            }),
+            None,
+            1,
+        )
+        .unwrap();
+        finalize_github_state(&mut state);
+
+        assert!(state.fingerprints.contains("fp-active"));
+        assert!(!state.github_discussions_by_fingerprint["fp-active"][0].has_resolution_marker);
+    }
+
+    #[test]
+    fn github_resolution_marker_rejects_nonnumeric_parent_id() {
+        let mut state = ProviderState::default();
+        let error = record_github_resolution_marker(
+            &mut state,
+            &serde_json::json!({
+                "id": 30,
+                "in_reply_to_id": "not-a-number",
+                "body": "<!-- fallow-resolved-fingerprint: fp-active -->",
+                "user": { "type": "Bot" }
+            }),
+            None,
+            1,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("nonnumeric in_reply_to_id"));
+        assert!(state.github_unattached_resolved_markers.is_empty());
+    }
+
+    #[test]
+    fn github_owned_review_comment_rejects_nonnumeric_parent_id() {
+        let mut state = ProviderState::default();
+        let error = record_github_review_root(
+            &mut state,
+            &serde_json::json!({
+                "id": 31,
+                "in_reply_to_id": "not-a-number",
+                "body": "<!-- fallow-fingerprint: fp-active -->",
+                "user": { "type": "Bot" }
+            }),
+            None,
+            1,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("nonnumeric in_reply_to_id"));
+        assert!(state.github_discussions_by_fingerprint.is_empty());
     }
 
     #[test]
@@ -2480,25 +2977,27 @@ mod tests {
             "id": "thread-2",
             "isResolved": false,
             "comments": { "nodes": [
-                { "body": "plain comment, no marker" }
+                { "databaseId": 2 }
             ]}
         });
         let mut state = ProviderState::default();
-        collect_github_thread_fingerprints(&mut state, &thread, None);
+        collect_github_thread_fingerprints(&mut state, &thread, None).unwrap();
         assert!(state.fingerprints.is_empty());
     }
 
     // --- collect_gitlab_discussion_fingerprints (lines 807-832) ---
 
     #[test]
-    fn collect_gitlab_discussion_fingerprints_skips_discussion_without_id() {
+    fn collect_gitlab_discussion_fingerprints_rejects_discussion_without_id() {
         let discussion = serde_json::json!({
             "notes": [
                 { "body": "<!-- fallow-fingerprint:v2: fp-x -->" }
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None);
+        let error =
+            collect_gitlab_discussion_fingerprints(&mut state, &discussion, None).unwrap_err();
+        assert!(error.contains("string id"));
         assert!(state.fingerprints.is_empty());
     }
 
@@ -2507,16 +3006,15 @@ mod tests {
         let discussion = serde_json::json!({
             "id": "disc-99",
             "notes": [
-                { "body": "<!-- fallow-fingerprint:v2: fp-gitlab -->" }
+                { "body": "<!-- fallow-fingerprint:v2: fp-gitlab -->", "resolved": false, "author": { "bot": true } }
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None);
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None).unwrap();
         assert!(state.fingerprints.contains("fp-gitlab"));
-        assert_eq!(
-            state.gitlab_discussions_by_fingerprint.get("fp-gitlab"),
-            Some(&vec!["disc-99".to_owned()])
-        );
+        let lifecycle = &state.gitlab_discussions_by_fingerprint["fp-gitlab"][0];
+        assert_eq!(lifecycle.discussion_id, "disc-99");
+        assert_eq!(lifecycle.status, DiscussionStatus::Active);
     }
 
     #[test]
@@ -2524,6 +3022,7 @@ mod tests {
         let discussion = serde_json::json!({
             "id": "disc-100",
             "notes": [
+                { "body": "<!-- fallow-fingerprint: fp-resolved -->", "resolved": true, "author": { "bot": true } },
                 {
                     "system": true,
                     "body": "<!-- fallow-resolved-fingerprint: fp-resolved -->"
@@ -2531,8 +3030,8 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None);
-        assert!(state.gitlab_resolved_markers.contains("fp-resolved"));
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None).unwrap();
+        assert!(state.gitlab_discussions_by_fingerprint["fp-resolved"][0].has_resolution_marker);
     }
 
     #[test]
@@ -2540,6 +3039,7 @@ mod tests {
         let discussion = serde_json::json!({
             "id": "disc-101",
             "notes": [
+                { "body": "<!-- fallow-fingerprint: fp-human -->", "resolved": false, "author": { "bot": true } },
                 {
                     "system": false,
                     "author": { "bot": false, "username": "alice" },
@@ -2548,8 +3048,40 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None);
-        assert!(!state.gitlab_resolved_markers.contains("fp-human"));
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None).unwrap();
+        assert!(!state.gitlab_discussions_by_fingerprint["fp-human"][0].has_resolution_marker);
+    }
+
+    #[test]
+    fn collect_gitlab_discussion_fingerprints_rejects_missing_root_note() {
+        let mut state = ProviderState::default();
+        let error = collect_gitlab_discussion_fingerprints(
+            &mut state,
+            &serde_json::json!({ "id": "disc-empty", "notes": [] }),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("did not contain a root note"));
+    }
+
+    #[test]
+    fn collect_gitlab_discussion_fingerprints_rejects_missing_owned_status() {
+        let mut state = ProviderState::default();
+        let error = collect_gitlab_discussion_fingerprints(
+            &mut state,
+            &serde_json::json!({
+                "id": "disc-statusless",
+                "notes": [{
+                    "body": "<!-- fallow-fingerprint: fp-statusless -->",
+                    "author": { "bot": true }
+                }]
+            }),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("did not contain a boolean resolved status"));
     }
 
     // --- stage_github_operations: additional paths (lines 595-634) ---
@@ -2572,12 +3104,16 @@ mod tests {
             ..ReconcilePlan::default()
         };
         let mut state = ProviderState::default();
-        state
-            .github_comments_by_fingerprint
-            .insert("fp-stale".to_owned(), vec![55]);
-        state
-            .github_threads_by_fingerprint
-            .insert("fp-stale".to_owned(), vec!["thread-55".to_owned()]);
+        state.github_discussions_by_fingerprint.insert(
+            "fp-stale".to_owned(),
+            vec![GithubDiscussion {
+                comment_id: 55,
+                provider_position: 0,
+                thread_id: Some("thread-55".to_owned()),
+                status: DiscussionStatus::Active,
+                has_resolution_marker: false,
+            }],
+        );
         let planned = PlannedReconcile {
             plan,
             state: &state,
@@ -2606,10 +3142,16 @@ mod tests {
             ..ReconcilePlan::default()
         };
         let mut state = ProviderState::default();
-        state
-            .github_comments_by_fingerprint
-            .insert("fp-bare".to_owned(), vec![99]);
-        state.github_resolved_markers.insert("fp-bare".to_owned());
+        state.github_discussions_by_fingerprint.insert(
+            "fp-bare".to_owned(),
+            vec![GithubDiscussion {
+                comment_id: 99,
+                provider_position: 0,
+                thread_id: None,
+                status: DiscussionStatus::Active,
+                has_resolution_marker: true,
+            }],
+        );
         let planned = PlannedReconcile {
             plan,
             state: &state,
@@ -2631,9 +3173,16 @@ mod tests {
             ..ReconcilePlan::default()
         };
         let mut state = ProviderState::default();
-        state
-            .github_comments_by_fingerprint
-            .insert("fp-nosha".to_owned(), vec![1]);
+        state.github_discussions_by_fingerprint.insert(
+            "fp-nosha".to_owned(),
+            vec![GithubDiscussion {
+                comment_id: 1,
+                provider_position: 0,
+                thread_id: None,
+                status: DiscussionStatus::Active,
+                has_resolution_marker: false,
+            }],
+        );
         let planned = PlannedReconcile {
             plan,
             state: &state,
@@ -2669,12 +3218,14 @@ mod tests {
             ..ReconcilePlan::default()
         };
         let mut state = ProviderState::default();
-        state
-            .gitlab_discussions_by_fingerprint
-            .insert("fp-gl".to_owned(), vec!["disc-gl".to_owned()]);
-        state
-            .gitlab_resolved_markers
-            .insert("fp-gl@abc1234".to_owned());
+        state.gitlab_discussions_by_fingerprint.insert(
+            "fp-gl".to_owned(),
+            vec![GitlabDiscussion {
+                discussion_id: "disc-gl".to_owned(),
+                status: DiscussionStatus::Active,
+                has_resolution_marker: true,
+            }],
+        );
         let planned = PlannedReconcile {
             plan,
             state: &state,
@@ -2698,12 +3249,14 @@ mod tests {
             ..ReconcilePlan::default()
         };
         let mut state = ProviderState::default();
-        state
-            .gitlab_discussions_by_fingerprint
-            .insert("fp-bare-gl".to_owned(), vec!["disc-bare".to_owned()]);
-        state
-            .gitlab_resolved_markers
-            .insert("fp-bare-gl".to_owned());
+        state.gitlab_discussions_by_fingerprint.insert(
+            "fp-bare-gl".to_owned(),
+            vec![GitlabDiscussion {
+                discussion_id: "disc-bare".to_owned(),
+                status: DiscussionStatus::Active,
+                has_resolution_marker: true,
+            }],
+        );
         let planned = PlannedReconcile {
             plan,
             state: &state,
@@ -2723,17 +3276,22 @@ mod tests {
             ..ReconcilePlan::default()
         };
         let mut state = ProviderState::default();
-        state
-            .gitlab_discussions_by_fingerprint
-            .insert("fp-gl-nosha".to_owned(), vec!["disc-nosha".to_owned()]);
+        state.gitlab_discussions_by_fingerprint.insert(
+            "fp-gl-nosha".to_owned(),
+            vec![GitlabDiscussion {
+                discussion_id: "disc-nosha".to_owned(),
+                status: DiscussionStatus::Active,
+                has_resolution_marker: false,
+            }],
+        );
         let planned = PlannedReconcile {
             plan,
             state: &state,
         };
         let ops = stage_gitlab_operations(&planned, None, None);
         assert_eq!(ops.len(), 2);
-        let GitlabApplyOperation::Note { body, .. } = &ops[0] else {
-            panic!("expected Note op first");
+        let GitlabApplyOperation::Note { body, .. } = &ops[1] else {
+            panic!("expected Note op after resolution");
         };
         assert!(
             body.contains("Resolved."),
@@ -2762,16 +3320,76 @@ mod tests {
         assert!(body.contains("fallow-resolved-fingerprint: fp-x"));
     }
 
+    #[test]
+    fn resolution_response_requires_exact_marker_and_scope() {
+        let review_id = ReviewId::parse("frontend").unwrap();
+        let expected = resolved_body("fp-x", Some("abcdef123"), Some(&review_id));
+        assert!(response_confirms_resolution_body(
+            &serde_json::json!({ "body": expected }),
+            &expected,
+        ));
+        assert!(!response_confirms_resolution_body(
+            &serde_json::json!({
+                "body": "<!-- fallow-resolved-fingerprint: fp-x@abcdef1 -->"
+            }),
+            &expected,
+        ));
+        assert!(!response_confirms_resolution_body(
+            &serde_json::json!({
+                "body": "<!-- fallow-resolved-fingerprint: fp-x@7654321 -->\n<!-- fallow-review-id: frontend -->"
+            }),
+            &expected,
+        ));
+        assert!(!response_confirms_resolution_body(
+            &serde_json::json!({
+                "body": "<!-- fallow-resolved-fingerprint: fp-x@abcdef1 -->\n<!-- fallow-review-id: frontend -->\n<!-- fallow-review-id: backend -->"
+            }),
+            &expected,
+        ));
+    }
+
+    #[test]
+    #[allow(
+        unsafe_code,
+        reason = "test-only env mutation, serialized via BOT_LOGIN_ENV_LOCK"
+    )]
+    fn empty_configured_bot_login_trusts_no_native_bot() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
+        unsafe {
+            std::env::set_var("FALLOW_BOT_LOGIN", "   ");
+        }
+        assert!(!is_github_bot_comment(&serde_json::json!({
+            "user": { "type": "Bot", "login": "foreign[bot]" }
+        })));
+        assert!(!is_gitlab_bot_note(&serde_json::json!({
+            "system": false,
+            "author": { "bot": true, "username": "foreign-bot" }
+        })));
+        // SAFETY: Restore the process environment after the scoped override.
+        unsafe {
+            std::env::remove_var("FALLOW_BOT_LOGIN");
+        }
+    }
+
     // --- is_github_bot_comment: missing branch (line 1323-1331) ---
 
     #[test]
     fn github_bot_check_returns_false_when_no_user_field() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({ "body": "no user" });
         assert!(!is_github_bot_comment(&comment));
     }
 
     #[test]
     fn github_bot_check_returns_false_when_fallow_bot_login_not_set_and_type_not_bot() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({
             "user": { "type": "User", "login": "someperson" },
         });
@@ -2806,6 +3424,9 @@ mod tests {
 
     #[test]
     fn gitlab_bot_check_returns_false_when_bot_flag_is_false_and_no_login_override() {
+        let _env = BOT_LOGIN_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let note = serde_json::json!({
             "system": false,
             "author": { "bot": false, "username": "contributor" },
@@ -2980,20 +3601,22 @@ mod tests {
         let backend = ReviewId::parse("backend").unwrap();
         let frontend_comment = serde_json::json!({
             "id": 1,
-            "body": "finding\n<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: frontend -->"
+            "body": "finding\n<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: frontend -->",
+            "user": { "type": "Bot" }
         });
         let backend_comment = serde_json::json!({
             "id": 2,
-            "body": "finding\n<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: backend -->"
+            "body": "finding\n<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: backend -->",
+            "user": { "type": "Bot" }
         });
         let mut state = ProviderState::default();
 
-        record_github_review_comment(&mut state, &frontend_comment, Some(&frontend));
-        record_github_review_comment(&mut state, &backend_comment, Some(&frontend));
+        record_github_review_root(&mut state, &frontend_comment, Some(&frontend), 0).unwrap();
+        record_github_review_root(&mut state, &backend_comment, Some(&frontend), 1).unwrap();
 
         assert_eq!(
-            state.github_comments_by_fingerprint["abcdef0123456789"],
-            vec![1]
+            state.github_discussions_by_fingerprint["abcdef0123456789"][0].comment_id,
+            1
         );
         assert!(fallow_output::body_matches_review_id(
             frontend_comment["body"].as_str().unwrap(),
@@ -3018,8 +3641,8 @@ mod tests {
         });
         let mut state = ProviderState::default();
 
-        record_github_review_comment(&mut state, &scoped, None);
-        record_github_review_comment(&mut state, &reply, None);
+        record_github_review_root(&mut state, &scoped, None, 0).unwrap();
+        record_github_review_root(&mut state, &reply, None, 1).unwrap();
 
         assert!(state.fingerprints.is_empty());
     }
@@ -3031,7 +3654,9 @@ mod tests {
             "id": "discussion-1",
             "notes": [
                 {
-                    "body": "finding\n<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: frontend -->"
+                    "body": "finding\n<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id: frontend -->",
+                    "resolved": true,
+                    "author": { "bot": true }
                 },
                 {
                     "body": "Resolved.\n<!-- fallow-resolved-fingerprint: abcdef0123456789 -->\n<!-- fallow-review-id: frontend -->",
@@ -3042,13 +3667,15 @@ mod tests {
         let mut scoped = ProviderState::default();
         let mut unscoped = ProviderState::default();
 
-        collect_gitlab_discussion_fingerprints(&mut scoped, &discussion, Some(&frontend));
-        collect_gitlab_discussion_fingerprints(&mut unscoped, &discussion, None);
+        collect_gitlab_discussion_fingerprints(&mut scoped, &discussion, Some(&frontend)).unwrap();
+        collect_gitlab_discussion_fingerprints(&mut unscoped, &discussion, None).unwrap();
 
-        assert!(scoped.fingerprints.contains("abcdef0123456789"));
-        assert!(scoped.gitlab_resolved_markers.contains("abcdef0123456789"));
+        assert!(!scoped.fingerprints.contains("abcdef0123456789"));
+        assert!(
+            scoped.gitlab_discussions_by_fingerprint["abcdef0123456789"][0].has_resolution_marker
+        );
         assert!(unscoped.fingerprints.is_empty());
-        assert!(unscoped.gitlab_resolved_markers.is_empty());
+        assert!(unscoped.gitlab_discussions_by_fingerprint.is_empty());
     }
 
     #[test]

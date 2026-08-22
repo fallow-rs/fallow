@@ -9580,7 +9580,8 @@ comments: number
  */
 current_fingerprints: number
 /**
- * Distinct fingerprints found in existing comments.
+ * Distinct fingerprints with an open Fallow lifecycle, including
+ * provider-resolved discussions not yet closed by a Fallow marker.
  */
 existing_fingerprints: number
 /**
@@ -9588,7 +9589,7 @@ existing_fingerprints: number
  */
 new_fingerprints: number
 /**
- * Fingerprints commented earlier whose findings no longer exist.
+ * Fingerprints with open Fallow lifecycles whose findings no longer exist.
  */
 stale_fingerprints: number
 /**
@@ -9608,7 +9609,7 @@ provider_warning?: (string | null)
  */
 resolution_comments_posted: number
 /**
- * Stale discussion threads resolved (GitLab).
+ * Provider discussion threads resolved or re-closed.
  */
 threads_resolved: number
 /**
