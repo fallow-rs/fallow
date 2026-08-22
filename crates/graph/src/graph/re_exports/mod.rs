@@ -135,6 +135,86 @@ fn is_namespace_re_export(re: &super::types::ReExportEdge) -> bool {
     re.imported_name == "*" && re.exported_name != "*"
 }
 
+/// Reverse index of the re-export edges that carry one exported name outward,
+/// from the module that declares it toward the barrels that forward it.
+///
+/// A namespace re-export (`export * as ns`) is not a forwarder: it bundles the
+/// source's names into one object instead of passing them along.
+struct NameForwarders<'a> {
+    /// `(source, imported name)` to the barrels re-exporting it, each with the
+    /// name it exports it under, so renames are followed exactly.
+    named: FxHashMap<(FileId, &'a str), Vec<(FileId, &'a str)>>,
+    /// Source file to the barrels that re-export all of its names.
+    stars: FxHashMap<FileId, Vec<FileId>>,
+}
+
+/// Reusable visited set and stack for [`NameForwarders::reaches_surface`].
+#[derive(Default)]
+struct NameSearchScratch<'a> {
+    visited: FxHashSet<(FileId, &'a str)>,
+    frontier: Vec<(FileId, &'a str)>,
+}
+
+impl<'a> NameForwarders<'a> {
+    fn build(modules: &'a [super::types::ModuleNode]) -> Self {
+        let mut named: FxHashMap<(FileId, &'a str), Vec<(FileId, &'a str)>> = FxHashMap::default();
+        let mut stars: FxHashMap<FileId, Vec<FileId>> = FxHashMap::default();
+        for module in modules {
+            for re in &module.re_exports {
+                if re.imported_name == "*" {
+                    if re.exported_name == "*" {
+                        stars
+                            .entry(re.source_file)
+                            .or_default()
+                            .push(module.file_id);
+                    }
+                } else {
+                    named
+                        .entry((re.source_file, re.imported_name.as_str()))
+                        .or_default()
+                        .push((module.file_id, re.exported_name.as_str()));
+                }
+            }
+        }
+        Self { named, stars }
+    }
+
+    /// Whether `name`, as exported by `file`, reaches a module on the entry
+    /// point's star surface through named and plain-star re-exports.
+    fn reaches_surface(
+        &self,
+        file: FileId,
+        name: &'a str,
+        star_surface: &FxHashSet<FileId>,
+        scratch: &mut NameSearchScratch<'a>,
+    ) -> bool {
+        scratch.visited.clear();
+        scratch.frontier.clear();
+        scratch.visited.insert((file, name));
+        scratch.frontier.push((file, name));
+        while let Some((current, current_name)) = scratch.frontier.pop() {
+            if star_surface.contains(&current) {
+                return true;
+            }
+            if let Some(barrels) = self.named.get(&(current, current_name)) {
+                for &(barrel, exported_name) in barrels {
+                    if scratch.visited.insert((barrel, exported_name)) {
+                        scratch.frontier.push((barrel, exported_name));
+                    }
+                }
+            }
+            if let Some(barrels) = self.stars.get(&current) {
+                for &barrel in barrels {
+                    if scratch.visited.insert((barrel, current_name)) {
+                        scratch.frontier.push((barrel, current_name));
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
 struct ReExportFixpointInput<'a> {
     re_export_info: &'a [ReExportTuple],
     entry_star_targets: &'a FxHashSet<FileId>,
@@ -322,12 +402,23 @@ impl ModuleGraph {
     /// re-exports, renames included (`export { sub } from './barrel'`). All
     /// three hand `ns` to consumers the graph cannot enumerate, so the
     /// target's own chains must be credited.
+    ///
+    /// The search runs outward from each namespace edge rather than inward
+    /// from every entry-point export, so its cost scales with the number of
+    /// `export * as` edges (usually a handful) instead of with the number of
+    /// names an entry point re-exports.
     fn seed_entry_exposed_namespaces(&self, targets: &mut FxHashSet<FileId>) {
-        if !self
+        let namespace_edges: Vec<(FileId, &str, FileId)> = self
             .modules
             .iter()
-            .any(|m| m.re_exports.iter().any(is_namespace_re_export))
-        {
+            .flat_map(|m| {
+                m.re_exports
+                    .iter()
+                    .filter(|re| is_namespace_re_export(re))
+                    .map(move |re| (m.file_id, re.exported_name.as_str(), re.source_file))
+            })
+            .collect();
+        if namespace_edges.is_empty() {
             return;
         }
 
@@ -339,49 +430,25 @@ impl ModuleGraph {
             .collect();
         self.extend_star_closure(&mut star_surface, StarChains::Plain);
 
-        let mut named_surface: FxHashSet<(FileId, &str)> = FxHashSet::default();
-        let mut frontier: Vec<(FileId, &str)> = Vec::new();
-        for module in star_surface
-            .iter()
-            .filter_map(|file_id| self.modules.get(file_id.0 as usize))
-        {
-            for re in &module.re_exports {
-                if is_namespace_re_export(re) {
-                    targets.insert(re.source_file);
-                } else if re.imported_name != "*"
-                    && named_surface.insert((re.source_file, re.imported_name.as_str()))
-                {
-                    frontier.push((re.source_file, re.imported_name.as_str()));
-                }
+        let mut off_surface: Vec<(FileId, &str, FileId)> = Vec::new();
+        for (barrel, exported_name, source) in namespace_edges {
+            if star_surface.contains(&barrel) {
+                targets.insert(source);
+            } else {
+                off_surface.push((barrel, exported_name, source));
             }
         }
+        if off_surface.is_empty() {
+            return;
+        }
 
-        while let Some((file_id, name)) = frontier.pop() {
-            let Some(module) = self.modules.get(file_id.0 as usize) else {
-                continue;
-            };
-            for re in &module.re_exports {
-                let inward = if re.imported_name == "*" {
-                    if re.exported_name == "*" {
-                        // A plain star is one of the places `name` can arrive
-                        // from, so the search continues under the same name.
-                        Some(name)
-                    } else {
-                        if re.exported_name == name {
-                            targets.insert(re.source_file);
-                        }
-                        None
-                    }
-                } else if re.exported_name == name {
-                    Some(re.imported_name.as_str())
-                } else {
-                    None
-                };
-                if let Some(inward_name) = inward
-                    && named_surface.insert((re.source_file, inward_name))
-                {
-                    frontier.push((re.source_file, inward_name));
-                }
+        let forwarders = NameForwarders::build(&self.modules);
+        let mut search = NameSearchScratch::default();
+        for (barrel, exported_name, source) in off_surface {
+            if !targets.contains(&source)
+                && forwarders.reaches_surface(barrel, exported_name, &star_surface, &mut search)
+            {
+                targets.insert(source);
             }
         }
     }
