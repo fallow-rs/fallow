@@ -68,6 +68,10 @@ an exit code.
   rebase, and the base-snapshot cache key all see the same map. A configured
   path that does not exist fails audit with the same structured exit 2 as
   health, and a relative winning root is rejected before analysis starts.
+  Resolution is scoped to runs that score health: bare combined mode resolves
+  coverage only when `--only` / `--skip` keep health in the run, so
+  `fallow --only check` neither loads config for coverage nor rejects a
+  `health.coverageRoot` it never reads.
 - Audit worktree cleanup must be scoped to Fallow-owned paths and registrations.
   Never prune unrelated user worktrees.
 - JSON mode emits structured errors on stdout and keeps progress off stdout.

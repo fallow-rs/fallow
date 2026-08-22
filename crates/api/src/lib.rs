@@ -1065,6 +1065,13 @@ pub fn derive_complexity_run_options(options: &ComplexityOptions) -> ComplexityR
 /// project-relative `health.coverage` validates against the project and not
 /// against the embedder's working directory.
 ///
+/// The options carry no record of which layer supplied `coverage`, so the
+/// path error's `context` is always `health.coverage`, whichever of the tool
+/// parameter, `FALLOW_COVERAGE`, or the config field won
+/// ([`crate::coverage::resolve_coverage_inputs`] resolves that order). The
+/// sibling root error names its layer because
+/// [`crate::coverage::CoverageInputError`] carries it.
+///
 /// # Errors
 ///
 /// Returns a structured programmatic error when a coverage path does not exist

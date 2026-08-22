@@ -3281,13 +3281,21 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         Ok(production) => production,
         Err(code) => return code,
     };
-    let coverage_inputs = match resolve_health_coverage_inputs(
-        dispatch,
-        cli.coverage.as_deref(),
-        cli.coverage_root.as_deref(),
-    ) {
-        Ok(inputs) => inputs,
-        Err(code) => return code,
+    // Coverage only feeds health scoring, and resolving it validates the
+    // winning root. A bare run that excludes health (`--only check`,
+    // `--skip health`) must neither load config for coverage nor reject a
+    // relative `health.coverageRoot` it never reads.
+    let coverage_inputs = if run_health {
+        match resolve_health_coverage_inputs(
+            dispatch,
+            cli.coverage.as_deref(),
+            cli.coverage_root.as_deref(),
+        ) {
+            Ok(inputs) => inputs,
+            Err(code) => return code,
+        }
+    } else {
+        ResolvedHealthCoverageInputs::default()
     };
     run_bare_combined(
         dispatch,

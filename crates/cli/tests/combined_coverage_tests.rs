@@ -284,6 +284,46 @@ fn relative_config_coverage_root_is_structured_exit_two() {
 }
 
 #[test]
+fn health_excluded_bare_runs_ignore_a_relative_config_coverage_root() {
+    let dir = create_branchy_project("bare-health-excluded-coverage-root");
+    write_config(
+        dir.path(),
+        r#"{"health":{"maxCrap":10,"coverageRoot":"src"}}"#,
+    );
+    let root = dir.path().to_str().unwrap();
+
+    for exclusion in [["--only", "check"], ["--skip", "health"]] {
+        let output = run_fallow_raw(&[
+            "--root",
+            root,
+            exclusion[0],
+            exclusion[1],
+            "--format",
+            "json",
+            "--quiet",
+        ]);
+        assert_eq!(
+            output.code, 0,
+            "{} {} runs no health scoring, so the coverage root is never read. stderr: {}",
+            exclusion[0], exclusion[1], output.stderr
+        );
+        let json = parse_json(&output);
+        assert_eq!(json["kind"], serde_json::json!("combined"));
+        assert!(
+            json.get("health").is_none(),
+            "health should be excluded from the run: {json}"
+        );
+    }
+
+    let with_health = run_fallow_raw(&combined_health_args(dir.path()));
+    assert_eq!(
+        with_health.code, 2,
+        "a bare run that includes health still rejects the relative root. stderr: {}",
+        with_health.stderr
+    );
+}
+
+#[test]
 fn bare_coverage_flags_before_subcommand_are_rejected() {
     let output = run_fallow_raw(&[
         "--coverage",

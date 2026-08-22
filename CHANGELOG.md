@@ -83,10 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FALLOW_INVALID_COVERAGE_PATH` / `FALLOW_INVALID_COVERAGE_ROOT` errors; the
   root error's `context` now names the layer that supplied the value
   (`health.coverageRoot`, `FALLOW_COVERAGE_ROOT`, or the tool's own
-  parameter), and the CLI rejects a relative winning root before analysis
-  starts with the same exit 2 and message as before. The Node-API bindings
-  are unchanged: they take `coverage` / `coverageRoot` as explicit options
-  and read neither the env vars nor the config fields. The env manifest
+  parameter), and a CLI run that scores health rejects a relative winning
+  root before analysis starts with the same exit 2 and message as before (a
+  bare run that excludes health, `--only check` or `--skip health`, never
+  reads the coverage inputs). Repositories that configured coverage will see
+  MCP finding counts and verdicts move in both directions, because real
+  coverage replaces the reachability estimate: a well-covered hotspot drops
+  out of the findings and an uncovered one can rise above `max_crap`. The
+  Node-API bindings still take `coverage` / `coverageRoot` as explicit
+  options and read neither the env vars nor the config fields; their
+  relative-path validation now follows the analysis root like every other
+  programmatic caller. The env manifest
   (`capabilities.json`), the MCP parameter descriptions, the
   `health.coverage` / `health.coverageRoot` field docs (`schema.json`), and
   the environment-variable docs no longer tell MCP callers to pass the inputs

@@ -138,8 +138,10 @@ impl CoverageFixture {
     }
 }
 
+/// Run git with its output captured, so fixture setup stays out of the test
+/// runner's stdout.
 fn git(root: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let output = Command::new("git")
         .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(root)
@@ -151,9 +153,13 @@ fn git(root: &Path, args: &[&str]) {
         .env("GIT_AUTHOR_EMAIL", "test@example.com")
         .env("GIT_COMMITTER_NAME", "test")
         .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .status()
+        .output()
         .expect("git command");
-    assert!(status.success(), "git {args:?} failed");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// The `branchy` complexity finding from a health or audit JSON payload.

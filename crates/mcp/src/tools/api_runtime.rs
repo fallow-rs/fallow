@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -56,9 +57,21 @@ pub(super) fn env_diff_file() -> Option<PathBuf> {
 /// environment layer, read at the adapter boundary. Empty values count as
 /// unset, as they do for the CLI.
 pub(super) fn env_coverage_inputs() -> CoverageInputs {
+    coverage_inputs_from(|name: &str| std::env::var_os(name))
+}
+
+/// [`env_coverage_inputs`] over an injectable lookup, so the reader itself is
+/// testable without mutating the process environment for the rest of the
+/// suite.
+fn coverage_inputs_from(lookup: impl Fn(&str) -> Option<OsString>) -> CoverageInputs {
+    let path = |name: &str| {
+        lookup(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
     CoverageInputs {
-        coverage: env_path("FALLOW_COVERAGE"),
-        coverage_root: env_path("FALLOW_COVERAGE_ROOT"),
+        coverage: path("FALLOW_COVERAGE"),
+        coverage_root: path("FALLOW_COVERAGE_ROOT"),
     }
 }
 
@@ -177,41 +190,38 @@ mod tests {
     }
 
     /// #2368: the adapter reads both coverage variables and ignores empty
-    /// values, as the CLI does.
+    /// values, as the CLI does. The lookup is injected, so no typed-route
+    /// test in this binary can observe a mutated process environment.
     #[test]
-    #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
     fn env_coverage_inputs_read_both_variables_and_ignore_empty_values() {
-        let previous = (
-            std::env::var_os("FALLOW_COVERAGE"),
-            std::env::var_os("FALLOW_COVERAGE_ROOT"),
-        );
-        // SAFETY: the values set here cannot change the outcome of a
-        // concurrently running typed-route test (an empty coverage value is
-        // ignored and a root without a map is inert), and the previous
-        // values are restored before the test returns.
-        unsafe {
-            std::env::set_var("FALLOW_COVERAGE", "");
-            std::env::set_var("FALLOW_COVERAGE_ROOT", "/ci/workspace");
-        }
-        let inputs = env_coverage_inputs();
-        // SAFETY: restore the process environment for the rest of the suite.
-        unsafe {
-            match previous.0 {
-                Some(value) => std::env::set_var("FALLOW_COVERAGE", value),
-                None => std::env::remove_var("FALLOW_COVERAGE"),
-            }
-            match previous.1 {
-                Some(value) => std::env::set_var("FALLOW_COVERAGE_ROOT", value),
-                None => std::env::remove_var("FALLOW_COVERAGE_ROOT"),
-            }
-        }
-
+        let inputs = coverage_inputs_from(|name| match name {
+            "FALLOW_COVERAGE" => Some(OsString::from("")),
+            "FALLOW_COVERAGE_ROOT" => Some(OsString::from("/ci/workspace")),
+            _ => None,
+        });
         assert_eq!(
             inputs,
             CoverageInputs {
                 coverage: None,
                 coverage_root: Some(PathBuf::from("/ci/workspace")),
             }
+        );
+
+        let inputs = coverage_inputs_from(|name| {
+            (name == "FALLOW_COVERAGE").then(|| OsString::from("artifacts/coverage-final.json"))
+        });
+        assert_eq!(
+            inputs,
+            CoverageInputs {
+                coverage: Some(PathBuf::from("artifacts/coverage-final.json")),
+                coverage_root: None,
+            }
+        );
+
+        assert_eq!(
+            env_coverage_inputs(),
+            coverage_inputs_from(|name: &str| std::env::var_os(name)),
+            "the adapter's env layer reads the process environment"
         );
     }
 
