@@ -65,7 +65,7 @@ fn bun_lockb_only_workspace_records_one_skip_diagnostic_at_root_manifest() {
     );
     assert!(
         diagnostic.message.contains("'package.json'")
-            && diagnostic.message.contains("only bun.lockb was found")
+            && diagnostic.message.contains("no parseable text lockfile")
             && diagnostic
                 .message
                 .contains("bun install --save-text-lockfile"),

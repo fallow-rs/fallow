@@ -1003,7 +1003,7 @@ fn bun_lockb_only_override_skip_surfaces_in_json_and_human_output() {
     assert_eq!(skips[0]["path"], "package.json");
     let message = skips[0]["message"].as_str().unwrap_or_default();
     assert!(
-        message.contains("only bun.lockb was found")
+        message.contains("no parseable text lockfile")
             && message.contains("bun install --save-text-lockfile"),
         "message states the cause and the text-lockfile next step: {message}"
     );
@@ -1019,7 +1019,7 @@ fn bun_lockb_only_override_skip_surfaces_in_json_and_human_output() {
         &[("RUST_LOG", "warn")],
     );
     assert!(
-        human.stderr.contains("only bun.lockb was found")
+        human.stderr.contains("no parseable text lockfile")
             && human.stderr.contains("bun install --save-text-lockfile"),
         "human run warns about the skip on stderr; stderr: {}",
         human.stderr

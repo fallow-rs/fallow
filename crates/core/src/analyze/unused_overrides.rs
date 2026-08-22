@@ -478,9 +478,10 @@ fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
     Some(key[..name_end].to_string())
 }
 
-/// Record the skip diagnostic for a root whose only lockfile is bun's binary
-/// `bun.lockb`: the manifest declares overrides, but resolution ground truth
-/// is unreadable, so the unused-override check does not run. Reaches
+/// Record the skip diagnostic for a root where bun's binary `bun.lockb` is
+/// present and `collect_lockfile_packages` found no parseable text lockfile
+/// to use instead: the manifest declares overrides, but resolution ground
+/// truth is unreadable, so the unused-override check does not run. Reaches
 /// `workspace_diagnostics[]` JSON and one deduplicated stderr warning, the
 /// same channel as a malformed `pnpm-workspace.yaml`, so the absence of
 /// findings is explained instead of silent (issue #2358).
@@ -498,8 +499,9 @@ fn report_bun_lockb_override_resolution_skipped(config: &ResolvedConfig) {
 /// Emit one `UnusedDependencyOverride` for every parseable override whose
 /// target package (and parent, when present) is not declared in any workspace
 /// `package.json` or resolved in any recognized lockfile. When resolution is
-/// unavailable (bun.lockb only), emits nothing and records the
-/// `bun-lockb-override-resolution-skipped` workspace diagnostic instead.
+/// unavailable (bun.lockb without a parseable text lockfile beside it), emits
+/// nothing and records the `bun-lockb-override-resolution-skipped` workspace
+/// diagnostic instead.
 #[must_use]
 #[deprecated(
     since = "2.76.0",
@@ -1060,6 +1062,44 @@ mod tests {
             bun_lockb_skip_diagnostics(root).is_empty(),
             "a parseable bun.lock means resolution ran, so no skip diagnostic"
         );
+    }
+
+    #[test]
+    fn bun_lockb_next_to_yarn_lock_or_unparseable_bun_lock_still_records_skip() {
+        // Neither sibling restores resolution: yarn.lock is never consulted and
+        // an unparseable bun.lock yields no package set, so the skip fires and
+        // the message must not claim bun.lockb was the only lockfile.
+        for (sibling, content) in [
+            (YARN_LOCK_FILE, "# yarn lockfile v1\n"),
+            (BUN_LOCK_FILE, ""),
+        ] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let root = dir.path();
+            write_bun_manifest(root, Some(r#"{ "ws": "^8.21.0" }"#));
+            std::fs::write(root.join(BUN_LOCKB_FILE), BUN_LOCKB_PLACEHOLDER)
+                .expect("write bun.lockb");
+            std::fs::write(root.join(sibling), content).expect("write sibling lockfile");
+            let config = resolve_config(root);
+
+            let findings = run_unused_override_detector(&config).expect("overrides are declared");
+            assert!(
+                findings.is_empty(),
+                "{sibling} next to bun.lockb does not restore resolution: {findings:?}"
+            );
+            let diagnostics = bun_lockb_skip_diagnostics(root);
+            assert_eq!(
+                diagnostics.len(),
+                1,
+                "{sibling} next to bun.lockb still skips and announces it: {diagnostics:?}"
+            );
+            let message = &diagnostics[0].message;
+            assert!(
+                !message.contains("only bun.lockb")
+                    && message.contains("no parseable text lockfile")
+                    && message.contains("delete the stale bun.lockb"),
+                "message describes the real condition and offers the stale-lockb exit: {message}"
+            );
+        }
     }
 
     #[test]
