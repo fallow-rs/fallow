@@ -1,16 +1,18 @@
 use crate::params::HealthParams;
 
 use fallow_api::{
-    AnalysisOptions, ComplexityOptions, ComplexitySort, OwnershipEmailMode, TargetEffort,
-    run_health as run_api_health, serialize_health_programmatic_json,
+    AnalysisOptions, ComplexityOptions, ComplexitySort, CoverageInputs, OwnershipEmailMode,
+    ProgrammaticError, TargetEffort, run_health as run_api_health,
+    serialize_health_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
-        programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
+        changed_since_from_param, env_coverage_inputs, env_diff_file, json_success, non_empty_path,
+        non_empty_string, programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
+        workspace_patterns_from_param,
     },
     fallback_policy::{
         CliFallbackReason, baseline_fallback_reason, filled, grouped_fallback_reason,
@@ -32,7 +34,9 @@ pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolRe
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
 
+    let env = env_coverage_inputs();
     let result = run_api_blocking("check_health", move || {
+        let options = with_resolved_coverage(options, env)?;
         run_api_health(&options).and_then(serialize_health_programmatic_json)
     })
     .await?
@@ -44,16 +48,43 @@ pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolRe
 }
 
 pub fn run_health_api_value(params: &HealthParams) -> Result<Option<serde_json::Value>, String> {
+    run_health_api_value_with_env(params, env_coverage_inputs())
+}
+
+/// [`run_health_api_value`] with the environment coverage layer injected, so
+/// the typed route can be exercised without mutating the process environment.
+fn run_health_api_value_with_env(
+    params: &HealthParams,
+    env: CoverageInputs,
+) -> Result<Option<serde_json::Value>, String> {
     if requires_cli_fallback(params) {
         return Ok(None);
     }
 
     let options = health_options_from_params(params)?;
-    let value = run_api_health(&options)
+    let value = with_resolved_coverage(options, env)
+        .and_then(|options| run_api_health(&options))
         .and_then(serialize_health_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
 
     Ok(Some(value))
+}
+
+/// Fill the typed route's coverage inputs from the explicit parameters, the
+/// environment, and the project config with the CLI's precedence (#2368).
+fn with_resolved_coverage(
+    mut options: ComplexityOptions,
+    env: CoverageInputs,
+) -> Result<ComplexityOptions, ProgrammaticError> {
+    let explicit = CoverageInputs {
+        coverage: options.coverage.take(),
+        coverage_root: options.coverage_root.take(),
+    };
+    let resolved =
+        resolve_typed_coverage_inputs(&options.analysis, explicit, env, "health.coverage_root")?;
+    options.coverage = resolved.coverage;
+    options.coverage_root = resolved.coverage_root;
+    Ok(options)
 }
 
 /// Build CLI arguments for the `check_health` tool.
@@ -413,6 +444,7 @@ mod tests {
 
     use rmcp::model::ContentBlock;
 
+    use super::super::coverage_fixture::{CoverageFixture, branchy_finding};
     use super::*;
 
     #[test]
@@ -610,5 +642,144 @@ mod tests {
         };
         let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");
         assert_eq!(json["kind"], "health");
+    }
+
+    /// #2368: `check_health` on the typed route scores CRAP from the
+    /// configured Istanbul map instead of the reachability estimate. The
+    /// config is discovered from `root` and its coverage path is
+    /// project-relative.
+    #[test]
+    fn typed_route_config_only_coverage_scores_from_istanbul_map() {
+        let uncovered = CoverageFixture::new(false);
+        uncovered.write_health_config(&CoverageFixture::config_health_section());
+        let json = typed_route_json(&health_params(&uncovered), CoverageInputs::default());
+        let branchy = branchy_finding(&json["findings"]).expect("branchy above max_crap");
+        assert_eq!(branchy["coverage_source"], "istanbul", "{json}");
+
+        let covered = CoverageFixture::new(true);
+        covered.write_health_config(&CoverageFixture::config_health_section());
+        let json = typed_route_json(&health_params(&covered), CoverageInputs::default());
+        assert!(
+            branchy_finding(&json["findings"]).is_none(),
+            "a covered map scores branchy below max_crap: {json}"
+        );
+    }
+
+    /// #2368 precedence on `check_health`: the `coverage` parameter beats
+    /// `FALLOW_COVERAGE`, which beats `health.coverage`, with each input
+    /// resolving independently. `branchy` is reported only while the winning
+    /// layer fails to match it.
+    #[test]
+    fn typed_route_parameter_beats_env_beats_config_coverage() {
+        let fixture = CoverageFixture::new(true);
+        fixture.write_stale_coverage("artifacts/stale.json");
+        let branchy_reported = |params: &HealthParams, env: CoverageInputs| {
+            branchy_finding(&typed_route_json(params, env)["findings"]).is_some()
+        };
+
+        fixture.write_health_config(
+            r#"{"coverage":"artifacts/stale.json","coverageRoot":"/ci/workspace"}"#,
+        );
+        assert!(
+            branchy_reported(&health_params(&fixture), CoverageInputs::default()),
+            "a stale config map falls back to the estimate"
+        );
+        let env_map = CoverageInputs {
+            coverage: Some(fixture.coverage_path()),
+            coverage_root: None,
+        };
+        assert!(
+            !branchy_reported(&health_params(&fixture), env_map),
+            "FALLOW_COVERAGE beats health.coverage while health.coverageRoot still applies"
+        );
+        let stale_env = CoverageInputs {
+            coverage: Some(fixture.path("artifacts/stale.json")),
+            coverage_root: Some(PathBuf::from("/ci/workspace")),
+        };
+        assert!(
+            branchy_reported(&health_params(&fixture), stale_env.clone()),
+            "a stale env map falls back to the estimate"
+        );
+        let with_parameter = HealthParams {
+            coverage: Some(fixture.coverage_path().display().to_string()),
+            ..health_params(&fixture)
+        };
+        assert!(
+            !branchy_reported(&with_parameter, stale_env),
+            "the coverage parameter beats FALLOW_COVERAGE while FALLOW_COVERAGE_ROOT still applies"
+        );
+
+        fixture.write_health_config(
+            r#"{"coverage":"artifacts/coverage-final.json","coverageRoot":"/wrong/root"}"#,
+        );
+        assert!(
+            branchy_reported(&health_params(&fixture), CoverageInputs::default()),
+            "a wrong config root strips nothing and matches nothing"
+        );
+        let env_root = CoverageInputs {
+            coverage: None,
+            coverage_root: Some(PathBuf::from("/ci/workspace")),
+        };
+        assert!(
+            !branchy_reported(&health_params(&fixture), env_root),
+            "FALLOW_COVERAGE_ROOT beats health.coverageRoot while health.coverage still applies"
+        );
+    }
+
+    /// #2368: the configured map's existence is checked under `root`, and a
+    /// missing one keeps the structured `FALLOW_INVALID_COVERAGE_PATH` error.
+    #[test]
+    fn typed_route_missing_config_coverage_is_structured_error() {
+        let fixture = CoverageFixture::new(true);
+        fixture.write_health_config(r#"{"coverage":"artifacts/missing.json"}"#);
+
+        let error = typed_route_error(&health_params(&fixture));
+        assert_eq!(error["code"], "FALLOW_INVALID_COVERAGE_PATH", "{error}");
+        assert_eq!(error["exit_code"], 2, "{error}");
+        let message = error["message"].as_str().expect("message");
+        assert!(
+            message.contains("missing.json") && message.contains(&fixture.root_string()),
+            "the message names the path under root: {message}"
+        );
+    }
+
+    /// #2368: a relative `health.coverageRoot` keeps the structured
+    /// `FALLOW_INVALID_COVERAGE_ROOT` error and names the config key.
+    #[test]
+    fn typed_route_relative_config_coverage_root_is_structured_error() {
+        let fixture = CoverageFixture::new(true);
+        fixture.write_health_config(r#"{"coverageRoot":"src"}"#);
+
+        let error = typed_route_error(&health_params(&fixture));
+        assert_eq!(error["code"], "FALLOW_INVALID_COVERAGE_ROOT", "{error}");
+        assert_eq!(error["context"], "health.coverageRoot", "{error}");
+        let message = error["message"].as_str().expect("message");
+        assert!(
+            message.contains("--coverage-root expects an absolute path")
+                && message.contains("got 'src'"),
+            "{message}"
+        );
+    }
+
+    fn typed_route_json(params: &HealthParams, env: CoverageInputs) -> serde_json::Value {
+        run_health_api_value_with_env(params, env)
+            .expect("typed route result")
+            .expect("typed route")
+    }
+
+    fn typed_route_error(params: &HealthParams) -> serde_json::Value {
+        let body = run_health_api_value_with_env(params, CoverageInputs::default())
+            .expect_err("the typed route rejects the inputs");
+        serde_json::from_str(&body).expect("structured error body")
+    }
+
+    fn health_params(fixture: &CoverageFixture) -> HealthParams {
+        HealthParams {
+            root: Some(fixture.root_string()),
+            max_crap: Some(10.0),
+            complexity: Some(true),
+            no_cache: Some(true),
+            ..HealthParams::default()
+        }
     }
 }

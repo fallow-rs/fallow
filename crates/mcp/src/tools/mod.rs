@@ -4,6 +4,8 @@ mod audit;
 mod check_changed;
 mod check_runtime_coverage;
 mod code_mode;
+#[cfg(test)]
+mod coverage_fixture;
 mod decision_surface;
 mod dupes;
 mod explain;

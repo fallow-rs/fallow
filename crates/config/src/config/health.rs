@@ -170,8 +170,8 @@ pub struct HealthConfig {
     /// Path to Istanbul-format coverage data for accurate per-function CRAP
     /// scores. Relative paths resolve against the project root. The CLI
     /// `--coverage` flag and `FALLOW_COVERAGE` environment variable override
-    /// this value. Consulted by `fallow health`, bare `fallow`, and
-    /// `fallow audit`.
+    /// this value. Consulted by `fallow health`, bare `fallow`, `fallow audit`,
+    /// and the MCP `audit` / `check_health` tools.
     #[serde(default)]
     pub coverage: Option<PathBuf>,
 
@@ -179,7 +179,8 @@ pub struct HealthConfig {
     /// Use when coverage was generated under a different checkout root in CI
     /// or Docker. The CLI `--coverage-root` flag and `FALLOW_COVERAGE_ROOT`
     /// environment variable override this value. Consulted by `fallow health`,
-    /// bare `fallow`, and `fallow audit`.
+    /// bare `fallow`, `fallow audit`, and the MCP `audit` / `check_health`
+    /// tools.
     #[serde(default)]
     pub coverage_root: Option<PathBuf>,
 

@@ -31,6 +31,7 @@ pub mod combined_output;
 /// One-line-per-finding compact text builders for dead-code, grouped, health,
 /// and duplication output.
 pub mod compact_output;
+pub mod coverage;
 pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
 pub mod decision_surface;
@@ -98,6 +99,9 @@ pub use compact_output::{
     build_compact_lines, build_duplication_compact_lines, build_grouped_compact_lines,
     build_health_compact_lines,
 };
+pub use coverage::{
+    CoverageInputError, CoverageInputSource, CoverageInputs, resolve_coverage_inputs,
+};
 pub use dead_code_codeclimate::build_codeclimate;
 pub use dead_code_sarif::build_sarif;
 pub use dupes_output::{
@@ -121,7 +125,7 @@ pub use explain::{
     rule_docs_url, rule_guide, security_meta, serialize_explain_programmatic_json,
     unknown_explain_error,
 };
-pub use fallow_config::{AuditGate, TypeAwareRequire};
+pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};
 pub use fallow_output::RootEnvelopeMode;
 pub use fallow_types::trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
@@ -169,11 +173,11 @@ pub use runtime::{
     TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
     TraceExportOutput, TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOutput,
     TraceFileProgrammaticOutput, benchmark_trace_clone_compact_json,
-    benchmark_trace_graph_family_compact_json, run_audit, run_boundary_violations,
-    run_circular_dependencies, run_combined, run_complexity_with_runner, run_dead_code,
-    run_decision_surface, run_duplication, run_feature_flags, run_health, run_health_with_runner,
-    run_trace_clone, run_trace_dependency, run_trace_export, run_trace_file,
-    serialize_health_report_json,
+    benchmark_trace_graph_family_compact_json, load_health_config, run_audit,
+    run_boundary_violations, run_circular_dependencies, run_combined, run_complexity_with_runner,
+    run_dead_code, run_decision_surface, run_duplication, run_feature_flags, run_health,
+    run_health_with_runner, run_trace_clone, run_trace_dependency, run_trace_export,
+    run_trace_file, serialize_health_report_json,
 };
 pub use runtime_json::{
     serialize_audit_programmatic_json, serialize_boundary_violations_programmatic_json,
@@ -1056,20 +1060,29 @@ pub fn derive_complexity_run_options(options: &ComplexityOptions) -> ComplexityR
 /// These option contracts belong to the API boundary because NAPI and future
 /// Rust embedders construct the same [`ComplexityOptions`] type.
 ///
+/// A relative coverage path resolves against `analysis.root` (the cwd when
+/// unset), exactly as the engine resolves it at read time, so a
+/// project-relative `health.coverage` validates against the project and not
+/// against the embedder's working directory.
+///
 /// # Errors
 ///
 /// Returns a structured programmatic error when a coverage path does not exist
 /// or when `coverage_root` is not an absolute prefix from the coverage data.
 pub fn validate_complexity_options(options: &ComplexityOptions) -> Result<(), ProgrammaticError> {
-    if let Some(path) = &options.coverage
-        && !path.exists()
-    {
-        return Err(ProgrammaticError::new(
-            format!("coverage path does not exist: {}", path.display()),
-            2,
-        )
-        .with_code("FALLOW_INVALID_COVERAGE_PATH")
-        .with_context("health.coverage"));
+    if let Some(path) = &options.coverage {
+        let resolved = fallow_engine::health::scoring::resolve_relative_to_root(
+            path,
+            options.analysis.root.as_deref(),
+        );
+        if !resolved.exists() {
+            return Err(ProgrammaticError::new(
+                format!("coverage path does not exist: {}", resolved.display()),
+                2,
+            )
+            .with_code("FALLOW_INVALID_COVERAGE_PATH")
+            .with_context("health.coverage"));
+        }
     }
     if let Err(message) =
         fallow_engine::health::validate_coverage_root_absolute(options.coverage_root.as_deref())
@@ -1326,6 +1339,48 @@ mod tests {
         assert_eq!(err.exit_code, 2);
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_COVERAGE_ROOT"));
         assert_eq!(err.context.as_deref(), Some("health.coverage_root"));
+    }
+
+    /// #2368: a project-relative coverage path (the documented form of
+    /// `health.coverage`) must be checked under the analysis root, not under
+    /// the embedder's working directory.
+    #[test]
+    fn complexity_options_validation_resolves_relative_coverage_against_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("artifacts")).expect("artifacts dir");
+        std::fs::write(dir.path().join("artifacts/coverage-final.json"), "{}")
+            .expect("coverage fixture");
+        let relative = PathBuf::from("artifacts/coverage-final.json");
+        assert!(
+            !relative.exists(),
+            "the fixture must not also exist under the test cwd"
+        );
+
+        let result = validate_complexity_options(&ComplexityOptions {
+            analysis: AnalysisOptions {
+                root: Some(dir.path().to_path_buf()),
+                ..AnalysisOptions::default()
+            },
+            coverage: Some(relative.clone()),
+            ..ComplexityOptions::default()
+        });
+        assert!(result.is_ok(), "{result:?}");
+
+        let err = validate_complexity_options(&ComplexityOptions {
+            analysis: AnalysisOptions {
+                root: Some(dir.path().join("elsewhere")),
+                ..AnalysisOptions::default()
+            },
+            coverage: Some(relative),
+            ..ComplexityOptions::default()
+        })
+        .expect_err("the path does not exist under the other root");
+        assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_COVERAGE_PATH"));
+        assert!(
+            err.message.contains("elsewhere"),
+            "the message names the resolved path: {}",
+            err.message
+        );
     }
 
     #[test]

@@ -118,7 +118,7 @@ fn validate_analysis_option_shape(options: &AnalysisOptions) -> ProgrammaticResu
     Ok(())
 }
 
-fn resolve_analysis_root(root: Option<&Path>) -> ProgrammaticResult<PathBuf> {
+pub fn resolve_analysis_root(root: Option<&Path>) -> ProgrammaticResult<PathBuf> {
     let root = match root {
         Some(root) => root.to_path_buf(),
         None => std::env::current_dir().map_err(|err| {
@@ -137,7 +137,7 @@ fn resolve_analysis_root(root: Option<&Path>) -> ProgrammaticResult<PathBuf> {
     })
 }
 
-fn validate_analysis_config_path(config_path: Option<&Path>) -> ProgrammaticResult<()> {
+pub fn validate_analysis_config_path(config_path: Option<&Path>) -> ProgrammaticResult<()> {
     if let Some(config_path) = config_path
         && !config_path.exists()
     {

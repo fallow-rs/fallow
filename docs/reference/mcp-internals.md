@@ -36,6 +36,14 @@ Do not hand-copy the complete tool list into durable prose. Read
   completion, cancellation, or timeout.
 - Never inherit unbounded environment or filesystem authority into code mode.
 - Keep tool ordering deterministic.
+- The `audit` and `check_health` typed routes resolve Istanbul coverage
+  through `fallow_api::coverage::resolve_coverage_inputs` with the CLI's
+  precedence (tool parameter, then `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT`,
+  then `health.coverage` / `health.coverageRoot`). `tools/api_runtime.rs`
+  reads the env vars at the adapter boundary and loads the config's `health`
+  section through `fallow_api::load_health_config` only when a higher layer
+  leaves an input unset, so a typed call and its CLI fallback score CRAP from
+  the same map (#2368).
 - `trace_symbol` and `symbol_impact` expose exact TypeScript evidence for
   Fallow-owned project questions. They do not expose compiler diagnostics or
   typed lint findings.

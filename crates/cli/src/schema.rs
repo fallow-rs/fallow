@@ -650,11 +650,11 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     ),
     (
         "FALLOW_COVERAGE",
-        "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this; it wins over the health.coverage config field. Honored by the health, bare fallow, and audit CLI commands; the MCP audit and check_health tools read it only when they fall back to the CLI, so pass their coverage parameter explicitly.",
+        "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this; it wins over the health.coverage config field. Honored by the health, bare fallow, and audit CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage parameter overrides it.",
     ),
     (
         "FALLOW_COVERAGE_ROOT",
-        "Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. CLI --coverage-root flag overrides this; it wins over the health.coverageRoot config field. Honored by the health, bare fallow, and audit CLI commands; the MCP audit and check_health tools read it only when they fall back to the CLI, so pass their coverage_root parameter explicitly.",
+        "Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. CLI --coverage-root flag overrides this; it wins over the health.coverageRoot config field. Honored by the health, bare fallow, and audit CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage_root parameter overrides it.",
     ),
     (
         "FALLOW_MAX_FILE_SIZE",
@@ -877,6 +877,46 @@ mod tests {
         assert!(env_vars["FALLOW_TIMEOUT_SECS"].is_string());
         assert!(env_vars["FALLOW_SUGGESTIONS"].is_string());
         assert!(env_vars["DO_NOT_TRACK"].is_string());
+    }
+
+    /// #2359 / #2368: the coverage variables document one precedence and name
+    /// every surface that honors it, including both MCP routes. The old
+    /// "only when they fall back to the CLI" caveat must not come back.
+    #[test]
+    fn coverage_environment_variables_name_every_honoring_surface() {
+        let schema = schema();
+        let env_vars = env_var_map(&schema);
+        for (var, config_field, parameter) in [
+            (
+                "FALLOW_COVERAGE",
+                "health.coverage config field",
+                "coverage",
+            ),
+            (
+                "FALLOW_COVERAGE_ROOT",
+                "health.coverageRoot config field",
+                "coverage_root",
+            ),
+        ] {
+            let description = env_vars[var].as_str().unwrap();
+            for required in [
+                config_field,
+                "health, bare fallow, and audit CLI commands",
+                "MCP audit and check_health tools",
+                "typed route",
+                "CLI fallback",
+                &format!("explicit {parameter} parameter overrides it"),
+            ] {
+                assert!(
+                    description.contains(required),
+                    "{var} description must mention {required:?}: {description}"
+                );
+            }
+            assert!(
+                !description.contains("only when they fall back"),
+                "{var} must not describe the typed route as config-blind: {description}"
+            );
+        }
     }
 
     /// Internal plumbing vars must NOT leak into the agent-facing manifest.

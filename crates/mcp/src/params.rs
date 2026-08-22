@@ -892,16 +892,16 @@ pub struct HealthParams {
 
     /// Path to Istanbul-format coverage data (coverage-final.json) for accurate per-function CRAP scores.
     /// Accepts a file path or a directory containing coverage-final.json.
-    /// Pass it explicitly: the typed route reads only this parameter, and
-    /// `FALLOW_COVERAGE` / the `health.coverage` config field apply only when
-    /// the call falls back to the CLI.
+    /// When omitted, `FALLOW_COVERAGE` and then the `health.coverage` config
+    /// field apply, on the typed route and on the CLI fallback alike, with the
+    /// same precedence as `fallow health --coverage`.
     pub coverage: Option<String>,
 
     /// Absolute prefix to strip from coverage data paths before prepending the project root.
     /// Use when coverage was generated in a different environment (CI runner, Docker).
-    /// Pass it explicitly: the typed route reads only this parameter, and
-    /// `FALLOW_COVERAGE_ROOT` / the `health.coverageRoot` config field apply
-    /// only when the call falls back to the CLI.
+    /// When omitted, `FALLOW_COVERAGE_ROOT` and then the `health.coverageRoot`
+    /// config field apply, on the typed route and on the CLI fallback alike,
+    /// with the same precedence as `fallow health --coverage-root`.
     pub coverage_root: Option<String>,
 
     /// Path to runtime coverage input. Accepts a V8 coverage directory
@@ -1130,17 +1130,18 @@ pub struct AuditParams {
 
     /// Path to Istanbul-format coverage data (coverage-final.json) for
     /// accurate per-function CRAP scores in audit's health sub-analysis.
-    /// Pass it explicitly: the typed route reads only this parameter, and
-    /// `FALLOW_COVERAGE` / the `health.coverage` config field apply only when
-    /// the call falls back to the CLI, where it is forwarded as `--coverage`.
+    /// When omitted, `FALLOW_COVERAGE` and then the `health.coverage` config
+    /// field apply, on the typed route and on the CLI fallback alike (where
+    /// the value is forwarded as `--coverage`), with the same precedence as
+    /// `fallow audit --coverage`.
     pub coverage: Option<String>,
 
     /// Absolute prefix to strip from coverage data paths before CRAP matching.
     /// Use when coverage was generated in a different checkout root in CI or Docker.
-    /// Pass it explicitly: the typed route reads only this parameter, and
-    /// `FALLOW_COVERAGE_ROOT` / the `health.coverageRoot` config field apply
-    /// only when the call falls back to the CLI, where it is forwarded as
-    /// `--coverage-root`.
+    /// When omitted, `FALLOW_COVERAGE_ROOT` and then the `health.coverageRoot`
+    /// config field apply, on the typed route and on the CLI fallback alike
+    /// (where the value is forwarded as `--coverage-root`), with the same
+    /// precedence as `fallow audit --coverage-root`.
     pub coverage_root: Option<String>,
 
     /// Report unused exports in entry files instead of auto-marking them as

@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use fallow_api::ProgrammaticError;
+use fallow_api::{
+    AnalysisOptions, CoverageInputs, ProgrammaticError, load_health_config, resolve_coverage_inputs,
+};
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Serialize;
@@ -47,9 +49,45 @@ where
 }
 
 pub(super) fn env_diff_file() -> Option<PathBuf> {
-    std::env::var_os("FALLOW_DIFF_FILE")
+    env_path("FALLOW_DIFF_FILE")
+}
+
+/// `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT` as the typed route's
+/// environment layer, read at the adapter boundary. Empty values count as
+/// unset, as they do for the CLI.
+pub(super) fn env_coverage_inputs() -> CoverageInputs {
+    CoverageInputs {
+        coverage: env_path("FALLOW_COVERAGE"),
+        coverage_root: env_path("FALLOW_COVERAGE_ROOT"),
+    }
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+/// Resolve the typed route's Istanbul coverage inputs with the precedence the
+/// CLI uses (#2368): the explicit tool parameters, then `env`, then
+/// `health.coverage` / `health.coverageRoot` from the project config, which is
+/// loaded only when a higher layer leaves an input unset. Engine
+/// auto-detection still applies when every layer is empty.
+/// `explicit_root_context` names the tool's own parameter when the explicit
+/// root is rejected as relative.
+pub(super) fn resolve_typed_coverage_inputs(
+    analysis: &AnalysisOptions,
+    explicit: CoverageInputs,
+    env: CoverageInputs,
+    explicit_root_context: &str,
+) -> Result<CoverageInputs, ProgrammaticError> {
+    let config_health = if CoverageInputs::needs_config_layer(&explicit, &env) {
+        load_health_config(analysis)?
+    } else {
+        None
+    };
+    resolve_coverage_inputs(explicit, env, config_health.as_ref())
+        .map_err(|err| err.into_programmatic_error(explicit_root_context))
 }
 
 fn env_changed_since() -> Option<String> {
@@ -136,6 +174,45 @@ mod tests {
         assert_eq!(workspace_patterns_from_param(Some("")), None);
         assert_eq!(workspace_patterns_from_param(Some(",, ,")), None);
         assert_eq!(workspace_patterns_from_param(None), None);
+    }
+
+    /// #2368: the adapter reads both coverage variables and ignores empty
+    /// values, as the CLI does.
+    #[test]
+    #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
+    fn env_coverage_inputs_read_both_variables_and_ignore_empty_values() {
+        let previous = (
+            std::env::var_os("FALLOW_COVERAGE"),
+            std::env::var_os("FALLOW_COVERAGE_ROOT"),
+        );
+        // SAFETY: the values set here cannot change the outcome of a
+        // concurrently running typed-route test (an empty coverage value is
+        // ignored and a root without a map is inert), and the previous
+        // values are restored before the test returns.
+        unsafe {
+            std::env::set_var("FALLOW_COVERAGE", "");
+            std::env::set_var("FALLOW_COVERAGE_ROOT", "/ci/workspace");
+        }
+        let inputs = env_coverage_inputs();
+        // SAFETY: restore the process environment for the rest of the suite.
+        unsafe {
+            match previous.0 {
+                Some(value) => std::env::set_var("FALLOW_COVERAGE", value),
+                None => std::env::remove_var("FALLOW_COVERAGE"),
+            }
+            match previous.1 {
+                Some(value) => std::env::set_var("FALLOW_COVERAGE_ROOT", value),
+                None => std::env::remove_var("FALLOW_COVERAGE_ROOT"),
+            }
+        }
+
+        assert_eq!(
+            inputs,
+            CoverageInputs {
+                coverage: None,
+                coverage_root: Some(PathBuf::from("/ci/workspace")),
+            }
+        );
     }
 
     #[test]

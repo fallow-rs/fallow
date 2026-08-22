@@ -58,6 +58,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The MCP `audit` and `check_health` tools now honor `health.coverage`,
+  `health.coverageRoot`, `FALLOW_COVERAGE`, and `FALLOW_COVERAGE_ROOT` on
+  their typed route** (Closes
+  [#2368](https://github.com/fallow-rs/fallow/issues/2368)). Both tools run
+  in-process through the programmatic API whenever their parameters map
+  cleanly to it, and that route built its options from the explicit
+  `coverage` / `coverage_root` parameters only, so an agent calling them on a
+  repository that configured coverage for `fallow health` got estimate-based
+  CRAP attribution (`coverage_source: estimated`) while the same call with a
+  parameter that forces the CLI fallback (`explain_skipped`, a baseline,
+  `group_by`, runtime coverage, type-aware) honored the keys since
+  [#2359](https://github.com/fallow-rs/fallow/issues/2359). The precedence
+  now has one pure owner, `fallow_api::coverage::resolve_coverage_inputs`
+  (parameter or flag, then environment, then config, then engine
+  auto-detection, each input independently), which the CLI and both MCP
+  tools delegate to; the tools read the env vars at the adapter boundary and
+  load the config's `health` section only when a higher layer leaves an
+  input unset. A relative `health.coverage` is resolved against the analysis
+  root before the programmatic existence check, so the documented
+  project-relative form works when the MCP server's working directory is not
+  the project. A configured map that does not exist and a relative
+  `coverage_root` from any layer keep the structured
+  `FALLOW_INVALID_COVERAGE_PATH` / `FALLOW_INVALID_COVERAGE_ROOT` errors; the
+  root error's `context` now names the layer that supplied the value
+  (`health.coverageRoot`, `FALLOW_COVERAGE_ROOT`, or the tool's own
+  parameter), and the CLI rejects a relative winning root before analysis
+  starts with the same exit 2 and message as before. The Node-API bindings
+  are unchanged: they take `coverage` / `coverageRoot` as explicit options
+  and read neither the env vars nor the config fields. The env manifest
+  (`capabilities.json`), the MCP parameter descriptions, the
+  `health.coverage` / `health.coverageRoot` field docs (`schema.json`), and
+  the environment-variable docs no longer tell MCP callers to pass the inputs
+  explicitly.
+
 - **Star re-exports inside `declare module '...'` bodies credit the full ES
   star surface of their target without adding to the declaring file's export
   surface** (Closes [#2357](https://github.com/fallow-rs/fallow/issues/2357)).

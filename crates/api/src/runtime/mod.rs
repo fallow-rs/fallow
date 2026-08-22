@@ -1,8 +1,8 @@
 //! Programmatic runtime entry points that avoid depending on `fallow-cli`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use fallow_config::{FallowConfig, ProductionAnalysis, ProductionConfig};
+use fallow_config::{FallowConfig, HealthConfig, ProductionAnalysis, ProductionConfig};
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts, duplicates::DuplicationReport, session::AnalysisSession,
 };
@@ -104,27 +104,59 @@ fn effective_production_mode(
 fn load_context_production_config(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<ProductionConfig> {
-    let load_options = fallow_config::ConfigLoadOptions {
-        allow_remote_extends: resolved.allow_remote_extends(),
-    };
-    let loaded = if let Some(path) = resolved.config_path().as_deref() {
-        FallowConfig::load_with_options(path, load_options)
-            .map(Some)
-            .map_err(|err| {
-                ProgrammaticError::new(format!("failed to load config: {err:#}"), 2)
-                    .with_code("FALLOW_CONFIG_LOAD_FAILED")
-                    .with_context("analysis.configPath")
-            })?
-    } else {
-        FallowConfig::find_and_load_with_options(resolved.root(), load_options)
-            .map(|found| found.map(|(config, _)| config))
-            .map_err(|err| {
-                ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-                    .with_code("FALLOW_CONFIG_LOAD_FAILED")
-                    .with_context("analysis.configPath")
-            })?
-    };
+    let loaded = load_config_file(
+        resolved.root(),
+        resolved.config_path().as_deref(),
+        resolved.allow_remote_extends(),
+    )?;
     Ok(loaded.map_or_else(ProductionConfig::default, |config| config.production))
+}
+
+/// Load the `health` section of the project config for adapters that layer
+/// config-sourced coverage inputs before building options (the MCP typed
+/// route; see [`crate::coverage`]). The root and config path resolve exactly
+/// as they do for the analysis itself. Returns `None` when the project has no
+/// config file.
+///
+/// # Errors
+///
+/// Returns the analysis-context errors for an invalid root or config path,
+/// and `FALLOW_CONFIG_LOAD_FAILED` when the config cannot be loaded.
+pub fn load_health_config(
+    options: &crate::AnalysisOptions,
+) -> ProgrammaticResult<Option<HealthConfig>> {
+    let root = crate::analysis_context::resolve_analysis_root(options.root.as_deref())?;
+    crate::analysis_context::validate_analysis_config_path(options.config_path.as_deref())?;
+    let loaded = load_config_file(
+        &root,
+        options.config_path.as_deref(),
+        options.allow_remote_extends,
+    )?;
+    Ok(loaded.map(|config| config.health))
+}
+
+fn load_config_file(
+    root: &Path,
+    config_path: Option<&Path>,
+    allow_remote_extends: bool,
+) -> ProgrammaticResult<Option<FallowConfig>> {
+    let load_options = fallow_config::ConfigLoadOptions {
+        allow_remote_extends,
+    };
+    if let Some(path) = config_path {
+        return FallowConfig::load_with_options(path, load_options)
+            .map(Some)
+            .map_err(|err| config_load_error(format!("failed to load config: {err:#}")));
+    }
+    FallowConfig::find_and_load_with_options(root, load_options)
+        .map(|found| found.map(|(config, _)| config))
+        .map_err(|err| config_load_error(format!("failed to load config: {err}")))
+}
+
+fn config_load_error(message: String) -> ProgrammaticError {
+    ProgrammaticError::new(message, 2)
+        .with_code("FALLOW_CONFIG_LOAD_FAILED")
+        .with_context("analysis.configPath")
 }
 
 pub(super) fn health_may_consume_dead_code_artifacts(
