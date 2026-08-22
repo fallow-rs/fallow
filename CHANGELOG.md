@@ -84,9 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`export { User } from './impl'`), explicitly type-only re-exports
   (`export type { User } from`, `export { type User } from`,
   `export type * from`), and `import('./impl').User` type references in
-  TypeScript and JSDoc keep crediting type space only. Both the extraction
-  and graph cache versions were bumped, so the first run after upgrading
-  performs one cold re-analysis.
+  TypeScript and JSDoc keep crediting type space only. An unreferenced `.ts`
+  file whose only content is an ambient star declaration is now reported as
+  an unused file while its ambient star still credits the target's exports
+  (the laundered star re-export edge previously kept such a shim off the
+  unused-file list; the named ambient form already reported this way). Both
+  the extraction and graph cache versions were bumped, so the first run after
+  upgrading performs one cold re-analysis.
 
 - **JSX member-expression tags (`<SC.Wrapper />`) now credit the referenced
   export** (Closes
