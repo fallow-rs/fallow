@@ -68,6 +68,17 @@ pub(super) struct AttachContext<'a> {
 }
 
 impl AttachContext<'_> {
+    /// Record that a consumer observed `target`'s whole namespace object.
+    ///
+    /// Every namespace mark-all site must call this so the exposed namespace
+    /// closure sees the same seed set the marks credited; the one deliberate
+    /// exception is a binding the namespace-object alias phase narrows on the
+    /// consumer's behalf. The seed is namespace-agnostic on purpose: the
+    /// object exposes the same names in the type and value namespaces.
+    fn observe_whole_namespace_object(&mut self, target: FileId) {
+        self.whole_module_targets.insert(target);
+    }
+
     fn reborrow(&mut self) -> AttachContext<'_> {
         AttachContext {
             module_by_id: self.module_by_id,
@@ -480,13 +491,15 @@ fn narrow_namespace_references(
     let observes_whole_module = is_whole_object
         || (!is_entry_with_no_access
             && (accessed_members.is_empty() || is_re_exported_from_non_entry));
-    let is_alias_source = source_mod.is_some_and(|m| {
-        m.namespace_object_aliases
-            .iter()
-            .any(|alias| alias.namespace_local == sym_local_name)
-    });
-    if observes_whole_module && (is_whole_object || !is_alias_source) {
-        ctx.whole_module_targets.insert(module.file_id);
+    let is_alias_source = || {
+        source_mod.is_some_and(|m| {
+            m.namespace_object_aliases
+                .iter()
+                .any(|alias| alias.namespace_local == sym_local_name)
+        })
+    };
+    if observes_whole_module && (is_whole_object || !is_alias_source()) {
+        ctx.observe_whole_namespace_object(module.file_id);
     }
 
     for (namespace, is_used) in [
@@ -776,7 +789,7 @@ pub(super) fn attach_symbol_reference(
             // Both observe the whole module, so the target's own `export *`
             // and `export * as ns` chains are credited downstream through the
             // exposed-namespace closure (issue #2372 for the runtime form).
-            ctx.whole_module_targets.insert(target_module.file_id);
+            ctx.observe_whole_namespace_object(target_module.file_id);
             let namespaces = desired_import_namespaces(sym, source_mod).namespaces();
             for (namespace, is_used) in [
                 (ExportNamespace::Type, namespaces.0),

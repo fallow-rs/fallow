@@ -96,22 +96,33 @@ error by suppressing a downstream detector.
   dynamic-import pattern match through `import()`, `import.meta.glob`, or
   `require.context`, and a namespace import the graph cannot narrow: a
   whole-object use, a binding handed on without member access, or a binding
-  re-exported from a non-entry module) plus the `export * as ns` sources on
-  the entry-point surface (entry points and every barrel they reach through
-  plain `export *`). The closure follows `export *` and `export * as` chains
-  from each member: star propagation treats a member like an entry barrel for
-  its `export *` sources (named exports in both namespaces, never `default`)
-  and namespace re-export propagation credits every export of its
-  `export * as` sources (`default` included). A member-narrowed namespace
-  import (`ns.one()`) never seeds it, a binding placed in an exported object
-  literal (`export const API = { ns }`) seeds it only when it is also used as
-  a whole object (the namespace-object alias phase follows `API.ns.<member>`
-  precisely while the direct-export mark-all stays as before), and a
-  namespace re-export on a barrel off the entry surface with no consumer
-  exposes nothing. The seed's own
-  credit keeps its shape: a runtime whole-module edge credits the namespace
-  object, `default` included; the ambient star form credits the star surface
-  without `default`.
+  re-exported from a non-entry module) plus the `export * as ns` sources an
+  entry point's own export surface exposes: on the entry point itself, on a
+  barrel the entry reaches through plain `export *`, or named by the entry
+  through a chain of named and star re-exports, renames included. That surface
+  is tracked by name, so a barrel an entry point reaches only through
+  `export { one } from './barrel'` exposes `one` and nothing else. The closure
+  follows `export *` and `export * as` chains from each member: star
+  propagation treats a member like an entry barrel for its `export *` sources
+  (named exports in both namespaces, never `default`) and namespace re-export
+  propagation credits every export of its `export * as` sources (`default`
+  included). A member-narrowed namespace import (`ns.one()`) never seeds it, a
+  binding placed in an exported object literal (`export const API = { ns }`)
+  seeds it only when it is also used as a whole object (the namespace-object
+  alias phase follows `API.ns.<member>` precisely while the direct-export
+  mark-all stays as before), and a namespace re-export on a barrel off the
+  entry surface with no consumer exposes nothing. The seed's own credit keeps
+  its shape: a runtime whole-module edge credits the namespace object,
+  `default` included; the ambient star form credits the star surface without
+  `default`. Seeding runs before reachability, like the mark-all sites that
+  feed it, so a whole-object use inside a file the same report calls unused
+  still credits its target's chain; deleting that file is what re-reports the
+  chain.
+- The exposed namespace closure is computed once per graph build, in
+  `ModuleGraph::build`, and threaded into both phases that read it (Phase 2c
+  namespace re-export propagation and the Phase 4 entry-star seed). It depends
+  only on `ModuleNode::re_exports` and the entry-point flags, neither of which
+  any phase after Phase 2 mutates.
 - Styling and CSS-in-JS extraction must preserve source line mapping.
 - Duplication token or normalization changes require the duplication cache
   version to move with the changed semantics.

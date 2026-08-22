@@ -1,9 +1,10 @@
 //! Issue #2373: an `export * as sub` on the entry-point surface (on the entry
-//! itself or on a barrel the entry reaches through plain `export *`) exposes
-//! sub's whole namespace object to consumers the graph cannot enumerate. The
-//! namespace re-export phase credited sub's direct exports, but neither sub's
-//! own `export *` sources nor its own `export * as sub2` sources, so the
-//! deeper levels of the chain were reported as unused.
+//! itself, on a barrel the entry reaches through plain `export *`, or named by
+//! the entry through a chain of named re-exports) exposes sub's whole
+//! namespace object to consumers the graph cannot enumerate. The namespace
+//! re-export phase credited sub's direct exports, but neither sub's own
+//! `export *` sources nor its own `export * as sub2` sources, so the deeper
+//! levels of the chain were reported as unused.
 //!
 //! ES semantics apply exactly: a plain `export *` never forwards `default`, a
 //! namespace object exposes its target's `default`, and a namespace re-export
@@ -141,6 +142,75 @@ fn entry_namespace_chain_credits_nested_star_and_namespace_sources() {
             "a plain `export *` never forwards `default`",
         );
     }
+}
+
+#[test]
+fn entry_named_re_export_of_a_namespace_credits_nested_star_and_namespace_sources() {
+    // index.ts `export { named } from './named'`; named.ts `export * as named
+    // from './named-sub'`. The entry exposes the namespace object by name
+    // rather than through a plain star, so named-sub's own `export *` and
+    // `export * as namedSub2` chains are reachable the same way.
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    for name in ["namedSubOne", "namedSub2", "default"] {
+        assert_credited(
+            &unused,
+            "src/named-sub.ts",
+            name,
+            "`named` is re-exported by name from the entry",
+        );
+    }
+    assert_credited(
+        &unused,
+        "src/named-deep.ts",
+        "namedDeepX",
+        "forwarded by named-sub.ts's `export *`",
+    );
+    for name in ["namedSub2X", "default"] {
+        assert_credited(
+            &unused,
+            "src/named-sub2.ts",
+            name,
+            "`named.namedSub2` is named-sub2.ts's namespace object",
+        );
+    }
+    assert_reported(
+        &unused,
+        "src/named-deep.ts",
+        "default",
+        "a plain `export *` never forwards `default`",
+    );
+    assert_reported(
+        &unused,
+        "src/named.ts",
+        "namedBarrelOne",
+        "the entry names `named` only, not the rest of named.ts",
+    );
+
+    // The same chain through a rename hop: index.ts `export { renamed } from
+    // './rename-mid'`; rename-mid.ts `export { rn as renamed } from
+    // './rename-barrel'`; rename-barrel.ts `export * as rn from
+    // './rename-sub'`.
+    assert_credited(
+        &unused,
+        "src/rename-sub.ts",
+        "renameSubOne",
+        "`rn` reaches the entry as `renamed`",
+    );
+    assert_credited(
+        &unused,
+        "src/rename-deep.ts",
+        "renameDeepX",
+        "forwarded by rename-sub.ts's `export *`",
+    );
+    assert_reported(
+        &unused,
+        "src/rename-deep.ts",
+        "default",
+        "a plain `export *` never forwards `default`",
+    );
 }
 
 #[test]

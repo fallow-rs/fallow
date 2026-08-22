@@ -156,19 +156,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`export * as sub` on the entry-point surface now credits sub's own
   `export *` and `export * as` chains** (Closes
   [#2373](https://github.com/fallow-rs/fallow/issues/2373)). For
-  `export * as sub from './sub'` on an entry point, or on a barrel the entry
-  reaches through plain `export *`, every direct export of `sub.ts` was
-  credited but neither its `export * from './deep'` sources nor its
-  `export * as sub2` sources were: the entry star closure walked plain
-  `export *` edges only, and only entry points counted as exposing a
-  namespace object. Every name on sub's namespace object is reachable through
-  the entry, so sub now joins the same closure: deep's named exports are
-  credited (never deep's `default`), every export of sub2 is credited
-  (`default` included), and the rules recurse through any further level. A
-  namespace re-export on a reachable non-entry barrel that is off the entry
-  surface and has no consumer still exposes nothing, and the entry's plain
-  `export *` still never forwards the barrel's own `default`. Fewer
-  unused-export findings for nested namespace re-exports behind an entry
+  `export * as sub from './sub'` on an entry point, on a barrel the entry
+  reaches through plain `export *`, or named by the entry through a chain of
+  named re-exports (`export { sub } from './barrel'`, renames included), every
+  direct export of `sub.ts` was credited but neither its
+  `export * from './deep'` sources nor its `export * as sub2` sources were:
+  the entry star closure walked plain `export *` edges only, and only entry
+  points counted as exposing a namespace object. Every name on sub's namespace
+  object is reachable through the entry, so sub now joins the same closure:
+  deep's named exports are credited (never deep's `default`), every export of
+  sub2 is credited (`default` included), and the rules recurse through any
+  further level. The entry surface is tracked by name, so a barrel the entry
+  reaches only through `export { one } from './barrel'` still exposes `one`
+  and nothing else; a namespace re-export on a reachable non-entry barrel that
+  is off the entry surface and has no consumer still exposes nothing; and the
+  entry's plain `export *` still never forwards the barrel's own `default`.
+  Fewer unused-export findings for nested namespace re-exports behind an entry
   point.
 
 - **Star re-exports inside `declare module '...'` bodies credit the full ES

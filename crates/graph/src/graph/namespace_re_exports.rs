@@ -75,12 +75,13 @@ struct PendingCredit {
 
 /// Phase 2c: credit `export * as Foo from './bar'` member accesses onto `./bar`.
 ///
-/// `whole_module_targets` are the targets whose whole namespace object Phase 2
-/// observed; they seed the exposed namespace closure.
+/// `exposed_namespace_targets` is the exposed namespace closure
+/// (`ModuleGraph::collect_exposed_namespace_targets`), computed once per build
+/// and shared with Phase 4.
 pub(super) fn propagate_namespace_re_exports(
     graph: &mut ModuleGraph,
     indexes: &NamespacePropagationIndexes<'_>,
-    whole_module_targets: &FxHashSet<FileId>,
+    exposed_namespace_targets: &FxHashSet<FileId>,
     reference_paths: &mut ReferencePathInterner,
 ) {
     let ns_edges: Vec<(FileId, FileId, String, bool)> = graph
@@ -108,7 +109,6 @@ pub(super) fn propagate_namespace_re_exports(
     }
 
     let mut pending: Vec<PendingCredit> = Vec::new();
-    let exposed_namespace_targets = graph.collect_exposed_namespace_targets(whole_module_targets);
     let credits_unseen_consumers = !exposed_namespace_targets.is_empty()
         || graph
             .modules
@@ -142,7 +142,7 @@ pub(super) fn propagate_namespace_re_exports(
             );
 
             for export in reachable.iter().filter(|export| {
-                exposes_namespace_object(graph, &exposed_namespace_targets, export.file_id)
+                exposes_namespace_object(graph, exposed_namespace_targets, export.file_id)
             }) {
                 let path = routes.entry_path(export, reference_paths);
                 pending.push(PendingCredit {

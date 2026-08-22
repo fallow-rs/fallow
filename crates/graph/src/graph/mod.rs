@@ -549,7 +549,7 @@ fn propagate_namespace_references(
     graph: &mut ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     features: build::NamespaceFeatures,
-    whole_module_targets: &FxHashSet<FileId>,
+    exposed_namespace_targets: &FxHashSet<FileId>,
     reference_paths: &mut ReferencePathInterner,
 ) {
     let indexes = namespace_indexes::NamespacePropagationIndexes::new(graph, module_by_id);
@@ -565,7 +565,7 @@ fn propagate_namespace_references(
         namespace_re_exports::propagate_namespace_re_exports(
             graph,
             &indexes,
-            whole_module_targets,
+            exposed_namespace_targets,
             reference_paths,
         );
     }
@@ -679,13 +679,15 @@ impl ModuleGraph {
             ReferencePathInterner::new(test_reachability_plan.requires_reference_provenance());
         let whole_module_targets =
             graph.populate_references(&module_by_id, &entry_point_ids, &mut reference_paths);
+        let exposed_namespace_targets =
+            graph.collect_exposed_namespace_targets(&whole_module_targets);
 
         if namespace_features.has_aliases || namespace_features.has_re_exports {
             propagate_namespace_references(
                 &mut graph,
                 &module_by_id,
                 namespace_features,
-                &whole_module_targets,
+                &exposed_namespace_targets,
                 &mut reference_paths,
             );
         }
@@ -699,7 +701,7 @@ impl ModuleGraph {
 
         graph.re_export_cycles = graph.resolve_re_export_chains(
             &module_by_id,
-            &whole_module_targets,
+            &exposed_namespace_targets,
             &mut reference_paths,
         );
         let finalized_paths = reference_paths.finalize(&mut graph.modules);
