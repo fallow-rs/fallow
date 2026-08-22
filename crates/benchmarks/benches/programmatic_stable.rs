@@ -54,6 +54,10 @@ const AUDIT_REVIEW_INTRODUCED_COUNT: usize = AUDIT_REVIEW_CHANGED_FILE_COUNT / 2
 const AUDIT_REVIEW_INHERITED_COUNT: usize = AUDIT_REVIEW_CHANGED_FILE_COUNT / 2;
 const AUDIT_REVIEW_PUBLIC_API_ADDED_COUNT: usize = AUDIT_REVIEW_CHANGED_FILE_COUNT;
 const AUDIT_REVIEW_DECISION_COUNT: usize = 4;
+const BUN_LOCK_PACKAGE_COUNT: usize = 4_096;
+const BUN_OVERRIDE_COUNT: usize = 512;
+const BUN_UNUSED_OVERRIDE_COUNT: usize = 1;
+const BUN_RESOLVED_OVERRIDE_COUNT: usize = BUN_OVERRIDE_COUNT - BUN_UNUSED_OVERRIDE_COUNT;
 const DEAD_CODE_FINDING_COUNT: usize = FIX_FILE_COUNT;
 const FIX_FILE_COUNT: usize = 128;
 const IMPACT_LAYER_COUNT: usize = 32;
@@ -782,6 +786,61 @@ export const unused{index} = {index} * 2;
         );
     }
     write_file(&root, "src/index.ts", index_source);
+
+    CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    }
+}
+
+fn create_bun_lock_override_project() -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    let mut overrides = String::new();
+    for index in 0..BUN_OVERRIDE_COUNT {
+        if index > 0 {
+            overrides.push(',');
+        }
+        let package = if index < BUN_RESOLVED_OVERRIDE_COUNT {
+            format!("package-{index}")
+        } else {
+            format!("missing-package-{index}")
+        };
+        write!(&mut overrides, r#""{package}":"1.0.0""#).unwrap();
+    }
+    write_file(
+        &root,
+        "package.json",
+        format!(
+            r#"{{
+  "name": "bench-bun-lock-overrides",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.2",
+  "main": "src/index.ts",
+  "overrides": {{{overrides}}}
+}}"#
+        ),
+    );
+
+    let mut packages = String::new();
+    for index in 0..BUN_LOCK_PACKAGE_COUNT {
+        if index > 0 {
+            packages.push(',');
+        }
+        write!(
+            &mut packages,
+            r#""package-{index}":["package-{index}@1.0.0"]"#
+        )
+        .unwrap();
+    }
+    write_file(
+        &root,
+        "bun.lock",
+        format!(r#"{{"lockfileVersion":1,"packages":{{{packages}}}}}"#),
+    );
+    write_file(&root, "src/index.ts", "console.log('bench');\n");
 
     CommandInput {
         _temp_dir: temp_dir,
@@ -1607,6 +1666,26 @@ fn stable_dead_code_many_exports_json(c: &mut Criterion) {
     });
 }
 
+fn stable_dead_code_bun_lock_many_packages_json(c: &mut Criterion) {
+    let input = create_bun_lock_override_project();
+
+    let (status, issue_count, rendered_bytes) =
+        benchmark_dead_code_json(&input.root, BENCH_THREADS);
+    assert_eq!(status, std::process::ExitCode::SUCCESS);
+    assert_eq!(issue_count, BUN_UNUSED_OVERRIDE_COUNT);
+    assert!(rendered_bytes > 0);
+
+    c.bench_function("stable_dead_code_bun_lock_many_packages_json", |bencher| {
+        bencher.iter(|| {
+            let result = benchmark_dead_code_json(&input.root, BENCH_THREADS);
+            assert_eq!(result.0, std::process::ExitCode::SUCCESS);
+            assert_eq!(result.1, BUN_UNUSED_OVERRIDE_COUNT);
+            assert!(result.2 > 0);
+            result
+        });
+    });
+}
+
 fn stable_security_many_framework_sinks_json(c: &mut Criterion) {
     let input = create_security_project();
     let expected_findings = SECURITY_FILE_COUNT * 2;
@@ -2052,6 +2131,7 @@ criterion_group!(
     stable_fix_dry_run_many_exports,
     stable_inspect_file_evidence_bundle_json,
     stable_dead_code_many_exports_json,
+    stable_dead_code_bun_lock_many_packages_json,
     stable_security_many_framework_sinks_json,
     stable_security_survivors_verdict_join_json,
     stable_security_blind_spots_unresolved_callees_json,
