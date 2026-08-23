@@ -429,7 +429,7 @@ impl ModuleGraph {
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
         entry_point_ids: &FxHashSet<FileId>,
         reference_paths: &mut ReferencePathInterner,
-    ) -> FxHashSet<FileId> {
+    ) -> super::re_exports::WholeModuleObservations {
         // Both maps are transient acceleration state for this pass: the name
         // index gives O(1) export lookup per imported symbol instead of a scan
         // over all target exports, and the dedup index keeps duplicate-
@@ -437,7 +437,7 @@ impl ModuleGraph {
         // keeps `references` as the only durable storage.
         let mut dedup = ReferenceDedup::default();
         let mut export_indices: FxHashMap<usize, ExportNameIndex> = FxHashMap::default();
-        let mut whole_module_targets: FxHashSet<FileId> = FxHashSet::default();
+        let mut whole_module_targets = super::re_exports::WholeModuleObservations::default();
         for edge_idx in 0..self.edges.len() {
             let source_id = self.edges[edge_idx].source;
             let target_id = self.edges[edge_idx].target;

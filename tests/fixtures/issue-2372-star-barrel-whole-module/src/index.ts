@@ -7,6 +7,8 @@ import { reNs } from './re-shim';
 import { aliasApi } from './alias';
 import { aliasReApi, aliasReNs } from './alias-reexport';
 import { wholeSub } from './whole-barrel';
+import { unreachedReentryUsed } from './unreached-reentry';
+import { unreachedNsUsed } from './unreached-ns-reentry';
 
 import './ambient-shim';
 
@@ -34,6 +36,10 @@ export const wholeAll = Object.values(wholeSub);
 export const cycleAll = Object.keys(cyc);
 
 export const shims = [shimAll, passedOn, reNs, aliasReNs];
+
+// unreached-shim.ts is an unused file, but its ambient chain runs back into
+// these two modules, which the entry point imports directly.
+export const reentry = unreachedReentryUsed + unreachedNsUsed;
 
 // Dynamic-import pattern targets hand the consumer each matched module's
 // namespace object.

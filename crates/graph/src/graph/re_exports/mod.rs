@@ -111,6 +111,54 @@ struct ReExportContext<'a> {
     reference_paths: &'a mut ReferencePathInterner,
 }
 
+/// The targets whose whole namespace object Phase 2 saw observed, split by
+/// whether the observation survives the target being unreachable.
+///
+/// An ambient `declare module 'pkg' { export * from './impl' }` states the
+/// shape of an external module id (issue #2357). Whoever imports that id
+/// observes the whole surface, and the shim file only stores the declaration,
+/// so neither the shim's nor the target's place in this graph says anything
+/// about who looks: the observation stands at any reachability, and the chain
+/// behind the target can re-enter modules an entry point does reach.
+///
+/// Every other observer is a real consumer in this graph (a whole-object
+/// namespace use, a dynamic-import pattern match, a bindingless side-effect
+/// `require()`, a namespace binding re-exported under its own name). A target
+/// no entry point reaches has no observer left that any entry point reaches
+/// either, and the report already calls it an unused file, so crediting its
+/// chain would only stack unused-export rows underneath that row.
+#[derive(Default)]
+pub(in crate::graph) struct WholeModuleObservations {
+    /// Targets an ambient module body re-exports from, at any reachability.
+    ambient: FxHashSet<FileId>,
+    /// Targets a consumer in this graph observes as a whole object.
+    observed: FxHashSet<FileId>,
+}
+
+impl WholeModuleObservations {
+    /// Record a whole-object observation made by a consumer in this graph.
+    pub(in crate::graph) fn observe(&mut self, target: FileId) {
+        self.observed.insert(target);
+    }
+
+    /// Record the target of an `export *` or `export * as ns` inside a
+    /// `declare module '...'` body.
+    pub(in crate::graph) fn observe_ambient(&mut self, target: FileId) {
+        self.ambient.insert(target);
+    }
+
+    /// The closure seeds: every ambient target, plus the observed targets an
+    /// entry point reaches.
+    fn seeds<'a>(&'a self, entry_reachable: &'a FixedBitSet) -> impl Iterator<Item = FileId> + 'a {
+        self.ambient.iter().copied().chain(
+            self.observed
+                .iter()
+                .copied()
+                .filter(|target| entry_reachable.contains(target.0 as usize)),
+        )
+    }
+}
+
 /// How much of a closure member the consumers that cannot be enumerated see.
 ///
 /// The two differ on `default` alone, because a plain `export *` forwards
@@ -239,6 +287,36 @@ impl<'a> NameForwarders<'a> {
     }
 }
 
+/// Extend `may_reach` with every module `seeds` re-exports from, transitively,
+/// following named and plain-star edges and ignoring names.
+///
+/// `export * as ns` is left out: it bundles its source's names into one object
+/// instead of forwarding them, so it never carries a name outward.
+///
+/// A seed already in `may_reach` is skipped with its whole subtree, which is
+/// what lets the closure fixpoint widen the prune round by round instead of
+/// rebuilding it from scratch.
+fn extend_forwarding_sources(
+    modules: &[super::types::ModuleNode],
+    may_reach: &mut FxHashSet<FileId>,
+    seeds: impl IntoIterator<Item = FileId>,
+) {
+    let mut stack: Vec<FileId> = seeds
+        .into_iter()
+        .filter(|seed| may_reach.insert(*seed))
+        .collect();
+    while let Some(barrel) = stack.pop() {
+        let Some(module) = modules.get(barrel.0 as usize) else {
+            continue;
+        };
+        for re in &module.re_exports {
+            if !is_namespace_re_export(re) && may_reach.insert(re.source_file) {
+                stack.push(re.source_file);
+            }
+        }
+    }
+}
+
 /// The outward search that decides whether one `export * as ns` edge hands its
 /// target's namespace object to consumers the graph cannot enumerate.
 ///
@@ -301,26 +379,41 @@ impl<'a> ExposedNameSearch<'a> {
             }
         }
 
+        let mut may_reach = FxHashSet::default();
+        extend_forwarding_sources(
+            modules,
+            &mut may_reach,
+            modules
+                .iter()
+                .filter(|m| m.is_entry_point())
+                .map(|m| m.file_id)
+                .chain(whole_object_names.keys().copied()),
+        );
+
         Self {
             forwarders: NameForwarders::build(modules),
             whole_object_names,
-            may_reach: FxHashSet::default(),
+            may_reach,
             scratch: NameSearchScratch::default(),
         }
     }
 
-    /// Rebuild the reachability prune and drop the memoised failures for a new
-    /// round against a wider closure.
-    fn refresh(&mut self, graph: &ModuleGraph, closure: &ExposedNamespaceTargets) {
-        let mut seeds: FxHashSet<FileId> = graph
-            .modules
-            .iter()
-            .filter(|m| m.is_entry_point())
-            .map(|m| m.file_id)
-            .collect();
-        seeds.extend(closure.members.keys().copied());
-        seeds.extend(self.whole_object_names.keys().copied());
-        self.may_reach = graph.collect_forwarding_sources(&seeds);
+    /// Widen the reachability prune with the members the last round added and
+    /// drop the memoised failures for a round against the wider closure.
+    ///
+    /// The prune only ever grows, so the members already walked keep their
+    /// subtree and each re-export edge is visited at most once across every
+    /// round instead of once per round.
+    fn refresh(
+        &mut self,
+        modules: &'a [super::types::ModuleNode],
+        closure: &ExposedNamespaceTargets,
+    ) {
+        extend_forwarding_sources(
+            modules,
+            &mut self.may_reach,
+            closure.members.keys().copied(),
+        );
         self.scratch.failed.clear();
     }
 
@@ -585,10 +678,14 @@ impl ModuleGraph {
     /// Phase 2c reads already contains every target Phase 2c would credit in
     /// full, instead of stopping one namespace level short of it.
     ///
-    /// `entry_reachable` is the entry-point reachability bitset. A module no
-    /// entry point reaches is already reported as an unused file, so crediting
-    /// its chain would only add unused-export rows underneath that row; the
-    /// only consumers left to observe it are unreachable themselves.
+    /// `entry_reachable` is the entry-point reachability bitset. It gates the
+    /// two seed kinds issues #2372 and #2373 add (an observed whole-object
+    /// target and an `export * as ns` source), and nothing else: withholding
+    /// those can only withhold credit the pre-existing closure never gave.
+    /// The ambient seeds and the walk stay ungated, because a chain that
+    /// starts at an unreachable shim routinely re-enters a module an entry
+    /// point imports directly, and gating it would report exports on files
+    /// the report calls reachable.
     ///
     /// Computed once per graph build and threaded into both phases that read
     /// it; it depends only on `re_exports`, the entry-point flags, the
@@ -596,7 +693,7 @@ impl ModuleGraph {
     /// phase mutates.
     pub(in crate::graph) fn collect_exposed_namespace_targets(
         &self,
-        whole_module_targets: &FxHashSet<FileId>,
+        whole_module_targets: &WholeModuleObservations,
         entry_reachable: &FixedBitSet,
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     ) -> ExposedNamespaceTargets {
@@ -604,10 +701,8 @@ impl ModuleGraph {
             members: FxHashMap::default(),
         };
         let mut stack: Vec<(FileId, Exposure)> = Vec::new();
-        for &seed in whole_module_targets {
-            if entry_reachable.contains(seed.0 as usize) {
-                closure.record(&mut stack, seed, Exposure::NamespaceObject);
-            }
+        for seed in whole_module_targets.seeds(entry_reachable) {
+            closure.record(&mut stack, seed, Exposure::NamespaceObject);
         }
 
         let mut pending: Vec<(FileId, &str, FileId)> = self
@@ -625,12 +720,12 @@ impl ModuleGraph {
             (!pending.is_empty()).then(|| ExposedNameSearch::build(&self.modules, module_by_id));
 
         loop {
-            self.extend_exposure_walk(&mut closure, &mut stack, entry_reachable);
+            self.extend_exposure_walk(&mut closure, &mut stack);
             let Some(search) = search.as_mut() else { break };
             if pending.is_empty() {
                 break;
             }
-            search.refresh(self, &closure);
+            search.refresh(&self.modules, &closure);
             let mut widened = false;
             let mut still_pending = Vec::with_capacity(pending.len());
             for (barrel, exported_name, source) in std::mem::take(&mut pending) {
@@ -654,18 +749,22 @@ impl ModuleGraph {
 
     /// Drain the closure's work stack, carrying each member's exposure along
     /// its own `export *` and `export * as ns` edges.
+    ///
+    /// No hop is dropped for reachability. A re-export edge makes its source
+    /// reachable whenever the barrel is, so only the ambient seeds can ever
+    /// walk from an unreachable member, and their chains routinely re-enter
+    /// modules an entry point imports directly.
     fn extend_exposure_walk(
         &self,
         closure: &mut ExposedNamespaceTargets,
         stack: &mut Vec<(FileId, Exposure)>,
-        entry_reachable: &FixedBitSet,
     ) {
         while let Some((file_id, exposure)) = stack.pop() {
             let Some(module) = self.modules.get(file_id.0 as usize) else {
                 continue;
             };
             for re in &module.re_exports {
-                if re.imported_name != "*" || !entry_reachable.contains(re.source_file.0 as usize) {
+                if re.imported_name != "*" {
                     continue;
                 }
                 let next = if re.exported_name == "*" {
@@ -680,37 +779,15 @@ impl ModuleGraph {
         }
     }
 
-    /// Every module one of `seeds` re-exports from, transitively, following
-    /// named and plain-star edges and ignoring names.
-    ///
-    /// `export * as ns` is left out: it bundles its source's names into one
-    /// object instead of forwarding them, so it never carries a name outward.
-    fn collect_forwarding_sources(&self, seeds: &FxHashSet<FileId>) -> FxHashSet<FileId> {
-        let mut may_reach = seeds.clone();
-        let mut stack: Vec<FileId> = seeds.iter().copied().collect();
-        while let Some(barrel) = stack.pop() {
-            let Some(module) = self.modules.get(barrel.0 as usize) else {
-                continue;
-            };
-            for re in &module.re_exports {
-                if !is_namespace_re_export(re) && may_reach.insert(re.source_file) {
-                    stack.push(re.source_file);
-                }
-            }
-        }
-        may_reach
-    }
-
     /// Whether `barrel` re-exports under `barrel_name` the very binding
     /// `source` exports under `source_name`.
     ///
-    /// A local declaration on the barrel, or the same name arriving from two
-    /// stars at once, shadows a star-forwarded name: the barrel then exports a
-    /// different binding and the name never travels further. The value
-    /// namespace decides whenever the source exports the name there (a
-    /// namespace object is a value binding); a type-only surface falls back to
-    /// the type namespace. Phase 2c's own walk applies the same rule through
-    /// `uniquely_forwards_binding`.
+    /// Only the namespace choice lives here: the value namespace decides
+    /// whenever the source exports the name there (a namespace object is a
+    /// value binding), and a type-only surface falls back to the type
+    /// namespace. The per-namespace comparison itself is Phase 2c's own
+    /// `uniquely_forwards_binding`, so the closure's outward search and the
+    /// phase it pre-computes for cannot drift apart on what a hop forwards.
     fn forwards_binding(
         &self,
         source: FileId,
@@ -719,14 +796,19 @@ impl ModuleGraph {
         barrel_name: &str,
     ) -> bool {
         for namespace in [super::ExportNamespace::Value, super::ExportNamespace::Type] {
-            let super::EffectiveExportResolution::Unique(origin) =
-                self.resolve_export(source, source_name, namespace)
-            else {
+            if !matches!(
+                self.resolve_export(source, source_name, namespace),
+                super::EffectiveExportResolution::Unique(_)
+            ) {
                 continue;
-            };
-            return matches!(
-                self.resolve_export(barrel, barrel_name, namespace),
-                super::EffectiveExportResolution::Unique(forwarded) if forwarded == origin
+            }
+            return super::namespace_indexes::uniquely_forwards_binding(
+                self,
+                source,
+                source_name,
+                barrel,
+                barrel_name,
+                namespace,
             );
         }
         false

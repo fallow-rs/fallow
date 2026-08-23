@@ -154,16 +154,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing else, and a binding placed in an exported object literal
   (`export const API = { ns }`) keeps the precise `API.ns.<member>` crediting
   of the alias phase unless it is also used as a whole object or exported
-  under its own name. A barrel no entry point reaches keeps reporting: it is
-  already an unused file, so its chain is not credited and no unused-export
-  row is stacked underneath that row. A whole-object use inside an unreachable
-  file still suppresses the reachable target's chain, exactly as it already
-  suppressed that target's direct exports, so deleting the unused file the
-  report names brings the chain back on the next run. Fewer unused-export
-  findings for star barrels consumed as whole objects, through a named
-  namespace binding, or through dynamic-import patterns. The graph cache
-  version was bumped, so the first run after upgrading performs one cold
-  re-analysis.
+  under its own name. A barrel no entry point reaches keeps reporting when one
+  of these five consumers is what observes it: that consumer is unreachable
+  too, the barrel is already an unused file, and crediting its chain would
+  only stack unused-export rows underneath that row. The ambient-module star
+  form is deliberately not gated that way, because the module id it declares
+  is imported from outside the graph: an unreachable `declare module` shim
+  keeps crediting its chain, which routinely runs back into modules an entry
+  point imports directly. A whole-object use inside an unreachable file still
+  suppresses the reachable target's chain, exactly as it already suppressed
+  that target's direct exports, so deleting the unused file the report names
+  brings the chain back on the next run.
+
+  Two properties of the seed are worth naming. `export type { ns }` seeds the
+  closure exactly like `export { ns }` and credits the chain in the value
+  namespace as well, because `typeof ns.member` keeps a value declaration
+  reachable through a type-only re-export. And a namespace binding exported
+  under its own name seeds the closure whether or not that export has a
+  consumer, so a report can call `m.ts:ns` unused while crediting the whole
+  chain behind it, the same self-inconsistency the unreachable-observer case
+  has. Fewer unused-export findings for star barrels consumed as whole
+  objects, through a named namespace binding, or through dynamic-import
+  patterns. The graph cache version was bumped, so the first run after
+  upgrading performs one cold re-analysis.
 
 - **`export * as sub` on the entry-point surface now credits sub's own
   `export *` and `export * as` chains** (Closes
@@ -197,9 +210,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `export * from './barrel'` whose barrel does `export * from './mid'` over a
   `mid` that does `export * as default from './target'` now reports target's
   exports. That includes the ambient form from
-  [#2357](https://github.com/fallow-rs/fallow/issues/2357): the issue-2357
-  behaviour is otherwise unchanged, and an `export * as default` declared
-  directly on the ambient star's own target still credits its chain.
+  [#2357](https://github.com/fallow-rs/fallow/issues/2357), where an
+  `export * as default` declared directly on the ambient star's own target
+  still credits its chain. Nothing else in the issue-2357 behaviour moves: an
+  ambient chain is seeded and walked at any reachability, exactly as it was.
 
 - **Star re-exports inside `declare module '...'` bodies credit the full ES
   star surface of their target without adding to the declaring file's export

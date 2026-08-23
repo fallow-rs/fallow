@@ -446,7 +446,16 @@ fn consumer_import_namespaces(
     namespaces
 }
 
-fn uniquely_forwards_binding(
+/// Whether `barrel_file` re-exports under `barrel_name`, in `namespace`, the
+/// very binding `source_file` exports under `source_name`.
+///
+/// A local declaration on the barrel, or the same name arriving from two stars
+/// at once, resolves to a different binding and the name never travels
+/// further. Phase 2c walks with this per namespace edge, and the exposed
+/// namespace closure's own outward search calls it through
+/// `ModuleGraph::forwards_binding`, so both agree on every hop by
+/// construction.
+pub(super) fn uniquely_forwards_binding(
     graph: &ModuleGraph,
     source_file: FileId,
     source_name: &str,

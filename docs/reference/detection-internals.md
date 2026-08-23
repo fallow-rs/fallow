@@ -109,14 +109,18 @@ error by suppressing a downstream detector.
   than with the number of names an entry point re-exports. Every hop must
   uniquely forward the binding, the same rule the Phase 2c walk applies, so a
   barrel that declares its own `ns`, or that receives `ns` from two stars at
-  once, exports a different binding under that name and the chain stops there.
-  Sitting on an entry point's plain-`export *` closure is not on its own proof
-  that a name survives to the entry, so no hop is skipped for it. The forwarding
-  check reads the value namespace whenever the source exports the name there and
-  the type namespace otherwise, so `export type { ns } from './barrel'` on an
-  entry point does not put the value namespace object on the surface. Plain-star
-  hops and the closure's own chain walk stay namespace-agnostic, like the
-  pre-existing entry-star closure.
+  once, exports a different binding under that name and the chain stops
+  there. That rule is not restated: `ModuleGraph::forwards_binding` picks the
+  namespace and then calls Phase 2c's own `uniquely_forwards_binding`, so the
+  closure and the phase it pre-computes for cannot drift apart on what a hop
+  forwards. Sitting on an entry point's plain-`export *` closure is not on its
+  own proof that a name survives to the entry, so no hop is skipped for it.
+  The forwarding check reads the value namespace whenever the source exports
+  the name there and the type namespace otherwise, so
+  `export type { ns } from './barrel'` on an entry point does not put the
+  value namespace object on the surface. Plain-star hops and the closure's own
+  chain walk stay namespace-agnostic, like the pre-existing entry-star
+  closure.
 - The closure follows `export *` and `export * as` chains from each member,
   and carries how much of each member is exposed. A member whose whole
   namespace object is observed exposes every export; a member reached through
@@ -134,7 +138,12 @@ error by suppressing a downstream detector.
   target is a member. Each round widens the closure or stops, so the walk
   terminates, and the closure Phase 2c reads already contains every target
   Phase 2c would credit in full instead of stopping one namespace level short
-  of it.
+  of it. The reachability prune the search uses only grows, so a round extends
+  it from the members the previous round added instead of rebuilding it, and
+  each re-export edge is walked at most once across all rounds. The rest of a
+  round is a rescan of the namespace edges still pending, which a chain shaped
+  to resolve exactly one edge per round can drive up; real barrel trees settle
+  whole subtrees per round and stay in the single digits.
 - A member-narrowed namespace import (`ns.one()`) never seeds the closure, a
   binding placed in an exported object literal (`export const API = { ns }`)
   seeds it only when it is also used as a whole object or exported under its
@@ -144,17 +153,37 @@ error by suppressing a downstream detector.
   The seed's own credit keeps its shape: a runtime whole-module edge credits
   the namespace object, `default` included; the ambient star form credits the
   star surface without `default`.
-- A module no entry point reaches is never a member: the report already calls
-  it an unused file, and the only consumers left to observe it are unreachable
-  themselves, so crediting its chain would only stack unused-export rows
-  underneath the unused-file rows. The reachability test applies to the seed,
-  not to the observer, so a whole-object use inside an unreachable file still
-  suppresses the reachable target's whole chain, the same way the pre-existing
-  mark-all already suppresses the target's direct exports from such a file.
-  Deleting the unused file the report names therefore brings the chain back as
-  unused exports on the next run. The mark-all sites that feed the closure keep
-  crediting the target's own direct exports as before, reachable or not;
-  reference-level reachability filters those at reporting time.
+- Reachability gates the seeds issues #2372 and #2373 add, and nothing else.
+  A target no entry point reaches, observed only by a consumer in this graph,
+  is not seeded: that consumer is unreachable too, the report already calls
+  the target an unused file, and crediting its chain would only stack
+  unused-export rows underneath the unused-file rows. The same holds for an
+  `export * as ns` source no entry point reaches. The test applies to the
+  seed, not to the observer, so a whole-object use inside an unreachable file
+  still suppresses the reachable target's whole chain, the same way the
+  pre-existing mark-all already suppresses the target's direct exports from
+  such a file; deleting the unused file the report names brings the chain back
+  as unused exports on the next run.
+- The ambient seeds are not gated, and neither is the chain walk. A
+  `declare module 'pkg'` body states the shape of an external module id: its
+  observers are importers of that id, outside this graph, so where the shim
+  and its target sit inside the graph says nothing about who looks. The chain
+  behind an unreachable shim routinely re-enters a module an entry point
+  imports directly, and gating it reported exports on files the report calls
+  reachable. A re-export edge makes its source reachable whenever the barrel
+  is, so only an ambient chain can ever walk out of an unreachable member in
+  the first place; a hop that lands on an unreachable module credits it
+  through a re-export reference the unused-export detector already discounts
+  when nothing reachable reads it. The mark-all sites that feed the closure
+  keep crediting the target's own direct exports as before, reachable or not.
+- Two seed properties are deliberate and visible in reports. The seed is
+  namespace-agnostic, so `export type { ns }` seeds it exactly like
+  `export { ns }` and the chain is credited in the value namespace as well:
+  `typeof ns.member` keeps a value declaration reachable through a type-only
+  re-export. And the seed does not ask whether the re-export itself has a
+  consumer, so a namespace binding exported under its own name credits the
+  chain behind it even when the report calls that very export unused, the same
+  self-inconsistency the unreachable-observer case has.
 - The exposed namespace closure is computed once per graph build, in
   `ModuleGraph::build`, and threaded into both phases that read it (Phase 2c
   namespace re-export propagation and the Phase 4 entry-star seed). It depends

@@ -578,6 +578,57 @@ fn an_ambient_star_chain_stops_at_a_plain_star_hop_before_a_default_namespace() 
 }
 
 #[test]
+fn an_unreachable_ambient_shim_credits_a_chain_that_re_enters_reachable_modules() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+
+    // unreached-shim.ts holds a `declare module` body in a plain `.ts` file
+    // nothing imports, so no entry point reaches it or the barrel behind it.
+    // The module id it declares is imported from outside this graph all the
+    // same, so the chain keeps its credit.
+    for path in [
+        "src/unreached-shim.ts",
+        "src/unreached-barrel.ts",
+        "src/unreached-mid.ts",
+    ] {
+        assert!(
+            unused_files.iter().any(|p| p.ends_with(path)),
+            "{path} must stay an unused file: {unused_files:?}"
+        );
+    }
+
+    // The chain runs back into two modules the entry point imports directly,
+    // so their unused-export rows sit under no unused-file row at all.
+    for path in ["src/unreached-reentry.ts", "src/unreached-ns-reentry.ts"] {
+        assert!(
+            !unused_files.iter().any(|p| p.ends_with(path)),
+            "{path} must stay a reachable file: {unused_files:?}"
+        );
+    }
+    assert_credited(
+        &unused,
+        "src/unreached-reentry.ts",
+        "unreachedReentryChainOnly",
+        "the ambient star surface forwards every named export of the chain, \
+         through the unreachable hop and back into a reachable module",
+    );
+    for name in ["unreachedNsChainOnly", "default"] {
+        assert_credited(
+            &unused,
+            "src/unreached-ns-reentry.ts",
+            name,
+            "`unreachedNs` is unreached-ns-reentry.ts's namespace object",
+        );
+    }
+}
+
+#[test]
 fn a_named_import_used_as_a_whole_object_credits_the_namespace_chain() {
     let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
         .expect("analysis should succeed");

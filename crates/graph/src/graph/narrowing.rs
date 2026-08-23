@@ -64,19 +64,33 @@ pub(super) struct AttachContext<'a> {
     /// behalf. Seeds `ModuleGraph::collect_exposed_namespace_targets`, which
     /// extends the credit to the names the target only exposes through its
     /// own `export *` and `export * as ns` chains.
-    pub(super) whole_module_targets: &'a mut FxHashSet<FileId>,
+    pub(super) whole_module_targets: &'a mut super::re_exports::WholeModuleObservations,
 }
 
 impl AttachContext<'_> {
-    /// Record that a consumer observed `target`'s whole namespace object.
+    /// Record that a consumer in this graph observed `target`'s whole
+    /// namespace object.
     ///
-    /// Every namespace mark-all site must call this so the exposed namespace
-    /// closure sees the same seed set the marks credited; the one deliberate
-    /// exception is a binding the namespace-object alias phase narrows on the
-    /// consumer's behalf. The seed is namespace-agnostic on purpose: the
-    /// object exposes the same names in the type and value namespaces.
+    /// Every namespace mark-all site must call this or
+    /// [`AttachContext::observe_ambient_namespace_object`] so the exposed
+    /// namespace closure sees the same seed set the marks credited; the one
+    /// deliberate exception is a binding the namespace-object alias phase
+    /// narrows on the consumer's behalf. The seed is namespace-agnostic on
+    /// purpose: the object exposes the same names in the type and value
+    /// namespaces, and `typeof ns.member` keeps a value declaration reachable
+    /// through a type-only observation.
     fn observe_whole_namespace_object(&mut self, target: FileId) {
-        self.whole_module_targets.insert(target);
+        self.whole_module_targets.observe(target);
+    }
+
+    /// Record that an ambient `declare module '...'` body re-exports every
+    /// name of `target` under an external module id (issue #2357).
+    ///
+    /// Separate from [`AttachContext::observe_whole_namespace_object`]
+    /// because the observers live outside this graph: the seed stands however
+    /// the shim and the target sit in it.
+    fn observe_ambient_namespace_object(&mut self, target: FileId) {
+        self.whole_module_targets.observe_ambient(target);
     }
 
     fn reborrow(&mut self) -> AttachContext<'_> {
@@ -793,7 +807,14 @@ pub(super) fn attach_symbol_reference(
             // Both observe the whole module, so the target's own `export *`
             // and `export * as ns` chains are credited downstream through the
             // exposed-namespace closure (issue #2372 for the runtime form).
-            ctx.observe_whole_namespace_object(target_module.file_id);
+            // The ambient form seeds that closure at any reachability: its
+            // observers are importers of the declared module id, not files in
+            // this graph.
+            if sym.is_ambient_star() {
+                ctx.observe_ambient_namespace_object(target_module.file_id);
+            } else {
+                ctx.observe_whole_namespace_object(target_module.file_id);
+            }
             let namespaces = desired_import_namespaces(sym, source_mod).namespaces();
             for (namespace, is_used) in [
                 (ExportNamespace::Type, namespaces.0),

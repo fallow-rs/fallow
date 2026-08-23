@@ -4278,3 +4278,157 @@ fn merged_exports(
         .expect("value export should exist");
     (type_export, value_export)
 }
+
+/// A `ResolvedReExport` that renames the binding on the way out.
+fn renaming_re_export(
+    source: &str,
+    imported_name: &str,
+    exported_name: &str,
+    target: ResolveResult,
+) -> ResolvedReExport {
+    ResolvedReExport {
+        info: fallow_types::extract::ReExportInfo {
+            source: source.to_string(),
+            imported_name: imported_name.to_string(),
+            exported_name: exported_name.to_string(),
+            is_type_only: false,
+            span: oxc_span::Span::default(),
+            statement_span: oxc_span::Span::default(),
+            source_span: oxc_span::Span::default(),
+        },
+        target,
+    }
+}
+
+fn star_re_export(source: &str, target: ResolveResult) -> ResolvedReExport {
+    plain_re_export(source, "*", target)
+}
+
+/// leaf/other declare `one`; the three barrels forward it, shadow it and
+/// receive it twice.
+fn graph_for_forwarding_shapes() -> ModuleGraph {
+    let files = vec![
+        discovered_file(0, "/project/leaf.ts"),
+        discovered_file(1, "/project/other.ts"),
+        discovered_file(2, "/project/rename.ts"),
+        discovered_file(3, "/project/shadow.ts"),
+        discovered_file(4, "/project/ambiguous.ts"),
+        discovered_file(5, "/project/consumer.ts"),
+    ];
+    let resolved_modules = vec![
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/leaf.ts"),
+            exports: vec![named_export("one", false)].into(),
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/other.ts"),
+            exports: vec![named_export("one", false)].into(),
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(2),
+            path: PathBuf::from("/project/rename.ts"),
+            re_exports: vec![renaming_re_export(
+                "./leaf",
+                "one",
+                "renamed",
+                ResolveResult::InternalModule(FileId(0)),
+            )],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(3),
+            path: PathBuf::from("/project/shadow.ts"),
+            exports: vec![named_export("one", false)].into(),
+            re_exports: vec![star_re_export(
+                "./leaf",
+                ResolveResult::InternalModule(FileId(0)),
+            )],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(4),
+            path: PathBuf::from("/project/ambiguous.ts"),
+            re_exports: vec![
+                star_re_export("./leaf", ResolveResult::InternalModule(FileId(0))),
+                star_re_export("./other", ResolveResult::InternalModule(FileId(1))),
+            ],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(5),
+            path: PathBuf::from("/project/consumer.ts"),
+            ..Default::default()
+        },
+    ];
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/consumer.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    ModuleGraph::build(&resolved_modules, &entry_points, &files)
+}
+
+#[test]
+fn forwards_binding_agrees_with_phase_2c_on_rename_shadow_and_ambiguity() {
+    let graph = graph_for_forwarding_shapes();
+    let (leaf, other) = (FileId(0), FileId(1));
+    let (rename, shadow, ambiguous) = (FileId(2), FileId(3), FileId(4));
+
+    // A rename hop forwards the leaf binding; a local declaration on the
+    // barrel and the same name arriving from two stars both stop the chain.
+    for (source, source_name, barrel, barrel_name, expected, why) in [
+        (
+            leaf,
+            "one",
+            rename,
+            "renamed",
+            true,
+            "a rename hop forwards",
+        ),
+        (
+            leaf,
+            "one",
+            shadow,
+            "one",
+            false,
+            "a local declaration shadows",
+        ),
+        (
+            leaf,
+            "one",
+            ambiguous,
+            "one",
+            false,
+            "two stars carry the name at once",
+        ),
+        (
+            other,
+            "one",
+            ambiguous,
+            "one",
+            false,
+            "the second star is ambiguous too",
+        ),
+    ] {
+        assert_eq!(
+            graph.forwards_binding(source, source_name, barrel, barrel_name),
+            expected,
+            "the closure search must agree that {why}"
+        );
+        assert_eq!(
+            crate::graph::namespace_indexes::uniquely_forwards_binding(
+                &graph,
+                source,
+                source_name,
+                barrel,
+                barrel_name,
+                ExportNamespace::Value,
+            ),
+            expected,
+            "Phase 2c's own walk must agree that {why}"
+        );
+    }
+}
