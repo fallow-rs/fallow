@@ -118,6 +118,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   many times is one entry. Warm caches invalidate (`CACHE_VERSION` 277 to 278,
   `GRAPH_CACHE_VERSION` 41 to 42).
 
+- **`import X = require('./x')` now records an import edge** (Closes
+  [#2365](https://github.com/fallow-rs/fallow/issues/2365)). The extractor had
+  no arm for a `TSImportEqualsDeclaration` with an external module reference,
+  so the TypeScript spelling of a CommonJS require produced no import at all:
+  the target was reported as an unused file and nothing reached through the
+  binding was credited. The declaration now records exactly what a
+  `const X = require('./x')` declaration records, so the target resolves
+  through the CommonJS mechanism, member accesses through `X` narrow the
+  target's exports the way a namespace import does, and a binding used as a
+  whole object (`Object.values(X)`) credits the full namespace object,
+  including the names the target only exposes through its own `export *`
+  chain. `export import X = require('./x')` inside a namespace body records
+  the same edge. Repositories that use the form will see fewer unused-file and
+  unused-export findings, and the exports of a file that becomes reachable for
+  the first time are narrowed against the members the consumer writes, so a
+  sibling nothing accesses surfaces as an unused export where the unused-file
+  row used to stand in its place. Total finding count is not guaranteed to
+  decrease: the edge is visible to every check that reads imports, so an
+  import-equals whose specifier does not resolve now reports
+  `unresolved-import`, and a bare specifier no manifest lists reports
+  `unlisted-dependency`, exactly as the equivalent `import X from './x'`
+  already did. `import X = Some.Namespace` is deliberately unchanged: an
+  entity-name reference aliases a binding declared in the same file, not a
+  module, so it records no edge. Warm caches invalidate (extract
+  `CACHE_VERSION` 278 to 279, `GRAPH_CACHE_VERSION` 42 to 43); the first run
+  after upgrading performs one cold re-analysis.
+
 - **A `default` import or re-export specifier now credits the target's default
   export** (Closes
   [#2374](https://github.com/fallow-rs/fallow/issues/2374)). `default` is one

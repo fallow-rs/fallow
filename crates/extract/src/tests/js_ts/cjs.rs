@@ -117,3 +117,84 @@ fn require_with_non_require_callee_not_captured() {
         "Only functions named 'require' should be captured"
     );
 }
+
+/// Issue #2365: `import X = require('./y')` is the TypeScript spelling of a
+/// CommonJS require binding and records the same require call as
+/// `const X = require('./y')`.
+#[test]
+fn import_equals_require_records_a_non_destructured_require_call() {
+    let info = parse_source("import Assigned = require('./assigned');");
+    assert_eq!(info.require_calls.len(), 1);
+    assert_eq!(info.require_calls[0].source, "./assigned");
+    assert_eq!(
+        info.require_calls[0].local_name.as_deref(),
+        Some("Assigned")
+    );
+    assert!(info.require_calls[0].destructured_names.is_empty());
+}
+
+/// The specifier span anchors the `unresolved-import` squiggly under `'./y'`
+/// rather than under the whole declaration.
+#[test]
+fn import_equals_require_anchors_the_specifier_span() {
+    let source = "import Assigned = require('./assigned');";
+    let info = parse_source(source);
+    assert_eq!(info.require_calls.len(), 1);
+    let call = &info.require_calls[0];
+    assert_eq!(
+        &source[call.source_span.start as usize..call.source_span.end as usize],
+        "'./assigned'"
+    );
+    assert_eq!(
+        &source[call.span.start as usize..call.span.end as usize],
+        "require('./assigned')"
+    );
+}
+
+/// `X.member` narrows the target's exports the way a namespace import does, so
+/// the member access and the binding name both have to be recorded.
+#[test]
+fn import_equals_require_records_member_accesses_through_the_binding() {
+    let info = parse_source(
+        "import Assigned = require('./assigned');\nconsole.log(Assigned.viaAssignment);",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Assigned" && access.member == "viaAssignment"),
+        "member accesses: {:?}",
+        info.member_accesses
+    );
+}
+
+/// `export import X = require('./y')` inside a namespace body is still an
+/// import of `./y`.
+#[test]
+fn export_import_equals_require_inside_a_namespace_records_the_require_call() {
+    let info =
+        parse_source("export namespace Outer {\n  export import Inner = require('./inner');\n}");
+    assert_eq!(info.require_calls.len(), 1);
+    assert_eq!(info.require_calls[0].source, "./inner");
+    assert_eq!(info.require_calls[0].local_name.as_deref(), Some("Inner"));
+}
+
+/// Deliberate negative control: `import X = Some.Namespace` names an entity
+/// declared in this file, not a module, so it stays a local alias and records
+/// no edge.
+#[test]
+fn import_equals_entity_name_records_no_require_call() {
+    let info = parse_source(
+        "namespace Some {\n  export namespace Nested {\n    export const value = 1;\n  }\n}\nimport \
+         Alias = Some;\nimport Deep = Some.Nested;",
+    );
+    assert!(
+        info.require_calls.is_empty(),
+        "an entity-name import-equals is a local alias: {:?}",
+        info.require_calls
+    );
+    assert!(
+        info.imports.is_empty(),
+        "an entity-name import-equals records no import: {:?}",
+        info.imports
+    );
+}

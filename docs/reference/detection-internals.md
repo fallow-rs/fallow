@@ -100,6 +100,15 @@ error by suppressing a downstream detector.
   narrowing gate `is_css_module_path` stays on the narrower `.css` / `.scss`
   pair, so `.less` and `.sass` class maps keep their default slot empty without
   gaining member narrowing.
+- `import X = require('./x')` is the TypeScript spelling of a CommonJS require
+  binding, so the extractor records the same non-destructured require call a
+  `const X = require('./x')` declaration records (issue #2365): one CommonJS
+  namespace import with the local binding, which makes `X.member` narrow the
+  target's exports and a whole-object use of `X` seed the exposed namespace
+  closure below. `export import X = require('./x')` inside a namespace body
+  records the same edge. `import X = Some.Namespace` is an entity-name
+  reference that aliases a binding declared in the same file, not a module, so
+  it records nothing.
 - An ambient-module star re-export (`export *` or `export * as ns` inside a
   `declare module '...'` body, recorded as a type-only namespace import
   without a local binding) credits the full ES star surface of its target:

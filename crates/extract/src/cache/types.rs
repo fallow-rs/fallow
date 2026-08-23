@@ -978,7 +978,13 @@ use crate::MemberKind;
 /// assignment right-hand side, a return value) is recorded as a whole-object
 /// use. Warm 277 caches hold the narrower record, so the siblings such a
 /// consumer can still reach would stay reported as unused.
-pub(super) const CACHE_VERSION: u32 = 278;
+///
+/// Bumped to 279 for issue #2365: `import X = require('./x')` now records the
+/// same require call a `const X = require('./x')` declaration records, plus the
+/// namespace binding that narrows `X.member` and the unused-binding verdict for
+/// an unreferenced one. Warm 278 caches hold the module without that require
+/// call, so the target would stay reported as an unused file on upgrade.
+pub(super) const CACHE_VERSION: u32 = 279;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

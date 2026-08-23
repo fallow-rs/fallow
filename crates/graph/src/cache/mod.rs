@@ -182,7 +182,12 @@ pub use store::GraphCacheStore;
 /// baked into the persisted graph. Warm 41 caches carry the narrowed verdict,
 /// so the siblings the consumer can still reach would stay reported as unused
 /// on upgrade.
-pub const GRAPH_CACHE_VERSION: u32 = 42;
+///
+/// Bumped to 43 for issue #2365: `import X = require('./x')` now resolves to a
+/// CommonJS namespace import edge, and the references it credits are baked into
+/// the persisted graph. Warm 42 caches hold the module without that edge, so
+/// the target would stay reported as an unused file on upgrade.
+pub const GRAPH_CACHE_VERSION: u32 = 43;
 
 /// Cached form of a resolved target.
 ///

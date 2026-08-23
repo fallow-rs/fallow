@@ -1,0 +1,7 @@
+{
+  "name": "issue-2365-import-equals",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

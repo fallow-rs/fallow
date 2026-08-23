@@ -2575,6 +2575,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
     }
 
+    fn visit_ts_import_equals_declaration(&mut self, decl: &TSImportEqualsDeclaration<'a>) {
+        self.handle_import_equals_declaration(decl);
+        walk::walk_ts_import_equals_declaration(self, decl);
+    }
+
     fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
         // `export { NS }` hands the namespace object to consumers the graph
         // cannot enumerate, and `narrow_namespace_references` already puts that

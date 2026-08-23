@@ -5,7 +5,8 @@
 
 use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Declaration, Expression, ImportExpression,
-    TSEnumMemberName, TSModuleDeclarationName, VariableDeclarator,
+    TSEnumMemberName, TSImportEqualsDeclaration, TSModuleDeclarationName, TSModuleReference,
+    VariableDeclarator,
 };
 
 use crate::{
@@ -375,6 +376,36 @@ impl ModuleInfoExtractor {
             }
             _ => {}
         }
+    }
+
+    /// Handle `import X = require('./y')`, the TypeScript spelling of a
+    /// CommonJS require binding. It records exactly what
+    /// `const X = require('./y')` records through
+    /// [`Self::handle_require_declaration`]: one non-destructured require call
+    /// plus the namespace binding name, so the target keeps its edge and
+    /// `X.member` narrows the target's exports the way a namespace import does
+    /// (issue #2365).
+    ///
+    /// `import X = Some.Namespace` names an entity declared in this file rather
+    /// than a module, so it records nothing.
+    pub(super) fn handle_import_equals_declaration(
+        &mut self,
+        decl: &TSImportEqualsDeclaration<'_>,
+    ) {
+        let TSModuleReference::ExternalModuleReference(reference) = &decl.module_reference else {
+            return;
+        };
+        let local = decl.id.name.to_string();
+        self.namespace_binding_names.push(local.clone());
+        self.require_calls.push(RequireCallInfo {
+            source: reference.expression.value.to_string(),
+            // The `require('./y')` reference, matching the call span a
+            // `const X = require('./y')` declaration records.
+            span: reference.span,
+            source_span: reference.expression.span,
+            destructured_names: Vec::new(),
+            local_name: Some(local),
+        });
     }
 
     /// Handle namespace destructuring: `const { a, b } = ns` where `ns` is a namespace
