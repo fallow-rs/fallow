@@ -1,0 +1,5 @@
+{
+  "name": "issue-2374-cjs-default-property",
+  "type": "module",
+  "main": "src/index.ts"
+}

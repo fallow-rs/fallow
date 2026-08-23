@@ -16,6 +16,13 @@ use super::common::{create_config, fixture_path};
 
 const FIXTURE: &str = "issue-2374-default-specifier";
 
+/// The two boundary fixtures stay separate from `FIXTURE`: each declares a
+/// second `ExportName::Named("default")`, which the pre-existing
+/// `duplicate_exports` grouping would treat as an ordinary colliding name and
+/// report against `FIXTURE`'s `export { inner as default }`.
+const CJS_FIXTURE: &str = "issue-2374-cjs-default-property";
+const CSS_FIXTURE: &str = "issue-2374-css-module-default-class";
+
 fn unused_export_pairs(results: &fallow_core::results::AnalysisResults) -> Vec<(String, String)> {
     results
         .unused_exports
@@ -156,7 +163,7 @@ fn plain_star_re_export_still_does_not_forward_default() {
 /// credited and `.default` must keep reporting.
 #[test]
 fn a_css_module_class_named_default_is_not_a_default_export() {
-    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+    let results = fallow_core::analyze(&create_config(fixture_path(CSS_FIXTURE)))
         .expect("analysis should succeed");
     let pairs = unused_export_pairs(&results);
 
@@ -185,7 +192,7 @@ fn a_css_module_class_named_default_is_not_a_default_export() {
 /// reported the default of every transpiled CommonJS module as unused.
 #[test]
 fn a_commonjs_default_property_export_answers_a_plain_default_import() {
-    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+    let results = fallow_core::analyze(&create_config(fixture_path(CJS_FIXTURE)))
         .expect("analysis should succeed");
     let unused_defaults = unused_defaults(&results);
     let pairs = unused_export_pairs(&results);

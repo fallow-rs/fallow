@@ -1,0 +1,5 @@
+{
+  "name": "issue-2374-css-module-default-class",
+  "type": "module",
+  "main": "src/index.ts"
+}

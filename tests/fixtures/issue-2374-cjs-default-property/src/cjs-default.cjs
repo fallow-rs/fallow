@@ -1,5 +1,5 @@
 exports.default = function cjsDefault() {
-  return 14;
+  return 1;
 };
 
-exports.cjsSibling = 15;
+exports.cjsSibling = 2;
