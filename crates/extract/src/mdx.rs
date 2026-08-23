@@ -306,12 +306,22 @@ const EXPORT_DECLARATION_KEYWORDS: [&str; 13] = [
 /// side-effect import, or, after `export`, a declaration keyword. Everything
 /// else stays prose, where the body scan still credits its member accesses and
 /// counts its mentions.
+///
+/// The shape table is a fast path, not the definition of the language, so a
+/// candidate it does not recognise is asked the parser before it is sent to
+/// prose: a line that parses as JavaScript on its own is a statement whatever
+/// its shape. That keeps heads the table does not enumerate
+/// (`import /* c */ './x'`, a spaced dynamic `import ('./x')`) out of prose,
+/// where the parse fallback below could never have recovered them, and it
+/// cannot let prose through, because a sentence does not parse. The probe
+/// costs one parse of one line, and only for a line that opens with the
+/// keyword and carries no recognised shape.
 fn is_statement_start(trimmed: &str) -> bool {
     if let Some(rest) = statement_keyword_rest(trimmed, "import") {
-        return is_import_statement_rest(rest);
+        return is_import_statement_rest(rest) || parses_as_javascript(trimmed);
     }
     if let Some(rest) = statement_keyword_rest(trimmed, "export") {
-        return is_export_statement_rest(rest);
+        return is_export_statement_rest(rest) || parses_as_javascript(trimmed);
     }
     false
 }
@@ -383,21 +393,27 @@ fn brace_delta(line: &str) -> i32 {
 }
 
 /// Does this line carry a source clause: a `from` keyword bounded by
-/// whitespace on the left and by whitespace or the opening quote of its module
+/// whitespace on the left and followed by the opening quote of its module
 /// specifier on the right?
 ///
-/// The boundaries are character classes, not literal spaces, so every
-/// whitespace JavaScript accepts qualifies: `from\t'./x'`, `X\tfrom './x'`, a
-/// multi-space form, and a no-break space all name a source the way
-/// `from './x'` does, and classifying one of them as prose would drop the edge
-/// (issue #2376). A `from` inside a word (`fromage`, `from_the_api`) never
-/// matches.
+/// The left boundary is a character class, not a literal space, so every
+/// whitespace JavaScript accepts qualifies: `X\tfrom './x'`, a multi-space
+/// form, and a no-break space all name a source the way `from './x'` does, and
+/// classifying one of them as prose would drop the edge (issue #2376). On the
+/// right the specifier quote has to follow, immediately (`from'./x'`) or after
+/// whitespace, so ordinary text after the word (`'Everything from scratch'`
+/// inside a multi-line object literal) never counts as a source clause and
+/// never ends a statement block one line early. A `from` inside a word
+/// (`fromage`, `from_the_api`) matches neither side.
 fn has_source_clause(line: &str) -> bool {
     line.match_indices("from").any(|(index, keyword)| {
-        let before = line[..index].chars().next_back();
-        let after = line[index + keyword.len()..].chars().next();
-        before.is_some_and(char::is_whitespace)
-            && after.is_some_and(|ch| ch.is_whitespace() || ch == '\'' || ch == '"')
+        line[..index]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace)
+            && line[index + keyword.len()..]
+                .trim_start()
+                .starts_with(['\'', '"'])
     })
 }
 
@@ -439,8 +455,18 @@ fn statement_block_is_accepted(block: &[(usize, &str)]) -> bool {
     for &(_, line) in block {
         body.push_str(line);
     }
+    parses_as_javascript(&body)
+}
+
+/// Does the JavaScript parser accept this source on its own, with the same
+/// source type the MDX statement body is parsed with?
+///
+/// "Accept" means the parse was not fatal, the criterion the whole-body parse
+/// uses: a head the parser recovers from is classified the way that parse
+/// would have treated it anyway.
+fn parses_as_javascript(source: &str) -> bool {
     let allocator = Allocator::default();
-    !Parser::new(&allocator, &body, SourceType::jsx())
+    !Parser::new(&allocator, source, SourceType::jsx())
         .parse()
         .panicked
 }
@@ -822,6 +848,14 @@ import { Visible } from './Visible'
             .collect()
     }
 
+    fn export_names(source: &str) -> Vec<String> {
+        parse_mdx_to_module(fallow_types::discover::FileId(0), source, 0)
+            .exports
+            .iter()
+            .map(|export| export.name.to_string())
+            .collect()
+    }
+
     /// Issue #2376: the reproduction. A prose line opening with the word
     /// "import" keeps the namespace import of the file, and the member tag it
     /// carries is credited like any other body tag.
@@ -848,14 +882,15 @@ import { Visible } from './Visible'
     }
 
     /// Issue #2376 fallback: a line that carries a statement shape but that
-    /// the parser rejects (`import data from the API`) is demoted to prose
-    /// instead of dropping every import of the file. The demoted line still
-    /// feeds the prose scan, so the binding it mentions keeps its mark-all
-    /// crediting (issue #2355) while an unmentioned namespace stays precise.
+    /// the parser rejects (a real source clause with prose trailing it) is
+    /// demoted to prose instead of dropping every import of the file. The
+    /// demoted line still feeds the prose scan, so the binding it mentions
+    /// keeps its mark-all crediting (issue #2355) while an unmentioned
+    /// namespace stays precise.
     #[test]
     fn unparsable_statement_line_falls_back_to_prose() {
         let source = "import * as NS from './ns'\nimport * as Other from './other'\n\n\
-             import data from the API using Other before rendering.\n\n\
+             import data from './the-api' using Other before rendering.\n\n\
              <NS.Star />\n<Other.Star />\n";
         assert_eq!(
             import_sources(source),
@@ -891,7 +926,7 @@ import { Visible } from './Visible'
     /// when a sibling block is demoted.
     #[test]
     fn parsable_multiline_import_survives_a_demoted_sibling() {
-        let source = "import data from the API before you begin.\n\nimport {\n  Foo,\n  Bar\n} from './module'\n";
+        let source = "import data from './the-api' before you begin.\n\nimport {\n  Foo,\n  Bar\n} from './module'\n";
         let info = parse_mdx_to_module(fallow_types::discover::FileId(0), source, 0);
         let locals: Vec<&str> = info
             .imports
@@ -925,7 +960,7 @@ import { Visible } from './Visible'
     #[test]
     fn suppressions_survive_the_fallback_reparse() {
         let source = "<!-- fallow-ignore-file -->\n<!-- fallow-ignore-file not-a-real-kind -->\n\n\
-             import data from the API before you begin.\n\n\
+             import data from './the-api' before you begin.\n\n\
              import { Card } from './card'\n";
         let info = parse_mdx_to_module(fallow_types::discover::FileId(0), source, 0);
         assert_eq!(
@@ -979,6 +1014,98 @@ import { Visible } from './Visible'
             vec!["./used".to_string()],
             "the tab-separated import must resolve like a space-separated one"
         );
+    }
+
+    /// Issue #2376: the shape table is a fast path, so a valid statement it
+    /// does not enumerate is asked the parser before it is sent to prose. The
+    /// parse fallback only rescues lines the classifier wrongly accepted, so
+    /// without this probe a wrongly rejected line would lose its edge with no
+    /// safety net at all.
+    #[test]
+    fn a_valid_statement_the_shape_table_misses_is_recovered_by_the_parse_probe() {
+        for line in [
+            "import /* set up styles */ './global.css'",
+            "import /* c */ Button from './button'",
+            "import /* c */ * as NS from './ns'",
+            "export /* keep */ const commented = 1",
+            "export /* keep */ function render() {}",
+            "import ('./dynamic')",
+        ] {
+            assert!(is_statement_start(line), "{line:?} should be a statement");
+        }
+
+        // Every shape a scan of real MDX corpora turns up that opens with the
+        // keyword and carries no specifier pattern. None of them parses with
+        // the JSX source type, so the probe leaves them all in prose.
+        for line in [
+            "import /* the good parts */ of the library into your head.",
+            "export /* only */ what the reader needs to see.",
+            "export FALLOW_FORMAT=json",
+            "export PATH=\"$BUN_INSTALL/bin:$PATH\"",
+            "export = contents;",
+            "export being referenced.",
+            "import json, sys",
+        ] {
+            assert!(!is_statement_start(line), "{line:?} should stay prose");
+        }
+    }
+
+    /// Issue #2376: a side-effect import whose keyword is followed by a block
+    /// comment keeps its edge instead of becoming a false unused file.
+    #[test]
+    fn commented_keyword_import_keeps_its_edge() {
+        let source = "import /* set up styles */ '../styles/global.css'\n\n# Title\n";
+        assert_eq!(
+            import_sources(source),
+            vec!["../styles/global.css".to_string()],
+            "the commented side-effect import must resolve"
+        );
+    }
+
+    /// Issue #2376: the same for an export declaration whose keyword is
+    /// followed by a block comment.
+    #[test]
+    fn commented_keyword_export_stays_an_export() {
+        let source = "export /* keep */ const commented = 1\n\n# Title\n";
+        assert_eq!(
+            export_names(source),
+            vec!["commented".to_string()],
+            "the commented export declaration must survive"
+        );
+    }
+
+    /// Issue #2376: a top-level dynamic import written with a space before the
+    /// parenthesis is an expression, not a declaration, so no specifier shape
+    /// names it; the parse probe keeps its edge.
+    #[test]
+    fn spaced_dynamic_import_keeps_its_edge() {
+        let source = "import ('../components/lazy')\n\n# Title\n";
+        let sources: Vec<String> =
+            parse_mdx_to_module(fallow_types::discover::FileId(0), source, 0)
+                .dynamic_imports
+                .iter()
+                .map(|import| import.source.clone())
+                .collect();
+        assert_eq!(
+            sources,
+            vec!["../components/lazy".to_string()],
+            "the spaced dynamic import must resolve"
+        );
+    }
+
+    /// Issue #2376: a source clause needs its specifier quote, so the word
+    /// `from` inside a string on a continuation line does not end the block
+    /// one line early and drop the declaration it belongs to.
+    #[test]
+    fn a_from_inside_a_string_does_not_end_a_statement_block() {
+        for note in ["Everything\tfrom scratch", "Everything from scratch"] {
+            let source = format!("export const meta = {{\n  note: '{note}',\n}}\n\n# Title\n");
+            assert_eq!(
+                export_names(&source),
+                vec!["meta".to_string()],
+                "the multi-line export must be collected whole for {note:?}"
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,1 @@
+export const Lazy = () => null;

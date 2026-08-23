@@ -128,14 +128,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   program, so the whole file lost its imports: the imported modules were
   reported as unused files, and nothing the body rendered was credited. A line
   is now a statement only when it carries a shape a real statement has, a
-  source clause (`from '...'`, with any whitespace JavaScript accepts around
-  `from`), a brace specifier list, a star specifier, a string-literal
+  source clause (`from` followed by its specifier quote, with any whitespace
+  JavaScript accepts in between and before the keyword), a brace specifier
+  list, a star specifier, a string-literal
   side-effect import, or, after `export`, a brace list, a star, or a
   declaration keyword (`const`, `let`, `var`, `function`, `class`, `async`,
   `default`, plus the TypeScript heads `type`, `interface`, `enum`,
   `namespace`, `declare`, and `abstract`, which are recognised as statement
   shapes and then handled by the fallback below rather than surviving as
-  statements). As a safety net, a statement block the parser rejects on its own is
+  statements), or when the line parses as JavaScript on its own, which keeps
+  valid heads no specifier pattern names (`import /* c */ './x'`, a top-level
+  dynamic `import ('./x')`) out of prose while a prose sentence, which does
+  not parse, stays there. As a safety net, a statement block the parser rejects on its own is
   demoted to prose and the remaining blocks are re-parsed, so the file keeps
   the imports the rejected block used to take with it (a TS-only `import type`
   clause, which the JSX source type the MDX statement body is parsed with does
@@ -147,7 +151,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list, the members their bodies render are credited, and their genuinely
   unused siblings surface as unused exports. The affected document's own
   exports are read too, so an `export const` nothing consumes now reports as an
-  unused export on the `.mdx` file itself. Duplication reads the same statement
+  unused export on the `.mdx` file itself. A multi-line MDX declaration whose
+  continuation line carries the word `from` inside a string (`summary:
+  'Written from scratch'`) is collected whole rather than cut one line short,
+  so that declaration parses and its unconsumed export reports as well.
+  Duplication reads the same statement
   body, so clones inside an affected document, and the duplication share of its
   health score, now surface where the file previously tokenized to nothing.
   The extraction, graph, and duplication token cache versions were bumped; the

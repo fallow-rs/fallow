@@ -66,8 +66,35 @@ fn mdx_import_prose_line_keeps_the_files_imports() {
     );
 }
 
-/// Issue #2376 fallback: `rejected.mdx` carries a line the parser rejects
-/// (`import data from the API using RJ before rendering.`). The block is
+/// Issue #2376: `commented.mdx` carries the two statement shapes no specifier
+/// pattern names, a side-effect import whose keyword is followed by a block
+/// comment and a top-level dynamic import written with a space before the
+/// parenthesis. Both parse as JavaScript, so both keep their edge instead of
+/// turning their target into a false unused file. The document also carries a
+/// multi-line `export const` whose continuation line has the word `from`
+/// inside a string: the block is collected whole, so the declaration survives
+/// and its unconsumed export reports on the `.mdx` file itself.
+#[test]
+fn statement_shapes_without_a_specifier_pattern_keep_their_edges() {
+    let (files, exports) = reported();
+
+    for target in ["commented.ts", "lazy.ts"] {
+        assert!(
+            !files.iter().any(|file| file == target),
+            "{target} is imported by commented.mdx and must not be an unused file: {files:?}"
+        );
+    }
+    assert!(
+        exports
+            .iter()
+            .any(|(file, name)| file == "commented.mdx" && name == "docNote"),
+        "the multi-line export of commented.mdx must be collected whole: {exports:?}"
+    );
+}
+
+/// Issue #2376 fallback: `rejected.mdx` carries a line the classifier accepts
+/// on its source clause and the parser then rejects
+/// (`import data from './the-api' using RJ before rendering.`). The block is
 /// demoted to prose instead of dropping every import of the file, so its
 /// target is used, and the demoted line still counts as a mention of `RJ`, so
 /// the namespace keeps its mark-all crediting (issue #2355) and the sibling
