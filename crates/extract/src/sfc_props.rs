@@ -508,7 +508,7 @@ fn bind_define_props_target(
 
 /// Resolve which of the destructured prop locals have at least one resolved
 /// reference in the program (via `oxc_semantic`), mirroring the import-binding
-/// usage check in `parse.rs::compute_semantic_usage`.
+/// usage check in `parse.rs::compute_semantic_usage_with_candidates`.
 fn resolve_used_locals(
     program: &Program<'_>,
     destructured_locals: &FxHashSet<String>,

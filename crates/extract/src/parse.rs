@@ -1141,24 +1141,6 @@ pub struct SemanticUsage {
     /// [`compute_semantic_usage_for_extractor`], which is the layer that knows
     /// which of them the exported form declares.
     pub(crate) unreferenced_import_equals_bindings: Vec<String>,
-    /// `import X = require('./x')` binding names the file also binds somewhere
-    /// else. Name-keyed credit for those is unsafe, so the exported form's
-    /// whole-object mark is withheld for them.
-    pub(crate) shadowed_import_equals_bindings: Vec<String>,
-}
-
-pub fn compute_semantic_usage(
-    program: &Program<'_>,
-    imports: &[ImportInfo],
-    template_used: &rustc_hash::FxHashSet<String>,
-) -> SemanticUsage {
-    compute_semantic_usage_with_candidates(
-        program,
-        imports,
-        &[],
-        template_used,
-        &rustc_hash::FxHashSet::default(),
-    )
 }
 
 pub fn compute_semantic_usage_for_extractor(
@@ -1175,9 +1157,6 @@ pub fn compute_semantic_usage_for_extractor(
         &computed_enum_key_spans,
     );
     extractor.resolve_computed_enum_key_uses(&semantic_usage.module_binding_reference_spans);
-    extractor.credit_unshadowed_import_equals_whole_object_uses(
-        &semantic_usage.shadowed_import_equals_bindings,
-    );
     report_unreferenced_import_equals_bindings(
         &mut semantic_usage,
         &extractor.exported_import_equals_names,
@@ -1213,7 +1192,11 @@ fn report_unreferenced_import_equals_bindings(
             .iter()
             .any(|exported| exported == name)
     }));
+    // One name, one row: the same binding name reaches this list twice when a
+    // file declares it both at root and inside a namespace body, and the graph
+    // reads membership rather than a count.
     unused.sort_unstable();
+    unused.dedup();
 }
 
 fn compute_semantic_usage_with_candidates(
@@ -1319,7 +1302,6 @@ fn compute_semantic_usage_with_candidates(
         mock_api_reference_spans,
         module_binding_reference_spans,
         unreferenced_import_equals_bindings: import_equals.unreferenced,
-        shadowed_import_equals_bindings: import_equals.shadowed,
     }
 }
 
@@ -1328,13 +1310,10 @@ fn compute_semantic_usage_with_candidates(
 struct ImportEqualsClassification {
     /// Names with no resolved reference anywhere in the file.
     unreferenced: Vec<String>,
-    /// Names the file binds more than once.
-    shadowed: Vec<String>,
 }
 
-/// Classify `import X = require('./y')` bindings for type and value usage, and
-/// report which of their names are unreferenced and which the file binds more
-/// than once.
+/// Classify `import X = require('./y')` bindings for type and value usage and
+/// report which of their names nothing in the file references.
 ///
 /// The binding lives in both the type and the value namespace, the same way
 /// `import * as X from './y'` does, but the require path records it outside
@@ -1348,12 +1327,10 @@ struct ImportEqualsClassification {
 /// whole-object credit. A name used only by a framework template is referenced,
 /// matching the `template_used` skip the `imports` loop applies.
 ///
-/// A name bound by a second symbol anywhere in the file is returned as
-/// shadowed. `whole_object_uses` is keyed by bare name, so the exported form's
-/// mark is withheld there: crediting an unrelated same-named binding as a whole
-/// object would silently delete real findings. Only names with a root binding
-/// are considered; one declared inside a namespace or ambient-module body has
-/// no module-flat identity to protect.
+/// Only names with a root binding are classified, the same restriction the
+/// `imports` loop next to it has: one declared inside a namespace or
+/// ambient-module body is left value-only, exactly as an `import * as X`
+/// binding in that position is.
 fn classify_import_equals_bindings(
     scoping: &oxc_semantic::Scoping,
     root_scope: oxc_semantic::ScopeId,
@@ -1366,18 +1343,6 @@ fn classify_import_equals_bindings(
         return ImportEqualsClassification::default();
     }
 
-    let candidates: rustc_hash::FxHashSet<&str> = import_equals_bindings
-        .iter()
-        .map(String::as_str)
-        .filter(|name| !name.is_empty())
-        .collect();
-    let mut name_counts: rustc_hash::FxHashMap<&str, usize> = rustc_hash::FxHashMap::default();
-    for symbol_id in scoping.symbol_ids() {
-        if let Some(name) = candidates.get(scoping.symbol_name(symbol_id)) {
-            *name_counts.entry(*name).or_default() += 1;
-        }
-    }
-
     let mut classification = ImportEqualsClassification::default();
     for local_name in import_equals_bindings {
         if local_name.is_empty() {
@@ -1387,12 +1352,6 @@ fn classify_import_equals_bindings(
         let Some(symbol_id) = scoping.get_binding(root_scope, name) else {
             continue;
         };
-        if name_counts
-            .get(local_name.as_str())
-            .is_some_and(|count| *count > 1)
-        {
-            classification.shadowed.push(local_name.clone());
-        }
         let mut has_references = false;
         let mut has_type_references = false;
         let mut has_value_references = false;
@@ -1616,12 +1575,30 @@ fn compute_auto_import_candidates_from_semantic(scoping: &oxc_semantic::Scoping)
 /// references. A value import used only as a type annotation (`const x: Foo`)
 /// will have a type-position reference and will NOT appear in the unused list.
 /// This is correct: `import { Foo }` (without `type`) may be needed at runtime.
+///
+/// `import_equals_bindings` carries the `import X = require('./x')` locals the
+/// extractor collected for the same program. They live outside `imports`, so
+/// without them the require-derived lane would be absent on this path and such
+/// a binding would keep crediting its target on a script the caller re-parses
+/// (a Vue `generic="..."` block). Pass `&[]` when the program has none.
 pub fn compute_import_binding_usage(
     program: &Program<'_>,
     imports: &[ImportInfo],
+    import_equals_bindings: &[String],
     template_used: &rustc_hash::FxHashSet<String>,
 ) -> ImportBindingUsage {
-    compute_semantic_usage(program, imports, template_used).import_binding_usage
+    let mut semantic_usage = compute_semantic_usage_with_candidates(
+        program,
+        imports,
+        import_equals_bindings,
+        template_used,
+        &rustc_hash::FxHashSet::default(),
+    );
+    // The exported form is exempt, exactly as it is on the extractor path, but
+    // `export import X = require('./x')` is not a `<script setup>` spelling: no
+    // name is exempted here.
+    report_unreferenced_import_equals_bindings(&mut semantic_usage, &[]);
+    semantic_usage.import_binding_usage
 }
 
 #[cfg(test)]

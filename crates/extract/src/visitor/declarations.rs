@@ -437,20 +437,30 @@ impl ModuleInfoExtractor {
         });
     }
 
-    /// Note the exported form, `export import X = require('./y')`, at file
-    /// level or inside an exported namespace body.
+    /// Credit the exported form, `export import X = require('./y')`, with a
+    /// whole-object use of its binding.
     ///
     /// The declaration hands the required module object to consumers the graph
     /// cannot enumerate, exactly as `import * as X from './y'; export { X }`
-    /// does, so the binding earns a whole-object use. Without it an entry point
-    /// that only re-exports the binding has no member access to narrow with,
-    /// `is_entry_with_no_access` fires, and every export of the target turns
-    /// into a false `unused-export` row (issues #2365, #2373).
+    /// does, so every export of the target is credited. Without it an entry
+    /// point that only re-exports the binding has no member access to narrow
+    /// with, `is_entry_with_no_access` fires, and every export of the target
+    /// turns into a false `unused-export` row (issues #2365, #2373).
     ///
-    /// Only the name is recorded here.
-    /// [`Self::credit_unshadowed_import_equals_whole_object_uses`] grants the
-    /// whole-object use once the semantic pass has confirmed the file binds the
-    /// name only once.
+    /// The credit is unconditional, matching the twin, which has no condition
+    /// either: `narrow_namespace_references` matches `whole_object_uses`
+    /// against the local name of an import edge of this same file, and a
+    /// file-level `import X = require(...)` owns that name outright, because a
+    /// second root binding of it is a TypeScript duplicate-identifier error.
+    /// The one shape that can still collide is a same-named require inside a
+    /// nested scope (`const X = require('./other')` in a function body), which
+    /// over-credits `./other`; that direction loses a finding and never invents
+    /// one, whereas withholding the credit reported every export of the real
+    /// target as unused.
+    ///
+    /// [`Self::push_whole_object_use`] deduplicates, so a whole-object use the
+    /// walk records for the same name (a genuine `Object.values(X)`) stays one
+    /// entry.
     ///
     /// The entity-name form stays out of scope: `export import X = Some.Ns`
     /// aliases a local declaration, not a module.
@@ -466,38 +476,7 @@ impl ModuleInfoExtractor {
         ) {
             self.exported_import_equals_names
                 .push(decl.id.name.to_string());
-        }
-    }
-
-    /// Grant the whole-object use to every `export import X = require('./x')`
-    /// binding whose name the file binds exactly once.
-    ///
-    /// Called from the semantic pass, which is the first place scope
-    /// information exists. The credit is only safe while the name resolves to
-    /// this one binding: `whole_object_uses` is keyed by bare name, so a
-    /// same-named local in any other scope would otherwise be read as a
-    /// whole-object use and every member of whatever it holds would be
-    /// credited.
-    ///
-    /// A whole-object use the walk already recorded for the same name (a
-    /// genuine `Object.values(X)`) is untouched, and the recording site
-    /// deduplicates, so a shadowed name keeps the credit it genuinely earned
-    /// while an unearned one is never granted.
-    pub(crate) fn credit_unshadowed_import_equals_whole_object_uses(
-        &mut self,
-        shadowed: &[String],
-    ) {
-        if self.exported_import_equals_names.is_empty() {
-            return;
-        }
-        let granted: Vec<String> = self
-            .exported_import_equals_names
-            .iter()
-            .filter(|name| !shadowed.iter().any(|other| other == *name))
-            .cloned()
-            .collect();
-        for name in granted {
-            self.push_whole_object_use(name);
+            self.push_whole_object_use(decl.id.name.to_string());
         }
     }
 

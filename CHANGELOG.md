@@ -144,11 +144,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consumers the graph cannot enumerate, so every export of the target keeps
   its credit exactly as it does behind `import * as X from './x';
   export { X }`, including on an entry point with no local member access
-  ([#2373](https://github.com/fallow-rs/fallow/issues/2373)). That credit is
-  matched by bare name, so it is granted only when the file binds the name
-  once; a whole-object use the file genuinely wrote (`Object.values(X)`) is
-  kept either way, so a same-named function parameter no longer deletes the
-  target's credit. In the other direction a binding nothing references credits
+  ([#2373](https://github.com/fallow-rs/fallow/issues/2373)) and whatever else
+  the file happens to bind under that name. The two spellings still differ in
+  one place, in the conservative direction: `export { X }` is an export row, so
+  a re-export nothing imports reports as an unused export, while the
+  import-equals binding records no export row and never does.
+  In the other direction a binding nothing references credits
   nothing at all: TypeScript elides such a declaration, so the target keeps
   every unused-export and unused-type row it earns, exactly as it does behind
   an unreferenced `import * as X from './x'`. The edge still resolves, so the

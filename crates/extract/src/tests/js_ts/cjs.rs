@@ -368,8 +368,10 @@ fn export_import_equals_require_records_a_whole_object_use() {
 /// Lenient-parse pin, deliberately non-compiling input: TypeScript rejects
 /// `export import X = require('...')` inside a namespace body with TS1147, so
 /// no compiling project reaches this arm. fallow parses leniently and still
-/// has to behave, which is what this pins. The valid spellings are covered by
-/// the file-level and ambient-module tests above.
+/// has to behave, which is what this pins: the edge is recorded and the
+/// binding is credited, the same conservative direction the file-level form
+/// takes. The valid spellings are covered by the file-level and
+/// ambient-module tests above.
 #[test]
 fn export_import_equals_inside_a_namespace_body_is_a_lenient_parse_pin() {
     let info =
@@ -416,27 +418,31 @@ fn import_equals_without_export_records_no_whole_object_use() {
     );
 }
 
-/// `whole_object_uses` is keyed by bare name, so the mark is only safe while
-/// the name resolves to the one binding. A same-named local in another scope
-/// would otherwise be read as a whole-object use and credit every member of
-/// whatever it holds, deleting real findings.
+/// The mark is granted whatever else the file binds under that name. A
+/// same-named local in a nested scope is not a reason to withhold it: the
+/// `import * as X; export { X }` twin has no such condition, and withholding
+/// reported every export of the real target as an auto-fixable unused export.
+///
+/// The twin carries no whole-object mark of its own here, so the two extraction
+/// records differ; the target credit does not, because `export { X }` puts the
+/// twin's binding on mark-all through the graph's re-export test instead
+/// (issue #2373). `a_shadowed_export_import_equals_keeps_the_targets_credit` in
+/// the integration suite pins that the two report identically end to end.
 #[test]
-fn export_import_equals_whole_object_use_is_withheld_when_the_name_is_shadowed() {
+fn export_import_equals_whole_object_use_survives_a_shadowed_name() {
     let shadowed = parse_source(
         "export import Session = require('./beta');\nexport const run = (): void => {\n  const \
          Session = makeSession();\n  Session.start();\n};\n",
     );
     assert!(
-        !shadowed
+        shadowed
             .whole_object_uses
             .iter()
             .any(|name| name == "Session"),
-        "a shadowed name cannot carry a bare-name whole-object mark: {:?}",
+        "a shadowed name keeps the mark the exported form earns: {:?}",
         shadowed.whole_object_uses
     );
 
-    // Positive control: the identical declaration keeps its mark when nothing
-    // else in the file binds the name.
     let unshadowed = parse_source(
         "export import Session = require('./beta');\nexport const run = (): void => {\n  const \
          local = makeSession();\n  local.start();\n};\n",
@@ -449,12 +455,26 @@ fn export_import_equals_whole_object_use_is_withheld_when_the_name_is_shadowed()
         "an unshadowed name keeps its mark: {:?}",
         unshadowed.whole_object_uses
     );
+
+    // One name yields one entry whether or not it is shadowed, so the grant
+    // never stacks a second copy on the genuine one (issue #2377).
+    assert_eq!(
+        shadowed
+            .whole_object_uses
+            .iter()
+            .filter(|name| *name == "Session")
+            .count(),
+        1,
+        "whole-object uses: {:?}",
+        shadowed.whole_object_uses
+    );
 }
 
-/// The mark the exported form earns is granted after the semantic pass, never
-/// pushed and then withdrawn, so a whole-object use the file genuinely wrote
-/// survives a shadowed name. Withdrawing by name deleted it and turned every
-/// export of the target into a false `unused-export` row.
+/// A whole-object use the file genuinely wrote survives a shadowed name, and
+/// the record matches the `import * as X; export { X }` twin exactly: both
+/// hold the one `Object.values(X)` entry. An earlier revision withdrew the
+/// exported form's mark by name, which deleted the genuine entry with it and
+/// turned every export of the target into a false `unused-export` row.
 #[test]
 fn a_genuine_whole_object_use_survives_a_shadowed_export_import_equals() {
     let source = "export import Config = require('./config');\nexport const read = (): number => \
@@ -476,19 +496,6 @@ fn a_genuine_whole_object_use_survives_a_shadowed_export_import_equals() {
         shadowed.whole_object_uses.to_vec(),
         esm_twin.whole_object_uses.to_vec(),
         "the namespace-import twin records the same whole-object uses"
-    );
-
-    // One name yields one entry: the granted mark deduplicates against the
-    // genuine one rather than stacking a second copy (issue #2377).
-    assert_eq!(
-        shadowed
-            .whole_object_uses
-            .iter()
-            .filter(|n| *n == "Config")
-            .count(),
-        1,
-        "whole-object uses: {:?}",
-        shadowed.whole_object_uses
     );
 }
 
@@ -524,5 +531,26 @@ fn a_bare_import_equals_reference_is_a_whole_object_use() {
         dotted.whole_object_uses.is_empty(),
         "a resolved member access is not a handover: {:?}",
         dotted.whole_object_uses
+    );
+}
+
+/// One name yields one unused-import-binding row. A file that declares the
+/// same name at root and inside a namespace body pushes two entries into the
+/// candidate list, both resolving to the one root binding, and the graph reads
+/// membership rather than a count.
+#[test]
+fn a_repeated_import_equals_name_reports_one_unused_import_binding() {
+    let info = parse_source(
+        "import Dup = require('./dup');\nexport namespace Outer {\n  import Dup = \
+         require('./dup-inner');\n}\nexport const other = 1;",
+    );
+    assert_eq!(
+        info.unused_import_bindings
+            .iter()
+            .filter(|binding| *binding == "Dup")
+            .count(),
+        1,
+        "unused import bindings: {:?}",
+        info.unused_import_bindings
     );
 }

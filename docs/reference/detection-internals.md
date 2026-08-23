@@ -124,13 +124,21 @@ error by suppressing a downstream detector.
   namespace import, which is what keeps an entry point that only re-exports the
   binding from reporting the target's whole surface (issue #2373). It is also
   exempt from the unused-import-binding verdict above, since it has no local
-  reference by construction. The credit is keyed by bare name, so the semantic
-  pass grants it only when the file binds that name once; a whole-object use
-  the file genuinely wrote (`Object.values(X)`) is recorded by the walk and is
-  never touched, so a shadowed name keeps the credit it earned and only the
-  unearned one is withheld. The same credit inside a namespace body is
-  defensive leniency only: TypeScript
+  reference by construction. The credit is unconditional, matching the twin,
+  which has no condition either: `narrow_namespace_references` matches
+  `whole_object_uses` against the local name of an import edge of the same
+  file, and a file-level `import X = require(...)` owns that name outright,
+  because a second root binding of it is a duplicate-identifier error. A
+  same-named require in a nested scope (`const X = require('./other')` inside a
+  function) can still collect the mark, which over-credits `./other`; that
+  direction loses a finding and never invents one, whereas withholding the
+  credit reported every export of the real target as unused. The credit inside
+  a namespace body is defensive leniency only: TypeScript
   rejects `namespace N { export import X = require('./x') }` with TS1147.
+  What the exported form does not record is an export row for the binding
+  itself, so unlike `export { X }` it never surfaces as an unused export; the
+  target credit is identical either way, and the missing row is a deliberate
+  miss rather than an invented one.
   `import X = Some.Namespace` is an entity-name reference that aliases a
   binding declared in the same file, not a module, so it records nothing.
 - An ambient-module star re-export (`export *` or `export * as ns` inside a

@@ -984,6 +984,71 @@ const items = ref<T[]>([]);
     assert_eq!(info.imports[0].source, "vue");
 }
 
+/// The `generic="..."` attribute re-parses an augmented body and recomputes the
+/// whole binding verdict, so the `import X = require('./x')` lane has to travel
+/// with it. Without that the binding kept crediting its target on a
+/// `generic="..."` script while the plain `<script setup>` next to it reported,
+/// which made the verdict depend on which parse path the file happened to take
+/// (issue #2365).
+#[test]
+fn vue_generic_attr_reports_an_unreferenced_import_equals_binding() {
+    let generic = parse_sfc(
+        r#"
+<script setup lang="ts" generic="T extends { id: string }">
+import GenTarget = require('./gen-target');
+defineProps<{ item: T }>();
+</script>
+"#,
+        "Generic.vue",
+    );
+    assert!(
+        generic
+            .unused_import_bindings
+            .contains(&"GenTarget".to_string()),
+        "an unreferenced import-equals binding reports on the generic= path too, got: {:?}",
+        generic.unused_import_bindings,
+    );
+
+    // The plain `<script setup>` twin takes the other parse path and must reach
+    // the same verdict.
+    let plain = parse_sfc(
+        r#"
+<script setup lang="ts">
+import PlainTarget = require('./plain-target');
+defineProps<{ item: string }>();
+</script>
+"#,
+        "Plain.vue",
+    );
+    assert!(
+        plain
+            .unused_import_bindings
+            .contains(&"PlainTarget".to_string()),
+        "the plain script path reports the same way, got: {:?}",
+        plain.unused_import_bindings,
+    );
+
+    // Positive control: a referenced binding is not reported on either path, so
+    // the assertions above are not passing because every binding lands there.
+    let referenced = parse_sfc(
+        r#"
+<script setup lang="ts" generic="T extends { id: string }">
+import UsedTarget = require('./used-target');
+defineProps<{ item: T }>();
+console.log(UsedTarget.alpha);
+</script>
+"#,
+        "Used.vue",
+    );
+    assert!(
+        !referenced
+            .unused_import_bindings
+            .contains(&"UsedTarget".to_string()),
+        "a referenced binding is not unused, got: {:?}",
+        referenced.unused_import_bindings,
+    );
+}
+
 #[test]
 fn vue_generic_attr_marks_type_only_import_as_type_referenced() {
     let info = parse_sfc(

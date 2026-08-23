@@ -604,7 +604,13 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     extractor.resolve_typed_destructure_bindings();
 
-    merge_script_binding_usage(input, &allocator, &extractor.imports, semantic_usage);
+    merge_script_binding_usage(
+        input,
+        &allocator,
+        &extractor.imports,
+        &extractor.import_equals_bindings,
+        semantic_usage,
+    );
     if input.need_complexity {
         input
             .combined
@@ -654,10 +660,17 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
 /// value-referenced) plus auto-import candidates into `combined`. A
 /// `generic="..."` attribute re-parses an augmented body so a type-only import
 /// consumed solely inside the constraint stays classified as type-referenced.
+///
+/// The re-parse recomputes the whole verdict, so it is handed the
+/// `import X = require('./x')` locals as well: those live outside `imports`,
+/// and without them such a binding would keep crediting its target on a
+/// `generic="..."` script while the plain `<script setup>` next to it reports
+/// (issue #2365).
 fn merge_script_binding_usage(
     input: &mut SfcScriptMergeInput<'_>,
     allocator: &Allocator,
     imports: &[ImportInfo],
+    import_equals_bindings: &[String],
     semantic_usage: crate::parse::SemanticUsage,
 ) {
     let augmented_body = build_generic_attr_probe_source(input.script);
@@ -667,7 +680,12 @@ fn merge_script_binding_usage(
         let augmented_return =
             Parser::new(allocator, augmented, source_type_for_script(input.script)).parse();
         (
-            compute_import_binding_usage(&augmented_return.program, imports, &empty_template_used),
+            compute_import_binding_usage(
+                &augmented_return.program,
+                imports,
+                import_equals_bindings,
+                &empty_template_used,
+            ),
             semantic_usage.auto_import_candidates,
         )
     } else {

@@ -6,9 +6,13 @@
 //!
 //! The exported form, `export import X = require('./x')`, additionally hands
 //! the module object to consumers the graph cannot enumerate, so it credits
-//! every export of the target exactly as `import * as X; export { X }` does.
-//! That credit is keyed by bare name, so it is withheld when the file binds the
-//! name twice; a whole-object use the file genuinely wrote is untouched.
+//! every export of the target exactly as `import * as X; export { X }` does,
+//! whatever else the file binds under that name.
+//!
+//! The one place the two spellings still differ is the consumer's own export
+//! surface: `export { X }` records an export row named `X`, so an unconsumed
+//! re-export reports; the import-equals form records no export row, so it never
+//! does. That is a deliberate miss, pinned below, not an invented row.
 //!
 //! A binding nothing references is elided by TypeScript, so it credits nothing
 //! and the target keeps every unused-export and unused-type row it earns,
@@ -276,9 +280,57 @@ fn an_unreferenced_import_equals_binding_credits_nothing() {
     }
 }
 
+/// The unmasked shadowed shape: an exported import-equals whose name a
+/// parameter binds again, with no `Object.values(...)` to mask the difference.
+/// A shadow guard on the whole-object credit reported every export of the
+/// target as an auto-fixable `unused-export`, rows main never produced and rows
+/// the `import * as X; export { X }` twin next to it never produces either.
+///
+/// The two files also pin the one deviation that remains between the spellings:
+/// `export { X }` is an export row, so an unconsumed re-export reports on the
+/// consumer, while the import-equals binding records no export row and never
+/// does. That direction loses a finding, it does not invent one.
+#[test]
+fn a_shadowed_export_import_equals_keeps_the_targets_credit() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused_files = unused_files(&results);
+
+    for file in [
+        "src/bare-shadowed-target.ts",
+        "src/bare-shadowed-esm-target.ts",
+    ] {
+        // An unreachable file stacks no unused-export rows underneath its
+        // unused-file row, so reachability is asserted first.
+        assert!(
+            !unused_files.iter().any(|p| p.ends_with(file)),
+            "{file} must be reachable before its exports can be credited: {unused_files:?}"
+        );
+        assert!(
+            unused_exports_of(&results, file).is_empty(),
+            "{file}: the re-exported binding hands the module object on, so every export keeps \
+             its credit: {:?}",
+            unused_exports_of(&results, file)
+        );
+    }
+
+    assert!(
+        unused_exports_of(&results, "src/bare-shadowed.ts").is_empty(),
+        "the import-equals binding is no export row, so only `parseBareShadowed` can report and \
+         the entry consumes it: {:?}",
+        unused_exports_of(&results, "src/bare-shadowed.ts")
+    );
+    assert_eq!(
+        unused_exports_of(&results, "src/bare-shadowed-esm.ts"),
+        vec!["BareShadowedEsmTarget".to_string()],
+        "the twin's `export {{ X }}` is an export row nothing imports, which is the one row the \
+         import-equals spelling does not produce"
+    );
+}
+
 /// A whole-object use the consumer genuinely wrote survives a same-named
-/// binding elsewhere in the file. The exported form's credit is granted by
-/// name, so withdrawing it by name deleted the genuine use with it and turned
+/// binding elsewhere in the file. An earlier revision withdrew the exported
+/// form's credit by name, which deleted the genuine use with it and turned
 /// every export of the target into a false `unused-export` row. The
 /// `import * as X` twin next to it writes the same `Object.values(X)` and the
 /// same shadowing parameter, and must report the same way.

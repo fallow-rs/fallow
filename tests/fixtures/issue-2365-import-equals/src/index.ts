@@ -14,6 +14,8 @@ import { staleMarker } from './stale';
 import { staleEsmMarker } from './stale-esm';
 import { parseShadowed, readShadowed } from './shadowed';
 import { parseShadowedEsm, readShadowedEsm } from './shadowed-esm';
+import { parseBareShadowed } from './bare-shadowed';
+import { parseBareShadowedEsm } from './bare-shadowed-esm';
 
 // The entry re-exports the binding itself, so consumers the graph cannot
 // enumerate reach every name on the required module object.
@@ -38,3 +40,4 @@ console.log(destructuredUsed, esmDestructuredUsed);
 console.log(staleMarker, staleEsmMarker);
 console.log(readShadowed(), parseShadowed({ n: 1 }));
 console.log(readShadowedEsm(), parseShadowedEsm({ n: 1 }));
+console.log(parseBareShadowed({ n: 1 }), parseBareShadowedEsm({ n: 1 }));
