@@ -215,6 +215,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still credits its chain. Nothing else in the issue-2357 behaviour moves: an
   ambient chain is seeded and walked at any reachability, exactly as it was.
 
+- **`dead-code --trace` no longer reports a value export as unused when its
+  only credit is a bound `import type` of that export** (Closes
+  [#2371](https://github.com/fallow-rs/fallow/issues/2371)). `dead-code`
+  credits `export const helper` referenced through `import type { helper }`:
+  the graph's type lane falls back to the value declaration when no type
+  declaration of that name exists, and the unused-export analyzer counts the
+  reference regardless of namespace. The trace selected the value namespace
+  for the value export, read only value-lane references, and printed
+  `is_used: false` with an empty `direct_references`, so an agent following
+  the "trace before deleting" guidance got two contradictory answers. The
+  trace now reports the references that credit the traced declaration: when
+  the preferred namespace carries none and the other namespace resolves to
+  the same declaration, it reports that lane's references and sets
+  `namespace` to the lane that carries them, so the repro returns
+  `namespace: "type"`, `is_used: true`, and the `import type` consumer in
+  `direct_references` (human output prints `USED` and `Namespace: type`).
+  When both lanes carry references the value namespace still wins; an
+  unreferenced export still reports `is_used: false`; and a same-name
+  `export type Foo` next to `export const Foo` keeps the value export on
+  `value` and unused under a type-only import, because the import credits the
+  type declaration and `dead-code` reports the value one. A declaration merge
+  that splits across lanes, such as an `interface` next to a same-name
+  `class`, also keeps the preferred lane and can still trace as unused while
+  `dead-code` credits the class through the merge; a merge that stays one
+  binding, such as a `class` next to a same-name `namespace`, is covered. The
+  `namespace` field may therefore now be `type` for a value export. `is_used`
+  keeps following the listed references only, so an export in an unreachable
+  file can still read `is_used: true` next to `file_reachable: false`, which
+  is how the value lane already behaved. Every consumer of the export trace
+  inherits the correction: the `trace_export` MCP tool, the typed API, the
+  `trace_symbol` root trace, and `fallow inspect --symbol` (both its
+  `identity.is_used` / `identity.reason` and its `evidence.trace_export`
+  section, in the CLI and in the `inspect` MCP tool); the LSP reference lens
+  already counted the type-only use. The class-member trace
+  (`--trace FILE:MEMBER`) is built from the same export trace, so a member of
+  an export credited only through the type lane inherits it too:
+  `owner_is_used`, `owner_direct_references` and the reason string describe
+  the crediting lane, the payload gains an additive `owner_namespace` naming
+  that lane, and the human trace prints an `Owner namespace:` line. Under
+  `--type-aware` the checker proof printed beside either trace still covers
+  only the lane the declaration itself occupies, so it can report
+  `no-references-found` for a credit the root trace lists;
+  `semantic.target.namespace` names the lane the proof covers, the human
+  proof line appends that lane (`value namespace only`) when such a proof
+  lists no references of its own, and the `_meta.field_definitions.semantic`
+  note plus the `trace_symbol` tool description now say that a root trace
+  listing a reference the proof omits is the wider evidence, not a stale one.
+  No cache version changed: the trace is a read-only query over the graph, so
+  a warm `.fallow` directory written by a previous release returns the
+  corrected trace.
+
 - **Star re-exports inside `declare module '...'` bodies credit the full ES
   star surface of their target without adding to the declaring file's export
   surface** (Closes [#2357](https://github.com/fallow-rs/fallow/issues/2357)).

@@ -1007,7 +1007,7 @@ fn attach_semantic_explain_meta(value: &mut serde_json::Value, explain: bool) {
     });
     meta.entry("field_definitions").or_insert_with(|| {
         serde_json::json!({
-            "semantic": "Authoritative checker-backed evidence. When present, trust semantic.identity, semantic.status, and semantic.references over the syntactic root trace fields.",
+            "semantic": "Authoritative checker-backed evidence. When present, trust semantic.identity, semantic.status, and semantic.references over the syntactic root trace fields. The proof covers only the lane named by semantic.target.namespace, so when the root trace lists a reference the proof does not, the root evidence is wider rather than stale.",
             "semantic.identity": "Compatibility identity for the selected effective TypeScript projects and semantic capabilities.",
             "semantic.status": "Whether checker-backed evidence is complete, partial, or unavailable.",
             "semantic.references": "Bounded exact TypeScript checker references for the requested module export or class member.",
@@ -2316,10 +2316,17 @@ mod tests {
         attach_semantic_explain_meta(&mut output, true);
 
         assert_eq!(output["_meta"]["telemetry"]["analysis_run_id"], "run-1");
+        let semantic_definition = output["_meta"]["field_definitions"]["semantic"]
+            .as_str()
+            .expect("semantic field definition");
+        assert!(semantic_definition.contains("trust semantic.identity"));
+        // Issue #2371: the in-band definition is the only guidance an agent
+        // always sees, so it must carry the same lane carve-out as the agent
+        // rules; without it an agent discards a corrected root trace.
         assert!(
-            output["_meta"]["field_definitions"]["semantic"]
-                .as_str()
-                .is_some_and(|definition| definition.contains("trust semantic.identity"))
+            semantic_definition.contains("semantic.target.namespace")
+                && semantic_definition.contains("wider"),
+            "the definition scopes the proof to its lane: {semantic_definition}"
         );
         assert!(output["_meta"]["metrics"]["semantic.total_reference_count"].is_object());
     }

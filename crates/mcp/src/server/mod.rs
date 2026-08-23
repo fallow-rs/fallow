@@ -182,7 +182,7 @@ impl FallowMcp {
         run_trace_export_tool(params.0).await
     }
 
-    /// Trace an exact TypeScript symbol with checker-backed references, namespace identity, aliases, and re-export hops. Root trace fields preserve syntactic context; treat `semantic.references`, `semantic.status`, and `semantic.identity` as the authoritative exact evidence. This is project-wide evidence for Fallow decisions, not a compiler-diagnostic or lint-rule surface.
+    /// Trace an exact TypeScript symbol with checker-backed references, namespace identity, aliases, and re-export hops. Root trace fields preserve syntactic context; treat `semantic.references`, `semantic.status`, and `semantic.identity` as the authoritative exact evidence. The proof covers only the lane named by `semantic.target.namespace`, so a root trace that lists a reference the proof does not is wider evidence rather than stale. This is project-wide evidence for Fallow decisions, not a compiler-diagnostic or lint-rule surface.
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn trace_symbol(
         &self,
