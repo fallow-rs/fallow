@@ -132,8 +132,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chain. Narrowing covers both semantic spaces: the binding is classified for
   type and value usage like a namespace import, so `X.SomeType` in an
   annotation credits the target's type export instead of leaving it reported
-  as an unused type. `export import X = require('./x')`, at file level or
-  inside an exported namespace body, additionally hands the module object to
+  as an unused type. `import type X = require('pkg')` is the one spelling
+  TypeScript erases completely, so it keeps the type-space edge but is never
+  read as a runtime import: a type-only devDependency stays out of
+  `dev-dependency-in-production`, matching `import type * as X from 'pkg'`.
+  `export import X = require('./x')` additionally hands the module object to
   consumers the graph cannot enumerate, so every export of the target keeps
   its credit exactly as it does behind `import * as X from './x';
   export { X }`, including on an entry point with no local member access

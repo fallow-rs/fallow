@@ -360,7 +360,17 @@ pub(crate) struct ModuleInfoExtractor {
     /// type and the value namespace exactly like an ESM namespace import, so
     /// the semantic pass classifies them alongside `imports` and `X.Member`
     /// narrows the target's type exports too (issue #2365).
+    ///
+    /// Classification reads the root scope only, the same restriction the
+    /// `imports` loop next to it has: a binding declared inside a `declare
+    /// module '...'` body is not classified and stays value-only, exactly as
+    /// an `import * as X` binding in that position does.
     pub(crate) import_equals_bindings: Vec<String>,
+    /// Names marked as whole-object uses by `export import X = require('./y')`.
+    /// The mark is provisional until the semantic pass confirms the file binds
+    /// the name only once; `whole_object_uses` is keyed by bare name, so a
+    /// same-named binding in another scope would otherwise be credited too.
+    exported_import_equals_names: Vec<String>,
     binding_target_names: FxHashMap<String, BindingTarget>,
     /// The class each binding name most recently named at this point in the walk,
     /// never poisoned to `Ambiguous`. `binding_target_names` is module-flat, so a

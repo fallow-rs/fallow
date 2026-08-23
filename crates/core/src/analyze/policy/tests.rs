@@ -254,6 +254,7 @@ fn require_call(source: &str, local: Option<&str>, destructured: &[&str]) -> Req
         source_span: oxc_span::Span::new(0, 10),
         destructured_names: destructured.iter().map(ToString::to_string).collect(),
         local_name: local.map(ToString::to_string),
+        is_type_only: false,
     }
 }
 

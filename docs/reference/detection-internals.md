@@ -108,14 +108,22 @@ error by suppressing a downstream detector.
   closure below. The binding is classified for type and value usage the same
   way an `import * as X` binding is, so `X.SomeType` in a type annotation
   narrows the target's type exports rather than leaving them uncredited.
-  `export import X = require('./x')`, at file level or inside an exported
-  namespace body, is recorded as a whole-object use of the binding: the module
-  object reaches consumers the graph cannot enumerate, so every export of the
-  target is credited the way `export { X }` credits a namespace import, which
-  is what keeps an entry point that only re-exports the binding from reporting
-  the target's whole surface (issue #2373). `import X = Some.Namespace` is an
-  entity-name reference that aliases a binding declared in the same file, not
-  a module, so it records nothing.
+  `import type X = require('./x')` is the one spelling TypeScript erases
+  completely, so the require call carries `is_type_only` and dependency
+  classification treats it exactly as it treats `import type * as X from
+  './x'` rather than claiming the package is imported at runtime.
+  `export import X = require('./x')` at file level is recorded as a
+  whole-object use of the binding: the module object reaches consumers the
+  graph cannot enumerate, so every export of the target is credited the way
+  `export { X }` credits a namespace import, which is what keeps an entry point
+  that only re-exports the binding from reporting the target's whole surface
+  (issue #2373). That mark is keyed by bare name, so the semantic pass
+  withdraws it when the file binds the same name in another scope, where
+  crediting an unrelated same-named binding would delete real findings. The
+  same mark inside a namespace body is defensive leniency only: TypeScript
+  rejects `namespace N { export import X = require('./x') }` with TS1147.
+  `import X = Some.Namespace` is an entity-name reference that aliases a
+  binding declared in the same file, not a module, so it records nothing.
 - An ambient-module star re-export (`export *` or `export * as ns` inside a
   `declare module '...'` body, recorded as a type-only namespace import
   without a local binding) credits the full ES star surface of its target:

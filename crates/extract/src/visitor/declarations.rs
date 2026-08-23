@@ -369,6 +369,7 @@ impl ModuleInfoExtractor {
                     source_span,
                     destructured_names: names,
                     local_name: None,
+                    is_type_only: false,
                 });
                 self.handled_require_spans.insert(call.span);
             }
@@ -381,6 +382,7 @@ impl ModuleInfoExtractor {
                     source_span,
                     destructured_names: Vec::new(),
                     local_name: Some(local),
+                    is_type_only: false,
                 });
                 self.handled_require_spans.insert(call.span);
             }
@@ -404,6 +406,13 @@ impl ModuleInfoExtractor {
     /// pass classifies its type and value usage: without that, `X.SomeType` in
     /// type position would leave the target's type exports uncredited.
     ///
+    /// `import type X = require('./y')` is the one spelling TypeScript erases
+    /// completely: the emitted JavaScript holds no `require` call at all. It
+    /// keeps the edge, because the target is still a type-space reference, but
+    /// carries `is_type_only`, so dependency classification treats it the way
+    /// it treats `import type * as X from './y'` instead of claiming the
+    /// package is imported at runtime.
+    ///
     /// `import X = Some.Namespace` names an entity declared in this file rather
     /// than a module, so it records nothing.
     pub(super) fn handle_import_equals_declaration(
@@ -424,6 +433,7 @@ impl ModuleInfoExtractor {
             source_span: reference.expression.span,
             destructured_names: Vec::new(),
             local_name: Some(local),
+            is_type_only: decl.import_kind.is_type(),
         });
     }
 
@@ -439,13 +449,47 @@ impl ModuleInfoExtractor {
     ///
     /// The entity-name form stays out of scope: `export import X = Some.Ns`
     /// aliases a local declaration, not a module.
+    ///
+    /// `whole_object_uses` is matched by bare name, so the mark is provisional:
+    /// [`Self::drop_shadowed_import_equals_whole_object_uses`] withdraws it
+    /// when the file binds the same name somewhere else, where crediting every
+    /// member of an unrelated same-named binding would silently delete real
+    /// findings.
+    ///
+    /// The namespace-body call site (`namespace N { export import X =
+    /// require('./x') }`) is defensive leniency only: TypeScript rejects that
+    /// spelling with TS1147, so no compiling project reaches it. The file-level
+    /// form is the one real code writes.
     fn record_exported_import_equals(&mut self, decl: &TSImportEqualsDeclaration<'_>) {
         if matches!(
             &decl.module_reference,
             TSModuleReference::ExternalModuleReference(_)
         ) {
-            self.whole_object_uses.push(decl.id.name.to_string());
+            let name = decl.id.name.to_string();
+            self.exported_import_equals_names.push(name.clone());
+            self.whole_object_uses.push(name);
         }
+    }
+
+    /// Withdraw the provisional whole-object mark from every `export import X =
+    /// require('./x')` binding whose name the file binds more than once.
+    ///
+    /// Called from the semantic pass, which is the first place scope
+    /// information exists. A mark is only safe while the name resolves to this
+    /// one binding: `whole_object_uses` is keyed by bare name, so a same-named
+    /// local in any other scope would otherwise be read as a whole-object use
+    /// and every member of whatever it holds would be credited.
+    pub(crate) fn drop_shadowed_import_equals_whole_object_uses(&mut self, shadowed: &[String]) {
+        if shadowed.is_empty() || self.exported_import_equals_names.is_empty() {
+            return;
+        }
+        self.whole_object_uses.retain(|name| {
+            !(shadowed.iter().any(|other| other == name)
+                && self
+                    .exported_import_equals_names
+                    .iter()
+                    .any(|other| other == name))
+        });
     }
 
     /// Handle namespace destructuring: `const { a, b } = ns` where `ns` is a namespace

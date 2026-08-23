@@ -147,6 +147,7 @@ fn make_require(
         destructured_names: destructured.into_iter().map(String::from).collect(),
         local_name: local_name.map(String::from),
         source_span: oxc_span::Span::default(),
+        is_type_only: false,
     }
 }
 
@@ -1422,6 +1423,7 @@ fn require_destructured_empty_names_uses_namespace() {
             destructured_names: vec![],
             local_name: None,
             source_span: oxc_span::Span::default(),
+            is_type_only: false,
         };
         let file = Path::new("/project/src/app.js");
         let result = resolve_single_require(ctx, file, &req);

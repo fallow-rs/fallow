@@ -1381,6 +1381,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
             destructured_names: vec![],
             local_name: None,
             source_span: oxc_span::Span::default(),
+            is_type_only: false,
         }],
         package_path_references: Box::default(),
         member_accesses: vec![

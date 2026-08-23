@@ -984,9 +984,11 @@ use crate::MemberKind;
 /// namespace binding that narrows `X.member`, its type-space and value-space
 /// binding classification, the unused-binding verdict for an unreferenced
 /// non-exported one, and the whole-object use the exported form
-/// (`export import X = require('./x')`) hands to consumers. Warm 278 caches hold
-/// the module without that require call and without those facts, so the target
-/// would stay reported as an unused file on upgrade.
+/// (`export import X = require('./x')`) hands to consumers, plus the type-only
+/// flag that keeps the erased `import type X = require('./x')` spelling out of
+/// runtime dependency classification. Warm 278 caches hold the module without
+/// that require call and without those facts, so the target would stay
+/// reported as an unused file on upgrade.
 pub(super) const CACHE_VERSION: u32 = 279;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
@@ -1066,7 +1068,7 @@ assert_cached_type_size!(CachedUnknownSuppressionKind, 56);
 assert_cached_type_size!(CachedExport, 136);
 assert_cached_type_size!(CachedImport, 96);
 assert_cached_type_size!(CachedDynamicImport, 88);
-assert_cached_type_size!(CachedRequireCall, 88);
+assert_cached_type_size!(CachedRequireCall, 96);
 assert_cached_type_size!(CachedReExport, 104);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 64);
@@ -1471,6 +1473,8 @@ pub struct CachedRequireCall {
     pub(crate) destructured_names: Vec<String>,
     /// Local variable name for namespace requires.
     pub(crate) local_name: Option<String>,
+    /// `true` for the type-erased `import type X = require('...')` spelling.
+    pub(crate) is_type_only: bool,
 }
 
 /// Cached re-export data.

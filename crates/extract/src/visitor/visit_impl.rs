@@ -713,6 +713,7 @@ impl ModuleInfoExtractor {
                 source_span: lit.span,
                 destructured_names: Vec::new(),
                 local_name: None,
+                is_type_only: false,
             });
         }
     }

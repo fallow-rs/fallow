@@ -5,8 +5,12 @@
 //!
 //! Destructured requires (`const { a, b } = require('./x')`) become named imports.
 //! Non-destructured requires (`const mod = require('./x')`) become namespace imports
-//! as a conservative default — the entire module binding may be used in ways that
+//! as a conservative default: the entire module binding may be used in ways that
 //! cannot be statically determined.
+//!
+//! `RequireCallInfo::is_type_only` carries through to the resolved import so
+//! the erased `import type X = require('./x')` spelling stays out of runtime
+//! dependency classification, matching `import type * as X from './x'`.
 
 use std::path::Path;
 
@@ -43,7 +47,7 @@ pub(super) fn resolve_single_require(
                 source: req.source.clone(),
                 imported_name: ImportedName::Namespace,
                 local_name: req.local_name.clone().unwrap_or_default(),
-                is_type_only: false,
+                is_type_only: req.is_type_only,
                 from_style: false,
                 span: req.span,
                 source_span: req.source_span,
@@ -59,7 +63,7 @@ pub(super) fn resolve_single_require(
                 source: req.source.clone(),
                 imported_name: ImportedName::Named(name.clone()),
                 local_name: name.clone(),
-                is_type_only: false,
+                is_type_only: req.is_type_only,
                 from_style: false,
                 span: req.span,
                 source_span: req.source_span,

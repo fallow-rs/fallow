@@ -8,16 +8,12 @@ import * as NarrowedEsm from './narrowed-esm';
 import * as TypedEsm from './typed-esm';
 import * as DestructuredEsm from './destructured-esm';
 import * as EntryReexportEsm from './entry-reexport-esm';
-import { Outer } from './ns-reexport';
+import { readRuntime, readTypeOnly, readTypeOnlyEsm } from './deps';
 import { aliasedMember } from './local-alias';
 
 // The entry re-exports the binding itself, so consumers the graph cannot
 // enumerate reach every name on the required module object.
 export import EntryReexport = require('./entry-reexport');
-
-export namespace EntryApi {
-  export import EntryNs = require('./entry-ns');
-}
 
 export { EntryReexportEsm };
 
@@ -32,6 +28,6 @@ console.log(Assigned.viaAssignment);
 console.log(Narrowed.used);
 console.log(NarrowedEsm.esmUsed);
 console.log(Object.values(Whole));
-console.log(Outer.outerValue);
+console.log(readRuntime, readTypeOnly, readTypeOnlyEsm);
 console.log(aliasedMember);
 console.log(destructuredUsed, esmDestructuredUsed);

@@ -1,7 +1,13 @@
 {
   "name": "issue-2365-import-equals",
   "main": "src/index.ts",
+  "dependencies": {
+    "ambient-dep": "^1.0.0"
+  },
   "devDependencies": {
+    "runtime-dep": "^1.0.0",
+    "type-only-dep": "^1.0.0",
+    "type-only-esm-dep": "^1.0.0",
     "typescript": "^5.9.3"
   }
 }

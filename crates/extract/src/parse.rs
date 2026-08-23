@@ -1136,6 +1136,10 @@ pub struct SemanticUsage {
     pub declaration_merges: Vec<fallow_types::extract::DeclarationMergeFact>,
     pub(crate) mock_api_reference_spans: MockApiReferenceSpans,
     pub(crate) module_binding_reference_spans: rustc_hash::FxHashSet<Span>,
+    /// `import X = require('./x')` binding names the file also binds somewhere
+    /// else. Name-keyed credit for those is unsafe, so the exported form's
+    /// whole-object mark is withdrawn for them.
+    pub(crate) shadowed_import_equals_bindings: Vec<String>,
 }
 
 pub fn compute_semantic_usage(
@@ -1166,6 +1170,9 @@ pub fn compute_semantic_usage_for_extractor(
         &computed_enum_key_spans,
     );
     extractor.resolve_computed_enum_key_uses(&semantic_usage.module_binding_reference_spans);
+    extractor.drop_shadowed_import_equals_whole_object_uses(
+        &semantic_usage.shadowed_import_equals_bindings,
+    );
     semantic_usage
 }
 
@@ -1219,35 +1226,13 @@ fn compute_semantic_usage_with_candidates(
         }
     }
 
-    // `import X = require('./y')` binds `X` in both the type and the value
-    // namespace, the same way `import * as X from './y'` does, but the require
-    // path records it outside `imports`, so the loop above never sees it.
-    // Classify it here: without a type-space entry `X.SomeType` in an
-    // annotation leaves the target's type exports uncredited (issue #2365). An
-    // unreferenced binding is deliberately kept out of `unused`: the require
-    // path has never reported an unused binding, and the exported form
-    // (`export import X = require('./y')`) legitimately has no local reference.
-    for local_name in import_equals_bindings {
-        if local_name.is_empty() {
-            continue;
-        }
-        let name = oxc_str::Ident::from(local_name.as_str());
-        let Some(symbol_id) = scoping.get_binding(root_scope, name) else {
-            continue;
-        };
-        let mut has_type_references = false;
-        let mut has_value_references = false;
-        for reference in scoping.get_resolved_references(symbol_id) {
-            has_type_references |= reference.is_type();
-            has_value_references |= reference.is_value();
-        }
-        if has_type_references {
-            type_referenced_bindings.insert(local_name.clone());
-        }
-        if has_value_references {
-            value_referenced_bindings.insert(local_name.clone());
-        }
-    }
+    let shadowed_import_equals_bindings = classify_import_equals_bindings(
+        scoping,
+        root_scope,
+        import_equals_bindings,
+        &mut type_referenced_bindings,
+        &mut value_referenced_bindings,
+    );
 
     unused.sort_unstable();
 
@@ -1292,7 +1277,80 @@ fn compute_semantic_usage_with_candidates(
         declaration_merges,
         mock_api_reference_spans,
         module_binding_reference_spans,
+        shadowed_import_equals_bindings,
     }
+}
+
+/// Classify `import X = require('./y')` bindings for type and value usage, and
+/// report which of their names the file binds more than once.
+///
+/// The binding lives in both the type and the value namespace, the same way
+/// `import * as X from './y'` does, but the require path records it outside
+/// `imports`, so the caller's `imports` loop never sees it. Without a
+/// type-space entry, `X.SomeType` in an annotation leaves the target's type
+/// exports uncredited (issue #2365). An unreferenced binding is deliberately
+/// left out of the unused-binding list: the require path has never reported
+/// one, and the exported form (`export import X = require('./y')`)
+/// legitimately has no local reference.
+///
+/// A name bound by a second symbol anywhere in the file is returned as
+/// shadowed. `whole_object_uses` is keyed by bare name, so the exported form's
+/// mark has to be withdrawn there: crediting an unrelated same-named binding
+/// as a whole object would silently delete real findings. Only names with a
+/// root binding are considered; one declared inside a namespace or
+/// ambient-module body has no module-flat identity to protect.
+fn classify_import_equals_bindings(
+    scoping: &oxc_semantic::Scoping,
+    root_scope: oxc_semantic::ScopeId,
+    import_equals_bindings: &[String],
+    type_referenced_bindings: &mut rustc_hash::FxHashSet<String>,
+    value_referenced_bindings: &mut rustc_hash::FxHashSet<String>,
+) -> Vec<String> {
+    if import_equals_bindings.is_empty() {
+        return Vec::new();
+    }
+
+    let candidates: rustc_hash::FxHashSet<&str> = import_equals_bindings
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !name.is_empty())
+        .collect();
+    let mut name_counts: rustc_hash::FxHashMap<&str, usize> = rustc_hash::FxHashMap::default();
+    for symbol_id in scoping.symbol_ids() {
+        if let Some(name) = candidates.get(scoping.symbol_name(symbol_id)) {
+            *name_counts.entry(*name).or_default() += 1;
+        }
+    }
+
+    let mut shadowed = Vec::new();
+    for local_name in import_equals_bindings {
+        if local_name.is_empty() {
+            continue;
+        }
+        let name = oxc_str::Ident::from(local_name.as_str());
+        let Some(symbol_id) = scoping.get_binding(root_scope, name) else {
+            continue;
+        };
+        if name_counts
+            .get(local_name.as_str())
+            .is_some_and(|count| *count > 1)
+        {
+            shadowed.push(local_name.clone());
+        }
+        let mut has_type_references = false;
+        let mut has_value_references = false;
+        for reference in scoping.get_resolved_references(symbol_id) {
+            has_type_references |= reference.is_type();
+            has_value_references |= reference.is_value();
+        }
+        if has_type_references {
+            type_referenced_bindings.insert(local_name.clone());
+        }
+        if has_value_references {
+            value_referenced_bindings.insert(local_name.clone());
+        }
+    }
+    shadowed
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

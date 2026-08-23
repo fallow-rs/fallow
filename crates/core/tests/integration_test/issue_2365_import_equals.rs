@@ -8,9 +8,18 @@
 //! the module object to consumers the graph cannot enumerate, so it credits
 //! every export of the target exactly as `import * as X; export { X }` does.
 //!
+//! `import type X = require('pkg')` is the one spelling TypeScript erases
+//! entirely, so it keeps the type-space edge but never claims the package is
+//! imported at runtime, matching `import type * as X from 'pkg'`.
+//!
 //! `import X = Some.Namespace` stays out of scope: an entity-name reference
 //! names a binding declared in the same file, not a module, so it records no
 //! edge at all.
+//!
+//! Every shape in the fixture is TypeScript the compiler accepts. The
+//! namespace-body spelling (`namespace N { export import X = require('./x') }`)
+//! is TS1147 and therefore lives only in the extractor's lenient-parse unit
+//! test, not here.
 
 use super::common::{create_config, fixture_path};
 
@@ -75,7 +84,6 @@ fn import_equals_require_makes_the_target_reachable() {
         "src/narrowed.ts",
         "src/whole.ts",
         "src/whole-deep.ts",
-        "src/inner.ts",
     ] {
         assert!(
             !unused_files.iter().any(|p| p.ends_with(path)),
@@ -202,19 +210,16 @@ fn import_equals_destructuring_off_the_binding_narrows_like_a_namespace_import()
 /// its credit. On an entry point there is no local member access to narrow
 /// with, and without the whole-object credit `is_entry_with_no_access` would
 /// turn every export of the target into a false `unused-export` row (#2373).
-/// Both the file-level form and the exported-namespace-body form are pinned,
-/// against the `import * as X; export { X }` twin.
+/// The file-level form is pinned against the `import * as X; export { X }`
+/// twin; it is the only spelling TypeScript accepts outside a `declare module`
+/// body.
 #[test]
 fn export_import_equals_on_an_entry_point_credits_the_whole_module() {
     let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
         .expect("analysis should succeed");
     let unused_files = unused_files(&results);
 
-    for file in [
-        "src/entry-reexport.ts",
-        "src/entry-reexport-esm.ts",
-        "src/entry-ns.ts",
-    ] {
+    for file in ["src/entry-reexport.ts", "src/entry-reexport-esm.ts"] {
         // An unreachable file stacks no unused-export rows underneath its
         // unused-file row, so reachability is asserted first.
         assert!(
@@ -229,27 +234,76 @@ fn export_import_equals_on_an_entry_point_credits_the_whole_module() {
     }
 }
 
-/// `export import Inner = require('./inner')` inside a namespace body is still
-/// an import of `./inner`, and the binding is public API under `Outer.Inner`,
-/// so every export of the target is credited the way `export { Inner }` credits
-/// a namespace import. Narrowing to the members the declaring file happens to
-/// read would be unsound: a consumer holding `Outer.Inner` can reach any of
-/// them.
+/// A `declare module '...'` body is the only context outside file scope where
+/// TypeScript accepts `export import X = require('...')`, and a relative
+/// specifier is TS2439 there, so the reference names a package. The edge still
+/// has to be recorded: without it the package is a false `unused-dependency`.
 #[test]
-fn export_import_equals_inside_a_namespace_credits_the_whole_module() {
+fn export_import_equals_inside_an_ambient_module_credits_the_package() {
     let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
         .expect("analysis should succeed");
 
+    let unused: Vec<String> = results
+        .unused_dependencies
+        .iter()
+        .map(|f| f.dep.package_name.clone())
+        .collect();
     assert!(
-        !unused_files(&results)
-            .iter()
-            .any(|p| p.ends_with("src/inner.ts")),
-        "the namespace body's import edge keeps the target reachable"
+        !unused.iter().any(|name| name == "ambient-dep"),
+        "the ambient body's import edge credits the package: {unused:?}"
     );
+    let unlisted: Vec<String> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|f| f.dep.package_name.clone())
+        .collect();
     assert!(
-        unused_exports_of(&results, "src/inner.ts").is_empty(),
-        "a binding re-exported as a namespace member observes the whole object: {:?}",
-        unused_exports_of(&results, "src/inner.ts")
+        unlisted.is_empty(),
+        "the package is declared in the manifest, so nothing is unlisted: {unlisted:?}"
+    );
+}
+
+/// `import type X = require('pkg')` is erased by TypeScript: the emitted
+/// JavaScript holds no `require` call, so the package is a type-space
+/// reference and never a runtime import. It must therefore report exactly what
+/// `import type * as X from 'pkg'` reports, which is nothing, while the
+/// unerased `import X = require('pkg')` next to it still reports the
+/// devDependency as production usage.
+#[test]
+fn type_only_import_equals_is_not_a_runtime_dependency() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+
+    let in_production: Vec<String> = results
+        .dev_dependencies_in_production
+        .iter()
+        .map(|f| f.dep.package_name.clone())
+        .collect();
+    let unused_dev: Vec<String> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|f| f.dep.package_name.clone())
+        .collect();
+
+    for package in ["type-only-dep", "type-only-esm-dep"] {
+        assert!(
+            !in_production.iter().any(|name| name == package),
+            "{package} is erased at compile time and is not imported at runtime: \
+             {in_production:?}"
+        );
+        assert!(
+            !unused_dev.iter().any(|name| name == package),
+            "{package} is used in a type position and is not an unused devDependency: \
+             {unused_dev:?}"
+        );
+    }
+
+    // Positive control: the same lane on the unerased spelling still fires, so
+    // the assertions above are not passing because the lane is dead.
+    assert!(
+        in_production.iter().any(|name| name == "runtime-dep"),
+        "an unerased `import X = require('pkg')` on a devDependency is production usage: \
+         {in_production:?}"
     );
 }
 

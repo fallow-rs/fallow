@@ -167,15 +167,46 @@ fn import_equals_require_records_member_accesses_through_the_binding() {
     );
 }
 
-/// `export import X = require('./y')` inside a namespace body is still an
-/// import of `./y`.
+/// A `declare module '...'` body is the only context outside file scope where
+/// TypeScript accepts `export import X = require('...')`. The edge is recorded
+/// there too, so the package is not a false unused dependency.
 #[test]
-fn export_import_equals_require_inside_a_namespace_records_the_require_call() {
-    let info =
-        parse_source("export namespace Outer {\n  export import Inner = require('./inner');\n}");
+fn export_import_equals_require_inside_an_ambient_module_records_the_require_call() {
+    let info = parse_source(
+        "declare module 'virtual:api' {\n  export import Inner = require('inner-pkg');\n}",
+    );
     assert_eq!(info.require_calls.len(), 1);
-    assert_eq!(info.require_calls[0].source, "./inner");
+    assert_eq!(info.require_calls[0].source, "inner-pkg");
     assert_eq!(info.require_calls[0].local_name.as_deref(), Some("Inner"));
+}
+
+/// `import type X = require('pkg')` is the one require spelling TypeScript
+/// erases: the emitted JavaScript holds no `require` call, so the edge is
+/// type-only and dependency classification must not read it as runtime usage.
+/// The unerased spelling next to it stays a runtime require.
+#[test]
+fn import_type_equals_require_records_a_type_only_require_call() {
+    let erased = parse_source("import type T = require('pkg');\nexport type Alias = T.Shape;");
+    assert_eq!(erased.require_calls.len(), 1);
+    assert_eq!(erased.require_calls[0].source, "pkg");
+    assert!(
+        erased.require_calls[0].is_type_only,
+        "`import type X = require(...)` emits no require call at runtime"
+    );
+
+    let runtime = parse_source("import T = require('pkg');\nconsole.log(T.value);");
+    assert_eq!(runtime.require_calls.len(), 1);
+    assert!(
+        !runtime.require_calls[0].is_type_only,
+        "`import X = require(...)` does emit a require call"
+    );
+
+    let variable = parse_source("const T = require('pkg');\nconsole.log(T.value);");
+    assert_eq!(variable.require_calls.len(), 1);
+    assert!(
+        !variable.require_calls[0].is_type_only,
+        "`const X = require(...)` has no type-only spelling"
+    );
 }
 
 /// Deliberate negative control: `import X = Some.Namespace` names an entity
@@ -264,10 +295,9 @@ fn import_equals_require_never_reports_an_unused_import_binding() {
     );
 }
 
-/// `export import X = require('./x')` hands the module object to consumers the
-/// graph cannot enumerate, so the binding is recorded as a whole-object use and
-/// every export of the target keeps its credit. Both the file-level form and
-/// the exported-namespace-body form record it.
+/// `export import X = require('./x')` at file level hands the module object to
+/// consumers the graph cannot enumerate, so the binding is recorded as a
+/// whole-object use and every export of the target keeps its credit.
 #[test]
 fn export_import_equals_require_records_a_whole_object_use() {
     let file_level = parse_source("export import Users = require('./users');");
@@ -279,22 +309,31 @@ fn export_import_equals_require_records_a_whole_object_use() {
         "file-level whole-object uses: {:?}",
         file_level.whole_object_uses
     );
+}
 
-    let in_namespace =
+/// Lenient-parse pin, deliberately non-compiling input: TypeScript rejects
+/// `export import X = require('...')` inside a namespace body with TS1147, so
+/// no compiling project reaches this arm. fallow parses leniently and still
+/// has to behave, which is what this pins. The valid spellings are covered by
+/// the file-level and ambient-module tests above.
+#[test]
+fn export_import_equals_inside_a_namespace_body_is_a_lenient_parse_pin() {
+    let info =
         parse_source("export namespace Outer {\n  export import Inner = require('./inner');\n}");
+    assert_eq!(info.require_calls.len(), 1);
+    assert_eq!(info.require_calls[0].source, "./inner");
+    assert_eq!(info.require_calls[0].local_name.as_deref(), Some("Inner"));
     assert!(
-        in_namespace
-            .whole_object_uses
-            .iter()
-            .any(|name| name == "Inner"),
+        info.whole_object_uses.iter().any(|name| name == "Inner"),
         "namespace-body whole-object uses: {:?}",
-        in_namespace.whole_object_uses
+        info.whole_object_uses
     );
 }
 
 /// Deliberate negative controls for the whole-object mark: an unexported
-/// binding is narrowable through its member accesses, and the entity-name form
-/// is a local alias with no module object behind it.
+/// binding is narrowable through its member accesses, a binding inside a
+/// `declare module` body augments that module rather than this file's public
+/// API, and the entity-name form is a local alias with no module object.
 #[test]
 fn import_equals_without_export_records_no_whole_object_use() {
     let plain = parse_source("import Users = require('./users');\nconsole.log(Users.alpha);");
@@ -304,16 +343,13 @@ fn import_equals_without_export_records_no_whole_object_use() {
         plain.whole_object_uses
     );
 
-    let local_namespace = parse_source(
-        "namespace Local {\n  export import Inner = require('./inner');\n}\nconsole.log(Local);",
+    let ambient = parse_source(
+        "declare module 'virtual:api' {\n  export import Inner = require('inner-pkg');\n}",
     );
     assert!(
-        !local_namespace
-            .whole_object_uses
-            .iter()
-            .any(|name| name == "Inner"),
-        "a binding inside an unexported namespace is not public API: {:?}",
-        local_namespace.whole_object_uses
+        ambient.whole_object_uses.is_empty(),
+        "an ambient-module member is not this file's public API: {:?}",
+        ambient.whole_object_uses
     );
 
     let entity_name = parse_source(
@@ -323,5 +359,40 @@ fn import_equals_without_export_records_no_whole_object_use() {
         entity_name.whole_object_uses.is_empty(),
         "an entity-name alias has no module object: {:?}",
         entity_name.whole_object_uses
+    );
+}
+
+/// `whole_object_uses` is keyed by bare name, so the mark is only safe while
+/// the name resolves to the one binding. A same-named local in another scope
+/// would otherwise be read as a whole-object use and credit every member of
+/// whatever it holds, deleting real findings.
+#[test]
+fn export_import_equals_whole_object_use_is_withdrawn_when_the_name_is_shadowed() {
+    let shadowed = parse_source(
+        "export import Session = require('./beta');\nexport const run = (): void => {\n  const \
+         Session = makeSession();\n  Session.start();\n};\n",
+    );
+    assert!(
+        !shadowed
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "Session"),
+        "a shadowed name cannot carry a bare-name whole-object mark: {:?}",
+        shadowed.whole_object_uses
+    );
+
+    // Positive control: the identical declaration keeps its mark when nothing
+    // else in the file binds the name.
+    let unshadowed = parse_source(
+        "export import Session = require('./beta');\nexport const run = (): void => {\n  const \
+         local = makeSession();\n  local.start();\n};\n",
+    );
+    assert!(
+        unshadowed
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "Session"),
+        "an unshadowed name keeps its mark: {:?}",
+        unshadowed.whole_object_uses
     );
 }

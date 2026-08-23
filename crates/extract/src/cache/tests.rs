@@ -1163,6 +1163,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             destructured_names: Vec::new(),
             local_name: None,
             source_span: oxc_span::Span::default(),
+            is_type_only: false,
         }],
         package_path_references: Box::default(),
         member_accesses: vec![MemberAccess {
@@ -3688,6 +3689,7 @@ fn module_to_cached_roundtrip_require_with_destructured() {
             destructured_names: vec!["readFile".to_string(), "writeFile".to_string()],
             local_name: None,
             source_span: oxc_span::Span::default(),
+            is_type_only: false,
         }],
         package_path_references: Box::default(),
         member_accesses: vec![].into(),

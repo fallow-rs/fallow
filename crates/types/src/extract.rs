@@ -3112,6 +3112,13 @@ pub struct RequireCallInfo {
     pub destructured_names: Vec<String>,
     /// The local variable name for `const x = require(...)`.
     pub local_name: Option<String>,
+    /// `true` for `import type X = require('...')`, the one require spelling
+    /// TypeScript erases entirely: the emitted JavaScript contains no
+    /// `require` call, so the target is a type-space reference and never a
+    /// runtime dependency. Always `false` for `const x = require(...)`, which
+    /// has no type-only spelling. Read by dependency classification so a
+    /// type-only devDependency is not reported as production usage.
+    pub is_type_only: bool,
 }
 
 /// Result of parsing all files, including incremental cache statistics.
@@ -3502,6 +3509,7 @@ mod tests {
                 source_span: span(),
                 destructured_names: Vec::new(),
                 local_name: Some("required".to_string()),
+                is_type_only: false,
             }],
             package_path_references: vec!["react".to_string()].into(),
             member_accesses: vec![MemberAccess {
