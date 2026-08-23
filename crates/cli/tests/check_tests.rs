@@ -1536,3 +1536,76 @@ fn combined_json_root_carries_a_diagnostic_only_the_dupes_walk_recorded() {
     );
     assert_eq!(skipped[0]["path"], "src/huge.test.ts");
 }
+
+/// Issue #2366: each analysis contributes the workspace-discovery list ITS OWN
+/// config load produced, which is the list `fallow list --workspaces` reports.
+/// That makes the combined root the only analysis envelope in agreement with
+/// the workspace listing: the standalone `dead-code` / `check` / `health` /
+/// `dupes` envelopes read the process diagnostics registry, which a later
+/// re-stash in the same run can leave without the entry. Pin only the
+/// agreement, so closing that separate registry-read gap does not break this.
+#[test]
+fn combined_json_root_agrees_with_the_workspace_listing_on_undeclared_workspaces() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("packages/inner/src")).expect("create inner package");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2366-undeclared","private":true,"main":"src/index.ts","workspaces":["packages/declared"]}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        dir.path().join("packages/inner/package.json"),
+        r#"{"name":"inner-pkg","version":"1.0.0"}"#,
+    )
+    .expect("write inner package.json");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::write(
+        dir.path().join("packages/inner/src/index.ts"),
+        "export const inner = 2;\n",
+    )
+    .expect("write inner source");
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+
+    let listing = parse_json(&run_fallow_raw(&[
+        "list",
+        "--workspaces",
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    let listed: Vec<serde_json::Value> = listing["workspace_diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|diagnostic| diagnostic["kind"] == "undeclared-workspace")
+        .collect();
+    assert_eq!(
+        listed.len(),
+        1,
+        "the workspace listing reports the undeclared package: {}",
+        listing["workspace_diagnostics"]
+    );
+    assert_eq!(listed[0]["path"], "packages/inner");
+
+    let combined = parse_json(&run_fallow_raw(&[
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+    let undeclared = combined_root_diagnostics_of_kind(&combined, "undeclared-workspace");
+    assert_eq!(
+        undeclared.len(),
+        1,
+        "the combined root reports what the workspace listing reports: {}",
+        combined["workspace_diagnostics"]
+    );
+    assert_eq!(undeclared[0]["path"], "packages/inner");
+}

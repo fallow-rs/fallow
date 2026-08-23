@@ -69,7 +69,24 @@ pub struct CheckOutput {
     /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
-    /// Workspace-discovery diagnostics surfaced during config load.
+    /// Non-fatal diagnostics about the project itself, from all three stages
+    /// that record them (issue #473):
+    ///
+    /// - workspace discovery, at config load: `undeclared-workspace`,
+    ///   `malformed-package-json`, `glob-matched-no-package-json`,
+    ///   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
+    /// - source discovery, during the file walk: `skipped-large-file`,
+    ///   `skipped-minified-file`, `source-read-failure`;
+    /// - dead-code analysis, from the dependency-catalog and override
+    ///   detectors: `malformed-pnpm-workspace-yaml`,
+    ///   `bun-lockb-override-resolution-skipped`.
+    ///
+    /// Analysis-stage kinds therefore reach only the envelopes whose run
+    /// includes a dead-code analyze pass, never a standalone
+    /// `fallow dupes --format json`. `path` is project-root-relative with
+    /// forward slashes; the array is omitted when empty. The same list is
+    /// repeated on each top-level command's envelope so single-command
+    /// consumers see it without having to look at a separate top-level field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted
@@ -176,7 +193,8 @@ pub struct CheckOutputInput {
     pub config_fixable: bool,
     /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<Meta>,
-    /// Workspace-discovery diagnostics surfaced during config load.
+    /// Workspace-discovery, source-discovery, and analysis-stage diagnostics.
+    /// See [`CheckOutput::workspace_diagnostics`] for the contract.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings.
     pub next_steps: Vec<NextStep>,

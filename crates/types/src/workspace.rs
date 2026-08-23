@@ -231,6 +231,26 @@ impl WorkspaceDiagnostic {
             message,
         }
     }
+
+    /// Return this diagnostic with `path` rewritten relative to `root`.
+    ///
+    /// `path` is stored absolute so callers can act on it. Every JSON envelope
+    /// emits it project-relative instead: the analysis envelopes get there
+    /// through the post-serialisation `strip_root_prefix` pass, which the
+    /// `fallow workspaces` / `fallow list --workspaces` envelope and the MCP
+    /// `project_info` tool never run, so those emitted the absolute path while
+    /// the sibling `workspaces[].path` next to it was relative. They normalise
+    /// at the typed layer with this method instead.
+    ///
+    /// Paths outside `root` (canonicalisation crossed a symlink) are left
+    /// absolute, matching how [`Self::new`] renders the message.
+    #[must_use]
+    pub fn into_root_relative(mut self, root: &Path) -> Self {
+        if let Ok(relative) = self.path.strip_prefix(root) {
+            self.path = relative.to_path_buf();
+        }
+        self
+    }
 }
 
 /// Strip the project root from absolute paths embedded inside variant
@@ -492,6 +512,26 @@ mod tests {
         );
         let json = serde_json::to_value(&diag).expect("diagnostic serializes");
         assert_eq!(json["kind"], "bun-lockb-override-resolution-skipped");
+    }
+
+    #[test]
+    fn into_root_relative_strips_the_root_and_keeps_outside_paths_absolute() {
+        let root = Path::new("/project");
+        let inside = WorkspaceDiagnostic::new(
+            root,
+            root.join("packages/inner"),
+            WorkspaceDiagnosticKind::UndeclaredWorkspace,
+        )
+        .into_root_relative(root);
+        assert_eq!(inside.path, Path::new("packages/inner"));
+
+        let outside = WorkspaceDiagnostic::new(
+            root,
+            PathBuf::from("/elsewhere/packages/inner"),
+            WorkspaceDiagnosticKind::UndeclaredWorkspace,
+        )
+        .into_root_relative(root);
+        assert_eq!(outside.path, Path::new("/elsewhere/packages/inner"));
     }
 
     #[test]

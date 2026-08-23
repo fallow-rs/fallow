@@ -84,8 +84,10 @@ pub struct WorkspacesOutput<Diagnostic> {
     /// declarations. Paths are project-root-relative and use forward slashes.
     pub workspaces: Vec<WorkspaceInfo>,
     /// Workspace discovery diagnostics produced while reading workspace
-    /// declarations. Present for compatibility with the current wire contract,
-    /// even when empty.
+    /// declarations. Paths are project-root-relative and use forward slashes,
+    /// like `workspaces[].path` and like the `workspace_diagnostics[]` array on
+    /// the analysis envelopes. Present for compatibility with the current wire
+    /// contract, even when empty.
     pub workspace_diagnostics: Vec<Diagnostic>,
 }
 

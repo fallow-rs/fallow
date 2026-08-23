@@ -393,9 +393,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`production: { deadCode, health, dupes }`, `--production-health`) can give
   those walks different file sets: reporting only what the last walk saw would
   drop, for example, a `skipped-large-file` that the dead-code walk recorded
-  for a test file the production health walk never looks at. For a run whose
-  analyses share one mode the array is exactly what the standalone `dead-code`
-  envelope carries, in the same order. The carrier is
+  for a test file the production health walk never looks at. For the
+  source-discovery and analysis-stage kinds on a run whose analyses share one
+  mode, the array is exactly what the standalone `dead-code` envelope carries,
+  in the same order. For the workspace-discovery kinds it can be BROADER: each
+  analysis contributes the list its own config load produced, the same list
+  `fallow list --workspaces` and the MCP `project_info` tool report, while the
+  standalone `dead-code`, `check`, `health`, and `dupes` envelopes read the
+  process diagnostics registry and can miss an `undeclared-workspace` or
+  `glob-matched-no-package-json` entry those two commands do report. That gap
+  in the standalone envelopes predates this change and is unchanged by it; the
+  combined root simply no longer inherits it. The carrier is
   the envelope root rather than a section, so a run that drops a section
   (`--skip check`, `--only health`, `--only dupes`) reports every diagnostic
   its analyses recorded instead of dropping them while stderr warns. The
@@ -424,6 +432,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   standalone `dead-code`, `check`, `health`, and `dupes` envelopes and every
   non-JSON format are byte-identical to before; the three envelopes named
   above are not, whenever the run records a diagnostic.
+
+- **`fallow workspaces --format json` and `fallow list --workspaces --format
+  json` now emit a project-relative `workspace_diagnostics[].path`.** Every
+  other envelope that carries the array reports the path relative to the
+  project root, and so does the `workspaces[].path` field right next to it in
+  the same envelope, but the list envelope emitted the absolute path because
+  it is the one envelope with no post-serialization root-prefix strip. A
+  diagnostic for `packages/inner` now reads `"path": "packages/inner"` instead
+  of `"path": "/Users/you/project/packages/inner"`, so the output no longer
+  leaks the checkout location and no longer differs between two checkouts of
+  the same repository. The MCP `project_info` tool, which shares the same
+  builder, is fixed with it. A diagnostic path outside the project root
+  (canonicalisation crossed a symlink) stays absolute, matching how the
+  human-readable `message` renders it. Consumers that joined the emitted path
+  onto the project root already got the right answer for every other envelope
+  and now get it here too; a consumer that treated this one field as absolute
+  needs to join it onto the root. The typed `workspace_diagnostics[]`
+  schema description also said the kinds are "surfaced during config load",
+  which has been wrong since source-discovery diagnostics joined the array
+  in [#1086](https://github.com/fallow-rs/fallow/issues/1086); it now names
+  all three recording stages and which envelopes each kind can reach.
 
 - **Star re-exports inside `declare module '...'` bodies credit the full ES
   star surface of their target without adding to the declaring file's export

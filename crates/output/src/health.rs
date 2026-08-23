@@ -57,7 +57,10 @@ pub struct HealthOutput<Report, Group> {
     /// `_meta` block with metric definitions, when `--explain` was passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
-    /// Workspace-discovery diagnostics surfaced during config load.
+    /// Workspace-discovery, source-discovery, and analysis-stage diagnostics
+    /// for the run. See `CheckOutput::workspace_diagnostics` for the full
+    /// contract: the kinds each stage records, project-root-relative paths,
+    /// omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings. See
@@ -84,7 +87,8 @@ pub struct HealthOutputInput<Report, Group> {
     pub groups: Option<Vec<Group>>,
     /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<Meta>,
-    /// Workspace-discovery diagnostics surfaced during config load.
+    /// Workspace-discovery, source-discovery, and analysis-stage diagnostics.
+    /// See `CheckOutput::workspace_diagnostics` for the contract.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings.
     pub next_steps: Vec<NextStep>,

@@ -2074,7 +2074,8 @@ fn source_discovery_diagnostics_reach_sessions_by_value_not_through_the_registry
     assert_eq!(
         writers,
         ["crates/core/src/discover/walk.rs"],
-        "the source walk is the only writer of the registry's source-discovery set; a second          writer reintroduces the interleaving that loses one walk's skips"
+        "the source walk is the only writer of the registry's source-discovery set; a second \
+         writer reintroduces the interleaving that loses one walk's skips"
     );
 
     let session =
@@ -2085,7 +2086,8 @@ fn source_discovery_diagnostics_reach_sessions_by_value_not_through_the_registry
     );
     assert!(
         session.contains("!diagnostic.kind.is_source_discovery()"),
-        "the session snapshot must drop the registry's source-discovery entries in favour of its          own walk's list"
+        "the session snapshot must drop the registry's source-discovery entries in favour of \
+         its own walk's list"
     );
 }
 

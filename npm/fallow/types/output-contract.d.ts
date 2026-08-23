@@ -2458,7 +2458,24 @@ regression?: (RegressionResult | null)
  */
 _meta?: (Meta | null)
 /**
- * Workspace-discovery diagnostics surfaced during config load.
+ * Non-fatal diagnostics about the project itself, from all three stages
+ * that record them (issue #473):
+ *
+ * - workspace discovery, at config load: `undeclared-workspace`,
+ *   `malformed-package-json`, `glob-matched-no-package-json`,
+ *   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
+ * - source discovery, during the file walk: `skipped-large-file`,
+ *   `skipped-minified-file`, `source-read-failure`;
+ * - dead-code analysis, from the dependency-catalog and override
+ *   detectors: `malformed-pnpm-workspace-yaml`,
+ *   `bun-lockb-override-resolution-skipped`.
+ *
+ * Analysis-stage kinds therefore reach only the envelopes whose run
+ * includes a dead-code analyze pass, never a standalone
+ * `fallow dupes --format json`. `path` is project-root-relative with
+ * forward slashes; the array is omitted when empty. The same list is
+ * repeated on each top-level command's envelope so single-command
+ * consumers see it without having to look at a separate top-level field.
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
@@ -9919,8 +9936,10 @@ workspace_count: number
 workspaces: WorkspaceInfo[]
 /**
  * Workspace discovery diagnostics produced while reading workspace
- * declarations. Present for compatibility with the current wire contract,
- * even when empty.
+ * declarations. Paths are project-root-relative and use forward slashes,
+ * like `workspaces[].path` and like the `workspace_diagnostics[]` array on
+ * the analysis envelopes. Present for compatibility with the current wire
+ * contract, even when empty.
  */
 workspace_diagnostics: WorkspaceDiagnostic[]
 }
@@ -10095,7 +10114,10 @@ groups?: (HealthGroup[] | null)
  */
 _meta?: (Meta | null)
 /**
- * Workspace-discovery diagnostics surfaced during config load.
+ * Workspace-discovery, source-discovery, and analysis-stage diagnostics
+ * for the run. See `CheckOutput::workspace_diagnostics` for the full
+ * contract: the kinds each stage records, project-root-relative paths,
+ * omitted when empty.
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
@@ -10244,11 +10266,13 @@ groups?: (DuplicationGroup[] | null)
  */
 _meta?: (Meta | null)
 /**
- * Workspace-discovery diagnostics surfaced during config load
+ * Workspace-discovery and source-discovery diagnostics for the run
  * (issue #473). See `CheckOutput::workspace_diagnostics` for the full
  * contract; the same list is repeated on each top-level command's
  * envelope so single-command consumers see it without having to look at
- * a separate top-level field.
+ * a separate top-level field. A standalone `fallow dupes` run has no
+ * dead-code analyze pass, so the two analysis-stage kinds never appear
+ * here.
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**

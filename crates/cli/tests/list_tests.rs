@@ -1031,3 +1031,56 @@ fn list_files_includes_plugin_scoped_hidden_dirs_for_remix() {
         "expected app/.server/db.ts in files: {files:?}"
     );
 }
+
+/// Issue #2366 follow-up: the `fallow workspaces` / `fallow list --workspaces`
+/// envelope has no post-serialization root-prefix strip, so its
+/// `workspace_diagnostics[].path` used to be the only absolute path in any
+/// fallow JSON envelope while the `workspaces[].path` next to it was relative.
+#[test]
+fn list_workspaces_json_emits_project_relative_diagnostic_paths() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("packages/inner/src")).expect("create inner package dir");
+    fs::create_dir_all(root.join("src")).expect("create source dir");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"undeclared-workspace-root","private":true,"workspaces":["packages/declared"]}"#,
+    )
+    .expect("write root manifest");
+    fs::write(
+        root.join("packages/inner/package.json"),
+        r#"{"name":"inner-pkg","version":"1.0.0"}"#,
+    )
+    .expect("write inner manifest");
+    fs::write(root.join("src/index.ts"), "export const value = 1;\n").expect("write source");
+    fs::write(
+        root.join("packages/inner/src/index.ts"),
+        "export const inner = 2;\n",
+    )
+    .expect("write inner source");
+
+    for subcommand in ["list", "workspaces"] {
+        let args: Vec<&str> = if subcommand == "list" {
+            vec!["list", "--workspaces", "--format", "json", "--quiet"]
+        } else {
+            vec!["workspaces", "--format", "json", "--quiet"]
+        };
+        let output = run_fallow_combined_in_root(root, &args);
+        assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+
+        let json = parse_json(&output);
+        let diagnostics = json["workspace_diagnostics"]
+            .as_array()
+            .expect("workspace_diagnostics array");
+        let path = diagnostics
+            .iter()
+            .find(|entry| entry["kind"] == "undeclared-workspace")
+            .expect("the undeclared workspace is reported")["path"]
+            .as_str()
+            .expect("diagnostic path string");
+        assert_eq!(
+            path, "packages/inner",
+            "`fallow {subcommand}` must emit a project-relative diagnostic path, got {path}"
+        );
+    }
+}

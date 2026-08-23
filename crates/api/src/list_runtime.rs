@@ -438,7 +438,13 @@ fn collect_workspace_output(
     WorkspacesOutput {
         workspace_count: workspaces.len(),
         workspaces,
-        workspace_diagnostics: diagnostics.to_vec(),
+        // Project-relative like the sibling `workspaces[].path` and like every
+        // analysis envelope's `workspace_diagnostics[]`. The list envelope has
+        // no post-serialization `strip_root_prefix` pass, so it normalises here.
+        workspace_diagnostics: diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.clone().into_root_relative(root))
+            .collect(),
     }
 }
 
@@ -643,6 +649,27 @@ mod tests {
 
     use super::*;
 
+    /// The `fallow workspaces` / `fallow list --workspaces` envelope and the
+    /// MCP `project_info` tool have no post-serialization `strip_root_prefix`
+    /// pass, so `collect_workspace_output` is what makes their diagnostic
+    /// paths project-relative like every other envelope's.
+    #[test]
+    fn workspace_output_emits_project_relative_diagnostic_paths() {
+        let root = Path::new("/project");
+        let output = collect_workspace_output(
+            root,
+            &[],
+            &[fallow_config::WorkspaceDiagnostic::new(
+                root,
+                root.join("packages/inner"),
+                fallow_config::WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )],
+        );
+
+        let value = serde_json::to_value(&output).expect("workspaces output serializes");
+        assert_eq!(value["workspace_diagnostics"][0]["path"], "packages/inner");
+    }
+
     fn empty_boundary_data() -> BoundaryData {
         BoundaryData {
             zones: vec![],
@@ -813,9 +840,9 @@ mod tests {
         assert!(
             diagnostics.iter().any(|diagnostic| {
                 diagnostic["kind"].as_str() == Some("undeclared-workspace")
-                    && diagnostic["path"]
-                        .as_str()
-                        .is_some_and(|path| path.replace('\\', "/").ends_with("/tools/extra"))
+                    // Project-relative, like every other envelope's
+                    // `workspace_diagnostics[].path` (issue #2366 follow-up).
+                    && diagnostic["path"].as_str() == Some("tools/extra")
             }),
             "project info must include undeclared workspace diagnostics from the reused session, got {diagnostics:#?}"
         );

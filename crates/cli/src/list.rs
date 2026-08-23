@@ -504,7 +504,14 @@ fn workspace_data_to_output(
     fallow_api::WorkspacesOutput {
         workspace_count: workspaces.len(),
         workspaces,
-        workspace_diagnostics: ws.diagnostics.clone(),
+        // Project-relative like the sibling `workspaces[].path` and like every
+        // analysis envelope's `workspace_diagnostics[]`. The list envelope has
+        // no post-serialization `strip_root_prefix` pass, so it normalises here.
+        workspace_diagnostics: ws
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.clone().into_root_relative(root))
+            .collect(),
     }
 }
 

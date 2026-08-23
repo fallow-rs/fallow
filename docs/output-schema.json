@@ -885,7 +885,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Workspace-discovery diagnostics surfaced during config load."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `source-read-failure`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field."
         },
         "next_steps": {
           "type": "array",
@@ -1591,7 +1591,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Workspace-discovery diagnostics surfaced during config load."
+          "description": "Workspace-discovery, source-discovery, and analysis-stage diagnostics\nfor the run. See `CheckOutput::workspace_diagnostics` for the full\ncontract: the kinds each stage records, project-root-relative paths,\nomitted when empty."
         },
         "next_steps": {
           "type": "array",
@@ -2783,7 +2783,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Workspace-discovery diagnostics surfaced during config load\n(issue #473). See `CheckOutput::workspace_diagnostics` for the full\ncontract; the same list is repeated on each top-level command's\nenvelope so single-command consumers see it without having to look at\na separate top-level field."
+          "description": "Workspace-discovery and source-discovery diagnostics for the run\n(issue #473). See `CheckOutput::workspace_diagnostics` for the full\ncontract; the same list is repeated on each top-level command's\nenvelope so single-command consumers see it without having to look at\na separate top-level field. A standalone `fallow dupes` run has no\ndead-code analyze pass, so the two analysis-stage kinds never appear\nhere."
         },
         "next_steps": {
           "type": "array",
@@ -12877,7 +12877,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Workspace discovery diagnostics produced while reading workspace\ndeclarations. Present for compatibility with the current wire contract,\neven when empty."
+          "description": "Workspace discovery diagnostics produced while reading workspace\ndeclarations. Paths are project-root-relative and use forward slashes,\nlike `workspaces[].path` and like the `workspace_diagnostics[]` array on\nthe analysis envelopes. Present for compatibility with the current wire\ncontract, even when empty."
         }
       },
       "required": [

@@ -1577,4 +1577,56 @@ wrapper();
             "the rerun drops the skip once a text bun.lock exists (#2366): {current:?}"
         );
     }
+
+    /// Issue #2366: a config reload that happens AFTER the analyze pass, with
+    /// no further pass to re-record, must not wipe the analysis-stage entry
+    /// from the process registry. This is the long-lived-server shape: an MCP
+    /// or LSP process analyzes once, a later request reloads config for a
+    /// different analysis family, and a session built after that reload still
+    /// reads the registry live. Pins the analysis-stage preserve in
+    /// `stash_workspace_diagnostics`; without it this session reports nothing.
+    #[test]
+    fn config_reload_after_the_analyze_pass_keeps_the_bun_lockb_skip_readable() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        write_single_source_project(
+            root,
+            r#"{"name":"issue-2366-reload-preserve","private":true,"overrides":{"ws":"^8.21.0"}}"#,
+        );
+        std::fs::write(root.join("bun.lockb"), b"placeholder binary lockfile")
+            .expect("write bun.lockb placeholder");
+        let config = fallow_config::FallowConfig::default().resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        let reload_config = || {
+            let (_, diagnostics) =
+                fallow_config::discover_workspaces_with_diagnostics(root, &config.ignore_patterns)
+                    .expect("workspace discovery succeeds");
+            fallow_config::stash_workspace_diagnostics(root, diagnostics);
+        };
+
+        reload_config();
+        let analyzing =
+            AnalysisSession::from_resolved_config(config.clone()).expect("session loads");
+        analyzing
+            .analyze_dead_code()
+            .expect("analysis with bun.lockb only succeeds");
+
+        // A later request reloads config for another analysis family and never
+        // runs a second dead-code pass.
+        reload_config();
+
+        let later = AnalysisSession::from_resolved_config(config.clone()).expect("session loads");
+        let current = later.current_workspace_diagnostics();
+        assert!(
+            has_diagnostic_kind(&current, "bun-lockb-override-resolution-skipped"),
+            "the reload must preserve the analysis-stage entry the pass recorded (#2366): \
+             {current:?}"
+        );
+    }
 }

@@ -62,11 +62,13 @@ pub struct DupesOutput<Report, Group> {
     /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
-    /// Workspace-discovery diagnostics surfaced during config load
+    /// Workspace-discovery and source-discovery diagnostics for the run
     /// (issue #473). See `CheckOutput::workspace_diagnostics` for the full
     /// contract; the same list is repeated on each top-level command's
     /// envelope so single-command consumers see it without having to look at
-    /// a separate top-level field.
+    /// a separate top-level field. A standalone `fallow dupes` run has no
+    /// dead-code analyze pass, so the two analysis-stage kinds never appear
+    /// here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings. See
@@ -95,7 +97,8 @@ pub struct DupesOutputInput<Report, Group> {
     pub groups: Option<Vec<Group>>,
     /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<Meta>,
-    /// Workspace-discovery diagnostics surfaced during config load.
+    /// Workspace-discovery and source-discovery diagnostics. See
+    /// `CheckOutput::workspace_diagnostics` for the contract.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings.
     pub next_steps: Vec<NextStep>,
