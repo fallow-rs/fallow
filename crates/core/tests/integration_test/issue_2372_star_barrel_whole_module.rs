@@ -528,3 +528,122 @@ fn a_whole_object_use_in_an_unreachable_file_credits_no_chain() {
         );
     }
 }
+
+#[test]
+fn an_ambient_star_chain_stops_at_a_plain_star_hop_before_a_default_namespace() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    // ambient-shim.ts declares `export * from './ambient-barrel'` inside a
+    // `declare module` body, so ambient-barrel.ts joins the closure at full
+    // namespace-object exposure: its `export * as ambientNs` source is
+    // credited whole, `default` included.
+    assert_credited(
+        &unused,
+        "src/ambient-barrel.ts",
+        "ambientBarrelOne",
+        "the ambient star credits its target's whole star surface",
+    );
+    for name in ["ambientNsOne", "default"] {
+        assert_credited(
+            &unused,
+            "src/ambient-ns-target.ts",
+            name,
+            "`ambientNs` is ambient-ns-target.ts's namespace object",
+        );
+    }
+
+    // ambient-mid.ts arrives through ambient-barrel.ts's plain `export *`,
+    // which forwards named exports and never `default`, so the namespace
+    // object ambient-mid.ts names `default` reaches nobody.
+    assert_credited(
+        &unused,
+        "src/ambient-mid.ts",
+        "ambientMidOne",
+        "a plain `export *` forwards every named export",
+    );
+    assert_reported(
+        &unused,
+        "src/ambient-mid.ts",
+        "default",
+        "a plain `export *` never forwards `default`",
+    );
+    assert_reported(
+        &unused,
+        "src/ambient-mid-target.ts",
+        "ambientMidTargetOne",
+        "the `default` namespace object never leaves ambient-mid.ts",
+    );
+}
+
+#[test]
+fn a_named_import_used_as_a_whole_object_credits_the_namespace_chain() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    // index.ts `import { wholeSub } from './whole-barrel'` plus
+    // `Object.values(wholeSub)`: the binding is whole-barrel.ts's
+    // `export * as wholeSub` stub, so the consumer observes whole-sub.ts's
+    // entire namespace object and every chain behind it.
+    assert_credited(
+        &unused,
+        "src/whole-sub.ts",
+        "wholeSubOne",
+        "the whole namespace object is observed",
+    );
+    assert_credited(
+        &unused,
+        "src/whole-deep.ts",
+        "wholeDeepX",
+        "forwarded by whole-sub.ts's `export *`",
+    );
+    for name in ["wholeSub2X", "default"] {
+        assert_credited(
+            &unused,
+            "src/whole-sub2.ts",
+            name,
+            "`wholeSub.wholeSub2` is whole-sub2.ts's namespace object",
+        );
+    }
+    assert_reported(
+        &unused,
+        "src/whole-deep.ts",
+        "default",
+        "a plain `export *` never forwards `default`",
+    );
+    assert_reported(
+        &unused,
+        "src/whole-barrel.ts",
+        "wholeBarrelOne",
+        "the consumer names `wholeSub` only, not the rest of whole-barrel.ts",
+    );
+}
+
+#[test]
+fn an_alias_source_exported_under_its_own_name_credits_the_namespace_chain() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    // alias-reexport.ts puts `aliasReNs` in an exported object literal and
+    // also exports it under its own name. The named export hands the whole
+    // object to consumers the graph cannot enumerate, so the alias exclusion
+    // that keeps `alias.ts` narrowed does not apply here.
+    assert_credited(
+        &unused,
+        "src/alias-re-deep.ts",
+        "aliasReOne",
+        "the binding is exported under its own name",
+    );
+
+    // Negative control: alias.ts places its binding in an object literal only,
+    // so the alias phase keeps following `aliasApi.aliasNs.<member>` exactly.
+    assert_reported(
+        &unused,
+        "src/alias-deep.ts",
+        "aliasTwo",
+        "an object-literal alias alone stays narrowed to the accessed members",
+    );
+}

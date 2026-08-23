@@ -5,6 +5,10 @@ import { shimAll } from './shim';
 import { passedOn } from './passer';
 import { reNs } from './re-shim';
 import { aliasApi } from './alias';
+import { aliasReApi, aliasReNs } from './alias-reexport';
+import { wholeSub } from './whole-barrel';
+
+import './ambient-shim';
 
 // Whole-object use of a namespace import observes every name on the barrel's
 // namespace object, including names that only arrive through the barrel's
@@ -18,10 +22,18 @@ export const narrowOne = narrow.one();
 // and nothing else behind the aliased namespace.
 export const aliasOne = aliasApi.aliasNs.aliasOne;
 
+// The same alias shape, but the binding is also exported under its own name,
+// which does hand the whole object on.
+export const aliasReDirect = aliasReApi.aliasReNs.aliasReDirect;
+
+// Whole-object use of an `export * as` binding imported by name: the same
+// closure seed as a whole-object namespace import.
+export const wholeAll = Object.values(wholeSub);
+
 // Whole-object use of a barrel that re-exports itself through a chain.
 export const cycleAll = Object.keys(cyc);
 
-export const shims = [shimAll, passedOn, reNs];
+export const shims = [shimAll, passedOn, reNs, aliasReNs];
 
 // Dynamic-import pattern targets hand the consumer each matched module's
 // namespace object.

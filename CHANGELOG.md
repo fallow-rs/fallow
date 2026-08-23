@@ -130,33 +130,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Whole-module consumers of a barrel now credit the exports the barrel only
   exposes through its own `export *` and `export * as` chains** (Closes
-  [#2372](https://github.com/fallow-rs/fallow/issues/2372)). A namespace
-  import the graph cannot narrow to member accesses (`import * as ns from
-  './barrel'` used as a whole object in `Object.values(ns)`, a spread, or a
-  destructure with rest, handed on without any member access, or re-exported
-  from a non-entry module), a dynamic-import pattern match (`import()` with
-  a template, `import.meta.glob`, `require.context`), and a bare side-effect
-  `require('./barrel')` credited the target's
-  direct exports only, so a name that reached the barrel through
-  `export * from './deep'` or `export * as sub from './sub'` was reported as
-  unused even though the consumer observes every name on the namespace
-  object. These consumers now seed the same closure the ambient-module star
-  form from [#2357](https://github.com/fallow-rs/fallow/issues/2357) uses:
-  the barrel's `export *` sources credit their named exports (never
-  `default`, which a plain `export *` does not forward), its `export * as sub`
-  sources credit every export (`default` included, because `sub.default` is
-  on the object), and both rules recurse through sub's own chains. A
-  member-narrowed namespace import (`ns.one()`) keeps narrowing to the
-  accessed members and credits nothing else, and a binding placed in an
-  exported object literal (`export const API = { ns }`) keeps the precise
-  `API.ns.<member>` crediting of the alias phase. A barrel no entry point
-  reaches keeps reporting: it is already an unused file, so its chain is not
-  credited and no unused-export row is stacked underneath that row. Fewer
-  unused-export findings for
-  star barrels consumed as whole objects or through dynamic-import patterns,
-  and never more.
-  The graph cache version was bumped, so the first run after upgrading
-  performs one cold re-analysis.
+  [#2372](https://github.com/fallow-rs/fallow/issues/2372)). Five consumer
+  shapes credited the target's direct exports only: a namespace import the
+  graph cannot narrow to member accesses (`import * as ns from './barrel'`
+  used as a whole object in `Object.values(ns)`, a spread, or a destructure
+  with rest, or handed on without any member access), a namespace binding
+  exported under its own name (`export { ns }`, on an entry point as much as
+  on any other module), an `export * as sub` binding imported by name and used
+  as a whole object (`import { sub } from './barrel'` plus
+  `Object.values(sub)`), a dynamic-import pattern match (`import()` with a
+  template, `import.meta.glob`, `require.context`), and a bare side-effect
+  `require('./barrel')` with no binding. A name that reached the barrel
+  through `export * from './deep'` or `export * as sub from './sub'` was
+  reported as unused even though the consumer observes every name on the
+  namespace object. These consumers now seed the same closure the
+  ambient-module star form from
+  [#2357](https://github.com/fallow-rs/fallow/issues/2357) uses: the barrel's
+  `export *` sources credit their named exports (never `default`, which a
+  plain `export *` does not forward), its `export * as sub` sources credit
+  every export (`default` included, because `sub.default` is on the object),
+  and both rules recurse through sub's own chains. A member-narrowed namespace
+  import (`ns.one()`) keeps narrowing to the accessed members and credits
+  nothing else, and a binding placed in an exported object literal
+  (`export const API = { ns }`) keeps the precise `API.ns.<member>` crediting
+  of the alias phase unless it is also used as a whole object or exported
+  under its own name. A barrel no entry point reaches keeps reporting: it is
+  already an unused file, so its chain is not credited and no unused-export
+  row is stacked underneath that row. A whole-object use inside an unreachable
+  file still suppresses the reachable target's chain, exactly as it already
+  suppressed that target's direct exports, so deleting the unused file the
+  report names brings the chain back on the next run. Fewer unused-export
+  findings for star barrels consumed as whole objects, through a named
+  namespace binding, or through dynamic-import patterns. The graph cache
+  version was bumped, so the first run after upgrading performs one cold
+  re-analysis.
 
 - **`export * as sub` on the entry-point surface now credits sub's own
   `export *` and `export * as` chains** (Closes
@@ -173,15 +180,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sub2 is credited (`default` included), and the rules recurse through any
   further level. The entry surface is tracked by name, so a barrel the entry
   reaches only through `export { one } from './barrel'` still exposes `one`
-  and nothing else; a barrel that declares its own `sub` shadows a
-  star-forwarded `sub` and stops the chain there; a namespace re-export on a
-  reachable non-entry barrel that
-  is off the entry surface and has no consumer still exposes nothing; and the
-  entry's plain `export *` still never forwards the barrel's own `default`,
-  so `export * as default` on such a barrel keeps reporting while the same
-  declaration on the entry point itself is credited.
+  and nothing else; a barrel that declares its own `sub`, or that receives
+  `sub` from two `export *` sources at once, exports a different binding under
+  that name and stops the chain there, whether the entry names the barrel or
+  reaches it through a plain `export *`; a namespace re-export on a reachable
+  non-entry barrel that is off the entry surface and has no consumer still
+  exposes nothing; and the entry's plain `export *` still never forwards the
+  barrel's own `default`, so `export * as default` on such a barrel keeps
+  reporting while the same declaration on the entry point itself is credited.
   Fewer unused-export findings for nested namespace re-exports behind an entry
   point.
+
+  One shape reports one finding more. A plain `export *` hop inside a chain no
+  longer carries a downstream `export * as default` onward, because that star
+  never forwards `default`, so an
+  `export * from './barrel'` whose barrel does `export * from './mid'` over a
+  `mid` that does `export * as default from './target'` now reports target's
+  exports. That includes the ambient form from
+  [#2357](https://github.com/fallow-rs/fallow/issues/2357): the issue-2357
+  behaviour is otherwise unchanged, and an `export * as default` declared
+  directly on the ambient star's own target still credits its chain.
 
 - **Star re-exports inside `declare module '...'` bodies credit the full ES
   star surface of their target without adding to the declaring file's export

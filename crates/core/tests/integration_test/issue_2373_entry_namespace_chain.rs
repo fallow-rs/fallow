@@ -431,3 +431,83 @@ fn a_locally_shadowed_star_name_does_not_carry_a_namespace_to_the_surface() {
         );
     }
 }
+
+#[test]
+fn a_plain_star_hop_does_not_carry_a_shadowed_or_ambiguous_namespace_to_the_surface() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    // index.ts `export * from './star-shadow-barrel'`: sitting on the entry's
+    // plain-`export *` closure is not proof the name survives to the entry.
+    // star-shadow-barrel.ts declares its own `starShadowNs`, so the entry's
+    // `starShadowNs` is that number and the namespace object stops there.
+    for (path, name) in [
+        ("src/star-shadow-source.ts", "starShadowNs"),
+        ("src/star-shadow-target.ts", "starShadowTargetOne"),
+        ("src/star-shadow-deep.ts", "starShadowDeepX"),
+    ] {
+        assert_reported(
+            &unused,
+            path,
+            name,
+            "a local declaration shadows the star-forwarded name",
+        );
+    }
+
+    // index.ts `export * from './ambig-barrel'`, whose two stars both carry
+    // `ambigNs`: the name is ambiguous on the barrel, so neither namespace
+    // object reaches the entry surface.
+    for (path, name) in [
+        ("src/ambig-s1.ts", "ambigNs"),
+        ("src/ambig-s2.ts", "ambigNs"),
+        ("src/ambig-target1.ts", "ambigTarget1One"),
+        ("src/ambig-target2.ts", "ambigTarget2One"),
+        ("src/ambig-deep1.ts", "ambigDeep1X"),
+        ("src/ambig-deep2.ts", "ambigDeep2X"),
+    ] {
+        assert_reported(
+            &unused,
+            path,
+            name,
+            "two stars carry the same name onto the barrel",
+        );
+    }
+}
+
+#[test]
+fn an_entry_that_re_exports_a_namespace_binding_credits_its_chain() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused = unused_export_pairs(&results);
+
+    // index.ts `import * as bindNs from './bind-barrel'` plus
+    // `export { bindNs }`: the namespace object is the entry point's public
+    // API, so bind-barrel.ts's own `export * as bindSub` chain follows.
+    for name in ["bindBarrelOne", "bindSub"] {
+        assert_credited(
+            &unused,
+            "src/bind-barrel.ts",
+            name,
+            "the entry point exports the namespace binding",
+        );
+    }
+    assert_credited(
+        &unused,
+        "src/bind-sub.ts",
+        "bindSubOne",
+        "`bindNs.bindSub` is bind-sub.ts's namespace object",
+    );
+    assert_credited(
+        &unused,
+        "src/bind-deep.ts",
+        "bindDeepX",
+        "forwarded by bind-sub.ts's `export *`",
+    );
+    assert_reported(
+        &unused,
+        "src/bind-deep.ts",
+        "default",
+        "a plain `export *` never forwards `default`",
+    );
+}

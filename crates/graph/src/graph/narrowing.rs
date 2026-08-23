@@ -468,14 +468,18 @@ fn narrow_namespace_references(
     let is_whole_object =
         source_mod.is_some_and(|m| m.whole_object_uses.iter().any(|n| n == sym_local_name));
 
-    let is_re_exported_from_non_entry = source_mod.is_some_and(|m| {
+    // `export { ns }` hands the namespace object itself to consumers the graph
+    // cannot enumerate, on an entry point as much as on any other module: the
+    // binding is the public API there (issue #2373).
+    let is_re_exported = source_mod.is_some_and(|m| {
         m.exports
             .iter()
             .any(|e| e.local_name.as_deref() == Some(sym_local_name))
-    }) && !ctx.entry_point_ids.contains(&site.from_file);
+    });
 
     let is_entry_with_no_access = accessed_members.is_empty()
         && !is_whole_object
+        && !is_re_exported
         && ctx.entry_point_ids.contains(&site.from_file);
 
     // The consumer observes the whole namespace object (a whole-object use,
@@ -487,10 +491,10 @@ fn narrow_namespace_references(
     // object literal (`export const API = { ns }`) keeps the direct-export
     // credit but never seeds that closure: the namespace-object alias phase
     // follows `API.ns.<member>` accesses precisely, so the chain behind it
-    // stays narrowed unless the binding is also used as a whole object.
+    // stays narrowed unless the binding is also used as a whole object or
+    // exported under its own name.
     let observes_whole_module = is_whole_object
-        || (!is_entry_with_no_access
-            && (accessed_members.is_empty() || is_re_exported_from_non_entry));
+        || (!is_entry_with_no_access && (accessed_members.is_empty() || is_re_exported));
     let is_alias_source = || {
         source_mod.is_some_and(|m| {
             m.namespace_object_aliases
@@ -498,7 +502,7 @@ fn narrow_namespace_references(
                 .any(|alias| alias.namespace_local == sym_local_name)
         })
     };
-    if observes_whole_module && (is_whole_object || !is_alias_source()) {
+    if observes_whole_module && (is_whole_object || is_re_exported || !is_alias_source()) {
         ctx.observe_whole_namespace_object(module.file_id);
     }
 

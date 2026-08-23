@@ -684,8 +684,11 @@ impl ModuleGraph {
         // namespace closure needs it to stay off modules the report already
         // calls unused files.
         let entry_reachable = graph.collect_reachable(&entry_point_ids, total_capacity);
-        let exposed_namespace_targets =
-            graph.collect_exposed_namespace_targets(&whole_module_targets, &entry_reachable);
+        let exposed_namespace_targets = graph.collect_exposed_namespace_targets(
+            &whole_module_targets,
+            &entry_reachable,
+            &module_by_id,
+        );
 
         if namespace_features.has_aliases || namespace_features.has_re_exports {
             propagate_namespace_references(

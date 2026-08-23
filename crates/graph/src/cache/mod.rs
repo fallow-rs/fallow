@@ -146,13 +146,17 @@ pub use store::GraphCacheStore;
 /// on upgrade.
 ///
 /// Bumped to 39 for issues #2372 and #2373: a consumer that observes a whole
-/// namespace object (a whole-object namespace use, a dynamic-import pattern
-/// match) and an `export * as ns` chain on the entry-point surface now credit
-/// the names the target only exposes through its own `export *` and
-/// `export * as` chains, and those references are baked into the persisted
-/// graph. Warm 38 caches carry only the direct-export credit, so the
-/// star-forwarded and nested-namespace exports would stay reported as unused
-/// on upgrade.
+/// namespace object (a whole-object namespace use of an `import * as` or of an
+/// `export * as` binding imported by name, a dynamic-import pattern match) and
+/// an `export * as ns` chain an entry point exposes now credit the names the
+/// target only exposes through its own `export *` and `export * as` chains,
+/// and those references are baked into the persisted graph. Warm 38 caches
+/// carry only the direct-export credit, so the star-forwarded and
+/// nested-namespace exports would stay reported as unused on upgrade. The same
+/// version covers the one direction that moves the other way: a plain
+/// `export *` hop no longer carries a downstream `export * as default` onward,
+/// so a chain behind such a namespace object can report one finding more than
+/// a warm 38 cache holds.
 pub const GRAPH_CACHE_VERSION: u32 = 39;
 
 /// Cached form of a resolved target.
