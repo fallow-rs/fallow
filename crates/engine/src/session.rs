@@ -313,13 +313,27 @@ impl AnalysisSession {
         &self.workspace_diagnostics
     }
 
-    /// Current diagnostics, including source read failures discovered lazily
-    /// after the session was created.
+    /// Current diagnostics, including the source read failures the parse stage
+    /// discovers and the analysis-stage entries the analyze pass records, both
+    /// of which land in the registry after the session was created.
+    ///
+    /// The live read drops walk-recorded entries
+    /// ([`fallow_types::workspace::WorkspaceDiagnosticKind::is_source_walk_recorded`])
+    /// for the same
+    /// reason the constructor does: a concurrent walk on the same root
+    /// replaces that set, so importing it here would make this session's list
+    /// depend on which walk wrote last, and the combined root's union would
+    /// come out in a different ORDER between runs of the same command (issue
+    /// #2366). This session's own walk-recorded entries are already in the
+    /// snapshot, by value, from its own walk.
     #[must_use]
     pub fn current_workspace_diagnostics(&self) -> Vec<WorkspaceDiagnostic> {
         merge_workspace_diagnostics(
             self.workspace_diagnostics.clone(),
-            fallow_config::workspace_diagnostics_for(&self.config.root),
+            fallow_config::workspace_diagnostics_for(&self.config.root)
+                .into_iter()
+                .filter(|diagnostic| !diagnostic.kind.is_source_walk_recorded())
+                .collect(),
         )
     }
 
@@ -1575,6 +1589,72 @@ wrapper();
         assert!(
             !has_diagnostic_kind(&current, "bun-lockb-override-resolution-skipped"),
             "the rerun drops the skip once a text bun.lock exists (#2366): {current:?}"
+        );
+    }
+
+    /// Issue #2366: `current_workspace_diagnostics` reads the registry live so
+    /// the parse-stage and analyze-stage entries that land after the session
+    /// was created still reach the envelope, but it must not import another
+    /// walk's skips along with them.
+    ///
+    /// Combined mode runs the dead-code and duplication walks on the same root
+    /// under `rayon::join` whenever a per-analysis `production` split stops
+    /// them from sharing a file list, and each walk replaces the registry's
+    /// source-discovery set. A session that read that set back would answer
+    /// "whichever walk wrote last", which decides where the other walk's skip
+    /// lands in the combined root's union and made the array come out in a
+    /// different ORDER between runs of the same command.
+    #[test]
+    fn session_keeps_its_own_walk_skips_and_ignores_another_walks_registry_write() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        write_single_source_project(
+            root,
+            r#"{"name":"issue-2366-parallel-walks","private":true}"#,
+        );
+        std::fs::write(root.join("src/huge.ts"), "// filler\n".repeat(400))
+            .expect("write oversized source");
+        let mut config = fallow_config::FallowConfig::default().resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        config.max_file_size_bytes = Some(1024);
+
+        let session = AnalysisSession::from_resolved_config(config).expect("session loads");
+
+        // The state a concurrent walk leaves behind: its own skip in this
+        // root's registry entry. It writes that through the registry's
+        // replace-in-one-operation call, which an architecture guard reserves
+        // for the walk itself, so the append is the stand-in here.
+        fallow_config::append_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("src/other-walk-only.ts"),
+                fallow_types::workspace::WorkspaceDiagnosticKind::SkippedLargeFile {
+                    size_bytes: 4096,
+                },
+            )],
+        );
+
+        let current = session.current_workspace_diagnostics();
+        let skipped: Vec<&Path> = current
+            .iter()
+            .filter(|diagnostic| diagnostic.kind.id() == "skipped-large-file")
+            .map(|diagnostic| diagnostic.path.as_path())
+            .collect();
+        assert_eq!(
+            skipped.len(),
+            1,
+            "the session reports its own walk's skips only: {skipped:?}"
+        );
+        assert!(
+            skipped[0].ends_with("src/huge.ts"),
+            "the surviving skip is this walk's own: {skipped:?}"
         );
     }
 

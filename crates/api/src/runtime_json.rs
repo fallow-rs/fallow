@@ -90,8 +90,10 @@ pub fn serialize_combined_programmatic_json(
 /// the root carries the deduplicated union in section order (dead code, then
 /// health, then duplication) and a run missing a section (`--skip check`,
 /// `--only health`, `--only dupes`) still reports what its remaining analyses
-/// recorded. The CLI folds its own per-analysis lists the same way, so both
-/// routes answer identically (issue #2366).
+/// recorded. The CLI folds its own per-analysis lists in the same order and
+/// closes with a process-registry read it does not need here, since every
+/// section carries its own list, so the two routes agree on everything an
+/// analysis records (issue #2366).
 fn combined_workspace_diagnostics(
     dead_code: Option<&DeadCodeProgrammaticOutput>,
     health: Option<&HealthProgrammaticOutput>,

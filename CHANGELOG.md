@@ -29,10 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   envelope carries it at the envelope root, in the top-level
   `workspace_diagnostics[]`; no section of the combined envelope repeats it
   (see the [#2366](https://github.com/fallow-rs/fallow/issues/2366) fix
-  below). The
-  diagnostic kind is additive on the `workspace_diagnostics[].kind` union;
-  consumers that exhaustively match on `kind` should treat unknown kinds as
-  informational.
+  below). The diagnostic kind is additive on the
+  `workspace_diagnostics[].kind` union; consumers that exhaustively match on
+  `kind` should treat unknown kinds as informational.
 
 - **bun repositories that pin transitive versions under Yarn-style
   `resolutions` now get `unused-dependency-overrides` and
@@ -386,10 +385,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registry while preserving only the source-discovery kinds, so the entries
   the analyze pass had recorded were wiped before the envelope was built. The
   combined envelope now carries a top-level `workspace_diagnostics[]` with the
-  same root-relative paths the standalone envelopes use, deduplicated on
-  `kind` plus `path`, and omitted when empty. It is the union of what every
-  analysis in the run recorded, which matters because a combined run walks the
-  project once per analysis and a per-analysis `production` mode
+  same root-relative paths the standalone envelopes use, deduplicated on the
+  whole `kind` (typed payload included) plus `path`, and omitted when empty.
+  Keying on the payload is what keeps two overlapping workspace globs
+  (`["packages/*", "packages/*/*"]`) reporting the same package-less directory
+  once per `pattern`, the way the standalone envelopes do. It is the union of
+  what every analysis in the run recorded, which matters because a combined
+  run walks the project once per analysis and a per-analysis `production` mode
   (`production: { deadCode, health, dupes }`, `--production-health`) can give
   those walks different file sets: reporting only what the last walk saw would
   drop, for example, a `skipped-large-file` that the dead-code walk recorded
@@ -403,32 +405,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process diagnostics registry and can miss an `undeclared-workspace` or
   `glob-matched-no-package-json` entry those two commands do report. That gap
   in the standalone envelopes predates this change and is unchanged by it; the
-  combined root simply no longer inherits it. The carrier is
-  the envelope root rather than a section, so a run that drops a section
-  (`--skip check`, `--only health`, `--only dupes`) reports every diagnostic
-  its analyses recorded instead of dropping them while stderr warns. The
-  `check`, `dupes`, and `health` sections stay report bodies and never repeat
-  the array. Config reloads preserve analysis-stage entries the way they
-  preserve source-discovery entries, and each dead-code analyze pass clears
-  its previous analysis-stage entries before re-recording, so a watch-mode
-  rerun or a long-lived engine session (MCP, LSP) drops the diagnostic once
-  the YAML is fixed or a text `bun.lock` exists instead of keeping a stale
-  entry. Two audit-family envelopes gain the same two analysis-stage kinds:
-  `fallow audit --format json` under `dead_code.workspace_diagnostics[]`, and
-  the `audit-brief` envelope shared by `fallow review --format json` and
-  `fallow audit --brief --format json`, also under `dead_code`. Those two
-  arrays already carried the workspace-discovery and source-discovery kinds,
-  so the change there is the two additional kinds, not a field that was
-  previously always empty; only the combined root is a genuinely new field.
-  Both sections are already typed as the `dead-code` envelope body, so the
-  widening is additive; the MCP `audit` tool and the programmatic combined
-  route (MCP code mode, NAPI, embedders) answer the same as the CLI, including
-  when per-analysis `production` modes make the run's walks disagree. Each
-  analysis now carries the diagnostics its own walk produced instead of
-  reading the shared registry back after the fact, so a combined run whose
-  `production` split makes it walk the project twice in parallel reports the
-  same union on every run. The combined envelope's new root field is optional
-  and absent when there are no diagnostics, so no `schema_version` moves. The
+  combined root simply no longer inherits it. The carrier is the envelope root
+  rather than a section, so a run that drops a section (`--skip check`,
+  `--only health`, `--only dupes`) reports every diagnostic its analyses
+  recorded instead of dropping them while stderr warns. The `check`, `dupes`,
+  and `health` sections stay report bodies and never repeat the array. Config
+  reloads preserve analysis-stage entries the way they preserve
+  source-discovery entries, and each dead-code analyze pass clears its
+  previous analysis-stage entries before re-recording, so a watch-mode rerun
+  or a long-lived engine session (MCP, LSP) drops the diagnostic once the YAML
+  is fixed or a text `bun.lock` exists instead of keeping a stale entry. Two
+  audit-family envelopes gain kinds too: `fallow audit --format json` under
+  `dead_code.workspace_diagnostics[]`, and the `audit-brief` envelope shared
+  by `fallow review --format json` and `fallow audit --brief --format json`,
+  also under `dead_code`. Those two arrays already carried the config-load
+  workspace-discovery kinds and the source-discovery kinds, so the change
+  there is three additional kinds, not a field that was previously always
+  empty: the two analysis-stage ones plus `undeclared-workspace`, which the
+  analyze pipeline appends after the config-load stash and a later
+  per-analysis reload used to wipe before the envelope was built. Only the
+  combined root is a genuinely new field. Both sections are already typed as
+  the `dead-code` envelope body, so the widening is additive; the MCP `audit`
+  tool and the programmatic combined route (MCP code mode, NAPI, embedders)
+  answer the same as the CLI, including when per-analysis `production` modes
+  make the run's walks disagree. Each analysis now carries the diagnostics its
+  own walk produced instead of reading the shared registry back after the
+  fact, so a combined run whose `production` split makes it walk the project
+  twice in parallel reports the same union, in the same order, on every run:
+  the array no longer depends on which of the two parallel walks wrote to the
+  shared registry last. The combined envelope's new root field is optional and
+  absent when there are no diagnostics, so no `schema_version` moves. The
   standalone `dead-code`, `check`, `health`, and `dupes` envelopes and every
   non-JSON format are byte-identical to before; the three envelopes named
   above are not, whenever the run records a diagnostic.

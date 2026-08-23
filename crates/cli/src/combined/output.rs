@@ -815,8 +815,10 @@ fn combined_diagnostics_root<'a>(input: &CombinedJsonPrintInput<'a>) -> &'a std:
 /// anything recorded after the last section captured its list. Reading it
 /// outside the `check` section is also what lets `--skip check`, `--only
 /// health`, and `--only dupes` report the diagnostics their analyses recorded.
-/// The programmatic combined route folds its typed sections the same way, so
-/// both answer identically (issue #2366).
+/// The programmatic combined route folds the same three section lists in the
+/// same order, so the two routes agree on everything an analysis records; the
+/// closing registry read is the CLI's only extra leg and can only add an entry
+/// no section had captured yet (issue #2366).
 fn combined_workspace_diagnostics(
     input: &CombinedJsonPrintInput<'_>,
 ) -> Vec<fallow_config::WorkspaceDiagnostic> {

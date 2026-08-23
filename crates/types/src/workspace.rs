@@ -143,6 +143,26 @@ impl WorkspaceDiagnosticKind {
         )
     }
 
+    /// Whether this diagnostic is written by the source file WALK
+    /// (`discover_files`), the subset of [`Self::is_source_discovery`] that a
+    /// walk replaces wholesale for its root. `source-read-failure` is the
+    /// other source-discovery kind and is NOT one of these: the parse stage
+    /// records it after the walk, so it has to keep reaching consumers through
+    /// the registry.
+    ///
+    /// A walk-recorded entry must reach an analysis from its OWN walk's return
+    /// value. Combined mode runs the dead-code and duplication walks under
+    /// `rayon::join` whenever a per-analysis `production` split stops them from
+    /// sharing a file list, so a registry read answers "whichever walk wrote
+    /// last" and varies between runs of the same command (issue #2366).
+    #[must_use]
+    pub const fn is_source_walk_recorded(&self) -> bool {
+        matches!(
+            self,
+            Self::SkippedLargeFile { .. } | Self::SkippedMinifiedFile { .. }
+        )
+    }
+
     /// Whether this diagnostic is recorded by the ANALYZE stage (the
     /// dependency-catalog and override detectors) rather than by workspace or
     /// source discovery. Analysis-stage diagnostics reach the registry through
@@ -289,8 +309,8 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
 }
 
 /// Concatenate two diagnostic lists, keeping the first occurrence of each
-/// `(kind id, path)` pair and the order of `primary` followed by the entries
-/// only `secondary` has.
+/// `(kind, path)` pair and the order of `primary` followed by the entries only
+/// `secondary` has.
 ///
 /// The single place diagnostics from two observation points are folded
 /// together: an engine session's own capture plus the process registry, and
@@ -300,15 +320,22 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
 /// everything the run recorded; the union does, and folding it the same way
 /// everywhere is what keeps the CLI and the programmatic route answering
 /// identically.
+///
+/// The key is the WHOLE kind, payload included, not its
+/// [`id`](WorkspaceDiagnosticKind::id). Two entries can share a kind id and a
+/// path and still be two distinct diagnostics: overlapping workspace globs
+/// (`["packages/*", "packages/*/*"]`) each report the same package-less
+/// directory with their own `pattern`, and the standalone envelopes report
+/// both. An id-keyed fold silently dropped the second one.
 #[must_use]
 pub fn merge_workspace_diagnostics(
     primary: Vec<WorkspaceDiagnostic>,
     secondary: Vec<WorkspaceDiagnostic>,
 ) -> Vec<WorkspaceDiagnostic> {
     let mut merged = Vec::with_capacity(primary.len() + secondary.len());
-    let mut seen: FxHashSet<(&'static str, PathBuf)> = FxHashSet::default();
+    let mut seen: FxHashSet<(WorkspaceDiagnosticKind, PathBuf)> = FxHashSet::default();
     for diagnostic in primary.into_iter().chain(secondary) {
-        let key = (diagnostic.kind.id(), diagnostic.path.clone());
+        let key = (diagnostic.kind.clone(), diagnostic.path.clone());
         if seen.insert(key) {
             merged.push(diagnostic);
         }
@@ -572,6 +599,79 @@ mod tests {
             assert!(
                 !kind.is_analysis_stage(),
                 "{} is a discovery kind, not an analyze-stage kind",
+                kind.id()
+            );
+        }
+    }
+
+    #[test]
+    fn merge_keeps_two_diagnostics_that_share_a_kind_id_and_path() {
+        let root = Path::new("/project");
+        let first = WorkspaceDiagnostic::new(
+            root,
+            root.join("packages/aaa"),
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: "packages/*".to_owned(),
+            },
+        );
+        let second = WorkspaceDiagnostic::new(
+            root,
+            root.join("packages/aaa"),
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: "packages/a*".to_owned(),
+            },
+        );
+
+        let merged = merge_workspace_diagnostics(
+            vec![first.clone(), second.clone()],
+            vec![first, second],
+        );
+
+        let patterns: Vec<String> = merged
+            .iter()
+            .map(|diagnostic| match &diagnostic.kind {
+                WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => pattern.clone(),
+                other => panic!("unexpected kind {}", other.id()),
+            })
+            .collect();
+        assert_eq!(
+            patterns,
+            ["packages/*", "packages/a*"],
+            "two overlapping globs report the same directory twice, with their own pattern; \
+             the same entry seen from two observation points still folds to one"
+        );
+    }
+
+    #[test]
+    fn source_walk_recorded_covers_only_the_kinds_a_walk_replaces() {
+        for kind in [
+            WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes: 1 },
+            WorkspaceDiagnosticKind::SkippedMinifiedFile { size_bytes: 1 },
+        ] {
+            assert!(
+                kind.is_source_walk_recorded() && kind.is_source_discovery(),
+                "{} is written by the source walk",
+                kind.id()
+            );
+        }
+
+        let read_failure = WorkspaceDiagnosticKind::SourceReadFailure {
+            error: "permission denied".to_owned(),
+        };
+        assert!(
+            read_failure.is_source_discovery() && !read_failure.is_source_walk_recorded(),
+            "the parse stage records source-read-failure after the walk, so it must keep \
+             reaching sessions through the registry"
+        );
+
+        for kind in [
+            WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            WorkspaceDiagnosticKind::TsconfigReferenceDirMissing,
+            WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+        ] {
+            assert!(
+                !kind.is_source_walk_recorded(),
+                "{} is not written by the source walk",
                 kind.id()
             );
         }

@@ -1400,6 +1400,122 @@ fn split_production_large_test_file_project(production_config: &str) -> tempfile
     dir
 }
 
+/// Two oversized files, one production and one test, plus both analysis-stage
+/// diagnostic kinds: under a `production` split every walk in the run skips a
+/// different pair, so each analysis contributes its own source-discovery list
+/// and the union has entries from more than one observation point.
+fn split_production_two_large_files_project(production_config: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2366-repeat-runs","private":true,"main":"src/index.ts","overrides":{"ws":"^8.21.0"},"dependencies":{"ws":"^8.18.0"}}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        dir.path().join("bun.lockb"),
+        b"\x00binary lockfile placeholder\x00",
+    )
+    .expect("write bun.lockb placeholder");
+    std::fs::write(
+        dir.path().join("pnpm-workspace.yaml"),
+        "catalog:\n  react: ^18.2.0\n{this is\nnot: valid: yaml: at: all\n",
+    )
+    .expect("write malformed pnpm-workspace.yaml");
+    std::fs::write(dir.path().join(".fallowrc.json"), production_config)
+        .expect("write .fallowrc.json");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::write(
+        dir.path().join("src/huge.prod.ts"),
+        "// filler\n".repeat(150_000),
+    )
+    .expect("write oversized production file");
+    std::fs::write(
+        dir.path().join("src/huge.test.ts"),
+        "// filler\n".repeat(150_000),
+    )
+    .expect("write oversized test file");
+    dir
+}
+
+/// Issue #2366: the combined root's union must be the same ARRAY on every run
+/// of the same command, not just the same set.
+///
+/// Under this split the dead-code and duplication walks run under
+/// `rayon::join` on one root, and each walk replaces the registry's
+/// source-discovery set. While the dead-code analysis folded a live registry
+/// read into its own list, whether the duplication walk had already written
+/// decided whether its skip arrived inside the dead-code section's list or
+/// later from the duplication section's, so the same command emitted two
+/// different orders across repeat runs. Every analysis now carries its own
+/// walk's skips by value and the live read drops walk-recorded entries, so the
+/// order is fixed by section order alone.
+#[test]
+fn combined_json_root_workspace_diagnostics_are_byte_identical_across_repeat_runs() {
+    let dir = split_production_two_large_files_project(
+        r#"{"production":{"deadCode":true,"health":false,"dupes":false}}"#,
+    );
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let mut observed: Vec<serde_json::Value> = Vec::new();
+    for _ in 0..6 {
+        let json = parse_json(&run_fallow_raw(&[
+            "--root",
+            root,
+            "--max-file-size",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]));
+        observed.push(json["workspace_diagnostics"].clone());
+    }
+
+    let entries: Vec<(String, String)> = observed[0]
+        .as_array()
+        .expect("the root carries the array")
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic["kind"].as_str().unwrap_or_default().to_owned(),
+                diagnostic["path"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        entries,
+        [
+            (
+                "skipped-large-file".to_owned(),
+                "src/huge.prod.ts".to_owned()
+            ),
+            (
+                "malformed-pnpm-workspace-yaml".to_owned(),
+                "pnpm-workspace.yaml".to_owned()
+            ),
+            (
+                "bun-lockb-override-resolution-skipped".to_owned(),
+                "package.json".to_owned()
+            ),
+            (
+                "skipped-large-file".to_owned(),
+                "src/huge.test.ts".to_owned()
+            ),
+        ],
+        "the union runs in section order: the dead-code analysis's own list \
+         (its production walk's skip plus the analysis-stage entries it recorded), \
+         then the skip only the full-file-set walks saw"
+    );
+    for (index, run) in observed.iter().enumerate() {
+        assert_eq!(
+            run, &observed[0],
+            "run {index} disagrees with the first run about the combined root's \
+             workspace_diagnostics[]"
+        );
+    }
+}
+
 /// Issue #2366: a combined run walks the project once per analysis, and a
 /// per-analysis `production` mode gives those walks different file sets, so
 /// each walk records a different source-discovery list and clears the previous
@@ -1608,4 +1724,70 @@ fn combined_json_root_agrees_with_the_workspace_listing_on_undeclared_workspaces
         combined["workspace_diagnostics"]
     );
     assert_eq!(undeclared[0]["path"], "packages/inner");
+}
+
+/// Issue #2366: two overlapping workspace globs (`["pkgs/*", "pkgs/a*"]`, the
+/// shape a monorepo gets from `["packages/*", "packages/*/*"]`) report the same
+/// package-less directory twice, once per pattern. The union that builds the
+/// combined root must keep both, otherwise the root is NARROWER than the
+/// standalone `dead-code` envelope it unions.
+#[test]
+fn combined_json_root_keeps_both_overlapping_glob_diagnostics() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("pkgs/aaa")).expect("create package-less directory");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2366-overlapping-globs","private":true,"main":"src/index.ts","workspaces":["pkgs/*","pkgs/a*"]}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::write(
+        dir.path().join("pkgs/aaa/readme.txt"),
+        "no package.json here\n",
+    )
+    .expect("write filler");
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+
+    let standalone = parse_json(&run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+    let combined = parse_json(&run_fallow_raw(&[
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+
+    let patterns: Vec<String> =
+        combined_root_diagnostics_of_kind(&combined, "glob-matched-no-package-json")
+            .iter()
+            .map(|diagnostic| {
+                diagnostic["pattern"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .collect();
+    assert_eq!(
+        patterns,
+        ["pkgs/*", "pkgs/a*"],
+        "both globs matched the same directory and both are reported: {}",
+        combined["workspace_diagnostics"]
+    );
+    assert_eq!(
+        standalone["workspace_diagnostics"], combined["workspace_diagnostics"],
+        "the combined root is never narrower than the standalone dead-code envelope: \
+         standalone {} vs combined {}",
+        standalone["workspace_diagnostics"], combined["workspace_diagnostics"]
+    );
 }

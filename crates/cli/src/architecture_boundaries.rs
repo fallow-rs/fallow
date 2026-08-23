@@ -2089,6 +2089,12 @@ fn source_discovery_diagnostics_reach_sessions_by_value_not_through_the_registry
         "the session snapshot must drop the registry's source-discovery entries in favour of \
          its own walk's list"
     );
+    assert!(
+        session.contains("!diagnostic.kind.is_source_walk_recorded()"),
+        "the live registry read in current_workspace_diagnostics must drop walk-recorded \
+         entries too; importing a concurrent walk's skips changes the order of the combined \
+         root's union between runs of the same command"
+    );
 }
 
 fn read_source_without_line_comments(path: &str) -> std::io::Result<String> {

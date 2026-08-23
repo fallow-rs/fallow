@@ -6244,6 +6244,147 @@ fn audit_json_dead_code_section_carries_a_skip_only_the_dead_code_walk_saw() {
     assert_eq!(skips[0]["path"], "src/huge.test.ts");
 }
 
+/// Issue #2366: `undeclared-workspace` is appended to the registry by the
+/// analyze pass, AFTER the config-load stash, so a later per-analysis reload
+/// wipes it before the audit envelope's registry read. Folding the dead-code
+/// analysis's own captured list in is what makes the audit family report it,
+/// so it is the third kind those envelopes gained, not only the two
+/// analysis-stage ones. Pin it the way the analysis-stage kinds are pinned.
+#[test]
+fn audit_json_dead_code_section_carries_the_analyze_appended_undeclared_workspace() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("packages/inner/src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"issue-2366-undeclared","private":true,"main":"src/index.ts","workspaces":["packages/declared"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "export const value = 1;\nconsole.log(value);\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("packages/inner/package.json"),
+        r#"{"name":"inner-pkg","version":"1.0.0"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("packages/inner/src/index.ts"),
+        "export const inner = 2;\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    fs::write(dir.join("src/added.ts"), "export const added = 3;\n").unwrap();
+
+    let root = dir.to_str().expect("fixture path should be UTF-8");
+    for command in [
+        ["audit"].as_slice(),
+        ["review"].as_slice(),
+        ["audit", "--brief"].as_slice(),
+    ] {
+        let mut args = command.to_vec();
+        args.extend_from_slice(&[
+            "--root",
+            root,
+            "--base",
+            "HEAD",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]);
+        let json = parse_json(&run_fallow_raw(&args));
+        let undeclared: Vec<&serde_json::Value> = json["dead_code"]["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic["kind"] == "undeclared-workspace")
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            undeclared.len(),
+            1,
+            "{command:?} reports the undeclared workspace: {}",
+            json["dead_code"]["workspace_diagnostics"]
+        );
+        assert_eq!(undeclared[0]["path"], "packages/inner");
+    }
+}
+
+/// Issue #2366: two overlapping workspace globs report the SAME package-less
+/// directory, each with its own `pattern`, and the standalone envelopes report
+/// both. Folding the audit family's dead-code list with the registry must keep
+/// both: an id-keyed fold collapsed them into one and made `fallow audit` and
+/// `fallow review` narrower than they were before the fold existed.
+#[test]
+fn audit_json_dead_code_section_keeps_both_overlapping_glob_diagnostics() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("pkgs/aaa")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"issue-2366-overlapping-globs","private":true,"main":"src/index.ts","workspaces":["pkgs/*","pkgs/a*"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "export const value = 1;\nconsole.log(value);\n",
+    )
+    .unwrap();
+    fs::write(dir.join("pkgs/aaa/readme.txt"), "no package.json here\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    fs::write(dir.join("src/added.ts"), "export const added = 3;\n").unwrap();
+
+    let root = dir.to_str().expect("fixture path should be UTF-8");
+    for command in [
+        ["audit"].as_slice(),
+        ["review"].as_slice(),
+        ["audit", "--brief"].as_slice(),
+    ] {
+        let mut args = command.to_vec();
+        args.extend_from_slice(&[
+            "--root",
+            root,
+            "--base",
+            "HEAD",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]);
+        let json = parse_json(&run_fallow_raw(&args));
+        let patterns: Vec<String> = json["dead_code"]["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic["kind"] == "glob-matched-no-package-json")
+                    .map(|diagnostic| {
+                        diagnostic["pattern"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_owned()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            patterns,
+            ["pkgs/*", "pkgs/a*"],
+            "{command:?} keeps both overlapping globs for the same directory: {}",
+            json["dead_code"]["workspace_diagnostics"]
+        );
+    }
+}
+
 /// Issue #2366: the `audit-brief` envelope shared by `fallow review` and
 /// `fallow audit --brief` builds its dead-code section from the same registry,
 /// so it is the third carrier that the preserve moves.
