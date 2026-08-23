@@ -76,6 +76,17 @@ error by suppressing a downstream detector.
   `ModuleGraph::ambiguous_star_exports` exposes collisions for reporting, while
   `ModuleGraph::ambiguity_participants` identifies their canonical declarations
   for detector gates.
+- `default` is one importable name that either side may spell two ways, and
+  reference attachment matches on the name, not on the spelling (issue #2374).
+  An export declares it as `export default x` or as `export { x as default }`;
+  an import names it as `import x from './impl'`, as
+  `import { default as x } from './impl'`, or as the ambient
+  `declare module '<specifier>' { export { default } from './impl' }` form,
+  which records one named type-space import per specifier. Every pairing
+  credits the target's default export, and a `export { default } from` chain
+  carries that credit hop by hop. A plain `export *` still never forwards
+  `default`, so the shape that reaches a default through a star is the
+  namespace object, not the star surface.
 - An ambient-module star re-export (`export *` or `export * as ns` inside a
   `declare module '...'` body, recorded as a type-only namespace import
   without a local binding) credits the full ES star surface of its target:

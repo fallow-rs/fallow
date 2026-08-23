@@ -85,6 +85,8 @@ mod issue_2357_ambient_star_reexport;
 mod issue_2372_star_barrel_whole_module;
 #[path = "integration_test/issue_2373_entry_namespace_chain.rs"]
 mod issue_2373_entry_namespace_chain;
+#[path = "integration_test/issue_2374_default_specifier.rs"]
+mod issue_2374_default_specifier;
 #[path = "integration_test/issue_546_storybook_runtime_resources.rs"]
 mod issue_546_storybook_runtime_resources;
 #[path = "integration_test/issue_914_pnpm_bare_binary.rs"]

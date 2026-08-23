@@ -5235,6 +5235,53 @@ fn ambient_module_named_re_export_keeps_reference_without_file_export() {
     );
 }
 
+/// Issue #2374: a `default` specifier keeps its written spelling in both
+/// producers, so the graph's export-name index is what has to know that
+/// `Named("default")` and `Default` name the same export. This pins the shape
+/// the index fix reads; it passes on both sides of that fix.
+#[test]
+fn default_specifiers_record_the_written_name() {
+    let info = parse(
+        "import { default as Impl, other } from './impl';\n\
+         declare module 'pkg' {\n\
+           export { default as Shim, Y as Z } from './shim';\n\
+         }\n\
+         export const app = [Impl, other];\n",
+    );
+    let plain = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./impl" && i.local_name == "Impl")
+        .expect("the `default as Impl` specifier must be recorded");
+    assert!(
+        matches!(&plain.imported_name, ImportedName::Named(n) if n == "default"),
+        "a `default` import specifier keeps its written name: {:?}",
+        plain.imported_name
+    );
+
+    let ambient: Vec<_> = info
+        .imports
+        .iter()
+        .filter(|i| i.source == "./shim")
+        .collect();
+    assert_eq!(
+        ambient.len(),
+        2,
+        "expected one import per ambient re-export specifier: {:?}",
+        info.imports
+    );
+    assert!(
+        matches!(&ambient[0].imported_name, ImportedName::Named(n) if n == "default"),
+        "an ambient `default` re-export keeps its written name: {:?}",
+        ambient[0].imported_name
+    );
+    assert!(
+        matches!(&ambient[1].imported_name, ImportedName::Named(n) if n == "Y"),
+        "the named half keeps the source-side name: {:?}",
+        ambient[1].imported_name
+    );
+}
+
 #[test]
 fn ambient_module_bare_re_export_keeps_side_effect_reference() {
     let info = parse(

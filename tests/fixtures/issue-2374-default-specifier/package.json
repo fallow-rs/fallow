@@ -1,0 +1,5 @@
+{
+  "name": "issue-2374-default-specifier",
+  "type": "module",
+  "main": "src/index.ts"
+}

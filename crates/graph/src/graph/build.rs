@@ -21,6 +21,10 @@ pub(super) struct PopulateEdgesInput<'a> {
     pub(super) total_capacity: usize,
 }
 
+/// The one importable name that both `ExportName` and `ImportedName` can
+/// spell either as their `Default` variant or as a `Named` string.
+const DEFAULT_EXPORT_NAME: &str = "default";
+
 #[derive(Clone, Copy, Default)]
 pub(super) struct NamespaceFeatures {
     pub(super) has_aliases: bool,
@@ -491,8 +495,20 @@ pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
 }
 
 /// Per-module index of exports by importable name: `ExportName::Named`
-/// matches `ImportedName::Named` with the same string, `Default` matches
-/// `Default`, and namespace or side-effect imports match nothing.
+/// matches `ImportedName::Named` with the same string, the default slot
+/// matches a default import, and namespace or side-effect imports match
+/// nothing.
+///
+/// `default` is one importable name spelled two ways on each side, so both
+/// spellings share the default slot (issue #2374). An export declares it as
+/// `ExportName::Default` (`export default x`) or as `ExportName::Named`
+/// (`export { x as default }`, which the extractor keeps under its written
+/// name); an import names it as `ImportedName::Default` (`import x from`) or
+/// as `ImportedName::Named` (`import { default as x } from`, and the ambient
+/// `declare module '<specifier>' { export { default } from './impl' }` form,
+/// which records one named type-space import per specifier). Keying those on
+/// the spelling left every mixed pairing uncredited, so the target's default
+/// export reported as unused.
 ///
 /// Built once per target module in `populate_references` and reused across
 /// all of that module's incoming edge symbols, so wide barrels stop paying a
@@ -520,9 +536,15 @@ impl ExportNameIndex {
     /// Index exports appended since the last sync. Namespace narrowing pushes
     /// synthetic star re-export stubs mid-pass; exports are append-only, so
     /// picking up the tail keeps every per-name list complete and ascending.
+    ///
+    /// `export { x as default }` lands in the default slot rather than under
+    /// the string key, so the slot holds every export that declares the
+    /// default in ascending order and the named map never carries a
+    /// `"default"` key.
     pub(super) fn sync(&mut self, exports: &[ExportSymbol]) {
         for (idx, export) in exports.iter().enumerate().skip(self.indexed_len) {
             match &export.name {
+                ExportName::Named(name) if name == DEFAULT_EXPORT_NAME => self.default.push(idx),
                 ExportName::Named(name) => self.named.entry(name.clone()).or_default().push(idx),
                 ExportName::Default => self.default.push(idx),
             }
@@ -531,8 +553,13 @@ impl ExportNameIndex {
     }
 
     /// Indices of exports matching `import`, in ascending export order.
+    ///
+    /// A named import of `default` is a default import (`import { default as
+    /// x } from './m'` binds the same export as `import x from './m'`), so it
+    /// reads the default slot.
     pub(super) fn matches(&self, import: &ImportedName) -> &[usize] {
         match import {
+            ImportedName::Named(name) if name == DEFAULT_EXPORT_NAME => &self.default,
             ImportedName::Named(name) => self.named.get(name).map_or(&[], Vec::as_slice),
             ImportedName::Default => &self.default,
             ImportedName::Namespace | ImportedName::SideEffect => &[],
@@ -581,6 +608,43 @@ mod tests {
             index
                 .matches(&ImportedName::Named("missing".to_string()))
                 .is_empty()
+        );
+    }
+
+    /// Issue #2374: `default` is one importable name however each side spells
+    /// it, so both spellings read the same slot and that slot holds both
+    /// declaration forms in ascending export order.
+    #[test]
+    fn export_name_index_matches_default_under_both_spellings() {
+        let exports = vec![
+            make_export(ExportName::Named("foo".to_string())),
+            make_export(ExportName::Default),
+            make_export(ExportName::Named("default".to_string())),
+            make_export(ExportName::Named("bar".to_string())),
+        ];
+        let index = ExportNameIndex::build(&exports);
+
+        assert_eq!(index.matches(&ImportedName::Default), &[1, 2]);
+        assert_eq!(
+            index.matches(&ImportedName::Named("default".to_string())),
+            &[1, 2]
+        );
+        // The default slot never leaks into an unrelated name lookup.
+        assert_eq!(index.matches(&ImportedName::Named("foo".to_string())), &[0]);
+        assert_eq!(index.matches(&ImportedName::Named("bar".to_string())), &[3]);
+    }
+
+    /// A module that only declares `export { x as default }` still answers a
+    /// plain `import x from './m'`.
+    #[test]
+    fn export_name_index_matches_default_declared_only_as_a_named_export() {
+        let exports = vec![make_export(ExportName::Named("default".to_string()))];
+        let index = ExportNameIndex::build(&exports);
+
+        assert_eq!(index.matches(&ImportedName::Default), &[0]);
+        assert_eq!(
+            index.matches(&ImportedName::Named("default".to_string())),
+            &[0]
         );
     }
 

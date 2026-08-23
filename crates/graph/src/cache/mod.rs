@@ -157,7 +157,16 @@ pub use store::GraphCacheStore;
 /// `export *` hop no longer carries a downstream `export * as default` onward,
 /// so a chain behind such a namespace object can report one finding more than
 /// a warm 38 cache holds.
-pub const GRAPH_CACHE_VERSION: u32 = 39;
+///
+/// Bumped to 40 for issue #2374: the per-module export-name index now treats
+/// `default` as one importable name however each side spells it, so
+/// `import { default as x } from './impl'`, an ambient
+/// `declare module '<specifier>' { export { default } from './impl' }`, and a
+/// plain `import x from './impl'` against an `export { x as default }` credit
+/// the target's default export, and those references are baked into the
+/// persisted graph. Warm 39 caches carry the uncredited verdict, so the
+/// default export would stay reported as unused on upgrade.
+pub const GRAPH_CACHE_VERSION: u32 = 40;
 
 /// Cached form of a resolved target.
 ///

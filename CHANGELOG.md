@@ -87,6 +87,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `default` import or re-export specifier now credits the target's default
+  export** (Closes
+  [#2374](https://github.com/fallow-rs/fallow/issues/2374)). `default` is one
+  importable name that either side may spell two ways, and the graph's
+  per-module export-name index keyed on the spelling instead of the name, so
+  three pairings never met and the target's default export kept reporting as
+  unused: `import { default as X } from './impl'`, an ambient
+  `declare module 'pkg' { export { default } from './impl' }` (including the
+  mixed `export { default as Impl, Y as Z } from './impl'`, where `Y` was
+  credited and the default was not), and a plain `import x from './impl'`
+  against a module whose default is written `export { x as default }`. A
+  `export { default } from` chain lost the credit at every hop when a
+  `default` specifier consumed it. The index now reads and writes a single
+  default slot however each side spells the name. A plain
+  `export * from './impl'` is unchanged: an ES star re-export never forwards
+  `default`, so the target's default export still reports. Repositories using
+  any of these shapes will see fewer unused-export findings. Warm graph caches
+  invalidate (`GRAPH_CACHE_VERSION` 39 to 40); the extract cache is untouched.
+
 - **The MCP `audit` and `check_health` tools now honor `health.coverage`,
   `health.coverageRoot`, `FALLOW_COVERAGE`, and `FALLOW_COVERAGE_ROOT` on
   their typed route** (Closes
