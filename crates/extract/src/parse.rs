@@ -1146,6 +1146,7 @@ pub fn compute_semantic_usage(
     compute_semantic_usage_with_candidates(
         program,
         imports,
+        &[],
         template_used,
         &rustc_hash::FxHashSet::default(),
     )
@@ -1160,6 +1161,7 @@ pub fn compute_semantic_usage_for_extractor(
     let semantic_usage = compute_semantic_usage_with_candidates(
         program,
         &extractor.imports,
+        &extractor.import_equals_bindings,
         template_used,
         &computed_enum_key_spans,
     );
@@ -1170,6 +1172,7 @@ pub fn compute_semantic_usage_for_extractor(
 fn compute_semantic_usage_with_candidates(
     program: &Program<'_>,
     imports: &[ImportInfo],
+    import_equals_bindings: &[String],
     template_used: &rustc_hash::FxHashSet<String>,
     module_binding_candidates: &rustc_hash::FxHashSet<Span>,
 ) -> SemanticUsage {
@@ -1213,6 +1216,36 @@ fn compute_semantic_usage_with_candidates(
             if has_value_references {
                 value_referenced_bindings.insert(import.local_name.clone());
             }
+        }
+    }
+
+    // `import X = require('./y')` binds `X` in both the type and the value
+    // namespace, the same way `import * as X from './y'` does, but the require
+    // path records it outside `imports`, so the loop above never sees it.
+    // Classify it here: without a type-space entry `X.SomeType` in an
+    // annotation leaves the target's type exports uncredited (issue #2365). An
+    // unreferenced binding is deliberately kept out of `unused`: the require
+    // path has never reported an unused binding, and the exported form
+    // (`export import X = require('./y')`) legitimately has no local reference.
+    for local_name in import_equals_bindings {
+        if local_name.is_empty() {
+            continue;
+        }
+        let name = oxc_str::Ident::from(local_name.as_str());
+        let Some(symbol_id) = scoping.get_binding(root_scope, name) else {
+            continue;
+        };
+        let mut has_type_references = false;
+        let mut has_value_references = false;
+        for reference in scoping.get_resolved_references(symbol_id) {
+            has_type_references |= reference.is_type();
+            has_value_references |= reference.is_value();
+        }
+        if has_type_references {
+            type_referenced_bindings.insert(local_name.clone());
+        }
+        if has_value_references {
+            value_referenced_bindings.insert(local_name.clone());
         }
     }
 

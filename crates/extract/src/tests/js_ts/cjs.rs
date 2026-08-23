@@ -198,3 +198,130 @@ fn import_equals_entity_name_records_no_require_call() {
         info.imports
     );
 }
+
+/// The binding lives in both the type and the value namespace, exactly like an
+/// `import * as X` namespace import. The graph reads these two vectors to
+/// decide which namespaces a member access credits, so a binding used in a type
+/// annotation has to land in `type_referenced_import_bindings`.
+#[test]
+fn import_equals_require_classifies_type_and_value_usage() {
+    let info = parse_source(
+        "import T = require('./t');\nconsole.log(T.val);\nexport const f = (v: T.Shape): number => \
+         v.n;",
+    );
+    assert!(
+        info.type_referenced_import_bindings
+            .iter()
+            .any(|binding| binding == "T"),
+        "`T.Shape` in an annotation is a type reference: {:?}",
+        info.type_referenced_import_bindings
+    );
+    assert!(
+        info.value_referenced_import_bindings
+            .iter()
+            .any(|binding| binding == "T"),
+        "`T.val` in an expression is a value reference: {:?}",
+        info.value_referenced_import_bindings
+    );
+}
+
+/// A binding used only in type position credits type space alone, so the value
+/// exports of the target stay narrowable.
+#[test]
+fn import_equals_require_used_only_in_type_position_stays_out_of_value_space() {
+    let info =
+        parse_source("import T = require('./t');\nexport const f = (v: T.Shape): number => v.n;");
+    assert!(
+        info.type_referenced_import_bindings
+            .iter()
+            .any(|binding| binding == "T"),
+        "type usage: {:?}",
+        info.type_referenced_import_bindings
+    );
+    assert!(
+        !info
+            .value_referenced_import_bindings
+            .iter()
+            .any(|binding| binding == "T"),
+        "no expression reads the binding: {:?}",
+        info.value_referenced_import_bindings
+    );
+}
+
+/// An unreferenced import-equals binding is never reported as an unused import
+/// binding: the require path has never done that, and the exported form
+/// legitimately has no local reference.
+#[test]
+fn import_equals_require_never_reports_an_unused_import_binding() {
+    let info = parse_source("import Unused = require('./unused');");
+    assert!(
+        !info
+            .unused_import_bindings
+            .iter()
+            .any(|binding| binding == "Unused"),
+        "unused import bindings: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+/// `export import X = require('./x')` hands the module object to consumers the
+/// graph cannot enumerate, so the binding is recorded as a whole-object use and
+/// every export of the target keeps its credit. Both the file-level form and
+/// the exported-namespace-body form record it.
+#[test]
+fn export_import_equals_require_records_a_whole_object_use() {
+    let file_level = parse_source("export import Users = require('./users');");
+    assert!(
+        file_level
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "Users"),
+        "file-level whole-object uses: {:?}",
+        file_level.whole_object_uses
+    );
+
+    let in_namespace =
+        parse_source("export namespace Outer {\n  export import Inner = require('./inner');\n}");
+    assert!(
+        in_namespace
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "Inner"),
+        "namespace-body whole-object uses: {:?}",
+        in_namespace.whole_object_uses
+    );
+}
+
+/// Deliberate negative controls for the whole-object mark: an unexported
+/// binding is narrowable through its member accesses, and the entity-name form
+/// is a local alias with no module object behind it.
+#[test]
+fn import_equals_without_export_records_no_whole_object_use() {
+    let plain = parse_source("import Users = require('./users');\nconsole.log(Users.alpha);");
+    assert!(
+        plain.whole_object_uses.is_empty(),
+        "an unexported binding stays narrowable: {:?}",
+        plain.whole_object_uses
+    );
+
+    let local_namespace = parse_source(
+        "namespace Local {\n  export import Inner = require('./inner');\n}\nconsole.log(Local);",
+    );
+    assert!(
+        !local_namespace
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "Inner"),
+        "a binding inside an unexported namespace is not public API: {:?}",
+        local_namespace.whole_object_uses
+    );
+
+    let entity_name = parse_source(
+        "namespace Shapes {\n  export const box = 1;\n}\nexport import Alias = Shapes;",
+    );
+    assert!(
+        entity_name.whole_object_uses.is_empty(),
+        "an entity-name alias has no module object: {:?}",
+        entity_name.whole_object_uses
+    );
+}

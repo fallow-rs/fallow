@@ -97,7 +97,12 @@ impl ModuleInfoExtractor {
             Declaration::TSModuleDeclaration(module) => {
                 self.extract_module_declaration_export(module, is_type_only);
             }
-            _ => {}
+            Declaration::TSImportEqualsDeclaration(import_equals) => {
+                self.record_exported_import_equals(import_equals);
+            }
+            // `export declare global { ... }` augments the global scope; it
+            // declares no export of this file.
+            Declaration::TSGlobalDeclaration(_) => {}
         }
     }
 
@@ -317,7 +322,12 @@ impl ModuleInfoExtractor {
                     self.push_namespace_member(lit.value.to_string(), lit.span);
                 }
             },
-            _ => {}
+            Declaration::TSImportEqualsDeclaration(import_equals) => {
+                self.record_exported_import_equals(import_equals);
+            }
+            // `declare global { ... }` inside a namespace body augments the
+            // global scope; it contributes no namespace member.
+            Declaration::TSGlobalDeclaration(_) => {}
         }
     }
 
@@ -379,12 +389,20 @@ impl ModuleInfoExtractor {
     }
 
     /// Handle `import X = require('./y')`, the TypeScript spelling of a
-    /// CommonJS require binding. It records exactly what
-    /// `const X = require('./y')` records through
-    /// [`Self::handle_require_declaration`]: one non-destructured require call
-    /// plus the namespace binding name, so the target keeps its edge and
-    /// `X.member` narrows the target's exports the way a namespace import does
-    /// (issue #2365).
+    /// CommonJS require binding. It records the same shape the
+    /// `BindingIdentifier` arm of [`Self::handle_require_declaration`] records
+    /// for `const X = require('./y')`: one non-destructured require call plus
+    /// the namespace binding name, so the target keeps its edge and `X.member`
+    /// narrows the target's exports the way a namespace import does (issue
+    /// #2365). The two paths run in parallel rather than one calling the other,
+    /// because a `TSExternalModuleReference` carries a `StringLiteral` where the
+    /// variable form carries a `CallExpression`; the `handled_require_spans`
+    /// insert is therefore deliberately absent, since `record_bare_require_call`
+    /// only ever sees call expressions.
+    ///
+    /// The binding is also recorded in `import_equals_bindings` so the semantic
+    /// pass classifies its type and value usage: without that, `X.SomeType` in
+    /// type position would leave the target's type exports uncredited.
     ///
     /// `import X = Some.Namespace` names an entity declared in this file rather
     /// than a module, so it records nothing.
@@ -397,6 +415,7 @@ impl ModuleInfoExtractor {
         };
         let local = decl.id.name.to_string();
         self.namespace_binding_names.push(local.clone());
+        self.import_equals_bindings.push(local.clone());
         self.require_calls.push(RequireCallInfo {
             source: reference.expression.value.to_string(),
             // The `require('./y')` reference, matching the call span a
@@ -406,6 +425,27 @@ impl ModuleInfoExtractor {
             destructured_names: Vec::new(),
             local_name: Some(local),
         });
+    }
+
+    /// Record the exported form, `export import X = require('./y')`, at file
+    /// level or inside an exported namespace body.
+    ///
+    /// The declaration hands the required module object to consumers the graph
+    /// cannot enumerate, exactly as `import * as X from './y'; export { X }`
+    /// does, so the binding is marked a whole-object use. Without it an entry
+    /// point that only re-exports the binding has no member access to narrow
+    /// with, `is_entry_with_no_access` fires, and every export of the target
+    /// turns into a false `unused-export` row (issues #2365, #2373).
+    ///
+    /// The entity-name form stays out of scope: `export import X = Some.Ns`
+    /// aliases a local declaration, not a module.
+    fn record_exported_import_equals(&mut self, decl: &TSImportEqualsDeclaration<'_>) {
+        if matches!(
+            &decl.module_reference,
+            TSModuleReference::ExternalModuleReference(_)
+        ) {
+            self.whole_object_uses.push(decl.id.name.to_string());
+        }
     }
 
     /// Handle namespace destructuring: `const { a, b } = ns` where `ns` is a namespace

@@ -129,8 +129,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target's exports the way a namespace import does, and a binding used as a
   whole object (`Object.values(X)`) credits the full namespace object,
   including the names the target only exposes through its own `export *`
-  chain. `export import X = require('./x')` inside a namespace body records
-  the same edge. Repositories that use the form will see fewer unused-file and
+  chain. Narrowing covers both semantic spaces: the binding is classified for
+  type and value usage like a namespace import, so `X.SomeType` in an
+  annotation credits the target's type export instead of leaving it reported
+  as an unused type. `export import X = require('./x')`, at file level or
+  inside an exported namespace body, additionally hands the module object to
+  consumers the graph cannot enumerate, so every export of the target keeps
+  its credit exactly as it does behind `import * as X from './x';
+  export { X }`, including on an entry point with no local member access
+  ([#2373](https://github.com/fallow-rs/fallow/issues/2373)).
+  Repositories that use the form will see fewer unused-file and
   unused-export findings, and the exports of a file that becomes reachable for
   the first time are narrowed against the members the consumer writes, so a
   sibling nothing accesses surfaces as an unused export where the unused-file

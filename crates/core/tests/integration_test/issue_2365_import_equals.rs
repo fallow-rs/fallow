@@ -2,7 +2,11 @@
 //! CommonJS require binding. It records the same edge a
 //! `const X = require('./x')` declaration records, so the target participates
 //! in reachability and member accesses through `X` narrow the target's exports
-//! the way a namespace import does.
+//! the way a namespace import does, in type space as well as value space.
+//!
+//! The exported form, `export import X = require('./x')`, additionally hands
+//! the module object to consumers the graph cannot enumerate, so it credits
+//! every export of the target exactly as `import * as X; export { X }` does.
 //!
 //! `import X = Some.Namespace` stays out of scope: an entity-name reference
 //! names a binding declared in the same file, not a module, so it records no
@@ -39,6 +43,22 @@ fn unused_exports_of(results: &fallow_core::results::AnalysisResults, file: &str
         .into_iter()
         .filter(|(path, _)| path.ends_with(file))
         .map(|(_, name)| name)
+        .collect()
+}
+
+/// Type exports reported on one file, in report order.
+fn unused_types_of(results: &fallow_core::results::AnalysisResults, file: &str) -> Vec<String> {
+    results
+        .unused_types
+        .iter()
+        .filter(|e| {
+            e.export
+                .path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with(file)
+        })
+        .map(|e| e.export.export_name.clone())
         .collect()
 }
 
@@ -127,17 +147,109 @@ fn import_equals_used_as_a_whole_object_credits_the_star_chain() {
     }
 }
 
-/// `export import Inner = require('./inner')` inside a namespace body is still
-/// an import of `./inner`, and it narrows the same way.
+/// The binding narrows in type space too. `Typed.UsedShape` in an annotation
+/// credits the interface; the untouched sibling interface still reports. The
+/// `import * as TypedEsm` half of the fixture declares the same shape and must
+/// report the same way: crediting only the value lane would invent an
+/// `unused-type` row the namespace import never produces.
 #[test]
-fn export_import_equals_inside_a_namespace_records_the_edge() {
+fn import_equals_narrows_type_members_like_a_namespace_import() {
     let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
         .expect("analysis should succeed");
 
     assert_eq!(
-        unused_exports_of(&results, "src/inner.ts"),
-        vec!["innerUnused".to_string()],
-        "the member the namespace body reads is credited and its sibling keeps reporting"
+        unused_types_of(&results, "src/typed.ts"),
+        vec!["UnusedShape".to_string()],
+        "a type reached through `Typed.UsedShape` is credited, its sibling is not"
+    );
+    assert_eq!(
+        unused_types_of(&results, "src/typed-esm.ts"),
+        vec!["EsmUnusedShape".to_string()],
+        "the equivalent namespace import reports the same way"
+    );
+
+    // The value export on the same target is credited through the same
+    // binding, so the type lane is not bought by dropping the value lane.
+    assert!(
+        unused_exports_of(&results, "src/typed.ts").is_empty(),
+        "the value member read through the binding stays credited: {:?}",
+        unused_exports_of(&results, "src/typed.ts")
+    );
+}
+
+/// Object destructuring off the binding (`const { used } = X`) resolves through
+/// the namespace binding name, so only the destructured member is credited.
+/// Without that binding name the whole target would report.
+#[test]
+fn import_equals_destructuring_off_the_binding_narrows_like_a_namespace_import() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+
+    assert_eq!(
+        unused_exports_of(&results, "src/destructured.ts"),
+        vec!["destructuredSibling".to_string()],
+        "destructuring off the binding credits the destructured member alone"
+    );
+    assert_eq!(
+        unused_exports_of(&results, "src/destructured-esm.ts"),
+        vec!["esmDestructuredSibling".to_string()],
+        "the equivalent namespace import reports the same way"
+    );
+}
+
+/// `export import X = require('./x')` hands the required module object to
+/// consumers the graph cannot enumerate, so every export of the target keeps
+/// its credit. On an entry point there is no local member access to narrow
+/// with, and without the whole-object credit `is_entry_with_no_access` would
+/// turn every export of the target into a false `unused-export` row (#2373).
+/// Both the file-level form and the exported-namespace-body form are pinned,
+/// against the `import * as X; export { X }` twin.
+#[test]
+fn export_import_equals_on_an_entry_point_credits_the_whole_module() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused_files = unused_files(&results);
+
+    for file in [
+        "src/entry-reexport.ts",
+        "src/entry-reexport-esm.ts",
+        "src/entry-ns.ts",
+    ] {
+        // An unreachable file stacks no unused-export rows underneath its
+        // unused-file row, so reachability is asserted first.
+        assert!(
+            !unused_files.iter().any(|p| p.ends_with(file)),
+            "{file} must be reachable before its exports can be credited: {unused_files:?}"
+        );
+        assert!(
+            unused_exports_of(&results, file).is_empty(),
+            "{file}: every export is reachable through the re-exported binding: {:?}",
+            unused_exports_of(&results, file)
+        );
+    }
+}
+
+/// `export import Inner = require('./inner')` inside a namespace body is still
+/// an import of `./inner`, and the binding is public API under `Outer.Inner`,
+/// so every export of the target is credited the way `export { Inner }` credits
+/// a namespace import. Narrowing to the members the declaring file happens to
+/// read would be unsound: a consumer holding `Outer.Inner` can reach any of
+/// them.
+#[test]
+fn export_import_equals_inside_a_namespace_credits_the_whole_module() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+
+    assert!(
+        !unused_files(&results)
+            .iter()
+            .any(|p| p.ends_with("src/inner.ts")),
+        "the namespace body's import edge keeps the target reachable"
+    );
+    assert!(
+        unused_exports_of(&results, "src/inner.ts").is_empty(),
+        "a binding re-exported as a namespace member observes the whole object: {:?}",
+        unused_exports_of(&results, "src/inner.ts")
     );
 }
 

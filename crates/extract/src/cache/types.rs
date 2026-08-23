@@ -981,9 +981,12 @@ use crate::MemberKind;
 ///
 /// Bumped to 279 for issue #2365: `import X = require('./x')` now records the
 /// same require call a `const X = require('./x')` declaration records, plus the
-/// namespace binding that narrows `X.member` and the unused-binding verdict for
-/// an unreferenced one. Warm 278 caches hold the module without that require
-/// call, so the target would stay reported as an unused file on upgrade.
+/// namespace binding that narrows `X.member`, its type-space and value-space
+/// binding classification, the unused-binding verdict for an unreferenced
+/// non-exported one, and the whole-object use the exported form
+/// (`export import X = require('./x')`) hands to consumers. Warm 278 caches hold
+/// the module without that require call and without those facts, so the target
+/// would stay reported as an unused file on upgrade.
 pub(super) const CACHE_VERSION: u32 = 279;
 
 /// Duplication token cache version. Bump when duplicate tokenization,

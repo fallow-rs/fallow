@@ -105,10 +105,17 @@ error by suppressing a downstream detector.
   `const X = require('./x')` declaration records (issue #2365): one CommonJS
   namespace import with the local binding, which makes `X.member` narrow the
   target's exports and a whole-object use of `X` seed the exposed namespace
-  closure below. `export import X = require('./x')` inside a namespace body
-  records the same edge. `import X = Some.Namespace` is an entity-name
-  reference that aliases a binding declared in the same file, not a module, so
-  it records nothing.
+  closure below. The binding is classified for type and value usage the same
+  way an `import * as X` binding is, so `X.SomeType` in a type annotation
+  narrows the target's type exports rather than leaving them uncredited.
+  `export import X = require('./x')`, at file level or inside an exported
+  namespace body, is recorded as a whole-object use of the binding: the module
+  object reaches consumers the graph cannot enumerate, so every export of the
+  target is credited the way `export { X }` credits a namespace import, which
+  is what keeps an entry point that only re-exports the binding from reporting
+  the target's whole surface (issue #2373). `import X = Some.Namespace` is an
+  entity-name reference that aliases a binding declared in the same file, not
+  a module, so it records nothing.
 - An ambient-module star re-export (`export *` or `export * as ns` inside a
   `declare module '...'` body, recorded as a type-only namespace import
   without a local binding) credits the full ES star surface of its target:
