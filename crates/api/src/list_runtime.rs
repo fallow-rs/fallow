@@ -848,6 +848,63 @@ mod tests {
         );
     }
 
+    /// Issue #2366: the MCP `project_info` tool reads the same workspace value
+    /// the `fallow workspaces` envelope does, so a glob declared in both
+    /// `package.json` and `pnpm-workspace.yaml` must reach an agent as one
+    /// entry per directory, project-relative, exactly as the CLI reports it.
+    #[test]
+    fn project_info_reports_one_entry_per_directory_for_a_glob_in_two_manifests() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir_all(root.join("pkgs/aaa")).expect("first package-less dir");
+        std::fs::create_dir_all(root.join("pkgs/bbb")).expect("second package-less dir");
+        std::fs::create_dir_all(root.join("src")).expect("source dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"two-manifest-root","private":true,"workspaces":["./pkgs/*"]}"#,
+        )
+        .expect("write root manifest");
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - \"pkgs/*\"\n",
+        )
+        .expect("write pnpm workspace manifest");
+        std::fs::write(root.join("src/index.ts"), "export const value = 1;\n")
+            .expect("write source");
+
+        let output = serialize_project_info_programmatic_json(
+            run_project_info(&ProjectInfoOptions {
+                analysis: AnalysisOptions {
+                    root: Some(root.to_path_buf()),
+                    no_cache: true,
+                    ..AnalysisOptions::default()
+                },
+                ..ProjectInfoOptions::default()
+            })
+            .expect("project info should run"),
+        )
+        .expect("project info should serialize");
+
+        let reported: Vec<(&str, &str)> = output["workspace_diagnostics"]
+            .as_array()
+            .expect("project info should include workspace_diagnostics")
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic["pattern"].as_str().unwrap_or_default(),
+                    diagnostic["path"].as_str().unwrap_or_default(),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            reported,
+            vec![("pkgs/*", "pkgs/aaa"), ("pkgs/*", "pkgs/bbb")],
+            "project_info agrees with the CLI envelopes: {}",
+            output["workspace_diagnostics"]
+        );
+    }
+
     #[test]
     fn list_runtimes_scope_files_and_boundary_counts_to_changed_since() {
         let project = setup_changed_boundary_project();

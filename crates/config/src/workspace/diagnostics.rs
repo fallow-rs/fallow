@@ -1177,4 +1177,37 @@ mod tests {
                 .any(|p| p.message.contains("references 4 directories"))
         );
     }
+
+    /// Issue #2366: the aggregated warning groups the diagnostics it is
+    /// handed and counts the group, so a list that still holds the duplicate
+    /// entries of one glob declared in two manifests reports a directory
+    /// count that does not exist and names one directory twice among its
+    /// examples. Deduplicating at discovery is what makes the summary true.
+    #[test]
+    fn two_manifest_glob_warning_counts_each_directory_once() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        crate::workspace::write_two_manifest_glob_project(dir.path());
+
+        let (_, diagnostics) = crate::workspace::discover_workspaces_with_diagnostics(
+            dir.path(),
+            &globset::GlobSet::empty(),
+        )
+        .expect("root package.json is valid");
+
+        let messages: Vec<String> = plan_warnings(dir.path(), &diagnostics)
+            .into_iter()
+            .map(|plan| plan.message)
+            .collect();
+
+        assert_eq!(
+            messages,
+            vec![
+                "Glob 'pkgs/*' matched 2 directories with no package.json \
+                 (e.g. pkgs/aaa, pkgs/bbb). Add a package.json, narrow the \
+                 pattern, or add them to ignorePatterns."
+                    .to_owned()
+            ],
+            "the summary names the true directory count and each example once"
+        );
+    }
 }

@@ -1131,3 +1131,112 @@ fn list_json_keeps_both_overlapping_glob_diagnostics() {
         );
     }
 }
+
+/// Build the issue-2366 repository shape: one glob declared in both
+/// `package.json` (spelled `./pkgs/*`) and `pnpm-workspace.yaml` (spelled
+/// `pkgs/*`), over two directories that carry no `package.json`.
+fn write_two_manifest_glob_project(root: &std::path::Path) {
+    fs::create_dir_all(root.join("pkgs/aaa")).expect("create first package-less dir");
+    fs::create_dir_all(root.join("pkgs/bbb")).expect("create second package-less dir");
+    fs::create_dir_all(root.join("src")).expect("create source dir");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"two-manifest-root","private":true,"workspaces":["./pkgs/*"]}"#,
+    )
+    .expect("write root manifest");
+    fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - \"pkgs/*\"\n",
+    )
+    .expect("write pnpm workspace manifest");
+    fs::write(root.join("src/index.ts"), "export const value = 1;\n").expect("write source");
+    fs::write(root.join("pkgs/aaa/readme.txt"), "no package.json here\n").expect("write filler");
+    fs::write(root.join("pkgs/bbb/readme.txt"), "no package.json here\n").expect("write filler");
+}
+
+/// Issue #2366: `package.json` `workspaces` and `pnpm-workspace.yaml`
+/// `packages` are additive, so one glob declared in both is walked twice.
+/// Every envelope that carries `workspace_diagnostics[]` must report one entry
+/// per distinct matching pattern, with the same project-relative path shape,
+/// whichever manifest happened to be read first.
+#[test]
+fn every_envelope_reports_one_entry_per_directory_for_a_glob_in_two_manifests() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_two_manifest_glob_project(root);
+
+    for args in [
+        ["--format", "json", "--quiet"].as_slice(),
+        ["--skip", "check", "--format", "json", "--quiet"].as_slice(),
+        ["--only", "health", "--format", "json", "--quiet"].as_slice(),
+        ["dead-code", "--format", "json", "--quiet"].as_slice(),
+        ["check", "--format", "json", "--quiet"].as_slice(),
+        ["health", "--format", "json", "--quiet"].as_slice(),
+        ["dupes", "--format", "json", "--quiet"].as_slice(),
+        ["list", "--format", "json", "--quiet"].as_slice(),
+        ["list", "--workspaces", "--format", "json", "--quiet"].as_slice(),
+        ["workspaces", "--format", "json", "--quiet"].as_slice(),
+    ] {
+        let output = run_fallow_combined_in_root(root, args);
+        assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+
+        let json = parse_json(&output);
+        let reported: Vec<(String, String)> = json["workspace_diagnostics"]
+            .as_array()
+            .expect("workspace_diagnostics array")
+            .iter()
+            .map(|entry| {
+                (
+                    entry["pattern"].as_str().unwrap_or_default().to_owned(),
+                    entry["path"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            reported,
+            vec![
+                ("pkgs/*".to_owned(), "pkgs/aaa".to_owned()),
+                ("pkgs/*".to_owned(), "pkgs/bbb".to_owned()),
+            ],
+            "`fallow {args:?}` reports each directory once, project-relative: {}",
+            json["workspace_diagnostics"]
+        );
+    }
+}
+
+/// The aggregated stderr warning is built from the same list, so a duplicated
+/// entry makes it claim a directory count the repository does not have and
+/// name one directory twice among its examples.
+#[test]
+fn two_manifest_glob_warning_names_the_true_directory_count_once_each() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_two_manifest_glob_project(root);
+
+    let output = Command::new(fallow_bin())
+        .arg("--root")
+        .arg(root)
+        .args(["workspaces", "--format", "json"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("failed to run fallow binary");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let warnings: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("no package.json"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "one glob is one summary line, whichever manifests declare it: {stderr}"
+    );
+    assert!(
+        warnings[0].contains(
+            "Glob 'pkgs/*' matched 2 directories with no package.json \
+             (e.g. pkgs/aaa, pkgs/bbb)"
+        ),
+        "the summary counts the directories once each: {}",
+        warnings[0]
+    );
+}

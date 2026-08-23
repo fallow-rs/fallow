@@ -159,6 +159,19 @@ pub fn discover_workspaces_with_diagnostics(
 /// only means downstream callers that have no access to the user's
 /// `ignorePatterns` cannot accidentally re-emit warnings on paths the user
 /// already excluded.
+///
+/// The returned diagnostics are deduplicated on the whole `(kind, path)`, the
+/// way every downstream fold is. The sources are additive, so a repository that
+/// declares one glob in both `package.json` `workspaces` and
+/// `pnpm-workspace.yaml` `packages` walks it twice and reports every
+/// package-less directory under it twice. Folding here rather than only in the
+/// process registry is what keeps the returned list, the `workspaces` and
+/// `list --workspaces` envelopes, the MCP `project_info` tool and the
+/// aggregated stderr warning (whose per-pattern grouping counts the entries it
+/// is handed) agreeing on one entry per distinct matching pattern (issue
+/// #2366). Two overlapping globs (`["packages/*", "packages/*/*"]`) still
+/// report the same directory once per `pattern`: the payload is part of the
+/// key.
 fn collect_workspaces_and_diagnostics(
     root: &Path,
     ignore_patterns: &globset::GlobSet,
@@ -195,7 +208,10 @@ fn collect_workspaces_and_diagnostics(
         mark_internal_dependencies(&mut workspaces);
     }
     let workspaces = workspaces.into_iter().map(|(ws, _)| ws).collect();
-    Ok((workspaces, diagnostics))
+    Ok((
+        workspaces,
+        fallow_types::workspace::dedupe_workspace_diagnostics(diagnostics),
+    ))
 }
 
 /// Find directories containing `package.json` that are not declared as workspaces.
@@ -684,6 +700,30 @@ fn dir_name(dir: &Path) -> String {
     dir.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default()
+}
+
+/// Build the issue-2366 repository shape: one glob declared in both
+/// `package.json` (spelled `./pkgs/*`) and `pnpm-workspace.yaml` (spelled
+/// `pkgs/*`), over two directories that carry no `package.json`.
+///
+/// Shared with the emission tests in `diagnostics.rs`, which assert that the
+/// aggregated stderr warning counts each directory once.
+#[cfg(test)]
+pub fn write_two_manifest_glob_project(root: &Path) {
+    std::fs::create_dir_all(root.join("pkgs/aaa")).unwrap();
+    std::fs::create_dir_all(root.join("pkgs/bbb")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"two-manifest-root","private":true,"workspaces":["./pkgs/*"]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - \"pkgs/*\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("pkgs/aaa/readme.txt"), "no package.json here\n").unwrap();
+    std::fs::write(root.join("pkgs/bbb/readme.txt"), "no package.json here\n").unwrap();
 }
 
 #[cfg(test)]
@@ -1433,9 +1473,17 @@ mod tests {
 
     /// The per-discovery [`ManifestCache`] memoizes `Err` outcomes; a member
     /// reached through two workspace sources (npm glob + tsconfig reference)
-    /// must still surface one diagnostic per source from the replayed error.
+    /// must still be diagnosed from the replayed error rather than silently
+    /// resolving. The tsconfig source proves it replayed: a swallowed error
+    /// would have read a real package name instead of falling back to the
+    /// directory name.
+    ///
+    /// The two sources produce byte-identical diagnostics, so the discovery
+    /// fold reports the member once (issue #2366). Nothing distinguishes them
+    /// on the wire, and every JSON envelope already showed one entry because
+    /// the process registry folded them.
     #[test]
-    fn malformed_member_reached_via_two_sources_diagnosed_per_source() {
+    fn malformed_member_reached_via_two_sources_is_diagnosed_once() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let pkg_good = dir.path().join("packages").join("good");
         let pkg_bad = dir.path().join("packages").join("bad");
@@ -1473,12 +1521,12 @@ mod tests {
             .collect();
         assert_eq!(
             malformed.len(),
-            2,
-            "cached Err replays once per workspace source: {diagnostics:?}"
+            1,
+            "the replayed Err is one diagnostic, not one per source: {diagnostics:?}"
         );
         assert!(
-            malformed.iter().all(|d| d.path.ends_with("bad")),
-            "both diagnostics point at the malformed member"
+            malformed[0].path.ends_with("bad"),
+            "the diagnostic points at the malformed member"
         );
     }
 
@@ -1782,5 +1830,82 @@ mod tests {
         let mut names: Vec<_> = workspaces.iter().map(|w| w.name.as_str()).collect();
         names.sort_unstable();
         assert_eq!(names, vec!["a", "b"]);
+    }
+
+    /// Issue #2366: `package.json` `workspaces` and `pnpm-workspace.yaml`
+    /// `packages` are additive sources, so one glob declared in both is walked
+    /// twice. Deduplicating at the discovery choke point is what lets the JSON
+    /// envelopes report one entry per distinct matching pattern and lets the
+    /// aggregated stderr warning count the directories it actually found.
+    #[test]
+    fn one_glob_declared_in_two_manifests_reports_each_directory_once() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_two_manifest_glob_project(dir.path());
+
+        let (_, diagnostics) =
+            discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty())
+                .expect("root package.json is valid");
+
+        let mut reported: Vec<(String, String)> = diagnostics
+            .iter()
+            .filter_map(|diagnostic| match &diagnostic.kind {
+                WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => Some((
+                    pattern.clone(),
+                    diagnostic
+                        .path
+                        .strip_prefix(dir.path())
+                        .unwrap_or(&diagnostic.path)
+                        .display()
+                        .to_string()
+                        .replace('\\', "/"),
+                )),
+                _ => None,
+            })
+            .collect();
+        reported.sort();
+
+        assert_eq!(
+            reported,
+            vec![
+                ("pkgs/*".to_owned(), "pkgs/aaa".to_owned()),
+                ("pkgs/*".to_owned(), "pkgs/bbb".to_owned()),
+            ],
+            "one glob spelled two ways is one diagnostic per directory: {diagnostics:?}"
+        );
+    }
+
+    /// The control for the fold above: the key is the WHOLE kind, payload
+    /// included. Two overlapping globs each report the same package-less
+    /// directory with their own `pattern`, and both survive.
+    #[test]
+    fn overlapping_globs_still_report_one_directory_once_per_pattern() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(dir.path().join("pkgs/aaa")).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name":"overlap-root","private":true,"workspaces":["pkgs/*","pkgs/a*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("pkgs/aaa/readme.txt"), "no package.json\n").unwrap();
+
+        let (_, diagnostics) =
+            discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty())
+                .expect("root package.json is valid");
+
+        let patterns: Vec<&str> = diagnostics
+            .iter()
+            .filter_map(|diagnostic| match &diagnostic.kind {
+                WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => {
+                    Some(pattern.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            patterns,
+            ["pkgs/*", "pkgs/a*"],
+            "distinct patterns are distinct diagnostics: {diagnostics:?}"
+        );
     }
 }

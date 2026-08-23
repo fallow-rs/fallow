@@ -1385,7 +1385,10 @@ fn combined_json_only_dupes_carries_workspace_discovery_diagnostics() {
 /// finding twice, with `./pkgs/*` and `pkgs/*` as its `pattern`. Keying the
 /// fold on the typed payload would have kept both spellings as distinct
 /// entries, doubling the array on a real monorepo, so the recorded pattern
-/// drops the no-op `./` and the registry stores the deduplicated set.
+/// drops the no-op `./`, the recorded path drops the matching no-op `.`
+/// component, and workspace discovery folds its own list before returning it.
+/// `list_tests` covers the same shape on the workspace listing envelope, which
+/// reads that list instead of the registry.
 #[test]
 fn one_glob_declared_in_two_manifests_reports_one_diagnostic() {
     let dir = tempfile::tempdir().expect("tempdir");

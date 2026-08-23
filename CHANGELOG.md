@@ -456,13 +456,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   json` already reported. Because the payload now decides identity, the
   recorded `pattern` drops the no-op `./` prefix a `package.json` `workspaces`
   entry may carry (`"./apps/**"` is reported as `apps/**`, in the JSON field
-  and in the warning text), and the diagnostics registry deduplicates what it
-  stores. A repository that declares one glob in both `package.json` and
-  `pnpm-workspace.yaml`, which is the conventional pnpm layout, reported every
-  package-less directory under that glob TWICE on `fallow dead-code`, `check`,
-  `dupes`, and `health --format json`, once per spelling; it now reports each
-  once. No kind is new on those envelopes and no field changes type, so no
-  `schema_version` moves.
+  and in the warning text), and the recorded `path` drops the matching no-op
+  `.` component, so one directory has one spelling everywhere instead of
+  `./pkgs/aaa` on the analysis envelopes next to `pkgs/aaa` on the workspace
+  listing, decided by which manifest happened to be read first. Workspace
+  discovery deduplicates before it returns, not only the process registry:
+  `package.json` `workspaces`, `pnpm-workspace.yaml` `packages`, `deno.json`
+  `workspace`, and the root `tsconfig.json` references are additive sources,
+  so one glob declared in two of them is walked twice. A repository that
+  declares one glob in both `package.json` and `pnpm-workspace.yaml`, which is
+  the conventional pnpm layout, reported every package-less directory under
+  that glob TWICE, once per spelling, on `fallow dead-code`, `check`, `dupes`,
+  `health`, `list --workspaces`, and `workspaces --format json`, through the
+  MCP `project_info` tool, and under `dead_code` in `fallow audit` and `fallow
+  review --format json`; it now reports each once, so such a repository sees a
+  finding-count decrease on those surfaces. The aggregated stderr warning
+  reads the same list, so its summary now names the directory count the
+  repository actually has and each example directory once instead of counting
+  the duplicates. The repair covers the case where both manifests spell the
+  glob identically too, which produced byte-identical duplicates before this
+  change as well. Two overlapping globs declared in ONE manifest
+  (`["packages/*", "packages/a*"]`) still report the same directory once per
+  `pattern`, because the payload is part of the key. No kind is new on those
+  envelopes and no field changes type, so no `schema_version` moves.
 
 - **`fallow workspaces --format json` and `fallow list --workspaces --format
   json` now emit a project-relative `workspace_diagnostics[].path`.** Every

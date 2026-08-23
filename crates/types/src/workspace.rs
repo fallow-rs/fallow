@@ -241,8 +241,13 @@ impl WorkspaceDiagnostic {
     ///
     /// If `path` is not under `root` (e.g. canonicalisation crossed a
     /// symlink), the absolute path is emitted instead.
+    ///
+    /// `path` also loses any no-op `.` component, for the same reason the
+    /// payload loses a glob's `./` prefix: one directory reached through two
+    /// spellings of one glob must be one diagnostic.
     #[must_use]
     pub fn new(root: &Path, path: PathBuf, kind: WorkspaceDiagnosticKind) -> Self {
+        let path = normalise_diagnostic_path(path);
         let kind = normalise_payload_paths(root, kind);
         let message = render_message(root, &path, &kind);
         Self {
@@ -270,6 +275,31 @@ impl WorkspaceDiagnostic {
             self.path = relative.to_path_buf();
         }
         self
+    }
+}
+
+/// Rebuild `path` from its components so one directory has one spelling.
+///
+/// The dedupe key was never the problem: [`Path`] equality already ignores an
+/// interior `.`, so `<root>/./pkgs/aaa` and `<root>/pkgs/aaa` are one key. The
+/// stored bytes were. A workspace glob spelled `./pkgs/*` in `package.json`
+/// expands to the first spelling and the same glob spelled `pkgs/*` in
+/// `pnpm-workspace.yaml` expands to the second, and the two envelope families
+/// make a project-relative path differently: the analysis envelopes strip the
+/// root as a string (leaving `./pkgs/aaa`) while the workspace listing
+/// envelope uses [`WorkspaceDiagnostic::into_root_relative`] (leaving
+/// `pkgs/aaa`). Whichever
+/// manifest happened to be read first then decided which shape every consumer
+/// saw. Collapsing at construction gives them one answer (issue #2366).
+///
+/// A path that is already component-clean rebuilds to itself. Serialization
+/// normalises separators, so the rebuild is wire-invisible on Windows.
+fn normalise_diagnostic_path(path: PathBuf) -> PathBuf {
+    let rebuilt: PathBuf = path.components().collect();
+    if rebuilt.as_os_str() == path.as_os_str() {
+        path
+    } else {
+        rebuilt
     }
 }
 
@@ -365,6 +395,24 @@ pub fn merge_workspace_diagnostics(
         }
     }
     merged
+}
+
+/// Keep the first occurrence of each `(kind, path)` pair in one list.
+///
+/// The single-list form of [`merge_workspace_diagnostics`], applied where
+/// diagnostics are produced rather than where two observation points are
+/// folded: workspace discovery reads `package.json` `workspaces`,
+/// `pnpm-workspace.yaml` `packages`, `deno.json` `workspace` and the root
+/// `tsconfig.json` references additively, so a repository that declares one
+/// glob in two of them reports every package-less directory under it twice.
+/// Deduplicating at that source is what keeps the JSON envelopes, the
+/// aggregated stderr warning and the process registry telling one story
+/// (issue #2366).
+#[must_use]
+pub fn dedupe_workspace_diagnostics(
+    diagnostics: Vec<WorkspaceDiagnostic>,
+) -> Vec<WorkspaceDiagnostic> {
+    merge_workspace_diagnostics(diagnostics, Vec::new())
 }
 
 /// Render `path` relative to `root` with forward slashes. The forward-slash
@@ -700,6 +748,96 @@ mod tests {
             merged.len(),
             1,
             "one glob declared twice is one diagnostic: {merged:?}"
+        );
+    }
+
+    /// Issue #2366, the path half of the same repository shape: expanding
+    /// `./pkgs/*` joins the no-op `.` into every match, so the two manifests
+    /// hand one directory to the diagnostic under two spellings. Both must
+    /// store, render and serialise as the bare one, otherwise whichever
+    /// manifest was read first decides whether the analysis envelopes print
+    /// `./pkgs/aaa` while the workspace listing envelope prints `pkgs/aaa`.
+    #[test]
+    fn new_stores_one_spelling_for_a_directory_reached_through_a_dotted_glob() {
+        let root = Path::new("/project");
+        let dotted = WorkspaceDiagnostic::new(
+            root,
+            root.join("./pkgs/aaa"),
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: "./pkgs/*".to_owned(),
+            },
+        );
+        let bare = WorkspaceDiagnostic::new(
+            root,
+            root.join("pkgs/aaa"),
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: "pkgs/*".to_owned(),
+            },
+        );
+
+        let spelling = |diagnostic: &WorkspaceDiagnostic| {
+            diagnostic.path.display().to_string().replace('\\', "/")
+        };
+        assert_eq!(
+            spelling(&dotted),
+            "/project/pkgs/aaa",
+            "the stored path drops the no-op . component, which Path equality              hides but serialization does not"
+        );
+        assert_eq!(spelling(&dotted), spelling(&bare));
+        assert_eq!(
+            spelling(&dotted.clone().into_root_relative(root)),
+            "pkgs/aaa"
+        );
+
+        let merged = merge_workspace_diagnostics(vec![dotted], vec![bare]);
+        assert_eq!(
+            merged.len(),
+            1,
+            "one directory reached through two spellings of one glob: {merged:?}"
+        );
+    }
+
+    /// The single-list fold applied at workspace discovery keeps one entry per
+    /// `(kind, path)` and leaves distinct payloads alone.
+    #[test]
+    fn dedupe_keeps_first_of_each_pair_and_every_distinct_payload() {
+        let root = Path::new("/project");
+        let glob = |pattern: &str, relative: &str| {
+            WorkspaceDiagnostic::new(
+                root,
+                root.join(relative),
+                WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                    pattern: pattern.to_owned(),
+                },
+            )
+        };
+
+        let deduped = dedupe_workspace_diagnostics(vec![
+            glob("pkgs/*", "pkgs/aaa"),
+            glob("pkgs/*", "pkgs/bbb"),
+            glob("./pkgs/*", "./pkgs/aaa"),
+            glob("pkgs/a*", "pkgs/aaa"),
+        ]);
+
+        let reported: Vec<(String, String)> = deduped
+            .iter()
+            .map(|diagnostic| match &diagnostic.kind {
+                WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => (
+                    pattern.clone(),
+                    diagnostic.path.display().to_string().replace('\\', "/"),
+                ),
+                other => panic!("unexpected kind {}", other.id()),
+            })
+            .collect();
+
+        assert_eq!(
+            reported,
+            vec![
+                ("pkgs/*".to_owned(), "/project/pkgs/aaa".to_owned()),
+                ("pkgs/*".to_owned(), "/project/pkgs/bbb".to_owned()),
+                ("pkgs/a*".to_owned(), "/project/pkgs/aaa".to_owned()),
+            ],
+            "the duplicate spelling folds away and the overlapping glob stays"
         );
     }
 
