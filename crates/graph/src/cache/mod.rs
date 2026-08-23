@@ -166,7 +166,15 @@ pub use store::GraphCacheStore;
 /// the target's default export, and those references are baked into the
 /// persisted graph. Warm 39 caches carry the uncredited verdict, so the
 /// default export would stay reported as unused on upgrade.
-pub const GRAPH_CACHE_VERSION: u32 = 40;
+///
+/// Bumped to 41 for issue #2376 (40 was taken by issue #2374 while this
+/// change was in review): an MDX prose line opening with the word
+/// "import" (and any other line the statement parser rejects) no longer drops
+/// every `import` of the file, so those files now resolve their imports and
+/// credit their bodies. Warm 40 caches persist the import-less module and its
+/// missing edges, so the imported modules would stay reported as unused files
+/// on upgrade.
+pub const GRAPH_CACHE_VERSION: u32 = 41;
 
 /// Cached form of a resolved target.
 ///

@@ -964,7 +964,14 @@ use crate::MemberKind;
 /// member accesses for member-expression component tags (`<SC.Card />`). Warm
 /// 275 caches lack those accesses, so namespace-imported exports rendered only
 /// in Astro or MDX markup would stay reported as unused.
-pub(super) const CACHE_VERSION: u32 = 276;
+///
+/// Bumped to 277 for issue #2376: an MDX line is a statement only when it
+/// carries a real `import` / `export` shape, and a statement block the parser
+/// rejects is demoted to prose instead of dropping every import of the file.
+/// Warm 276 caches hold the import-less module for every MDX file whose prose
+/// opens with the word "import" (or that carries any other rejected statement
+/// line), so its imported modules would stay reported as unused.
+pub(super) const CACHE_VERSION: u32 = 277;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -987,7 +994,13 @@ pub(super) const CACHE_VERSION: u32 = 276;
 ///
 /// Bumped to 10: cached duplicate token payloads now preserve function-like
 /// source spans for opt-in near-miss detection.
-pub const DUPES_CACHE_VERSION: u32 = 10;
+///
+/// Bumped to 11 for issue #2376: `extract_mdx_statements` feeds the duplication
+/// tokenizer from the same MDX scanner the statement fix narrowed, so a prose
+/// line that only looks like an `import` no longer reaches the token stream and
+/// a rejected statement block is demoted to prose. Warm v10 caches hold the old
+/// token stream for those files and must invalidate.
+pub const DUPES_CACHE_VERSION: u32 = 11;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.

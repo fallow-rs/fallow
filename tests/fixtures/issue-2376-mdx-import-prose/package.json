@@ -1,0 +1,7 @@
+{
+  "name": "issue-2376-mdx-import-prose-fixture",
+  "private": true,
+  "dependencies": {
+    "astro": "^4.0.0"
+  }
+}

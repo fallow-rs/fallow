@@ -265,6 +265,8 @@ mod issue_2225_root_manual_mocks;
 mod issue_2348_jsx_namespace_member;
 #[path = "integration_test/issue_2355_astro_mdx_member_tags.rs"]
 mod issue_2355_astro_mdx_member_tags;
+#[path = "integration_test/issue_2376_mdx_import_prose.rs"]
+mod issue_2376_mdx_import_prose;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
