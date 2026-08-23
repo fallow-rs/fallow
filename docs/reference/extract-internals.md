@@ -108,7 +108,16 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   every block it also rejects on its own is demoted to prose and the rest is
   re-parsed, so a rejected line costs only itself. Demoted lines feed the
   prose scan like any other body line, so the completeness guard above still
-  sees their mentions.
+  sees their mentions. A source clause is a `from` bounded by whitespace on
+  the left and by whitespace or its specifier quote on the right, so every
+  whitespace form JavaScript accepts (`from\t'./x'`, a no-break space, a
+  multi-space run) names a source, while a `from` inside a word does not.
+- The parse fallback covers the dead-code path only. The duplication tokenizer
+  reads MDX through `extract_mdx_statements`, which returns the classified
+  statement body without a retry, so a line the classifier accepts and the
+  parser then rejects still costs that MDX file its whole token stream there.
+  Duplication findings inside such a file are missing rather than wrong, and
+  the classifier is what keeps the common prose sentence out of that path.
 
 ## Verification
 

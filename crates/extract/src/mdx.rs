@@ -173,7 +173,7 @@ impl<'a> MdxStatementScanner<'a> {
     fn push_statement_start(&mut self, line_start: usize, line: &'a str, trimmed: &str) {
         self.blocks.push(vec![(line_start, line)]);
         self.brace_depth = brace_delta(trimmed);
-        if self.brace_depth > 0 && !has_spaced_source_clause(trimmed) {
+        if self.brace_depth > 0 && !has_source_clause(trimmed) {
             self.in_multiline = true;
         }
     }
@@ -183,7 +183,7 @@ impl<'a> MdxStatementScanner<'a> {
             block.push((line_start, line));
         }
         self.brace_depth += brace_delta(trimmed);
-        if self.brace_depth <= 0 || trimmed.ends_with(';') || has_any_source_clause(trimmed) {
+        if self.brace_depth <= 0 || trimmed.ends_with(';') || has_source_clause(trimmed) {
             self.in_multiline = false;
             self.brace_depth = 0;
         }
@@ -271,6 +271,14 @@ fn collect_unexplained_statement_mentions(scan: &MdxScan<'_>, info: &ModuleInfo)
 /// The keywords a real `export` statement may put in front of its declaration.
 /// `default` covers `export default`; the rest are the value, type, and
 /// ambient declaration heads.
+///
+/// A keyword here says the line has the shape of a statement, not that it
+/// survives as one. The statement body is parsed with the JSX source type,
+/// which rejects every TS-only head (`export type`, `export interface`,
+/// `export enum`, `export namespace`, `export declare`, `export abstract`), so
+/// those blocks reach the parser and the fallback demotes them; the list keeps
+/// prose classification a statement about the language rather than about what
+/// this parser configuration happens to accept.
 const EXPORT_DECLARATION_KEYWORDS: [&str; 13] = [
     "abstract",
     "async",
@@ -337,7 +345,7 @@ fn is_import_statement_rest(rest: &str) -> bool {
     }
     // A default (or type-only) specifier followed by its source clause:
     // `import Button from './Button'`, `import type X from './x'`.
-    has_any_source_clause(rest)
+    has_source_clause(rest)
 }
 
 /// Does the text after `export` belong to a real export statement?
@@ -374,12 +382,23 @@ fn brace_delta(line: &str) -> i32 {
     opens.saturating_sub(closes)
 }
 
-fn has_spaced_source_clause(line: &str) -> bool {
-    line.contains(" from ")
-}
-
-fn has_any_source_clause(line: &str) -> bool {
-    has_spaced_source_clause(line) || line.contains(" from'") || line.contains(" from\"")
+/// Does this line carry a source clause: a `from` keyword bounded by
+/// whitespace on the left and by whitespace or the opening quote of its module
+/// specifier on the right?
+///
+/// The boundaries are character classes, not literal spaces, so every
+/// whitespace JavaScript accepts qualifies: `from\t'./x'`, `X\tfrom './x'`, a
+/// multi-space form, and a no-break space all name a source the way
+/// `from './x'` does, and classifying one of them as prose would drop the edge
+/// (issue #2376). A `from` inside a word (`fromage`, `from_the_api`) never
+/// matches.
+fn has_source_clause(line: &str) -> bool {
+    line.match_indices("from").any(|(index, keyword)| {
+        let before = line[..index].chars().next_back();
+        let after = line[index + keyword.len()..].chars().next();
+        before.is_some_and(char::is_whitespace)
+            && after.is_some_and(|ch| ch.is_whitespace() || ch == '\'' || ch == '"')
+    })
 }
 
 /// Parse the collected statement body and build the module info from it.
@@ -476,16 +495,18 @@ pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u
     let mut scan = extract_mdx_source(source);
 
     let mut extraction = scan.extraction();
-    let (mut info, accepted) = parse_statement_body(
-        &extraction,
-        file_id,
-        content_hash,
-        parsed_suppressions.clone(),
-    );
+    let (mut info, accepted) =
+        parse_statement_body(&extraction, file_id, content_hash, parsed_suppressions);
     // A rejected body is an empty program, so without this the file would keep
     // none of its imports (issue #2376). Retry with the rejected blocks moved
-    // to prose; the retry can only add statements back.
+    // to prose; the retry can only add statements back. The rejected module
+    // info is discarded, so its suppressions move on to the retry instead of
+    // being cloned for every MDX file.
     if !accepted && scan.demote_rejected_blocks() {
+        let parsed_suppressions = crate::suppress::ParsedSuppressions {
+            suppressions: std::mem::take(&mut info.suppressions),
+            unknown_kinds: std::mem::take(&mut info.unknown_suppression_kinds),
+        };
         extraction = scan.extraction();
         info = parse_statement_body(&extraction, file_id, content_hash, parsed_suppressions).0;
     }
@@ -895,6 +916,68 @@ import { Visible } from './Visible'
             import_sources(source),
             vec!["./card".to_string()],
             "the runtime import must survive the rejected type-only clause"
+        );
+    }
+
+    /// Issue #2376 fallback: the retry parses the demoted body a second time,
+    /// so the suppressions parsed from the source have to reach the module
+    /// info the retry returns and not the one it replaced.
+    #[test]
+    fn suppressions_survive_the_fallback_reparse() {
+        let source = "<!-- fallow-ignore-file -->\n<!-- fallow-ignore-file not-a-real-kind -->\n\n\
+             import data from the API before you begin.\n\n\
+             import { Card } from './card'\n";
+        let info = parse_mdx_to_module(fallow_types::discover::FileId(0), source, 0);
+        assert_eq!(
+            info.imports.len(),
+            1,
+            "the fallback has to have run for this test to pin anything"
+        );
+        assert_eq!(
+            info.suppressions.len(),
+            1,
+            "the file-level suppression must survive the retry"
+        );
+        assert_eq!(
+            info.unknown_suppression_kinds.len(),
+            1,
+            "the unknown suppression token must survive the retry"
+        );
+    }
+
+    /// Issue #2376: the source clause is recognised by character class, not by
+    /// literal spaces, so every whitespace form JavaScript accepts around
+    /// `from` still opens a statement. A `from` inside a word never does.
+    #[test]
+    fn source_clause_matches_any_whitespace_around_from() {
+        for line in [
+            "import Used from\t'./used'",
+            "import Used\tfrom './used'",
+            "import Used  from  './used'",
+            "import Used from\u{a0}'./used'",
+            "import type Meta from\t'./meta'",
+        ] {
+            assert!(is_statement_start(line), "{line:?} should be a statement");
+        }
+
+        for line in [
+            "import fromage before you begin.",
+            "import the fromage and the bread.",
+            "import data from_the_api and render it.",
+        ] {
+            assert!(!is_statement_start(line), "{line:?} should stay prose");
+        }
+    }
+
+    /// Issue #2376: a default import whose `from` is separated by a tab is
+    /// valid JavaScript, so its edge must survive rather than be lost to prose.
+    #[test]
+    fn tab_separated_source_clause_keeps_the_import() {
+        let source = "import Used from\t'./used'\n\n<Used />\n";
+        assert_eq!(
+            import_sources(source),
+            vec!["./used".to_string()],
+            "the tab-separated import must resolve like a space-separated one"
         );
     }
 

@@ -995,11 +995,13 @@ pub(super) const CACHE_VERSION: u32 = 277;
 /// Bumped to 10: cached duplicate token payloads now preserve function-like
 /// source spans for opt-in near-miss detection.
 ///
-/// Bumped to 11 for issue #2376: `extract_mdx_statements` feeds the duplication
-/// tokenizer from the same MDX scanner the statement fix narrowed, so a prose
-/// line that only looks like an `import` no longer reaches the token stream and
-/// a rejected statement block is demoted to prose. Warm v10 caches hold the old
-/// token stream for those files and must invalidate.
+/// Bumped to 11 for issue #2376: the duplication tokenizer reads MDX through
+/// `extract_mdx_statements`, and an MDX line is now a statement only when it
+/// carries a real `import` / `export` shape, so MDX token streams change.
+/// Warm v10 entries hold the old stream (a prose sentence opening with the
+/// word "import" used to swallow the whole file, and a statement head the old
+/// prefix match missed used to be skipped), so clone groups inside MDX would
+/// stay hidden on upgrade.
 pub const DUPES_CACHE_VERSION: u32 = 11;
 
 /// Default maximum cache size (256 MB). Overridable per-project via

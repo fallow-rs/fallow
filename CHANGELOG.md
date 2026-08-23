@@ -128,11 +128,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   program, so the whole file lost its imports: the imported modules were
   reported as unused files, and nothing the body rendered was credited. A line
   is now a statement only when it carries a shape a real statement has, a
-  source clause (`from '...'`), a brace specifier list, a star specifier, a
-  string-literal side-effect import, or, after `export`, a declaration keyword
-  (`const`, `let`, `var`, `function`, `class`, `async`, `type`, `interface`,
-  `enum`, `namespace`, `declare`, `abstract`, `default`), a brace list, or a
-  star. As a safety net, a statement block the parser rejects on its own is
+  source clause (`from '...'`, with any whitespace JavaScript accepts around
+  `from`), a brace specifier list, a star specifier, a string-literal
+  side-effect import, or, after `export`, a brace list, a star, or a
+  declaration keyword (`const`, `let`, `var`, `function`, `class`, `async`,
+  `default`, plus the TypeScript heads `type`, `interface`, `enum`,
+  `namespace`, `declare`, and `abstract`, which are recognised as statement
+  shapes and then handled by the fallback below rather than surviving as
+  statements). As a safety net, a statement block the parser rejects on its own is
   demoted to prose and the remaining blocks are re-parsed, so the file keeps
   the imports the rejected block used to take with it (a TS-only `import type`
   clause, which the JSX source type the MDX statement body is parsed with does
@@ -142,9 +145,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mark-all crediting instead of narrowing. Behavior change: MDX documents with
   such a line now resolve their imports, so their targets leave the unused-file
   list, the members their bodies render are credited, and their genuinely
-  unused siblings surface as unused exports. Both the extraction and graph
-  cache versions were bumped; the first run after upgrading performs one cold
-  re-analysis.
+  unused siblings surface as unused exports. The affected document's own
+  exports are read too, so an `export const` nothing consumes now reports as an
+  unused export on the `.mdx` file itself. Duplication reads the same statement
+  body, so clones inside an affected document, and the duplication share of its
+  health score, now surface where the file previously tokenized to nothing.
+  The extraction, graph, and duplication token cache versions were bumped; the
+  first run after upgrading performs one cold re-analysis.
 
 - **The MCP `audit` and `check_health` tools now honor `health.coverage`,
   `health.coverageRoot`, `FALLOW_COVERAGE`, and `FALLOW_COVERAGE_ROOT` on
