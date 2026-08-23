@@ -95,6 +95,20 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   feed the security secret-source index, so MDX prose records a dotted chain
   only when its root is an import local of the file: prose never creates
   member accesses on foreign roots such as `process.env`.
+- The MDX line scan hands the statement lines of the whole file to the parser
+  as one program, and a rejected program is an empty program, so one
+  misclassified line would drop every import of the file. A line opens a
+  statement only when it carries a shape a real statement has: a source
+  clause, a brace specifier list, a star specifier, a string-literal
+  side-effect import, or, after `export`, a brace list, a star, or a
+  declaration keyword. Prose that merely opens with the word "import" or
+  "export" stays prose. The classification is backed by a parse fallback: the
+  scan keeps statement blocks (an opening line plus the continuation lines a
+  multi-line specifier list collected), and when the parser rejects the body,
+  every block it also rejects on its own is demoted to prose and the rest is
+  re-parsed, so a rejected line costs only itself. Demoted lines feed the
+  prose scan like any other body line, so the completeness guard above still
+  sees their mentions.
 
 ## Verification
 
