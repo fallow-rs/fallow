@@ -136,11 +136,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TypeScript erases completely, so it keeps the type-space edge but is never
   read as a runtime import: a type-only devDependency stays out of
   `dev-dependency-in-production`, matching `import type * as X from 'pkg'`.
+  A bare reference that hands the module object on (`register(X)`,
+  `const alias = X`, `return X`) credits every export the receiver can reach,
+  matching the namespace-import rule added in
+  [#2377](https://github.com/fallow-rs/fallow/issues/2377).
   `export import X = require('./x')` additionally hands the module object to
   consumers the graph cannot enumerate, so every export of the target keeps
   its credit exactly as it does behind `import * as X from './x';
   export { X }`, including on an entry point with no local member access
-  ([#2373](https://github.com/fallow-rs/fallow/issues/2373)).
+  ([#2373](https://github.com/fallow-rs/fallow/issues/2373)). That credit is
+  matched by bare name, so it is granted only when the file binds the name
+  once; a whole-object use the file genuinely wrote (`Object.values(X)`) is
+  kept either way, so a same-named function parameter no longer deletes the
+  target's credit. In the other direction a binding nothing references credits
+  nothing at all: TypeScript elides such a declaration, so the target keeps
+  every unused-export and unused-type row it earns, exactly as it does behind
+  an unreferenced `import * as X from './x'`. The edge still resolves, so the
+  target is a reachable file either way.
   Repositories that use the form will see fewer unused-file and
   unused-export findings, and the exports of a file that becomes reachable for
   the first time are narrowed against the members the consumer writes, so a

@@ -279,19 +279,73 @@ fn import_equals_require_used_only_in_type_position_stays_out_of_value_space() {
     );
 }
 
-/// An unreferenced import-equals binding is never reported as an unused import
-/// binding: the require path has never done that, and the exported form
-/// legitimately has no local reference.
+/// An unreferenced import-equals binding is an unused import binding, exactly
+/// as the `import * as X` spelling of the same binding is. TypeScript elides
+/// both, so neither may buy the target a whole-object credit: crediting one
+/// deleted every unused-export and unused-type row on the target.
 #[test]
-fn import_equals_require_never_reports_an_unused_import_binding() {
-    let info = parse_source("import Unused = require('./unused');");
+fn unreferenced_import_equals_reports_an_unused_import_binding() {
+    let info = parse_source("import Unused = require('./unused');\nexport const other = 1;");
     assert!(
-        !info
-            .unused_import_bindings
+        info.unused_import_bindings
             .iter()
             .any(|binding| binding == "Unused"),
         "unused import bindings: {:?}",
         info.unused_import_bindings
+    );
+
+    let esm_twin = parse_source("import * as Unused from './unused';\nexport const other = 1;");
+    assert_eq!(
+        info.unused_import_bindings, esm_twin.unused_import_bindings,
+        "the namespace-import twin reports the same way"
+    );
+
+    // The erased spelling is elided just as completely, and its twin is
+    // `import type * as X`.
+    let type_only =
+        parse_source("import type Unused = require('./unused');\nexport const other = 1;");
+    let type_only_esm_twin =
+        parse_source("import type * as Unused from './unused';\nexport const other = 1;");
+    assert_eq!(
+        type_only.unused_import_bindings, type_only_esm_twin.unused_import_bindings,
+        "the type-only namespace-import twin reports the same way"
+    );
+    assert!(
+        type_only
+            .unused_import_bindings
+            .iter()
+            .any(|binding| binding == "Unused"),
+        "unused import bindings: {:?}",
+        type_only.unused_import_bindings
+    );
+
+    // Positive control: a binding anything references is not reported, so the
+    // assertion above is not passing because every binding lands there.
+    let referenced = parse_source("import Used = require('./used');\nconsole.log(Used.alpha);");
+    assert!(
+        referenced.unused_import_bindings.is_empty(),
+        "a referenced binding is not unused: {:?}",
+        referenced.unused_import_bindings
+    );
+}
+
+/// `export import X = require('./x')` is exempt: the binding is the file's
+/// public API and has no local reference by construction, so reporting it
+/// unused would withdraw the whole-object credit issue #2373 gives its
+/// `import * as X; export { X }` twin.
+#[test]
+fn exported_import_equals_is_not_an_unused_import_binding() {
+    let info = parse_source("export import Users = require('./users');");
+    assert!(
+        info.unused_import_bindings.is_empty(),
+        "unused import bindings: {:?}",
+        info.unused_import_bindings
+    );
+
+    let esm_twin = parse_source("import * as Users from './users';\nexport { Users };");
+    assert_eq!(
+        info.unused_import_bindings, esm_twin.unused_import_bindings,
+        "the re-exported namespace-import twin reports the same way"
     );
 }
 
@@ -367,7 +421,7 @@ fn import_equals_without_export_records_no_whole_object_use() {
 /// would otherwise be read as a whole-object use and credit every member of
 /// whatever it holds, deleting real findings.
 #[test]
-fn export_import_equals_whole_object_use_is_withdrawn_when_the_name_is_shadowed() {
+fn export_import_equals_whole_object_use_is_withheld_when_the_name_is_shadowed() {
     let shadowed = parse_source(
         "export import Session = require('./beta');\nexport const run = (): void => {\n  const \
          Session = makeSession();\n  Session.start();\n};\n",
@@ -394,5 +448,81 @@ fn export_import_equals_whole_object_use_is_withdrawn_when_the_name_is_shadowed(
             .any(|name| name == "Session"),
         "an unshadowed name keeps its mark: {:?}",
         unshadowed.whole_object_uses
+    );
+}
+
+/// The mark the exported form earns is granted after the semantic pass, never
+/// pushed and then withdrawn, so a whole-object use the file genuinely wrote
+/// survives a shadowed name. Withdrawing by name deleted it and turned every
+/// export of the target into a false `unused-export` row.
+#[test]
+fn a_genuine_whole_object_use_survives_a_shadowed_export_import_equals() {
+    let source = "export import Config = require('./config');\nexport const read = (): number => \
+                  Object.values(Config).length;\nexport const parse = (Config: { n: number }): \
+                  number => Config.n;\n";
+    let shadowed = parse_source(source);
+    assert!(
+        shadowed.whole_object_uses.iter().any(|n| n == "Config"),
+        "`Object.values(Config)` is a whole-object use the file wrote: {:?}",
+        shadowed.whole_object_uses
+    );
+
+    let esm_twin = parse_source(
+        "import * as Config from './config';\nexport { Config };\nexport const read = (): number \
+         => Object.values(Config).length;\nexport const parse = (Config: { n: number }): number \
+         => Config.n;\n",
+    );
+    assert_eq!(
+        shadowed.whole_object_uses.to_vec(),
+        esm_twin.whole_object_uses.to_vec(),
+        "the namespace-import twin records the same whole-object uses"
+    );
+
+    // One name yields one entry: the granted mark deduplicates against the
+    // genuine one rather than stacking a second copy (issue #2377).
+    assert_eq!(
+        shadowed
+            .whole_object_uses
+            .iter()
+            .filter(|n| *n == "Config")
+            .count(),
+        1,
+        "whole-object uses: {:?}",
+        shadowed.whole_object_uses
+    );
+}
+
+/// A bare reference that hands the module object on (a call argument, an alias,
+/// a return value) credits every export the receiver can reach, exactly as the
+/// `import * as X` spelling does since issue #2377. Without it a file with one
+/// dotted access plus one handover narrows to that member and reports every
+/// sibling the receiver still uses.
+#[test]
+fn a_bare_import_equals_reference_is_a_whole_object_use() {
+    let handed = parse_source(
+        "import Icons = require('./icons');\nconsole.log(Icons.Star);\nregister(Icons);\n",
+    );
+    assert!(
+        handed.whole_object_uses.iter().any(|name| name == "Icons"),
+        "a call argument hands the module object on: {:?}",
+        handed.whole_object_uses
+    );
+
+    let esm_twin = parse_source(
+        "import * as Icons from './icons';\nconsole.log(Icons.Star);\nregister(Icons);\n",
+    );
+    assert_eq!(
+        handed.whole_object_uses.to_vec(),
+        esm_twin.whole_object_uses.to_vec(),
+        "the namespace-import twin records the same whole-object uses"
+    );
+
+    // Negative control: a dotted-only binding keeps narrowing, so the rule does
+    // not credit every import-equals binding wholesale.
+    let dotted = parse_source("import Icons = require('./icons');\nconsole.log(Icons.Star);\n");
+    assert!(
+        dotted.whole_object_uses.is_empty(),
+        "a resolved member access is not a handover: {:?}",
+        dotted.whole_object_uses
     );
 }

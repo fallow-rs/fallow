@@ -366,11 +366,13 @@ pub(crate) struct ModuleInfoExtractor {
     /// module '...'` body is not classified and stays value-only, exactly as
     /// an `import * as X` binding in that position does.
     pub(crate) import_equals_bindings: Vec<String>,
-    /// Names marked as whole-object uses by `export import X = require('./y')`.
-    /// The mark is provisional until the semantic pass confirms the file binds
-    /// the name only once; `whole_object_uses` is keyed by bare name, so a
-    /// same-named binding in another scope would otherwise be credited too.
-    exported_import_equals_names: Vec<String>,
+    /// Names declared by `export import X = require('./y')`. The whole-object
+    /// use they earn is granted only after the semantic pass confirms the file
+    /// binds the name once; `whole_object_uses` is keyed by bare name, so a
+    /// same-named binding in another scope would otherwise be credited too. The
+    /// same list exempts them from the unused-import-binding verdict: the
+    /// exported form has no local reference by construction.
+    pub(crate) exported_import_equals_names: Vec<String>,
     binding_target_names: FxHashMap<String, BindingTarget>,
     /// The class each binding name most recently named at this point in the walk,
     /// never poisoned to `Ambiguous`. `binding_target_names` is module-flat, so a

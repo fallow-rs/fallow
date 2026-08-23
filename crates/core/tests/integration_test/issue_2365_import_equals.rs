@@ -7,6 +7,12 @@
 //! The exported form, `export import X = require('./x')`, additionally hands
 //! the module object to consumers the graph cannot enumerate, so it credits
 //! every export of the target exactly as `import * as X; export { X }` does.
+//! That credit is keyed by bare name, so it is withheld when the file binds the
+//! name twice; a whole-object use the file genuinely wrote is untouched.
+//!
+//! A binding nothing references is elided by TypeScript, so it credits nothing
+//! and the target keeps every unused-export and unused-type row it earns,
+//! exactly as an unreferenced `import * as X` does.
 //!
 //! `import type X = require('pkg')` is the one spelling TypeScript erases
 //! entirely, so it keeps the type-space edge but never claims the package is
@@ -229,6 +235,67 @@ fn export_import_equals_on_an_entry_point_credits_the_whole_module() {
         assert!(
             unused_exports_of(&results, file).is_empty(),
             "{file}: every export is reachable through the re-exported binding: {:?}",
+            unused_exports_of(&results, file)
+        );
+    }
+}
+
+/// An `import X = require('./x')` binding nothing references is elided by
+/// TypeScript, so it credits nothing: the target stays reachable through the
+/// edge, and every export and type on it still reports. Crediting the whole
+/// module object there deleted rows the analyzer is right about, which is worse
+/// than the missing edge the issue started from. Pinned against the
+/// `import * as X` twin, which reports exactly the same way.
+#[test]
+fn an_unreferenced_import_equals_binding_credits_nothing() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused_files = unused_files(&results);
+
+    for (file, export, type_name) in [
+        ("src/stale-target.ts", "staleAlpha", "StaleShape"),
+        ("src/stale-esm-target.ts", "staleEsmAlpha", "StaleEsmShape"),
+    ] {
+        // The edge still resolves, so the target is reachable; an unreachable
+        // file would stack no rows underneath its unused-file row and the
+        // assertions below would hold vacuously.
+        assert!(
+            !unused_files.iter().any(|p| p.ends_with(file)),
+            "{file} is imported and must stay reachable: {unused_files:?}"
+        );
+        assert_eq!(
+            unused_exports_of(&results, file),
+            vec![export.to_string()],
+            "{file}: an unreferenced binding credits no export"
+        );
+        assert_eq!(
+            unused_types_of(&results, file),
+            vec![type_name.to_string()],
+            "{file}: an unreferenced binding credits no type either"
+        );
+    }
+}
+
+/// A whole-object use the consumer genuinely wrote survives a same-named
+/// binding elsewhere in the file. The exported form's credit is granted by
+/// name, so withdrawing it by name deleted the genuine use with it and turned
+/// every export of the target into a false `unused-export` row. The
+/// `import * as X` twin next to it writes the same `Object.values(X)` and the
+/// same shadowing parameter, and must report the same way.
+#[test]
+fn a_shadowed_export_import_equals_keeps_a_genuine_whole_object_use() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused_files = unused_files(&results);
+
+    for file in ["src/shadowed-target.ts", "src/shadowed-esm-target.ts"] {
+        assert!(
+            !unused_files.iter().any(|p| p.ends_with(file)),
+            "{file} must be reachable before its exports can be credited: {unused_files:?}"
+        );
+        assert!(
+            unused_exports_of(&results, file).is_empty(),
+            "{file}: `Object.values(...)` observes every name on the module object: {:?}",
             unused_exports_of(&results, file)
         );
     }

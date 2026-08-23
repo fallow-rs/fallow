@@ -107,20 +107,29 @@ error by suppressing a downstream detector.
   target's exports and a whole-object use of `X` seed the exposed namespace
   closure below. The binding is classified for type and value usage the same
   way an `import * as X` binding is, so `X.SomeType` in a type annotation
-  narrows the target's type exports rather than leaving them uncredited.
+  narrows the target's type exports rather than leaving them uncredited, and it
+  is registered as a namespace-import local, so a bare reference that hands the
+  module object on records a whole-object use exactly as it does for
+  `import * as X` (issue #2377). A binding nothing references is reported as an
+  unused import binding, the same verdict an unreferenced `import * as X` gets:
+  TypeScript elides the declaration, so it must not credit the target's
+  exports, while the edge itself keeps the target reachable.
   `import type X = require('./x')` is the one spelling TypeScript erases
   completely, so the require call carries `is_type_only` and dependency
   classification treats it exactly as it treats `import type * as X from
   './x'` rather than claiming the package is imported at runtime.
-  `export import X = require('./x')` at file level is recorded as a
-  whole-object use of the binding: the module object reaches consumers the
-  graph cannot enumerate, so every export of the target is credited the way
-  `export { X }` credits a namespace import, which is what keeps an entry point
-  that only re-exports the binding from reporting the target's whole surface
-  (issue #2373). That mark is keyed by bare name, so the semantic pass
-  withdraws it when the file binds the same name in another scope, where
-  crediting an unrelated same-named binding would delete real findings. The
-  same mark inside a namespace body is defensive leniency only: TypeScript
+  `export import X = require('./x')` at file level earns a whole-object use of
+  the binding: the module object reaches consumers the graph cannot enumerate,
+  so every export of the target is credited the way `export { X }` credits a
+  namespace import, which is what keeps an entry point that only re-exports the
+  binding from reporting the target's whole surface (issue #2373). It is also
+  exempt from the unused-import-binding verdict above, since it has no local
+  reference by construction. The credit is keyed by bare name, so the semantic
+  pass grants it only when the file binds that name once; a whole-object use
+  the file genuinely wrote (`Object.values(X)`) is recorded by the walk and is
+  never touched, so a shadowed name keeps the credit it earned and only the
+  unearned one is withheld. The same credit inside a namespace body is
+  defensive leniency only: TypeScript
   rejects `namespace N { export import X = require('./x') }` with TS1147.
   `import X = Some.Namespace` is an entity-name reference that aliases a
   binding declared in the same file, not a module, so it records nothing.

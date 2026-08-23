@@ -10,6 +10,10 @@ import * as DestructuredEsm from './destructured-esm';
 import * as EntryReexportEsm from './entry-reexport-esm';
 import { readRuntime, readTypeOnly, readTypeOnlyEsm } from './deps';
 import { aliasedMember } from './local-alias';
+import { staleMarker } from './stale';
+import { staleEsmMarker } from './stale-esm';
+import { parseShadowed, readShadowed } from './shadowed';
+import { parseShadowedEsm, readShadowedEsm } from './shadowed-esm';
 
 // The entry re-exports the binding itself, so consumers the graph cannot
 // enumerate reach every name on the required module object.
@@ -31,3 +35,6 @@ console.log(Object.values(Whole));
 console.log(readRuntime, readTypeOnly, readTypeOnlyEsm);
 console.log(aliasedMember);
 console.log(destructuredUsed, esmDestructuredUsed);
+console.log(staleMarker, staleEsmMarker);
+console.log(readShadowed(), parseShadowed({ n: 1 }));
+console.log(readShadowedEsm(), parseShadowedEsm({ n: 1 }));

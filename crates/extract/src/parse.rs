@@ -1136,9 +1136,14 @@ pub struct SemanticUsage {
     pub declaration_merges: Vec<fallow_types::extract::DeclarationMergeFact>,
     pub(crate) mock_api_reference_spans: MockApiReferenceSpans,
     pub(crate) module_binding_reference_spans: rustc_hash::FxHashSet<Span>,
+    /// `import X = require('./x')` bindings nothing in the file references.
+    /// Moved into `import_binding_usage.unused` by
+    /// [`compute_semantic_usage_for_extractor`], which is the layer that knows
+    /// which of them the exported form declares.
+    pub(crate) unreferenced_import_equals_bindings: Vec<String>,
     /// `import X = require('./x')` binding names the file also binds somewhere
     /// else. Name-keyed credit for those is unsafe, so the exported form's
-    /// whole-object mark is withdrawn for them.
+    /// whole-object mark is withheld for them.
     pub(crate) shadowed_import_equals_bindings: Vec<String>,
 }
 
@@ -1162,7 +1167,7 @@ pub fn compute_semantic_usage_for_extractor(
     template_used: &rustc_hash::FxHashSet<String>,
 ) -> SemanticUsage {
     let computed_enum_key_spans = extractor.computed_enum_key_reference_spans();
-    let semantic_usage = compute_semantic_usage_with_candidates(
+    let mut semantic_usage = compute_semantic_usage_with_candidates(
         program,
         &extractor.imports,
         &extractor.import_equals_bindings,
@@ -1170,10 +1175,45 @@ pub fn compute_semantic_usage_for_extractor(
         &computed_enum_key_spans,
     );
     extractor.resolve_computed_enum_key_uses(&semantic_usage.module_binding_reference_spans);
-    extractor.drop_shadowed_import_equals_whole_object_uses(
+    extractor.credit_unshadowed_import_equals_whole_object_uses(
         &semantic_usage.shadowed_import_equals_bindings,
     );
+    report_unreferenced_import_equals_bindings(
+        &mut semantic_usage,
+        &extractor.exported_import_equals_names,
+    );
     semantic_usage
+}
+
+/// Move every unreferenced `import X = require('./x')` binding into the unused
+/// import-binding list, except the ones the exported form declares.
+///
+/// TypeScript elides an import-equals binding nothing references, exactly as it
+/// elides an unreferenced `import * as X from './x'`, so such a binding must
+/// not credit the target's exports; leaving it out deleted every unused-export
+/// and unused-type row on the target (issue #2365). The edge itself stays, so
+/// the target is still a reachable file, which is what the namespace-import
+/// twin does.
+///
+/// `export import X = require('./x')` is exempt: the binding is the file's
+/// public API and has no local reference by construction, so it keeps the
+/// whole-object credit issue #2373 gives the `import * as X; export { X }`
+/// twin.
+fn report_unreferenced_import_equals_bindings(
+    semantic_usage: &mut SemanticUsage,
+    exported_import_equals_names: &[String],
+) {
+    let unreferenced = std::mem::take(&mut semantic_usage.unreferenced_import_equals_bindings);
+    if unreferenced.is_empty() {
+        return;
+    }
+    let unused = &mut semantic_usage.import_binding_usage.unused;
+    unused.extend(unreferenced.into_iter().filter(|name| {
+        !exported_import_equals_names
+            .iter()
+            .any(|exported| exported == name)
+    }));
+    unused.sort_unstable();
 }
 
 fn compute_semantic_usage_with_candidates(
@@ -1226,10 +1266,11 @@ fn compute_semantic_usage_with_candidates(
         }
     }
 
-    let shadowed_import_equals_bindings = classify_import_equals_bindings(
+    let import_equals = classify_import_equals_bindings(
         scoping,
         root_scope,
         import_equals_bindings,
+        template_used,
         &mut type_referenced_bindings,
         &mut value_referenced_bindings,
     );
@@ -1277,37 +1318,52 @@ fn compute_semantic_usage_with_candidates(
         declaration_merges,
         mock_api_reference_spans,
         module_binding_reference_spans,
-        shadowed_import_equals_bindings,
+        unreferenced_import_equals_bindings: import_equals.unreferenced,
+        shadowed_import_equals_bindings: import_equals.shadowed,
     }
 }
 
+/// Verdicts [`classify_import_equals_bindings`] reaches per binding name.
+#[derive(Default)]
+struct ImportEqualsClassification {
+    /// Names with no resolved reference anywhere in the file.
+    unreferenced: Vec<String>,
+    /// Names the file binds more than once.
+    shadowed: Vec<String>,
+}
+
 /// Classify `import X = require('./y')` bindings for type and value usage, and
-/// report which of their names the file binds more than once.
+/// report which of their names are unreferenced and which the file binds more
+/// than once.
 ///
 /// The binding lives in both the type and the value namespace, the same way
 /// `import * as X from './y'` does, but the require path records it outside
 /// `imports`, so the caller's `imports` loop never sees it. Without a
 /// type-space entry, `X.SomeType` in an annotation leaves the target's type
-/// exports uncredited (issue #2365). An unreferenced binding is deliberately
-/// left out of the unused-binding list: the require path has never reported
-/// one, and the exported form (`export import X = require('./y')`)
-/// legitimately has no local reference.
+/// exports uncredited (issue #2365).
+///
+/// A name with no resolved reference is returned as unreferenced, the same
+/// verdict the `imports` loop reaches for an unreferenced `import * as X`: the
+/// declaration is erased by TypeScript, so it must not buy the target a
+/// whole-object credit. A name used only by a framework template is referenced,
+/// matching the `template_used` skip the `imports` loop applies.
 ///
 /// A name bound by a second symbol anywhere in the file is returned as
 /// shadowed. `whole_object_uses` is keyed by bare name, so the exported form's
-/// mark has to be withdrawn there: crediting an unrelated same-named binding
-/// as a whole object would silently delete real findings. Only names with a
-/// root binding are considered; one declared inside a namespace or
-/// ambient-module body has no module-flat identity to protect.
+/// mark is withheld there: crediting an unrelated same-named binding as a whole
+/// object would silently delete real findings. Only names with a root binding
+/// are considered; one declared inside a namespace or ambient-module body has
+/// no module-flat identity to protect.
 fn classify_import_equals_bindings(
     scoping: &oxc_semantic::Scoping,
     root_scope: oxc_semantic::ScopeId,
     import_equals_bindings: &[String],
+    template_used: &rustc_hash::FxHashSet<String>,
     type_referenced_bindings: &mut rustc_hash::FxHashSet<String>,
     value_referenced_bindings: &mut rustc_hash::FxHashSet<String>,
-) -> Vec<String> {
+) -> ImportEqualsClassification {
     if import_equals_bindings.is_empty() {
-        return Vec::new();
+        return ImportEqualsClassification::default();
     }
 
     let candidates: rustc_hash::FxHashSet<&str> = import_equals_bindings
@@ -1322,7 +1378,7 @@ fn classify_import_equals_bindings(
         }
     }
 
-    let mut shadowed = Vec::new();
+    let mut classification = ImportEqualsClassification::default();
     for local_name in import_equals_bindings {
         if local_name.is_empty() {
             continue;
@@ -1335,13 +1391,21 @@ fn classify_import_equals_bindings(
             .get(local_name.as_str())
             .is_some_and(|count| *count > 1)
         {
-            shadowed.push(local_name.clone());
+            classification.shadowed.push(local_name.clone());
         }
+        let mut has_references = false;
         let mut has_type_references = false;
         let mut has_value_references = false;
         for reference in scoping.get_resolved_references(symbol_id) {
+            has_references = true;
             has_type_references |= reference.is_type();
             has_value_references |= reference.is_value();
+        }
+        if !has_references {
+            if !template_used.contains(local_name) {
+                classification.unreferenced.push(local_name.clone());
+            }
+            continue;
         }
         if has_type_references {
             type_referenced_bindings.insert(local_name.clone());
@@ -1350,7 +1414,7 @@ fn classify_import_equals_bindings(
             value_referenced_bindings.insert(local_name.clone());
         }
     }
-    shadowed
+    classification
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

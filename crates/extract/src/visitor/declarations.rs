@@ -437,24 +437,23 @@ impl ModuleInfoExtractor {
         });
     }
 
-    /// Record the exported form, `export import X = require('./y')`, at file
+    /// Note the exported form, `export import X = require('./y')`, at file
     /// level or inside an exported namespace body.
     ///
     /// The declaration hands the required module object to consumers the graph
     /// cannot enumerate, exactly as `import * as X from './y'; export { X }`
-    /// does, so the binding is marked a whole-object use. Without it an entry
-    /// point that only re-exports the binding has no member access to narrow
-    /// with, `is_entry_with_no_access` fires, and every export of the target
-    /// turns into a false `unused-export` row (issues #2365, #2373).
+    /// does, so the binding earns a whole-object use. Without it an entry point
+    /// that only re-exports the binding has no member access to narrow with,
+    /// `is_entry_with_no_access` fires, and every export of the target turns
+    /// into a false `unused-export` row (issues #2365, #2373).
+    ///
+    /// Only the name is recorded here.
+    /// [`Self::credit_unshadowed_import_equals_whole_object_uses`] grants the
+    /// whole-object use once the semantic pass has confirmed the file binds the
+    /// name only once.
     ///
     /// The entity-name form stays out of scope: `export import X = Some.Ns`
     /// aliases a local declaration, not a module.
-    ///
-    /// `whole_object_uses` is matched by bare name, so the mark is provisional:
-    /// [`Self::drop_shadowed_import_equals_whole_object_uses`] withdraws it
-    /// when the file binds the same name somewhere else, where crediting every
-    /// member of an unrelated same-named binding would silently delete real
-    /// findings.
     ///
     /// The namespace-body call site (`namespace N { export import X =
     /// require('./x') }`) is defensive leniency only: TypeScript rejects that
@@ -465,31 +464,41 @@ impl ModuleInfoExtractor {
             &decl.module_reference,
             TSModuleReference::ExternalModuleReference(_)
         ) {
-            let name = decl.id.name.to_string();
-            self.exported_import_equals_names.push(name.clone());
-            self.whole_object_uses.push(name);
+            self.exported_import_equals_names
+                .push(decl.id.name.to_string());
         }
     }
 
-    /// Withdraw the provisional whole-object mark from every `export import X =
-    /// require('./x')` binding whose name the file binds more than once.
+    /// Grant the whole-object use to every `export import X = require('./x')`
+    /// binding whose name the file binds exactly once.
     ///
     /// Called from the semantic pass, which is the first place scope
-    /// information exists. A mark is only safe while the name resolves to this
-    /// one binding: `whole_object_uses` is keyed by bare name, so a same-named
-    /// local in any other scope would otherwise be read as a whole-object use
-    /// and every member of whatever it holds would be credited.
-    pub(crate) fn drop_shadowed_import_equals_whole_object_uses(&mut self, shadowed: &[String]) {
-        if shadowed.is_empty() || self.exported_import_equals_names.is_empty() {
+    /// information exists. The credit is only safe while the name resolves to
+    /// this one binding: `whole_object_uses` is keyed by bare name, so a
+    /// same-named local in any other scope would otherwise be read as a
+    /// whole-object use and every member of whatever it holds would be
+    /// credited.
+    ///
+    /// A whole-object use the walk already recorded for the same name (a
+    /// genuine `Object.values(X)`) is untouched, and the recording site
+    /// deduplicates, so a shadowed name keeps the credit it genuinely earned
+    /// while an unearned one is never granted.
+    pub(crate) fn credit_unshadowed_import_equals_whole_object_uses(
+        &mut self,
+        shadowed: &[String],
+    ) {
+        if self.exported_import_equals_names.is_empty() {
             return;
         }
-        self.whole_object_uses.retain(|name| {
-            !(shadowed.iter().any(|other| other == name)
-                && self
-                    .exported_import_equals_names
-                    .iter()
-                    .any(|other| other == name))
-        });
+        let granted: Vec<String> = self
+            .exported_import_equals_names
+            .iter()
+            .filter(|name| !shadowed.iter().any(|other| other == *name))
+            .cloned()
+            .collect();
+        for name in granted {
+            self.push_whole_object_use(name);
+        }
     }
 
     /// Handle namespace destructuring: `const { a, b } = ns` where `ns` is a namespace

@@ -732,7 +732,9 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Pre-register every `import * as NS from '...'` local of the program.
+    /// Pre-register every namespace-import local of the program: an
+    /// `import * as NS from '...'` specifier, and the `import NS =
+    /// require('...')` spelling of the same binding (issue #2365).
     ///
     /// [`ModuleInfoExtractor::record_bare_namespace_reference`] needs the answer
     /// at every reference, and an import declaration is legal after the code
@@ -742,18 +744,47 @@ impl ModuleInfoExtractor {
     /// they are not statements the language hoists. See issue #2377.
     fn record_program_namespace_import_locals(&mut self, program: &Program<'_>) {
         for statement in &program.body {
-            let Statement::ImportDeclaration(decl) = statement else {
-                continue;
-            };
-            let Some(specifiers) = &decl.specifiers else {
-                continue;
-            };
-            for specifier in specifiers {
-                if let ImportDeclarationSpecifier::ImportNamespaceSpecifier(namespace) = specifier {
-                    self.namespace_import_locals
-                        .insert(namespace.local.name.to_string());
+            match statement {
+                Statement::ImportDeclaration(decl) => {
+                    let Some(specifiers) = &decl.specifiers else {
+                        continue;
+                    };
+                    for specifier in specifiers {
+                        if let ImportDeclarationSpecifier::ImportNamespaceSpecifier(namespace) =
+                            specifier
+                        {
+                            self.namespace_import_locals
+                                .insert(namespace.local.name.to_string());
+                        }
+                    }
                 }
+                Statement::TSImportEqualsDeclaration(decl) => {
+                    self.record_import_equals_namespace_local(decl);
+                }
+                Statement::ExportNamedDeclaration(decl) => {
+                    if let Some(Declaration::TSImportEqualsDeclaration(inner)) = &decl.declaration {
+                        self.record_import_equals_namespace_local(inner);
+                    }
+                }
+                _ => {}
             }
+        }
+    }
+
+    /// Register the local of an `import X = require('...')` declaration as a
+    /// namespace-import local, so a bare reference that hands the module object
+    /// on credits every export the receiver can reach, exactly as the
+    /// `import * as X from '...'` spelling does (issues #2365, #2377).
+    ///
+    /// The entity-name form (`import X = Some.Ns`) names a binding declared in
+    /// this file, not a module object, so it is not registered.
+    fn record_import_equals_namespace_local(&mut self, decl: &TSImportEqualsDeclaration<'_>) {
+        if matches!(
+            &decl.module_reference,
+            TSModuleReference::ExternalModuleReference(_)
+        ) {
+            self.namespace_import_locals
+                .insert(decl.id.name.to_string());
         }
     }
 
@@ -892,7 +923,7 @@ impl ModuleInfoExtractor {
     /// persisted, so a name mentioned opaquely many times (a namespace handed
     /// to several callees) stays one entry. `extend_whole_object_uses` applies
     /// the same rule to the Astro and MDX template passes.
-    fn push_whole_object_use(&mut self, name: String) {
+    pub(super) fn push_whole_object_use(&mut self, name: String) {
         if self.whole_object_uses.contains(&name) {
             return;
         }
