@@ -65,19 +65,13 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
         String::new()
     };
     lines.push(format!("  File: {reachable}{entry}"));
-    lines.push(format!(
-        "  Namespace: {}",
-        match trace.namespace {
-            SemanticNamespace::Value => "value",
-            SemanticNamespace::Type => "type",
-        }
-    ));
+    lines.push(format!("  Namespace: {}", namespace_name(trace.namespace)));
     lines.push(format!("  Reason: {}", trace.reason));
 
     push_export_trace_direct_references(&mut lines, trace);
     push_export_trace_re_export_chains(&mut lines, trace);
     if let Some(semantic) = &trace.semantic {
-        push_semantic_trace(&mut lines, semantic);
+        push_semantic_trace(&mut lines, semantic, trace.namespace);
     }
     lines.push(String::new());
     lines
@@ -135,25 +129,58 @@ fn build_class_member_trace_human_lines(trace: &ClassMemberTrace) -> Vec<String>
         "  Owner: {owner_status} {} ({reachable}{entry})",
         trace.owner_export.bold()
     ));
+    lines.push(format!(
+        "  Owner namespace: {}",
+        namespace_name(trace.owner_namespace)
+    ));
     lines.push(format!("  Reason: {}", trace.reason));
 
     push_direct_references(&mut lines, &trace.owner_direct_references);
     push_re_export_chains(&mut lines, &trace.owner_re_export_chains);
     if let Some(semantic) = &trace.semantic {
-        push_semantic_trace(&mut lines, semantic);
+        push_semantic_trace(&mut lines, semantic, trace.owner_namespace);
     }
     lines.push(String::new());
     lines
 }
 
-fn push_semantic_trace(lines: &mut Vec<String>, trace: &SemanticSymbolTrace) {
+const fn namespace_name(namespace: SemanticNamespace) -> &'static str {
+    match namespace {
+        SemanticNamespace::Value => "value",
+        SemanticNamespace::Type => "type",
+    }
+}
+
+/// Render the checker proof under a syntactic trace.
+///
+/// `listed_namespace` is the namespace whose references the surrounding trace
+/// lists: the export's own lane, or the owner's lane on a class-member trace.
+/// The proof always covers the lane the declaration itself occupies, so the
+/// two differ exactly when a value export is credited through a bound
+/// `import type` (issue #2371). The scope is only printed when the proof also
+/// found nothing, which is the case that would otherwise read as a denial of
+/// the references printed above it; a proof that lists its own references
+/// contradicts nothing and stays unqualified.
+fn push_semantic_trace(
+    lines: &mut Vec<String>,
+    trace: &SemanticSymbolTrace,
+    listed_namespace: SemanticNamespace,
+) {
+    let proved_lane = if listed_namespace != trace.target.namespace && trace.references.is_empty() {
+        format!(
+            ", {} namespace only",
+            namespace_name(trace.target.namespace)
+        )
+    } else {
+        String::new()
+    };
     lines.push(String::new());
     lines.push(format!(
         "  {}",
         human_status_line(
             semantic_status(trace.status),
             format!(
-                "Type-aware proof: {} ({})",
+                "Type-aware proof: {} ({}{proved_lane})",
                 trace.assertion,
                 completeness_name(trace.status)
             )
@@ -524,6 +551,173 @@ mod tests {
             .join("\n")
     }
 
+    fn semantic_trace_for(
+        target_namespace: fallow_types::semantic::SemanticNamespace,
+    ) -> SemanticSymbolTrace {
+        SemanticSymbolTrace {
+            target: fallow_types::semantic::SemanticSymbol {
+                path: PathBuf::from("src/impl.ts"),
+                namespace: target_namespace,
+                declaration_kind: "export".to_string(),
+                exported_name: "helper".to_string(),
+                local_name: "helper".to_string(),
+                owner: None,
+                line: 1,
+                col: 13,
+            },
+            identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            selected_project: "tsconfig.json".to_string(),
+            assertion: "no-references-found".to_string(),
+            status: SemanticCompleteness::Complete,
+            references: Vec::new(),
+            total_reference_count: 0,
+            checker_evidence_count: 0,
+            graph_evidence_count: 0,
+            truncated: false,
+            omissions: Vec::new(),
+            actions: Vec::new(),
+        }
+    }
+
+    fn type_lane_credited_trace(
+        semantic: Option<SemanticSymbolTrace>,
+    ) -> fallow_types::trace::ExportTrace {
+        ExportTrace {
+            file: PathBuf::from("src/impl.ts"),
+            export_name: "helper".to_string(),
+            namespace: fallow_types::semantic::SemanticNamespace::Type,
+            file_reachable: true,
+            is_entry_point: false,
+            is_used: true,
+            direct_references: vec![ExportReference {
+                from_file: PathBuf::from("src/index.ts"),
+                kind: "named import".to_string(),
+            }],
+            re_export_chains: Vec::new(),
+            reason: "Used by 1 file(s)".to_string(),
+            semantic,
+        }
+    }
+
+    #[test]
+    fn export_trace_scopes_a_proof_that_covers_the_other_lane() {
+        // Issue #2371: the trace lists the type lane that credits the value
+        // declaration while the checker proof covers the value lane, so the
+        // proof line must name its lane instead of reading as a denial of the
+        // reference printed above it.
+        let trace = type_lane_credited_trace(Some(semantic_trace_for(
+            fallow_types::semantic::SemanticNamespace::Value,
+        )));
+
+        let rendered = plain(&build_export_trace_human_lines(&trace));
+
+        assert!(rendered.contains("Namespace: type"));
+        assert!(rendered.contains("-> src/index.ts (named import)"));
+        assert!(
+            rendered
+                .contains("Type-aware proof: no-references-found (complete, value namespace only)"),
+            "the proof line names the lane it covers: {rendered}"
+        );
+    }
+
+    #[test]
+    fn export_trace_leaves_a_same_lane_proof_unscoped() {
+        // Deliberate negative control: when the proof covers the same lane the
+        // trace lists there is nothing to disambiguate, so the line stays as
+        // it was before issue #2371.
+        let trace = type_lane_credited_trace(Some(semantic_trace_for(
+            fallow_types::semantic::SemanticNamespace::Type,
+        )));
+
+        let rendered = plain(&build_export_trace_human_lines(&trace));
+
+        assert!(rendered.contains("Type-aware proof: no-references-found (complete)"));
+        assert!(!rendered.contains("namespace only"));
+    }
+
+    #[test]
+    fn export_trace_leaves_a_cross_lane_proof_that_found_references_unscoped() {
+        // Deliberate negative control: the lanes differ, but a proof that
+        // lists its own references denies nothing the trace printed, so the
+        // qualifier must not appear above that evidence.
+        let mut semantic = semantic_trace_for(fallow_types::semantic::SemanticNamespace::Value);
+        semantic.assertion = "references-found".to_string();
+        semantic.references = vec![fallow_types::semantic::SemanticReference {
+            path: PathBuf::from("src/index.ts"),
+            line: 1,
+            col: 14,
+            role: "type-reference".to_string(),
+            namespace: fallow_types::semantic::SemanticNamespace::Type,
+            via: Vec::new(),
+        }];
+        semantic.total_reference_count = 1;
+        semantic.checker_evidence_count = 1;
+        let trace = type_lane_credited_trace(Some(semantic));
+
+        let rendered = plain(&build_export_trace_human_lines(&trace));
+
+        assert!(
+            rendered.contains("Type-aware proof: references-found (complete)"),
+            "a proof with its own evidence stays unqualified: {rendered}"
+        );
+        assert!(!rendered.contains("namespace only"));
+    }
+
+    fn type_lane_credited_member_trace(semantic: Option<SemanticSymbolTrace>) -> ClassMemberTrace {
+        ClassMemberTrace {
+            file: PathBuf::from("src/impl.ts"),
+            member_name: "run".to_string(),
+            member_kind: "class-method".to_string(),
+            owner_export: "Helper".to_string(),
+            owner_namespace: fallow_types::semantic::SemanticNamespace::Type,
+            owner_is_used: true,
+            owner_file_reachable: true,
+            owner_is_entry_point: false,
+            owner_direct_references: vec![ExportReference {
+                from_file: PathBuf::from("src/index.ts"),
+                kind: "named import".to_string(),
+            }],
+            owner_re_export_chains: Vec::new(),
+            reason: "'Helper' is used by 1 file(s)".to_string(),
+            semantic,
+        }
+    }
+
+    #[test]
+    fn class_member_trace_scopes_a_proof_that_covers_the_other_lane() {
+        // Issue #2371: the member trace inherits the owner's crediting lane,
+        // so the proof beside it must name the narrower lane it covers rather
+        // than reading as a denial of the owner reference printed above.
+        let trace = type_lane_credited_member_trace(Some(semantic_trace_for(
+            fallow_types::semantic::SemanticNamespace::Value,
+        )));
+
+        let rendered = plain(&build_class_member_trace_human_lines(&trace));
+
+        assert!(rendered.contains("Owner: USED Helper (reachable)"));
+        assert!(rendered.contains("Owner namespace: type"));
+        assert!(
+            rendered
+                .contains("Type-aware proof: no-references-found (complete, value namespace only)"),
+            "the member proof line names the lane it covers: {rendered}"
+        );
+    }
+
+    #[test]
+    fn class_member_trace_leaves_a_same_lane_proof_unscoped() {
+        // Deliberate negative control: an owner credited through its own lane
+        // leaves nothing to disambiguate, so the member proof line keeps the
+        // pre-#2371 shape.
+        let trace = type_lane_credited_member_trace(Some(semantic_trace_for(
+            fallow_types::semantic::SemanticNamespace::Type,
+        )));
+
+        let rendered = plain(&build_class_member_trace_human_lines(&trace));
+
+        assert!(rendered.contains("Type-aware proof: no-references-found (complete)"));
+        assert!(!rendered.contains("namespace only"));
+    }
+
     #[test]
     fn export_trace_renders_reachability_references_and_barrels() {
         let trace = ExportTrace {
@@ -565,6 +759,7 @@ mod tests {
             member_name: "createEstimate".to_string(),
             member_kind: "class-method".to_string(),
             owner_export: "Ctrl".to_string(),
+            owner_namespace: fallow_types::semantic::SemanticNamespace::Value,
             owner_is_used: true,
             owner_file_reachable: true,
             owner_is_entry_point: false,
@@ -587,6 +782,7 @@ mod tests {
             rendered.contains("MEMBER createEstimate (class-method) of Ctrl in src/controller.ts")
         );
         assert!(rendered.contains("Owner: USED Ctrl (reachable)"));
+        assert!(rendered.contains("Owner namespace: value"));
         assert!(rendered.contains("Reason: member reason text"));
         assert!(rendered.contains("1 direct reference(s):"));
         assert!(rendered.contains("-> src/consumer.ts (named import)"));

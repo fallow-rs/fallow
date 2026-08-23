@@ -9109,6 +9109,7 @@ member_kind: string
  * The export that declares this member (the class / enum / store name).
  */
 owner_export: string
+owner_namespace?: SemanticNamespace
 /**
  * Whether the owning export is considered used.
  */

@@ -129,15 +129,8 @@ pub fn trace_export(
         .find(|m| path_matches(&m.path, root, file_path))?;
 
     let surface = select_export(graph, module, export_name)?;
-    let namespace = surface.namespace();
-
-    let mut referenced_files = FxHashSet::default();
-    let direct_references: Vec<ExportReference> = graph
-        .effective_export_surface_references(module.file_id, export_name, namespace)
-        .into_iter()
-        .filter(|reference| referenced_files.insert(reference.from_file))
-        .map(|r| reference_to_export_reference(graph, root, r))
-        .collect();
+    let (namespace, direct_references) =
+        crediting_export_references(graph, root, module.file_id, export_name, surface);
 
     let re_export_chains =
         collect_re_export_chains(graph, root, module.file_id, export_name, namespace);
@@ -165,6 +158,63 @@ pub fn trace_export(
         reason,
         semantic: None,
     })
+}
+
+/// Distinct referencing files of one module export surface in one namespace.
+fn direct_export_references(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_id: crate::discover::FileId,
+    export_name: &str,
+    namespace: ExportNamespace,
+) -> Vec<ExportReference> {
+    let mut referenced_files = FxHashSet::default();
+    graph
+        .effective_export_surface_references(file_id, export_name, namespace)
+        .into_iter()
+        .filter(|reference| referenced_files.insert(reference.from_file))
+        .map(|r| reference_to_export_reference(graph, root, r))
+        .collect()
+}
+
+/// References that credit the traced declaration, with the namespace that
+/// carries them.
+///
+/// The preferred surface wins whenever its lane carries a reference. When it
+/// carries none, the other namespace is consulted only if it resolves to the
+/// same effective binding: that is the type lane falling back onto a
+/// value-only declaration (`import type { helper }` of `export const helper`),
+/// which the unused-export analyzer counts as a use regardless of namespace.
+/// A distinct same-name declaration in the other namespace keeps the preferred
+/// lane, because its references credit that other declaration and dead-code
+/// still reports the traced one. See issue #2371.
+fn crediting_export_references(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_id: crate::discover::FileId,
+    export_name: &str,
+    surface: crate::graph::EffectiveExportSurface<'_>,
+) -> (ExportNamespace, Vec<ExportReference>) {
+    let namespace = surface.namespace();
+    let references = direct_export_references(graph, root, file_id, export_name, namespace);
+    if !references.is_empty() {
+        return (namespace, references);
+    }
+    let other = match namespace {
+        ExportNamespace::Type => ExportNamespace::Value,
+        ExportNamespace::Value => ExportNamespace::Type,
+    };
+    let same_binding = graph
+        .effective_export_surface(file_id, export_name, other)
+        .is_some_and(|candidate| candidate.binding() == surface.binding());
+    if !same_binding {
+        return (namespace, references);
+    }
+    let other_references = direct_export_references(graph, root, file_id, export_name, other);
+    if other_references.is_empty() {
+        return (namespace, references);
+    }
+    (other, other_references)
 }
 
 /// Resolve the exact source identity required by the semantic sidecar for a
@@ -430,6 +480,7 @@ pub fn trace_class_member(
         member_name: member_name.to_string(),
         member_kind: kind_str.to_string(),
         owner_export: owner_name,
+        owner_namespace: owner_trace.namespace,
         owner_is_used: owner_trace.is_used,
         owner_file_reachable: owner_trace.file_reachable,
         owner_is_entry_point: owner_trace.is_entry_point,
@@ -976,6 +1027,11 @@ mod tests {
         assert!(!trace.is_used);
         assert!(trace.file_reachable);
         assert!(trace.direct_references.is_empty());
+        assert_eq!(
+            trace.namespace,
+            fallow_types::semantic::SemanticNamespace::Value,
+            "an unreferenced value export stays in the value namespace"
+        );
     }
 
     #[test]
@@ -1373,11 +1429,300 @@ mod tests {
         let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
             .expect("value export exists");
 
+        // The type import credits the distinct `export type Foo` declaration,
+        // so dead-code still reports the value `Foo`; the trace must agree and
+        // must not borrow the type lane here (issue #2371). A declaration
+        // merge that splits across lanes, `interface Foo` next to `class Foo`,
+        // reaches the graph as this same pair of surfaces, so it is the shape
+        // the documented gap names: dead-code credits the class through the
+        // merge while the trace still reports it unused.
         assert_eq!(
             trace.namespace,
             fallow_types::semantic::SemanticNamespace::Value
         );
         assert!(!trace.is_used, "type usage must not select the type export");
+    }
+
+    /// Consumer `entry.ts` importing `Foo` from `source.ts`, whose exports are
+    /// supplied by the caller.
+    fn source_consumer_graph(
+        source_exports: Vec<ExportInfo>,
+        import_is_type_only: bool,
+        classified_usage: bool,
+    ) -> ModuleGraph {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                size_bytes: 10,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/source.ts"),
+                size_bytes: 10,
+            },
+        ];
+        let classified = if classified_usage {
+            vec!["Foo".to_string()]
+        } else {
+            Vec::new()
+        };
+        let resolved = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./source".to_string(),
+                        imported_name: ImportedName::Named("Foo".to_string()),
+                        local_name: "Foo".to_string(),
+                        is_type_only: import_is_type_only,
+                        from_style: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                type_referenced_import_bindings: classified.clone(),
+                value_referenced_import_bindings: classified,
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                exports: source_exports.into(),
+                ..Default::default()
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        ModuleGraph::build(&resolved, &entry_points, &files)
+    }
+
+    /// Two consumers of `source.ts`: `entry.ts` imports `Foo` in value
+    /// position and `typed.ts` imports the same name with `import type`, so
+    /// one effective binding carries a reference in both lanes.
+    fn dual_lane_consumer_graph(source_exports: Vec<ExportInfo>) -> ModuleGraph {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                size_bytes: 10,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/source.ts"),
+                size_bytes: 10,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/src/typed.ts"),
+                size_bytes: 10,
+            },
+        ];
+        let consumer = |file_id: FileId, path: PathBuf, is_type_only: bool| ResolvedModule {
+            file_id,
+            path,
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "./source".to_string(),
+                    imported_name: ImportedName::Named("Foo".to_string()),
+                    local_name: "Foo".to_string(),
+                    is_type_only,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 10),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            ..Default::default()
+        };
+        let resolved = vec![
+            consumer(FileId(0), files[0].path.clone(), false),
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                exports: source_exports.into(),
+                ..Default::default()
+            },
+            consumer(FileId(2), files[2].path.clone(), true),
+        ];
+        let entry_points = vec![
+            EntryPoint {
+                path: files[0].path.clone(),
+                source: EntryPointSource::PackageJsonMain,
+            },
+            EntryPoint {
+                path: files[2].path.clone(),
+                source: EntryPointSource::PackageJsonMain,
+            },
+        ];
+        ModuleGraph::build(&resolved, &entry_points, &files)
+    }
+
+    fn named_foo_export(is_type_only: bool) -> ExportInfo {
+        ExportInfo {
+            name: ExportName::Named("Foo".to_string()),
+            local_name: Some("Foo".to_string()),
+            is_type_only,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 3),
+            members: Vec::new(),
+            is_side_effect_used: false,
+            super_class: None,
+        }
+    }
+
+    #[test]
+    fn trace_credits_a_value_only_export_through_the_type_lane() {
+        // Issue #2371: `import type { Foo }` of `export const Foo` lands on the
+        // value declaration through the type-lane fallback, and dead-code
+        // counts that as a use. The trace reports the crediting lane.
+        let graph = source_consumer_graph(vec![named_foo_export(false)], true, false);
+
+        let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
+            .expect("value export exists");
+
+        assert_eq!(
+            trace.namespace,
+            fallow_types::semantic::SemanticNamespace::Type,
+            "the type lane carries the only credit"
+        );
+        assert!(
+            trace.is_used,
+            "a type-only import credits a value-only export"
+        );
+        assert_eq!(trace.direct_references.len(), 1);
+        assert_eq!(
+            trace.direct_references[0].from_file,
+            PathBuf::from("src/entry.ts")
+        );
+        assert_eq!(trace.direct_references[0].kind, "named import");
+        assert_eq!(trace.reason, "Used by 1 file(s)");
+    }
+
+    #[test]
+    fn trace_keeps_the_value_lane_when_one_binding_carries_both_lanes() {
+        // The preferred lane wins whenever it carries a reference, including
+        // when the other lane resolves to the SAME binding and carries one
+        // too: `export class Foo` consumed by a value importer and by an
+        // `import type` importer must keep reporting the value consumer.
+        // Without that rule the type lane would take over the payload.
+        let graph = dual_lane_consumer_graph(vec![named_foo_export(false)]);
+
+        let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
+            .expect("value export exists");
+
+        assert_eq!(
+            trace.namespace,
+            fallow_types::semantic::SemanticNamespace::Value
+        );
+        assert!(trace.is_used);
+        assert_eq!(trace.direct_references.len(), 1);
+        assert_eq!(
+            trace.direct_references[0].from_file,
+            PathBuf::from("src/entry.ts"),
+            "the value consumer stays the listed reference"
+        );
+    }
+
+    #[test]
+    fn trace_credits_a_declaration_merge_that_stays_one_binding() {
+        // A merge whose parts share the value lane, `class Foo` next to
+        // `namespace Foo`, is one effective binding in both lanes, so a bound
+        // `import type` credits it and the trace reports the crediting lane.
+        let graph = source_consumer_graph(
+            vec![named_foo_export(false), named_foo_export(false)],
+            true,
+            false,
+        );
+
+        let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
+            .expect("value export exists");
+
+        assert_eq!(
+            trace.namespace,
+            fallow_types::semantic::SemanticNamespace::Type,
+            "the merged binding is reachable from the type lane"
+        );
+        assert!(trace.is_used);
+        assert_eq!(trace.direct_references.len(), 1);
+        assert_eq!(
+            trace.direct_references[0].from_file,
+            PathBuf::from("src/entry.ts")
+        );
+    }
+
+    #[test]
+    fn trace_keeps_the_value_namespace_when_lanes_hold_distinct_bindings() {
+        // Deliberate negative control: two same-name declarations in opposite
+        // lanes are two bindings, so the value lane is kept even though the
+        // type lane also carries a reference. The value lane holds the
+        // reference here, so this pins the preferred-lane rule;
+        // `trace_prefers_the_value_namespace_independent_of_usage` is the test
+        // that reaches and pins the binding-equality guard.
+        let graph = source_consumer_graph(
+            vec![named_foo_export(false), named_foo_export(true)],
+            false,
+            true,
+        );
+
+        let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
+            .expect("value export exists");
+
+        assert_eq!(
+            trace.namespace,
+            fallow_types::semantic::SemanticNamespace::Value
+        );
+        assert!(trace.is_used);
+        assert_eq!(trace.direct_references.len(), 1);
+        assert_eq!(
+            trace.direct_references[0].from_file,
+            PathBuf::from("src/entry.ts")
+        );
+    }
+
+    #[test]
+    fn class_member_trace_inherits_the_type_lane_credit_of_its_owner() {
+        use fallow_types::extract::{MemberInfo, MemberKind};
+
+        // Issue #2371: the member trace is built from the owner's export
+        // trace, so an owner credited only through the type lane reports a
+        // used owner instead of the "referenced by no file" reason.
+        let mut owner = named_foo_export(false);
+        owner.members = vec![MemberInfo {
+            name: "run".to_string(),
+            kind: MemberKind::ClassMethod,
+            span: oxc_span::Span::new(0, 3),
+            has_decorator: false,
+            decorator_names: vec![],
+            is_instance_returning_static: false,
+            is_self_returning: false,
+        }];
+        let graph = source_consumer_graph(vec![owner], true, false);
+
+        let trace = trace_class_member(&graph, Path::new("/project"), "src/source.ts", "run")
+            .expect("member of the traced export");
+
+        assert!(trace.owner_is_used, "the type lane credits the owner");
+        assert_eq!(
+            trace.owner_namespace,
+            fallow_types::semantic::SemanticNamespace::Type,
+            "the member payload names the lane that credits its owner"
+        );
+        assert_eq!(trace.owner_direct_references.len(), 1);
+        assert_eq!(
+            trace.owner_direct_references[0].from_file,
+            PathBuf::from("src/entry.ts")
+        );
+        assert!(
+            trace.reason.contains("'Foo' is used by 1 file(s)"),
+            "the reason must follow the owner's credit: {}",
+            trace.reason
+        );
     }
 
     #[test]

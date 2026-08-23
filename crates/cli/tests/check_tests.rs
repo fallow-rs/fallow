@@ -8,8 +8,9 @@
 mod common;
 
 use common::{
-    fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
-    run_fallow_raw, run_fallow_raw_with_env, run_fallow_raw_with_type_aware_sidecar,
+    fixture_path, parse_json, redact_all, redact_paths, run_fallow, run_fallow_combined,
+    run_fallow_in_root, run_fallow_raw, run_fallow_raw_with_env,
+    run_fallow_raw_with_type_aware_sidecar,
 };
 
 #[test]
@@ -1066,5 +1067,148 @@ fn bun_resolutions_surface_as_unused_overrides_in_json_output() {
             .is_none_or(Vec::is_empty),
         "a parseable bun.lock resolves normally: {}",
         json["workspace_diagnostics"]
+    );
+}
+
+/// The #2371 probe: `src/impl.ts` exports a value whose only consumer is the
+/// bound `import type` in `src/index.ts`.
+fn write_type_only_import_probe(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("src")).expect("create source directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"probe","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import type { helper } from './impl';\nexport type T = typeof helper;\n",
+    )
+    .expect("write index.ts");
+    std::fs::write(
+        root.join("src/impl.ts"),
+        "export const helper = (): number => 1;\n",
+    )
+    .expect("write impl.ts");
+}
+
+/// A `tsconfig.json` the sidecar can select for a probe under `src`.
+fn write_probe_tsconfig(root: &std::path::Path) {
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"strict":true,"module":"ESNext","moduleResolution":"Bundler","target":"ES2022","noEmit":true},"include":["src"]}"#,
+    )
+    .expect("write tsconfig.json");
+}
+
+/// Issue #2371: a value-only export whose only credit is a bound
+/// `import type` is not reported by dead-code, and the trace must say so
+/// through the type namespace instead of contradicting the verdict.
+#[test]
+fn trace_reports_the_type_lane_credit_of_a_value_only_export() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_type_only_import_probe(root);
+
+    let verdict = parse_json(&run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--format", "json", "--quiet", "--no-cache"],
+    ));
+    assert_eq!(
+        verdict["unused_exports"].as_array().map(Vec::len),
+        Some(0),
+        "the type-only import credits the value export: {}",
+        verdict["unused_exports"]
+    );
+
+    let trace = parse_json(&run_fallow_in_root(
+        "dead-code",
+        root,
+        &[
+            "--trace",
+            "src/impl.ts:helper",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    assert_eq!(trace["kind"], "trace");
+    assert_eq!(trace["namespace"], "type");
+    assert_eq!(trace["is_used"], true);
+    assert_eq!(trace["direct_references"][0]["from_file"], "src/index.ts");
+    assert_eq!(trace["direct_references"][0]["kind"], "named import");
+    assert_eq!(trace["reason"], "Used by 1 file(s)");
+
+    let human = run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--trace", "src/impl.ts:helper", "--quiet", "--no-cache"],
+    );
+    // The human renderer prints native paths, so normalize separators before
+    // matching: on Windows the same lines read `src\impl.ts`.
+    let stderr = redact_paths(&human.stderr, root);
+    assert!(
+        stderr.contains("USED helper in src/impl.ts")
+            && stderr.contains("Namespace: type")
+            && stderr.contains("-> src/index.ts (named import)"),
+        "human trace reports the type-lane credit; stderr: {stderr}"
+    );
+}
+
+/// Issue #2371: the checker proof beside the syntactic trace covers the lane
+/// the declaration occupies, and the sidecar does not model a cross-lane
+/// import as a reference. The payload must stay readable across that gap: the
+/// root trace reports the credit, `semantic.target.namespace` names the lane
+/// the narrower proof covers, and the human proof line says so.
+#[test]
+fn type_aware_trace_scopes_the_proof_that_misses_the_type_lane_credit() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_type_only_import_probe(root);
+    write_probe_tsconfig(root);
+    let root_arg = root.to_string_lossy();
+
+    let output = run_fallow_raw_with_type_aware_sidecar(&[
+        "dead-code",
+        "--root",
+        &root_arg,
+        "--trace",
+        "src/impl.ts:helper",
+        "--type-aware",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    let trace = parse_json(&output);
+    assert_eq!(trace["namespace"], "type", "stderr: {}", output.stderr);
+    assert_eq!(trace["is_used"], true);
+    assert_eq!(trace["direct_references"][0]["from_file"], "src/index.ts");
+    assert_eq!(
+        trace["semantic"]["target"]["namespace"], "value",
+        "the proof covers the declaration's own lane: {}",
+        trace["semantic"]
+    );
+    // Deliberate negative control: the sidecar does not credit a cross-lane
+    // import, so the proof is narrower than the graph here. It pins the known
+    // gap, not a behaviour this change introduces.
+    assert_eq!(trace["semantic"]["assertion"], "no-references-found");
+
+    let human = run_fallow_raw_with_type_aware_sidecar(&[
+        "dead-code",
+        "--root",
+        &root_arg,
+        "--trace",
+        "src/impl.ts:helper",
+        "--type-aware",
+        "--quiet",
+        "--no-cache",
+    ]);
+    let stderr = redact_paths(&human.stderr, root);
+    assert!(
+        stderr.contains("Type-aware proof: no-references-found (complete, value namespace only)"),
+        "the proof line names the lane it covers; stderr: {stderr}"
     );
 }

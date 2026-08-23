@@ -21761,7 +21761,7 @@
           "description": "The export name being traced."
         },
         "namespace": {
-          "description": "Namespace selected for this trace. Producers always emit it; the schema\npermits omission by payloads created before namespaces were exposed.",
+          "description": "Namespace whose references are listed for the traced export. The\npreferred lane wins whenever it carries a reference: `value` for a\nvalue export, `type` for a type-only one. When the preferred lane\ncarries none and the other lane resolves to the same declaration, the\nother lane's references are listed and this field names it, so a value\nexport whose only credit is a bound `import type` reports `type` with\n`is_used: true`. `is_used` and `direct_references` follow the listed\nlane only; file reachability stays a separate axis, so an export in an\nunreachable file can still report `is_used: true` next to\n`file_reachable: false` (the value lane behaves the same way). When the\nother lane resolves to a separate same-name declaration the preferred\nlane is kept, including a declaration merge that splits across lanes\nsuch as an `interface` next to a same-name `class`, where dead-code\ncredits the class through the merge and the trace can still report it\nunused. A merge that stays one binding, such as a `class` next to a\nsame-name `namespace`, is covered. `semantic.target.namespace` names\nthe lane the declaration itself occupies and can therefore differ from\nthis field. Producers always emit the field; the schema permits\nomission by payloads created before namespaces were exposed.",
           "$ref": "#/definitions/SemanticNamespace"
         },
         "file_reachable": {
@@ -21877,6 +21877,10 @@
         "owner_export": {
           "type": "string",
           "description": "The export that declares this member (the class / enum / store name)."
+        },
+        "owner_namespace": {
+          "description": "Namespace whose references credit the owning export, mirroring\n[`ExportTrace::namespace`] for the export this member is declared on.\n`owner_is_used` and `owner_direct_references` describe that lane, so a\nmember of a value export credited only by a bound `import type` reports\n`type` here. `semantic.target.namespace` names the lane the checker\nproof covers and can therefore differ. Producers always emit the field;\nthe schema permits omission by payloads created before the owner\nnamespace was exposed.",
+          "$ref": "#/definitions/SemanticNamespace"
         },
         "owner_is_used": {
           "type": "boolean",

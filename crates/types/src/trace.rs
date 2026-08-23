@@ -16,8 +16,25 @@ pub struct ExportTrace {
     pub file: PathBuf,
     /// The export name being traced.
     pub export_name: String,
-    /// Namespace selected for this trace. Producers always emit it; the schema
-    /// permits omission by payloads created before namespaces were exposed.
+    /// Namespace whose references are listed for the traced export. The
+    /// preferred lane wins whenever it carries a reference: `value` for a
+    /// value export, `type` for a type-only one. When the preferred lane
+    /// carries none and the other lane resolves to the same declaration, the
+    /// other lane's references are listed and this field names it, so a value
+    /// export whose only credit is a bound `import type` reports `type` with
+    /// `is_used: true`. `is_used` and `direct_references` follow the listed
+    /// lane only; file reachability stays a separate axis, so an export in an
+    /// unreachable file can still report `is_used: true` next to
+    /// `file_reachable: false` (the value lane behaves the same way). When the
+    /// other lane resolves to a separate same-name declaration the preferred
+    /// lane is kept, including a declaration merge that splits across lanes
+    /// such as an `interface` next to a same-name `class`, where dead-code
+    /// credits the class through the merge and the trace can still report it
+    /// unused. A merge that stays one binding, such as a `class` next to a
+    /// same-name `namespace`, is covered. `semantic.target.namespace` names
+    /// the lane the declaration itself occupies and can therefore differ from
+    /// this field. Producers always emit the field; the schema permits
+    /// omission by payloads created before namespaces were exposed.
     #[cfg_attr(feature = "schema", schemars(default))]
     pub namespace: crate::semantic::SemanticNamespace,
     /// Whether the file is reachable from an entry point.
@@ -56,6 +73,16 @@ pub struct ClassMemberTrace {
     pub member_kind: String,
     /// The export that declares this member (the class / enum / store name).
     pub owner_export: String,
+    /// Namespace whose references credit the owning export, mirroring
+    /// [`ExportTrace::namespace`] for the export this member is declared on.
+    /// `owner_is_used` and `owner_direct_references` describe that lane, so a
+    /// member of a value export credited only by a bound `import type` reports
+    /// `type` here. `semantic.target.namespace` names the lane the checker
+    /// proof covers and can therefore differ. Producers always emit the field;
+    /// the schema permits omission by payloads created before the owner
+    /// namespace was exposed.
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub owner_namespace: crate::semantic::SemanticNamespace,
     /// Whether the owning export is considered used.
     pub owner_is_used: bool,
     /// Whether the file is reachable from an entry point.
