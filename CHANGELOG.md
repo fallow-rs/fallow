@@ -443,10 +443,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the test file the non-production health walk skipped while the MCP `audit`
   tool reported none, and they now agree. The combined envelope's new root
   field is optional and absent when there are no diagnostics, so no
-  `schema_version` moves. The standalone `dead-code`, `check`, `health`, and
-  `dupes` envelopes and every non-JSON format are byte-identical to before;
-  the three envelopes named above are not, whenever the run records a
-  diagnostic. Two further shapes move for a shared reason: the fold is
+  `schema_version` moves. The carrier work does not touch the standalone
+  `dead-code`, `check`, `health`, and `dupes` envelopes or any non-JSON
+  format; the three envelopes named above change whenever the run records a
+  diagnostic. The deduplication described next does reach those standalone
+  envelopes, so they stay byte-identical to before only on a repository that
+  declares each workspace glob once and reaches each workspace member through
+  one source. Two further shapes move for a shared reason: the fold is
   deduplicated on the whole typed `kind` rather than its id, so bare `fallow
   list --format json` and the envelopes built from an engine session's
   snapshot (the MCP `project_info`, `find_dupes`, and `check_health` tools,
@@ -475,7 +478,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository actually has and each example directory once instead of counting
   the duplicates. The repair covers the case where both manifests spell the
   glob identically too, which produced byte-identical duplicates before this
-  change as well. Two overlapping globs declared in ONE manifest
+  change as well. A second shape folds with it, on the same surfaces: a
+  malformed workspace member reached through BOTH an npm glob and a root
+  `tsconfig.json` `references[]` entry reported one `malformed-package-json`
+  diagnostic per source and now reports one in total. Two overlapping globs
+  declared in ONE manifest
   (`["packages/*", "packages/a*"]`) still report the same directory once per
   `pattern`, because the payload is part of the key. No kind is new on those
   envelopes and no field changes type, so no `schema_version` moves.
@@ -495,10 +502,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   human-readable `message` renders it. Consumers that joined the emitted path
   onto the project root already got the right answer for every other envelope
   and now get it here too; a consumer that treated this one field as absolute
-  needs to join it onto the root. Joining is the portable comparison: the list
-  envelope normalises a leading `./`, which a workspace glob written as
-  `"./apps/**"` leaves on the analysis envelopes' copy of the same diagnostic,
-  so the two spellings can still differ by that prefix. The typed
+  needs to join it onto the root. Joining onto the project root is the
+  portable comparison, and the two envelope families now agree on the spelling
+  as well: a workspace glob written as `"./apps/**"` no longer leaves a `./`
+  prefix on the analysis envelopes' copy of the same diagnostic, so the same
+  directory reads the same on both. The typed
   `workspace_diagnostics[]`
   schema description also said the kinds are "surfaced during config load",
   which has been wrong since source-discovery diagnostics joined the array

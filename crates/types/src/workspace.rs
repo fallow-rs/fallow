@@ -353,9 +353,15 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
 
 /// Drop the leading `./` (or `.\`) a workspace glob may carry, so the same
 /// pattern declared in two manifests is one payload.
+///
+/// A pattern that is nothing BUT the prefix (`"./"`, the root itself) keeps
+/// its spelling: stripping it would report an empty `pattern` field and an
+/// empty quoted glob in the warning text, which names no glob at all.
 fn canonical_glob_pattern(pattern: String) -> String {
     for prefix in ["./", ".\\"] {
-        if let Some(rest) = pattern.strip_prefix(prefix) {
+        if let Some(rest) = pattern.strip_prefix(prefix)
+            && !rest.is_empty()
+        {
             return rest.to_owned();
         }
     }
@@ -751,6 +757,38 @@ mod tests {
         );
     }
 
+    /// A glob spelled exactly `"./"` (the project root itself) is the one
+    /// pattern the prefix strip must leave alone: an empty `pattern` field
+    /// names no glob, and the warning would quote nothing.
+    #[test]
+    fn new_keeps_a_root_only_glob_spelling_and_still_strips_a_real_prefix() {
+        let root = Path::new("/project");
+        let recorded = |pattern: &str| {
+            let diagnostic = WorkspaceDiagnostic::new(
+                root,
+                root.join("pkgs"),
+                WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                    pattern: pattern.to_owned(),
+                },
+            );
+            let WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } = diagnostic.kind
+            else {
+                panic!("constructed a glob-matched-no-package-json diagnostic");
+            };
+            (pattern, diagnostic.message)
+        };
+
+        let (root_pattern, root_message) = recorded("./");
+        assert_eq!(root_pattern, "./", "a root-only glob keeps its spelling");
+        assert!(
+            root_message.contains("Glob './'"),
+            "the warning names the glob the manifest declared: {root_message}"
+        );
+        assert_eq!(recorded(".\\").0, ".\\");
+        assert_eq!(recorded("./pkgs/*").0, "pkgs/*");
+        assert_eq!(recorded(".\\pkgs\\*").0, "pkgs\\*");
+    }
+
     /// Issue #2366, the path half of the same repository shape: expanding
     /// `./pkgs/*` joins the no-op `.` into every match, so the two manifests
     /// hand one directory to the diagnostic under two spellings. Both must
@@ -781,7 +819,8 @@ mod tests {
         assert_eq!(
             spelling(&dotted),
             "/project/pkgs/aaa",
-            "the stored path drops the no-op . component, which Path equality              hides but serialization does not"
+            "the stored path drops the no-op . component, which Path equality \
+             hides but serialization does not"
         );
         assert_eq!(spelling(&dotted), spelling(&bare));
         assert_eq!(

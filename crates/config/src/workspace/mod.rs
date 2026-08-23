@@ -1471,17 +1471,15 @@ mod tests {
         assert!(diagnostics[0].message.contains("deno.jsonc"));
     }
 
-    /// The per-discovery [`ManifestCache`] memoizes `Err` outcomes; a member
-    /// reached through two workspace sources (npm glob + tsconfig reference)
-    /// must still be diagnosed from the replayed error rather than silently
-    /// resolving. The tsconfig source proves it replayed: a swallowed error
-    /// would have read a real package name instead of falling back to the
-    /// directory name.
+    /// A member reached through two workspace sources (npm glob + tsconfig
+    /// reference) is diagnosed, and diagnosed ONCE: the two sources produce
+    /// byte-identical diagnostics, so the discovery fold reports the member
+    /// once where every envelope used to report it twice (issue #2366).
     ///
-    /// The two sources produce byte-identical diagnostics, so the discovery
-    /// fold reports the member once (issue #2366). Nothing distinguishes them
-    /// on the wire, and every JSON envelope already showed one entry because
-    /// the process registry folded them.
+    /// That the tsconfig leg replayed the memoized `Err` rather than silently
+    /// resolving is NOT observable here (both `Ok(None)` and `Err` fall back
+    /// to the directory name, and the fold hides a second diagnostic);
+    /// [`manifest_cache_replays_the_same_err_on_every_visit`] pins it.
     #[test]
     fn malformed_member_reached_via_two_sources_is_diagnosed_once() {
         let dir = tempfile::tempdir().expect("create temp dir");
@@ -1527,6 +1525,38 @@ mod tests {
         assert!(
             malformed[0].path.ends_with("bad"),
             "the diagnostic points at the malformed member"
+        );
+    }
+
+    /// The per-discovery [`ManifestCache`] memoizes `Err` outcomes and every
+    /// repeat visit must get the same `Err` back. Both callers that can reach
+    /// one member ([`register_matched_workspace`] for an npm glob and
+    /// [`load_tsconfig_workspace_package`] for a tsconfig reference) diagnose
+    /// from the outcome the cache hands them, so a replay that degraded to
+    /// `Ok(None)` would silently drop the diagnostic on whichever source is
+    /// second. No end-to-end assertion can witness that: `Ok(None)` and `Err`
+    /// both fall back to the directory name for the workspace, and the
+    /// discovery fold collapses the two byte-identical diagnostics into one
+    /// either way.
+    #[test]
+    fn manifest_cache_replays_the_same_err_on_every_visit() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let member = dir.path().join("packages").join("bad");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(member.join("package.json"), r"{,}").unwrap();
+
+        let mut cache = ManifestCache::default();
+        let first = load_member_package_manifest_cached(&member, &mut cache)
+            .expect_err("a malformed member manifest is an Err");
+        assert_eq!(cache.len(), 1, "the outcome is memoized: {cache:?}");
+
+        std::fs::remove_file(member.join("package.json")).unwrap();
+        let replayed = load_member_package_manifest_cached(&member, &mut cache)
+            .expect_err("the memoized Err replays instead of re-reading the directory");
+        assert_eq!(
+            replayed, first,
+            "the replayed outcome is byte-identical to the first, so both \
+             workspace sources diagnose the same member the same way"
         );
     }
 
