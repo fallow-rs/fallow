@@ -555,12 +555,14 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
 /// section.
 ///
 /// `analysis_diagnostics` is the dead-code analysis's OWN
-/// `workspace_diagnostics[]`, folded with the process registry the same way
+/// `workspace_diagnostics[]`, folded with the registry leg the same way
 /// `combined_workspace_diagnostics` folds the combined root. The registry read
 /// alone reports whichever walk in the run wrote last, so under a per-analysis
 /// `production` split the audit envelope would otherwise be narrower than the
-/// run and than the MCP `audit` tool, which serializes the typed list (issue
-/// #2366).
+/// run and than the MCP `audit` tool, which serializes the typed list. The leg
+/// is [`fallow_config::registry_diagnostics_to_fold`], not a raw registry read,
+/// so the same split cannot make it BROADER either by importing a file the
+/// dead-code walk never looked at from the health or dupes walk (issue #2366).
 pub fn api_check_json_payload_with_config_fixable(
     results: &AnalysisResults,
     root: &Path,
@@ -576,7 +578,7 @@ pub fn api_check_json_payload_with_config_fixable(
         extras: CheckJsonExtraOutputs::default(),
         workspace_diagnostics: fallow_types::workspace::merge_workspace_diagnostics(
             analysis_diagnostics.to_vec(),
-            workspace_diagnostics_for_output(root),
+            fallow_config::registry_diagnostics_to_fold(root),
         ),
     })
 }

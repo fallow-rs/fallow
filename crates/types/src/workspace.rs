@@ -274,9 +274,17 @@ impl WorkspaceDiagnostic {
 }
 
 /// Strip the project root from absolute paths embedded inside variant
-/// payloads (the `error` field of malformed-config and source-read failures).
-/// Mirrors the per-platform `display()` byte sequence
-/// so the substring match works on Windows too.
+/// payloads (the `error` field of malformed-config and source-read failures),
+/// and drop a glob pattern's no-op `./` prefix.
+///
+/// Mirrors the per-platform `display()` byte sequence so the substring match
+/// works on Windows too.
+///
+/// The pattern prefix matters because the payload is part of the dedupe key in
+/// [`merge_workspace_diagnostics`]. A repository whose `package.json` declares
+/// `"./apps/**"` and whose `pnpm-workspace.yaml` declares `apps/**` names one
+/// glob twice, and without this both spellings would report every package-less
+/// directory under `apps/` a second time (issue #2366).
 fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> WorkspaceDiagnosticKind {
     let root_str = root.display().to_string();
     let root_alt = root_str.replace('\\', "/");
@@ -304,8 +312,24 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
                 error: normalise(error),
             }
         }
+        WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => {
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: canonical_glob_pattern(pattern),
+            }
+        }
         other => other,
     }
+}
+
+/// Drop the leading `./` (or `.\`) a workspace glob may carry, so the same
+/// pattern declared in two manifests is one payload.
+fn canonical_glob_pattern(pattern: String) -> String {
+    for prefix in ["./", ".\\"] {
+        if let Some(rest) = pattern.strip_prefix(prefix) {
+            return rest.to_owned();
+        }
+    }
+    pattern
 }
 
 /// Concatenate two diagnostic lists, keeping the first occurrence of each
@@ -622,10 +646,8 @@ mod tests {
             },
         );
 
-        let merged = merge_workspace_diagnostics(
-            vec![first.clone(), second.clone()],
-            vec![first, second],
-        );
+        let merged =
+            merge_workspace_diagnostics(vec![first.clone(), second.clone()], vec![first, second]);
 
         let patterns: Vec<String> = merged
             .iter()
@@ -639,6 +661,45 @@ mod tests {
             ["packages/*", "packages/a*"],
             "two overlapping globs report the same directory twice, with their own pattern; \
              the same entry seen from two observation points still folds to one"
+        );
+    }
+
+    /// Issue #2366: a repository that declares one glob in two manifests
+    /// (`"./apps/**"` in `package.json`, `apps/**` in `pnpm-workspace.yaml`)
+    /// must not report every package-less directory under it twice now that the
+    /// payload is part of the dedupe key.
+    #[test]
+    fn merge_folds_two_spellings_of_one_glob_into_one_diagnostic() {
+        let root = Path::new("/project");
+        let dotted = WorkspaceDiagnostic::new(
+            root,
+            root.join("apps/site/.next/cache"),
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: "./apps/**".to_owned(),
+            },
+        );
+        let bare = WorkspaceDiagnostic::new(
+            root,
+            root.join("apps/site/.next/cache"),
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: "apps/**".to_owned(),
+            },
+        );
+        assert_eq!(
+            dotted.kind, bare.kind,
+            "the no-op ./ prefix is normalised out of the recorded pattern"
+        );
+        assert!(
+            dotted.message.contains("Glob 'apps/**'"),
+            "the message renders the normalised pattern: {}",
+            dotted.message
+        );
+
+        let merged = merge_workspace_diagnostics(vec![dotted], vec![bare]);
+        assert_eq!(
+            merged.len(),
+            1,
+            "one glob declared twice is one diagnostic: {merged:?}"
         );
     }
 

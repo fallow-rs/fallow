@@ -48,8 +48,12 @@ pub fn serialize_combined_programmatic_json(
         envelope_mode,
         telemetry_analysis_run_id,
     } = output;
-    let workspace_diagnostics =
-        combined_workspace_diagnostics(dead_code.as_ref(), health.as_ref(), duplication.as_ref());
+    let workspace_diagnostics = combined_workspace_diagnostics(
+        dead_code.as_ref(),
+        health.as_ref(),
+        duplication.as_ref(),
+        &root,
+    );
     crate::serialize_combined_json(crate::CombinedJsonOutputInput {
         check: dead_code
             .as_ref()
@@ -90,14 +94,21 @@ pub fn serialize_combined_programmatic_json(
 /// the root carries the deduplicated union in section order (dead code, then
 /// health, then duplication) and a run missing a section (`--skip check`,
 /// `--only health`, `--only dupes`) still reports what its remaining analyses
-/// recorded. The CLI folds its own per-analysis lists in the same order and
-/// closes with a process-registry read it does not need here, since every
-/// section carries its own list, so the two routes agree on everything an
-/// analysis records (issue #2366).
+/// recorded.
+///
+/// [`fallow_config::registry_diagnostics_to_fold`] closes the fold, exactly as
+/// the CLI's fold does, because a section list is captured when its analysis
+/// finishes and an analysis can record after that: the health run's own
+/// dead-code precompute records the analysis-stage kinds after
+/// `HealthProgrammaticOutput::workspace_diagnostics` was taken, so a
+/// `dead_code: false` run would otherwise report an empty array where the CLI's
+/// `--skip check` reports the diagnostic. The leg drops walk-recorded kinds, so
+/// it cannot import another walk's file set (issue #2366).
 fn combined_workspace_diagnostics(
     dead_code: Option<&DeadCodeProgrammaticOutput>,
     health: Option<&HealthProgrammaticOutput>,
     duplication: Option<&DuplicationProgrammaticOutput>,
+    root: &Path,
 ) -> Vec<WorkspaceDiagnostic> {
     let merged = merge_workspace_diagnostics(
         dead_code.map_or_else(Vec::new, |dead_code| {
@@ -105,12 +116,38 @@ fn combined_workspace_diagnostics(
         }),
         health.map_or_else(Vec::new, |health| health.workspace_diagnostics.clone()),
     );
-    merge_workspace_diagnostics(
+    let merged = merge_workspace_diagnostics(
         merged,
         duplication.map_or_else(Vec::new, |duplication| {
             duplication.output.workspace_diagnostics.clone()
         }),
+    );
+    merge_workspace_diagnostics(
+        merged,
+        fallow_config::registry_diagnostics_to_fold(combined_diagnostics_root(
+            dead_code,
+            health,
+            duplication,
+            root,
+        )),
     )
+}
+
+/// Root the diagnostics registry is keyed on: the root a section resolved,
+/// which is the resolved config root the run recorded against, with the
+/// combined output's own root as the fallback. Mirrors the CLI's
+/// `combined_diagnostics_root`.
+fn combined_diagnostics_root<'a>(
+    dead_code: Option<&'a DeadCodeProgrammaticOutput>,
+    health: Option<&'a HealthProgrammaticOutput>,
+    duplication: Option<&'a DuplicationProgrammaticOutput>,
+    root: &'a Path,
+) -> &'a Path {
+    dead_code
+        .map(|dead_code| dead_code.root.as_path())
+        .or_else(|| health.map(|health| health.root.as_path()))
+        .or_else(|| duplication.map(|duplication| duplication.root.as_path()))
+        .unwrap_or(root)
 }
 
 /// Serialize typed decision-surface output into the stable JSON contract.
@@ -202,12 +239,16 @@ pub fn serialize_audit_programmatic_json(
 ///
 /// The sub-result is a `CheckOutput` body, so it carries the run's
 /// `workspace_diagnostics[]` the way the standalone `dead-code` envelope and
-/// the combined `check` section do. Both routes fold the dead-code analysis's
-/// own captured list with a process-registry read: this one takes the list
-/// from the typed dead-code output, the CLI audit path takes it from
-/// `CheckResult::workspace_diagnostics`, so a per-analysis `production` split
-/// (which makes the run's walks disagree about which files exist) cannot make
-/// them answer differently (issue #2366).
+/// the combined `check` section do. The two audit routes agree on everything
+/// the dead-code analysis records: this one serializes the typed list, which
+/// the runtime already built from the session's own capture plus
+/// [`fallow_config::registry_diagnostics_to_fold`] after the analyze pass, and
+/// the CLI audit path folds `CheckResult::workspace_diagnostics` with that same
+/// filtered registry leg at serialization time. That closing read is the CLI's
+/// only extra leg and can only add an entry recorded after the analysis
+/// captured its list; because the leg drops walk-recorded kinds, a per-analysis
+/// `production` split (which makes the run's walks disagree about which files
+/// exist) cannot make the two routes answer differently (issue #2366).
 fn serialize_audit_dead_code(
     output: &DeadCodeProgrammaticOutput,
     base_snapshot: Option<&crate::AuditProgrammaticKeySnapshot>,

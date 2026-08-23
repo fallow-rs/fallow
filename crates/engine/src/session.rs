@@ -317,23 +317,19 @@ impl AnalysisSession {
     /// discovers and the analysis-stage entries the analyze pass records, both
     /// of which land in the registry after the session was created.
     ///
-    /// The live read drops walk-recorded entries
-    /// ([`fallow_types::workspace::WorkspaceDiagnosticKind::is_source_walk_recorded`])
-    /// for the same
-    /// reason the constructor does: a concurrent walk on the same root
-    /// replaces that set, so importing it here would make this session's list
-    /// depend on which walk wrote last, and the combined root's union would
-    /// come out in a different ORDER between runs of the same command (issue
-    /// #2366). This session's own walk-recorded entries are already in the
-    /// snapshot, by value, from its own walk.
+    /// The live read goes through
+    /// [`fallow_config::registry_diagnostics_to_fold`], which drops
+    /// walk-recorded entries for the same reason the constructor does: a
+    /// concurrent walk on the same root replaces that set, so importing it here
+    /// would make this session's list depend on which walk wrote last, and the
+    /// combined root's union would come out in a different ORDER between runs
+    /// of the same command (issue #2366). This session's own walk-recorded
+    /// entries are already in the snapshot, by value, from its own walk.
     #[must_use]
     pub fn current_workspace_diagnostics(&self) -> Vec<WorkspaceDiagnostic> {
         merge_workspace_diagnostics(
             self.workspace_diagnostics.clone(),
-            fallow_config::workspace_diagnostics_for(&self.config.root)
-                .into_iter()
-                .filter(|diagnostic| !diagnostic.kind.is_source_walk_recorded())
-                .collect(),
+            fallow_config::registry_diagnostics_to_fold(&self.config.root),
         )
     }
 

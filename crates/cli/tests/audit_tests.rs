@@ -6244,6 +6244,79 @@ fn audit_json_dead_code_section_carries_a_skip_only_the_dead_code_walk_saw() {
     assert_eq!(skips[0]["path"], "src/huge.test.ts");
 }
 
+/// Issue #2366, the inverse polarity of the test above: when the split makes
+/// the OTHER analyses walk a file the dead-code walk never looks at, the
+/// dead-code section must not report their skip.
+///
+/// The section folds the dead-code analysis's own list with the registry, and
+/// the registry holds whichever walk wrote last. Under `production.deadCode`
+/// the dead-code walk skips test files entirely while the non-production health
+/// and dupes walks read the oversized one and record the skip, so an unfiltered
+/// registry leg made `fallow audit --format json` report a diagnostic its
+/// dead-code analysis never saw, disagreeing with the MCP `audit` tool and with
+/// the standalone `dead-code` envelope.
+#[test]
+fn audit_json_dead_code_section_omits_a_skip_only_another_walk_saw() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"issue-2366-audit-split-inverse","private":true,"main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"production":{"deadCode":true,"health":false,"dupes":false}}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/index.ts"), "export const value = 1;\n").unwrap();
+    fs::write(dir.join("src/huge.test.ts"), "// filler\n".repeat(150_000)).unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    fs::write(
+        dir.join("src/changed.ts"),
+        "export const changed = () => 1;\n",
+    )
+    .unwrap();
+
+    let root = dir.to_str().expect("fixture path should be UTF-8");
+    for command in [
+        ["audit"].as_slice(),
+        ["review"].as_slice(),
+        ["audit", "--brief"].as_slice(),
+    ] {
+        let mut args = command.to_vec();
+        args.extend_from_slice(&[
+            "--root",
+            root,
+            "--base",
+            "HEAD",
+            "--max-file-size",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]);
+        let json = parse_json(&run_fallow_raw(&args));
+        let skips: Vec<&serde_json::Value> = json["dead_code"]["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic["kind"] == "skipped-large-file")
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            skips.is_empty(),
+            "{command:?} reports only what its own dead-code walk skipped: {}",
+            json["dead_code"]["workspace_diagnostics"]
+        );
+    }
+}
+
 /// Issue #2366: `undeclared-workspace` is appended to the registry by the
 /// analyze pass, AFTER the config-load stash, so a later per-analysis reload
 /// wipes it before the audit envelope's registry read. Folding the dead-code

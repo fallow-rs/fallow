@@ -1084,3 +1084,50 @@ fn list_workspaces_json_emits_project_relative_diagnostic_paths() {
         );
     }
 }
+
+/// Issue #2366: bare `fallow list --format json` reads the engine session's
+/// diagnostics snapshot, whose fold is keyed on the whole diagnostic kind
+/// rather than its id. Two overlapping workspace globs report the same
+/// package-less directory once per `pattern`, and bare `list` used to collapse
+/// them into one while `list --workspaces`, which reads the workspace value
+/// directly, reported both. Pin the agreement between the two.
+#[test]
+fn list_json_keeps_both_overlapping_glob_diagnostics() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("pkgs/aaa")).expect("create package-less dir");
+    fs::create_dir_all(root.join("src")).expect("create source dir");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"overlapping-glob-root","private":true,"workspaces":["pkgs/*","pkgs/a*"]}"#,
+    )
+    .expect("write root manifest");
+    fs::write(root.join("src/index.ts"), "export const value = 1;\n").expect("write source");
+    fs::write(root.join("pkgs/aaa/readme.txt"), "no package.json here\n").expect("write filler");
+
+    for args in [
+        ["list", "--format", "json", "--quiet"].as_slice(),
+        ["list", "--workspaces", "--format", "json", "--quiet"].as_slice(),
+    ] {
+        let output = run_fallow_combined_in_root(root, args);
+        assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+
+        let json = parse_json(&output);
+        let patterns: Vec<String> = json["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|entry| entry["kind"] == "glob-matched-no-package-json")
+                    .map(|entry| entry["pattern"].as_str().unwrap_or_default().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            patterns,
+            ["pkgs/*", "pkgs/a*"],
+            "`fallow {args:?}` reports the directory once per matching glob: {}",
+            json["workspace_diagnostics"]
+        );
+    }
+}

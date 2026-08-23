@@ -363,20 +363,26 @@ static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDia
 /// also after this stash, and are preserved for the same reason; each analyze
 /// pass refreshes them through [`clear_analysis_stage_diagnostics`] (issue
 /// #2366).
+///
+/// The stored set is deduplicated on the whole `(kind, path)` the way every
+/// fold is: a repository that declares one glob in both `package.json` and
+/// `pnpm-workspace.yaml` produces the same diagnostic twice at config load, and
+/// the standalone envelopes read this registry verbatim (issue #2366).
 pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagnostic>) {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
     if let Ok(mut map) = registry.lock() {
-        let mut combined = diagnostics;
-        if let Some(existing) = map.get(&canonical) {
-            combined.extend(
-                existing
-                    .iter()
-                    .filter(|d| d.kind.is_source_discovery() || d.kind.is_analysis_stage())
-                    .cloned(),
-            );
-        }
-        map.insert(canonical, combined);
+        let preserved = map.get(&canonical).map_or_else(Vec::new, |existing| {
+            existing
+                .iter()
+                .filter(|d| d.kind.is_source_discovery() || d.kind.is_analysis_stage())
+                .cloned()
+                .collect()
+        });
+        map.insert(
+            canonical,
+            fallow_types::workspace::merge_workspace_diagnostics(diagnostics, preserved),
+        );
     }
 }
 
@@ -549,6 +555,34 @@ pub fn workspace_diagnostics_for(root: &Path) -> Vec<WorkspaceDiagnostic> {
         .ok()
         .and_then(|map| map.get(&canonical).cloned())
         .unwrap_or_default()
+}
+
+/// Read the registry leg of a diagnostics FOLD: everything
+/// [`workspace_diagnostics_for`] holds for `root` EXCEPT the entries a source
+/// walk records (see
+/// [`WorkspaceDiagnosticKind::is_source_walk_recorded`]).
+///
+/// A fold combines an analysis's own captured list with the registry. The
+/// analysis already carries its own walk's skips by value, and each walk
+/// replaces the registry's source-discovery set for the root, so an unfiltered
+/// registry read imports ANOTHER walk's file set: under a per-analysis
+/// `production` split the dead-code and duplication walks see different files,
+/// and the read answers whichever walk wrote last. That made the audit family
+/// report a skip its dead-code analysis never saw, disagreeing with the MCP
+/// `audit` tool, and made the order of the combined root's union depend on
+/// which parallel walk won the race (issue #2366).
+///
+/// `source-read-failure` is deliberately still read: the parse stage records
+/// it after the walk, so the registry is the only place it exists. Every
+/// non-walk kind (workspace discovery, analysis stage) is likewise still read,
+/// which is what lets `--skip check` and `--only health` report what their
+/// analyses recorded after the section captured its list.
+#[must_use]
+pub fn registry_diagnostics_to_fold(root: &Path) -> Vec<WorkspaceDiagnostic> {
+    workspace_diagnostics_for(root)
+        .into_iter()
+        .filter(|diagnostic| !diagnostic.kind.is_source_walk_recorded())
+        .collect()
 }
 
 /// Directories that are conventionally NOT workspace packages even when a

@@ -196,6 +196,71 @@ fn run_combined_returns_typed_sections_before_json() {
     assert!(json.get("health").is_some());
 }
 
+/// Issue #2366: the programmatic combined route must report the analysis-stage
+/// diagnostics its run recorded even when the dead-code section is switched
+/// off, the way the CLI's `--skip check` and `--only health` do.
+///
+/// The health run records them inside its own dead-code precompute, AFTER
+/// `HealthProgrammaticOutput::workspace_diagnostics` was captured, so the
+/// section lists alone come back empty and only the closing registry leg sees
+/// the entry. Each case gets its own project root because the diagnostics
+/// registry is process-wide and keyed on the root.
+#[test]
+fn combined_programmatic_json_carries_diagnostics_without_a_dead_code_section() {
+    for (name, dead_code, duplication) in [
+        ("combined-diag-all", true, true),
+        ("combined-diag-no-dead-code", false, true),
+        ("combined-diag-health-only", false, false),
+    ] {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            format!(
+                r#"{{"name":"{name}","type":"module","main":"src/index.ts","overrides":{{"ws":"^8.21.0"}}}}"#
+            ),
+        )
+        .expect("write package");
+        std::fs::write(root.join("bun.lockb"), "").expect("write lockb");
+        std::fs::create_dir_all(root.join("src")).expect("create src");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export const used = 1;\nconsole.log(used);\n",
+        )
+        .expect("write entry");
+
+        let output = run_combined(&CombinedOptions {
+            analysis: analysis_at(root),
+            dead_code,
+            duplication,
+            health: true,
+            ..CombinedOptions::default()
+        })
+        .expect("combined output");
+        assert_eq!(output.dead_code.is_some(), dead_code);
+
+        let json = serialize_combined_programmatic_json(output).expect("combined json");
+        let skips: Vec<&serde_json::Value> = json["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| {
+                        diagnostic["kind"] == "bun-lockb-override-resolution-skipped"
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            skips.len(),
+            1,
+            "{name} carries the bun.lockb skip at the root: {}",
+            json["workspace_diagnostics"]
+        );
+        assert_eq!(skips[0]["path"], "package.json");
+    }
+}
+
 #[test]
 fn derives_programmatic_health_execution_options_from_api_contracts() {
     let project = tempfile::tempdir().expect("temp dir");

@@ -2090,11 +2090,56 @@ fn source_discovery_diagnostics_reach_sessions_by_value_not_through_the_registry
          its own walk's list"
     );
     assert!(
-        session.contains("!diagnostic.kind.is_source_walk_recorded()"),
-        "the live registry read in current_workspace_diagnostics must drop walk-recorded \
-         entries too; importing a concurrent walk's skips changes the order of the combined \
+        session.contains("registry_diagnostics_to_fold("),
+        "the live registry read in current_workspace_diagnostics must go through the filtered \
+         fold leg; importing a concurrent walk's skips changes the order of the combined \
          root's union between runs of the same command"
     );
+}
+
+/// Issue #2366: every fold of an analysis's own diagnostics with the process
+/// registry must read the registry through `registry_diagnostics_to_fold`.
+///
+/// A raw read imports whichever walk in the run wrote last. Under a
+/// per-analysis `production` split that walk looked at a different file set, so
+/// the audit family reported a `skipped-large-file` its dead-code analysis
+/// never saw while the MCP `audit` tool, which serializes the typed list,
+/// reported none. Pin the filtered leg at all four fold sites so a raw read
+/// cannot come back.
+#[test]
+fn diagnostics_folds_read_the_registry_through_the_filtered_leg() {
+    let registry = read_source_without_line_comments("crates/config/src/workspace/diagnostics.rs")
+        .expect("read diagnostics registry");
+    assert!(
+        registry.contains("pub fn registry_diagnostics_to_fold(")
+            && registry.contains("!diagnostic.kind.is_source_walk_recorded()"),
+        "the registry owns the fold leg and the walk-recorded filter it applies"
+    );
+
+    for (path, site) in [
+        (
+            "crates/engine/src/session.rs",
+            "the engine session's live read",
+        ),
+        (
+            "crates/cli/src/report/json.rs",
+            "the CLI audit family's dead-code section",
+        ),
+        (
+            "crates/cli/src/combined/output.rs",
+            "the CLI combined root fold",
+        ),
+        (
+            "crates/api/src/runtime_json.rs",
+            "the programmatic combined root fold",
+        ),
+    ] {
+        let source = read_source_without_line_comments(path).expect("read fold site");
+        assert!(
+            source.contains("registry_diagnostics_to_fold("),
+            "{site} ({path}) must close its fold with the filtered registry leg"
+        );
+    }
 }
 
 fn read_source_without_line_comments(path: &str) -> std::io::Result<String> {

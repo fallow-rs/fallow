@@ -811,14 +811,15 @@ fn combined_diagnostics_root<'a>(input: &CombinedJsonPrintInput<'a>) -> &'a std:
 /// envelope of the same project and, when two walks run concurrently, differs
 /// between runs of the same command. Every section instead carries the list its
 /// own analysis observed, captured from that walk's return value, so the union
-/// is the same on every run. The registry read closes the fold: it covers
-/// anything recorded after the last section captured its list. Reading it
-/// outside the `check` section is also what lets `--skip check`, `--only
-/// health`, and `--only dupes` report the diagnostics their analyses recorded.
-/// The programmatic combined route folds the same three section lists in the
-/// same order, so the two routes agree on everything an analysis records; the
-/// closing registry read is the CLI's only extra leg and can only add an entry
-/// no section had captured yet (issue #2366).
+/// is the same on every run. [`fallow_config::registry_diagnostics_to_fold`]
+/// closes the fold: it covers anything recorded after the last section captured
+/// its list (a parse-stage `source-read-failure`, an analysis-stage kind the
+/// health run's dead-code precompute recorded) while dropping walk-recorded
+/// kinds, which reach an envelope only from their own walk's snapshot. Reading
+/// it outside the `check` section is what lets `--skip check`, `--only health`,
+/// and `--only dupes` report the diagnostics their analyses recorded. The
+/// programmatic combined route folds the same three section lists in the same
+/// order and closes with the same read, so the two routes agree (issue #2366).
 fn combined_workspace_diagnostics(
     input: &CombinedJsonPrintInput<'_>,
 ) -> Vec<fallow_config::WorkspaceDiagnostic> {
@@ -832,7 +833,7 @@ fn combined_workspace_diagnostics(
         input
             .dupes_result
             .map(|result| result.workspace_diagnostics.clone()),
-        Some(crate::runtime_support::workspace_diagnostics_for(
+        Some(fallow_config::registry_diagnostics_to_fold(
             combined_diagnostics_root(input),
         )),
     ]

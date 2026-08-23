@@ -1376,6 +1376,66 @@ fn combined_json_only_dupes_carries_workspace_discovery_diagnostics() {
     assert_eq!(unmatched[0]["path"], "packages/no-manifest");
 }
 
+/// Issue #2366: one glob declared in both `package.json` and
+/// `pnpm-workspace.yaml`, in the two spellings those files conventionally use,
+/// is ONE diagnostic per matched directory.
+///
+/// Config load expands both manifests and records a diagnostic from each, so
+/// the process registry the standalone envelopes read verbatim held the same
+/// finding twice, with `./pkgs/*` and `pkgs/*` as its `pattern`. Keying the
+/// fold on the typed payload would have kept both spellings as distinct
+/// entries, doubling the array on a real monorepo, so the recorded pattern
+/// drops the no-op `./` and the registry stores the deduplicated set.
+#[test]
+fn one_glob_declared_in_two_manifests_reports_one_diagnostic() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("pkgs/aaa")).expect("create package-less dir");
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"issue-2366-two-manifests","private":true,"main":"src/index.ts","workspaces":["./pkgs/*"]}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - \"pkgs/*\"\n",
+    )
+    .expect("write pnpm-workspace.yaml");
+    std::fs::write(root.join("src/index.ts"), "export const value = 1;\n").expect("write source");
+    std::fs::write(root.join("pkgs/aaa/readme.txt"), "no package.json here\n")
+        .expect("write filler");
+
+    for args in [["dead-code"].as_slice(), ["list"].as_slice(), [].as_slice()] {
+        let mut argv = args.to_vec();
+        argv.extend_from_slice(&[
+            "--root",
+            root.to_str().expect("temp path is UTF-8"),
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]);
+        let json = parse_json(&run_fallow_raw(&argv));
+        let patterns: Vec<String> = json["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|entry| entry["kind"] == "glob-matched-no-package-json")
+                    .map(|entry| entry["pattern"].as_str().unwrap_or_default().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            patterns,
+            ["pkgs/*"],
+            "`fallow {args:?}` reports the directory once: {}",
+            json["workspace_diagnostics"]
+        );
+    }
+}
+
 /// Write a project whose test file is over the `--max-file-size 1` ceiling, so
 /// a NON-production walk records `skipped-large-file` for it and a production
 /// walk (which excludes test files) never sees it. `production_config` is the

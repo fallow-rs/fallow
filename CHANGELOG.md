@@ -433,11 +433,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fact, so a combined run whose `production` split makes it walk the project
   twice in parallel reports the same union, in the same order, on every run:
   the array no longer depends on which of the two parallel walks wrote to the
-  shared registry last. The combined envelope's new root field is optional and
-  absent when there are no diagnostics, so no `schema_version` moves. The
-  standalone `dead-code`, `check`, `health`, and `dupes` envelopes and every
-  non-JSON format are byte-identical to before; the three envelopes named
-  above are not, whenever the run records a diagnostic.
+  shared registry last. Each of those folds closes with a process-registry
+  read for the kinds an analysis records after its list was captured (a
+  parse-stage `source-read-failure`, or the analysis-stage kinds the health
+  run's own dead-code precompute records), and that read now drops the
+  walk-recorded kinds, so a split can no longer make an envelope report a
+  `skipped-large-file` for a file the analysis it belongs to never walked:
+  `fallow audit --format json` under `production: { deadCode: true }` reported
+  the test file the non-production health walk skipped while the MCP `audit`
+  tool reported none, and they now agree. The combined envelope's new root
+  field is optional and absent when there are no diagnostics, so no
+  `schema_version` moves. The standalone `dead-code`, `check`, `health`, and
+  `dupes` envelopes and every non-JSON format are byte-identical to before;
+  the three envelopes named above are not, whenever the run records a
+  diagnostic. Two further shapes move for a shared reason: the fold is
+  deduplicated on the whole typed `kind` rather than its id, so bare `fallow
+  list --format json` and the envelopes built from an engine session's
+  snapshot (the MCP `project_info`, `find_dupes`, and `check_health` tools,
+  and the programmatic dead-code and combined routes) now report a
+  package-less directory matched by two workspace globs once per `pattern`
+  instead of once in total, matching what `fallow list --workspaces --format
+  json` already reported. Because the payload now decides identity, the
+  recorded `pattern` drops the no-op `./` prefix a `package.json` `workspaces`
+  entry may carry (`"./apps/**"` is reported as `apps/**`, in the JSON field
+  and in the warning text), and the diagnostics registry deduplicates what it
+  stores. A repository that declares one glob in both `package.json` and
+  `pnpm-workspace.yaml`, which is the conventional pnpm layout, reported every
+  package-less directory under that glob TWICE on `fallow dead-code`, `check`,
+  `dupes`, and `health --format json`, once per spelling; it now reports each
+  once. No kind is new on those envelopes and no field changes type, so no
+  `schema_version` moves.
 
 - **`fallow workspaces --format json` and `fallow list --workspaces --format
   json` now emit a project-relative `workspace_diagnostics[].path`.** Every
@@ -454,7 +479,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   human-readable `message` renders it. Consumers that joined the emitted path
   onto the project root already got the right answer for every other envelope
   and now get it here too; a consumer that treated this one field as absolute
-  needs to join it onto the root. The typed `workspace_diagnostics[]`
+  needs to join it onto the root. Joining is the portable comparison: the list
+  envelope normalises a leading `./`, which a workspace glob written as
+  `"./apps/**"` leaves on the analysis envelopes' copy of the same diagnostic,
+  so the two spellings can still differ by that prefix. The typed
+  `workspace_diagnostics[]`
   schema description also said the kinds are "surfaced during config load",
   which has been wrong since source-discovery diagnostics joined the array
   in [#1086](https://github.com/fallow-rs/fallow/issues/1086); it now names
