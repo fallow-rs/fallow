@@ -7,21 +7,23 @@
 //! target's default export.
 //!
 //! Two shapes must stay uncredited. A plain `export * from './impl'`: an ES
-//! star re-export never forwards `default`, so the target's default export
-//! keeps reporting. And a CSS Module class spelled `.default`: a stylesheet
-//! exports class names rather than a module default, so only the member
-//! accesses the consumer writes credit its classes.
+//! star re-export never forwards `default`, however the target spells it. And
+//! a CSS Module class spelled `.default`, in any of the four stylesheet
+//! syntaxes the extractor treats as a CSS Module: a stylesheet exports class
+//! names rather than a module default, so only the member accesses the
+//! consumer writes credit its classes.
 
 use super::common::{create_config, fixture_path};
 
 const FIXTURE: &str = "issue-2374-default-specifier";
 
-/// The two boundary fixtures stay separate from `FIXTURE`: each declares a
-/// second `ExportName::Named("default")`, which the pre-existing
-/// `duplicate_exports` grouping would treat as an ordinary colliding name and
-/// report against `FIXTURE`'s `export { inner as default }`.
+/// The boundary fixtures stay separate from `FIXTURE`: each declares a further
+/// `ExportName::Named("default")`, which the pre-existing `duplicate_exports`
+/// grouping would treat as an ordinary colliding name and report against
+/// `FIXTURE`'s `export { inner as default }`.
 const CJS_FIXTURE: &str = "issue-2374-cjs-default-property";
 const CSS_FIXTURE: &str = "issue-2374-css-module-default-class";
+const STAR_NAMED_DEFAULT_FIXTURE: &str = "issue-2374-star-named-default";
 
 fn unused_export_pairs(results: &fallow_core::results::AnalysisResults) -> Vec<(String, String)> {
     results
@@ -156,23 +158,65 @@ fn plain_star_re_export_still_does_not_forward_default() {
     );
 }
 
+/// Deliberate negative control: a plain `export *` forwards named exports and
+/// never `default`, including when the target writes its default as
+/// `export { hidden as default }`. That spelling is the one the fix relocates
+/// into the default slot, so it is the spelling the star boundary has to be
+/// pinned on.
+#[test]
+fn plain_star_re_export_does_not_forward_a_named_default_either() {
+    let results = fallow_core::analyze(&create_config(fixture_path(STAR_NAMED_DEFAULT_FIXTURE)))
+        .expect("analysis should succeed");
+    let unused_defaults = unused_defaults(&results);
+    let pairs = unused_export_pairs(&results);
+
+    assert!(
+        unused_defaults
+            .iter()
+            .any(|p| p.ends_with("src/star-impl.ts")),
+        "`export {{ hidden as default }}` is not forwarded by a plain `export *`; unused \
+         defaults: {unused_defaults:?}"
+    );
+    // The named export the star does forward stays credited, so the control
+    // proves the star edge is live rather than absent.
+    assert!(
+        !pairs
+            .iter()
+            .any(|(path, name)| path.ends_with("src/star-impl.ts") && name == "starNamed"),
+        "the star re-export forwards named exports: {pairs:?}"
+    );
+}
+
 /// Deliberate negative control: a CSS Module exports class names, so a class
 /// spelled `.default` is an ordinary class. A plain
 /// `import classes from './classes.module.css'` binds the whole class map and
 /// names no single class, so only the members the consumer writes are
 /// credited and `.default` must keep reporting.
+///
+/// The exception covers every stylesheet syntax the extractor treats as a CSS
+/// Module, so `.module.less` and `.module.sass` siblings carry the same pin
+/// (issue #2374 review round 2). Their non-`default` classes report too:
+/// `narrow_css_module_references` runs on `.module.css` / `.module.scss`
+/// alone, which is pre-existing behavior this fixture only has to leave
+/// unchanged.
 #[test]
 fn a_css_module_class_named_default_is_not_a_default_export() {
     let results = fallow_core::analyze(&create_config(fixture_path(CSS_FIXTURE)))
         .expect("analysis should succeed");
     let pairs = unused_export_pairs(&results);
 
-    for name in ["default", "unusedClass"] {
+    for (stylesheet, name) in [
+        ("src/classes.module.css", "default"),
+        ("src/classes.module.css", "unusedClass"),
+        ("src/classes.module.less", "default"),
+        ("src/classes.module.sass", "default"),
+    ] {
         assert!(
             pairs
                 .iter()
-                .any(|(path, export)| path.ends_with("src/classes.module.css") && export == name),
-            "`{name}` is accessed on no consumer and must keep reporting: {pairs:?}"
+                .any(|(path, export)| path.ends_with(stylesheet) && export == name),
+            "{stylesheet}: `{name}` is credited by no member access and must keep reporting: \
+             {pairs:?}"
         );
     }
     // The class the consumer does write stays credited, so the control proves
@@ -183,6 +227,23 @@ fn a_css_module_class_named_default_is_not_a_default_export() {
             .any(|(path, name)| path.ends_with("src/classes.module.css") && name == "usedClass"),
         "a class the consumer accesses keeps its credit: {pairs:?}"
     );
+    // Every stylesheet is imported, so none of them may fall out as an unused
+    // file: that would make the `default` assertions above pass vacuously.
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    for stylesheet in [
+        "src/classes.module.css",
+        "src/classes.module.less",
+        "src/classes.module.sass",
+    ] {
+        assert!(
+            !unused_files.iter().any(|p| p.ends_with(stylesheet)),
+            "{stylesheet} is imported and must resolve: {unused_files:?}"
+        );
+    }
 }
 
 /// A CommonJS `exports.default = x` declares the same binding

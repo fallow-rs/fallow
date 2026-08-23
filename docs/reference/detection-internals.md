@@ -94,6 +94,12 @@ error by suppressing a downstream detector.
   a plain `import styles from './x.module.css'` binds the whole class map and
   names no single class, and `narrow_css_module_references` remains the only
   thing that credits classes, from the member accesses the consumer writes.
+  `NamedDefaultSpelling::for_target` decides that from the target path with
+  `is_css_module_stylesheet`, which tracks the extractor's own CSS Module set
+  (`.module.css`, `.module.scss`, `.module.sass`, `.module.less`). The
+  narrowing gate `is_css_module_path` stays on the narrower `.css` / `.scss`
+  pair, so `.less` and `.sass` class maps keep their default slot empty without
+  gaining member narrowing.
 - An ambient-module star re-export (`export *` or `export * as ns` inside a
   `declare module '...'` body, recorded as a type-only namespace import
   without a local binding) credits the full ES star surface of its target:

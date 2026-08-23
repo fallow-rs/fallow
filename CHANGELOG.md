@@ -105,11 +105,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from` chain lost the credit at every hop when a `default` specifier consumed
   it. The index now reads and writes a single default slot however each side
   spells the name. Two shapes are deliberately unchanged: a plain
-  `export * from './impl'` still does not forward `default`, and a CSS Module
-  class spelled `.default` is still an ordinary class, credited only by the
-  member accesses the consumer writes. Repositories using any of these shapes
-  will see fewer unused-export findings. Warm graph caches invalidate
-  (`GRAPH_CACHE_VERSION` 39 to 40); the extract cache is untouched.
+  `export * from './impl'` still does not forward `default`, however the target
+  spells it, and a class spelled `.default` in a CSS Module (`.module.css`,
+  `.module.scss`, `.module.sass` or `.module.less`) is still an ordinary class,
+  credited only by the member accesses the consumer writes. One shape moves the
+  other way: a CommonJS `default` property is the binding a default import
+  reads, so a plain data key named `default` on a `module.exports` object
+  literal now stops reporting once anything default-imports that module.
+  Repositories using any of these shapes will see fewer unused-export findings.
+  A default export credited for the first time also becomes reachable, so
+  member-level detectors such as unused class members can now report on it
+  where the unused-export finding used to stand in its place. Warm graph caches
+  invalidate (`GRAPH_CACHE_VERSION` 39 to 40); the extract cache is untouched.
 
 - **The MCP `audit` and `check_health` tools now honor `health.coverage`,
   `health.coverageRoot`, `FALLOW_COVERAGE`, and `FALLOW_COVERAGE_ROOT` on

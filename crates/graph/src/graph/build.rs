@@ -488,15 +488,38 @@ impl ModuleGraph {
     }
 }
 
-/// Check if a path is a CSS Module file (`.module.css` or `.module.scss`).
-pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
+/// Whether a path carries the `.module` stem every CSS Module convention uses.
+fn has_css_module_stem(path: &std::path::Path) -> bool {
     path.file_stem()
         .and_then(|s| s.to_str())
         .is_some_and(|stem| stem.ends_with(".module"))
+}
+
+/// Check if a path is a CSS Module file (`.module.css` or `.module.scss`).
+pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
+    has_css_module_stem(path)
         && path
             .extension()
             .and_then(|e| e.to_str())
             .is_some_and(|ext| ext == "css" || ext == "scss")
+}
+
+/// Check if a path is a CSS Module stylesheet in any syntax the extractor
+/// treats as one: `.module.css`, `.module.scss`, `.module.sass` or
+/// `.module.less`. This mirrors `fallow_extract`'s own `is_css_module_file`,
+/// which decides where the class-name export list comes from, so it answers
+/// "are this module's exports a class map?".
+///
+/// Deliberately wider than [`is_css_module_path`], which gates CSS member
+/// narrowing on the `.css` / `.scss` pair alone. Widening that one would start
+/// narrowing `.less` and `.sass` class references for every project, a
+/// behavior change well past crediting the default export (issue #2374).
+pub(super) fn is_css_module_stylesheet(path: &std::path::Path) -> bool {
+    has_css_module_stem(path)
+        && path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| matches!(ext, "css" | "scss" | "sass" | "less"))
 }
 
 /// Per-module index of exports by importable name: `ExportName::Named`
@@ -546,6 +569,11 @@ pub(super) struct ExportNameIndex {
 /// and silently dropped a real unused-class finding. Crediting for that import
 /// belongs to `narrow_css_module_references`, which reads the member accesses
 /// the consumer actually writes.
+///
+/// The stylesheet side is decided by [`is_css_module_stylesheet`], which
+/// tracks the extractor's own extension set (`.module.css`, `.module.scss`,
+/// `.module.sass`, `.module.less`) rather than the narrower pair that gates
+/// member narrowing, so every syntax that produces a class map is covered.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum NamedDefaultSpelling {
     /// `Named("default")` and `Default` share the default slot.
@@ -557,7 +585,7 @@ pub(super) enum NamedDefaultSpelling {
 impl NamedDefaultSpelling {
     /// Pick the rule for a target module from its path.
     pub(super) fn for_target(path: &std::path::Path) -> Self {
-        if is_css_module_path(path) {
+        if is_css_module_stylesheet(path) {
             Self::IsOrdinaryName
         } else {
             Self::IsDefaultExport
@@ -734,21 +762,79 @@ mod tests {
         );
     }
 
+    /// Issue #2374 review round 2: the exception must cover every stylesheet
+    /// syntax the extractor treats as a CSS Module, not just the `.css` /
+    /// `.scss` pair that gates member narrowing. A `.module.less` or
+    /// `.module.sass` class map is built by the same extractor branch, so a
+    /// class spelled `.default` there is an ordinary class too.
     #[test]
     fn named_default_spelling_follows_the_target_path() {
-        for css in ["Button.module.css", "theme.module.scss"] {
+        for css in [
+            "Button.module.css",
+            "theme.module.scss",
+            "theme.module.sass",
+            "Button.module.less",
+        ] {
             assert_eq!(
                 NamedDefaultSpelling::for_target(std::path::Path::new(css)),
                 NamedDefaultSpelling::IsOrdinaryName,
                 "{css}"
             );
         }
-        for code in ["impl.ts", "impl.js", "Button.css", "styles.module.ts"] {
+        for code in [
+            "impl.ts",
+            "impl.js",
+            "Button.css",
+            "Button.less",
+            "theme.sass",
+            "styles.module.ts",
+        ] {
             assert_eq!(
                 NamedDefaultSpelling::for_target(std::path::Path::new(code)),
                 NamedDefaultSpelling::IsDefaultExport,
                 "{code}"
             );
+        }
+    }
+
+    /// The class-map predicate tracks the extractor while the narrowing gate
+    /// stays put, so widening one must never widen the other.
+    #[test]
+    fn css_module_stylesheet_covers_every_extractor_extension() {
+        for stylesheet in [
+            "Button.module.css",
+            "Button.module.scss",
+            "Button.module.sass",
+            "Button.module.less",
+            "/project/src/components/Button.module.less",
+        ] {
+            assert!(
+                is_css_module_stylesheet(std::path::Path::new(stylesheet)),
+                "{stylesheet}"
+            );
+        }
+        for other in [
+            "Button.css",
+            "Button.less",
+            "Button.module.ts",
+            "Button.module",
+            "Button.module.json",
+        ] {
+            assert!(
+                !is_css_module_stylesheet(std::path::Path::new(other)),
+                "{other}"
+            );
+        }
+    }
+
+    /// The narrowing gate keeps its narrower set: `.module.less` and
+    /// `.module.sass` classes are still not narrowed by member access.
+    #[test]
+    fn css_module_stylesheet_is_wider_than_the_narrowing_gate() {
+        for wider in ["Button.module.less", "Button.module.sass"] {
+            let path = std::path::Path::new(wider);
+            assert!(is_css_module_stylesheet(path), "{wider}");
+            assert!(!is_css_module_path(path), "{wider}");
         }
     }
 

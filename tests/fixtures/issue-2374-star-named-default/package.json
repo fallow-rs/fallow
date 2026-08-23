@@ -1,0 +1,5 @@
+{
+  "name": "issue-2374-star-named-default",
+  "type": "module",
+  "main": "src/index.ts"
+}
