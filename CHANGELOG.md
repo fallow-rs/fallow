@@ -405,17 +405,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its previous analysis-stage entries before re-recording, so a watch-mode
   rerun or a long-lived engine session (MCP, LSP) drops the diagnostic once
   the YAML is fixed or a text `bun.lock` exists instead of keeping a stale
-  entry. Because config reloads now preserve those entries, two audit-family
-  envelopes populate an array that was previously always empty:
+  entry. Two audit-family envelopes gain the same two analysis-stage kinds:
   `fallow audit --format json` under `dead_code.workspace_diagnostics[]`, and
   the `audit-brief` envelope shared by `fallow review --format json` and
-  `fallow audit --brief --format json`, also under `dead_code`. Both sections
-  are already typed as the `dead-code` envelope body, so populating them is
-  additive; the MCP `audit` tool and the programmatic combined route (MCP code
-  mode, NAPI, embedders) answer the same as the CLI, including when
-  per-analysis `production` modes make the run's walks disagree. The combined
-  envelope's new root field is optional and
-  absent when there are no diagnostics, so no `schema_version` moves. The
+  `fallow audit --brief --format json`, also under `dead_code`. Those two
+  arrays already carried the workspace-discovery and source-discovery kinds,
+  so the change there is the two additional kinds, not a field that was
+  previously always empty; only the combined root is a genuinely new field.
+  Both sections are already typed as the `dead-code` envelope body, so the
+  widening is additive; the MCP `audit` tool and the programmatic combined
+  route (MCP code mode, NAPI, embedders) answer the same as the CLI, including
+  when per-analysis `production` modes make the run's walks disagree. Each
+  analysis now carries the diagnostics its own walk produced instead of
+  reading the shared registry back after the fact, so a combined run whose
+  `production` split makes it walk the project twice in parallel reports the
+  same union on every run. The combined envelope's new root field is optional
+  and absent when there are no diagnostics, so no `schema_version` moves. The
   standalone `dead-code`, `check`, `health`, and `dupes` envelopes and every
   non-JSON format are byte-identical to before; the three envelopes named
   above are not, whenever the run records a diagnostic.

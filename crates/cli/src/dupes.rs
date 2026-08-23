@@ -255,6 +255,16 @@ pub struct DupesResult {
     /// toml value, not the resolved CLI/default precedence.
     pub ignore_imports: bool,
     pub explain_skipped: bool,
+    /// Workspace, source-discovery, and analysis-stage diagnostics as THIS
+    /// analysis saw them, mirroring `CheckResult::workspace_diagnostics` and
+    /// the programmatic `DuplicationProgrammaticOutput`. Combined mode runs the
+    /// duplication walk concurrently with the dead-code walk whenever a
+    /// per-analysis `production` split stops them from sharing a file list, and
+    /// each walk replaces the process registry's source-discovery set for the
+    /// root, so only a by-value snapshot answers "what did the dupes walk skip"
+    /// the same way on every run (issue #2366). Empty when the run reused
+    /// another analysis's discovery: that analysis carries the same list.
+    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
 /// Run duplication analysis, filtering, and baseline handling. Returns results without printing.
@@ -343,6 +353,7 @@ fn execute_dupes_inner(
     let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =
         opts.changed_files.or(changed_files_from_since.as_ref());
 
+    let mut workspace_diagnostics = Vec::new();
     let (mut report, default_ignore_skips) = match pre_discovered {
         Some(files) => run_duplication_analysis(
             opts,
@@ -364,12 +375,14 @@ fn execute_dupes_inner(
                         ));
                     }
                 };
-            run_duplication_analysis_with_session(
+            let analysis = run_duplication_analysis_with_session(
                 opts,
                 &session,
                 &dupes_config,
                 effective_changed_files,
-            )
+            );
+            workspace_diagnostics = session.current_workspace_diagnostics();
+            analysis
         }
     };
 
@@ -412,6 +425,7 @@ fn execute_dupes_inner(
         min_occurrences: dupes_config.min_occurrences,
         ignore_imports: dupes_config.ignore_imports,
         explain_skipped: opts.explain_skipped,
+        workspace_diagnostics,
     })
 }
 

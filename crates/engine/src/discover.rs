@@ -113,24 +113,25 @@ pub struct AnalysisDiscovery {
     workspaces: Vec<WorkspaceInfo>,
     root_pkg: Option<PackageJson>,
     config_candidates: Vec<PathBuf>,
+    source_diagnostics: Vec<WorkspaceDiagnostic>,
     discover_ms: f64,
     workspaces_ms: f64,
 }
 
 impl AnalysisDiscovery {
     fn from_parts(
-        files: Vec<DiscoveredFile>,
+        sources: crate::core_backend::DiscoveredSources,
         workspaces: Vec<WorkspaceInfo>,
         root_pkg: Option<PackageJson>,
-        config_candidates: Vec<PathBuf>,
         discover_ms: f64,
         workspaces_ms: f64,
     ) -> Self {
         Self {
-            files,
+            files: sources.files,
             workspaces,
             root_pkg,
-            config_candidates,
+            config_candidates: sources.config_candidates,
+            source_diagnostics: sources.diagnostics,
             discover_ms,
             workspaces_ms,
         }
@@ -154,6 +155,13 @@ impl AnalysisDiscovery {
 
     pub(crate) fn config_candidates(&self) -> &[PathBuf] {
         &self.config_candidates
+    }
+
+    /// Source-discovery diagnostics this session's OWN walk produced. Held by
+    /// value because a concurrent walk on the same root replaces the process
+    /// registry's source-discovery set (issue #2366).
+    pub(crate) fn source_diagnostics(&self) -> &[WorkspaceDiagnostic] {
+        &self.source_diagnostics
     }
 
     pub(crate) fn discover_ms(&self) -> f64 {
@@ -193,18 +201,10 @@ pub(crate) fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDis
     let hidden_dir_scopes = collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces);
 
     let discover_start = Instant::now();
-    let (files, config_candidates) =
-        discover_files_and_config_candidates(config, &hidden_dir_scopes);
+    let sources = discover_files_config_candidates_and_diagnostics(config, &hidden_dir_scopes);
     let discover_ms = discover_start.elapsed().as_secs_f64() * 1000.0;
 
-    AnalysisDiscovery::from_parts(
-        files,
-        workspaces,
-        root_pkg,
-        config_candidates,
-        discover_ms,
-        workspaces_ms,
-    )
+    AnalysisDiscovery::from_parts(sources, workspaces, root_pkg, discover_ms, workspaces_ms)
 }
 
 /// Run source discovery with workspace metadata already resolved by config load.
@@ -229,15 +229,13 @@ pub(crate) fn prepare_analysis_discovery_with_workspaces(
     let hidden_dir_scopes = collect_hidden_dir_scopes(config, root_pkg.as_ref(), workspaces);
 
     let discover_start = Instant::now();
-    let (files, config_candidates) =
-        discover_files_and_config_candidates(config, &hidden_dir_scopes);
+    let sources = discover_files_config_candidates_and_diagnostics(config, &hidden_dir_scopes);
     let discover_ms = discover_start.elapsed().as_secs_f64() * 1000.0;
 
     AnalysisDiscovery::from_parts(
-        files,
+        sources,
         workspaces.to_vec(),
         root_pkg,
-        config_candidates,
         discover_ms,
         workspaces_ms,
     )
@@ -804,6 +802,18 @@ pub fn discover_files_and_config_candidates(
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
     crate::core_backend::discover_files_and_config_candidates(config, additional_hidden_dir_scopes)
+}
+
+/// The same traversal, keeping the source-discovery diagnostics it produced.
+#[must_use]
+pub(crate) fn discover_files_config_candidates_and_diagnostics(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> crate::core_backend::DiscoveredSources {
+    crate::core_backend::discover_files_config_candidates_and_diagnostics(
+        config,
+        additional_hidden_dir_scopes,
+    )
 }
 
 /// Discover configured and inferred entry points.

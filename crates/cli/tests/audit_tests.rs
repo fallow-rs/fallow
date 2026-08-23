@@ -6183,6 +6183,67 @@ fn audit_json_dead_code_section_carries_analysis_stage_workspace_diagnostics() {
     assert_dead_code_section_carries_bun_lockb_skip(&parse_json(&output));
 }
 
+/// Issue #2366: under a per-analysis `production` split the audit family's
+/// walks disagree about which files exist, and the last walk to run replaces
+/// the process registry's source-discovery set. The dead-code section must
+/// still report what the DEAD-CODE walk skipped, from that analysis's own
+/// captured list, otherwise `fallow audit --format json` is narrower than the
+/// run and narrower than the MCP `audit` tool, which serializes the typed list.
+#[test]
+fn audit_json_dead_code_section_carries_a_skip_only_the_dead_code_walk_saw() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"issue-2366-audit-split","private":true,"main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"production":{"deadCode":false,"health":true,"dupes":true}}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/index.ts"), "export const value = 1;\n").unwrap();
+    fs::write(dir.join("src/huge.test.ts"), "// filler\n".repeat(150_000)).unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    fs::write(
+        dir.join("src/changed.ts"),
+        "export const changed = () => 1;\n",
+    )
+    .unwrap();
+
+    let json = parse_json(&run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().expect("fixture path should be UTF-8"),
+        "--base",
+        "HEAD",
+        "--max-file-size",
+        "1",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+    let diagnostics = json["dead_code"]["workspace_diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let skips: Vec<&serde_json::Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["kind"] == "skipped-large-file")
+        .collect();
+    assert_eq!(
+        skips.len(),
+        1,
+        "the dead-code section reports what only its own walk skipped: {}",
+        json["dead_code"]["workspace_diagnostics"]
+    );
+    assert_eq!(skips[0]["path"], "src/huge.test.ts");
+}
+
 /// Issue #2366: the `audit-brief` envelope shared by `fallow review` and
 /// `fallow audit --brief` builds its dead-code section from the same registry,
 /// so it is the third carrier that the preserve moves.

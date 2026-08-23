@@ -946,6 +946,7 @@ fn build_audit_dead_code_json_with_results(
         &check.config.root,
         check.elapsed,
         check.config_fixable,
+        &check.workspace_diagnostics,
     ) {
         Ok(mut json) => {
             if let Some(ref base) = result.base_snapshot {

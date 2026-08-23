@@ -1442,12 +1442,12 @@ fn combined_json_root_unions_workspace_diagnostics_across_split_production_modes
 }
 
 /// Issue #2366: the combined root and the programmatic combined envelope are
-/// built from different inputs (the CLI folds the process registry per
-/// analysis phase, the programmatic route folds the typed sections' own
-/// lists), so pin that a non-production dead-code pass under a production
-/// health/dupes split reaches the standalone envelope and the combined root
-/// alike. Without the union the combined root is empty here while
-/// `dead-code --format json` on the same project reports the entry.
+/// built from different inputs (the CLI folds each analysis's captured list
+/// plus a final registry read, the programmatic route folds the typed
+/// sections' own lists), so pin that a non-production dead-code pass under a
+/// production health/dupes split reaches the standalone envelope and the
+/// combined root alike. Without the union the combined root is empty here
+/// while `dead-code --format json` on the same project reports the entry.
 #[test]
 fn combined_json_root_matches_standalone_dead_code_under_a_production_split() {
     let dir = split_production_large_test_file_project(
@@ -1492,7 +1492,11 @@ fn combined_json_root_matches_standalone_dead_code_under_a_production_split() {
 /// analysis that walks the full file set is duplication, so the oversized test
 /// file is recorded by the dupes walk alone and neither the dead-code nor the
 /// health section's own list carries it. The combined root must still report
-/// it, from the registry read that closes the fold.
+/// it, from the duplication section's own captured list.
+///
+/// This split is also the case that runs the dead-code and duplication walks
+/// under `rayon::join`, so a registry read would answer "whichever walk wrote
+/// last" and the assertion below would hold only on some runs.
 #[test]
 fn combined_json_root_carries_a_diagnostic_only_the_dupes_walk_recorded() {
     let dir = tempfile::tempdir().expect("tempdir");

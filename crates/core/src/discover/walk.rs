@@ -171,13 +171,16 @@ fn partition_minified_generated_js(
         .partition(|(path, size)| !is_probably_minified_generated_js(path, *size))
 }
 
-/// Record the skipped files in the workspace-diagnostics registry (so they
-/// surface in `workspace_diagnostics[]` JSON) and emit one aggregated
-/// `tracing::warn!` so a human running `fallow` sees what was dropped. Mirrors
-/// the JSON-plus-gated-warn pattern used for undeclared workspaces.
-fn report_skipped_large_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
+/// Build the typed diagnostics for the over-limit files this walk dropped and
+/// emit one aggregated `tracing::warn!` so a human running `fallow` sees what
+/// was dropped. Mirrors the JSON-plus-gated-warn pattern used for undeclared
+/// workspaces. The caller writes the returned list to the registry.
+fn report_skipped_large_files(
+    config: &ResolvedConfig,
+    skipped: &[SizedFile],
+) -> Vec<WorkspaceDiagnostic> {
     if skipped.is_empty() {
-        return;
+        return Vec::new();
     }
     let diagnostics: Vec<WorkspaceDiagnostic> = skipped
         .iter()
@@ -191,7 +194,6 @@ fn report_skipped_large_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
             )
         })
         .collect();
-    fallow_config::append_workspace_diagnostics(&config.root, diagnostics);
 
     let mut sorted: Vec<SizedFile> = skipped.to_vec();
     sorted.sort_unstable_by_key(|f| std::cmp::Reverse(f.1));
@@ -210,12 +212,17 @@ fn report_skipped_large_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
              Raise the limit with --max-file-size <MB> (or FALLOW_MAX_FILE_SIZE), or add them to ignorePatterns."
         );
     }
+    diagnostics
 }
 
-/// Record generated minified JS files skipped before parsing.
-fn report_skipped_minified_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
+/// Build the typed diagnostics for generated minified JS files skipped before
+/// parsing. The caller writes the returned list to the registry.
+fn report_skipped_minified_files(
+    config: &ResolvedConfig,
+    skipped: &[SizedFile],
+) -> Vec<WorkspaceDiagnostic> {
     if skipped.is_empty() {
-        return;
+        return Vec::new();
     }
     let diagnostics: Vec<WorkspaceDiagnostic> = skipped
         .iter()
@@ -229,7 +236,6 @@ fn report_skipped_minified_files(config: &ResolvedConfig, skipped: &[SizedFile])
             )
         })
         .collect();
-    fallow_config::append_workspace_diagnostics(&config.root, diagnostics);
 
     let mut sorted: Vec<SizedFile> = skipped.to_vec();
     sorted.sort_unstable_by_key(|f| std::cmp::Reverse(f.1));
@@ -249,6 +255,7 @@ fn report_skipped_minified_files(config: &ResolvedConfig, skipped: &[SizedFile])
              Add {pronoun} to ignorePatterns, rename {pronoun} with a .min.js suffix, or use --max-file-size 0 to analyze {pronoun}."
         );
     }
+    diagnostics
 }
 
 /// Build the pre-parse largest-files note, or `None` when the discovered set is
@@ -676,15 +683,48 @@ pub fn discover_files_with_additional_hidden_dirs(
 /// # Panics
 ///
 /// Panics if the file type glob or progress template is invalid (compile-time constants).
+pub fn discover_files_and_config_candidates(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
+    let discovered =
+        discover_files_config_candidates_and_diagnostics(config, additional_hidden_dir_scopes);
+    (discovered.files, discovered.config_candidates)
+}
+
+/// Source files, config candidates, and the source-discovery diagnostics one
+/// walk produced.
+///
+/// `diagnostics` is the walk's OWN skip list, not a read of the process-wide
+/// registry: combined mode can run two walks on the same root concurrently, and
+/// each walk replaces the registry's source-discovery entries, so only the
+/// by-value list is a stable answer to "what did THIS analysis skip" (issue
+/// #2366).
+pub struct DiscoveredSources {
+    /// Source files with stable path-sorted [`FileId`]s.
+    pub files: Vec<DiscoveredFile>,
+    /// Non-source config-candidate paths captured in the same traversal.
+    pub config_candidates: Vec<PathBuf>,
+    /// Skipped-large-file and skipped-minified-file diagnostics from this walk.
+    pub diagnostics: Vec<WorkspaceDiagnostic>,
+}
+
+/// [`discover_files_and_config_candidates`] plus the source-discovery
+/// diagnostics this walk recorded, for callers that must carry a per-analysis
+/// snapshot instead of reading the shared registry back (issue #2366).
+///
+/// # Panics
+///
+/// Panics if the file type glob or progress template is invalid (compile-time constants).
 #[expect(
     clippy::cast_possible_truncation,
     reason = "file count is bounded by project size, well under u32::MAX"
 )]
 #[expect(clippy::expect_used, reason = "the collector lock must remain usable")]
-pub fn discover_files_and_config_candidates(
+pub fn discover_files_config_candidates_and_diagnostics(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
-) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
+) -> DiscoveredSources {
     let _span = tracing::info_span!("discover_files").entered();
 
     let capture_config = !config.production;
@@ -722,15 +762,20 @@ pub fn discover_files_and_config_candidates(
         .expect("walk config collector lock poisoned");
     config_candidates.sort_unstable();
 
-    // Drop any source-discovery diagnostics from a previous pass (watch-mode
-    // rerun, combined-mode re-walk) BEFORE re-recording this walk's skips, so a
-    // file that is no longer skipped does not leave a stale entry (issue #1086).
-    fallow_config::clear_source_discovery_diagnostics(&config.root);
     let (kept, skipped) = partition_by_size(raw, config.max_file_size_bytes);
-    report_skipped_large_files(config, &skipped);
     let (kept, skipped_minified) =
         partition_minified_generated_js(kept, config.max_file_size_bytes);
-    report_skipped_minified_files(config, &skipped_minified);
+    // One registry write replaces this root's whole source-discovery set, so a
+    // stale entry from a previous pass drops out (issue #1086) without a window
+    // in which a concurrent walk on the same root can observe or clobber a
+    // half-written set (issue #2366).
+    let diagnostics = fallow_config::replace_source_discovery_diagnostics(
+        &config.root,
+        report_skipped_large_files(config, &skipped)
+            .into_iter()
+            .chain(report_skipped_minified_files(config, &skipped_minified))
+            .collect(),
+    );
 
     let files: Vec<DiscoveredFile> = kept
         .into_iter()
@@ -744,7 +789,11 @@ pub fn discover_files_and_config_candidates(
 
     note_largest_files(config, &files);
 
-    (files, config_candidates)
+    DiscoveredSources {
+        files,
+        config_candidates,
+        diagnostics,
+    }
 }
 
 #[cfg(test)]

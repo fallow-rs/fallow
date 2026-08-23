@@ -803,20 +803,20 @@ fn combined_diagnostics_root<'a>(input: &CombinedJsonPrintInput<'a>) -> &'a std:
 /// Union of what each analysis in the combined run recorded, deduplicated on
 /// kind plus path.
 ///
-/// A combined run walks the project once per analysis, each walk clears the
-/// previous walk's source-discovery entries from the shared diagnostics
-/// registry, and a per-analysis `production` mode gives those walks different
-/// file sets. Reading the registry once at output time therefore reports only
-/// what the last walk saw, which can be narrower than the standalone
-/// `dead-code` envelope of the same project and depends on which walk ran
-/// last. The dead-code and health sections instead carry the list their own
-/// analysis observed, and the registry read closes the fold: it covers a dupes
-/// section (which reuses another analysis's discovery whenever the run's
-/// production modes agree) and anything recorded after the last section
-/// captured its list. Reading it outside the `check` section is also what lets
-/// `--skip check`, `--only health`, and `--only dupes` report the diagnostics
-/// their analyses recorded. The programmatic combined route folds its typed
-/// sections the same way, so both answer identically (issue #2366).
+/// A combined run walks the project once per analysis, each walk replaces the
+/// previous walk's source-discovery entries in the shared diagnostics registry,
+/// and a per-analysis `production` mode gives those walks different file sets.
+/// Reading the registry once at output time therefore reports only what the
+/// last walk wrote, which can be narrower than the standalone `dead-code`
+/// envelope of the same project and, when two walks run concurrently, differs
+/// between runs of the same command. Every section instead carries the list its
+/// own analysis observed, captured from that walk's return value, so the union
+/// is the same on every run. The registry read closes the fold: it covers
+/// anything recorded after the last section captured its list. Reading it
+/// outside the `check` section is also what lets `--skip check`, `--only
+/// health`, and `--only dupes` report the diagnostics their analyses recorded.
+/// The programmatic combined route folds its typed sections the same way, so
+/// both answer identically (issue #2366).
 fn combined_workspace_diagnostics(
     input: &CombinedJsonPrintInput<'_>,
 ) -> Vec<fallow_config::WorkspaceDiagnostic> {
@@ -826,6 +826,9 @@ fn combined_workspace_diagnostics(
             .map(|result| result.workspace_diagnostics.clone()),
         input
             .health_result
+            .map(|result| result.workspace_diagnostics.clone()),
+        input
+            .dupes_result
             .map(|result| result.workspace_diagnostics.clone()),
         Some(crate::runtime_support::workspace_diagnostics_for(
             combined_diagnostics_root(input),

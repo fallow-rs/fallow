@@ -1516,8 +1516,10 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::plugins::registry::is_external_plugin_active",
         // The discovery walk has one implementation, in fallow-core, so its
         // config-candidate basenames stay derived from the plugin registry.
+        "fallow_core::discover::DiscoveredSources",
         "fallow_core::discover::HiddenDirScope",
         "fallow_core::discover::discover_files_and_config_candidates",
+        "fallow_core::discover::discover_files_config_candidates_and_diagnostics",
         // Entry-point discovery has one implementation, in fallow-core.
         "fallow_core::discover::discover_entry_points",
         "fallow_core::discover::discover_workspace_entry_points",
@@ -2042,6 +2044,49 @@ fn analysis_stage_diagnostics_are_recorded_only_from_the_dead_code_analyze_pass(
             "the dead-code analyze pass must reach the {recorder} detector"
         );
     }
+}
+
+/// Issue #2366: source-discovery diagnostics must reach an analysis by value
+/// from its own walk, never by reading the process registry back.
+///
+/// Combined mode runs the dead-code and duplication walks under `rayon::join`
+/// whenever a per-analysis `production` split stops them from sharing a file
+/// list. Each walk replaces the registry's source-discovery set for the root,
+/// so a registry read after the walk answers "whichever walk wrote last",
+/// which varies between runs of the same command. Pin both halves: one writer,
+/// and a session snapshot built from that writer's return value.
+#[test]
+fn source_discovery_diagnostics_reach_sessions_by_value_not_through_the_registry() {
+    let exempt = [
+        "crates/config/src/workspace/diagnostics.rs",
+        "crates/cli/src/architecture_boundaries.rs",
+    ];
+    let mut writers: Vec<String> = rust_sources_under(["crates"])
+        .into_iter()
+        .filter(|path| !exempt.contains(&path.as_str()))
+        .filter(|path| {
+            read_source_without_line_comments(path)
+                .expect("read crate source")
+                .contains("replace_source_discovery_diagnostics(")
+        })
+        .collect();
+    writers.sort();
+    assert_eq!(
+        writers,
+        ["crates/core/src/discover/walk.rs"],
+        "the source walk is the only writer of the registry's source-discovery set; a second          writer reintroduces the interleaving that loses one walk's skips"
+    );
+
+    let session =
+        read_source_without_line_comments("crates/engine/src/session.rs").expect("read session");
+    assert!(
+        session.contains("discovery.source_diagnostics()"),
+        "the session snapshot must carry its own walk's source-discovery diagnostics"
+    );
+    assert!(
+        session.contains("!diagnostic.kind.is_source_discovery()"),
+        "the session snapshot must drop the registry's source-discovery entries in favour of its          own walk's list"
+    );
 }
 
 fn read_source_without_line_comments(path: &str) -> std::io::Result<String> {

@@ -200,9 +200,12 @@ pub fn serialize_audit_programmatic_json(
 ///
 /// The sub-result is a `CheckOutput` body, so it carries the run's
 /// `workspace_diagnostics[]` the way the standalone `dead-code` envelope and
-/// the combined `check` section do; the CLI audit path reads the same list
-/// from the process registry, and this programmatic path takes it from the
-/// typed dead-code output so both answer identically (issue #2366).
+/// the combined `check` section do. Both routes fold the dead-code analysis's
+/// own captured list with a process-registry read: this one takes the list
+/// from the typed dead-code output, the CLI audit path takes it from
+/// `CheckResult::workspace_diagnostics`, so a per-analysis `production` split
+/// (which makes the run's walks disagree about which files exist) cannot make
+/// them answer differently (issue #2366).
 fn serialize_audit_dead_code(
     output: &DeadCodeProgrammaticOutput,
     base_snapshot: Option<&crate::AuditProgrammaticKeySnapshot>,

@@ -118,6 +118,22 @@ pub fn discover_files_and_config_candidates(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
+    let discovered =
+        discover_files_config_candidates_and_diagnostics(config, additional_hidden_dir_scopes);
+    (discovered.files, discovered.config_candidates)
+}
+
+/// Source files, config candidates, and the source-discovery diagnostics of
+/// one walk, re-exported so engine modules never name the core type directly.
+pub use fallow_core::discover::DiscoveredSources;
+
+/// The same walk, keeping the source-discovery diagnostics it produced so a
+/// session can carry its own snapshot instead of reading the process registry
+/// a concurrent walk may already have replaced (issue #2366).
+pub fn discover_files_config_candidates_and_diagnostics(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> DiscoveredSources {
     let scopes = additional_hidden_dir_scopes
         .iter()
         .map(|scope| {
@@ -127,7 +143,7 @@ pub fn discover_files_and_config_candidates(
             )
         })
         .collect::<Vec<_>>();
-    fallow_core::discover::discover_files_and_config_candidates(config, &scopes)
+    fallow_core::discover::discover_files_config_candidates_and_diagnostics(config, &scopes)
 }
 
 /// Discover configured and inferred entry points via the shared core implementation.

@@ -475,28 +475,39 @@ pub fn record_source_read_failures(
     diagnostics
 }
 
-/// Remove all source-discovery diagnostics (see
-/// [`WorkspaceDiagnosticKind::is_source_discovery`]) for `root` from the
-/// registry, keeping the workspace-discovery set intact.
+/// Replace every source-discovery diagnostic for `root` with `diagnostics` in
+/// ONE registry operation, and hand the same list back to the caller.
 ///
-/// Called at the START of each source walk (`discover_files`) so a stale
-/// `skipped-large-file` entry from a previous analysis pass (e.g. a watch-mode
+/// Called at the END of each source walk (`discover_files`) so a stale
+/// `skipped-large-file` entry from a previous analysis pass (a watch-mode
 /// rerun after the user raised `--max-file-size` or added the file to
-/// `ignorePatterns`) is dropped before the current walk re-appends only the
-/// files it actually skips. Pairs with the preserve in
-/// [`stash_workspace_diagnostics`]: clear keeps the set CURRENT across reruns,
-/// preserve keeps it ALIVE across combined-mode's per-analysis config re-loads
-/// (issue #1086).
-pub fn clear_source_discovery_diagnostics(root: &Path) {
+/// `ignorePatterns`) is dropped while the current walk's skips are written.
+/// Pairs with the preserve in [`stash_workspace_diagnostics`]: this call keeps
+/// the set CURRENT across reruns, the preserve keeps it ALIVE across
+/// combined-mode's per-analysis config re-loads (issue #1086).
+///
+/// The clear-then-append pair this replaces was two separate lock
+/// acquisitions, so a second source walk running concurrently on the same root
+/// (combined mode runs the dead-code and duplication walks under `rayon::join`
+/// whenever a per-analysis `production` split stops them from sharing a file
+/// list) could interleave its clear between this walk's clear and its appends,
+/// or between the appends and the walk's own read-back. Holding the lock across
+/// the whole replacement makes the registry state a clean last-writer-wins, and
+/// returning the list lets each analysis carry exactly what ITS walk skipped
+/// without reading the shared registry back at all (issue #2366).
+#[must_use]
+pub fn replace_source_discovery_diagnostics(
+    root: &Path,
+    diagnostics: Vec<WorkspaceDiagnostic>,
+) -> Vec<WorkspaceDiagnostic> {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let Some(registry) = WORKSPACE_DIAGNOSTICS.get() else {
-        return;
-    };
-    if let Ok(mut map) = registry.lock()
-        && let Some(existing) = map.get_mut(&canonical)
-    {
+    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
+    if let Ok(mut map) = registry.lock() {
+        let existing = map.entry(canonical).or_default();
         existing.retain(|d| !d.kind.is_source_discovery());
+        existing.extend(diagnostics.iter().cloned());
     }
+    diagnostics
 }
 
 /// Remove all analysis-stage diagnostics (see
@@ -508,7 +519,7 @@ pub fn clear_source_discovery_diagnostics(root: &Path) {
 /// entry from a previous pass (a watch-mode rerun or a long-lived engine
 /// session after the YAML was fixed or a text `bun.lock` was written) is
 /// dropped before the detectors re-record only what still applies. Mirrors
-/// [`clear_source_discovery_diagnostics`] and pairs with the preserve in
+/// [`replace_source_discovery_diagnostics`] and pairs with the preserve in
 /// [`stash_workspace_diagnostics`] (issue #2366).
 pub fn clear_analysis_stage_diagnostics(root: &Path) {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
@@ -829,7 +840,11 @@ mod tests {
             )],
         );
         // A later walk (the file is no longer skipped) clears the stale entry.
-        clear_source_discovery_diagnostics(root);
+        let replaced = replace_source_discovery_diagnostics(root, Vec::new());
+        assert!(
+            replaced.is_empty(),
+            "the walk's own list is what it wrote, not what it removed"
+        );
 
         let after = workspace_diagnostics_for(root);
         assert!(

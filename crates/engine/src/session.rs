@@ -198,12 +198,25 @@ impl AnalysisSession {
         // refreshes the registry on every run; pinning them in the session
         // snapshot would keep a stale entry alive after the cause is fixed
         // (issue #2366). `current_workspace_diagnostics` reads them live.
+        //
+        // Source-discovery entries come from THIS walk's return value, not from
+        // the registry: combined mode runs the dead-code and duplication walks
+        // concurrently whenever a per-analysis `production` split stops them
+        // from sharing a file list, and each walk replaces the registry's
+        // source-discovery set for the root, so a registry read here would
+        // report whichever walk happened to write last (issue #2366).
         let workspace_diagnostics = merge_workspace_diagnostics(
-            project_config.workspace_diagnostics,
-            fallow_config::workspace_diagnostics_for(&project_config.config.root)
-                .into_iter()
-                .filter(|diagnostic| !diagnostic.kind.is_analysis_stage())
-                .collect(),
+            merge_workspace_diagnostics(
+                project_config.workspace_diagnostics,
+                fallow_config::workspace_diagnostics_for(&project_config.config.root)
+                    .into_iter()
+                    .filter(|diagnostic| {
+                        !diagnostic.kind.is_analysis_stage()
+                            && !diagnostic.kind.is_source_discovery()
+                    })
+                    .collect(),
+            ),
+            discovery.source_diagnostics().to_vec(),
         );
         Self {
             config: project_config.config,
