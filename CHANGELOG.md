@@ -459,7 +459,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   json` already reported. Because the payload now decides identity, the
   recorded `pattern` drops the no-op `./` prefix a `package.json` `workspaces`
   entry may carry (`"./apps/**"` is reported as `apps/**`, in the JSON field
-  and in the warning text), and the recorded `path` drops the matching no-op
+  and in the warning text; a glob spelled exactly `"./"`, the project root
+  itself, keeps its spelling), and the recorded `path` drops the matching no-op
   `.` component, so one directory has one spelling everywhere instead of
   `./pkgs/aaa` on the analysis envelopes next to `pkgs/aaa` on the workspace
   listing, decided by which manifest happened to be read first. Workspace
