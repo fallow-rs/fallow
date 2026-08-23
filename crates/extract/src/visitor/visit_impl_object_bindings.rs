@@ -145,11 +145,12 @@ impl ModuleInfoExtractor {
         binding_name: &str,
         obj: &ObjectExpression<'_>,
     ) {
-        self.record_object_binding_targets_at_path(binding_name, obj);
+        self.record_object_binding_targets_at_path(binding_name, binding_name, obj);
     }
 
     fn record_object_binding_targets_at_path(
         &mut self,
+        root_name: &str,
         object_path: &str,
         obj: &ObjectExpression<'_>,
     ) {
@@ -171,13 +172,21 @@ impl ModuleInfoExtractor {
                 Expression::Identifier(ident)
                     if self.object_binding_candidates.len() < MAX_OBJECT_BINDING_CANDIDATES =>
                 {
+                    // The candidate gives this placement a precise path, which
+                    // `resolve_object_binding_candidates` turns back into
+                    // `<source>.<member>` accesses, so a namespace placed here
+                    // is resolved rather than handed over bare. What hands it
+                    // over is a bare reference to the root the object is bound
+                    // to, which `record_object_literal_namespace_pass` covers.
+                    // See issue #2377.
+                    self.record_object_literal_namespace_placement(root_name, ident);
                     self.object_binding_candidates.push(ObjectBindingCandidate {
                         binding_path,
                         source_name: ident.name.to_string(),
                     });
                 }
                 Expression::ObjectExpression(child) => {
-                    self.record_object_binding_targets_at_path(&binding_path, child);
+                    self.record_object_binding_targets_at_path(root_name, &binding_path, child);
                 }
                 _ => {}
             }

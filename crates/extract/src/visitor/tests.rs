@@ -319,9 +319,16 @@ fn into_module_info_transfers_require_calls() {
 #[test]
 fn into_module_info_transfers_whole_object_uses() {
     let info = parse(
-        "import { Status } from './types';\nObject.values(Status);\nconst y = { ...Status };",
+        "import { Status } from './types';\nimport { Role } from './role';\n\
+         Object.values(Status);\nconst y = { ...Role };\nconst z = { ...Status };",
     );
-    assert!(info.whole_object_uses.len() >= 2);
+    let mut uses = info.whole_object_uses.to_vec();
+    uses.sort();
+    assert_eq!(
+        uses,
+        vec!["Role".to_string(), "Status".to_string()],
+        "one entry per name; a name recorded twice is not repeated"
+    );
 }
 
 fn has_member_access(info: &crate::ModuleInfo, object: &str, member: &str) -> bool {
@@ -2103,6 +2110,149 @@ fn spread_marks_whole_use() {
 fn dynamic_computed_access_marks_whole_use() {
     let info = parse("import { E } from './e';\nconst k = 'x';\nE[k];");
     assert!(info.whole_object_uses.contains(&"E".to_string()));
+}
+
+/// Issue #2377: a namespace-import local handed over whole is a whole-object
+/// use in every position the visitor cannot resolve to one member.
+#[test]
+fn bare_namespace_reference_marks_whole_use() {
+    for (label, source) in [
+        ("call argument", "register(NS);"),
+        ("alias", "const alias = NS;"),
+        ("array literal", "const all = [NS];"),
+        ("object literal argument", "register({ icons: NS });"),
+        (
+            "object literal bound and handed on",
+            "const api = { icons: NS };\nregister(api);",
+        ),
+        ("return value", "export const get = () => NS;"),
+        ("assignment right-hand side", "let slot; slot = NS;"),
+        ("type query", "export type All = typeof NS;"),
+    ] {
+        let info = parse(&format!(
+            "import * as NS from './ns';\nNS.Star();\n{source}"
+        ));
+        assert!(
+            info.whole_object_uses.contains(&"NS".to_string()),
+            "{label} must record a whole-object use: {:?}",
+            info.whole_object_uses
+        );
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "NS" && access.member == "Star"),
+            "{label} must keep the dotted access: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+/// Issue #2377: a namespace-import local the visitor resolved to a member is
+/// not a whole-object use, so the graph keeps narrowing it.
+#[test]
+fn resolved_namespace_reference_keeps_narrowing() {
+    for (label, source) in [
+        ("static access", "NS.Star();"),
+        ("optional access", "NS?.Star;"),
+        ("string-computed access", "NS['Star'];"),
+        ("dotted type name", "export const s: NS.Star = 1;"),
+        ("re-export specifier", "export { NS };"),
+    ] {
+        let info = parse(&format!("import * as NS from './ns';\n{source}"));
+        assert!(
+            !info.whole_object_uses.contains(&"NS".to_string()),
+            "{label} must not record a whole-object use: {:?}",
+            info.whole_object_uses
+        );
+    }
+}
+
+/// Issue #2377: a JSX member tag is the JSX spelling of `NS.Card`, while a
+/// namespace passed as an attribute value is a whole-object pass. The closing
+/// tag must not undo the exclusion the opening tag set up.
+#[test]
+fn jsx_namespace_positions_split_member_tag_from_attribute_pass() {
+    let tag_only = crate::tests::parse_tsx(
+        "import * as NS from './ns';\nexport const A = () => <NS.Card>text</NS.Card>;",
+    );
+    assert!(
+        !tag_only.whole_object_uses.contains(&"NS".to_string()),
+        "a member tag must stay narrowed: {:?}",
+        tag_only.whole_object_uses
+    );
+
+    let attribute_pass = crate::tests::parse_tsx(
+        "import * as NS from './ns';\nimport { Callout } from './callout';\n\
+         export const A = () => <div><NS.Card /><Callout icons={NS} /></div>;",
+    );
+    assert!(
+        attribute_pass.whole_object_uses.contains(&"NS".to_string()),
+        "a namespace passed as an attribute value must record a whole-object use: {:?}",
+        attribute_pass.whole_object_uses
+    );
+}
+
+/// Issue #2377: the local is registered from the statement list, not from walk
+/// order, so a body that reads the namespace above its own import declaration
+/// still records the pass. One entry is recorded however many times the local
+/// is mentioned.
+#[test]
+fn bare_namespace_reference_is_hoisted_and_deduplicated() {
+    let info = parse(
+        "export const first = () => register(NS);\n\
+         export const second = () => register(NS);\n\
+         import * as NS from './ns';",
+    );
+    assert_eq!(
+        info.whole_object_uses
+            .iter()
+            .filter(|name| *name == "NS")
+            .count(),
+        1,
+        "one deduplicated entry expected: {:?}",
+        info.whole_object_uses
+    );
+}
+
+/// Issue #2377: a namespace placed in an object literal bound to a local is
+/// resolved by the object-binding path (`api.ns.member`), which issue #2372
+/// keeps off the whole-module closure on purpose, so the placement alone stays
+/// narrowed. A destructure names its members and stays narrowed too.
+#[test]
+fn resolved_namespace_placement_keeps_narrowing() {
+    for (label, source) in [
+        (
+            "object literal read through its path",
+            "const api = { icons: NS };\nexport const used = api.icons.Star;",
+        ),
+        ("destructure", "const { Star } = NS;\nStar();"),
+    ] {
+        let info = parse(&format!("import * as NS from './ns';\n{source}"));
+        assert!(
+            !info.whole_object_uses.contains(&"NS".to_string()),
+            "{label} must not record a whole-object use: {:?}",
+            info.whole_object_uses
+        );
+    }
+
+    let rest = parse("import * as NS from './ns';\nconst { Star, ...others } = NS;");
+    assert!(
+        rest.whole_object_uses.contains(&"NS".to_string()),
+        "a rest element keeps its own whole-object use: {:?}",
+        rest.whole_object_uses
+    );
+}
+
+/// Issue #2377: the rule is scoped to namespace-import locals, so a named
+/// import passed whole keeps the recording allow-list it had.
+#[test]
+fn bare_named_import_reference_is_not_a_whole_use() {
+    let info = parse("import { E } from './e';\nregister(E);");
+    assert!(
+        !info.whole_object_uses.contains(&"E".to_string()),
+        "a named import is out of scope: {:?}",
+        info.whole_object_uses
+    );
 }
 
 #[test]

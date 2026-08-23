@@ -338,6 +338,23 @@ pub(crate) struct ModuleInfoExtractor {
     handled_require_spans: FxHashSet<Span>,
     handled_import_spans: FxHashSet<Span>,
     namespace_binding_names: Vec<String>,
+    /// The `import * as NS from '...'` locals of this program, pre-registered
+    /// from the top-level statement list before the body walk: an import
+    /// declaration is legal after the code that reads it, so walk order cannot
+    /// answer whether a reference names a namespace object. See issue #2377.
+    namespace_import_locals: FxHashSet<String>,
+    /// Spans of references to those locals that a more precise pass already
+    /// resolved to a member, so `visit_identifier_reference` leaves them alone:
+    /// the object of a static or string-computed access, the root of a JSX
+    /// member tag, and the left side of a dotted type name, plus a re-export
+    /// specifier local the graph already treats as a whole-object observation.
+    /// See issue #2377.
+    structured_namespace_reference_spans: FxHashSet<Span>,
+    /// `(root local, namespace local)` for a namespace placed in an object
+    /// literal bound to that root (`const api = { ns }`). The placement itself
+    /// is precise, so a bare reference to the root is what hands the namespace
+    /// object on. See issue #2377.
+    object_literal_namespace_placements: Vec<(String, String)>,
     binding_target_names: FxHashMap<String, BindingTarget>,
     /// The class each binding name most recently named at this point in the walk,
     /// never poisoned to `Ambiguous`. `binding_target_names` is module-flat, so a

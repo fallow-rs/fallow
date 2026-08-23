@@ -174,7 +174,15 @@ pub use store::GraphCacheStore;
 /// credit their bodies. Warm 40 caches persist the import-less module and its
 /// missing edges, so the imported modules would stay reported as unused files
 /// on upgrade.
-pub const GRAPH_CACHE_VERSION: u32 = 41;
+///
+/// Bumped to 42 for issue #2377: a namespace import handed over whole (a call
+/// argument, a JSX attribute value, an alias, an array or object literal
+/// element, an initializer, an assignment right-hand side, a return value) no
+/// longer narrows to its dotted accesses, and those mark-all verdicts are
+/// baked into the persisted graph. Warm 41 caches carry the narrowed verdict,
+/// so the siblings the consumer can still reach would stay reported as unused
+/// on upgrade.
+pub const GRAPH_CACHE_VERSION: u32 = 42;
 
 /// Cached form of a resolved target.
 ///

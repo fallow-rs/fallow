@@ -971,7 +971,14 @@ use crate::MemberKind;
 /// Warm 276 caches hold the import-less module for every MDX file whose prose
 /// opens with the word "import" (or that carries any other rejected statement
 /// line), so its imported modules would stay reported as unused.
-pub(super) const CACHE_VERSION: u32 = 277;
+///
+/// Bumped to 278 for issue #2377: a reference to an `import * as NS` local the
+/// visitor cannot resolve to one member (a call argument, a JSX attribute
+/// value, an alias, an array or object literal element, an initializer, an
+/// assignment right-hand side, a return value) is recorded as a whole-object
+/// use. Warm 277 caches hold the narrower record, so the siblings such a
+/// consumer can still reach would stay reported as unused.
+pub(super) const CACHE_VERSION: u32 = 278;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

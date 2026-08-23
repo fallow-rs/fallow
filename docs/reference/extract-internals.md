@@ -78,14 +78,15 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   use, which keeps the graph on mark-all for entry-point and non-entry
   consumers alike. The script side the visitor parsed (Astro frontmatter, MDX
   `import` / `export` lines) is guarded too
-  (`record_unexplained_script_mentions`), because the visitor records a bare
-  identifier as a whole-object use only for an allow-list of positions: for
-  the bindings the graph narrows exports for (namespace imports and CSS
-  module default imports) a mention outside the import declaration is
-  explained only by a static dotted access whose `(root, member)` pair the
-  visitor recorded or by a JSX tag root, so `const N = NS`, `NS as T`,
-  `pick(NS)`, `Object.assign({}, NS)`, `[NS]`, `{ all: NS }`, and
-  `export const all = NS` record a whole-object use. Class and enum bindings
+  (`record_unexplained_script_mentions`), because the text scan cannot see
+  what the parser resolved: for the bindings the graph narrows exports for
+  (namespace imports and CSS module default imports) a mention outside the
+  import declaration is explained only by a static dotted access whose
+  `(root, member)` pair the visitor recorded or by a JSX tag root, so
+  `NS['Moon']` and `NS?.Moon`, which the visitor resolves exactly, record a
+  whole-object use there. On the CSS-module side the guard is also what
+  covers `const N = styles`, `pick(styles)`, `[styles]`, and
+  `{ all: styles }`. Class and enum bindings
   are not script-guarded (a type annotation or `new` expression names them
   bare in ordinary code), so their member crediting stays at visitor parity
   with `.tsx` on the script side while the markup guard covers them. Narrowing
@@ -95,6 +96,20 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   feed the security secret-source index, so MDX prose records a dotted chain
   only when its root is an import local of the file: prose never creates
   member accesses on foreign roots such as `process.env`.
+- A reference to an `import * as NS` local that the visitor cannot resolve to
+  one member is a whole-object use, so the graph credits every export of the
+  target instead of narrowing to the dotted accesses
+  (`record_bare_namespace_reference` in
+  `crates/extract/src/visitor/visit_impl.rs`). The resolved positions are the
+  exclusions: the object of a static or string-computed access, the root of a
+  JSX member tag, the left side of a dotted type name, a destructure
+  initializer, a re-export specifier local (which the graph credits through
+  its own rule), and a placement in an object literal bound to a local, whose
+  `api.NS.member` path the object-binding resolver follows. A bare reference
+  to that local hands the namespace on in turn. The locals are pre-registered
+  from the program's statement list, because an import declaration is legal
+  after the code that reads it. Namespace objects bound by `require` or a
+  dynamic import keep the older allow-list.
 - The MDX line scan hands the statement lines of the whole file to the parser
   as one program, and a rejected program is an empty program, so one
   misclassified line would drop every import of the file. A line opens a

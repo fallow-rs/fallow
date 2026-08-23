@@ -87,6 +87,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A namespace import handed over whole (a call argument, a JSX attribute
+  value, an alias, an initializer) now credits every export of its target**
+  (Closes [#2377](https://github.com/fallow-rs/fallow/issues/2377)). The
+  visitor recorded a whole-object use for an allow-list of positions only:
+  `Object.keys/values/entries/getOwnPropertyNames(NS)`, a spread, `for ... in`,
+  a computed non-string access, a rest destructure, and a few type positions.
+  Every other reference to an `import * as NS` local left no trace, so a
+  consumer that also wrote one dotted access narrowed to that member alone and
+  reported every sibling the receiver can still reach: `register(NS)`,
+  `<Callout icons={NS} />`, `const alias = NS`, `[NS]`, `{ icons: NS }` handed
+  to a callee, `export const all = NS`, `slot = NS`, `return NS`, and
+  `typeof NS`. A reference the parser resolves to one member is unchanged and
+  keeps narrowing: `NS.member`, `NS?.member`, `NS['member']`, a JSX member tag
+  `<NS.Card />`, a dotted type name `NS.Type`, a destructure, and a namespace
+  placed in an object literal bound to a local whose path is read
+  (`const api = { NS }` plus `api.NS.member`, the shape the namespace-object
+  alias phase follows precisely). A bare reference to that local
+  (`hand(api)`) now hands the namespace on as well. `export { NS }` is
+  unchanged: the graph already credits every export there. The rule is scoped
+  to `import * as` locals, so named imports, and namespace objects bound by
+  `require` or a dynamic import, keep the behavior they had. Since Astro and
+  MDX consumers got this guarantee from their whole-file completeness guard,
+  only `.ts` / `.tsx` / `.js` / `.jsx` consumers change. **Repositories using
+  any of these shapes will see fewer unused-export findings**, and an export
+  credited for the first time also becomes reachable, so member-level
+  detectors can report on it where the unused-export finding used to stand in
+  its place. The record is also deduplicated now: a name recorded opaquely
+  many times is one entry. Warm caches invalidate (`CACHE_VERSION` 277 to 278,
+  `GRAPH_CACHE_VERSION` 41 to 42).
+
 - **A `default` import or re-export specifier now credits the target's default
   export** (Closes
   [#2374](https://github.com/fallow-rs/fallow/issues/2374)). `default` is one

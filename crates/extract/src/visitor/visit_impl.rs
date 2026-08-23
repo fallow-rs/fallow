@@ -731,16 +731,171 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Pre-register every `import * as NS from '...'` local of the program.
+    ///
+    /// [`ModuleInfoExtractor::record_bare_namespace_reference`] needs the answer
+    /// at every reference, and an import declaration is legal after the code
+    /// that reads it (a function body hoisted above its own import), so the
+    /// walk-order `namespace_binding_names` cannot be asked. Namespace objects
+    /// bound by `require` or a dynamic import keep their walk-order registry:
+    /// they are not statements the language hoists. See issue #2377.
+    fn record_program_namespace_import_locals(&mut self, program: &Program<'_>) {
+        for statement in &program.body {
+            let Statement::ImportDeclaration(decl) = statement else {
+                continue;
+            };
+            let Some(specifiers) = &decl.specifiers else {
+                continue;
+            };
+            for specifier in specifiers {
+                if let ImportDeclarationSpecifier::ImportNamespaceSpecifier(namespace) = specifier {
+                    self.namespace_import_locals
+                        .insert(namespace.local.name.to_string());
+                }
+            }
+        }
+    }
+
+    /// Mark a reference the visitor resolved to a specific member, so
+    /// [`ModuleInfoExtractor::record_bare_namespace_reference`] does not turn it
+    /// into a whole-object use (issue #2377).
+    fn mark_structured_namespace_reference(&mut self, ident: &IdentifierReference<'_>) {
+        if self.carries_namespace_object(ident.name.as_str()) {
+            self.structured_namespace_reference_spans.insert(ident.span);
+        }
+    }
+
+    /// Whether a bare reference to `name` hands a namespace object on: the
+    /// namespace-import local itself, or a local whose object literal holds one
+    /// (`const api = { ns }`).
+    fn carries_namespace_object(&self, name: &str) -> bool {
+        self.namespace_import_locals.contains(name)
+            || self
+                .object_literal_namespace_placements
+                .iter()
+                .any(|(root, _)| root == name)
+    }
+
+    /// Record a namespace-import local placed in an object literal bound to
+    /// `root_name`, and exclude the placement itself from the bare-reference
+    /// rule (issue #2377).
+    pub(super) fn record_object_literal_namespace_placement(
+        &mut self,
+        root_name: &str,
+        value: &IdentifierReference<'_>,
+    ) {
+        if !self.namespace_import_locals.contains(value.name.as_str()) {
+            return;
+        }
+        self.structured_namespace_reference_spans.insert(value.span);
+        let placement = (root_name.to_string(), value.name.to_string());
+        if !self
+            .object_literal_namespace_placements
+            .contains(&placement)
+        {
+            self.object_literal_namespace_placements.push(placement);
+        }
+    }
+
+    /// Mark the root identifier of a JSX member-expression tag (`<NS.Card />`),
+    /// which is the JSX spelling of `NS.Card`, not a bare pass of `NS`.
+    fn mark_jsx_member_tag_root(&mut self, name: Option<&JSXElementName<'_>>) {
+        let Some(JSXElementName::MemberExpression(member)) = name else {
+            return;
+        };
+        let mut current = member;
+        loop {
+            match &current.object {
+                JSXMemberExpressionObject::MemberExpression(inner) => current = inner,
+                JSXMemberExpressionObject::IdentifierReference(root) => {
+                    self.mark_structured_namespace_reference(root);
+                    return;
+                }
+                JSXMemberExpressionObject::ThisExpression(_) => return,
+            }
+        }
+    }
+
+    /// A namespace-import local mentioned anywhere the visitor cannot resolve to
+    /// one member hands the whole namespace object over: a call argument, a JSX
+    /// attribute value, an alias (`const N = NS`), an array or object literal
+    /// element, an initializer, an assignment right-hand side, a return value,
+    /// or `typeof NS`. The callee (or the reader of the alias) can reach every
+    /// export, so narrowing to the dotted accesses alone reports the siblings it
+    /// still uses. Recording a whole-object use puts the binding back on the
+    /// graph's mark-all path, which over-credits instead (issue #2377).
+    ///
+    /// The precise positions record their own member access and are excluded
+    /// through `structured_namespace_reference_spans`. That includes the
+    /// string-computed access `NS['Moon']`, which the parser resolves exactly;
+    /// the Astro and MDX text guards cannot and leave it on mark-all.
+    ///
+    /// The local of the binding's own `import * as NS` is a binding identifier,
+    /// never a reference, so the import declaration needs no exclusion.
+    fn record_bare_namespace_reference(&mut self, ident: &IdentifierReference<'_>) {
+        // Every identifier reference of every file reaches here; a file without
+        // a namespace import has nothing to answer.
+        if self.namespace_import_locals.is_empty()
+            && self.object_literal_namespace_placements.is_empty()
+        {
+            return;
+        }
+        if self
+            .structured_namespace_reference_spans
+            .contains(&ident.span)
+        {
+            return;
+        }
+        let name = ident.name.as_str();
+        if self.namespace_import_locals.contains(name) {
+            self.record_whole_object_identifier_use(name);
+            return;
+        }
+        self.record_object_literal_namespace_pass(name);
+    }
+
+    /// A bare reference to a local whose object literal holds a namespace
+    /// (`const api = { ns }; hand(api)`) hands that namespace on with the
+    /// object. Placing it there is precise on its own: the object-binding
+    /// resolver follows `api.ns.<member>`, and issue #2372 keeps such a binding
+    /// off the whole-module closure for exactly that reason. See issue #2377.
+    fn record_object_literal_namespace_pass(&mut self, root_name: &str) {
+        if self.object_literal_namespace_placements.is_empty() {
+            return;
+        }
+        let passed: Vec<String> = self
+            .object_literal_namespace_placements
+            .iter()
+            .filter(|(root, _)| root == root_name)
+            .map(|(_, namespace)| namespace.clone())
+            .collect();
+        for namespace in passed {
+            self.record_whole_object_identifier_use(&namespace);
+        }
+    }
+
     fn record_whole_object_identifier_use(&mut self, name: &str) {
         if name == "loaderData" || self.route_loader_data_bindings.contains(name) {
-            self.whole_object_uses
-                .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+            self.push_whole_object_use(ROUTE_LOADER_DATA_OBJECT.to_string());
         }
         // A `this.<field>` reflective use (`Object.keys(this.opts.c)`) is keyed
         // per class so it resolves against the same class's binding, then
         // stripped back to `this.` before emission (issue #1821).
         let qualified = self.qualify_this_scope(name);
-        self.whole_object_uses.push(qualified);
+        self.push_whole_object_use(qualified);
+    }
+
+    /// Record one name in the whole-object set, skipping a repeat.
+    ///
+    /// Every consumer asks membership, never a count, and the record is
+    /// persisted, so a name mentioned opaquely many times (a namespace handed
+    /// to several callees) stays one entry. `extend_whole_object_uses` applies
+    /// the same rule to the Astro and MDX template passes.
+    fn push_whole_object_use(&mut self, name: String) {
+        if self.whole_object_uses.contains(&name) {
+            return;
+        }
+        self.whole_object_uses.push(name);
     }
 }
 
@@ -1850,6 +2005,13 @@ impl<'a> ModuleInfoExtractor {
                 .iter()
                 .any(|n| n == ident.name.as_str())
         {
+            // A destructure names its members: `handle_namespace_destructuring`
+            // records them (or the whole object, for a rest element), so the
+            // initializer is not a bare pass (issue #2377). A plain
+            // `const alias = NS` binds the object itself and is one.
+            if matches!(declarator.id, BindingPattern::ObjectPattern(_)) {
+                self.mark_structured_namespace_reference(ident);
+            }
             self.handle_namespace_destructuring(declarator, &ident.name);
             return;
         }
@@ -2151,6 +2313,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.directives
                 .push(directive.directive.as_str().to_string());
         }
+        self.record_program_namespace_import_locals(program);
         self.record_program_function_type_aliases(program);
         self.record_program_prologue(program);
         self.record_program_sanitizer_functions(program);
@@ -2413,6 +2576,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
+        // `export { NS }` hands the namespace object to consumers the graph
+        // cannot enumerate, and `narrow_namespace_references` already puts that
+        // binding on mark-all through its own re-export test (issue #2373), so
+        // the specifier local is not a bare pass to record again (issue #2377).
+        for specifier in &decl.specifiers {
+            if let ModuleExportName::IdentifierReference(local) = &specifier.local {
+                self.mark_structured_namespace_reference(local);
+            }
+        }
+
         let is_namespace = matches!(&decl.declaration, Some(Declaration::TSModuleDeclaration(_)));
 
         // Exports inside a namespace declared without the `export` keyword are
@@ -3056,6 +3229,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 member: expr.property.name.to_string(),
             });
         }
+        if let Expression::Identifier(object) = &expr.object {
+            self.mark_structured_namespace_reference(object);
+        }
         walk::walk_static_member_expression(self, expr);
     }
 
@@ -3087,6 +3263,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     object: obj.name.to_string(),
                     member: lit.value.to_string(),
                 });
+                self.mark_structured_namespace_reference(obj);
             } else {
                 self.record_whole_object_identifier_use(obj.name.as_str());
             }
@@ -3100,6 +3277,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 object: obj.name.to_string(),
                 member: it.right.name.to_string(),
             });
+            self.mark_structured_namespace_reference(obj);
         }
         walk::walk_ts_qualified_name(self, it);
     }
@@ -3108,14 +3286,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let TSType::TSTypeReference(type_ref) = &it.constraint
             && let TSTypeName::IdentifierReference(ident) = &type_ref.type_name
         {
-            self.whole_object_uses.push(ident.name.to_string());
+            self.push_whole_object_use(ident.name.to_string());
         }
         if let TSType::TSTypeOperatorType(op) = &it.constraint
             && op.operator == TSTypeOperatorOperator::Keyof
             && let TSType::TSTypeQuery(query) = &op.type_annotation
             && let TSTypeQueryExprName::IdentifierReference(ident) = &query.expr_name
         {
-            self.whole_object_uses.push(ident.name.to_string());
+            self.push_whole_object_use(ident.name.to_string());
         }
         walk::walk_ts_mapped_type(self, it);
     }
@@ -3128,7 +3306,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             && let TSType::TSTypeReference(key_ref) = first_arg
             && let TSTypeName::IdentifierReference(key_ident) = &key_ref.type_name
         {
-            self.whole_object_uses.push(key_ident.name.to_string());
+            self.push_whole_object_use(key_ident.name.to_string());
         }
         walk::walk_ts_type_reference(self, it);
     }
@@ -3300,7 +3478,22 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let JSXElementName::MemberExpression(member) = &element.opening_element.name {
             self.record_jsx_member_tag_accesses(member);
         }
+        // Both tags name the same member, so neither root is a bare pass of the
+        // namespace object (issue #2377). The closing tag is excluded on its own
+        // because `record_jsx_member_tag_accesses` deliberately skips it.
+        self.mark_jsx_member_tag_root(Some(&element.opening_element.name));
+        self.mark_jsx_member_tag_root(
+            element
+                .closing_element
+                .as_ref()
+                .map(|closing| &closing.name),
+        );
         walk::walk_jsx_element(self, element);
+    }
+
+    fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
+        self.record_bare_namespace_reference(ident);
+        walk::walk_identifier_reference(self, ident);
     }
 }
 

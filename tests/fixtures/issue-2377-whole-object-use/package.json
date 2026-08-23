@@ -1,0 +1,4 @@
+{
+  "name": "issue-2377-whole-object-use-fixture",
+  "main": "src/index.ts"
+}
