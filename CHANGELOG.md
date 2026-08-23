@@ -446,12 +446,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `schema_version` moves. The carrier work does not touch the standalone
   `dead-code`, `check`, `health`, and `dupes` envelopes or any non-JSON
   format; the three envelopes named above change whenever the run records a
-  diagnostic. The deduplication described next does reach those standalone
-  envelopes, so they stay byte-identical to before only on a repository that
-  declares each workspace glob once and reaches each workspace member through
-  one source. Two further shapes move for a shared reason: the fold is
-  deduplicated on the whole typed `kind` rather than its id, so bare `fallow
-  list --format json` and the envelopes built from an engine session's
+  diagnostic. Two of the changes described next do reach those four standalone
+  envelopes, and either one alone is enough to move them: the recorded
+  `pattern`, `path`, and `message` change on a repository whose manifests spell
+  any workspace glob with a leading `./`, and the entry count drops on a
+  repository that declares one glob, or reaches one workspace member, through
+  two sources. A repository with neither shape reports the same bytes on those
+  four envelopes as before. Two further shapes move for a shared reason: the
+  fold is deduplicated on the whole typed `kind` rather than its id, so bare
+  `fallow list --format json` and the envelopes built from an engine session's
   snapshot (the MCP `project_info`, `find_dupes`, and `check_health` tools,
   and the programmatic dead-code and combined routes) now report a
   package-less directory matched by two workspace globs once per `pattern`
@@ -474,12 +477,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `health`, `list --workspaces`, and `workspaces --format json`, through the
   MCP `project_info` tool, and under `dead_code` in `fallow audit` and `fallow
   review --format json`; it now reports each once, so such a repository sees a
-  finding-count decrease on those surfaces. The aggregated stderr warning
-  reads the same list, so its summary now names the directory count the
-  repository actually has and each example directory once instead of counting
-  the duplicates. The repair covers the case where both manifests spell the
-  glob identically too, which produced byte-identical duplicates before this
-  change as well. A second shape folds with it, on the same surfaces: a
+  finding-count decrease on those surfaces. The human surfaces render the same
+  list, so three of them move with it: the aggregated stderr warning names the
+  directory count the repository actually has and each example directory once
+  instead of counting the duplicates, the `N workspace discovery diagnostics`
+  summary line every human-format command prints names the deduplicated
+  count, and so does the per-entry block `fallow workspaces` and `fallow list
+  --workspaces` print. SARIF, markdown, compact, badge, CodeClimate, and the
+  cache format carry no workspace diagnostic and are unchanged. The repair
+  covers the case where both manifests spell the glob identically too, which
+  produced byte-identical duplicates before this change as well. A second
+  shape folds with it, on the same surfaces: a
   malformed workspace member reached through BOTH an npm glob and a root
   `tsconfig.json` `references[]` entry reported one `malformed-package-json`
   diagnostic per source and now reports one in total. Two overlapping globs
@@ -488,8 +496,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pattern`, because the payload is part of the key. No kind is new on those
   envelopes and no field changes type, so no `schema_version` moves.
 
-- **`fallow workspaces --format json` and `fallow list --workspaces --format
-  json` now emit a project-relative `workspace_diagnostics[].path`.** Every
+- **The `list-workspaces` envelope now emits a project-relative
+  `workspace_diagnostics[].path`** on `fallow workspaces --format json`,
+  `fallow list --workspaces --format json`, and bare `fallow list --format
+  json`. Every
   other envelope that carries the array reports the path relative to the
   project root, and so does the `workspaces[].path` field right next to it in
   the same envelope, but the list envelope emitted the absolute path because

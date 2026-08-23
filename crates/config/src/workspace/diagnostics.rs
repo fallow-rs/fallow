@@ -501,6 +501,16 @@ pub fn record_source_read_failures(
 /// the whole replacement makes the registry state a clean last-writer-wins, and
 /// returning the list lets each analysis carry exactly what ITS walk skipped
 /// without reading the shared registry back at all (issue #2366).
+///
+/// The retain also drops the parse stage's `source-read-failure` entries,
+/// because [`WorkspaceDiagnosticKind::is_source_discovery`] covers that kind
+/// too, so a concurrent walk on the same root can clear a read failure another
+/// analysis's parse recorded. That window closes on its own:
+/// [`record_source_read_failures`] replaces the read-failure set from each
+/// analysis's own parse, and a fold's closing registry leg reads after both
+/// walks have finished. Narrowing this retain to
+/// [`WorkspaceDiagnosticKind::is_source_walk_recorded`] would leave the
+/// read-failure set to its own recorder entirely.
 #[must_use]
 pub fn replace_source_discovery_diagnostics(
     root: &Path,
