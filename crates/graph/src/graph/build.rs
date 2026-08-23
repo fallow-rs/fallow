@@ -462,7 +462,12 @@ impl ModuleGraph {
                 let export_index = export_indices
                     .entry(target_idx)
                     .and_modify(|index| index.sync(&module.exports))
-                    .or_insert_with(|| ExportNameIndex::build(&module.exports));
+                    .or_insert_with(|| {
+                        ExportNameIndex::build(
+                            &module.exports,
+                            NamedDefaultSpelling::for_target(&module.path),
+                        )
+                    });
                 attach_symbol_reference(
                     module,
                     source_id,
@@ -510,6 +515,9 @@ pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
 /// the spelling left every mixed pairing uncredited, so the target's default
 /// export reported as unused.
 ///
+/// That collapse holds only where a named `default` really is the module's
+/// default export, so `NamedDefaultSpelling` turns it off per target module.
+///
 /// Built once per target module in `populate_references` and reused across
 /// all of that module's incoming edge symbols, so wide barrels stop paying a
 /// full export scan per imported symbol (same shape as the star-propagation
@@ -520,14 +528,54 @@ pub(super) struct ExportNameIndex {
     named: FxHashMap<String, Vec<usize>>,
     default: Vec<usize>,
     indexed_len: usize,
+    named_default: NamedDefaultSpelling,
+}
+
+/// Whether a target module's `Named("default")` spells its default export.
+///
+/// It does for a JavaScript or TypeScript module: `export { x as default }`
+/// and `exports.default = x` both declare the binding `import x from './m'`
+/// reads, and the extractor keeps both under the written name.
+///
+/// It does not for a CSS Module, whose every export is a class name
+/// (`crates/extract/src/css.rs` emits one `ExportName::Named(class)` per rule
+/// and never an `ExportName::Default`). A class happens to be spelled
+/// `.default` no more meaningfully than it is spelled `.primary`, and a plain
+/// `import styles from './x.module.css'` binds the whole class map rather than
+/// any one class, so folding there credited a `.default` class unconditionally
+/// and silently dropped a real unused-class finding. Crediting for that import
+/// belongs to `narrow_css_module_references`, which reads the member accesses
+/// the consumer actually writes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum NamedDefaultSpelling {
+    /// `Named("default")` and `Default` share the default slot.
+    IsDefaultExport,
+    /// `Named("default")` stays an ordinary name in the string map.
+    IsOrdinaryName,
+}
+
+impl NamedDefaultSpelling {
+    /// Pick the rule for a target module from its path.
+    pub(super) fn for_target(path: &std::path::Path) -> Self {
+        if is_css_module_path(path) {
+            Self::IsOrdinaryName
+        } else {
+            Self::IsDefaultExport
+        }
+    }
+
+    const fn folds(self) -> bool {
+        matches!(self, Self::IsDefaultExport)
+    }
 }
 
 impl ExportNameIndex {
-    pub(super) fn build(exports: &[ExportSymbol]) -> Self {
+    pub(super) fn build(exports: &[ExportSymbol], named_default: NamedDefaultSpelling) -> Self {
         let mut index = Self {
             named: FxHashMap::default(),
             default: Vec::new(),
             indexed_len: 0,
+            named_default,
         };
         index.sync(exports);
         index
@@ -537,14 +585,19 @@ impl ExportNameIndex {
     /// synthetic star re-export stubs mid-pass; exports are append-only, so
     /// picking up the tail keeps every per-name list complete and ascending.
     ///
-    /// `export { x as default }` lands in the default slot rather than under
-    /// the string key, so the slot holds every export that declares the
-    /// default in ascending order and the named map never carries a
-    /// `"default"` key.
+    /// Under `NamedDefaultSpelling::IsDefaultExport`, `export { x as default }`
+    /// and `exports.default = x` land in the default slot rather than under the
+    /// string key, so the slot holds every export that declares the default in
+    /// ascending order and the named map never carries a `"default"` key.
+    /// Under `IsOrdinaryName` the name keeps its string key and the slot stays
+    /// empty, which is what a CSS Module target needs.
     pub(super) fn sync(&mut self, exports: &[ExportSymbol]) {
+        let folds = self.named_default.folds();
         for (idx, export) in exports.iter().enumerate().skip(self.indexed_len) {
             match &export.name {
-                ExportName::Named(name) if name == DEFAULT_EXPORT_NAME => self.default.push(idx),
+                ExportName::Named(name) if folds && name == DEFAULT_EXPORT_NAME => {
+                    self.default.push(idx);
+                }
                 ExportName::Named(name) => self.named.entry(name.clone()).or_default().push(idx),
                 ExportName::Default => self.default.push(idx),
             }
@@ -556,10 +609,15 @@ impl ExportNameIndex {
     ///
     /// A named import of `default` is a default import (`import { default as
     /// x } from './m'` binds the same export as `import x from './m'`), so it
-    /// reads the default slot.
+    /// reads the default slot, unless the target spells `default` as an
+    /// ordinary name.
     pub(super) fn matches(&self, import: &ImportedName) -> &[usize] {
         match import {
-            ImportedName::Named(name) if name == DEFAULT_EXPORT_NAME => &self.default,
+            ImportedName::Named(name)
+                if self.named_default.folds() && name == DEFAULT_EXPORT_NAME =>
+            {
+                &self.default
+            }
             ImportedName::Named(name) => self.named.get(name).map_or(&[], Vec::as_slice),
             ImportedName::Default => &self.default,
             ImportedName::Namespace | ImportedName::SideEffect => &[],
@@ -596,7 +654,7 @@ mod tests {
             make_export(ExportName::Named("foo".to_string())),
             make_export(ExportName::Named("bar".to_string())),
         ];
-        let index = ExportNameIndex::build(&exports);
+        let index = ExportNameIndex::build(&exports, NamedDefaultSpelling::IsDefaultExport);
 
         assert_eq!(
             index.matches(&ImportedName::Named("foo".to_string())),
@@ -622,7 +680,7 @@ mod tests {
             make_export(ExportName::Named("default".to_string())),
             make_export(ExportName::Named("bar".to_string())),
         ];
-        let index = ExportNameIndex::build(&exports);
+        let index = ExportNameIndex::build(&exports, NamedDefaultSpelling::IsDefaultExport);
 
         assert_eq!(index.matches(&ImportedName::Default), &[1, 2]);
         assert_eq!(
@@ -639,7 +697,7 @@ mod tests {
     #[test]
     fn export_name_index_matches_default_declared_only_as_a_named_export() {
         let exports = vec![make_export(ExportName::Named("default".to_string()))];
-        let index = ExportNameIndex::build(&exports);
+        let index = ExportNameIndex::build(&exports, NamedDefaultSpelling::IsDefaultExport);
 
         assert_eq!(index.matches(&ImportedName::Default), &[0]);
         assert_eq!(
@@ -648,13 +706,59 @@ mod tests {
         );
     }
 
+    /// Issue #2374 review: a CSS Module exports class names, so a class
+    /// spelled `default` must stay an ordinary name. Folding it would let a
+    /// plain `import styles from './x.module.css'` credit that class without
+    /// the consumer ever writing `styles.default`, silently dropping a real
+    /// unused-class finding.
+    #[test]
+    fn export_name_index_keeps_a_named_default_ordinary_for_a_css_module() {
+        let exports = vec![
+            make_export(ExportName::Named("default".to_string())),
+            make_export(ExportName::Named("primary".to_string())),
+        ];
+        let index = ExportNameIndex::build(&exports, NamedDefaultSpelling::IsOrdinaryName);
+
+        assert!(
+            index.matches(&ImportedName::Default).is_empty(),
+            "a plain default import of a class map names no single class"
+        );
+        assert_eq!(
+            index.matches(&ImportedName::Named("default".to_string())),
+            &[0],
+            "the class keeps its own string key"
+        );
+        assert_eq!(
+            index.matches(&ImportedName::Named("primary".to_string())),
+            &[1]
+        );
+    }
+
+    #[test]
+    fn named_default_spelling_follows_the_target_path() {
+        for css in ["Button.module.css", "theme.module.scss"] {
+            assert_eq!(
+                NamedDefaultSpelling::for_target(std::path::Path::new(css)),
+                NamedDefaultSpelling::IsOrdinaryName,
+                "{css}"
+            );
+        }
+        for code in ["impl.ts", "impl.js", "Button.css", "styles.module.ts"] {
+            assert_eq!(
+                NamedDefaultSpelling::for_target(std::path::Path::new(code)),
+                NamedDefaultSpelling::IsDefaultExport,
+                "{code}"
+            );
+        }
+    }
+
     #[test]
     fn export_name_index_namespace_and_side_effect_match_nothing() {
         let exports = vec![
             make_export(ExportName::Named("foo".to_string())),
             make_export(ExportName::Default),
         ];
-        let index = ExportNameIndex::build(&exports);
+        let index = ExportNameIndex::build(&exports, NamedDefaultSpelling::IsDefaultExport);
 
         assert!(index.matches(&ImportedName::Namespace).is_empty());
         assert!(index.matches(&ImportedName::SideEffect).is_empty());
@@ -663,7 +767,7 @@ mod tests {
     #[test]
     fn export_name_index_sync_picks_up_appended_exports() {
         let mut exports = vec![make_export(ExportName::Named("foo".to_string()))];
-        let mut index = ExportNameIndex::build(&exports);
+        let mut index = ExportNameIndex::build(&exports, NamedDefaultSpelling::IsDefaultExport);
 
         exports.push(make_export(ExportName::Named("foo".to_string())));
         exports.push(make_export(ExportName::Default));

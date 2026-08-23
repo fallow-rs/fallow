@@ -6,9 +6,11 @@
 //! one named type-space import per specifier. Every pairing must credit the
 //! target's default export.
 //!
-//! The one shape that must stay uncredited is a plain `export * from './impl'`:
-//! an ES star re-export never forwards `default`, so the target's default
-//! export keeps reporting.
+//! Two shapes must stay uncredited. A plain `export * from './impl'`: an ES
+//! star re-export never forwards `default`, so the target's default export
+//! keeps reporting. And a CSS Module class spelled `.default`: a stylesheet
+//! exports class names rather than a module default, so only the member
+//! accesses the consumer writes credit its classes.
 
 use super::common::{create_config, fixture_path};
 
@@ -144,6 +146,62 @@ fn plain_star_re_export_still_does_not_forward_default() {
             .iter()
             .any(|(path, name)| path.ends_with("src/star-impl.ts") && name == "starNamed"),
         "the star re-export forwards named exports: {pairs:?}"
+    );
+}
+
+/// Deliberate negative control: a CSS Module exports class names, so a class
+/// spelled `.default` is an ordinary class. A plain
+/// `import classes from './classes.module.css'` binds the whole class map and
+/// names no single class, so only the members the consumer writes are
+/// credited and `.default` must keep reporting.
+#[test]
+fn a_css_module_class_named_default_is_not_a_default_export() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let pairs = unused_export_pairs(&results);
+
+    for name in ["default", "unusedClass"] {
+        assert!(
+            pairs
+                .iter()
+                .any(|(path, export)| path.ends_with("src/classes.module.css") && export == name),
+            "`{name}` is accessed on no consumer and must keep reporting: {pairs:?}"
+        );
+    }
+    // The class the consumer does write stays credited, so the control proves
+    // the stylesheet edge is live rather than absent.
+    assert!(
+        !pairs
+            .iter()
+            .any(|(path, name)| path.ends_with("src/classes.module.css") && name == "usedClass"),
+        "a class the consumer accesses keeps its credit: {pairs:?}"
+    );
+}
+
+/// A CommonJS `exports.default = x` declares the same binding
+/// `import x from './m'` reads, and the extractor records it as
+/// `Named("default")` exactly like `export { x as default }`. Crediting it is
+/// deliberate: the graph cannot tell the two apart, and leaving it uncredited
+/// reported the default of every transpiled CommonJS module as unused.
+#[test]
+fn a_commonjs_default_property_export_answers_a_plain_default_import() {
+    let results = fallow_core::analyze(&create_config(fixture_path(FIXTURE)))
+        .expect("analysis should succeed");
+    let unused_defaults = unused_defaults(&results);
+    let pairs = unused_export_pairs(&results);
+
+    assert!(
+        !unused_defaults
+            .iter()
+            .any(|p| p.ends_with("src/cjs-default.cjs")),
+        "`exports.default` is the binding a plain default import reads; unused defaults: \
+         {unused_defaults:?}"
+    );
+    assert!(
+        pairs
+            .iter()
+            .any(|(path, name)| path.ends_with("src/cjs-default.cjs") && name == "cjsSibling"),
+        "a sibling property export no import names must keep reporting: {pairs:?}"
     );
 }
 

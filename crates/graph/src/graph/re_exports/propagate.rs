@@ -163,6 +163,12 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
 /// currently being processed (each name is visited exactly once), so they never
 /// need to appear in a later name's lookup. The result is therefore byte-identical
 /// to the exact-`ExportName::Named`-match, ascending-index scan it replaces.
+///
+/// Unlike `ExportNameIndex` (issue #2374), this map keeps a `"default"` key
+/// rather than folding it into a default slot. Star propagation never forwards
+/// `default`, and the `name == "default"` early returns in
+/// `collect_star_refs_by_name` and `apply_star_refs_to_source` mean the entry
+/// is never read, so the two indexes cannot disagree in practice.
 fn build_named_export_index(source: &ModuleNode) -> FxHashMap<String, Vec<usize>> {
     let mut index: FxHashMap<String, Vec<usize>> =
         FxHashMap::with_capacity_and_hasher(source.exports.len(), FxBuildHasher);

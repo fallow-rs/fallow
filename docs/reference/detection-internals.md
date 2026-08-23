@@ -82,11 +82,18 @@ error by suppressing a downstream detector.
   an import names it as `import x from './impl'`, as
   `import { default as x } from './impl'`, or as the ambient
   `declare module '<specifier>' { export { default } from './impl' }` form,
-  which records one named type-space import per specifier. Every pairing
-  credits the target's default export, and a `export { default } from` chain
-  carries that credit hop by hop. A plain `export *` still never forwards
-  `default`, so the shape that reaches a default through a star is the
-  namespace object, not the star surface.
+  which records one named type-space import per specifier. A CommonJS
+  `exports.default = x` declares the same binding and is recorded under the
+  same written name. Every pairing credits the target's default export, and a
+  `export { default } from` chain carries that credit hop by hop. A plain
+  `export *` still never forwards `default`, so the shape that reaches a
+  default through a star is the namespace object, not the star surface.
+- That name collapse is scoped to modules whose `default` really is a default
+  export. A CSS Module exports one `ExportName::Named` per class and never an
+  `ExportName::Default`, so a class spelled `.default` stays an ordinary name:
+  a plain `import styles from './x.module.css'` binds the whole class map and
+  names no single class, and `narrow_css_module_references` remains the only
+  thing that credits classes, from the member accesses the consumer writes.
 - An ambient-module star re-export (`export *` or `export * as ns` inside a
   `declare module '...'` body, recorded as a type-only namespace import
   without a local binding) credits the full ES star surface of its target:

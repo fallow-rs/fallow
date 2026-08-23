@@ -1,0 +1,11 @@
+.default {
+  color: red;
+}
+
+.usedClass {
+  color: green;
+}
+
+.unusedClass {
+  color: blue;
+}
