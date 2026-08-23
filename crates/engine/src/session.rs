@@ -10,7 +10,7 @@ use fallow_types::extract::ModuleInfo;
 #[cfg(test)]
 use fallow_types::results::AnalysisResults;
 use fallow_types::source_fingerprint::SourceFingerprint;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use fallow_types::workspace::{WorkspaceDiagnostic, merge_workspace_diagnostics};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -194,9 +194,16 @@ impl AnalysisSession {
         } else {
             discovery.workspaces().to_vec()
         };
+        // Analysis-stage diagnostics are owned by the analyze pass, which
+        // refreshes the registry on every run; pinning them in the session
+        // snapshot would keep a stale entry alive after the cause is fixed
+        // (issue #2366). `current_workspace_diagnostics` reads them live.
         let workspace_diagnostics = merge_workspace_diagnostics(
             project_config.workspace_diagnostics,
-            fallow_config::workspace_diagnostics_for(&project_config.config.root),
+            fallow_config::workspace_diagnostics_for(&project_config.config.root)
+                .into_iter()
+                .filter(|diagnostic| !diagnostic.kind.is_analysis_stage())
+                .collect(),
         );
         Self {
             config: project_config.config,
@@ -747,21 +754,6 @@ impl AnalysisSession {
         }
         None
     }
-}
-
-fn merge_workspace_diagnostics(
-    primary: Vec<WorkspaceDiagnostic>,
-    secondary: Vec<WorkspaceDiagnostic>,
-) -> Vec<WorkspaceDiagnostic> {
-    let mut merged = Vec::with_capacity(primary.len() + secondary.len());
-    let mut seen: FxHashSet<(String, PathBuf)> = FxHashSet::default();
-    for diagnostic in primary.into_iter().chain(secondary) {
-        let key = (diagnostic.kind.id().to_owned(), diagnostic.path.clone());
-        if seen.insert(key) {
-            merged.push(diagnostic);
-        }
-    }
-    merged
 }
 
 struct ParsedModules {
@@ -1442,6 +1434,134 @@ wrapper();
                     diagnostic.kind.id() == "source-read-failure" && diagnostic.path == removed_path
                 }),
             "session output carries parse-time source diagnostics"
+        );
+    }
+
+    const MALFORMED_PNPM_WORKSPACE_YAML: &str =
+        "catalog:\n  react: ^18.2.0\n{this is\nnot: valid: yaml: at: all\n";
+    const VALID_PNPM_WORKSPACE_YAML: &str = "catalog:\n  react: ^18.2.0\n";
+
+    fn has_diagnostic_kind(diagnostics: &[WorkspaceDiagnostic], id: &str) -> bool {
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind.id() == id)
+    }
+
+    fn write_single_source_project(root: &Path, manifest: &str) {
+        std::fs::create_dir(root.join("src")).expect("create source directory");
+        std::fs::write(root.join("package.json"), manifest).expect("write package manifest");
+        std::fs::write(root.join("src/index.ts"), "export const value = 1;\n")
+            .expect("write source");
+    }
+
+    /// Issue #2366: engine sessions (the MCP and LSP path) never re-stash the
+    /// registry, so a session created after an earlier analysis in the same
+    /// process must not keep that analysis's analysis-stage diagnostic once
+    /// the cause is fixed: the analyze pass refreshes the entry and the
+    /// session snapshot must not pin it.
+    #[test]
+    fn later_session_drops_stale_analysis_stage_diagnostic_after_cause_is_fixed() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        write_single_source_project(
+            root,
+            r#"{"name":"issue-2366-engine-session","private":true}"#,
+        );
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            MALFORMED_PNPM_WORKSPACE_YAML,
+        )
+        .expect("write malformed workspace yaml");
+
+        let broken = AnalysisSession::load(root, None).expect("session loads");
+        broken
+            .analyze_dead_code()
+            .expect("analysis on the malformed yaml succeeds");
+        assert!(
+            has_diagnostic_kind(
+                &broken.current_workspace_diagnostics(),
+                "malformed-pnpm-workspace-yaml"
+            ),
+            "the first session surfaces the malformed yaml: {:?}",
+            broken.current_workspace_diagnostics()
+        );
+
+        std::fs::write(root.join("pnpm-workspace.yaml"), VALID_PNPM_WORKSPACE_YAML)
+            .expect("fix workspace yaml");
+
+        let fixed = AnalysisSession::load(root, None).expect("session loads");
+        fixed
+            .analyze_dead_code()
+            .expect("analysis on the fixed yaml succeeds");
+        let current = fixed.current_workspace_diagnostics();
+        assert!(
+            !has_diagnostic_kind(&current, "malformed-pnpm-workspace-yaml"),
+            "a later session must not keep the stale analysis-stage entry (#2366): {current:?}"
+        );
+    }
+
+    /// Watch-mode rerun shape (issue #2366): the CLI reloads config, which
+    /// re-stashes the workspace-discovery set, and builds a fresh session from
+    /// the resolved config before re-analyzing. Once a text `bun.lock` exists
+    /// the rerun must drop the bun.lockb skip diagnostic. Regression pin: the
+    /// old stash wiped analysis-stage entries instead of preserving them, so
+    /// this passes before and after the fix.
+    #[test]
+    fn watch_style_rerun_drops_bun_lockb_skip_once_text_lockfile_exists() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        write_single_source_project(
+            root,
+            r#"{"name":"issue-2366-watch-rerun","private":true,"overrides":{"ws":"^8.21.0"}}"#,
+        );
+        std::fs::write(root.join("bun.lockb"), b"placeholder binary lockfile")
+            .expect("write bun.lockb placeholder");
+        let config = fallow_config::FallowConfig::default().resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        let reload_config = || {
+            let (_, diagnostics) =
+                fallow_config::discover_workspaces_with_diagnostics(root, &config.ignore_patterns)
+                    .expect("workspace discovery succeeds");
+            fallow_config::stash_workspace_diagnostics(root, diagnostics);
+        };
+
+        reload_config();
+        let first =
+            AnalysisSession::from_resolved_config(config.clone()).expect("first session loads");
+        first
+            .analyze_dead_code()
+            .expect("analysis with bun.lockb only succeeds");
+        assert!(
+            has_diagnostic_kind(
+                &first.current_workspace_diagnostics(),
+                "bun-lockb-override-resolution-skipped"
+            ),
+            "the first run surfaces the bun.lockb skip: {:?}",
+            first.current_workspace_diagnostics()
+        );
+
+        std::fs::write(
+            root.join("bun.lock"),
+            r#"{"lockfileVersion":1,"workspaces":{"":{"name":"issue-2366-watch-rerun"}},"packages":{"ws":["ws@8.21.3","",{},"sha512-20"]}}"#,
+        )
+        .expect("write text bun.lock");
+
+        reload_config();
+        let rerun =
+            AnalysisSession::from_resolved_config(config.clone()).expect("rerun session loads");
+        rerun
+            .analyze_dead_code()
+            .expect("analysis with the text bun.lock succeeds");
+        let current = rerun.current_workspace_diagnostics();
+        assert!(
+            !has_diagnostic_kind(&current, "bun-lockb-override-resolution-skipped"),
+            "the rerun drops the skip once a text bun.lock exists (#2366): {current:?}"
         );
     }
 }

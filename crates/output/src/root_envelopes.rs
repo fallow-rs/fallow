@@ -2,6 +2,7 @@
 
 use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, ToolVersion};
 use fallow_types::output::NextStep;
+use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
 /// Current schema version for `fallow audit --format json`.
@@ -257,6 +258,14 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     /// Health section of the combined run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<Health>,
+    /// Workspace-discovery, source-discovery, and analysis-stage diagnostics
+    /// for the run (issue #2366). See `CheckOutput::workspace_diagnostics` for
+    /// the full contract: root-relative paths, omitted when empty. The
+    /// combined envelope carries them here rather than inside a section, so a
+    /// run that skips a section (`--skip check`, `--only health`,
+    /// `--only dupes`) still reports every diagnostic its analyses recorded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands aggregated across the combined run's
     /// findings. See `CheckOutput::next_steps` for the contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -553,6 +562,7 @@ mod tests {
                 check: Some(json!({ "summary": { "total_issues": 0 } })),
                 dupes: None::<serde_json::Value>,
                 health: None::<serde_json::Value>,
+                workspace_diagnostics: Vec::new(),
                 next_steps: Vec::new(),
             },
             RootEnvelopeMode::Tagged,

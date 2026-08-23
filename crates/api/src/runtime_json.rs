@@ -22,6 +22,7 @@ use fallow_output::{
     serialize_feature_flags_json_output, strip_root_prefix,
 };
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use fallow_types::workspace::{WorkspaceDiagnostic, merge_workspace_diagnostics};
 use serde::Serialize;
 use std::path::Path;
 use std::time::Duration;
@@ -47,6 +48,8 @@ pub fn serialize_combined_programmatic_json(
         envelope_mode,
         telemetry_analysis_run_id,
     } = output;
+    let workspace_diagnostics =
+        combined_workspace_diagnostics(dead_code.as_ref(), health.as_ref(), duplication.as_ref());
     crate::serialize_combined_json(crate::CombinedJsonOutputInput {
         check: dead_code
             .as_ref()
@@ -65,6 +68,7 @@ pub fn serialize_combined_programmatic_json(
         elapsed,
         explain,
         type_aware: None,
+        workspace_diagnostics,
         next_steps,
         envelope_mode,
         telemetry_analysis_run_id: telemetry_analysis_run_id.as_deref(),
@@ -74,6 +78,37 @@ pub fn serialize_combined_programmatic_json(
             .with_code("FALLOW_SERIALIZE_COMBINED_REPORT")
             .with_context("combined")
     })
+}
+
+/// Union the combined run's workspace diagnostics across its typed sections.
+///
+/// Each section captured the list as of the moment its own analysis finished,
+/// and those lists can differ: a combined run walks the project once per
+/// analysis, per-analysis `production` modes can give those walks different
+/// file sets, and each walk clears the previous walk's source-discovery
+/// entries. No single section therefore holds everything the run recorded, so
+/// the root carries the deduplicated union in section order (dead code, then
+/// health, then duplication) and a run missing a section (`--skip check`,
+/// `--only health`, `--only dupes`) still reports what its remaining analyses
+/// recorded. The CLI folds its own per-analysis lists the same way, so both
+/// routes answer identically (issue #2366).
+fn combined_workspace_diagnostics(
+    dead_code: Option<&DeadCodeProgrammaticOutput>,
+    health: Option<&HealthProgrammaticOutput>,
+    duplication: Option<&DuplicationProgrammaticOutput>,
+) -> Vec<WorkspaceDiagnostic> {
+    let merged = merge_workspace_diagnostics(
+        dead_code.map_or_else(Vec::new, |dead_code| {
+            dead_code.output.workspace_diagnostics.clone()
+        }),
+        health.map_or_else(Vec::new, |health| health.workspace_diagnostics.clone()),
+    );
+    merge_workspace_diagnostics(
+        merged,
+        duplication.map_or_else(Vec::new, |duplication| {
+            duplication.output.workspace_diagnostics.clone()
+        }),
+    )
 }
 
 /// Serialize typed decision-surface output into the stable JSON contract.
@@ -161,6 +196,13 @@ pub fn serialize_audit_programmatic_json(
     })
 }
 
+/// Serialize the audit envelope's dead-code sub-result.
+///
+/// The sub-result is a `CheckOutput` body, so it carries the run's
+/// `workspace_diagnostics[]` the way the standalone `dead-code` envelope and
+/// the combined `check` section do; the CLI audit path reads the same list
+/// from the process registry, and this programmatic path takes it from the
+/// typed dead-code output so both answer identically (issue #2366).
 fn serialize_audit_dead_code(
     output: &DeadCodeProgrammaticOutput,
     base_snapshot: Option<&crate::AuditProgrammaticKeySnapshot>,
@@ -171,7 +213,7 @@ fn serialize_audit_dead_code(
         elapsed: Duration::from_millis(output.output.elapsed_ms.0),
         config_fixable: output.config_fixable,
         extras: crate::CheckJsonExtraOutputs::default(),
-        workspace_diagnostics: Vec::new(),
+        workspace_diagnostics: output.output.workspace_diagnostics.clone(),
     })
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize audit dead-code: {err}"), 2)
@@ -542,5 +584,331 @@ fn group_by_mode_from_label(label: &str) -> Option<GroupByMode> {
         "package" => Some(GroupByMode::Package),
         "section" => Some(GroupByMode::Section),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RootEnvelopeMode, serialize_audit_dead_code, serialize_combined_programmatic_json,
+    };
+    use crate::DupesReportPayload;
+    use crate::runtime::{
+        CombinedProgrammaticOutput, DeadCodeProgrammaticOutput, DuplicationProgrammaticOutput,
+        HealthProgrammaticOutput,
+    };
+    use fallow_output::{
+        CHECK_SCHEMA_VERSION, CheckOutputInput, DUPES_SCHEMA_VERSION, DupesOutputInput,
+        HealthReport, build_check_output, build_dupes_output,
+    };
+    use fallow_types::duplicates::DuplicationReport;
+    use fallow_types::results::AnalysisResults;
+    use fallow_types::workspace::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
+    use std::path::Path;
+    use std::time::Duration;
+
+    fn dead_code_output(
+        root: &Path,
+        workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    ) -> DeadCodeProgrammaticOutput {
+        DeadCodeProgrammaticOutput {
+            output: build_check_output(CheckOutputInput {
+                schema_version: CHECK_SCHEMA_VERSION,
+                version: "0.0.0-test".to_owned(),
+                elapsed: Duration::ZERO,
+                results: AnalysisResults::default(),
+                config_fixable: false,
+                meta: None,
+                workspace_diagnostics,
+                next_steps: Vec::new(),
+            }),
+            root: root.to_path_buf(),
+            config_fixable: false,
+            envelope_mode: RootEnvelopeMode::Tagged,
+            telemetry_analysis_run_id: None,
+        }
+    }
+
+    /// Issue #2366: the audit envelope's dead-code sub-result carries the run's
+    /// workspace diagnostics root-relative, matching what the CLI audit path
+    /// reads from the registry, and omits the array when there are none.
+    #[test]
+    fn audit_dead_code_section_carries_workspace_diagnostics_root_relative_or_omits_them() {
+        let root = Path::new("/project");
+        let carried = serialize_audit_dead_code(
+            &dead_code_output(
+                root,
+                vec![WorkspaceDiagnostic::new(
+                    root,
+                    root.join("package.json"),
+                    WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+                )],
+            ),
+            None,
+        )
+        .expect("audit dead-code JSON");
+        assert_eq!(
+            carried["workspace_diagnostics"][0]["kind"],
+            "bun-lockb-override-resolution-skipped"
+        );
+        assert_eq!(carried["workspace_diagnostics"][0]["path"], "package.json");
+
+        let empty = serialize_audit_dead_code(&dead_code_output(root, Vec::new()), None)
+            .expect("audit dead-code JSON");
+        assert!(
+            empty.get("workspace_diagnostics").is_none(),
+            "an empty list is omitted from the audit dead-code section: {empty}"
+        );
+    }
+
+    fn health_output(
+        root: &Path,
+        workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    ) -> HealthProgrammaticOutput {
+        HealthProgrammaticOutput {
+            report: HealthReport::default(),
+            grouping: None,
+            root: root.to_path_buf(),
+            elapsed: Duration::ZERO,
+            explain: false,
+            workspace_diagnostics,
+            next_steps: Vec::new(),
+            envelope_mode: RootEnvelopeMode::Tagged,
+            telemetry_analysis_run_id: None,
+        }
+    }
+
+    fn duplication_output(
+        root: &Path,
+        workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    ) -> DuplicationProgrammaticOutput {
+        DuplicationProgrammaticOutput {
+            output: build_dupes_output(DupesOutputInput {
+                schema_version: DUPES_SCHEMA_VERSION,
+                version: "0.0.0-test".to_owned(),
+                elapsed: Duration::ZERO,
+                report: DupesReportPayload::from_report(&DuplicationReport::default()),
+                grouped_by: None,
+                total_issues: None,
+                groups: None,
+                meta: None,
+                workspace_diagnostics,
+                next_steps: Vec::new(),
+            }),
+            root: root.to_path_buf(),
+            threshold: 0.0,
+            envelope_mode: RootEnvelopeMode::Tagged,
+            telemetry_analysis_run_id: None,
+        }
+    }
+
+    fn combined_output(
+        root: &Path,
+        dead_code: Option<DeadCodeProgrammaticOutput>,
+        health: Option<HealthProgrammaticOutput>,
+    ) -> CombinedProgrammaticOutput {
+        combined_output_with_duplication(root, dead_code, health, None)
+    }
+
+    fn combined_output_with_duplication(
+        root: &Path,
+        dead_code: Option<DeadCodeProgrammaticOutput>,
+        health: Option<HealthProgrammaticOutput>,
+        duplication: Option<DuplicationProgrammaticOutput>,
+    ) -> CombinedProgrammaticOutput {
+        CombinedProgrammaticOutput {
+            dead_code,
+            duplication,
+            health,
+            root: root.to_path_buf(),
+            elapsed: Duration::ZERO,
+            explain: false,
+            next_steps: Vec::new(),
+            envelope_mode: RootEnvelopeMode::Tagged,
+            telemetry_analysis_run_id: None,
+        }
+    }
+
+    fn bun_lockb_diagnostic(root: &Path) -> WorkspaceDiagnostic {
+        WorkspaceDiagnostic::new(
+            root,
+            root.join("package.json"),
+            WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+        )
+    }
+
+    fn large_file_diagnostic(root: &Path, relative: &str) -> WorkspaceDiagnostic {
+        WorkspaceDiagnostic::new(
+            root,
+            root.join(relative),
+            WorkspaceDiagnosticKind::SkippedLargeFile {
+                size_bytes: 6_000_000,
+            },
+        )
+    }
+
+    fn root_kinds(document: &serde_json::Value) -> Vec<String> {
+        document["workspace_diagnostics"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|diagnostic| diagnostic["kind"].as_str().unwrap_or_default().to_owned())
+            .collect()
+    }
+
+    /// Issue #2366: the programmatic combined envelope (MCP `analyze` in code
+    /// mode, NAPI, embedders) carries the run's workspace diagnostics on the
+    /// combined root, root-relative, and omits the array when there are none.
+    #[test]
+    fn combined_programmatic_root_carries_workspace_diagnostics_or_omits_them() {
+        let root = Path::new("/project");
+        let carried = serialize_combined_programmatic_json(combined_output(
+            root,
+            Some(dead_code_output(root, vec![bun_lockb_diagnostic(root)])),
+            None,
+        ))
+        .expect("combined JSON");
+        assert_eq!(
+            carried["workspace_diagnostics"][0]["kind"],
+            "bun-lockb-override-resolution-skipped"
+        );
+        assert_eq!(carried["workspace_diagnostics"][0]["path"], "package.json");
+        assert!(
+            carried["check"].is_object(),
+            "the check section is present, so the absence check below is not vacuous: {carried}"
+        );
+        assert!(
+            carried["check"].get("workspace_diagnostics").is_none(),
+            "the check section is not a second carrier: {carried}"
+        );
+
+        let empty = serialize_combined_programmatic_json(combined_output(
+            root,
+            Some(dead_code_output(root, Vec::new())),
+            None,
+        ))
+        .expect("combined JSON");
+        assert!(
+            empty.get("workspace_diagnostics").is_none(),
+            "an empty list is omitted from the combined root: {empty}"
+        );
+    }
+
+    /// Issue #2366: a programmatic combined run without a dead-code section
+    /// (the `--skip check` / `--only health` shape) still reports the
+    /// diagnostics, taken from the section that did run.
+    #[test]
+    fn combined_programmatic_root_carries_workspace_diagnostics_without_a_dead_code_section() {
+        let root = Path::new("/project");
+        let carried = serialize_combined_programmatic_json(combined_output(
+            root,
+            None,
+            Some(health_output(root, vec![bun_lockb_diagnostic(root)])),
+        ))
+        .expect("combined JSON");
+        assert!(
+            carried.get("check").is_none(),
+            "this run has no check section: {carried}"
+        );
+        assert_eq!(
+            carried["workspace_diagnostics"][0]["kind"],
+            "bun-lockb-override-resolution-skipped"
+        );
+        assert_eq!(carried["workspace_diagnostics"][0]["path"], "package.json");
+    }
+
+    /// Issue #2366: a duplication-only combined run (an embedder driving
+    /// `CombinedOptions` with just `duplication`) reports what that section
+    /// recorded.
+    #[test]
+    fn combined_programmatic_root_carries_workspace_diagnostics_from_a_duplication_only_run() {
+        let root = Path::new("/project");
+        let carried = serialize_combined_programmatic_json(combined_output_with_duplication(
+            root,
+            None,
+            None,
+            Some(duplication_output(
+                root,
+                vec![large_file_diagnostic(root, "src/generated.ts")],
+            )),
+        ))
+        .expect("combined JSON");
+        assert!(
+            carried.get("check").is_none() && carried.get("health").is_none(),
+            "only the dupes section ran: {carried}"
+        );
+        assert_eq!(root_kinds(&carried), ["skipped-large-file"]);
+        assert_eq!(
+            carried["workspace_diagnostics"][0]["path"],
+            "src/generated.ts"
+        );
+    }
+
+    /// Issue #2366: sections of one combined run can record different lists,
+    /// because each analysis walks the project itself and a per-analysis
+    /// `production` mode changes which files that walk sees. The root carries
+    /// the union so nothing the run recorded is dropped, deduplicated so a
+    /// diagnostic two sections both saw is reported once, and in section order
+    /// so a run whose analyses agree matches the standalone `dead-code`
+    /// envelope exactly.
+    #[test]
+    fn combined_programmatic_root_unions_sections_that_recorded_different_diagnostics() {
+        let root = Path::new("/project");
+        let shared = bun_lockb_diagnostic(root);
+        let carried = serialize_combined_programmatic_json(combined_output_with_duplication(
+            root,
+            Some(dead_code_output(
+                root,
+                vec![shared.clone(), large_file_diagnostic(root, "src/big.ts")],
+            )),
+            Some(health_output(root, vec![shared.clone()])),
+            Some(duplication_output(
+                root,
+                vec![shared, large_file_diagnostic(root, "src/other.ts")],
+            )),
+        ))
+        .expect("combined JSON");
+        assert_eq!(
+            root_kinds(&carried),
+            [
+                "bun-lockb-override-resolution-skipped",
+                "skipped-large-file",
+                "skipped-large-file",
+            ],
+            "the union keeps dead-code order first and drops the repeats: {}",
+            carried["workspace_diagnostics"]
+        );
+        let paths: Vec<&str> = carried["workspace_diagnostics"]
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|diagnostic| diagnostic["path"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(paths, ["package.json", "src/big.ts", "src/other.ts"]);
+    }
+
+    /// Issue #2366: a diagnostic only the health or duplication section
+    /// recorded still reaches the root when the dead-code section recorded
+    /// nothing, the direction that a `production: { deadCode: true }` split
+    /// produces on a real project.
+    #[test]
+    fn combined_programmatic_root_keeps_diagnostics_an_empty_dead_code_section_missed() {
+        let root = Path::new("/project");
+        let carried = serialize_combined_programmatic_json(combined_output_with_duplication(
+            root,
+            Some(dead_code_output(root, Vec::new())),
+            Some(health_output(
+                root,
+                vec![large_file_diagnostic(root, "src/big.test.ts")],
+            )),
+            None,
+        ))
+        .expect("combined JSON");
+        assert_eq!(root_kinds(&carried), ["skipped-large-file"]);
+        assert_eq!(
+            carried["workspace_diagnostics"][0]["path"],
+            "src/big.test.ts"
+        );
     }
 }

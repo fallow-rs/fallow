@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rustc_hash::FxHashSet;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -141,6 +142,37 @@ impl WorkspaceDiagnosticKind {
                 | Self::SourceReadFailure { .. }
         )
     }
+
+    /// Whether this diagnostic is recorded by the ANALYZE stage (the
+    /// dependency-catalog and override detectors) rather than by workspace or
+    /// source discovery. Analysis-stage diagnostics reach the registry through
+    /// `record_workspace_diagnostics` after config load, so
+    /// `stash_workspace_diagnostics` must preserve them across combined-mode's
+    /// per-analysis config re-loads, and every analyze pass clears its previous
+    /// entries before re-recording so a fixed cause drops out on the next run
+    /// (issue #2366). The match is exhaustive on purpose: a new kind must be
+    /// classified here before it compiles.
+    ///
+    /// Classify a kind `true` ONLY when a detector reachable from the dead-code
+    /// analyze pass (`find_dead_code_full`) re-records it, because that pass is
+    /// the single clear site. A kind recorded exclusively by another stage would
+    /// be cleared by the next dead-code pass and never come back.
+    #[must_use]
+    pub const fn is_analysis_stage(&self) -> bool {
+        match self {
+            Self::MalformedPnpmWorkspaceYaml { .. } | Self::BunLockbOverrideResolutionSkipped => {
+                true
+            }
+            Self::UndeclaredWorkspace
+            | Self::MalformedPackageJson { .. }
+            | Self::GlobMatchedNoPackageJson { .. }
+            | Self::MalformedTsconfig { .. }
+            | Self::TsconfigReferenceDirMissing
+            | Self::SkippedLargeFile { .. }
+            | Self::SkippedMinifiedFile { .. }
+            | Self::SourceReadFailure { .. } => false,
+        }
+    }
 }
 
 /// Render a byte count as a megabyte figure with one decimal place for
@@ -234,6 +266,34 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
         }
         other => other,
     }
+}
+
+/// Concatenate two diagnostic lists, keeping the first occurrence of each
+/// `(kind id, path)` pair and the order of `primary` followed by the entries
+/// only `secondary` has.
+///
+/// The single place diagnostics from two observation points are folded
+/// together: an engine session's own capture plus the process registry, and
+/// the combined run's per-analysis lists (issue #2366). A combined run walks
+/// the project once per analysis, and per-analysis `production` modes can make
+/// those walks see different file sets, so no single observation point holds
+/// everything the run recorded; the union does, and folding it the same way
+/// everywhere is what keeps the CLI and the programmatic route answering
+/// identically.
+#[must_use]
+pub fn merge_workspace_diagnostics(
+    primary: Vec<WorkspaceDiagnostic>,
+    secondary: Vec<WorkspaceDiagnostic>,
+) -> Vec<WorkspaceDiagnostic> {
+    let mut merged = Vec::with_capacity(primary.len() + secondary.len());
+    let mut seen: FxHashSet<(&'static str, PathBuf)> = FxHashSet::default();
+    for diagnostic in primary.into_iter().chain(secondary) {
+        let key = (diagnostic.kind.id(), diagnostic.path.clone());
+        if seen.insert(key) {
+            merged.push(diagnostic);
+        }
+    }
+    merged
 }
 
 /// Render `path` relative to `root` with forward slashes. The forward-slash
@@ -432,6 +492,49 @@ mod tests {
         );
         let json = serde_json::to_value(&diag).expect("diagnostic serializes");
         assert_eq!(json["kind"], "bun-lockb-override-resolution-skipped");
+    }
+
+    #[test]
+    fn analysis_stage_classification_covers_only_analyze_stage_kinds() {
+        let analysis_stage = [
+            WorkspaceDiagnosticKind::MalformedPnpmWorkspaceYaml {
+                error: "bad yaml".to_owned(),
+            },
+            WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+        ];
+        for kind in &analysis_stage {
+            assert!(
+                kind.is_analysis_stage() && !kind.is_source_discovery(),
+                "{} is recorded by the analyze stage only",
+                kind.id()
+            );
+        }
+
+        let other = [
+            WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            WorkspaceDiagnosticKind::MalformedPackageJson {
+                error: "trailing comma".to_owned(),
+            },
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: "packages/*".to_owned(),
+            },
+            WorkspaceDiagnosticKind::MalformedTsconfig {
+                error: "unexpected token".to_owned(),
+            },
+            WorkspaceDiagnosticKind::TsconfigReferenceDirMissing,
+            WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes: 1 },
+            WorkspaceDiagnosticKind::SkippedMinifiedFile { size_bytes: 1 },
+            WorkspaceDiagnosticKind::SourceReadFailure {
+                error: "permission denied".to_owned(),
+            },
+        ];
+        for kind in &other {
+            assert!(
+                !kind.is_analysis_stage(),
+                "{} is a discovery kind, not an analyze-stage kind",
+                kind.id()
+            );
+        }
     }
 
     #[test]

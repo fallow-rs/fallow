@@ -26,11 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bun.lockb` in a repo that no longer uses bun. Manifests without overrides,
   repos with a parseable text lockfile next to the `bun.lockb`, and repos
   without any lockfile are unaffected. The bare combined `fallow` JSON
-  envelope does not carry analysis-stage workspace diagnostics (pre-existing,
-  shared with `malformed-pnpm-workspace-yaml`; the stderr warning still
-  appears there). The diagnostic kind is additive on the
-  `workspace_diagnostics[].kind` union; consumers that exhaustively match on
-  `kind` should treat unknown kinds as informational.
+  envelope carries it at the envelope root, in the top-level
+  `workspace_diagnostics[]`; no section of the combined envelope repeats it
+  (see the [#2366](https://github.com/fallow-rs/fallow/issues/2366) fix
+  below). The
+  diagnostic kind is additive on the `workspace_diagnostics[].kind` union;
+  consumers that exhaustively match on `kind` should treat unknown kinds as
+  informational.
 
 - **bun repositories that pin transitive versions under Yarn-style
   `resolutions` now get `unused-dependency-overrides` and
@@ -369,6 +371,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   No cache version changed: the trace is a read-only query over the graph, so
   a warm `.fallow` directory written by a previous release returns the
   corrected trace.
+
+- **The bare combined `fallow --format json` envelope now carries the
+  analysis-stage workspace diagnostics that `dead-code`, `check`, and
+  `health` already carry** (Closes
+  [#2366](https://github.com/fallow-rs/fallow/issues/2366)). A malformed
+  `pnpm-workspace.yaml` (`malformed-pnpm-workspace-yaml`) and the bun.lockb
+  override-resolution skip (`bun-lockb-override-resolution-skipped`) reached
+  `workspace_diagnostics[]` on every standalone JSON envelope, but the bare
+  combined run (dead code plus duplication plus health) printed neither at
+  the root nor under `check`, while the stderr warning still appeared. Two
+  causes: the combined envelope had no diagnostics field at all, and every
+  per-analysis config reload inside the combined run replaced the diagnostics
+  registry while preserving only the source-discovery kinds, so the entries
+  the analyze pass had recorded were wiped before the envelope was built. The
+  combined envelope now carries a top-level `workspace_diagnostics[]` with the
+  same root-relative paths the standalone envelopes use, deduplicated on
+  `kind` plus `path`, and omitted when empty. It is the union of what every
+  analysis in the run recorded, which matters because a combined run walks the
+  project once per analysis and a per-analysis `production` mode
+  (`production: { deadCode, health, dupes }`, `--production-health`) can give
+  those walks different file sets: reporting only what the last walk saw would
+  drop, for example, a `skipped-large-file` that the dead-code walk recorded
+  for a test file the production health walk never looks at. For a run whose
+  analyses share one mode the array is exactly what the standalone `dead-code`
+  envelope carries, in the same order. The carrier is
+  the envelope root rather than a section, so a run that drops a section
+  (`--skip check`, `--only health`, `--only dupes`) reports every diagnostic
+  its analyses recorded instead of dropping them while stderr warns. The
+  `check`, `dupes`, and `health` sections stay report bodies and never repeat
+  the array. Config reloads preserve analysis-stage entries the way they
+  preserve source-discovery entries, and each dead-code analyze pass clears
+  its previous analysis-stage entries before re-recording, so a watch-mode
+  rerun or a long-lived engine session (MCP, LSP) drops the diagnostic once
+  the YAML is fixed or a text `bun.lock` exists instead of keeping a stale
+  entry. Because config reloads now preserve those entries, two audit-family
+  envelopes populate an array that was previously always empty:
+  `fallow audit --format json` under `dead_code.workspace_diagnostics[]`, and
+  the `audit-brief` envelope shared by `fallow review --format json` and
+  `fallow audit --brief --format json`, also under `dead_code`. Both sections
+  are already typed as the `dead-code` envelope body, so populating them is
+  additive; the MCP `audit` tool and the programmatic combined route (MCP code
+  mode, NAPI, embedders) answer the same as the CLI, including when
+  per-analysis `production` modes make the run's walks disagree. The combined
+  envelope's new root field is optional and
+  absent when there are no diagnostics, so no `schema_version` moves. The
+  standalone `dead-code`, `check`, `health`, and `dupes` envelopes and every
+  non-JSON format are byte-identical to before; the three envelopes named
+  above are not, whenever the run records a diagnostic.
 
 - **Star re-exports inside `declare module '...'` bodies credit the full ES
   star surface of their target without adding to the declaring file's export

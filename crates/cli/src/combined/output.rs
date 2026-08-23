@@ -781,6 +781,64 @@ fn print_combined_json(
     emit_combined_json_output(&output, json_style)
 }
 
+/// Root the diagnostics registry is keyed on: the resolved config root, which
+/// every section shares, with the CLI root as the fallback.
+fn combined_diagnostics_root<'a>(input: &CombinedJsonPrintInput<'a>) -> &'a std::path::Path {
+    input
+        .check_result
+        .map(|result| result.config.root.as_path())
+        .or_else(|| {
+            input
+                .health_result
+                .map(|result| result.config.root.as_path())
+        })
+        .or_else(|| {
+            input
+                .dupes_result
+                .map(|result| result.config.root.as_path())
+        })
+        .unwrap_or(input.root)
+}
+
+/// Union of what each analysis in the combined run recorded, deduplicated on
+/// kind plus path.
+///
+/// A combined run walks the project once per analysis, each walk clears the
+/// previous walk's source-discovery entries from the shared diagnostics
+/// registry, and a per-analysis `production` mode gives those walks different
+/// file sets. Reading the registry once at output time therefore reports only
+/// what the last walk saw, which can be narrower than the standalone
+/// `dead-code` envelope of the same project and depends on which walk ran
+/// last. The dead-code and health sections instead carry the list their own
+/// analysis observed, and the registry read closes the fold: it covers a dupes
+/// section (which reuses another analysis's discovery whenever the run's
+/// production modes agree) and anything recorded after the last section
+/// captured its list. Reading it outside the `check` section is also what lets
+/// `--skip check`, `--only health`, and `--only dupes` report the diagnostics
+/// their analyses recorded. The programmatic combined route folds its typed
+/// sections the same way, so both answer identically (issue #2366).
+fn combined_workspace_diagnostics(
+    input: &CombinedJsonPrintInput<'_>,
+) -> Vec<fallow_config::WorkspaceDiagnostic> {
+    [
+        input
+            .check_result
+            .map(|result| result.workspace_diagnostics.clone()),
+        input
+            .health_result
+            .map(|result| result.workspace_diagnostics.clone()),
+        Some(crate::runtime_support::workspace_diagnostics_for(
+            combined_diagnostics_root(input),
+        )),
+    ]
+    .into_iter()
+    .flatten()
+    .fold(
+        Vec::new(),
+        fallow_types::workspace::merge_workspace_diagnostics,
+    )
+}
+
 fn build_combined_json_output(
     input: CombinedJsonPrintInput<'_>,
 ) -> Result<serde_json::Value, ExitCode> {
@@ -793,6 +851,7 @@ fn build_combined_json_output(
         input.health_result,
         input.root,
     );
+    let workspace_diagnostics = combined_workspace_diagnostics(&input);
 
     fallow_api::serialize_combined_json(CombinedJsonOutputInput {
         check: input.check_result.map(|result| CombinedCheckJsonSection {
@@ -810,6 +869,7 @@ fn build_combined_json_output(
         type_aware: input
             .check_result
             .and_then(|result| result.type_aware_meta.clone()),
+        workspace_diagnostics,
         next_steps,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),

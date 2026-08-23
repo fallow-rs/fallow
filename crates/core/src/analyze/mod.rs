@@ -796,6 +796,12 @@ pub(crate) fn find_dead_code_full(
 ) -> AnalysisResults {
     let _span = tracing::info_span!("find_dead_code").entered();
 
+    // Drop analysis-stage diagnostics from a previous pass (watch-mode rerun,
+    // engine-session rerun) BEFORE the detectors re-record this pass's, so a
+    // fixed pnpm-workspace.yaml or a new text bun.lock does not leave a stale
+    // entry (issue #2366).
+    fallow_config::clear_analysis_stage_diagnostics(&config.root);
+
     let run_context = build_dead_code_run_context(graph, config, workspaces, modules);
 
     let mut results = run_setup_and_detect(&SetupAndDetectInput {

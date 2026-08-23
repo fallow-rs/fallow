@@ -345,8 +345,9 @@ static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDia
 
 /// Replace the workspace-discovery diagnostics for `root` with `diagnostics`,
 /// PRESERVING any source-discovery diagnostics (see
-/// [`WorkspaceDiagnosticKind::is_source_discovery`]) already appended for the
-/// root.
+/// [`WorkspaceDiagnosticKind::is_source_discovery`]) and analysis-stage
+/// diagnostics (see [`WorkspaceDiagnosticKind::is_analysis_stage`]) already
+/// appended for the root.
 ///
 /// Called at config-load time after [`super::discover_workspaces_with_diagnostics`]
 /// completes; the analyze pipeline then APPENDS undeclared-workspace and
@@ -356,7 +357,12 @@ static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDia
 /// across watch-mode reruns), but source-discovery diagnostics are appended
 /// AFTER this stash, so combined-mode's per-analysis config re-loads would
 /// otherwise wipe a `skipped-large-file` entry that the first analysis's
-/// discovery already recorded (issue #1086).
+/// discovery already recorded (issue #1086). Analysis-stage diagnostics
+/// (`malformed-pnpm-workspace-yaml`, `bun-lockb-override-resolution-skipped`)
+/// are recorded by the analyze pass through [`record_workspace_diagnostics`],
+/// also after this stash, and are preserved for the same reason; each analyze
+/// pass refreshes them through [`clear_analysis_stage_diagnostics`] (issue
+/// #2366).
 pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagnostic>) {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
@@ -366,7 +372,7 @@ pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagno
             combined.extend(
                 existing
                     .iter()
-                    .filter(|d| d.kind.is_source_discovery())
+                    .filter(|d| d.kind.is_source_discovery() || d.kind.is_analysis_stage())
                     .cloned(),
             );
         }
@@ -490,6 +496,29 @@ pub fn clear_source_discovery_diagnostics(root: &Path) {
         && let Some(existing) = map.get_mut(&canonical)
     {
         existing.retain(|d| !d.kind.is_source_discovery());
+    }
+}
+
+/// Remove all analysis-stage diagnostics (see
+/// [`WorkspaceDiagnosticKind::is_analysis_stage`]) for `root` from the
+/// registry, keeping every workspace-discovery and source-discovery entry.
+///
+/// Called at the START of each dead-code analyze pass so a stale
+/// `malformed-pnpm-workspace-yaml` or `bun-lockb-override-resolution-skipped`
+/// entry from a previous pass (a watch-mode rerun or a long-lived engine
+/// session after the YAML was fixed or a text `bun.lock` was written) is
+/// dropped before the detectors re-record only what still applies. Mirrors
+/// [`clear_source_discovery_diagnostics`] and pairs with the preserve in
+/// [`stash_workspace_diagnostics`] (issue #2366).
+pub fn clear_analysis_stage_diagnostics(root: &Path) {
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let Some(registry) = WORKSPACE_DIAGNOSTICS.get() else {
+        return;
+    };
+    if let Ok(mut map) = registry.lock()
+        && let Some(existing) = map.get_mut(&canonical)
+    {
+        existing.retain(|d| !d.kind.is_analysis_stage());
     }
 }
 
@@ -658,6 +687,63 @@ mod tests {
         );
     }
 
+    fn analysis_stage_diagnostics(root: &Path) -> Vec<WorkspaceDiagnostic> {
+        vec![
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("pnpm-workspace.yaml"),
+                WorkspaceDiagnosticKind::MalformedPnpmWorkspaceYaml {
+                    error: "could not find expected ':'".to_owned(),
+                },
+            ),
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("package.json"),
+                WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+            ),
+        ]
+    }
+
+    fn count_kind(diagnostics: &[WorkspaceDiagnostic], id: &str) -> usize {
+        diagnostics.iter().filter(|d| d.kind.id() == id).count()
+    }
+
+    #[test]
+    fn stash_preserves_recorded_analysis_stage_diagnostics_across_restash() {
+        let root = Path::new("/fallow-test-2366-stash-preserve");
+        let undeclared = || {
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )
+        };
+        // The check analysis loads config, then its analyze pass records both
+        // analysis-stage kinds.
+        stash_workspace_diagnostics(root, vec![undeclared()]);
+        record_workspace_diagnostics(root, analysis_stage_diagnostics(root));
+        // Combined-mode dupes/health re-load config and re-stash the same
+        // workspace-discovery set before the JSON envelope is built.
+        stash_workspace_diagnostics(root, vec![undeclared()]);
+
+        let after = workspace_diagnostics_for(root);
+        assert_eq!(
+            count_kind(&after, "malformed-pnpm-workspace-yaml"),
+            1,
+            "malformed-pnpm-workspace-yaml survives the combined-mode re-stash exactly once (#2366): {after:?}"
+        );
+        assert_eq!(
+            count_kind(&after, "bun-lockb-override-resolution-skipped"),
+            1,
+            "bun-lockb-override-resolution-skipped survives the combined-mode re-stash exactly once (#2366): {after:?}"
+        );
+        assert_eq!(
+            count_kind(&after, "undeclared-workspace"),
+            1,
+            "the workspace-discovery diagnostic is replaced, not duplicated"
+        );
+    }
+
     #[test]
     fn source_read_failures_replace_only_their_previous_parse_set() {
         let root = Path::new("/fallow-test-source-read-replace");
@@ -755,6 +841,49 @@ mod tests {
                 .iter()
                 .any(|d| matches!(d.kind, WorkspaceDiagnosticKind::UndeclaredWorkspace)),
             "the workspace-discovery diagnostic survives the source-discovery clear"
+        );
+    }
+
+    #[test]
+    fn clear_analysis_stage_drops_stale_entries_keeps_other_kinds() {
+        let root = Path::new("/fallow-test-2366-clear-stale");
+        stash_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )],
+        );
+        append_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("vendor/big.js"),
+                WorkspaceDiagnosticKind::SkippedLargeFile {
+                    size_bytes: 9_999_999,
+                },
+            )],
+        );
+        record_workspace_diagnostics(root, analysis_stage_diagnostics(root));
+        // The next analyze pass (the yaml is fixed, a text bun.lock exists)
+        // clears the stale entries before re-recording nothing.
+        clear_analysis_stage_diagnostics(root);
+
+        let after = workspace_diagnostics_for(root);
+        assert!(
+            !after.iter().any(|d| d.kind.is_analysis_stage()),
+            "stale analysis-stage entries are dropped on the next analyze pass (#2366): {after:?}"
+        );
+        assert_eq!(
+            count_kind(&after, "undeclared-workspace"),
+            1,
+            "the workspace-discovery diagnostic survives the analysis-stage clear"
+        );
+        assert_eq!(
+            count_kind(&after, "skipped-large-file"),
+            1,
+            "the source-discovery diagnostic survives the analysis-stage clear"
         );
     }
 

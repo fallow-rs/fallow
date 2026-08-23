@@ -6112,3 +6112,104 @@ fn review_brief_weakening_flags_deleted_test_file_not_added_file() {
         "a net-new file scans against an empty base and must not fabricate signals: {weakening:?}"
     );
 }
+
+/// Write a git repository whose `bun.lockb` blocks override resolution, with
+/// one uncommitted file so the audit family has a changeset to report on.
+fn bun_lockb_audit_repo(tmp: &TempDir) -> &std::path::Path {
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"issue-2366-audit","private":true,"main":"src/index.ts","overrides":{"ws":"^8.21.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("bun.lockb"), "").unwrap();
+    fs::write(dir.join("src/index.ts"), "export const value = 1;\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    fs::write(
+        dir.join("src/changed.ts"),
+        "export const changed = () => 1;\n",
+    )
+    .unwrap();
+    dir
+}
+
+/// Assert the envelope's dead-code section carries exactly one bun.lockb skip
+/// diagnostic, root-relative, and that the envelope root carries no array.
+fn assert_dead_code_section_carries_bun_lockb_skip(json: &serde_json::Value) {
+    let diagnostics = json["dead_code"]["workspace_diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let skips: Vec<&serde_json::Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["kind"] == "bun-lockb-override-resolution-skipped")
+        .collect();
+    assert_eq!(
+        skips.len(),
+        1,
+        "exactly one bun.lockb skip diagnostic under dead_code: {}",
+        json["dead_code"]["workspace_diagnostics"]
+    );
+    assert_eq!(skips[0]["path"], "package.json");
+    assert!(
+        json.get("workspace_diagnostics").is_none(),
+        "the audit-family root has no diagnostics array of its own: {json}"
+    );
+}
+
+/// Issue #2366: `fallow audit --format json` carries the analysis-stage
+/// workspace diagnostics under `dead_code.workspace_diagnostics[]`, the same
+/// `CheckOutput` payload the standalone `dead-code` envelope carries.
+/// Preserving analysis-stage entries across the per-analysis config reloads is
+/// what lets the audit envelope see them.
+#[test]
+fn audit_json_dead_code_section_carries_analysis_stage_workspace_diagnostics() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = bun_lockb_audit_repo(&tmp);
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().expect("fixture path should be UTF-8"),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    assert_dead_code_section_carries_bun_lockb_skip(&parse_json(&output));
+}
+
+/// Issue #2366: the `audit-brief` envelope shared by `fallow review` and
+/// `fallow audit --brief` builds its dead-code section from the same registry,
+/// so it is the third carrier that the preserve moves.
+#[test]
+fn review_json_dead_code_section_carries_analysis_stage_workspace_diagnostics() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = bun_lockb_audit_repo(&tmp);
+    let root = dir.to_str().expect("fixture path should be UTF-8");
+
+    for command in [["review"].as_slice(), ["audit", "--brief"].as_slice()] {
+        let mut args = command.to_vec();
+        args.extend_from_slice(&[
+            "--root",
+            root,
+            "--base",
+            "HEAD",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]);
+        let output = run_fallow_raw(&args);
+        let json = parse_json(&output);
+        assert_eq!(
+            json["kind"], "audit-brief",
+            "{command:?} emits the shared brief envelope: {json}"
+        );
+        assert_dead_code_section_carries_bun_lockb_skip(&json);
+    }
+}

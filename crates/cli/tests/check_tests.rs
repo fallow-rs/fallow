@@ -1212,3 +1212,323 @@ fn type_aware_trace_scopes_the_proof_that_misses_the_type_lane_credit() {
         "the proof line names the lane it covers; stderr: {stderr}"
     );
 }
+
+fn combined_root_diagnostics_of_kind(
+    json: &serde_json::Value,
+    kind: &str,
+) -> Vec<serde_json::Value> {
+    json["workspace_diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|diagnostic| diagnostic["kind"] == kind)
+        .collect()
+}
+
+/// Write a project whose `pnpm-workspace.yaml` does not parse, the second
+/// analysis-stage diagnostic kind, and return its temp dir.
+fn malformed_pnpm_workspace_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2366-malformed-pnpm-workspace-yaml","private":true}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        dir.path().join("pnpm-workspace.yaml"),
+        "catalog:\n  react: ^18.2.0\n{this is\nnot: valid: yaml: at: all\n",
+    )
+    .expect("write malformed pnpm-workspace.yaml");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(
+        dir.path().join("src/index.ts"),
+        "export const greet = (name: string): string => `hello ${name}`;\n",
+    )
+    .expect("write source");
+    dir
+}
+
+/// Issue #2366: the bare combined run (`fallow --format json`) must carry the
+/// analysis-stage workspace diagnostics that `dead-code --format json` carries.
+/// The combined root is the single carrier, so no section repeats the array.
+/// Both kinds the analyze stage records are covered: the bun.lockb override
+/// skip and a malformed `pnpm-workspace.yaml`.
+#[test]
+fn combined_json_root_carries_analysis_stage_workspace_diagnostics() {
+    let output = run_fallow_combined(
+        "issue-2358-bun-lockb-diagnostic",
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    let skips = combined_root_diagnostics_of_kind(&json, "bun-lockb-override-resolution-skipped");
+    assert_eq!(
+        skips.len(),
+        1,
+        "exactly one bun.lockb skip diagnostic on the combined root: {}",
+        json["workspace_diagnostics"]
+    );
+    assert_eq!(skips[0]["path"], "package.json");
+
+    let dir = malformed_pnpm_workspace_project();
+    let output = run_fallow_raw(&[
+        "--root",
+        dir.path().to_str().expect("temp path is UTF-8"),
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    let json = parse_json(&output);
+    let malformed = combined_root_diagnostics_of_kind(&json, "malformed-pnpm-workspace-yaml");
+    assert_eq!(
+        malformed.len(),
+        1,
+        "exactly one malformed yaml diagnostic on the combined root: {}",
+        json["workspace_diagnostics"]
+    );
+    assert_eq!(malformed[0]["path"], "pnpm-workspace.yaml");
+    assert!(
+        json["check"].is_object() && json["dupes"].is_object() && json["health"].is_object(),
+        "all three sections ran, so the absence checks below are not vacuous: {json}"
+    );
+    assert!(
+        json["check"].get("workspace_diagnostics").is_none()
+            && json["dupes"].get("workspace_diagnostics").is_none()
+            && json["health"].get("workspace_diagnostics").is_none(),
+        "the root is the only carrier; no section repeats the array: {json}"
+    );
+}
+
+/// Issue #2366: the carrier is unconditional, so a combined run that drops the
+/// `check` section still reports what its analyses recorded. `--skip check`
+/// and `--only health` both still run a dead-code analyze pass, which is what
+/// records the analysis-stage kinds and warns on stderr.
+#[test]
+fn combined_json_carries_workspace_diagnostics_without_a_check_section() {
+    for section_flags in [
+        ["--skip", "check"].as_slice(),
+        ["--only", "health"].as_slice(),
+    ] {
+        let mut args = vec!["--format", "json", "--quiet", "--no-cache"];
+        args.extend_from_slice(section_flags);
+        let output = run_fallow_combined("issue-2358-bun-lockb-diagnostic", &args);
+        let json = parse_json(&output);
+        assert!(
+            json.get("check").is_none(),
+            "{section_flags:?} drops the check section: {json}"
+        );
+        let skips =
+            combined_root_diagnostics_of_kind(&json, "bun-lockb-override-resolution-skipped");
+        assert_eq!(
+            skips.len(),
+            1,
+            "{section_flags:?} still carries the skip diagnostic: {}",
+            json["workspace_diagnostics"]
+        );
+        assert_eq!(skips[0]["path"], "package.json");
+    }
+}
+
+/// Issue #2366: `--only dupes` runs no dead-code analyze pass, so it records no
+/// analysis-stage kind, but the workspace-discovery diagnostics config load
+/// records still reach the combined root.
+#[test]
+fn combined_json_only_dupes_carries_workspace_discovery_diagnostics() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("packages/no-manifest/src")).expect("create packages");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2366-only-dupes","private":true,"main":"src/index.ts","workspaces":["packages/*"]}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::write(
+        dir.path().join("packages/no-manifest/src/a.ts"),
+        "export const other = 2;\n",
+    )
+    .expect("write workspace source");
+
+    let output = run_fallow_raw(&[
+        "--root",
+        dir.path().to_str().expect("temp path is UTF-8"),
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+        "--only",
+        "dupes",
+    ]);
+    let json = parse_json(&output);
+    assert!(
+        json["dupes"].is_object() && json.get("check").is_none() && json.get("health").is_none(),
+        "only the dupes section ran: {json}"
+    );
+    let unmatched = combined_root_diagnostics_of_kind(&json, "glob-matched-no-package-json");
+    assert_eq!(
+        unmatched.len(),
+        1,
+        "the workspace glob diagnostic reaches a dupes-only combined run: {}",
+        json["workspace_diagnostics"]
+    );
+    assert_eq!(unmatched[0]["path"], "packages/no-manifest");
+}
+
+/// Write a project whose test file is over the `--max-file-size 1` ceiling, so
+/// a NON-production walk records `skipped-large-file` for it and a production
+/// walk (which excludes test files) never sees it. `production_config` is the
+/// `.fallowrc.json` body that splits the per-analysis production modes.
+fn split_production_large_test_file_project(production_config: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2366-split-production","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(dir.path().join(".fallowrc.json"), production_config)
+        .expect("write .fallowrc.json");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::write(
+        dir.path().join("src/huge.test.ts"),
+        "// filler\n".repeat(150_000),
+    )
+    .expect("write oversized test file");
+    dir
+}
+
+/// Issue #2366: a combined run walks the project once per analysis, and a
+/// per-analysis `production` mode gives those walks different file sets, so
+/// each walk records a different source-discovery list and clears the previous
+/// one. The combined root must report the UNION of what the run recorded, in
+/// both directions of the split, otherwise the answer depends on which walk
+/// happened to run last and the root contradicts the standalone `dead-code`
+/// envelope of the same project.
+#[test]
+fn combined_json_root_unions_workspace_diagnostics_across_split_production_modes() {
+    for production_config in [
+        r#"{"production":{"deadCode":true,"health":false,"dupes":false}}"#,
+        r#"{"production":{"deadCode":false,"health":true,"dupes":true}}"#,
+    ] {
+        let dir = split_production_large_test_file_project(production_config);
+        let root = dir.path().to_str().expect("temp path is UTF-8");
+        let output = run_fallow_raw(&[
+            "--root",
+            root,
+            "--max-file-size",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]);
+        let json = parse_json(&output);
+        assert!(
+            json["check"].is_object() && json["dupes"].is_object() && json["health"].is_object(),
+            "all three sections ran under {production_config}: {json}"
+        );
+        let skipped = combined_root_diagnostics_of_kind(&json, "skipped-large-file");
+        assert_eq!(
+            skipped.len(),
+            1,
+            "the combined root reports the oversized file under {production_config}: {}",
+            json["workspace_diagnostics"]
+        );
+        assert_eq!(skipped[0]["path"], "src/huge.test.ts");
+    }
+}
+
+/// Issue #2366: the combined root and the programmatic combined envelope are
+/// built from different inputs (the CLI folds the process registry per
+/// analysis phase, the programmatic route folds the typed sections' own
+/// lists), so pin that a non-production dead-code pass under a production
+/// health/dupes split reaches the standalone envelope and the combined root
+/// alike. Without the union the combined root is empty here while
+/// `dead-code --format json` on the same project reports the entry.
+#[test]
+fn combined_json_root_matches_standalone_dead_code_under_a_production_split() {
+    let dir = split_production_large_test_file_project(
+        r#"{"production":{"deadCode":false,"health":true,"dupes":true}}"#,
+    );
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let standalone = parse_json(&run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--max-file-size",
+        "1",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+    let combined = parse_json(&run_fallow_raw(&[
+        "--root",
+        root,
+        "--max-file-size",
+        "1",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+    assert_eq!(
+        standalone["workspace_diagnostics"], combined["workspace_diagnostics"],
+        "the combined root carries the standalone dead-code list: standalone {} vs combined {}",
+        standalone["workspace_diagnostics"], combined["workspace_diagnostics"]
+    );
+    assert_eq!(
+        combined_root_diagnostics_of_kind(&combined, "skipped-large-file").len(),
+        1,
+        "the comparison above is not vacuous: {}",
+        combined["workspace_diagnostics"]
+    );
+}
+
+/// Issue #2366: with `--production-dead-code --production-health` the only
+/// analysis that walks the full file set is duplication, so the oversized test
+/// file is recorded by the dupes walk alone and neither the dead-code nor the
+/// health section's own list carries it. The combined root must still report
+/// it, from the registry read that closes the fold.
+#[test]
+fn combined_json_root_carries_a_diagnostic_only_the_dupes_walk_recorded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2366-dupes-only-carrier","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::write(
+        dir.path().join("src/huge.test.ts"),
+        "// filler\n".repeat(150_000),
+    )
+    .expect("write oversized test file");
+
+    let json = parse_json(&run_fallow_raw(&[
+        "--root",
+        dir.path().to_str().expect("temp path is UTF-8"),
+        "--max-file-size",
+        "1",
+        "--production-dead-code",
+        "--production-health",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+    assert!(json["dupes"].is_object(), "the dupes section ran: {json}");
+    let skipped = combined_root_diagnostics_of_kind(&json, "skipped-large-file");
+    assert_eq!(
+        skipped.len(),
+        1,
+        "the combined root reports what only the dupes walk saw: {}",
+        json["workspace_diagnostics"]
+    );
+    assert_eq!(skipped[0]["path"], "src/huge.test.ts");
+}

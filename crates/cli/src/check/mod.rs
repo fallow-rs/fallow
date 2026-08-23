@@ -389,6 +389,12 @@ pub struct CheckResult {
     pub type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
     /// Bounded non-fatal diagnostics from the semantic backend.
     pub type_aware_warnings: Vec<String>,
+    /// Workspace, source-discovery, and analysis-stage diagnostics as this
+    /// analysis saw them. Captured from the session rather than read back from
+    /// the process registry at output time, because a later analysis in the
+    /// same combined run re-walks the project and clears the source-discovery
+    /// entries this walk recorded (issue #2366).
+    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
     /// Pre-refinement dead-code audit keys captured immediately before the
     /// type-aware pass mutated `results`. `None` when type-aware analysis was
     /// not enabled. The audit gate uses this identity-independent set to fall
@@ -444,12 +450,13 @@ struct CheckAnalysisData {
     retained_modules: Option<Vec<ModuleInfo>>,
     retained_files: Option<Vec<DiscoveredFile>>,
     workspaces: Vec<WorkspaceInfo>,
+    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
     script_used_packages: rustc_hash::FxHashSet<String>,
 }
 
 fn check_data_from_artifacts(
     output: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
-    workspaces: &[WorkspaceInfo],
+    session: &fallow_engine::session::AnalysisSession,
 ) -> CheckAnalysisData {
     CheckAnalysisData {
         results: output.results,
@@ -457,14 +464,15 @@ fn check_data_from_artifacts(
         trace_timings: output.timings,
         retained_modules: output.modules,
         retained_files: output.files,
-        workspaces: workspaces.to_vec(),
+        workspaces: session.workspaces().to_vec(),
+        workspace_diagnostics: session.current_workspace_diagnostics(),
         script_used_packages: output.script_used_packages,
     }
 }
 
 fn check_data_from_plain_artifacts(
     output: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
-    workspaces: &[WorkspaceInfo],
+    session: &fallow_engine::session::AnalysisSession,
 ) -> CheckAnalysisData {
     CheckAnalysisData {
         results: output.results,
@@ -472,7 +480,8 @@ fn check_data_from_plain_artifacts(
         trace_timings: None,
         retained_modules: None,
         retained_files: None,
-        workspaces: workspaces.to_vec(),
+        workspaces: session.workspaces().to_vec(),
+        workspace_diagnostics: session.current_workspace_diagnostics(),
         script_used_packages: output.script_used_packages,
     }
 }
@@ -487,7 +496,7 @@ fn run_check_analysis(
     if opts.retain_modules_for_health {
         return session
             .analyze_dead_code_with_artifacts(true, true)
-            .map(|output| check_data_from_artifacts(output, session.workspaces()))
+            .map(|output| check_data_from_artifacts(output, &session))
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
@@ -496,7 +505,7 @@ fn run_check_analysis(
             .analyze_dead_code_retaining_files(false, opts.trace_opts.any_active())
             .map(|mut output| {
                 output.modules = None;
-                check_data_from_artifacts(output, session.workspaces())
+                check_data_from_artifacts(output, &session)
             })
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
@@ -507,14 +516,14 @@ fn run_check_analysis(
             .map(|mut output| {
                 output.modules = None;
                 output.files = None;
-                check_data_from_artifacts(output, session.workspaces())
+                check_data_from_artifacts(output, &session)
             })
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
     session
         .analyze_dead_code_with_artifacts(false, false)
-        .map(|output| check_data_from_plain_artifacts(output, session.workspaces()))
+        .map(|output| check_data_from_plain_artifacts(output, &session))
         .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
 }
 
@@ -896,6 +905,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         retained_modules,
         mut retained_files,
         workspaces,
+        workspace_diagnostics,
         script_used_packages,
     } = data;
 
@@ -955,6 +965,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         type_aware_meta,
         type_coupling,
         type_aware_warnings,
+        workspace_diagnostics,
         syntactic_dead_code_keys,
         impact_closure: None,
         public_api_keys: None,

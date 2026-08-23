@@ -73,6 +73,13 @@
           ],
           "description": "Health section of the combined run."
         },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Workspace-discovery, source-discovery, and analysis-stage diagnostics\nfor the run (issue #2366). See `CheckOutput::workspace_diagnostics` for\nthe full contract: root-relative paths, omitted when empty. The\ncombined envelope carries them here rather than inside a section, so a\nrun that skips a section (`--skip check`, `--only health`,\n`--only dupes`) still reports every diagnostic its analyses recorded."
+        },
         "next_steps": {
           "type": "array",
           "items": {

@@ -281,6 +281,53 @@ fn health_document_conforms() {
     EnvelopeSchema::load().assert_conforms("health", &json);
 }
 
+/// A project that records a workspace diagnostic: root `overrides` next to
+/// bun's legacy binary `bun.lockb` with no parseable text lockfile, which the
+/// override analysis reports as `bun-lockb-override-resolution-skipped`.
+fn project_recording_a_workspace_diagnostic() -> tempfile::TempDir {
+    let project = tempfile::tempdir().expect("temp dir");
+    let root = project.path();
+    std::fs::create_dir(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"conformance-diagnostic-fixture","main":"src/index.ts","overrides":{"ws":"^8.21.0"}}"#,
+    )
+    .expect("package.json");
+    std::fs::write(root.join("bun.lockb"), []).expect("bun.lockb");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export const entry = 1;\nconsole.log(entry);\n",
+    )
+    .expect("entry");
+    project
+}
+
+/// Issue #2366: the combined envelope's `workspace_diagnostics[]` root field is
+/// optional, so the fixture above validates only its ABSENT shape. Validate a
+/// document that actually carries an entry against the same schema, so the
+/// populated array is instance-checked and not only asserted on by value in
+/// the unit and CLI tests.
+#[test]
+fn combined_document_with_workspace_diagnostics_conforms() {
+    let project = project_recording_a_workspace_diagnostic();
+    let run = run_combined(&CombinedOptions {
+        analysis: analysis_at(project.path()),
+        health_options: ComplexityOptions {
+            complexity: true,
+            score: true,
+            ..ComplexityOptions::default()
+        },
+        ..CombinedOptions::default()
+    })
+    .expect("combined runs");
+    let json = serialize_combined_programmatic_json(run).expect("serialize combined");
+    assert_eq!(
+        json["workspace_diagnostics"][0]["kind"], "bun-lockb-override-resolution-skipped",
+        "the validated document must carry the optional root array: {json}"
+    );
+    EnvelopeSchema::load().assert_conforms("combined", &json);
+}
+
 #[test]
 fn combined_document_conforms() {
     let project = small_project();

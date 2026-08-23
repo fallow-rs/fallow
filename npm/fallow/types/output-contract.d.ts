@@ -11926,6 +11926,15 @@ dupes?: (DupesReportPayload | null)
  */
 health?: (HealthReport | null)
 /**
+ * Workspace-discovery, source-discovery, and analysis-stage diagnostics
+ * for the run (issue #2366). See `CheckOutput::workspace_diagnostics` for
+ * the full contract: root-relative paths, omitted when empty. The
+ * combined envelope carries them here rather than inside a section, so a
+ * run that skips a section (`--skip check`, `--only health`,
+ * `--only dupes`) still reports every diagnostic its analyses recorded.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
+/**
  * Read-only follow-up commands aggregated across the combined run's
  * findings. See `CheckOutput::next_steps` for the contract.
  */

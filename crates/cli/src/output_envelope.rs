@@ -55,6 +55,7 @@ mod tests {
             check: None,
             dupes: None,
             health: None,
+            workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
         }
     }
