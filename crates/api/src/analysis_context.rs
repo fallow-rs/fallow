@@ -157,7 +157,12 @@ impl ProgrammaticAnalysisContext {
     /// Run work inside the per-call Rayon pool.
     pub fn install<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
         debug_mcp_phase("analysis pool install starting");
-        let result = self.pool.install(f);
+        let result = self.pool.install(|| {
+            debug_mcp_phase("analysis pool closure entered");
+            let result = f();
+            debug_mcp_phase("analysis pool closure returned");
+            result
+        });
         debug_mcp_phase("analysis pool install returned");
         result
     }
