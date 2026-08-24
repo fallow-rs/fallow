@@ -1,0 +1,5 @@
+{
+  "name": "issue-2390-trace-consistency",
+  "type": "module",
+  "main": "src/index.ts"
+}

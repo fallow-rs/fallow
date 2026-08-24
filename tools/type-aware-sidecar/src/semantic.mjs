@@ -20,6 +20,7 @@ import {
   isImportTypeNode,
   isNamespaceImport,
   isPropertyAccessExpression,
+  isQualifiedName,
   isPrivateIdentifier,
   isSetAccessorDeclaration,
   isStringLiteralLikeNode,
@@ -431,28 +432,58 @@ const registerSymbolTargets = (root, state, entry) => {
       state.exportEntriesByProject.set(project, projectEntries);
     });
   }
-  entry.resolved.ownerContexts.forEach(({ project, declaration }) => {
-    const symbol = resolveAlias(project.checker, symbolForDeclaration(project, declaration));
-    declarationsForSymbol(project, symbol).forEach((target) => {
-      const namespaces =
-        entry.query.symbol.declarationKind === "export"
-          ? declarationNamespaces(target)
-          : new Set([entry.query.symbol.namespace]);
-      namespaces.forEach((namespace) => addSymbolTarget(root, state, entry, target, namespace));
-    });
+  entry.resolved.ownerContexts.forEach(({ project, declaration, anchor }) => {
+    const namespaces =
+      entry.query.symbol.declarationKind === "export"
+        ? declarationNamespaces(declaration)
+        : new Set([entry.query.symbol.namespace]);
+    namespaces.forEach((namespace) => addSymbolTarget(root, state, entry, declaration, namespace));
+    if (entry.query.symbol.declarationKind === "export" && anchor) {
+      declarationNamespaces(anchor).forEach((namespace) =>
+        addSymbolTarget(root, state, entry, anchor, namespace),
+      );
+    }
   });
   state.contractRelationsByQuery.set(entry.query.id, entry.resolved.contractRelations);
 };
 
 const matchingSymbolEntries = (project, symbol, namespace, targetsByKey) => {
-  return new Set(
-    declarationsForSymbol(project, symbol)
-      .filter((declaration) => declarationNamespaces(declaration).has(namespace))
-      .flatMap((declaration) => {
-        const key = stableDeclarationKey(declaration, namespace);
-        return targetsByKey.get(key) ?? [];
-      }),
+  const declarations = declarationsForSymbol(project, symbol);
+  const matchingLane = declarations.filter((declaration) =>
+    declarationNamespaces(declaration).has(namespace),
   );
+  if (matchingLane.length > 0) {
+    return new Set(
+      matchingLane.flatMap(
+        (declaration) => targetsByKey.get(stableDeclarationKey(declaration, namespace)) ?? [],
+      ),
+    );
+  }
+  return new Set(
+    declarations.flatMap((declaration) =>
+      [...declarationNamespaces(declaration)].flatMap(
+        (declaredNamespace) =>
+          targetsByKey.get(stableDeclarationKey(declaration, declaredNamespace)) ?? [],
+      ),
+    ),
+  );
+};
+
+const matchingAliasEntries = (project, symbol, namespace, targetsByKey) => {
+  const entries = new Set();
+  const seen = new Set();
+  let current = symbol;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    matchingSymbolEntries(project, current, namespace, targetsByKey).forEach((entry) =>
+      entries.add(entry),
+    );
+    if ((current.flags & SymbolFlags.Alias) === 0) break;
+    const aliased = project.checker.getAliasedSymbol(current);
+    if (project.checker.isUnknownSymbol(aliased) || aliased === current) break;
+    current = aliased;
+  }
+  return entries;
 };
 
 const isDeclarationReference = (root, state, entry, node) => {
@@ -488,13 +519,37 @@ const importTypeSpecifier = (node) => {
 const isDynamicImportCall = (node) =>
   isCallExpression(node) && node.expression.getText(node.getSourceFile()) === "import";
 
+const MODULE_SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+
+const lexicalModuleIdentityForText = (project, sourceFile, specifierText) => {
+  if (!specifierText?.startsWith(".")) return undefined;
+  const resolved = path.resolve(path.dirname(sourceFile.fileName), specifierText);
+  const extension = path.extname(resolved);
+  const stem = extension ? resolved.slice(0, -extension.length) : resolved;
+  const candidates = [
+    resolved,
+    ...MODULE_SOURCE_EXTENSIONS.map((candidate) => `${stem}${candidate}`),
+    ...MODULE_SOURCE_EXTENSIONS.map((candidate) => path.join(resolved, `index${candidate}`)),
+  ];
+  for (const candidate of candidates) {
+    const matched = project.program.getSourceFile(candidate);
+    if (matched) return sourceFileIdentity(matched);
+    if (existsSync(candidate)) return canonicalFileIdentity(candidate);
+  }
+  return undefined;
+};
+
+const lexicalModuleIdentity = (project, specifier) =>
+  specifier
+    ? lexicalModuleIdentityForText(project, specifier.getSourceFile(), specifier.text)
+    : undefined;
+
 const moduleIdentityForSpecifier = (project, specifier) => {
   if (!specifier) return undefined;
+  const lexicalIdentity = lexicalModuleIdentity(project, specifier);
+  if (lexicalIdentity) return lexicalIdentity;
   const moduleSymbol = project.checker.getSymbolAtLocation(specifier);
-  const moduleDeclaration = declarationsForSymbol(
-    project,
-    resolveAlias(project.checker, moduleSymbol),
-  )[0];
+  const moduleDeclaration = declarationsForSymbol(project, moduleSymbol)[0];
   return moduleDeclaration ? sourceFileIdentity(moduleDeclaration.getSourceFile()) : undefined;
 };
 
@@ -507,7 +562,9 @@ const namespaceImportDeclaration = (project, node) => {
       : undefined
     : isElementAccessExpression(parent) && parent.argumentExpression === node
       ? parent.expression
-      : undefined;
+      : isQualifiedName(parent) && parent.right === node
+        ? parent.left
+        : undefined;
   if (!namespace) return undefined;
   if (!isIdentifier(namespace)) return undefined;
   const symbol = project.checker.getSymbolAtLocation(namespace);
@@ -516,9 +573,28 @@ const namespaceImportDeclaration = (project, node) => {
     .find(isNamespaceImport);
 };
 
+const localAliasModuleEdgeDeclaration = (project, node) => {
+  const symbol = project.checker.getSymbolAtLocation(node);
+  return symbol?.declarations
+    ?.map((declaration) => moduleEdgeDeclaration(declaration.resolve(project)))
+    .find(Boolean);
+};
+
 const referencedModuleIdentity = (project, node) => {
+  const importType = ancestorImportType(node);
+  const lexicalImportType = importType
+    ?.getText(importType.getSourceFile())
+    .match(/import\s*\(\s*["']([^"']+)["']/u)?.[1];
+  const lexicalIdentity = lexicalModuleIdentityForText(
+    project,
+    node.getSourceFile(),
+    lexicalImportType,
+  );
+  if (lexicalIdentity) return lexicalIdentity;
   const declaration =
-    moduleEdgeDeclaration(node) ?? moduleEdgeDeclaration(namespaceImportDeclaration(project, node));
+    moduleEdgeDeclaration(node) ??
+    moduleEdgeDeclaration(namespaceImportDeclaration(project, node)) ??
+    localAliasModuleEdgeDeclaration(project, node);
   const declarationSpecifier = declaration?.moduleSpecifier;
   const specifier =
     declarationSpecifier && isStringLiteralLikeNode(declarationSpecifier)
@@ -527,13 +603,22 @@ const referencedModuleIdentity = (project, node) => {
   return moduleIdentityForSpecifier(project, specifier);
 };
 
-const isExactExportReference = (project, entry, node) =>
-  entry.query.symbol.declarationKind !== "export" ||
-  referencedModuleIdentity(project, node) ===
-    canonicalFileIdentity(entry.query.symbol.absolutePath);
+const isExactExportReference = (project, entry, node) => {
+  if (entry.query.symbol.declarationKind !== "export") return true;
+  const referencedModule = referencedModuleIdentity(project, node);
+  if (!referencedModule) return false;
+  const queryModule = canonicalFileIdentity(entry.query.symbol.absolutePath);
+  return (
+    referencedModule === queryModule ||
+    sourceFileIdentity(entry.resolved.declaration.getSourceFile()) === queryModule
+  );
+};
 
 const recordSymbolUse = (root, state, project, entry, node, namespace) => {
   if (isDeclarationReference(root, state, entry, node)) return;
+  if (isDeclaration(node.parent) && node.parent.name === node) return;
+  const moduleEdge = moduleEdgeDeclaration(node);
+  if (moduleEdge && isImportDeclaration(moduleEdge)) return;
   if (!isExactExportReference(project, entry, node)) return;
   const evidence = state.evidenceByQuery.get(entry.query.id);
   state.totalByQuery.set(entry.query.id, state.totalByQuery.get(entry.query.id) + 1);
@@ -635,6 +720,26 @@ const referenceNamespaces = (project, node, symbol) => {
   return namespaces.size > 0 ? [...namespaces] : [isTypePosition(node) ? "type" : "value"];
 };
 
+const surfaceEntriesForNode = (state, project, node, namespace) => {
+  if (moduleEdgeDeclaration(node)) return new Set();
+  const moduleIdentity = referencedModuleIdentity(project, node);
+  if (!moduleIdentity) return new Set();
+  const direct = [...(state.exportEntriesByModule.get(moduleIdentity) ?? [])].filter(
+    (entry) =>
+      entry.query.symbol.exportedName === node.text && entry.query.symbol.namespace === namespace,
+  );
+  const entries = new Set(direct);
+  for (const entry of direct) {
+    for (const { declaration } of entry.resolved.ownerContexts) {
+      const symbol = resolveAlias(project.checker, symbolForDeclaration(project, declaration));
+      matchingSymbolEntries(project, symbol, namespace, state.targetsByKey).forEach((related) =>
+        entries.add(related),
+      );
+    }
+  }
+  return entries;
+};
+
 const scanSymbolUseFile = (root, state, project, sourceFile, includeDefaultImports) => {
   const projectEntries = classMemberEntrySetForProject(state, project);
   const nodes = [];
@@ -644,7 +749,7 @@ const scanSymbolUseFile = (root, state, project, sourceFile, includeDefaultImpor
       recordStringDispatchedMemberAccess(state, projectEntries, node);
       recordComputedMemberAccess(state, project, projectEntries, node);
     }
-    if (isIdentifierReference(node, state.candidateNames, includeDefaultImports)) {
+    if (isIdentifierReference(node, undefined, includeDefaultImports)) {
       nodes.push(node);
       return;
     }
@@ -652,9 +757,13 @@ const scanSymbolUseFile = (root, state, project, sourceFile, includeDefaultImpor
   });
   const symbols = project.checker.getSymbolAtLocation(nodes);
   nodes.forEach((node, index) => {
-    const symbol = resolveAlias(project.checker, symbols[index]);
+    const rawSymbol = symbols[index];
+    const symbol = resolveAlias(project.checker, rawSymbol);
     referenceNamespaces(project, node, symbol).forEach((namespace) => {
-      const entries = matchingSymbolEntries(project, symbol, namespace, state.targetsByKey);
+      const entries = new Set([
+        ...matchingAliasEntries(project, rawSymbol, namespace, state.targetsByKey),
+        ...surfaceEntriesForNode(state, project, node, namespace),
+      ]);
       entries.forEach((entry) => recordSymbolUse(root, state, project, entry, node, namespace));
     });
   });
@@ -956,7 +1065,7 @@ const resolvedOwnerContext = (query, owner) => {
   const anchor = symbolQueryAnchor(owner.project, query);
   const target = resolvedAnchorTarget(owner.project, anchor, query.symbol);
   return symbolQueryResolved(owner.project, query.symbol, anchor, target)
-    ? { ...owner, ...target }
+    ? { ...owner, anchor, ...target }
     : undefined;
 };
 

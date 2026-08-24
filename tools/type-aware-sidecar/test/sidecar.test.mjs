@@ -1989,6 +1989,154 @@ test("protocol v7 fails closed for an unknown exact symbol identity", () => {
   }
 });
 
+test("protocol v7 counts reads, not import and re-export declarations", () => {
+  const cases = [
+    {
+      name: "unread import",
+      source: "export const helper = 1;\n",
+      bridge: 'import { helper } from "./source";\nexport const entry = 1;\n',
+      expected: "confirmed-no-static-references",
+    },
+    {
+      name: "read import",
+      source: "export const helper = 1;\n",
+      bridge: 'import { helper } from "./source";\nexport const entry = helper;\n',
+      expected: "confirmed-used",
+    },
+  ];
+
+  for (const expected of cases) {
+    const root = makeProject();
+    try {
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+      );
+      write(root, "src/source.ts", expected.source);
+      write(root, "src/index.ts", expected.bridge);
+      const identity = symbolIdentity({
+        source: expected.source,
+        marker: "helper",
+        file: "src/source.ts",
+        namespace: "value",
+        declarationKind: "export",
+        exportedName: "helper",
+        localName: "helper",
+      });
+
+      const response = runSidecar(
+        semanticRequest(root, [{ id: 51, operation: "symbol-use", symbol: identity }]),
+      );
+      const result = response.results[0];
+      assert.equal(result.assertion, expected.expected, expected.name);
+      if (expected.expected === "confirmed-used") {
+        assert.equal(result.total_evidence_count, 1, expected.name);
+        assert.equal(result.evidence[0].line, 2, expected.name);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("protocol v7 keeps distinct type and value declarations isolated", () => {
+  const root = makeProject();
+  try {
+    const source = "export type Foo = number;\nexport const Foo = 1;\n";
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/source.ts", source);
+    write(root, "src/index.ts", 'import type { Foo } from "./source";\nexport type Used = Foo;\n');
+    const identity = symbolIdentity({
+      source,
+      marker: "Foo",
+      occurrence: 2,
+      file: "src/source.ts",
+      namespace: "value",
+      declarationKind: "export",
+      exportedName: "Foo",
+      localName: "Foo",
+    });
+    Object.assign(identity, utf8Position(source, "Foo", 2));
+
+    const response = runSidecar(
+      semanticRequest(root, [{ id: 52, operation: "symbol-use", symbol: identity }]),
+    );
+    assert.equal(response.results[0].assertion, "confirmed-no-static-references");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("protocol v7 proves cross-lane and namespace-qualified reads in one scan", () => {
+  const root = makeProject();
+  try {
+    const valueSource = "export const helper = 1;\n";
+    const typeSource = "export interface Shape { value: number }\n";
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/value.ts", valueSource);
+    write(root, "src/shape.ts", typeSource);
+    write(
+      root,
+      "src/index.ts",
+      [
+        'import type { helper } from "./value";',
+        'import * as shapes from "./shape";',
+        "export type Value = typeof helper;",
+        "export type Model = shapes.Shape;",
+        "",
+      ].join("\n"),
+    );
+    const requestValue = semanticRequest(root, [
+      {
+        id: 53,
+        operation: "symbol-use",
+        symbol: symbolIdentity({
+          source: valueSource,
+          marker: "helper",
+          file: "src/value.ts",
+          namespace: "value",
+          declarationKind: "export",
+          exportedName: "helper",
+          localName: "helper",
+        }),
+      },
+      {
+        id: 54,
+        operation: "symbol-trace",
+        symbol: symbolIdentity({
+          source: typeSource,
+          marker: "Shape",
+          file: "src/shape.ts",
+          namespace: "type",
+          declarationKind: "export",
+          exportedName: "Shape",
+          localName: "Shape",
+        }),
+      },
+    ]);
+
+    const response = runSidecar(requestValue);
+    const directAnalysis = analyzeSemanticQueries(parseRequest(requestValue));
+    assert.equal(response.results[0].assertion, "confirmed-used");
+    assert.equal(response.results[0].evidence[0].namespace, "value");
+    assert.equal(response.results[1].assertion, "references-found");
+    assert.equal(response.results[1].evidence[0].path, "src/index.ts");
+    assert.equal(response.results[1].evidence[0].namespace, "type");
+    assert.equal(directAnalysis.sourceScanCount, 3);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v7 resolves a generic export identity through an alias", () => {
   const root = makeProject();
   try {

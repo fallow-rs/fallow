@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 
 pub use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
-    ImpactClosureGap, ImpactClosureTrace, PipelineTimings, ReExportChain, TracedCloneGroup,
-    TracedExport, TracedReExport,
+    ImpactClosureGap, ImpactClosureTrace, NamespacedExportReferences, PipelineTimings,
+    ReExportChain, TracedCloneGroup, TracedExport, TracedReExport,
 };
+use fallow_types::trace_chain::StarExportAmbiguity;
 use rustc_hash::FxHashSet;
 
 use crate::duplicates::{
@@ -77,7 +78,14 @@ fn collect_re_export_chains(
                         route.exported_name(),
                         namespace,
                     )
-                    .len(),
+                    .into_iter()
+                    .filter(|reference| {
+                        graph
+                            .modules
+                            .get(reference.from_file.0 as usize)
+                            .is_some_and(crate::graph::ModuleNode::is_reachable)
+                    })
+                    .count(),
             })
         })
         .collect()
@@ -128,16 +136,43 @@ pub fn trace_export(
         .iter()
         .find(|m| path_matches(&m.path, root, file_path))?;
 
-    let surface = select_export(graph, module, export_name)?;
-    let (namespace, direct_references) =
+    let star_export_ambiguity =
+        trace_star_export_ambiguity(graph, root, module.file_id, export_name);
+    let Some(surface) = select_export(graph, module, export_name) else {
+        let ambiguity = star_export_ambiguity?;
+        let namespace = ambiguity.namespaces.first().copied().unwrap_or_default();
+        return Some(ExportTrace {
+            file: module
+                .path
+                .strip_prefix(root)
+                .unwrap_or(&module.path)
+                .to_path_buf(),
+            export_name: export_name.to_string(),
+            namespace,
+            file_reachable: module.is_reachable(),
+            is_entry_point: module.is_entry_point(),
+            is_used: false,
+            direct_references: Vec::new(),
+            direct_references_by_namespace: Vec::new(),
+            star_export_ambiguity: Some(ambiguity),
+            re_export_chains: Vec::new(),
+            reason: "Star re-export collision makes this name ambiguous".to_string(),
+            semantic: None,
+        });
+    };
+    let (namespace, direct_references, direct_references_by_namespace) =
         crediting_export_references(graph, root, module.file_id, export_name, surface);
 
     let re_export_chains =
         collect_re_export_chains(graph, root, module.file_id, export_name, namespace);
 
     let reference_count = direct_references.len();
-    let is_used = reference_count > 0;
-    let reason = export_trace_reason(module, reference_count, is_used, &re_export_chains);
+    let is_used = module.is_reachable() && reference_count > 0;
+    let reason = if star_export_ambiguity.is_some() {
+        "Star re-export collision prevents consumers from resolving this declaration".to_string()
+    } else {
+        export_trace_reason(module, reference_count, is_used, &re_export_chains)
+    };
 
     Some(ExportTrace {
         file: module
@@ -154,6 +189,8 @@ pub fn trace_export(
         is_entry_point: module.is_entry_point(),
         is_used,
         direct_references,
+        direct_references_by_namespace,
+        star_export_ambiguity,
         re_export_chains,
         reason,
         semantic: None,
@@ -172,6 +209,12 @@ fn direct_export_references(
     graph
         .effective_export_surface_references(file_id, export_name, namespace)
         .into_iter()
+        .filter(|reference| {
+            graph
+                .modules
+                .get(reference.from_file.0 as usize)
+                .is_some_and(crate::graph::ModuleNode::is_reachable)
+        })
         .filter(|reference| referenced_files.insert(reference.from_file))
         .map(|r| reference_to_export_reference(graph, root, r))
         .collect()
@@ -194,27 +237,102 @@ fn crediting_export_references(
     file_id: crate::discover::FileId,
     export_name: &str,
     surface: crate::graph::EffectiveExportSurface<'_>,
-) -> (ExportNamespace, Vec<ExportReference>) {
+) -> (
+    ExportNamespace,
+    Vec<ExportReference>,
+    Vec<NamespacedExportReferences>,
+) {
     let namespace = surface.namespace();
     let references = direct_export_references(graph, root, file_id, export_name, namespace);
-    if !references.is_empty() {
-        return (namespace, references);
-    }
     let other = match namespace {
         ExportNamespace::Type => ExportNamespace::Value,
         ExportNamespace::Value => ExportNamespace::Type,
     };
     let same_binding = graph
         .effective_export_surface(file_id, export_name, other)
-        .is_some_and(|candidate| candidate.binding() == surface.binding());
+        .is_some_and(|candidate| {
+            graph.effective_bindings_share_declaration_group(candidate.binding(), surface.binding())
+        });
     if !same_binding {
-        return (namespace, references);
+        return (
+            namespace,
+            references.clone(),
+            vec![namespaced_references(namespace, references)],
+        );
     }
     let other_references = direct_export_references(graph, root, file_id, export_name, other);
-    if other_references.is_empty() {
-        return (namespace, references);
+    let by_namespace = vec![
+        namespaced_references(namespace, references.clone()),
+        namespaced_references(other, other_references.clone()),
+    ];
+    if references.is_empty() && !other_references.is_empty() {
+        (other, other_references, by_namespace)
+    } else {
+        (namespace, references, by_namespace)
     }
-    (other, other_references)
+}
+
+fn namespaced_references(
+    namespace: ExportNamespace,
+    references: Vec<ExportReference>,
+) -> NamespacedExportReferences {
+    NamespacedExportReferences {
+        namespace: match namespace {
+            ExportNamespace::Type => fallow_types::semantic::SemanticNamespace::Type,
+            ExportNamespace::Value => fallow_types::semantic::SemanticNamespace::Value,
+        },
+        reference_count: references.len(),
+        references,
+    }
+}
+
+fn trace_star_export_ambiguity(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_id: crate::discover::FileId,
+    export_name: &str,
+) -> Option<StarExportAmbiguity> {
+    let collisions: Vec<_> = graph
+        .ambiguous_star_exports()
+        .into_iter()
+        .filter(|collision| {
+            collision.name.as_ref() == export_name
+                && (collision.barrel == file_id || collision.contributors.contains(&file_id))
+        })
+        .collect();
+    if collisions.is_empty() {
+        return None;
+    }
+    let mut sources: Vec<_> = collisions
+        .iter()
+        .flat_map(|collision| collision.contributors.iter())
+        .filter_map(|contributor| graph.modules.get(contributor.0 as usize))
+        .map(|module| {
+            module
+                .path
+                .strip_prefix(root)
+                .unwrap_or(&module.path)
+                .to_path_buf()
+        })
+        .collect();
+    sources.sort();
+    sources.dedup();
+    let mut namespaces: Vec<_> = collisions
+        .iter()
+        .map(|collision| match collision.namespace {
+            ExportNamespace::Type => fallow_types::semantic::SemanticNamespace::Type,
+            ExportNamespace::Value => fallow_types::semantic::SemanticNamespace::Value,
+        })
+        .collect();
+    namespaces.sort_unstable_by_key(|namespace| match namespace {
+        fallow_types::semantic::SemanticNamespace::Type => 0,
+        fallow_types::semantic::SemanticNamespace::Value => 1,
+    });
+    namespaces.dedup();
+    Some(StarExportAmbiguity {
+        sources,
+        namespaces,
+    })
 }
 
 /// Resolve the exact source identity required by the semantic sidecar for a
@@ -1454,6 +1572,7 @@ mod tests {
         source_exports: Vec<ExportInfo>,
         import_is_type_only: bool,
         classified_usage: bool,
+        semantic_facts: Vec<fallow_types::extract::SemanticFact>,
     ) -> ModuleGraph {
         let files = vec![
             DiscoveredFile {
@@ -1497,6 +1616,7 @@ mod tests {
                 file_id: FileId(1),
                 path: files[1].path.clone(),
                 exports: source_exports.into(),
+                semantic_facts: semantic_facts.into(),
                 ..Default::default()
             },
         ];
@@ -1588,7 +1708,7 @@ mod tests {
         // Issue #2371: `import type { Foo }` of `export const Foo` lands on the
         // value declaration through the type-lane fallback, and dead-code
         // counts that as a use. The trace reports the crediting lane.
-        let graph = source_consumer_graph(vec![named_foo_export(false)], true, false);
+        let graph = source_consumer_graph(vec![named_foo_export(false)], true, false, Vec::new());
 
         let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
             .expect("value export exists");
@@ -1634,6 +1754,12 @@ mod tests {
             PathBuf::from("src/entry.ts"),
             "the value consumer stays the listed reference"
         );
+        assert_eq!(trace.direct_references_by_namespace.len(), 2);
+        assert!(trace.direct_references_by_namespace.iter().any(|lane| {
+            lane.namespace == fallow_types::semantic::SemanticNamespace::Type
+                && lane.reference_count == 1
+                && lane.references[0].from_file == PathBuf::from("src/typed.ts")
+        }));
     }
 
     #[test]
@@ -1645,6 +1771,7 @@ mod tests {
             vec![named_foo_export(false), named_foo_export(false)],
             true,
             false,
+            Vec::new(),
         );
 
         let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
@@ -1664,6 +1791,34 @@ mod tests {
     }
 
     #[test]
+    fn trace_credits_a_class_interface_declaration_merge() {
+        let mut interface = named_foo_export(true);
+        interface.span = oxc_span::Span::new(0, 3);
+        let mut class = named_foo_export(false);
+        class.span = oxc_span::Span::new(4, 7);
+        let graph = source_consumer_graph(
+            vec![interface, class],
+            true,
+            true,
+            vec![fallow_types::extract::SemanticFact::DeclarationMerge(
+                fallow_types::extract::DeclarationMergeFact {
+                    export_spans: vec![(0, 3), (4, 7)],
+                },
+            )],
+        );
+
+        let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
+            .expect("merged class export exists");
+
+        assert_eq!(
+            trace.namespace,
+            fallow_types::semantic::SemanticNamespace::Type
+        );
+        assert!(trace.is_used);
+        assert_eq!(trace.direct_references.len(), 1);
+    }
+
+    #[test]
     fn trace_keeps_the_value_namespace_when_lanes_hold_distinct_bindings() {
         // Deliberate negative control: two same-name declarations in opposite
         // lanes are two bindings, so the value lane is kept even though the
@@ -1675,6 +1830,7 @@ mod tests {
             vec![named_foo_export(false), named_foo_export(true)],
             false,
             true,
+            Vec::new(),
         );
 
         let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
@@ -1709,7 +1865,7 @@ mod tests {
             is_instance_returning_static: false,
             is_self_returning: false,
         }];
-        let graph = source_consumer_graph(vec![owner], true, false);
+        let graph = source_consumer_graph(vec![owner], true, false, Vec::new());
 
         let trace = trace_class_member(&graph, Path::new("/project"), "src/source.ts", "run")
             .expect("member of the traced export");
@@ -2645,6 +2801,8 @@ mod tests {
                 from_file: PathBuf::from(r"src\entry.ts"),
                 kind: "named import".to_string(),
             }],
+            direct_references_by_namespace: Vec::new(),
+            star_export_ambiguity: None,
             re_export_chains: vec![ReExportChain {
                 barrel_file: PathBuf::from(r"src\index.ts"),
                 exported_as: "foo".to_string(),

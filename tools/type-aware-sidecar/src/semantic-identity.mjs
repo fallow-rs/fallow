@@ -237,9 +237,15 @@ export const symbolForDeclaration = (project, declaration) =>
 
 export const resolveAlias = (checker, symbol) => {
   if (!symbol) return undefined;
-  if ((symbol.flags & SymbolFlags.Alias) === 0) return symbol;
-  const aliased = checker.getAliasedSymbol(symbol);
-  return checker.isUnknownSymbol(aliased) ? symbol : aliased;
+  const seen = new Set();
+  let current = symbol;
+  while ((current.flags & SymbolFlags.Alias) !== 0 && !seen.has(current)) {
+    seen.add(current);
+    const aliased = checker.getAliasedSymbol(current);
+    if (checker.isUnknownSymbol(aliased) || aliased === current) return current;
+    current = aliased;
+  }
+  return current;
 };
 
 export const declarationsForSymbol = (project, symbol) =>

@@ -42,7 +42,9 @@ fn print_lines(lines: &[String]) {
 fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
     let mut lines = Vec::new();
     lines.push(String::new());
-    let status_icon = if trace.is_used {
+    let status_icon = if trace.star_export_ambiguity.is_some() {
+        "AMBIGUOUS".yellow().bold()
+    } else if trace.is_used {
         "USED".green().bold()
     } else {
         "UNUSED".red().bold()
@@ -68,7 +70,20 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
     lines.push(format!("  Namespace: {}", namespace_name(trace.namespace)));
     lines.push(format!("  Reason: {}", trace.reason));
 
+    if let Some(ambiguity) = &trace.star_export_ambiguity {
+        lines.push(format!(
+            "  Collision sources: {}",
+            ambiguity
+                .sources
+                .iter()
+                .map(|source| source.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
     push_export_trace_direct_references(&mut lines, trace);
+    push_export_trace_namespaced_references(&mut lines, trace);
     push_export_trace_re_export_chains(&mut lines, trace);
     if let Some(semantic) = &trace.semantic {
         push_semantic_trace(&mut lines, semantic, trace.namespace);
@@ -79,6 +94,33 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
 
 fn push_export_trace_direct_references(lines: &mut Vec<String>, trace: &ExportTrace) {
     push_direct_references(lines, &trace.direct_references);
+}
+
+fn push_export_trace_namespaced_references(lines: &mut Vec<String>, trace: &ExportTrace) {
+    let other_lanes: Vec<_> = trace
+        .direct_references_by_namespace
+        .iter()
+        .filter(|lane| lane.namespace != trace.namespace && lane.reference_count > 0)
+        .collect();
+    if other_lanes.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    for lane in other_lanes {
+        lines.push(format!(
+            "  {} additional {}-namespace reference(s):",
+            lane.reference_count,
+            namespace_name(lane.namespace)
+        ));
+        for reference in &lane.references {
+            lines.push(format!(
+                "    {} {} ({})",
+                "->".dimmed(),
+                reference.from_file.display(),
+                reference.kind.dimmed()
+            ));
+        }
+    }
 }
 
 fn push_direct_references(lines: &mut Vec<String>, refs: &[ExportReference]) {
@@ -540,6 +582,7 @@ mod tests {
         ReExportChain, TracedCloneGroup, TracedExport, TracedReExport,
     };
     use fallow_types::duplicates::{CloneInstance, RefactoringKind, RefactoringSuggestion};
+    use fallow_types::trace::NamespacedExportReferences;
 
     use super::*;
 
@@ -593,6 +636,8 @@ mod tests {
                 from_file: PathBuf::from("src/index.ts"),
                 kind: "named import".to_string(),
             }],
+            direct_references_by_namespace: Vec::new(),
+            star_export_ambiguity: None,
             re_export_chains: Vec::new(),
             reason: "Used by 1 file(s)".to_string(),
             semantic,
@@ -720,7 +765,7 @@ mod tests {
 
     #[test]
     fn export_trace_renders_reachability_references_and_barrels() {
-        let trace = ExportTrace {
+        let mut trace = ExportTrace {
             file: PathBuf::from("src/lib.ts"),
             export_name: "formatUser".to_string(),
             namespace: fallow_types::semantic::SemanticNamespace::Value,
@@ -731,6 +776,15 @@ mod tests {
                 from_file: PathBuf::from("src/app.ts"),
                 kind: "value".to_string(),
             }],
+            direct_references_by_namespace: vec![NamespacedExportReferences {
+                namespace: fallow_types::semantic::SemanticNamespace::Type,
+                reference_count: 1,
+                references: vec![ExportReference {
+                    from_file: PathBuf::from("src/types.ts"),
+                    kind: "type import".to_string(),
+                }],
+            }],
+            star_export_ambiguity: None,
             re_export_chains: vec![ReExportChain {
                 barrel_file: PathBuf::from("src/index.ts"),
                 exported_as: "formatUser".to_string(),
@@ -748,8 +802,18 @@ mod tests {
         assert!(rendered.contains("Reason: referenced from reachable code"));
         assert!(rendered.contains("1 direct reference(s):"));
         assert!(rendered.contains("-> src/app.ts (value)"));
+        assert!(rendered.contains("1 additional type-namespace reference(s):"));
+        assert!(rendered.contains("-> src/types.ts (type import)"));
         assert!(rendered.contains("Re-exported through:"));
         assert!(rendered.contains("-> src/index.ts as 'formatUser' (2 ref(s))"));
+
+        trace.star_export_ambiguity = Some(fallow_types::trace_chain::StarExportAmbiguity {
+            sources: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
+            namespaces: vec![fallow_types::semantic::SemanticNamespace::Value],
+        });
+        let ambiguous = plain(&build_export_trace_human_lines(&trace));
+        assert!(ambiguous.contains("AMBIGUOUS formatUser"));
+        assert!(ambiguous.contains("Collision sources: src/a.ts, src/b.ts"));
     }
 
     #[test]

@@ -236,6 +236,12 @@ pub enum SemanticGapReason {
     FrameworkContractProvenance,
     /// A configured request or response capacity was reached.
     Capacity,
+    /// Checker references exist, but every referenced file is unreachable
+    /// from the analyzed entry points and therefore cannot refute dead code.
+    UnreachableEvidence,
+    /// Checker evidence consists only of re-export declarations, which do not
+    /// prove that any reachable consumer reads the exposed binding.
+    NonCreditingEvidence,
     /// The requested syntax or declaration kind is unsupported.
     UnsupportedSyntax,
 }

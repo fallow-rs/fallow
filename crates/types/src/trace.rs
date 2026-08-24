@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::duplicates::{CloneInstance, RefactoringSuggestion};
+use crate::semantic::SemanticNamespace;
 use crate::serde_path;
+use crate::trace_chain::StarExportAmbiguity;
 
 /// Result of tracing an export: why it is considered used or unused.
 #[derive(Debug, Serialize)]
@@ -23,9 +25,7 @@ pub struct ExportTrace {
     /// other lane's references are listed and this field names it, so a value
     /// export whose only credit is a bound `import type` reports `type` with
     /// `is_used: true`. `is_used` and `direct_references` follow the listed
-    /// lane only; file reachability stays a separate axis, so an export in an
-    /// unreachable file can still report `is_used: true` next to
-    /// `file_reachable: false` (the value lane behaves the same way). When the
+    /// lane only, and only reachable reference sources can credit it. When the
     /// other lane resolves to a separate same-name declaration the preferred
     /// lane is kept, including a declaration merge that splits across lanes
     /// such as an `interface` next to a same-name `class`, where dead-code
@@ -45,6 +45,16 @@ pub struct ExportTrace {
     pub is_used: bool,
     /// Files that reference this export directly.
     pub direct_references: Vec<ExportReference>,
+    /// Reachable direct references grouped by namespace. This is additive to
+    /// `namespace` and `direct_references`, whose winning-lane meaning remains
+    /// unchanged for backwards compatibility.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub direct_references_by_namespace: Vec<NamespacedExportReferences>,
+    /// A star-export collision that makes the traced name ambiguous. When
+    /// present, `is_used: false` is an abstention rather than an unused-code
+    /// verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub star_export_ambiguity: Option<StarExportAmbiguity>,
     /// Re-export chains that pass through this export.
     pub re_export_chains: Vec<ReExportChain>,
     /// Human-readable reason summary.
@@ -104,7 +114,7 @@ pub struct ClassMemberTrace {
 }
 
 /// A direct reference to an export.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExportReference {
     /// File that contains the reference.
@@ -112,6 +122,18 @@ pub struct ExportReference {
     pub from_file: PathBuf,
     /// Reference kind, such as named import, default import, or re-export.
     pub kind: String,
+}
+
+/// Direct references that credit one namespace of an export binding.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct NamespacedExportReferences {
+    /// Credited namespace.
+    pub namespace: SemanticNamespace,
+    /// Number of reachable references in this namespace.
+    pub reference_count: usize,
+    /// Reachable references in deterministic graph order.
+    pub references: Vec<ExportReference>,
 }
 
 /// A re-export chain showing how an export is propagated.
