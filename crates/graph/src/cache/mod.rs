@@ -194,7 +194,14 @@ pub use store::GraphCacheStore;
 /// the persisted graph. Warm 43 caches hold the re-export edge, the laundered
 /// entry surface, and the value-lane credits, and a graph-cache hit skips the
 /// build entirely.
-pub const GRAPH_CACHE_VERSION: u32 = 44;
+///
+/// Bumped to 45 for issues #2391, #2395, and #2397: namespace handover now
+/// covers require, dynamic-import, Vue, and CSS Module bindings; ambient plain
+/// stars retain star-surface exposure; equivalent default spellings share the
+/// same duplicate-export rules; and proven CommonJS object maps use member
+/// narrowing. Those reference outcomes are baked into the persisted graph, so
+/// a warm 44 cache would skip the corrected build logic.
+pub const GRAPH_CACHE_VERSION: u32 = 45;
 
 /// Cached form of a resolved target.
 ///

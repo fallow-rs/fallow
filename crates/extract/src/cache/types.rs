@@ -996,7 +996,15 @@ use crate::MemberKind;
 /// star, instead of a file-level type-only star re-export. Warm 279 caches
 /// replay that re-export, so the declaring file would keep laundering the
 /// target's value exports into its own surface.
-pub(super) const CACHE_VERSION: u32 = 280;
+///
+/// Bumped to 281 for issues #2391, #2393, #2395, and #2397: extraction now
+/// records require and dynamic-import whole-object usage across their full
+/// binding lifetimes, uses one source-mapped MDX statement stream, recognizes
+/// every supported CSS Module extension consistently, and persists the
+/// conservative single-static-CommonJS-object-map semantic fact. Warm 280
+/// caches lack those binding, statement, stylesheet, and provenance facts, so
+/// they would replay the pre-fix crediting and MDX token source on upgrade.
+pub(super) const CACHE_VERSION: u32 = 281;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -1027,7 +1035,11 @@ pub(super) const CACHE_VERSION: u32 = 280;
 /// word "import" used to swallow the whole file, and a statement head the old
 /// prefix match missed used to be skipped), so clone groups inside MDX would
 /// stay hidden on upgrade.
-pub const DUPES_CACHE_VERSION: u32 = 11;
+///
+/// Bumped to 12 for issue #2393: MDX duplicate tokenization now consumes the
+/// same source-mapped accepted statement stream as graph extraction. Warm v11
+/// entries contain compacted or truncated token streams and stale source spans.
+pub const DUPES_CACHE_VERSION: u32 = 12;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.

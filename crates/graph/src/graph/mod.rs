@@ -879,6 +879,29 @@ impl ModuleGraph {
         self.effective_exports.resolve(file_id, name, namespace)
     }
 
+    /// Whether two effective bindings denote the same declaration surface.
+    ///
+    /// TypeScript declaration merges occupy separate export slots while
+    /// representing one symbol. Consumers that compare type and value lanes
+    /// use this instead of raw binding equality so either half can carry the
+    /// reference credit for the merged declaration.
+    #[must_use]
+    pub fn effective_bindings_share_declaration_group(
+        &self,
+        left: EffectiveExportBinding,
+        right: EffectiveExportBinding,
+    ) -> bool {
+        if left == right || left.origin_file() != right.origin_file() {
+            return left == right;
+        }
+        let Some(right_slot) = right.origin_slot() else {
+            return false;
+        };
+        self.effective_exports
+            .declaration_group_slots(left)
+            .contains(&right_slot)
+    }
+
     /// Resolve one exported name to its unique direct declaration.
     ///
     /// Missing and ambiguous bindings return `None`. Namespace-object exports

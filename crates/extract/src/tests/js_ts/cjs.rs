@@ -256,6 +256,28 @@ fn import_equals_require_classifies_type_and_value_usage() {
     );
 }
 
+#[test]
+fn ordinary_require_classifies_qualified_type_usage() {
+    let info = parse_source(
+        "const T = require('./t');\nexport const f = (v: T.Shape): T.Result => v.value;",
+    );
+    assert!(
+        info.type_referenced_import_bindings
+            .iter()
+            .any(|binding| binding == "T"),
+        "`T.Shape` and `T.Result` are type references: {:?}",
+        info.type_referenced_import_bindings
+    );
+    assert!(
+        !info
+            .value_referenced_import_bindings
+            .iter()
+            .any(|binding| binding == "T"),
+        "the require binding is not read as a runtime value: {:?}",
+        info.value_referenced_import_bindings
+    );
+}
+
 /// A binding used only in type position credits type space alone, so the value
 /// exports of the target stay narrowable.
 #[test]
@@ -298,6 +320,12 @@ fn unreferenced_import_equals_reports_an_unused_import_binding() {
     assert_eq!(
         info.unused_import_bindings, esm_twin.unused_import_bindings,
         "the namespace-import twin reports the same way"
+    );
+
+    let ordinary = parse_source("const Unused = require('./unused');\nexport const other = 1;");
+    assert_eq!(
+        ordinary.unused_import_bindings, esm_twin.unused_import_bindings,
+        "an ordinary require binding follows the same unused rule"
     );
 
     // The erased spelling is elided just as completely, and its twin is

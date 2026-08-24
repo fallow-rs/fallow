@@ -111,54 +111,6 @@ struct ReExportContext<'a> {
     reference_paths: &'a mut ReferencePathInterner,
 }
 
-/// The targets whose whole namespace object Phase 2 saw observed, split by
-/// whether the observation survives the target being unreachable.
-///
-/// An ambient `declare module 'pkg' { export * from './impl' }` states the
-/// shape of an external module id (issue #2357). Whoever imports that id
-/// observes the whole surface, and the shim file only stores the declaration,
-/// so neither the shim's nor the target's place in this graph says anything
-/// about who looks: the observation stands at any reachability, and the chain
-/// behind the target can re-enter modules an entry point does reach.
-///
-/// Every other observer is a real consumer in this graph (a whole-object
-/// namespace use, a dynamic-import pattern match, a bindingless side-effect
-/// `require()`, a namespace binding re-exported under its own name). A target
-/// no entry point reaches has no observer left that any entry point reaches
-/// either, and the report already calls it an unused file, so crediting its
-/// chain would only stack unused-export rows underneath that row.
-#[derive(Default)]
-pub(in crate::graph) struct WholeModuleObservations {
-    /// Targets an ambient module body re-exports from, at any reachability.
-    ambient: FxHashSet<FileId>,
-    /// Targets a consumer in this graph observes as a whole object.
-    observed: FxHashSet<FileId>,
-}
-
-impl WholeModuleObservations {
-    /// Record a whole-object observation made by a consumer in this graph.
-    pub(in crate::graph) fn observe(&mut self, target: FileId) {
-        self.observed.insert(target);
-    }
-
-    /// Record the target of an `export *` or `export * as ns` inside a
-    /// `declare module '...'` body.
-    pub(in crate::graph) fn observe_ambient(&mut self, target: FileId) {
-        self.ambient.insert(target);
-    }
-
-    /// The closure seeds: every ambient target, plus the observed targets an
-    /// entry point reaches.
-    fn seeds<'a>(&'a self, entry_reachable: &'a FixedBitSet) -> impl Iterator<Item = FileId> + 'a {
-        self.ambient.iter().copied().chain(
-            self.observed
-                .iter()
-                .copied()
-                .filter(|target| entry_reachable.contains(target.0 as usize)),
-        )
-    }
-}
-
 /// How much of a closure member the consumers that cannot be enumerated see.
 ///
 /// The two differ on `default` alone, because a plain `export *` forwards
@@ -170,6 +122,56 @@ enum Exposure {
     /// The whole namespace object is observed: every export, `default`
     /// included.
     NamespaceObject,
+}
+
+/// The targets whose module surface Phase 2 saw observed, split by whether
+/// the observation survives the target being unreachable.
+///
+/// Ambient module declarations expose an external module id, so their
+/// observation stands at any reachability. Every other observer is a real
+/// consumer in this graph and is retained only while an entry point reaches
+/// its target.
+#[derive(Default)]
+pub(in crate::graph) struct WholeModuleObservations {
+    /// Targets an ambient module body re-exports from, at any reachability.
+    ambient: FxHashMap<FileId, Exposure>,
+    /// Targets a consumer in this graph observes as a whole object.
+    observed: FxHashSet<FileId>,
+}
+
+impl WholeModuleObservations {
+    /// Record a whole-object observation made by a consumer in this graph.
+    pub(in crate::graph) fn observe(&mut self, target: FileId) {
+        self.observed.insert(target);
+    }
+
+    /// Record the target of an ambient plain `export *`.
+    pub(in crate::graph) fn observe_ambient_star(&mut self, target: FileId) {
+        self.ambient.entry(target).or_insert(Exposure::StarSurface);
+    }
+
+    /// Record the target of an ambient `export * as ns`.
+    pub(in crate::graph) fn observe_ambient_namespace(&mut self, target: FileId) {
+        self.ambient.insert(target, Exposure::NamespaceObject);
+    }
+
+    /// The closure seeds: every ambient target, plus the observed targets an
+    /// entry point reaches.
+    fn seeds<'a>(
+        &'a self,
+        entry_reachable: &'a FixedBitSet,
+    ) -> impl Iterator<Item = (FileId, Exposure)> + 'a {
+        self.ambient
+            .iter()
+            .map(|(&target, &exposure)| (target, exposure))
+            .chain(
+                self.observed
+                    .iter()
+                    .copied()
+                    .filter(|target| entry_reachable.contains(target.0 as usize))
+                    .map(|target| (target, Exposure::NamespaceObject)),
+            )
+    }
 }
 
 /// The exposed namespace closure: every module whose names reach consumers
@@ -701,8 +703,8 @@ impl ModuleGraph {
             members: FxHashMap::default(),
         };
         let mut stack: Vec<(FileId, Exposure)> = Vec::new();
-        for seed in whole_module_targets.seeds(entry_reachable) {
-            closure.record(&mut stack, seed, Exposure::NamespaceObject);
+        for (seed, exposure) in whole_module_targets.seeds(entry_reachable) {
+            closure.record(&mut stack, seed, exposure);
         }
 
         let mut pending: Vec<(FileId, &str, FileId)> = self

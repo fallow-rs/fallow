@@ -111,6 +111,7 @@ pub fn analyze_template_snippet_with_bound_targets(
     }
 
     let mut extractor = ModuleInfoExtractor::new();
+    extractor.register_template_object_locals(used_bindings.iter().cloned());
     extractor.visit_program(&parser_return.program);
 
     build_template_usage(

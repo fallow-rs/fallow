@@ -54,22 +54,25 @@ pub fn guarded_import_locals(imports: &[ImportInfo]) -> FxHashSet<&str> {
 pub fn narrowable_import_locals(imports: &[ImportInfo]) -> FxHashSet<&str> {
     imports
         .iter()
-        .filter(|import| match import.imported_name {
+        .filter(|import| match &import.imported_name {
             crate::ImportedName::Namespace => true,
             crate::ImportedName::Default => is_css_module_source(&import.source),
-            crate::ImportedName::Named(_) | crate::ImportedName::SideEffect => false,
+            crate::ImportedName::Named(name) => {
+                name == "default" && is_css_module_source(&import.source)
+            }
+            crate::ImportedName::SideEffect => false,
         })
         .map(|import| import.local_name.as_str())
         .filter(|local| !local.is_empty())
         .collect()
 }
 
-fn is_css_module_source(source: &str) -> bool {
+pub fn is_css_module_source(source: &str) -> bool {
     let file_name = source.rsplit(['/', '\\']).next().unwrap_or(source);
     let Some((stem, extension)) = file_name.rsplit_once('.') else {
         return false;
     };
-    stem.ends_with(".module") && matches!(extension, "css" | "scss")
+    stem.ends_with(".module") && matches!(extension, "css" | "scss" | "sass" | "less")
 }
 
 /// The `(object, member)` pairs recorded for the guarded bindings, which
@@ -566,6 +569,12 @@ mod tests {
             import("./ns", crate::ImportedName::Namespace, "NS"),
             import("./card.module.css", crate::ImportedName::Default, "styles"),
             import("../a/b.module.scss", crate::ImportedName::Default, "scss"),
+            import("./theme.module.less", crate::ImportedName::Default, "less"),
+            import(
+                "./theme.module.sass",
+                crate::ImportedName::Named("default".into()),
+                "sass",
+            ),
             import("./plain.css", crate::ImportedName::Default, "plain"),
             import("./module.ts", crate::ImportedName::Default, "Layout"),
             import("./util", crate::ImportedName::Named("Util".into()), "Util"),
@@ -573,8 +582,8 @@ mod tests {
         ];
         let mut locals: Vec<&str> = narrowable_import_locals(&imports).into_iter().collect();
         locals.sort_unstable();
-        assert_eq!(locals, vec!["NS", "scss", "styles"]);
-        assert_eq!(guarded_import_locals(&imports).len(), 6);
+        assert_eq!(locals, vec!["NS", "less", "sass", "scss", "styles"]);
+        assert_eq!(guarded_import_locals(&imports).len(), 8);
     }
 
     /// Issue #2355 script guard: the import declaration's own span is not a

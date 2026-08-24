@@ -334,6 +334,9 @@ pub(crate) struct ModuleInfoExtractor {
     pending_vitest_mock_operations: Vec<PendingVitestMockOperation>,
     pub(crate) whole_object_uses: Vec<String>,
     has_cjs_exports: bool,
+    cjs_assignment_count: u32,
+    cjs_single_static_object_map: bool,
+    has_cjs_es_module_marker: bool,
     has_angular_component_template_url: bool,
     handled_require_spans: FxHashSet<Span>,
     handled_import_spans: FxHashSet<Span>,
@@ -343,6 +346,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// declaration is legal after the code that reads it, so walk order cannot
     /// answer whether a reference names a namespace object. See issue #2377.
     namespace_import_locals: FxHashSet<String>,
+    /// Names seeded into an isolated template snippet. Directly calling an
+    /// imported function is not a whole-object handover, so call-callee spans
+    /// for this broader name set are excluded during that snippet's walk.
+    template_object_locals: FxHashSet<String>,
     /// Spans of references to those locals that a more precise pass already
     /// resolved to a member, so `visit_identifier_reference` leaves them alone:
     /// the object of a static or string-computed access, the root of a JSX
@@ -355,16 +362,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// is precise, so a bare reference to the root is what hands the namespace
     /// object on. See issue #2377.
     object_literal_namespace_placements: Vec<(String, String)>,
-    /// Local bindings introduced by `import X = require('./y')`. The require
-    /// path records them outside `imports`, but the binding lives in both the
-    /// type and the value namespace exactly like an ESM namespace import, so
-    /// the semantic pass classifies them alongside `imports` and `X.Member`
-    /// narrows the target's type exports too (issue #2365).
-    ///
-    /// Classification reads the root scope only, the same restriction the
-    /// `imports` loop next to it has: a binding declared inside a `declare
-    /// module '...'` body is not classified and stays value-only, exactly as
-    /// an `import * as X` binding in that position does.
+    /// Local bindings introduced by `import X = require('./y')`.
     pub(crate) import_equals_bindings: Vec<String>,
     /// Names declared by `export import X = require('./y')`. The walk credits
     /// each one with a whole-object use as it records it, the same credit
@@ -872,6 +870,32 @@ pub(crate) struct SecurityPathSinkBinding {
 impl ModuleInfoExtractor {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// Every non-destructured CommonJS namespace binding, including ordinary
+    /// `const X = require()` and TypeScript import-equals declarations.
+    pub(crate) fn require_namespace_bindings(&self) -> Vec<String> {
+        let mut bindings: Vec<String> = self
+            .require_calls
+            .iter()
+            .filter_map(|call| call.local_name.clone())
+            .collect();
+        bindings.sort_unstable();
+        bindings.dedup();
+        bindings
+    }
+
+    /// Seed imported bindings for an isolated framework-template expression.
+    /// The snippet contains no import declarations of its own, so its visitor
+    /// needs the script-side locals before it can distinguish a dotted member
+    /// read from handing the imported value over whole.
+    pub(crate) fn register_template_object_locals(
+        &mut self,
+        locals: impl IntoIterator<Item = String>,
+    ) {
+        self.template_object_locals.extend(locals);
+        self.namespace_import_locals
+            .extend(self.template_object_locals.iter().cloned());
     }
 
     pub(crate) fn set_route_load_harvest_mode(&mut self, mode: RouteLoadHarvestMode) {
@@ -2693,6 +2717,13 @@ impl ModuleInfoExtractor {
         namespace_object_aliases
     }
 
+    fn finalize_cjs_provenance(&mut self) {
+        if self.cjs_single_static_object_map && !self.has_cjs_es_module_marker {
+            self.semantic_facts
+                .push(SemanticFact::CjsSingleStaticObjectMap);
+        }
+    }
+
     pub(crate) fn into_module_info(
         mut self,
         file_id: fallow_types::discover::FileId,
@@ -2703,6 +2734,7 @@ impl ModuleInfoExtractor {
             suppressions,
             unknown_kinds,
         } = parsed;
+        self.finalize_cjs_provenance();
         let namespace_object_aliases = self.finalize_resolution_phase();
         let exported_factory_returns = self.collect_exported_factory_returns();
         let exported_factory_return_object_shapes =
@@ -2804,6 +2836,7 @@ impl ModuleInfoExtractor {
              Angular content here, plumb inline_template_findings into the \
              merge step before relying on this assertion"
         );
+        self.finalize_cjs_provenance();
         let namespace_object_aliases = self.finalize_resolution_phase();
         self.merge_module_graph(info, namespace_object_aliases);
         self.merge_security_info(info);

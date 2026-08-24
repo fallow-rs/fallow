@@ -1778,6 +1778,11 @@ pub enum SemanticFact {
     /// or object type.
     /// Appended because bitcode encodes enum variants by ordinal.
     RequiredTypeMember(RequiredTypeMemberFact),
+    /// The file's complete CommonJS assignment surface is exactly one
+    /// top-level `module.exports = { ... }` object literal whose keys are all
+    /// static and which has no transpilation marker or competing assignment.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    CjsSingleStaticObjectMap,
 }
 
 /// Iterate Angular template member names from typed semantic facts.

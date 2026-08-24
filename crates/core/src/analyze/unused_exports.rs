@@ -1147,7 +1147,10 @@ fn collect_module_duplicate_export_locations(
     export_locations: &mut FxHashMap<String, Vec<ExportEntry>>,
     input: DuplicateExportModuleInput<'_>,
 ) {
-    if !input.module.is_reachable() || input.module.is_entry_point() {
+    if !input.module.is_reachable()
+        || input.module.is_entry_point()
+        || is_css_module_path(&input.module.path)
+    {
         return;
     }
     if input
@@ -1188,7 +1191,9 @@ fn duplicate_export_entry(
     matching_ignore: &[&[String]],
     matching_tanstack_contracts: &[&[&str]],
 ) -> Option<(String, ExportEntry)> {
-    if matches!(export.name, crate::extract::ExportName::Default) {
+    if matches!(export.name, crate::extract::ExportName::Default)
+        || matches!(&export.name, crate::extract::ExportName::Named(name) if name == "default")
+    {
         return None;
     }
     if export.span.start == 0 && export.span.end == 0 {
@@ -1220,6 +1225,16 @@ fn duplicate_export_entry(
             is_type_only: export.is_type_only,
         },
     ))
+}
+
+fn is_css_module_path(path: &std::path::Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let Some((stem, extension)) = file_name.rsplit_once('.') else {
+        return false;
+    };
+    stem.ends_with(".module") && matches!(extension, "css" | "scss" | "sass" | "less")
 }
 
 /// Evaluate one same-name export group into an optional duplicate finding:

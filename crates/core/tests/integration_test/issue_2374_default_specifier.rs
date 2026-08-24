@@ -195,10 +195,8 @@ fn plain_star_re_export_does_not_forward_a_named_default_either() {
 ///
 /// The exception covers every stylesheet syntax the extractor treats as a CSS
 /// Module, so `.module.less` and `.module.sass` siblings carry the same pin
-/// (issue #2374 review round 2). Their non-`default` classes report too:
-/// `narrow_css_module_references` runs on `.module.css` / `.module.scss`
-/// alone, which is pre-existing behavior this fixture only has to leave
-/// unchanged.
+/// (issue #2374 review round 2). Every syntax uses the same member-narrowing
+/// rule, so the accessed non-`default` class stays credited too.
 #[test]
 fn a_css_module_class_named_default_is_not_a_default_export() {
     let results = fallow_core::analyze(&create_config(fixture_path(CSS_FIXTURE)))
@@ -221,12 +219,18 @@ fn a_css_module_class_named_default_is_not_a_default_export() {
     }
     // The class the consumer does write stays credited, so the control proves
     // the stylesheet edge is live rather than absent.
-    assert!(
-        !pairs
-            .iter()
-            .any(|(path, name)| path.ends_with("src/classes.module.css") && name == "usedClass"),
-        "a class the consumer accesses keeps its credit: {pairs:?}"
-    );
+    for (stylesheet, name) in [
+        ("src/classes.module.css", "usedClass"),
+        ("src/classes.module.less", "lessClass"),
+        ("src/classes.module.sass", "sassClass"),
+    ] {
+        assert!(
+            !pairs
+                .iter()
+                .any(|(path, export)| path.ends_with(stylesheet) && export == name),
+            "{stylesheet}: a class the consumer accesses keeps its credit: {pairs:?}"
+        );
+    }
     // Every stylesheet is imported, so none of them may fall out as an unused
     // file: that would make the `default` assertions above pass vacuously.
     let unused_files: Vec<String> = results

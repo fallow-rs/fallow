@@ -6534,6 +6534,35 @@ fn cjs_module_exports_object_keys() {
     let info = parse("module.exports = { foo: 1, bar: 2, baz: 3 };");
     assert!(info.has_cjs_exports);
     assert_eq!(info.exports.len(), 3);
+    assert!(
+        info.semantic_facts
+            .contains(&SemanticFact::CjsSingleStaticObjectMap)
+    );
+}
+
+#[test]
+fn cjs_object_map_provenance_fails_closed_for_ambiguous_forms() {
+    for source in [
+        "exports.default = 1;",
+        "module.exports.default = 1;",
+        "module.exports = value;",
+        "module.exports = { default: 1 }; module.exports = { default: 2 };",
+        "module.exports = { default: 1 }; exports.extra = 2;",
+        "exports.extra = 2; module.exports = { default: 1 };",
+        "module.exports = { default: 1, ...extra };",
+        "module.exports = { ['default']: 1 };",
+        "module.exports = { default: 1, default: 2 };",
+        "function configure() { module.exports = { default: 1 }; }",
+        "Object.defineProperty(exports, '__esModule', { value: true }); module.exports = { default: 1 };",
+    ] {
+        let info = parse(source);
+        assert!(
+            !info
+                .semantic_facts
+                .contains(&SemanticFact::CjsSingleStaticObjectMap),
+            "ambiguous CommonJS form must not carry provenance: {source}"
+        );
+    }
 }
 
 #[test]

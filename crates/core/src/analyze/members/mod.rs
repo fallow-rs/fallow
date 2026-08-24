@@ -1611,6 +1611,26 @@ fn collect_direct_member_accesses(
             if let Some(export_keys) = local_to_export_keys.get(local_name.as_str()) {
                 whole_object_used_exports.extend(export_keys.iter().cloned());
             }
+            for import in resolved.all_resolved_imports().filter(|import| {
+                import.info.local_name == *local_name
+                    && matches!(
+                        import.info.imported_name,
+                        crate::extract::ImportedName::Namespace
+                    )
+            }) {
+                let Some(target_file_id) = import.target.internal_file_id() else {
+                    continue;
+                };
+                let Some(target) = indexes.module_by_id.get(&target_file_id) else {
+                    continue;
+                };
+                whole_object_used_exports.extend(
+                    target
+                        .exports
+                        .iter()
+                        .map(|export| ExportKey::new(target_file_id, export.name.to_string())),
+                );
+            }
         }
     }
 

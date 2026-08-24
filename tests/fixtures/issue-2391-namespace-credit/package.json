@@ -1,0 +1,5 @@
+{
+  "name": "issue-2391-namespace-credit",
+  "main": "src/index.ts",
+  "types": "src/ambient.d.ts"
+}

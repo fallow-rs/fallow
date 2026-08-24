@@ -1137,7 +1137,7 @@ pub struct SemanticUsage {
     pub declaration_merges: Vec<fallow_types::extract::DeclarationMergeFact>,
     pub(crate) mock_api_reference_spans: MockApiReferenceSpans,
     pub(crate) module_binding_reference_spans: rustc_hash::FxHashSet<Span>,
-    /// `import X = require('./x')` bindings nothing in the file references.
+    /// Non-destructured `require()` bindings nothing in the file references.
     /// Moved into `import_binding_usage.unused` by
     /// [`compute_semantic_usage_for_extractor`], which is the layer that knows
     /// which of them the exported form declares.
@@ -1150,10 +1150,11 @@ pub fn compute_semantic_usage_for_extractor(
     template_used: &rustc_hash::FxHashSet<String>,
 ) -> SemanticUsage {
     let computed_enum_key_spans = extractor.computed_enum_key_reference_spans();
+    let require_namespace_bindings = extractor.require_namespace_bindings();
     let mut semantic_usage = compute_semantic_usage_with_candidates(
         program,
         &extractor.imports,
-        &extractor.import_equals_bindings,
+        &require_namespace_bindings,
         template_used,
         &computed_enum_key_spans,
     );
@@ -1165,8 +1166,8 @@ pub fn compute_semantic_usage_for_extractor(
     semantic_usage
 }
 
-/// Move every unreferenced `import X = require('./x')` binding into the unused
-/// import-binding list, except the ones the exported form declares.
+/// Move every unreferenced non-destructured `require()` binding into the
+/// unused import-binding list, except exported import-equals declarations.
 ///
 /// TypeScript elides an import-equals binding nothing references, exactly as it
 /// elides an unreferenced `import * as X from './x'`, so such a binding must
@@ -1203,7 +1204,7 @@ fn report_unreferenced_import_equals_bindings(
 fn compute_semantic_usage_with_candidates(
     program: &Program<'_>,
     imports: &[ImportInfo],
-    import_equals_bindings: &[String],
+    require_namespace_bindings: &[String],
     template_used: &rustc_hash::FxHashSet<String>,
     module_binding_candidates: &rustc_hash::FxHashSet<Span>,
 ) -> SemanticUsage {
@@ -1222,18 +1223,9 @@ fn compute_semantic_usage_with_candidates(
         if import.local_name.is_empty() {
             continue;
         }
-        let name = oxc_str::Ident::from(import.local_name.as_str());
-        if let Some(symbol_id) = scoping.get_binding(root_scope, name) {
-            let mut has_references = false;
-            let mut has_type_references = false;
-            let mut has_value_references = false;
-
-            for reference in scoping.get_resolved_references(symbol_id) {
-                has_references = true;
-                has_type_references |= reference.is_type();
-                has_value_references |= reference.is_value();
-            }
-
+        if let Some((has_references, has_type_references, has_value_references)) =
+            binding_reference_usage(scoping, &import.local_name)
+        {
             if !has_references {
                 if !template_used.contains(&import.local_name) {
                     unused.push(import.local_name.clone());
@@ -1252,8 +1244,7 @@ fn compute_semantic_usage_with_candidates(
 
     let import_equals = classify_import_equals_bindings(
         scoping,
-        root_scope,
-        import_equals_bindings,
+        require_namespace_bindings,
         template_used,
         &mut type_referenced_bindings,
         &mut value_referenced_bindings,
@@ -1313,8 +1304,44 @@ struct ImportEqualsClassification {
     unreferenced: Vec<String>,
 }
 
-/// Classify `import X = require('./y')` bindings for type and value usage and
-/// report which of their names nothing in the file references.
+/// Aggregate references for every binding with `local_name`, including
+/// namespace and ambient-module scopes. Module graph binding lists are
+/// name-keyed, so duplicate spellings fail closed: any live binding keeps the
+/// shared edge classified instead of declaring it unused.
+fn binding_reference_usage(
+    scoping: &oxc_semantic::Scoping,
+    local_name: &str,
+) -> Option<(bool, bool, bool)> {
+    let mut found_binding = false;
+    let mut has_references = false;
+    let mut has_type_references = false;
+    let mut has_value_references = false;
+    for symbol_id in scoping
+        .symbol_ids()
+        .filter(|symbol_id| scoping.symbol_name(*symbol_id) == local_name)
+    {
+        found_binding = true;
+        for reference in scoping.get_resolved_references(symbol_id) {
+            has_references = true;
+            has_type_references |= reference.is_type();
+            has_value_references |= reference.is_value();
+        }
+    }
+    if found_binding
+        && let Some(reference_ids) = scoping.root_unresolved_references().get(local_name)
+    {
+        for reference_id in reference_ids {
+            let reference = scoping.get_reference(*reference_id);
+            has_references = true;
+            has_type_references |= reference.is_type();
+            has_value_references |= reference.is_value();
+        }
+    }
+    found_binding.then_some((has_references, has_type_references, has_value_references))
+}
+
+/// Classify non-destructured `require()` bindings for type and value usage and
+/// report which names nothing in the file references.
 ///
 /// The binding lives in both the type and the value namespace, the same way
 /// `import * as X from './y'` does, but the require path records it outside
@@ -1328,13 +1355,8 @@ struct ImportEqualsClassification {
 /// whole-object credit. A name used only by a framework template is referenced,
 /// matching the `template_used` skip the `imports` loop applies.
 ///
-/// Only names with a root binding are classified, the same restriction the
-/// `imports` loop next to it has: one declared inside a namespace or
-/// ambient-module body is left value-only, exactly as an `import * as X`
-/// binding in that position is.
 fn classify_import_equals_bindings(
     scoping: &oxc_semantic::Scoping,
-    root_scope: oxc_semantic::ScopeId,
     import_equals_bindings: &[String],
     template_used: &rustc_hash::FxHashSet<String>,
     type_referenced_bindings: &mut rustc_hash::FxHashSet<String>,
@@ -1349,18 +1371,11 @@ fn classify_import_equals_bindings(
         if local_name.is_empty() {
             continue;
         }
-        let name = oxc_str::Ident::from(local_name.as_str());
-        let Some(symbol_id) = scoping.get_binding(root_scope, name) else {
+        let Some((has_references, has_type_references, has_value_references)) =
+            binding_reference_usage(scoping, local_name)
+        else {
             continue;
         };
-        let mut has_references = false;
-        let mut has_type_references = false;
-        let mut has_value_references = false;
-        for reference in scoping.get_resolved_references(symbol_id) {
-            has_references = true;
-            has_type_references |= reference.is_type();
-            has_value_references |= reference.is_value();
-        }
         if !has_references {
             if !template_used.contains(local_name) {
                 classification.unreferenced.push(local_name.clone());

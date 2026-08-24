@@ -498,13 +498,13 @@ fn has_css_module_stem(path: &std::path::Path) -> bool {
         .is_some_and(|stem| stem.ends_with(".module"))
 }
 
-/// Check if a path is a CSS Module file (`.module.css` or `.module.scss`).
+/// Check if a path is a CSS Module file in any syntax the extractor supports.
 pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
     has_css_module_stem(path)
         && path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|ext| ext == "css" || ext == "scss")
+            .is_some_and(|ext| matches!(ext, "css" | "scss" | "sass" | "less"))
 }
 
 /// Check if a path is a CSS Module stylesheet in any syntax the extractor
@@ -513,16 +513,8 @@ pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
 /// which decides where the class-name export list comes from, so it answers
 /// "are this module's exports a class map?".
 ///
-/// Deliberately wider than [`is_css_module_path`], which gates CSS member
-/// narrowing on the `.css` / `.scss` pair alone. Widening that one would start
-/// narrowing `.less` and `.sass` class references for every project, a
-/// behavior change well past crediting the default export (issue #2374).
 pub(super) fn is_css_module_stylesheet(path: &std::path::Path) -> bool {
-    has_css_module_stem(path)
-        && path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|ext| matches!(ext, "css" | "scss" | "sass" | "less"))
+    is_css_module_path(path)
 }
 
 /// Per-module index of exports by importable name: `ExportName::Named`
@@ -575,8 +567,8 @@ pub(super) struct ExportNameIndex {
 ///
 /// The stylesheet side is decided by [`is_css_module_stylesheet`], which
 /// tracks the extractor's own extension set (`.module.css`, `.module.scss`,
-/// `.module.sass`, `.module.less`) rather than the narrower pair that gates
-/// member narrowing, so every syntax that produces a class map is covered.
+/// `.module.sass`, `.module.less`), so every syntax that produces a class map
+/// is covered.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum NamedDefaultSpelling {
     /// `Named("default")` and `Default` share the default slot.
@@ -766,8 +758,7 @@ mod tests {
     }
 
     /// Issue #2374 review round 2: the exception must cover every stylesheet
-    /// syntax the extractor treats as a CSS Module, not just the `.css` /
-    /// `.scss` pair that gates member narrowing. A `.module.less` or
+    /// syntax the extractor treats as a CSS Module. A `.module.less` or
     /// `.module.sass` class map is built by the same extractor branch, so a
     /// class spelled `.default` there is an ordinary class too.
     #[test]
@@ -800,8 +791,6 @@ mod tests {
         }
     }
 
-    /// The class-map predicate tracks the extractor while the narrowing gate
-    /// stays put, so widening one must never widen the other.
     #[test]
     fn css_module_stylesheet_covers_every_extractor_extension() {
         for stylesheet in [
@@ -830,14 +819,12 @@ mod tests {
         }
     }
 
-    /// The narrowing gate keeps its narrower set: `.module.less` and
-    /// `.module.sass` classes are still not narrowed by member access.
     #[test]
-    fn css_module_stylesheet_is_wider_than_the_narrowing_gate() {
-        for wider in ["Button.module.less", "Button.module.sass"] {
-            let path = std::path::Path::new(wider);
-            assert!(is_css_module_stylesheet(path), "{wider}");
-            assert!(!is_css_module_path(path), "{wider}");
+    fn css_module_narrowing_covers_every_extractor_extension() {
+        for stylesheet in ["Button.module.less", "Button.module.sass"] {
+            let path = std::path::Path::new(stylesheet);
+            assert!(is_css_module_stylesheet(path), "{stylesheet}");
+            assert!(is_css_module_path(path), "{stylesheet}");
         }
     }
 
@@ -896,8 +883,8 @@ mod tests {
     }
 
     #[test]
-    fn css_module_path_less_not_matched() {
-        assert!(!is_css_module_path(std::path::Path::new(
+    fn css_module_path_less_is_matched() {
+        assert!(is_css_module_path(std::path::Path::new(
             "Button.module.less"
         )));
     }
