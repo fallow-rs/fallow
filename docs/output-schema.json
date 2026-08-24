@@ -11368,6 +11368,32 @@
             "kind"
           ],
           "description": "Dependency-override resolution was skipped because bun's legacy binary\n`bun.lockb` sits next to this `package.json`, fallow cannot read the\nbinary format, and no parseable text lockfile was found to use\ninstead: no `bun.lock` that parses, and no readable `pnpm-lock.yaml`,\n`package-lock.json`, or `npm-shrinkwrap.json`. A `yarn.lock` is never\nconsulted (yarn ignores `overrides`), so it does not prevent the skip\neither. The manifest declares overrides, so the\n`unused-dependency-overrides` check would otherwise have run; without\nresolution ground truth it would flag every transitive-only pin, so no\nunused-override findings are reported at all (issue #2358). Surfaced\nby the override analysis, not workspace discovery, but shares this\nchannel so the skip is visible in `workspace_diagnostics[]` JSON and\nas a stderr warning."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "bun-lock-override-resolution-skipped"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "Dependency-override resolution was skipped because bun's text\n`bun.lock` exists but could not be parsed and no readable pnpm or npm\nlockfile was available as independent resolution ground truth."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "bun-resolutions-shadowed-by-overrides"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "A bun manifest declares both `overrides` and a non-empty `resolutions`\nobject. Bun applies `overrides` and ignores `resolutions`, so fallow\nreports the shadowed configuration without offering removal advice."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
@@ -12273,6 +12299,13 @@
             }
           ],
           "description": "Gate verdict, present only when `--gate <mode>` was set (issue #886).\nEmitted on pass too (`verdict: \"pass\"`, `new_count: 0`) so consumers\ndistinguish \"gate ran and passed\" from \"gate did not run\" (absent)."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Diagnostics owned by this security analysis run."
         },
         "security_findings": {
           "type": "array",
@@ -13571,6 +13604,13 @@
             }
           ],
           "description": "Gate verdict, present only when `--gate <mode>` was set."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Diagnostics owned by the full security analysis summarized here."
         },
         "summary": {
           "description": "Aggregate security counts after all filters, gates, and scopes.",
@@ -16688,6 +16728,13 @@
           "description": "Wall-clock milliseconds spent producing the report.",
           "$ref": "#/definitions/ElapsedMs"
         },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Diagnostics preserved from the candidate security report."
+        },
         "summary": {
           "description": "Aggregate verdict counts.",
           "$ref": "#/definitions/SecuritySurvivorsSummary"
@@ -16915,6 +16962,13 @@
         "elapsed_ms": {
           "description": "Wall-clock milliseconds spent producing the report.",
           "$ref": "#/definitions/ElapsedMs"
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Diagnostics owned by the security analysis used for this view."
         },
         "summary": {
           "description": "Aggregate blind-spot counts from the security analysis.",
@@ -20534,6 +20588,14 @@
         "capacity": {
           "type": "integer",
           "description": "Candidates retained because the bounded semantic request reached capacity."
+        },
+        "unreachable_evidence": {
+          "type": "integer",
+          "description": "Candidates whose checker evidence came only from unreachable files."
+        },
+        "non_crediting_evidence": {
+          "type": "integer",
+          "description": "Candidates whose checker evidence consisted only of non-crediting declarations."
         }
       },
       "required": [
@@ -20543,7 +20605,9 @@
         "svelte_virtual_module_exports",
         "unknown_symbol",
         "unsupported_syntax",
-        "capacity"
+        "capacity",
+        "unreachable_evidence",
+        "non_crediting_evidence"
       ],
       "description": "Closed abstention reason counts for stable machine consumption."
     },
@@ -20967,6 +21031,16 @@
           "type": "string",
           "const": "capacity",
           "description": "A configured request or response capacity was reached."
+        },
+        {
+          "type": "string",
+          "const": "unreachable-evidence",
+          "description": "Checker references exist, but every referenced file is unreachable\nfrom the analyzed entry points and therefore cannot refute dead code."
+        },
+        {
+          "type": "string",
+          "const": "non-crediting-evidence",
+          "description": "Checker evidence consists only of re-export declarations, which do not\nprove that any reachable consumer reads the exposed binding."
         },
         {
           "type": "string",
@@ -21768,7 +21842,7 @@
           "description": "The export name being traced."
         },
         "namespace": {
-          "description": "Namespace whose references are listed for the traced export. The\npreferred lane wins whenever it carries a reference: `value` for a\nvalue export, `type` for a type-only one. When the preferred lane\ncarries none and the other lane resolves to the same declaration, the\nother lane's references are listed and this field names it, so a value\nexport whose only credit is a bound `import type` reports `type` with\n`is_used: true`. `is_used` and `direct_references` follow the listed\nlane only; file reachability stays a separate axis, so an export in an\nunreachable file can still report `is_used: true` next to\n`file_reachable: false` (the value lane behaves the same way). When the\nother lane resolves to a separate same-name declaration the preferred\nlane is kept, including a declaration merge that splits across lanes\nsuch as an `interface` next to a same-name `class`, where dead-code\ncredits the class through the merge and the trace can still report it\nunused. A merge that stays one binding, such as a `class` next to a\nsame-name `namespace`, is covered. `semantic.target.namespace` names\nthe lane the declaration itself occupies and can therefore differ from\nthis field. Producers always emit the field; the schema permits\nomission by payloads created before namespaces were exposed.",
+          "description": "Namespace whose references are listed for the traced export. The\npreferred lane wins whenever it carries a reference: `value` for a\nvalue export, `type` for a type-only one. When the preferred lane\ncarries none and the other lane resolves to the same declaration, the\nother lane's references are listed and this field names it, so a value\nexport whose only credit is a bound `import type` reports `type` with\n`is_used: true`. `is_used` and `direct_references` follow the listed\nlane only, and only reachable reference sources can credit it. When the\nother lane resolves to a separate same-name declaration the preferred\nlane is kept, including a declaration merge that splits across lanes\nsuch as an `interface` next to a same-name `class`, where dead-code\ncredits the class through the merge and the trace can still report it\nunused. A merge that stays one binding, such as a `class` next to a\nsame-name `namespace`, is covered. `semantic.target.namespace` names\nthe lane the declaration itself occupies and can therefore differ from\nthis field. Producers always emit the field; the schema permits\nomission by payloads created before namespaces were exposed.",
           "$ref": "#/definitions/SemanticNamespace"
         },
         "file_reachable": {
@@ -21789,6 +21863,24 @@
             "$ref": "#/definitions/ExportReference"
           },
           "description": "Files that reference this export directly."
+        },
+        "direct_references_by_namespace": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NamespacedExportReferences"
+          },
+          "description": "Reachable direct references grouped by namespace. This is additive to\n`namespace` and `direct_references`, whose winning-lane meaning remains\nunchanged for backwards compatibility."
+        },
+        "star_export_ambiguity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StarExportAmbiguity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A star-export collision that makes the traced name ambiguous. When\npresent, `is_used: false` is an abstention rather than an unused-code\nverdict."
         },
         "re_export_chains": {
           "type": "array",
@@ -22678,6 +22770,32 @@
         "namespaces"
       ],
       "description": "The `export *` collision that keeps a name from being exported."
+    },
+    "NamespacedExportReferences": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "description": "Credited namespace.",
+          "$ref": "#/definitions/SemanticNamespace"
+        },
+        "reference_count": {
+          "type": "integer",
+          "description": "Number of reachable references in this namespace."
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExportReference"
+          },
+          "description": "Reachable references in deterministic graph order."
+        }
+      },
+      "required": [
+        "namespace",
+        "reference_count",
+        "references"
+      ],
+      "description": "Direct references that credit one namespace of an export binding."
     }
   }
 }

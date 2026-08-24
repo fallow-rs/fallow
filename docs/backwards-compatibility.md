@@ -164,6 +164,35 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **Trace evidence is reachability-aware and lane-complete**
+  ([#2390](https://github.com/fallow-rs/fallow/issues/2390)). This supersedes
+  the remaining #2371 caveats documented below. `is_used` now agrees with the
+  dead-code verdict when every direct consumer is unreachable, declaration
+  merges use the declaration group that dead-code credits, and a star-export
+  collision returns ambiguity rather than ordinary unused or not-found output.
+  The trace root adds optional `direct_references_by_namespace` evidence so
+  type and value references can be inspected without changing the existing
+  selected `namespace` field or silently redefining its totals. Type-aware
+  proof no longer treats an import or re-export declaration as a read and no
+  longer suppresses a finding with unreachable-only, re-export-only, or
+  different-declaration evidence. These are additive fields and evidence
+  corrections on the unversioned trace contract, so no trace schema version
+  moves. Consumers should prefer the explicit ambiguity payload and per-lane
+  evidence over deriving a verdict from `direct_references.length`.
+
+- **Programmatic workspace diagnostics belong to the run that produced them**
+  ([#2392](https://github.com/fallow-rs/fallow/issues/2392),
+  [#2394](https://github.com/fallow-rs/fallow/issues/2394), and
+  [#2396](https://github.com/fallow-rs/fallow/issues/2396)). This supersedes
+  the #2366 process-registry behavior described above. Analysis-owning
+  dead-code, check, health, dupes, and security envelopes carry only their
+  stage-owned root-relative diagnostics. Project-info, workspace-listing, and
+  duplicate-list surfaces do not inherit analysis-stage diagnostics from an
+  earlier call in the same process. Security full, summary, survivors, and
+  blind-spots roots add an optional `workspace_diagnostics` field that remains
+  absent when empty. The new Bun lockfile and shadowed-resolution diagnostic
+  kinds are additive. No schema version moves under the additive-field policy.
+
 - **Export traces report the namespace that credits the declaration** ([#2371](https://github.com/fallow-rs/fallow/issues/2371)). `trace_export` still prefers the Value namespace for a value export, but when that lane carries no reference and the Type namespace resolves to the same declaration (a bound `import type { helper }` of `export const helper`, which `dead-code` counts as a use), the trace reports the type-lane references and emits `namespace: "type"` with `is_used: true`. Consumers that assumed `namespace` is always `"value"` for a value declaration should read it as the lane the listed references use. `is_used` still follows the listed references alone, so an export in an unreachable file can report `is_used: true` next to `file_reachable: false` while `dead-code` reports the unused file; that split is how the value lane already behaved and is unchanged here. A same-name type declaration is a distinct binding, so the value export keeps `namespace: "value"` and `is_used: false` under a type-only import, matching the unused-export finding on it; a declaration merge that splits across lanes, such as an `interface` next to a same-name `class`, keeps the preferred lane too and can still trace as unused, while a merge that stays one binding (a `class` next to a same-name `namespace`) is covered. `semantic.target.namespace` keeps naming the lane the declaration itself occupies, so it can differ from the root `namespace` on a corrected trace. `fallow inspect --symbol` runs the same trace, so its `identity.is_used`, `identity.reason` and `evidence.trace_export` block move with it, in the CLI and in the `inspect` MCP tool. The class-member trace built on the same export (`--trace FILE:MEMBER`) inherits the correction: `owner_is_used`, `owner_direct_references` and the reason string now describe the crediting lane, the payload carries an additive `owner_namespace` naming that lane (optional in the schema, like the export trace's `namespace`), and the human member trace prints an `Owner namespace:` line. The type-aware proof is unchanged and still covers only the declaration's own lane, so `semantic.assertion` can stay `no-references-found` for a credit the root trace lists; on both the export and the member trace the human proof line now appends the proved lane (`value namespace only`) when such a proof lists no references of its own, JSON consumers read the same scope from `semantic.target.namespace`, and the `_meta.field_definitions.semantic` note and `trace_symbol` tool description now state that a root trace listing a reference the proof omits is the wider evidence rather than a stale one. The field stays optional in the schema; unversioned trace roots are unchanged.
 
 - **Type-aware semantic gap reasons use wire protocol 7 and semantic schema version 3.** The new required `SemanticOmission.reason_code` enum value is not ignorable by a protocol 6 reader, so exact-version companion pairing now uses wire protocol 7. Every versioned JSON root that can embed that contract also bumps: audit 9 to 10, coverage analyze 1 to 2, health 10 to 11, duplication CLI 8 to 9 and programmatic 2 to 3, dead-code flat and grouped 8 to 9, per-project and cross-repo impact 1 to 2, security full and summary 7 to 8, combined 10 to 11, and audit brief 6 to 7. Unversioned trace and inspect roots are unchanged.

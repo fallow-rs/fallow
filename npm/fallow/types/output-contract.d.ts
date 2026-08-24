@@ -144,7 +144,7 @@ export type SemanticCompletenessRequirement = ("best-effort" | "complete")
 /**
  * Stable reason why semantic evidence is partial or unavailable.
  */
-export type SemanticGapReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics" | "svelte-virtual-module-exports" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "virtual-dispatch" | "dynamic-member-access" | "decorated-declaration" | "optional-contract" | "accessor-pair" | "overload-set" | "attached-comment" | "abstract-declaration" | "incomplete-project-coverage" | "framework-contract-provenance" | "capacity" | "unsupported-syntax")
+export type SemanticGapReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics" | "svelte-virtual-module-exports" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "virtual-dispatch" | "dynamic-member-access" | "decorated-declaration" | "optional-contract" | "accessor-pair" | "overload-set" | "attached-comment" | "abstract-declaration" | "incomplete-project-coverage" | "framework-contract-provenance" | "capacity" | "unreachable-evidence" | "non-crediting-evidence" | "unsupported-syntax")
 /**
  * Value or type namespace for one exact declaration or reference.
  */
@@ -443,6 +443,10 @@ error: string
 kind: "source-read-failure"
 } | {
 kind: "bun-lockb-override-resolution-skipped"
+} | {
+kind: "bun-lock-override-resolution-skipped"
+} | {
+kind: "bun-resolutions-shadowed-by-overrides"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
@@ -1959,6 +1963,14 @@ unsupported_syntax: number
  * Candidates retained because the bounded semantic request reached capacity.
  */
 capacity: number
+/**
+ * Candidates whose checker evidence came only from unreachable files.
+ */
+unreachable_evidence: number
+/**
+ * Candidates whose checker evidence consisted only of non-crediting declarations.
+ */
+non_crediting_evidence: number
 }
 /**
  * Bounded provenance for one TypeScript project handled by the sidecar.
@@ -9058,6 +9070,18 @@ is_used: boolean
  */
 direct_references: ExportReference[]
 /**
+ * Reachable direct references grouped by namespace. This is additive to
+ * `namespace` and `direct_references`, whose winning-lane meaning remains
+ * unchanged for backwards compatibility.
+ */
+direct_references_by_namespace?: NamespacedExportReferences[]
+/**
+ * A star-export collision that makes the traced name ambiguous. When
+ * present, `is_used: false` is an abstention rather than an unused-code
+ * verdict.
+ */
+star_export_ambiguity?: (StarExportAmbiguity | null)
+/**
  * Re-export chains that pass through this export.
  */
 re_export_chains: ReExportChain[]
@@ -9082,6 +9106,36 @@ from_file: string
  * Reference kind, such as named import, default import, or re-export.
  */
 kind: string
+}
+/**
+ * Direct references that credit one namespace of an export binding.
+ */
+export interface NamespacedExportReferences {
+namespace: SemanticNamespace
+/**
+ * Number of reachable references in this namespace.
+ */
+reference_count: number
+/**
+ * Reachable references in deterministic graph order.
+ */
+references: ExportReference[]
+}
+/**
+ * The `export *` collision that keeps a name from being exported.
+ */
+export interface StarExportAmbiguity {
+/**
+ * Files that each declare a colliding declaration under the traced name
+ * (project-root-relative), sorted. These are the origins to fix: keep one,
+ * rename or explicitly re-export the rest.
+ */
+sources: string[]
+/**
+ * The namespaces the collision occurs in, type before value. A name can
+ * collide in type space, value space, or both.
+ */
+namespaces: SemanticNamespace[]
 }
 /**
  * A re-export chain showing how an export is propagated.
@@ -9444,22 +9498,6 @@ export interface UnresolvedCallee {
  */
 callee: string
 reason: UnresolvedReason
-}
-/**
- * The `export *` collision that keeps a name from being exported.
- */
-export interface StarExportAmbiguity {
-/**
- * Files that each declare a colliding declaration under the traced name
- * (project-root-relative), sorted. These are the origins to fix: keep one,
- * rename or explicitly re-export the rest.
- */
-sources: string[]
-/**
- * The namespaces the collision occurs in, type before value. A name can
- * collide in type space, value space, or both.
- */
-namespaces: SemanticNamespace[]
 }
 /**
  * Envelope emitted by `fallow --format review-github` / `review-gitlab`.
@@ -11055,6 +11093,10 @@ _meta?: (Meta | null)
  */
 gate?: (SecurityGate | null)
 /**
+ * Diagnostics owned by this security analysis run.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
+/**
  * Security candidates. Paths are project-root-relative, forward-slash.
  */
 security_findings: SecurityFinding[]
@@ -11671,6 +11713,10 @@ _meta?: (Meta | null)
  * Gate verdict, present only when `--gate <mode>` was set.
  */
 gate?: (SecurityGate | null)
+/**
+ * Diagnostics owned by the full security analysis summarized here.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
 summary: SecuritySummary
 }
 /**
@@ -11790,6 +11836,10 @@ export interface SecuritySurvivorsOutput {
 schema_version: SecuritySurvivorsSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
+/**
+ * Diagnostics preserved from the candidate security report.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
 summary: SecuritySurvivorsSummary
 /**
  * Verifier-retained candidates keyed by finding id.
@@ -11872,6 +11922,10 @@ export interface SecurityBlindSpotsOutput {
 schema_version: SecurityBlindSpotsSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
+/**
+ * Diagnostics owned by the security analysis used for this view.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
 summary: SecurityBlindSpotsSummary
 /**
  * Grouped unresolved callee diagnostics, derived from existing samples.

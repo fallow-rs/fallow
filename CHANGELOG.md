@@ -88,6 +88,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Convex plugin now honors a custom `convex.json#functions` directory**
+  (Closes [#2387](https://github.com/fallow-rs/fallow/issues/2387)). A valid
+  in-project path replaces the default `convex/` entry root, including the
+  matching `_generated` exclusions and special Convex entry files. Missing,
+  malformed, empty, or escaping values keep the safe default. Projects using a
+  custom root will no longer report those runtime modules as unused files;
+  files outside that root remain eligible for unused-file findings.
+
+- **Dead-code traces, symbol impact, and type-aware proof now agree on
+  namespace, reachability, and ambiguity** (Closes
+  [#2390](https://github.com/fallow-rs/fallow/issues/2390)). Declaration merges
+  and dual-lane references use declaration-safe evidence, unreachable or
+  re-export-only checker evidence cannot suppress a finding, and star collisions
+  return an additive ambiguity payload plus human `AMBIGUOUS` status instead of
+  ordinary unused or not-found output. Valid alias, import-type, and qualified
+  namespace reads now remove false unused findings, while unread imports,
+  dangling re-exports, and type references to a distinct same-name declaration
+  no longer remove valid findings.
+
+- **Namespace and star-re-export crediting now covers the remaining equivalent
+  binding shapes** (Closes
+  [#2391](https://github.com/fallow-rs/fallow/issues/2391)). Require and dynamic
+  import bindings, re-exported type namespaces, nested ambient bindings, Vue
+  template handovers, and whole-object member-detector abstention now match
+  static namespace imports. Dotted-only reads stay narrow, so genuinely unused
+  siblings continue to report, while exports reachable through a whole-object
+  handover no longer report falsely. Warm extraction and graph caches
+  invalidate.
+
+- **MCP and typed programmatic routes now share CLI option, error, and
+  diagnostics semantics** (Closes
+  [#2392](https://github.com/fallow-rs/fallow/issues/2392)). Explicit coverage
+  and production options retain precedence over environment and config values,
+  `FALLOW_MAX_FILE_SIZE` reaches typed analysis, health preserves its structured
+  engine error, and project/list/dupe routes no longer inherit analysis-stage
+  diagnostics from earlier calls in the same process. The generated Code Mode
+  description now identifies the actual subprocess-backed tools.
+
+- **MDX statement extraction now shares one source-mapped TSX stream across
+  dead-code and duplication analysis** (Closes
+  [#2393](https://github.com/fallow-rs/fallow/issues/2393)). Multiline imports
+  and exports, JSX initializers, dynamic imports, comments, strings, and later
+  valid statements after rejected prose retain their original spans. Valid
+  dependencies and clone groups that were previously dropped now appear, while
+  import-looking prose and compacted cross-line token artifacts no longer
+  create false findings. Warm extraction and duplication token caches
+  invalidate.
+
+- **Dependency-override analysis now parses selectors and lockfile failure
+  states without unsafe removal advice** (Closes
+  [#2394](https://github.com/fallow-rs/fallow/issues/2394)). Qualified npm and
+  pnpm selectors plus JSON-escaped keys keep correct source locations, corrupt
+  text `bun.lock` files emit a diagnostic and fail closed, and Bun resolutions
+  shadowed by overrides are diagnostic-only. Human and integration output now
+  counts misconfigured overrides and uses package-manager-neutral guidance.
+
+- **CSS Module crediting now treats supported extensions and default-import
+  spellings consistently** (Closes
+  [#2395](https://github.com/fallow-rs/fallow/issues/2395)). CSS, SCSS, Sass,
+  and Less modules share one narrowing rule; `import { default as styles }`
+  matches a default import; whole-object handovers credit the full class map;
+  and equal class names in different modules no longer form cross-file
+  duplicate-export findings. Precise member reads still leave unused classes
+  reportable, including an ordinary class named `default`.
+
+- **Standalone analysis envelopes now carry the diagnostics produced by their
+  own workspace run** (Closes
+  [#2396](https://github.com/fallow-rs/fallow/issues/2396)). Dead-code, check,
+  health, dupes, and applicable security routes use root-relative, deterministic
+  run-owned diagnostics instead of a stale process registry. Listing and
+  project-info surfaces remain call-order independent and omit analysis-stage
+  diagnostics they did not produce.
+
+- **Equivalent default-export spellings now share crediting and duplicate
+  rules** (Closes
+  [#2397](https://github.com/fallow-rs/fallow/issues/2397)). Ambient plain stars
+  expose only the star surface, named `default` specifiers are excluded from
+  cross-module duplicate grouping like `export default`, and a default import
+  from one provable static `module.exports = { ... }` map narrows to the members
+  the consumer reads. Transpiled, mixed, reordered, spread, and computed
+  CommonJS forms retain their conservative behavior. This can add valid unused
+  data-key findings and remove false findings for accessed keys. Warm extraction
+  and graph caches invalidate.
+
 - **`export type *` inside a `declare module '...'` body no longer creates a
   file-level star re-export on the declaring file** (Closes
   [#2375](https://github.com/fallow-rs/fallow/issues/2375)). The
