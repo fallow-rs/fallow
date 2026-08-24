@@ -2178,6 +2178,21 @@ impl<'a> ModuleInfoExtractor {
                     ) if identifier.name == "module" && property.value == "exports"
                 )
             }
+            Expression::TSAsExpression(expression) => {
+                Self::is_cjs_exports_expression(&expression.expression)
+            }
+            Expression::TSSatisfiesExpression(expression) => {
+                Self::is_cjs_exports_expression(&expression.expression)
+            }
+            Expression::TSNonNullExpression(expression) => {
+                Self::is_cjs_exports_expression(&expression.expression)
+            }
+            Expression::TSTypeAssertion(expression) => {
+                Self::is_cjs_exports_expression(&expression.expression)
+            }
+            Expression::ParenthesizedExpression(expression) => {
+                Self::is_cjs_exports_expression(&expression.expression)
+            }
             _ => false,
         }
     }

@@ -837,6 +837,7 @@ for await (const line of lines) {
     fn cancelled_session_does_not_restart_after_request_failure() {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
+        use std::time::Instant;
 
         #[derive(Serialize)]
         struct Request {
@@ -864,7 +865,7 @@ for await (const line of lines) {
   if (envelope.type === "shutdown") process.exit(0);
   fs.writeFileSync(path.join(process.cwd(), ".session-request-seen"), "1");
   const cancellationAcknowledgement = path.join(process.cwd(), ".session-cancelled");
-  for (let attempt = 0; attempt < 200 && !fs.existsSync(cancellationAcknowledgement); attempt += 1) {
+  for (let attempt = 0; attempt < 2000 && !fs.existsSync(cancellationAcknowledgement); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   process.exit(1);
@@ -887,36 +888,38 @@ for await (const line of lines) {
         let process = TypeAwareSessionProcess::spawn(&canonical_sidecar, &canonical_root)
             .expect("spawn persistent sidecar");
         let cancellation = Arc::new(AtomicBool::new(false));
-        let cancellation_watcher = Arc::clone(&cancellation);
         let request_marker = sidecar_dir.join(".session-request-seen");
         let cancellation_marker = sidecar_dir.join(".session-cancelled");
-        let watcher = std::thread::spawn(move || {
-            for _ in 0..100 {
-                if request_marker.exists() {
-                    cancellation_watcher.store(true, Ordering::SeqCst);
-                    fs::write(cancellation_marker, "1").expect("acknowledge cancellation");
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        });
         let mut session = TypeAwareSession {
             root: canonical_root.clone(),
             sidecar: canonical_sidecar,
             process: Some(process),
             request_id: 0,
             revision: 0,
-            cancellation: Some(cancellation),
+            cancellation: Some(Arc::clone(&cancellation)),
         };
+        let request_root = canonical_root.clone();
+        let request = std::thread::spawn(move || {
+            let error = session
+                .run_semantic_request::<_, serde_json::Value>(
+                    &request_root,
+                    &Request { value: 9 },
+                    None,
+                )
+                .expect_err("cancelled owner prevents restart");
+            (session, error)
+        });
 
-        let error = session
-            .run_semantic_request::<_, serde_json::Value>(
-                &canonical_root,
-                &Request { value: 9 },
-                None,
-            )
-            .expect_err("cancelled owner prevents restart");
-        watcher.join().expect("cancellation watcher");
+        let request_deadline = Instant::now() + Duration::from_secs(5);
+        while !request_marker.exists() && Instant::now() < request_deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let request_seen = request_marker.exists();
+        cancellation.store(true, Ordering::SeqCst);
+        fs::write(cancellation_marker, "1").expect("acknowledge cancellation");
+        let (session, error) = request.join().expect("semantic request");
+
+        assert!(request_seen, "sidecar did not observe the semantic request");
 
         assert!(
             error.to_string().contains("owner is closing"),

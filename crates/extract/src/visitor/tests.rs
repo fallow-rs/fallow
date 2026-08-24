@@ -6634,6 +6634,8 @@ fn cjs_object_map_provenance_fails_closed_for_ambiguous_forms() {
         "module.exports = { default: 1 }; [module.exports.extra = 1] = source;",
         "module.exports = { default: 1 }; [...module.exports.extra] = source;",
         "module.exports = { default: 1 }; (module.exports.extra as unknown) = 1;",
+        "module.exports = { default: 1 }; (module.exports as any).extra = 1;",
+        "module.exports = { default: 1 }; (module.exports as any)['extra'] = 1;",
         "module.exports = { default: 1, ...extra };",
         "module.exports = { ['default']: 1 };",
         "module.exports = { default: 1, default: 2 };",
