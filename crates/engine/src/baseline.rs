@@ -167,10 +167,10 @@ pub struct BaselineData {
     /// Unresolved catalog references, keyed by `path:line:catalog_name:entry_name`.
     #[serde(default)]
     unresolved_catalog_references: Vec<String>,
-    /// Unused pnpm dependency overrides, keyed by `source:raw_key`.
+    /// Unused package-manager dependency overrides, keyed by `source:raw_key`.
     #[serde(default)]
     unused_dependency_overrides: Vec<String>,
-    /// Misconfigured pnpm dependency overrides, keyed by `source:raw_key`.
+    /// Misconfigured package-manager dependency overrides, keyed by `source:raw_key`.
     #[serde(default)]
     misconfigured_dependency_overrides: Vec<String>,
     /// Invalid `"use client"` exports, keyed by `path:export_name`.

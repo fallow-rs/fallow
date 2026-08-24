@@ -327,8 +327,6 @@ fn retain_non_crediting_evidence(
 ) -> SemanticCandidateDecision {
     if decision.decision != SemanticCandidateDecisionKind::ConfirmedUsed
         || decision.evidence.is_empty()
-        || decision.truncated
-        || decision.total_evidence_count != decision.evidence.len()
     {
         return decision;
     }
@@ -344,16 +342,14 @@ fn retain_non_crediting_evidence(
     if !only_unreachable && !only_re_exports {
         return decision;
     }
-    let (reason, action, assertion, explanation) = if only_unreachable {
+    let (action, assertion, explanation) = if only_unreachable {
         (
-            SemanticGapReason::UnreachableEvidence,
             "Review the unreachable consumer files before removing this declaration.",
             "retained-unreachable-evidence",
             "came only from files unreachable from analyzed entry points",
         )
     } else {
         (
-            SemanticGapReason::NonCreditingEvidence,
             "Confirm that a reachable consumer reads the re-exported binding before removing it.",
             "retained-non-crediting-evidence",
             "consisted only of re-export declarations with no proven consumer read",
@@ -363,21 +359,16 @@ fn retain_non_crediting_evidence(
     decision.status = SemanticCompleteness::Partial;
     decision.closed_world_eligible = false;
     decision.edit_guard = None;
-    decision.reason_code = Some(reason);
+    decision.reason_code = None;
     decision.explanation = format!(
         "Type-aware evidence for '{}' {explanation}, so it does not refute the dead-code finding.",
         decision.subject.exported_name,
     );
     decision.actions = vec![action.to_string()];
-    decision.omissions = vec![SemanticOmission {
-        reason_code: reason,
-        count: decision.evidence.len(),
-    }];
     summary.assertion = assertion.to_string();
     summary.status = SemanticCompleteness::Partial;
-    summary.reason_code = Some(reason);
+    summary.reason_code = None;
     summary.actions = vec![action.to_string()];
-    summary.omissions = decision.omissions.clone();
     decision
 }
 
@@ -461,10 +452,7 @@ mod tests {
             decision.decision,
             SemanticCandidateDecisionKind::RetainedAbstained
         );
-        assert_eq!(
-            decision.reason_code,
-            Some(SemanticGapReason::UnreachableEvidence)
-        );
+        assert_eq!(decision.reason_code, None);
         assert_eq!(query_summary.status, SemanticCompleteness::Partial);
     }
 
@@ -486,6 +474,26 @@ mod tests {
     }
 
     #[test]
+    fn truncated_unreachable_evidence_fails_closed() {
+        let unreachable = BTreeSet::from([PathBuf::from("src/orphan.ts")]);
+        let mut candidate = confirmed_used("src/orphan.ts");
+        candidate.total_evidence_count = 41;
+        candidate.truncated = true;
+        let mut query_summary = summary();
+        query_summary.total_evidence_count = 41;
+        query_summary.truncated = true;
+
+        let decision = retain_non_crediting_evidence(candidate, &unreachable, &mut query_summary);
+
+        assert_eq!(
+            decision.decision,
+            SemanticCandidateDecisionKind::RetainedAbstained
+        );
+        assert!(decision.truncated);
+        assert_eq!(decision.total_evidence_count, 41);
+    }
+
+    #[test]
     fn re_export_declaration_without_consumer_read_cannot_refute_dead_code() {
         let mut candidate = confirmed_used("src/barrel.ts");
         candidate.evidence[0].role = "re-export".to_string();
@@ -497,9 +505,6 @@ mod tests {
             decision.decision,
             SemanticCandidateDecisionKind::RetainedAbstained
         );
-        assert_eq!(
-            decision.reason_code,
-            Some(SemanticGapReason::NonCreditingEvidence)
-        );
+        assert_eq!(decision.reason_code, None);
     }
 }

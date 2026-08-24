@@ -618,7 +618,7 @@ const recordSymbolUse = (root, state, project, entry, node, namespace) => {
   if (isDeclarationReference(root, state, entry, node)) return;
   if (isDeclaration(node.parent) && node.parent.name === node) return;
   const moduleEdge = moduleEdgeDeclaration(node);
-  if (moduleEdge && isImportDeclaration(moduleEdge)) return;
+  if (moduleEdge) return;
   if (!isExactExportReference(project, entry, node)) return;
   const evidence = state.evidenceByQuery.get(entry.query.id);
   state.totalByQuery.set(entry.query.id, state.totalByQuery.get(entry.query.id) + 1);

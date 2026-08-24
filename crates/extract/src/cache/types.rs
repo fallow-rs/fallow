@@ -1001,9 +1001,10 @@ use crate::MemberKind;
 /// records require and dynamic-import whole-object usage across their full
 /// binding lifetimes, uses one source-mapped MDX statement stream, recognizes
 /// every supported CSS Module extension consistently, and persists the
-/// conservative single-static-CommonJS-object-map semantic fact. Warm 280
-/// caches lack those binding, statement, stylesheet, and provenance facts, so
-/// they would replay the pre-fix crediting and MDX token source on upgrade.
+/// conservative single-static-CommonJS-object-map and target-agnostic default
+/// import whole-object semantic facts. Warm 280 caches lack those binding,
+/// statement, stylesheet, provenance, and handoff facts, so they would replay
+/// the pre-fix crediting and MDX token source on upgrade.
 pub(super) const CACHE_VERSION: u32 = 281;
 
 /// Duplication token cache version. Bump when duplicate tokenization,

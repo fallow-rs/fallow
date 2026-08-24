@@ -5887,6 +5887,42 @@ fn import_default() {
 }
 
 #[test]
+fn default_import_whole_object_handoffs_are_distinct_from_member_accesses() {
+    let info = parse(
+        "import direct from './direct';\n\
+         import { default as aliased } from './aliased';\n\
+         direct.used;\n\
+         aliased.used;\n\
+         hand(direct);\n\
+         hand(aliased);",
+    );
+
+    for local_name in ["direct", "aliased"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == local_name && access.member == "used"),
+            "the precise member access must remain available for {local_name}"
+        );
+        assert!(
+            info.semantic_facts.iter().any(|fact| matches!(
+                fact,
+                SemanticFact::DefaultImportWholeObjectUse(use_fact)
+                    if use_fact.local_name == local_name
+            )),
+            "the bare handoff must be recorded separately for {local_name}"
+        );
+    }
+
+    let precise_only = parse("import value from './value'; value.used;");
+    assert!(precise_only.semantic_facts.iter().all(|fact| !matches!(
+        fact,
+        SemanticFact::DefaultImportWholeObjectUse(use_fact)
+            if use_fact.local_name == "value"
+    )));
+}
+
+#[test]
 fn css_module_default_import_destructure_records_member_accesses() {
     let info = parse(
         "import styles from './Card.module.css';\n\
@@ -6549,6 +6585,10 @@ fn cjs_object_map_provenance_fails_closed_for_ambiguous_forms() {
         "module.exports = { default: 1 }; module.exports = { default: 2 };",
         "module.exports = { default: 1 }; exports.extra = 2;",
         "exports.extra = 2; module.exports = { default: 1 };",
+        "module.exports = { default: 1 }; module['exports'].extra = 2;",
+        "module.exports = { default: 1 }; module['exports'] = { other: 2 };",
+        "module.exports = { default: 1 }; exports['extra'] = 2;",
+        "module.exports += { default: 1 };",
         "module.exports = { default: 1, ...extra };",
         "module.exports = { ['default']: 1 };",
         "module.exports = { default: 1, default: 2 };",

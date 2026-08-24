@@ -863,6 +863,22 @@ mod tests {
     }
 
     #[test]
+    fn saved_security_validator_accepts_pre_2390_type_aware_counts() {
+        let mut envelope = current_security_envelope();
+        let mut type_aware = serde_json::to_value(fallow_types::envelope::TypeAwareMeta::default())
+            .expect("serialize type-aware metadata");
+        let abstention_reasons = type_aware["abstention_reasons"]
+            .as_object_mut()
+            .expect("abstention reason object");
+        abstention_reasons.remove("unreachable_evidence");
+        abstention_reasons.remove("non_crediting_evidence");
+        envelope["_meta"] = json!({"type_aware": type_aware});
+
+        validate_saved_security_envelope(&envelope)
+            .expect("pre-2390 current-version type-aware metadata stays readable");
+    }
+
+    #[test]
     fn saved_security_validator_rejects_malformed_current_payloads() {
         let mut findings = current_security_envelope();
         findings["security_findings"] = json!("not-an-array");

@@ -71,4 +71,50 @@ fn proven_commonjs_object_maps_narrow_plain_default_imports() {
             "an unaccessed object-map key must keep reporting: {name}: {unused:?}"
         );
     }
+    assert!(
+        unused.iter().any(|(path, name)| {
+            path.ends_with("src/aliased-member.cjs") && name == "aliasMemberSpare"
+        }),
+        "the named-default spelling must retain precise object-map narrowing: {unused:?}"
+    );
+}
+
+#[test]
+fn ambiguous_commonjs_forms_and_whole_handoffs_stay_conservative() {
+    let root = fixture_path("issue-2397-default-export-credit");
+    let results = fallow_core::analyze(&create_config(root)).expect("analysis should succeed");
+    let unused: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|finding| {
+            (
+                finding.export.path.to_string_lossy().replace('\\', "/"),
+                finding.export.export_name.clone(),
+            )
+        })
+        .collect();
+
+    for (path, name) in [
+        ("src/computed.cjs", "computedSpare"),
+        ("src/compound.cjs", "compoundSpare"),
+    ] {
+        assert!(
+            unused
+                .iter()
+                .any(|(reported_path, reported)| reported_path.ends_with(path) && reported == name),
+            "ambiguous CommonJS forms must preserve the prior reporting behavior for {path}:{name}: {unused:?}"
+        );
+    }
+
+    for (path, name) in [
+        ("src/handoff.cjs", "handoffSpare"),
+        ("src/aliased-handoff.cjs", "aliasHandoffSpare"),
+    ] {
+        assert!(
+            !unused
+                .iter()
+                .any(|(reported_path, reported)| reported_path.ends_with(path) && reported == name),
+            "a whole-object CommonJS handoff must retain {path}:{name}: {unused:?}"
+        );
+    }
 }

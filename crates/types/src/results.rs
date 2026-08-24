@@ -368,8 +368,9 @@ pub struct AnalysisResults {
     /// `add-catalog-entry` / `update-catalog-reference` primary at position 0.
     #[serde(default)]
     pub unresolved_catalog_references: Vec<UnresolvedCatalogReferenceFinding>,
-    /// Entries in pnpm-workspace.yaml's overrides: section, package.json's
-    /// pnpm.overrides block, or package.json's top-level npm overrides object,
+    /// Entries in pnpm-workspace.yaml's overrides section, package.json's
+    /// pnpm.overrides block, npm or Bun's top-level overrides object, or Bun's
+    /// top-level resolutions object,
     /// whose target package is not declared by any workspace package and is
     /// not present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,
     /// or bun.lock. Default severity is warn because projects without a
@@ -379,10 +380,10 @@ pub struct AnalysisResults {
     /// Wrapped in [`UnusedDependencyOverrideFinding`].
     #[serde(default)]
     pub unused_dependency_overrides: Vec<UnusedDependencyOverrideFinding>,
-    /// pnpm.overrides or npm overrides entries whose key or value does not
-    /// parse as a valid override spec (empty key, empty value, malformed
-    /// selector, unbalanced parent matcher). The package manager will reject
-    /// these at install time. Default severity is error. Wrapped in
+    /// Package-manager override or resolution entries whose key or value does
+    /// not parse in the declaration source's grammar (empty key, empty value,
+    /// malformed selector, unbalanced parent matcher). The package manager may
+    /// reject or ignore these at install time. Default severity is error. Wrapped in
     /// [`MisconfiguredDependencyOverrideFinding`].
     #[serde(default)]
     pub misconfigured_dependency_overrides: Vec<MisconfiguredDependencyOverrideFinding>,
@@ -3159,7 +3160,7 @@ pub struct UnusedDependencyOverride {
     /// `"@types/react@<18"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version_constraint: Option<String>,
-    /// The right-hand side of the entry: the version pnpm should force.
+    /// The right-hand side of the entry: the version the package manager should force.
     pub version_range: String,
     /// File the override was declared in. Matches the value users write in
     /// `ignoreDependencyOverrides[].source`.
@@ -3182,14 +3183,14 @@ pub struct UnusedDependencyOverride {
     pub hint: Option<String>,
 }
 
-/// Why a dependency-override entry is misconfigured. `pnpm install` would
-/// either fail at install time or silently no-op on these entries; surfacing
-/// them statically catches the issue before pnpm does.
+/// Why a dependency-override entry is misconfigured. The active package
+/// manager may fail at install time or silently no-op on these entries;
+/// surfacing them statically catches the issue first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum DependencyOverrideMisconfigReason {
-    /// The override key could not be parsed into a recognised pnpm shape
+    /// The override key could not be parsed into a recognised source shape
     /// (e.g. dangling `>`, missing target, garbage characters).
     UnparsableKey,
     /// The override value is missing, empty, or contains line breaks.
@@ -3208,8 +3209,8 @@ impl DependencyOverrideMisconfigReason {
 }
 
 /// An override entry whose key or value is malformed. Default severity is
-/// `error` because pnpm refuses to install (or silently produces a no-op
-/// override) when it encounters these shapes.
+/// `error` because the active package manager may refuse to install or silently
+/// produce a no-op override when it encounters these shapes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MisconfiguredDependencyOverride {
@@ -3228,7 +3229,7 @@ pub struct MisconfiguredDependencyOverride {
     /// value was missing.
     pub raw_value: String,
     /// Classifier for the misconfiguration. 'unparsable-key' = the key is not a
-    /// valid pnpm shape; 'empty-value' = the value is missing, empty, or
+    /// valid source shape; 'empty-value' = the value is missing, empty, or
     /// contains line breaks.
     pub reason: DependencyOverrideMisconfigReason,
     /// Where the override entry was declared.

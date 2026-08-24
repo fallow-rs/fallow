@@ -46,11 +46,26 @@ When using fallow via MCP (`fallow-mcp`), the following tools are available:
 | `trace_clone` | trace | free | `fallow dupes --trace <file:line> --format json --quiet` | `file`, `line`, `fingerprint`, `near`, `min_occurrences` | Deep-dive a duplicate-code clone group (`fallow dupes --trace <spec> --format json`). Address by exactly one of: `file` + `line` (a source location), or `fingerprint` (a `dup:<id>` from a prior `find_dupes` `clone_groups[].fingerprint`, usually `dup:<8hex>` and widened only on rare report collisions). Returns the matched clone instance plus every clone group containing it; each traced group carries its `fingerprint`, an extract-function `suggestion` with estimated savings, and a best-effort `suggested_name` (omitted when no confident name). Supports `mode`, `near`, `min_tokens`, `min_lines`, `min_occurrences`, `threshold`, `skip_local`, `cross_language`, `ignore_imports`. Use the same `near` value as the originating `find_dupes` call. Use to consolidate duplication when you need exact sibling locations and a refactor target |
 <!-- generated:mcp-tools:end -->
 
-## When the type-aware proof is narrower than the root trace
+## How type-aware proof relates to the root trace
 
-`trace_symbol` is the only tool that returns a checker-backed `semantic` block next to a syntactic root trace, and there `semantic.references` / `semantic.status` / `semantic.identity` are the authoritative exact evidence for a symbol the checker can see. One exception: when the root trace lists a reference the proof does not, the root trace is the wider evidence, not a stale one. The proof always covers a single namespace, the one named by `semantic.target.namespace`, which is the lane the declaration itself occupies. A reference that credits the declaration from the other lane is outside that scope, so a bound `import type { helper }` of `export const helper` and a namespace-qualified read in a type position (`import * as impl` plus `type T = typeof impl.helper`) both report `no-references-found` with `status: "complete"` for a symbol `dead-code` counts as used. On an export trace the root `namespace` names the lane whose references are listed, so `namespace: "type"` next to `semantic.target.namespace: "value"` is the signature of that gap, and the human renderer marks the proof line `value namespace only`. A class-member trace carries the same signal as `owner_namespace`. The same carve-out is stated in-band on every type-aware payload under `_meta.field_definitions.semantic`. Never delete a symbol on a `no-references-found` proof whose root trace lists `direct_references`; resolve the disagreement first.
+`trace_symbol` is the only tool that returns a checker-backed `semantic` block
+next to a syntactic root trace. The checker resolves actual reads through local
+aliases, import types, namespace-qualified names, and barrels to the exact type
+or value declaration. Import and re-export declarations alone are not reads.
+The root trace stays authoritative for graph reachability and star ambiguity,
+and its optional `direct_references_by_namespace` keeps type and value evidence
+separate without changing the selected root `namespace`. Type-aware
+reconciliation fails closed: unreachable-only, re-export-only, or
+different-declaration evidence cannot suppress a syntactic finding. Treat an
+ambiguous root as an abstention, and investigate any remaining mismatch before
+deleting a symbol.
 
-`symbol_impact` carries no `semantic` block and no root trace to cross-check against. Its checker evidence is top-level (`target`, `identity`, `assertion`, `status`, `direct_consumers`) and is scoped to the same single namespace, so a cross-lane credit is invisible to it: the `import type` shape above returns `assertion: "no-consumers-found"`, `status: "complete"`, `confidence: "high"` and an empty `direct_consumers` for a symbol `dead-code` counts as used. Treat a clean `symbol_impact` on a value symbol as a claim about the value lane only, and confirm with `trace_export` or `trace_symbol` before deleting. On a consumer it does list, `relation` names the traced symbol's own lane (`direct-value-consumer` for a value symbol), not the consumer's, so a listed consumer may only couple to the symbol through a type.
+`symbol_impact` carries no `semantic` block and no root trace. Its top-level
+checker evidence uses the same declaration-safe alias and namespace resolution
+as `trace_symbol`. A listed consumer's `relation` names the traced symbol's own
+lane, not the consumer's syntax. Confirm a clean impact result with
+`trace_export` or `trace_symbol` before deletion when the graph reports
+ambiguity or reachable references.
 
 `trace_export` never carries a `semantic` block: it is API-backed in-process and answers from the graph alone.
 

@@ -79,7 +79,13 @@ pub(super) fn handle_type_aware_trace_output(
                 ));
             };
             match fallow_api::trace_type_aware_symbol(&config.root, &projects, symbol) {
-                Ok(semantic) => {
+                Ok(mut semantic) => {
+                    fallow_engine::trace::reconcile_semantic_trace_reachability(
+                        graph,
+                        &config.root,
+                        trace.file_reachable,
+                        &mut semantic,
+                    );
                     let exit =
                         semantic_completeness_exit(config.type_aware.require, semantic.status);
                     trace.semantic = Some(semantic);
@@ -111,7 +117,13 @@ pub(super) fn handle_type_aware_trace_output(
                 ));
             };
             match fallow_api::trace_type_aware_symbol(&config.root, &projects, symbol) {
-                Ok(semantic) => {
+                Ok(mut semantic) => {
+                    fallow_engine::trace::reconcile_semantic_trace_reachability(
+                        graph,
+                        &config.root,
+                        trace.owner_file_reachable,
+                        &mut semantic,
+                    );
                     let exit =
                         semantic_completeness_exit(config.type_aware.require, semantic.status);
                     trace.semantic = Some(semantic);

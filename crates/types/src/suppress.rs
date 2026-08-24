@@ -72,11 +72,11 @@ pub enum IssueKind {
     /// A workspace package.json reference (`catalog:` / `catalog:<name>`) pointing at
     /// a catalog that does not declare the consumed package.
     UnresolvedCatalogReference,
-    /// An entry in pnpm's `overrides:` / `pnpm.overrides` whose target package
-    /// is not declared in any workspace `package.json`.
+    /// A package-manager override whose target package is not declared in any
+    /// workspace `package.json`.
     UnusedDependencyOverride,
-    /// An entry in pnpm's `overrides:` / `pnpm.overrides` whose key or value
-    /// cannot be parsed into a valid pnpm shape.
+    /// A package-manager override whose key or value cannot be parsed in its
+    /// declaration source's grammar.
     MisconfiguredDependencyOverride,
     /// A `"use client"` file that transitively imports a module reading a
     /// non-public `process.env` secret (security candidate).

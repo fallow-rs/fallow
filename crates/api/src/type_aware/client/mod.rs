@@ -2105,12 +2105,6 @@ const fn gap_reason_phrase(reason: Option<SemanticGapReason>) -> &'static str {
             "unverified framework package provenance"
         }
         Some(SemanticGapReason::Capacity) => "the configured semantic capacity",
-        Some(SemanticGapReason::UnreachableEvidence) => {
-            "checker references found only in unreachable files"
-        }
-        Some(SemanticGapReason::NonCreditingEvidence) => {
-            "checker evidence contains no proven consumer read"
-        }
         Some(SemanticGapReason::UnsupportedSyntax) => "unsupported declaration syntax",
         None => "incomplete semantic evidence",
     }
@@ -2151,13 +2145,10 @@ fn record_candidate_decision(
                 Some(SemanticGapReason::Capacity) => {
                     stats.abstention_reasons.capacity += 1;
                 }
-                Some(SemanticGapReason::UnreachableEvidence) => {
-                    stats.abstention_reasons.unreachable_evidence += 1;
+                Some(SemanticGapReason::UnsupportedSyntax) => {
+                    stats.abstention_reasons.unsupported_syntax += 1;
                 }
-                Some(SemanticGapReason::NonCreditingEvidence) => {
-                    stats.abstention_reasons.non_crediting_evidence += 1;
-                }
-                _ => stats.abstention_reasons.unsupported_syntax += 1,
+                _ => {}
             }
         }
         SemanticCandidateDecisionKind::RetainedAbstained => {
@@ -2176,13 +2167,10 @@ fn record_candidate_decision(
                 Some(SemanticGapReason::Capacity) => {
                     stats.abstention_reasons.capacity += 1;
                 }
-                Some(SemanticGapReason::UnreachableEvidence) => {
-                    stats.abstention_reasons.unreachable_evidence += 1;
+                Some(SemanticGapReason::UnsupportedSyntax) => {
+                    stats.abstention_reasons.unsupported_syntax += 1;
                 }
-                Some(SemanticGapReason::NonCreditingEvidence) => {
-                    stats.abstention_reasons.non_crediting_evidence += 1;
-                }
-                _ => stats.abstention_reasons.unsupported_syntax += 1,
+                _ => {}
             }
         }
     }

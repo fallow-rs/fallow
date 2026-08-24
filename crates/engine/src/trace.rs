@@ -53,6 +53,22 @@ pub fn trace_export(
     trace_impl::trace_export(graph.as_graph(), root, file_path, export_name)
 }
 
+/// Reconcile checker-backed trace evidence with graph reachability while
+/// retaining non-crediting evidence for inspection.
+pub fn reconcile_semantic_trace_reachability(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    target_reachable: bool,
+    trace: &mut fallow_types::semantic::SemanticSymbolTrace,
+) {
+    trace_impl::reconcile_semantic_trace_reachability(
+        graph.as_graph(),
+        root,
+        target_reachable,
+        trace,
+    );
+}
+
 /// Resolve the source identity for an exact semantic export query.
 #[must_use]
 pub fn semantic_symbol_for_export(

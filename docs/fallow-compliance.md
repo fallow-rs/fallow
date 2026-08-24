@@ -24,7 +24,7 @@ In priority order:
 3. **Complexity and hotspots** -- `fallow health` shows `Above threshold: 0`
 4. **Duplication** -- clone families either consolidated or documented
 5. **Architecture boundaries** -- no unintended boundary violations or new circular dependencies
-6. **Dependency hygiene** -- no unused, unresolved, or unlisted dependencies; pnpm catalog and overrides clean
+6. **Dependency hygiene** -- no unused, unresolved, or unlisted dependencies; package-manager catalogs and overrides clean
 7. **Cleanup opportunities** -- unused files, exports, types either deleted or explicitly kept with a documented reason
 8. **Suppression hygiene** -- no stale suppression comments, no broad ignore patterns covering real issues
 

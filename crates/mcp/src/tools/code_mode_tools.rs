@@ -14,8 +14,8 @@ use fallow_api::{
 use super::super::{
     analyze::run_analyze_api_value,
     api_runtime::{
-        changed_since_from_param, env_diff_file, non_empty_path, resolve_typed_coverage_inputs,
-        workspace_patterns_from_param,
+        changed_since_from_param, env_diff_file, non_empty_path, programmatic_error_body,
+        resolve_typed_coverage_inputs, workspace_patterns_from_param,
     },
     audit::run_audit_api_value,
     build_analyze_args, build_audit_args, build_check_changed_args,
@@ -480,7 +480,7 @@ fn run_combined_api_value(params: &CombinedParams) -> Result<Option<serde_json::
     let options = combined_options_from_params(params)?;
     let value = run_combined(&options)
         .and_then(serialize_combined_programmatic_json)
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| programmatic_error_body(&err))?;
 
     Ok(Some(value))
 }
@@ -509,7 +509,7 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
         None,
         "combined.coverage_root",
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| programmatic_error_body(&error))?;
     Ok(CombinedOptions {
         analysis,
         include_entry_exports: params.include_entry_exports.unwrap_or(false),

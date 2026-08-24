@@ -20,6 +20,8 @@ fn every_css_module_spelling_credits_exact_or_whole_class_maps() {
         ("src/theme.module.sass", "sassUsed"),
         ("src/alias.module.css", "aliasUsed"),
         ("src/whole.module.css", "wholeSpare"),
+        ("src/extensionless.module.css", "extensionlessSpare"),
+        ("src/aliased-target.module.css", "aliasedSpare"),
     ] {
         assert!(
             !unused

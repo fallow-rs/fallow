@@ -36,6 +36,39 @@ fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
     module_str.ends_with(&format!("/{user_path_norm}"))
 }
 
+/// Reconcile checker-backed reference evidence with the retained graph's
+/// entry-point reachability. Evidence from unreachable files remains visible,
+/// but cannot produce a complete `references-found` assertion.
+pub fn reconcile_semantic_trace_reachability(
+    graph: &ModuleGraph,
+    root: &Path,
+    target_reachable: bool,
+    trace: &mut fallow_types::semantic::SemanticSymbolTrace,
+) {
+    if trace.assertion != "references-found" || trace.references.is_empty() {
+        return;
+    }
+    let has_reachable_reference = target_reachable
+        && trace.references.iter().any(|reference| {
+            let reference_path = reference.path.to_string_lossy();
+            graph.modules.iter().any(|module| {
+                path_matches(&module.path, root, &reference_path) && module.is_reachable()
+            })
+        });
+    if has_reachable_reference {
+        return;
+    }
+
+    trace.assertion = "references-only-in-unreachable-files".to_string();
+    trace.status = fallow_types::semantic::SemanticCompleteness::Partial;
+    trace.identity.completeness = fallow_types::semantic::SemanticCompleteness::Partial;
+    let action =
+        "Review the unreachable consumer files before removing this declaration.".to_string();
+    if !trace.actions.contains(&action) {
+        trace.actions.push(action);
+    }
+}
+
 /// Map a reference's `from_file` id to a root-relative [`ExportReference`].
 fn reference_to_export_reference(
     graph: &ModuleGraph,
@@ -1758,7 +1791,7 @@ mod tests {
         assert!(trace.direct_references_by_namespace.iter().any(|lane| {
             lane.namespace == fallow_types::semantic::SemanticNamespace::Type
                 && lane.reference_count == 1
-                && lane.references[0].from_file == PathBuf::from("src/typed.ts")
+                && lane.references[0].from_file == Path::new("src/typed.ts")
         }));
     }
 

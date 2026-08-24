@@ -439,6 +439,12 @@ fn classify_host_error(message: &str) -> &'static str {
     {
         return "invalid_params";
     }
+    if serde_json::from_str::<serde_json::Value>(message).is_ok_and(|error| {
+        error.get("error").and_then(serde_json::Value::as_bool) == Some(true)
+            && error.get("code").is_some_and(serde_json::Value::is_string)
+    }) {
+        return "programmatic";
+    }
     "subprocess"
 }
 
@@ -590,6 +596,42 @@ mod tests {
         assert!(json["result"]["health"]["summary"].is_object());
         assert_eq!(json["calls"][0]["tool"].as_str(), Some("combined"));
         assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_combined_preserves_structured_programmatic_errors() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-combined-error-test","type":"module"}"#,
+        )
+        .expect("package json");
+
+        let output = execute_code_mode(
+            "/definitely/not/fallow".to_string(),
+            CodeExecuteParams {
+                code: "return fallow.combined({ coverage: 'missing-coverage.json' });".to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect_err("missing coverage should stay a structured API error");
+
+        let envelope: serde_json::Value =
+            serde_json::from_str(&output).expect("code mode error envelope");
+        let error: serde_json::Value = serde_json::from_str(
+            envelope["error"]
+                .as_str()
+                .expect("programmatic error should remain encoded as JSON"),
+        )
+        .expect("structured programmatic error");
+        assert_eq!(error["error"], true);
+        assert_eq!(error["exit_code"], 2);
+        assert_eq!(error["code"], "FALLOW_INVALID_COVERAGE_PATH");
+        assert_eq!(error["context"], "health.coverage");
+        assert_eq!(envelope["calls"][0]["tool"], "combined");
+        assert_eq!(envelope["calls"][0]["error_kind"], "programmatic");
     }
 
     #[test]

@@ -99,15 +99,17 @@ pub(super) fn run_dead_code_with_session(
             .with_context("dead-code")
     })?;
     let mut results = analysis.results;
+    let unfiltered_unused_files = results.unused_files.clone();
 
     apply_dead_code_scope(options, resolved, session, changed_files, &mut results)?;
     apply_dead_code_filters(&options.filters, &mut results);
     post_filter(&mut results);
-    let type_aware_meta = crate::type_aware::refine_programmatic_dead_code(
+    let type_aware_meta = refine_with_unfiltered_unused_files(
         &options.analysis.type_aware,
         &options.filters,
         session,
         &mut results,
+        unfiltered_unused_files,
     )?;
 
     Ok(build_dead_code_programmatic_output(
@@ -135,6 +137,7 @@ pub(super) fn run_dead_code_with_session_artifacts(
                 .with_code("FALLOW_DEAD_CODE_FAILED")
                 .with_context("dead-code")
         })?;
+    let unfiltered_unused_files = artifacts.results.unused_files.clone();
 
     apply_dead_code_scope(
         options,
@@ -145,11 +148,12 @@ pub(super) fn run_dead_code_with_session_artifacts(
     )?;
     apply_dead_code_filters(&options.filters, &mut artifacts.results);
     post_filter(&mut artifacts.results);
-    let type_aware_meta = crate::type_aware::refine_programmatic_dead_code(
+    let type_aware_meta = refine_with_unfiltered_unused_files(
         &options.analysis.type_aware,
         &options.filters,
         session,
         &mut artifacts.results,
+        unfiltered_unused_files,
     )?;
 
     Ok(build_dead_code_run_with_artifacts(
@@ -170,6 +174,7 @@ pub(super) fn run_dead_code_from_artifacts(
     mut artifacts: DeadCodeAnalysisArtifacts,
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticRunWithArtifacts> {
+    let unfiltered_unused_files = artifacts.results.unused_files.clone();
     apply_dead_code_scope(
         options,
         resolved,
@@ -178,11 +183,12 @@ pub(super) fn run_dead_code_from_artifacts(
         &mut artifacts.results,
     )?;
     apply_dead_code_filters(&options.filters, &mut artifacts.results);
-    let type_aware_meta = crate::type_aware::refine_programmatic_dead_code(
+    let type_aware_meta = refine_with_unfiltered_unused_files(
         &options.analysis.type_aware,
         &options.filters,
         session,
         &mut artifacts.results,
+        unfiltered_unused_files,
     )?;
 
     Ok(build_dead_code_run_with_artifacts(
@@ -193,6 +199,21 @@ pub(super) fn run_dead_code_from_artifacts(
         type_aware_meta,
         start,
     ))
+}
+
+fn refine_with_unfiltered_unused_files(
+    options: &crate::TypeAwareOptions,
+    filters: &DeadCodeFilters,
+    session: &AnalysisSession,
+    results: &mut AnalysisResults,
+    unfiltered_unused_files: Vec<fallow_types::output_dead_code::UnusedFileFinding>,
+) -> ProgrammaticResult<Option<fallow_types::envelope::TypeAwareMeta>> {
+    let reported_unused_files =
+        std::mem::replace(&mut results.unused_files, unfiltered_unused_files);
+    let outcome =
+        crate::type_aware::refine_programmatic_dead_code(options, filters, session, results);
+    results.unused_files = reported_unused_files;
+    outcome
 }
 
 fn build_dead_code_run_with_artifacts(

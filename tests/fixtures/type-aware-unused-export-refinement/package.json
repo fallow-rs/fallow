@@ -1,5 +1,6 @@
 {
   "name": "type-aware-unused-export-refinement-fixture",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "main": "src/consumer.ts"
 }

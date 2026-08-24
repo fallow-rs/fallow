@@ -704,14 +704,14 @@
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+          "description": "Entries in pnpm-workspace.yaml's overrides section, package.json's\npnpm.overrides block, npm or Bun's top-level overrides object, or Bun's\ntop-level resolutions object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
           },
-          "description": "pnpm.overrides or npm overrides entries whose key or value does not\nparse as a valid override spec (empty key, empty value, malformed\nselector, unbalanced parent matcher). The package manager will reject\nthese at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
+          "description": "Package-manager override or resolution entries whose key or value does\nnot parse in the declaration source's grammar (empty key, empty value,\nmalformed selector, unbalanced parent matcher). The package manager may\nreject or ignore these at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
         },
         "invalid_client_exports": {
           "type": "array",
@@ -1194,14 +1194,14 @@
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+          "description": "Entries in pnpm-workspace.yaml's overrides section, package.json's\npnpm.overrides block, npm or Bun's top-level overrides object, or Bun's\ntop-level resolutions object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
           },
-          "description": "pnpm.overrides or npm overrides entries whose key or value does not\nparse as a valid override spec (empty key, empty value, malformed\nselector, unbalanced parent matcher). The package manager will reject\nthese at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
+          "description": "Package-manager override or resolution entries whose key or value does\nnot parse in the declaration source's grammar (empty key, empty value,\nmalformed selector, unbalanced parent matcher). The package manager may\nreject or ignore these at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
         },
         "invalid_client_exports": {
           "type": "array",
@@ -5124,7 +5124,7 @@
         },
         "version_range": {
           "type": "string",
-          "description": "The right-hand side of the entry: the version pnpm should force."
+          "description": "The right-hand side of the entry: the version the package manager should force."
         },
         "source": {
           "description": "File the override was declared in. Matches the value users write in\n`ignoreDependencyOverrides[].source`.",
@@ -5175,7 +5175,7 @@
           "description": "The right-hand side of the entry, exactly as written. Empty when the\nvalue was missing."
         },
         "reason": {
-          "description": "Classifier for the misconfiguration. 'unparsable-key' = the key is not a\nvalid pnpm shape; 'empty-value' = the value is missing, empty, or\ncontains line breaks.",
+          "description": "Classifier for the misconfiguration. 'unparsable-key' = the key is not a\nvalid source shape; 'empty-value' = the value is missing, empty, or\ncontains line breaks.",
           "$ref": "#/definitions/DependencyOverrideMisconfigReason"
         },
         "source": {
@@ -5199,7 +5199,7 @@
         "path",
         "line"
       ],
-      "description": "An override entry whose key or value is malformed. Default severity is\n`error` because pnpm refuses to install (or silently produces a no-op\noverride) when it encounters these shapes."
+      "description": "An override entry whose key or value is malformed. Default severity is\n`error` because the active package manager may refuse to install or silently\nproduce a no-op override when it encounters these shapes."
     },
     "CloneGroup": {
       "type": "object",
@@ -5625,11 +5625,11 @@
         },
         "unused_dependency_overrides": {
           "type": "integer",
-          "description": "Pnpm `overrides:` entries whose target package is not declared by any\nworkspace package and not present in the lockfile."
+          "description": "Package-manager overrides whose target package is not declared by any\nworkspace package and not present in the active readable lockfile."
         },
         "misconfigured_dependency_overrides": {
           "type": "integer",
-          "description": "Pnpm `overrides:` entries whose key or value cannot be parsed."
+          "description": "Package-manager overrides whose key or value cannot be parsed."
         },
         "invalid_client_exports": {
           "type": "integer",
@@ -6413,14 +6413,14 @@
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, package.json's\npnpm.overrides block, or package.json's top-level npm overrides object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+          "description": "Entries in pnpm-workspace.yaml's overrides section, package.json's\npnpm.overrides block, npm or Bun's top-level overrides object, or Bun's\ntop-level resolutions object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
           },
-          "description": "pnpm.overrides or npm overrides entries whose key or value does not\nparse as a valid override spec (empty key, empty value, malformed\nselector, unbalanced parent matcher). The package manager will reject\nthese at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
+          "description": "Package-manager override or resolution entries whose key or value does\nnot parse in the declaration source's grammar (empty key, empty value,\nmalformed selector, unbalanced parent matcher). The package manager may\nreject or ignore these at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
         },
         "invalid_client_exports": {
           "type": "array",
@@ -6700,7 +6700,7 @@
         {
           "type": "string",
           "const": "unparsable-key",
-          "description": "The override key could not be parsed into a recognised pnpm shape\n(e.g. dangling `>`, missing target, garbage characters)."
+          "description": "The override key could not be parsed into a recognised source shape\n(e.g. dangling `>`, missing target, garbage characters)."
         },
         {
           "type": "string",
@@ -6708,7 +6708,7 @@
           "description": "The override value is missing, empty, or contains line breaks."
         }
       ],
-      "description": "Why a dependency-override entry is misconfigured. `pnpm install` would\neither fail at install time or silently no-op on these entries; surfacing\nthem statically catches the issue before pnpm does."
+      "description": "Why a dependency-override entry is misconfigured. The active package\nmanager may fail at install time or silently no-op on these entries;\nsurfacing them statically catches the issue first."
     },
     "RefactoringKind": {
       "oneOf": [
@@ -10497,7 +10497,7 @@
         },
         "version_range": {
           "type": "string",
-          "description": "The right-hand side of the entry: the version pnpm should force."
+          "description": "The right-hand side of the entry: the version the package manager should force."
         },
         "source": {
           "description": "File the override was declared in. Matches the value users write in\n`ignoreDependencyOverrides[].source`.",
@@ -10567,7 +10567,7 @@
           "description": "The right-hand side of the entry, exactly as written. Empty when the\nvalue was missing."
         },
         "reason": {
-          "description": "Classifier for the misconfiguration. 'unparsable-key' = the key is not a\nvalid pnpm shape; 'empty-value' = the value is missing, empty, or\ncontains line breaks.",
+          "description": "Classifier for the misconfiguration. 'unparsable-key' = the key is not a\nvalid source shape; 'empty-value' = the value is missing, empty, or\ncontains line breaks.",
           "$ref": "#/definitions/DependencyOverrideMisconfigReason"
         },
         "source": {
@@ -20588,14 +20588,6 @@
         "capacity": {
           "type": "integer",
           "description": "Candidates retained because the bounded semantic request reached capacity."
-        },
-        "unreachable_evidence": {
-          "type": "integer",
-          "description": "Candidates whose checker evidence came only from unreachable files."
-        },
-        "non_crediting_evidence": {
-          "type": "integer",
-          "description": "Candidates whose checker evidence consisted only of non-crediting declarations."
         }
       },
       "required": [
@@ -20605,9 +20597,7 @@
         "svelte_virtual_module_exports",
         "unknown_symbol",
         "unsupported_syntax",
-        "capacity",
-        "unreachable_evidence",
-        "non_crediting_evidence"
+        "capacity"
       ],
       "description": "Closed abstention reason counts for stable machine consumption."
     },
@@ -21031,16 +21021,6 @@
           "type": "string",
           "const": "capacity",
           "description": "A configured request or response capacity was reached."
-        },
-        {
-          "type": "string",
-          "const": "unreachable-evidence",
-          "description": "Checker references exist, but every referenced file is unreachable\nfrom the analyzed entry points and therefore cannot refute dead code."
-        },
-        {
-          "type": "string",
-          "const": "non-crediting-evidence",
-          "description": "Checker evidence consists only of re-export declarations, which do not\nprove that any reachable consumer reads the exposed binding."
         },
         {
           "type": "string",

@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@theme": ["src/aliased-target.module.css"]
+    }
+  }
+}

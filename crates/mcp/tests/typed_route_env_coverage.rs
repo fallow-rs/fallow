@@ -78,6 +78,23 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
     );
 }
 
+#[test]
+fn trace_symbol_typed_route_does_not_credit_an_unreachable_consumer() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_type_aware_trace_project(project.path());
+
+    let mut server = McpServer::start(false);
+    let trace = server.trace_symbol(project.path(), "src/lonely.ts", "helper");
+
+    assert_eq!(trace["is_used"], false);
+    assert_eq!(
+        trace["semantic"]["assertion"],
+        "references-only-in-unreachable-files"
+    );
+    assert_eq!(trace["semantic"]["status"], "partial");
+    assert_eq!(trace["semantic"]["references"][0]["path"], "src/orphan.ts");
+}
+
 /// `coverage_source` of the `branchy` finding from a `check_health` call on a
 /// server started with or without the coverage variables.
 fn branchy_coverage_source(root: &Path, with_env: bool) -> Option<String> {
@@ -169,6 +186,31 @@ fn write_large_file_project(root: &Path) {
     std::fs::write(root.join("src/huge.ts"), source).expect("write large source");
 }
 
+fn write_type_aware_trace_project(root: &Path) {
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"mcp-type-aware-trace","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"strict":true,"module":"ESNext","moduleResolution":"Bundler","target":"ES2022","noEmit":true},"include":["src/**/*.ts"]}"#,
+    )
+    .expect("write tsconfig");
+    std::fs::write(root.join("src/index.ts"), "export const entry = true;\n").expect("write entry");
+    std::fs::write(
+        root.join("src/lonely.ts"),
+        "export const helper = (): number => 1;\n",
+    )
+    .expect("write declaration");
+    std::fs::write(
+        root.join("src/orphan.ts"),
+        "import { helper } from './lonely';\nexport const orphan = helper();\n",
+    )
+    .expect("write unreachable consumer");
+}
+
 /// The built `fallow-mcp` binary as a child process, spoken to over the stdio
 /// transport's newline-delimited JSON-RPC.
 struct McpServer {
@@ -184,6 +226,7 @@ impl McpServer {
 
     fn start_with_options(with_coverage_env: bool, max_file_size: Option<&str>) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
+        configure_type_aware_sidecar(&mut command);
         if with_coverage_env {
             command
                 .env("FALLOW_COVERAGE", COVERAGE_FILE)
@@ -290,6 +333,34 @@ impl McpServer {
         serde_json::from_str(text).expect("analyze payload")
     }
 
+    fn trace_symbol(&mut self, root: &Path, file: &str, export_name: &str) -> serde_json::Value {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "trace_symbol",
+                "arguments": {
+                    "root": root.display().to_string(),
+                    "file": file,
+                    "export_name": export_name,
+                    "no_cache": true
+                }
+            }
+        });
+        self.send(&serde_json::to_string(&request).expect("serialize request"));
+        let response = self.response(2);
+        let result = &response["result"];
+        assert_ne!(
+            result["isError"], true,
+            "trace_symbol must succeed: {response}"
+        );
+        let text = result["content"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| panic!("text content: {response}"));
+        serde_json::from_str(text).expect("trace payload")
+    }
+
     fn send(&mut self, message: &str) {
         writeln!(self.stdin, "{message}").expect("write message");
         self.stdin.flush().expect("flush message");
@@ -311,6 +382,28 @@ impl McpServer {
             }
         }
     }
+}
+
+fn configure_type_aware_sidecar(command: &mut Command) {
+    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let sidecar = repository_root.join("tools/type-aware-sidecar/fallow-type-aware.mjs");
+
+    #[cfg(windows)]
+    {
+        let path = std::env::var_os("PATH").expect("PATH must contain Node.js");
+        let node = std::env::split_paths(&path)
+            .map(|entry| entry.join("node.exe"))
+            .find(|candidate| candidate.is_file())
+            .expect("Node.js executable");
+        command
+            .env("FALLOW_TYPE_AWARE_BIN", node)
+            .env("FALLOW_TYPE_AWARE_SCRIPT", sidecar);
+    }
+    #[cfg(not(windows))]
+    command.env("FALLOW_TYPE_AWARE_BIN", sidecar);
 }
 
 impl Drop for McpServer {

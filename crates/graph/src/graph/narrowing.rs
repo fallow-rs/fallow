@@ -197,6 +197,16 @@ fn is_single_static_cjs_object_map(module: &ResolvedModule) -> bool {
         .any(|fact| matches!(fact, SemanticFact::CjsSingleStaticObjectMap))
 }
 
+fn default_import_has_whole_object_use(module: &ResolvedModule, local_name: &str) -> bool {
+    module.semantic_facts.iter().any(|fact| {
+        matches!(
+            fact,
+            SemanticFact::DefaultImportWholeObjectUse(use_fact)
+                if use_fact.local_name == local_name
+        )
+    })
+}
+
 /// Extract member access names for a given local variable from a resolved module.
 fn extract_accessed_members(source_mod: Option<&&ResolvedModule>, local_name: &str) -> Vec<String> {
     source_mod
@@ -506,8 +516,12 @@ fn narrow_namespace_references(
     let source_mod = ctx.module_by_id.get(&site.from_file);
     let accessed_members = extract_accessed_members(source_mod, sym_local_name);
 
-    let is_whole_object =
-        source_mod.is_some_and(|m| m.whole_object_uses.iter().any(|n| n == sym_local_name));
+    let is_whole_object = source_mod.is_some_and(|module| {
+        module
+            .whole_object_uses
+            .iter()
+            .any(|name| name == sym_local_name)
+    });
 
     // `export { ns }` hands the namespace object itself to consumers the graph
     // cannot enumerate, on an entry point as much as on any other module: the
@@ -601,8 +615,13 @@ fn narrow_css_module_references(
     ctx: &mut AttachContext<'_>,
 ) {
     let source_mod = ctx.module_by_id.get(&site.from_file);
-    let is_whole_object =
-        source_mod.is_some_and(|m| m.whole_object_uses.iter().any(|n| n == sym_local_name));
+    let is_whole_object = source_mod.is_some_and(|module| {
+        module
+            .whole_object_uses
+            .iter()
+            .any(|name| name == sym_local_name)
+            || default_import_has_whole_object_use(module, sym_local_name)
+    });
     let accessed_members = extract_accessed_members(source_mod, sym_local_name);
     let mut mark = NamespaceMarkContext {
         module_id,
@@ -828,7 +847,9 @@ pub(super) fn attach_symbol_reference(
     }
 
     let site = ReferenceSite::from_symbol(source_id, target_module.file_id, sym, reference_paths);
-    let narrows_default_object_map = matches!(sym.imported_name, ImportedName::Default)
+    let is_default_import = matches!(sym.imported_name, ImportedName::Default)
+        || matches!(&sym.imported_name, ImportedName::Named(name) if name == "default");
+    let narrows_default_object_map = is_default_import
         && !sym.local_name.is_empty()
         && ctx
             .module_by_id
@@ -897,8 +918,7 @@ pub(super) fn attach_symbol_reference(
         }
     }
 
-    if (matches!(sym.imported_name, ImportedName::Default)
-        || matches!(&sym.imported_name, ImportedName::Named(name) if name == "default"))
+    if is_default_import
         && !sym.local_name.is_empty()
         && (is_css_module_path(&target_module.path) || narrows_default_object_map)
     {

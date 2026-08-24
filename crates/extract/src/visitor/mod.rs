@@ -346,6 +346,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// declaration is legal after the code that reads it, so walk order cannot
     /// answer whether a reference names a namespace object. See issue #2377.
     namespace_import_locals: FxHashSet<String>,
+    /// Default-import locals whose target shape is known only after graph
+    /// resolution. Bare uses become semantic facts instead of joining the
+    /// namespace-wide `whole_object_uses` stream.
+    default_import_locals: FxHashSet<String>,
+    default_import_whole_object_uses: FxHashSet<String>,
     /// Names seeded into an isolated template snippet. Directly calling an
     /// imported function is not a whole-object handover, so call-callee spans
     /// for this broader name set are excluded during that snippet's walk.

@@ -251,17 +251,17 @@ pub const CHECK_RULES: &[RuleDef] = &[
     RuleDef {
         id: "fallow/unused-dependency-override",
         category: "Dependencies",
-        name: "Unused pnpm dependency override",
-        short: "pnpm.overrides entry targets a package not declared or resolved",
-        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, whose target package is not declared by any workspace package and is not present in `pnpm-lock.yaml`. Override entries linger after their target package leaves the resolved dependency tree. For projects without a readable lockfile, fallow falls back to workspace package.json manifests and keeps a `hint` so transitive CVE pins can be reviewed before removal. To fix: delete the entry, refresh `pnpm-lock.yaml` if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override.",
+        name: "Unused dependency override",
+        short: "Package-manager override target is not declared or resolved",
+        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` section, `package.json#pnpm.overrides`, npm or Bun's top-level `package.json#overrides`, or Bun's `package.json#resolutions` whose target package is not declared by any workspace package and is not present in the active readable lockfile (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, or `bun.lock`). Override entries linger after their target package leaves the resolved dependency tree. pnpm and npm projects without a readable lockfile fall back to workspace package manifests and keep a `hint` so transitive CVE pins can be reviewed before removal. Bun projects with only binary `bun.lockb` fail closed: fallow reports a workspace diagnostic and emits no unused-override finding until a readable `bun.lock` exists. To fix: delete the entry, refresh the active lockfile if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override.",
         docs_path: "explanations/dead-code#unused-dependency-overrides",
     },
     RuleDef {
         id: "fallow/misconfigured-dependency-override",
         category: "Dependencies",
-        name: "Misconfigured pnpm dependency override",
-        short: "pnpm.overrides entry has an unparsable key or value",
-        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: fallow/unused-dependency-override.",
+        name: "Misconfigured dependency override",
+        short: "Package-manager override has an unparsable key or value",
+        full: "An entry in `pnpm-workspace.yaml#overrides`, `package.json#pnpm.overrides`, npm or Bun's top-level `package.json#overrides`, or Bun's `package.json#resolutions` whose key or value cannot be interpreted in that source's override grammar. Common shapes include an empty key, an empty value, a malformed version selector (`@types/react@<<18`), or an unbalanced parent matcher (`react>`). The active package manager may reject or ignore the entry. To fix: correct the key or value according to that package manager's grammar, or remove the entry. See also: fallow/unused-dependency-override.",
         docs_path: "explanations/dead-code#misconfigured-dependency-overrides",
     },
     RuleDef {
@@ -733,12 +733,12 @@ fn catalog_rule_guide(id: &str) -> Option<RuleGuide> {
             how_to_fix: "If `available_in_catalogs` is non-empty, change the reference to one of those catalogs (e.g. `catalog:react18`). Otherwise add the package to the named catalog in the catalog source, or remove the catalog reference and pin a hardcoded version. For staged migrations where the catalog edit lands separately, add the (package, catalog, consumer) triple to `ignoreCatalogReferences` in your fallow config.",
         },
         "fallow/unused-dependency-override" => RuleGuide {
-            example: "pnpm-workspace.yaml declares `overrides: { axios: ^1.6.0 }`, but no workspace package.json declares `axios` and `pnpm-lock.yaml` does not resolve it.",
-            how_to_fix: "Delete the entry from `pnpm-workspace.yaml` or `package.json#pnpm.overrides`. If the finding is caused by a stale or missing lockfile, refresh `pnpm-lock.yaml` and rerun fallow. If the override is intentionally retained, add it to `ignoreDependencyOverrides` in your fallow config.",
+            example: "The root package.json declares `overrides: { axios: ^1.6.0 }`, but no workspace package.json declares `axios` and the active lockfile does not resolve it.",
+            how_to_fix: "Delete the entry from its reported declaration source. If the finding is caused by a stale or missing readable lockfile, refresh the active lockfile and rerun fallow. If the override is intentionally retained, add it to `ignoreDependencyOverrides` in your fallow config.",
         },
         "fallow/misconfigured-dependency-override" => RuleGuide {
-            example: "pnpm-workspace.yaml declares `overrides: { \"@types/react@<<18\": \"18.0.0\" }`. The doubled `<<` is not a valid pnpm version selector and pnpm will reject the workspace at install time.",
-            how_to_fix: "Fix the key/value to match pnpm's override grammar: bare names (`axios`), scoped names (`@types/react`), targets with version selectors (`@types/react@<18`), parent matchers (`react>react-dom`), and parent chains with selectors on either side. Allowed value idioms: bare version range, `-` (delete), `$ref`, and `npm:alias`. If the entry was experimental, remove it.",
+            example: "The root package.json declares `overrides: { \"axios\": \"\" }`. An empty override value is invalid and the active package manager will reject or ignore it.",
+            how_to_fix: "Fix the key or value to match the active package manager's grammar. For pnpm this includes bare or scoped package names, version selectors, parent matchers, and the supported `-`, `$ref`, and `npm:alias` values. For npm or Bun, preserve the supported nested object shape. Remove experimental entries that should not remain.",
         },
         _ => return None,
     })
@@ -1327,6 +1327,21 @@ mod tests {
             output.docs,
             format!("https://docs.fallow.tools/{}", meta.meta_docs_path)
         );
+    }
+
+    #[test]
+    fn dependency_override_explanations_cover_supported_package_managers() {
+        let unused = explain_issue_type("unused-dependency-override").unwrap();
+        assert_eq!(unused.name, "Unused dependency override");
+        assert!(unused.summary.contains("Package-manager override"));
+        assert!(unused.rationale.contains("npm"));
+        assert!(unused.rationale.contains("Bun"));
+
+        let misconfigured = explain_issue_type("misconfigured-dependency-override").unwrap();
+        assert_eq!(misconfigured.name, "Misconfigured dependency override");
+        assert!(misconfigured.summary.contains("Package-manager override"));
+        assert!(misconfigured.rationale.contains("npm"));
+        assert!(misconfigured.rationale.contains("Bun"));
     }
 
     #[test]

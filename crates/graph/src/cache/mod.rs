@@ -199,8 +199,9 @@ pub use store::GraphCacheStore;
 /// covers require, dynamic-import, Vue, and CSS Module bindings; ambient plain
 /// stars retain star-surface exposure; equivalent default spellings share the
 /// same duplicate-export rules; and proven CommonJS object maps use member
-/// narrowing. Those reference outcomes are baked into the persisted graph, so
-/// a warm 44 cache would skip the corrected build logic.
+/// narrowing while resolved CommonJS and CSS Module default imports preserve
+/// whole-object handoffs. Those reference outcomes are baked into the persisted
+/// graph, so a warm 44 cache would skip the corrected build logic.
 pub const GRAPH_CACHE_VERSION: u32 = 45;
 
 /// Cached form of a resolved target.

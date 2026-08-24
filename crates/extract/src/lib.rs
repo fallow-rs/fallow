@@ -56,8 +56,8 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::{
     AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
     ClassHeritageInfo, ClassThisMemberAccessFact, ClassThisWholeObjectUseFact,
-    ComputedEnumKeyUseFact, DynamicCustomElementRenderFact, DynamicImportInfo,
-    DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
+    ComputedEnumKeyUseFact, DefaultImportWholeObjectUseFact, DynamicCustomElementRenderFact,
+    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
     FactoryFnMemberAccessFact, FactoryFnWholeObjectFact, FactoryReturnExport,
     FactoryReturnObjectPropertyAccessFact, FactoryReturnObjectShapeExport,
     FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,

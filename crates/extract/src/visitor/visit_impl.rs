@@ -10,9 +10,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::{
-    ComputedEnumKeyUseFact, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
-    ImportInfo, ImportedName, MemberAccess, ModuleLoadMechanism, ReExportInfo, RequireCallInfo,
-    RequiredTypeMemberFact, SemanticFact, VisibilityTag,
+    ComputedEnumKeyUseFact, DefaultImportWholeObjectUseFact, DynamicImportInfo,
+    DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess,
+    ModuleLoadMechanism, ReExportInfo, RequireCallInfo, RequiredTypeMemberFact, SemanticFact,
+    VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
@@ -732,9 +733,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Pre-register every import local whose target is narrowed like a
-    /// namespace object: namespace imports, import-equals bindings, and CSS
-    /// Module default imports in either spelling.
+    /// Pre-register namespace imports and every default-import local.
     ///
     /// [`ModuleInfoExtractor::record_bare_namespace_reference`] needs the answer
     /// at every reference, and an import declaration is legal after the code
@@ -755,24 +754,27 @@ impl ModuleInfoExtractor {
                                 self.namespace_import_locals
                                     .insert(namespace.local.name.to_string());
                             }
-                            ImportDeclarationSpecifier::ImportDefaultSpecifier(default)
+                            ImportDeclarationSpecifier::ImportDefaultSpecifier(default) => {
+                                let local = default.local.name.to_string();
+                                self.default_import_locals.insert(local.clone());
                                 if crate::template_expression_scan::is_css_module_source(
                                     decl.source.value.as_str(),
-                                ) =>
-                            {
-                                self.namespace_import_locals
-                                    .insert(default.local.name.to_string());
+                                ) {
+                                    self.namespace_import_locals.insert(local);
+                                }
                             }
                             ImportDeclarationSpecifier::ImportSpecifier(named)
-                                if named.imported.name() == "default"
-                                    && crate::template_expression_scan::is_css_module_source(
-                                        decl.source.value.as_str(),
-                                    ) =>
+                                if named.imported.name() == "default" =>
                             {
-                                self.namespace_import_locals
-                                    .insert(named.local.name.to_string());
+                                let local = named.local.name.to_string();
+                                self.default_import_locals.insert(local.clone());
+                                if crate::template_expression_scan::is_css_module_source(
+                                    decl.source.value.as_str(),
+                                ) {
+                                    self.namespace_import_locals.insert(local);
+                                }
                             }
-                            _ => {}
+                            ImportDeclarationSpecifier::ImportSpecifier(_) => {}
                         }
                     }
                 }
@@ -810,7 +812,9 @@ impl ModuleInfoExtractor {
     /// [`ModuleInfoExtractor::record_bare_namespace_reference`] does not turn it
     /// into a whole-object use (issue #2377).
     fn mark_structured_namespace_reference(&mut self, ident: &IdentifierReference<'_>) {
-        if self.carries_namespace_object(ident.name.as_str()) {
+        if self.carries_namespace_object(ident.name.as_str())
+            || self.default_import_locals.contains(ident.name.as_str())
+        {
             self.structured_namespace_reference_spans.insert(ident.span);
         }
     }
@@ -890,6 +894,7 @@ impl ModuleInfoExtractor {
         // Every identifier reference of every file reaches here; a file without
         // a namespace-like binding has nothing to answer.
         if self.namespace_import_locals.is_empty()
+            && self.default_import_locals.is_empty()
             && self.namespace_binding_names.is_empty()
             && self.object_literal_namespace_placements.is_empty()
         {
@@ -902,6 +907,18 @@ impl ModuleInfoExtractor {
             return;
         }
         let name = ident.name.as_str();
+        if self.default_import_locals.contains(name)
+            && self
+                .default_import_whole_object_uses
+                .insert(name.to_string())
+        {
+            self.semantic_facts
+                .push(SemanticFact::DefaultImportWholeObjectUse(
+                    DefaultImportWholeObjectUseFact {
+                        local_name: name.to_string(),
+                    },
+                ));
+        }
         if self.namespace_import_locals.contains(name)
             || self
                 .namespace_binding_names
@@ -2141,8 +2158,29 @@ impl<'a> ModuleInfoExtractor {
                         Expression::Identifier(identifier) if identifier.name == "module"
                     )
             }
+            Expression::ComputedMemberExpression(member) => {
+                matches!(
+                    (&member.object, &member.expression),
+                    (
+                        Expression::Identifier(identifier),
+                        Expression::StringLiteral(property)
+                    ) if identifier.name == "module" && property.value == "exports"
+                )
+            }
             _ => false,
         }
+    }
+
+    fn is_computed_cjs_assignment_target(member: &ComputedMemberExpression<'_>) -> bool {
+        matches!(&member.object, Expression::Identifier(identifier) if identifier.name == "exports")
+            || matches!(
+                (&member.object, &member.expression),
+                (
+                    Expression::Identifier(identifier),
+                    Expression::StringLiteral(property)
+                ) if identifier.name == "module" && property.value == "exports"
+            )
+            || Self::is_cjs_exports_expression(&member.object)
     }
 
     fn is_cjs_es_module_marker_call(call: &CallExpression<'_>) -> bool {
@@ -2205,7 +2243,8 @@ impl<'a> ModuleInfoExtractor {
                 let is_top_level =
                     self.block_depth == 0 && self.function_depth == 0 && self.namespace_depth == 0;
                 self.record_cjs_assignment(
-                    is_top_level
+                    matches!(expr.operator, AssignmentOperator::Assign)
+                        && is_top_level
                         && object_map
                             .is_some_and(|object_map| Self::is_static_cjs_object_map(object_map)),
                 );
@@ -2223,11 +2262,7 @@ impl<'a> ModuleInfoExtractor {
                 self.record_cjs_assignment(false);
                 self.push_cjs_named_export(member.property.name.to_string(), expr.span);
             }
-        } else if let Expression::StaticMemberExpression(inner) = &member.object
-            && let Expression::Identifier(obj) = &inner.object
-            && obj.name == "module"
-            && inner.property.name == "exports"
-        {
+        } else if Self::is_cjs_exports_expression(&member.object) {
             self.record_cjs_assignment(false);
             self.push_cjs_named_export(member.property.name.to_string(), expr.span);
         }
@@ -3318,6 +3353,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             if matches!(member.object, Expression::ThisExpression(_)) {
                 self.handle_this_member_assignment(member.property.name.as_str(), expr);
             }
+        }
+        if let AssignmentTarget::ComputedMemberExpression(member) = &expr.left
+            && Self::is_computed_cjs_assignment_target(member)
+        {
+            self.record_cjs_assignment(false);
         }
         // `this.#dep = new Dep()` / `this.#dep = dep`: oxc routes a `#`-private
         // assignment target through the `PrivateFieldExpression` variant, so it

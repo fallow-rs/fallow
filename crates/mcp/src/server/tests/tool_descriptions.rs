@@ -35,6 +35,17 @@ fn live_tool_descriptions_match_the_checked_fixture() {
 }
 
 #[test]
+fn analyze_description_covers_supported_dependency_override_sources() {
+    let live = live_tool_descriptions();
+    let analyze = live.get("analyze").expect("analyze description");
+
+    assert!(analyze.contains("top-level `package.json#overrides`"));
+    assert!(analyze.contains("Bun `package.json#resolutions`"));
+    assert!(!analyze.contains("unused pnpm dependency overrides"));
+    assert!(!analyze.contains("misconfigured pnpm dependency overrides"));
+}
+
+#[test]
 fn description_contract_detects_punctuation_and_whitespace_drift() {
     let live = BTreeMap::from([("example".to_owned(), "alpha beta".to_owned())]);
 

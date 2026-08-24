@@ -97,9 +97,8 @@ error by suppressing a downstream detector.
   `NamedDefaultSpelling::for_target` decides that from the target path with
   `is_css_module_stylesheet`, which tracks the extractor's own CSS Module set
   (`.module.css`, `.module.scss`, `.module.sass`, `.module.less`). The
-  narrowing gate `is_css_module_path` stays on the narrower `.css` / `.scss`
-  pair, so `.less` and `.sass` class maps keep their default slot empty without
-  gaining member narrowing.
+  narrowing gate uses that same resolved-target set, so extensionless and
+  path-aliased imports receive identical member and whole-object handling.
 - `import X = require('./x')` is the TypeScript spelling of a CommonJS require
   binding, so the extractor records the same non-destructured require call a
   `const X = require('./x')` declaration records (issue #2365): one CommonJS

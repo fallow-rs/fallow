@@ -1,7 +1,8 @@
 //! CSS/SCSS file parsing and CSS Module class name extraction.
 //!
 //! Handles `@import`, `@use`, `@forward`, `@plugin`, `@apply`, `@tailwind` directives,
-//! and extracts class names as named exports from `.module.css`/`.module.scss` files.
+//! and extracts class names as named exports from `.module.css`, `.module.scss`,
+//! `.module.sass`, and `.module.less` files.
 //!
 //! Extraction is a deliberate hybrid, not a half-finished migration. lightningcss
 //! owns the membership decision for standard CSS (which `.token` occurrences are
@@ -697,7 +698,7 @@ fn lightningcss_class_set(source: &str) -> Option<FxHashSet<String>> {
         // Recover from individual malformed rules so a single bad rule does not
         // discard class names from the rest of the file.
         error_recovery: true,
-        // These files are `.module.css` / `.module.scss`, so parse in CSS Modules
+        // These files are CSS Modules, so parse standard CSS syntax in CSS Modules
         // mode. That makes the `:local()` / `:global()` pseudo-classes parse as
         // real selectors rather than erroring, so classes wrapped in them are
         // collected (matching the regex scanner). Renaming is a print-time

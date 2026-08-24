@@ -549,10 +549,10 @@ expression: redact_sarif_version(&json_str)
             {
               "id": "fallow/unused-dependency-override",
               "shortDescription": {
-                "text": "pnpm.overrides entry targets a package not declared or resolved"
+                "text": "Package-manager override target is not declared or resolved"
               },
               "fullDescription": {
-                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, whose target package is not declared by any workspace package and is not present in `pnpm-lock.yaml`. Override entries linger after their target package leaves the resolved dependency tree. For projects without a readable lockfile, fallow falls back to workspace package.json manifests and keeps a `hint` so transitive CVE pins can be reviewed before removal. To fix: delete the entry, refresh `pnpm-lock.yaml` if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override."
+                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` section, `package.json#pnpm.overrides`, npm or Bun's top-level `package.json#overrides`, or Bun's `package.json#resolutions` whose target package is not declared by any workspace package and is not present in the active readable lockfile (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, or `bun.lock`). Override entries linger after their target package leaves the resolved dependency tree. pnpm and npm projects without a readable lockfile fall back to workspace package manifests and keep a `hint` so transitive CVE pins can be reviewed before removal. Bun projects with only binary `bun.lockb` fail closed: fallow reports a workspace diagnostic and emits no unused-override finding until a readable `bun.lock` exists. To fix: delete the entry, refresh the active lockfile if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides",
               "defaultConfiguration": {
@@ -562,10 +562,10 @@ expression: redact_sarif_version(&json_str)
             {
               "id": "fallow/misconfigured-dependency-override",
               "shortDescription": {
-                "text": "pnpm.overrides entry has an unparsable key or value"
+                "text": "Package-manager override has an unparsable key or value"
               },
               "fullDescription": {
-                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: fallow/unused-dependency-override."
+                "text": "An entry in `pnpm-workspace.yaml#overrides`, `package.json#pnpm.overrides`, npm or Bun's top-level `package.json#overrides`, or Bun's `package.json#resolutions` whose key or value cannot be interpreted in that source's override grammar. Common shapes include an empty key, an empty value, a malformed version selector (`@types/react@<<18`), or an unbalanced parent matcher (`react>`). The active package manager may reject or ignore the entry. To fix: correct the key or value according to that package manager's grammar, or remove the entry. See also: fallow/unused-dependency-override."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides",
               "defaultConfiguration": {

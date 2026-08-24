@@ -528,6 +528,10 @@ fn api_check_json_document_with_config_fixable_and_meta(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "check output keeps envelope metadata and run-owned diagnostics explicit"
+)]
 pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
     results: &AnalysisResults,
     root: &Path,
@@ -718,6 +722,10 @@ pub(super) fn api_health_json_document(
     Ok(output)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "grouped health output keeps render options and run-owned diagnostics explicit"
+)]
 fn api_grouped_health_json_document(
     report: &fallow_output::HealthReport,
     grouping: &fallow_output::HealthGrouping,
@@ -749,6 +757,10 @@ fn api_grouped_health_json_document(
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "health output keeps render options and run-owned diagnostics explicit"
+)]
 pub(super) fn print_health_json(
     report: &fallow_output::HealthReport,
     root: &Path,
@@ -885,6 +897,10 @@ fn group_by_mode_from_label(label: &str) -> GroupByMode {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "grouped duplication output keeps render options and run-owned diagnostics explicit"
+)]
 pub(super) fn print_grouped_duplication_json(
     report: &DuplicationReport,
     grouping: &DuplicationGrouping,

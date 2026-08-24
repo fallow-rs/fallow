@@ -751,11 +751,11 @@ enum Command {
         #[arg(long)]
         unresolved_catalog_references: bool,
 
-        /// Only report unused pnpm dependency overrides
+        /// Only report unused package-manager dependency overrides
         #[arg(long)]
         unused_dependency_overrides: bool,
 
-        /// Only report misconfigured pnpm dependency overrides
+        /// Only report misconfigured package-manager dependency overrides
         #[arg(long)]
         misconfigured_dependency_overrides: bool,
 
@@ -6139,6 +6139,21 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
+    }
+
+    #[test]
+    fn dependency_override_help_is_package_manager_neutral() {
+        use clap::CommandFactory;
+        let help = Cli::command()
+            .find_subcommand_mut("dead-code")
+            .expect("dead-code command")
+            .render_long_help()
+            .to_string();
+
+        assert!(help.contains("Only report unused package-manager dependency overrides"));
+        assert!(help.contains("Only report misconfigured package-manager dependency overrides"));
+        assert!(!help.contains("unused pnpm dependency overrides"));
+        assert!(!help.contains("misconfigured pnpm dependency overrides"));
     }
 
     #[test]

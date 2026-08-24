@@ -144,7 +144,7 @@ export type SemanticCompletenessRequirement = ("best-effort" | "complete")
 /**
  * Stable reason why semantic evidence is partial or unavailable.
  */
-export type SemanticGapReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics" | "svelte-virtual-module-exports" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "virtual-dispatch" | "dynamic-member-access" | "decorated-declaration" | "optional-contract" | "accessor-pair" | "overload-set" | "attached-comment" | "abstract-declaration" | "incomplete-project-coverage" | "framework-contract-provenance" | "capacity" | "unreachable-evidence" | "non-crediting-evidence" | "unsupported-syntax")
+export type SemanticGapReason = ("no-project" | "ambiguous-project" | "blocking-diagnostics" | "svelte-virtual-module-exports" | "unknown-symbol" | "unknown-entry-point" | "evidence-limit" | "dynamic-behavior" | "virtual-dispatch" | "dynamic-member-access" | "decorated-declaration" | "optional-contract" | "accessor-pair" | "overload-set" | "attached-comment" | "abstract-declaration" | "incomplete-project-coverage" | "framework-contract-provenance" | "capacity" | "unsupported-syntax")
 /**
  * Value or type namespace for one exact declaration or reference.
  */
@@ -363,9 +363,9 @@ type: "jsdoc_tag"
  */
 export type DependencyOverrideSource = ("pnpm-workspace.yaml" | "package.json")
 /**
- * Why a dependency-override entry is misconfigured. `pnpm install` would
- * either fail at install time or silently no-op on these entries; surfacing
- * them statically catches the issue before pnpm does.
+ * Why a dependency-override entry is misconfigured. The active package
+ * manager may fail at install time or silently no-op on these entries;
+ * surfacing them statically catches the issue first.
  */
 export type DependencyOverrideMisconfigReason = ("unparsable-key" | "empty-value")
 /**
@@ -1963,14 +1963,6 @@ unsupported_syntax: number
  * Candidates retained because the bounded semantic request reached capacity.
  */
 capacity: number
-/**
- * Candidates whose checker evidence came only from unreachable files.
- */
-unreachable_evidence: number
-/**
- * Candidates whose checker evidence consisted only of non-crediting declarations.
- */
-non_crediting_evidence: number
 }
 /**
  * Bounded provenance for one TypeScript project handled by the sidecar.
@@ -2297,8 +2289,9 @@ empty_catalog_groups?: EmptyCatalogGroupFinding[]
  */
 unresolved_catalog_references?: UnresolvedCatalogReferenceFinding[]
 /**
- * Entries in pnpm-workspace.yaml's overrides: section, package.json's
- * pnpm.overrides block, or package.json's top-level npm overrides object,
+ * Entries in pnpm-workspace.yaml's overrides section, package.json's
+ * pnpm.overrides block, npm or Bun's top-level overrides object, or Bun's
+ * top-level resolutions object,
  * whose target package is not declared by any workspace package and is
  * not present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,
  * or bun.lock. Default severity is warn because projects without a
@@ -2309,10 +2302,10 @@ unresolved_catalog_references?: UnresolvedCatalogReferenceFinding[]
  */
 unused_dependency_overrides?: UnusedDependencyOverrideFinding[]
 /**
- * pnpm.overrides or npm overrides entries whose key or value does not
- * parse as a valid override spec (empty key, empty value, malformed
- * selector, unbalanced parent matcher). The package manager will reject
- * these at install time. Default severity is error. Wrapped in
+ * Package-manager override or resolution entries whose key or value does
+ * not parse in the declaration source's grammar (empty key, empty value,
+ * malformed selector, unbalanced parent matcher). The package manager may
+ * reject or ignore these at install time. Default severity is error. Wrapped in
  * [`MisconfiguredDependencyOverrideFinding`].
  */
 misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
@@ -2671,12 +2664,12 @@ empty_catalog_groups: number
  */
 unresolved_catalog_references: number
 /**
- * Pnpm `overrides:` entries whose target package is not declared by any
- * workspace package and not present in the lockfile.
+ * Package-manager overrides whose target package is not declared by any
+ * workspace package and not present in the active readable lockfile.
  */
 unused_dependency_overrides: number
 /**
- * Pnpm `overrides:` entries whose key or value cannot be parsed.
+ * Package-manager overrides whose key or value cannot be parsed.
  */
 misconfigured_dependency_overrides: number
 /**
@@ -3919,7 +3912,7 @@ parent_package?: (string | null)
  */
 version_constraint?: (string | null)
 /**
- * The right-hand side of the entry: the version pnpm should force.
+ * The right-hand side of the entry: the version the package manager should force.
  */
 version_range: string
 source: DependencyOverrideSource
@@ -10660,8 +10653,9 @@ empty_catalog_groups?: EmptyCatalogGroupFinding[]
  */
 unresolved_catalog_references?: UnresolvedCatalogReferenceFinding[]
 /**
- * Entries in pnpm-workspace.yaml's overrides: section, package.json's
- * pnpm.overrides block, or package.json's top-level npm overrides object,
+ * Entries in pnpm-workspace.yaml's overrides section, package.json's
+ * pnpm.overrides block, npm or Bun's top-level overrides object, or Bun's
+ * top-level resolutions object,
  * whose target package is not declared by any workspace package and is
  * not present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,
  * or bun.lock. Default severity is warn because projects without a
@@ -10672,10 +10666,10 @@ unresolved_catalog_references?: UnresolvedCatalogReferenceFinding[]
  */
 unused_dependency_overrides?: UnusedDependencyOverrideFinding[]
 /**
- * pnpm.overrides or npm overrides entries whose key or value does not
- * parse as a valid override spec (empty key, empty value, malformed
- * selector, unbalanced parent matcher). The package manager will reject
- * these at install time. Default severity is error. Wrapped in
+ * Package-manager override or resolution entries whose key or value does
+ * not parse in the declaration source's grammar (empty key, empty value,
+ * malformed selector, unbalanced parent matcher). The package manager may
+ * reject or ignore these at install time. Default severity is error. Wrapped in
  * [`MisconfiguredDependencyOverrideFinding`].
  */
 misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]

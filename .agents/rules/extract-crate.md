@@ -13,7 +13,7 @@ Key modules:
 - `template_usage.rs` — `TemplateUsage` struct and `analyze_template_snippet()` for parsing template expressions via Oxc to extract used bindings and member accesses.
 - `astro.rs` — Astro frontmatter extraction between `---` delimiters
 - `mdx.rs` — MDX import/export extraction with multi-line brace tracking
-- `css.rs` — CSS Module class name extraction (`.module.css`/`.module.scss` → named exports)
+- `css.rs`: CSS Module class name extraction for `.module.css`, `.module.scss`, `.module.sass`, and `.module.less` into named exports
 - `html.rs` — HTML asset reference extraction (`<script src>`, `<link rel="stylesheet" href>`, `<link rel="modulepreload" href>` → `SideEffect` imports). Regex-based, comment-stripped.
 - `parse.rs` — File type dispatcher. Runs `oxc_semantic` after parsing to detect unused import bindings (imports where the binding is never read in the file).
 - `cache.rs` — Incremental bitcode cache with xxh3 hashing. Unchanged files skip parsing and load from cache. Pruned of stale entries on each run.

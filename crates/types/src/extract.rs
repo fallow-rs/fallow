@@ -1697,6 +1697,19 @@ pub struct DeclarationMergeFact {
     pub export_spans: Vec<(u32, u32)>,
 }
 
+/// A default import binding consumed outside a statically known member access.
+///
+/// Resolution decides whether the target is an object-shaped module such as a
+/// CSS Module or a proven static CommonJS object map. Keeping this fact
+/// target-agnostic lets aliases and extensionless specifiers use the resolved
+/// target path without broadening ordinary default-import behavior.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DefaultImportWholeObjectUseFact {
+    /// Local binding name in the importing module.
+    pub local_name: String,
+}
+
 /// A typed extraction fact for cross-layer analysis.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1783,6 +1796,9 @@ pub enum SemanticFact {
     /// static and which has no transpilation marker or competing assignment.
     /// Appended because bitcode encodes enum variants by ordinal.
     CjsSingleStaticObjectMap,
+    /// A default import binding was handed on as a whole object.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    DefaultImportWholeObjectUse(DefaultImportWholeObjectUseFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.

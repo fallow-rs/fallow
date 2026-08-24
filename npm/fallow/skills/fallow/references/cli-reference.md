@@ -89,8 +89,8 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-catalog-entries` | Unused pnpm catalog entries |
 | `--empty-catalog-groups` | Empty named pnpm catalog groups |
 | `--unresolved-catalog-references` | Package references to missing pnpm catalog entries |
-| `--unused-dependency-overrides` | Unused pnpm dependency overrides |
-| `--misconfigured-dependency-overrides` | Malformed pnpm dependency overrides |
+| `--unused-dependency-overrides` | Unused package-manager dependency overrides |
+| `--misconfigured-dependency-overrides` | Misconfigured package-manager dependency overrides |
 <!-- generated:flags:dead-code-filters:end -->
 ### Examples
 

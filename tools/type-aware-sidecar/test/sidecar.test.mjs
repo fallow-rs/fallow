@@ -2040,6 +2040,73 @@ test("protocol v7 counts reads, not import and re-export declarations", () => {
   }
 });
 
+test("protocol v7 ignores dangling re-export declarations but credits their consumers", () => {
+  const cases = [
+    {
+      name: "single dangling barrel",
+      barrels: [['src/barrel.ts', 'export { helper } from "./source";\n']],
+      consumer: undefined,
+      expected: "confirmed-no-static-references",
+    },
+    {
+      name: "multiple dangling barrels",
+      barrels: [
+        ['src/first.ts', 'export { helper } from "./source";\n'],
+        ['src/second.ts', 'export { helper } from "./source";\n'],
+      ],
+      consumer: undefined,
+      expected: "confirmed-no-static-references",
+    },
+    {
+      name: "consumer through barrel",
+      barrels: [['src/barrel.ts', 'export { helper } from "./source";\n']],
+      consumer: 'import { helper } from "./barrel";\nexport const used = helper;\n',
+      expected: "confirmed-used",
+    },
+  ];
+
+  for (const expected of cases) {
+    const root = makeProject();
+    try {
+      const source = "export const helper = 1;\n";
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+      );
+      write(root, "src/source.ts", source);
+      expected.barrels.forEach(([file, contents]) => write(root, file, contents));
+      if (expected.consumer) write(root, "src/consumer.ts", expected.consumer);
+      const identity = symbolIdentity({
+        source,
+        marker: "helper",
+        file: "src/source.ts",
+        namespace: "value",
+        declarationKind: "export",
+        exportedName: "helper",
+        localName: "helper",
+      });
+
+      const response = runSidecar(
+        semanticRequest(root, [{ id: 52, operation: "symbol-use", symbol: identity }]),
+      );
+      const result = response.results[0];
+      assert.equal(result.assertion, expected.expected, expected.name);
+      if (expected.consumer) {
+        assert.deepEqual(
+          result.evidence.map((entry) => entry.path),
+          ["src/consumer.ts"],
+          expected.name,
+        );
+      } else {
+        assert.equal(result.total_evidence_count, 0, expected.name);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("protocol v7 keeps distinct type and value declarations isolated", () => {
   const root = makeProject();
   try {
@@ -2269,7 +2336,10 @@ test("protocol v7 resolves typeof import for both halves of a declaration merge"
     assert.equal(response.results[0].assertion, "confirmed-used");
     assert.equal(response.results[0].evidence[0].namespace, "value");
     assert.equal(response.results[1].assertion, "confirmed-used");
-    assert.ok(response.results[1].evidence.some((entry) => entry.path === "src/barrel.ts"));
+    assert.deepEqual(
+      response.results[1].evidence.map((entry) => entry.path),
+      ["src/consumer.ts"],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
