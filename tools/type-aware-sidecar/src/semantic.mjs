@@ -432,7 +432,7 @@ const registerSymbolTargets = (root, state, entry) => {
       state.exportEntriesByProject.set(project, projectEntries);
     });
   }
-  entry.resolved.ownerContexts.forEach(({ project, declaration, anchor }) => {
+  entry.resolved.ownerContexts.forEach(({ declaration, anchor }) => {
     const namespaces =
       entry.query.symbol.declarationKind === "export"
         ? declarationNamespaces(declaration)
