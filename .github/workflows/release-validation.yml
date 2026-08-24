@@ -55,6 +55,9 @@ jobs:
       - name: Test Windows child-process wiring
         run: node --test tools/type-aware-sidecar/test/windows-child-process.test.mjs
 
+      - name: Build current CLI for MCP tests
+        run: cargo build -p fallow-cli --bin fallow
+
       - name: Run MCP tests without workspace contention
         run: cargo test -p fallow-mcp --lib --bins --tests --examples
 
