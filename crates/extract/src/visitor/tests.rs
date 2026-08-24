@@ -5930,8 +5930,15 @@ fn shadowed_default_import_name_does_not_record_object_usage() {
            const { shadowedDestructure } = value;\n\
            return [hand(value), value.shadowedMember, shadowedDestructure];\n\
          }\n\
+         function inspectHoisted() {\n\
+           hand(value);\n\
+           value.hoistedMember;\n\
+           function value() {}\n\
+           return value;\n\
+         }\n\
          value.used;\n\
-         inspect({ shadowedDestructure: 1, shadowedMember: 2 });",
+         inspect({ shadowedDestructure: 1, shadowedMember: 2 });\n\
+         inspectHoisted();",
     );
 
     assert!(info.semantic_facts.iter().all(|fact| !matches!(
@@ -5948,7 +5955,7 @@ fn shadowed_default_import_name_does_not_record_object_usage() {
         access.object != "value"
             || !matches!(
                 access.member.as_str(),
-                "shadowedMember" | "shadowedDestructure"
+                "shadowedMember" | "shadowedDestructure" | "hoistedMember"
             )
     }));
 }
@@ -6622,6 +6629,11 @@ fn cjs_object_map_provenance_fails_closed_for_ambiguous_forms() {
         "module.exports += { default: 1 };",
         "module.exports = { default: 1 }; module.exports.default++;",
         "module.exports = { default: 1 }; delete module.exports.default;",
+        "module.exports = { default: 1 }; ({ extra: module.exports.extra } = source);",
+        "module.exports = { default: 1 }; [module.exports.extra] = source;",
+        "module.exports = { default: 1 }; [module.exports.extra = 1] = source;",
+        "module.exports = { default: 1 }; [...module.exports.extra] = source;",
+        "module.exports = { default: 1 }; (module.exports.extra as unknown) = 1;",
         "module.exports = { default: 1, ...extra };",
         "module.exports = { ['default']: 1 };",
         "module.exports = { default: 1, default: 2 };",

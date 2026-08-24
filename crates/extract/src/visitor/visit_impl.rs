@@ -1251,6 +1251,14 @@ impl ModuleInfoExtractor {
         }
     }
 
+    fn preseed_nested_declarations(&mut self, statements: &[Statement<'_>]) {
+        for statement in statements {
+            if let Some(declaration) = statement.as_declaration() {
+                self.record_nested_declaration(declaration);
+            }
+        }
+    }
+
     fn record_nested_named_declaration(&mut self, id: &BindingIdentifier<'_>) {
         self.record_nested_declaration_names(std::iter::once(id));
         self.record_sanitizer_binding(id.name.as_str(), None);
@@ -2203,8 +2211,71 @@ impl<'a> ModuleInfoExtractor {
             Expression::ComputedMemberExpression(member) => {
                 Self::is_computed_cjs_assignment_target(member)
             }
+            Expression::TSAsExpression(expression) => {
+                Self::is_cjs_mutation_expression(&expression.expression)
+            }
+            Expression::TSSatisfiesExpression(expression) => {
+                Self::is_cjs_mutation_expression(&expression.expression)
+            }
+            Expression::TSNonNullExpression(expression) => {
+                Self::is_cjs_mutation_expression(&expression.expression)
+            }
+            Expression::TSTypeAssertion(expression) => {
+                Self::is_cjs_mutation_expression(&expression.expression)
+            }
+            Expression::ParenthesizedExpression(expression) => {
+                Self::is_cjs_mutation_expression(&expression.expression)
+            }
             _ => Self::is_cjs_exports_expression(expression),
         }
+    }
+
+    fn assignment_target_mutates_cjs_exports(target: &AssignmentTarget<'_>) -> bool {
+        if target
+            .get_expression()
+            .is_some_and(Self::is_cjs_mutation_expression)
+        {
+            return true;
+        }
+        match target {
+            AssignmentTarget::StaticMemberExpression(member) => {
+                Self::is_static_cjs_assignment_target(member)
+            }
+            AssignmentTarget::ComputedMemberExpression(member) => {
+                Self::is_computed_cjs_assignment_target(member)
+            }
+            AssignmentTarget::ArrayAssignmentTarget(array) => {
+                array.elements.iter().flatten().any(|element| {
+                    Self::assignment_target_maybe_default_mutates_cjs_exports(element)
+                }) || array
+                    .rest
+                    .as_ref()
+                    .is_some_and(|rest| Self::assignment_target_mutates_cjs_exports(&rest.target))
+            }
+            AssignmentTarget::ObjectAssignmentTarget(object) => {
+                object.properties.iter().any(|property| match property {
+                    AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(_) => false,
+                    AssignmentTargetProperty::AssignmentTargetPropertyProperty(property) => {
+                        Self::assignment_target_maybe_default_mutates_cjs_exports(&property.binding)
+                    }
+                }) || object
+                    .rest
+                    .as_ref()
+                    .is_some_and(|rest| Self::assignment_target_mutates_cjs_exports(&rest.target))
+            }
+            _ => false,
+        }
+    }
+
+    fn assignment_target_maybe_default_mutates_cjs_exports(
+        target: &AssignmentTargetMaybeDefault<'_>,
+    ) -> bool {
+        if let AssignmentTargetMaybeDefault::AssignmentTargetWithDefault(default) = target {
+            return Self::assignment_target_mutates_cjs_exports(&default.binding);
+        }
+        target
+            .as_assignment_target()
+            .is_some_and(Self::assignment_target_mutates_cjs_exports)
     }
 
     fn is_cjs_es_module_marker_call(call: &CallExpression<'_>) -> bool {
@@ -2627,6 +2698,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.risky_regex_binding_stack.push(FxHashMap::default());
             self.path_sink_binding_stack.push(FxHashMap::default());
             self.path_relative_binding_stack.push(FxHashMap::default());
+            self.preseed_nested_declarations(&stmt.body);
         }
         for statement in &stmt.body {
             self.visit_statement(statement);
@@ -2723,6 +2795,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
+            self.preseed_nested_declarations(&body.statements);
         }
         for statement in &body.statements {
             self.visit_statement(statement);
@@ -3378,8 +3451,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 self.handle_this_member_assignment(member.property.name.as_str(), expr);
             }
         }
-        if let AssignmentTarget::ComputedMemberExpression(member) = &expr.left
-            && Self::is_computed_cjs_assignment_target(member)
+        if !matches!(expr.left, AssignmentTarget::StaticMemberExpression(_))
+            && Self::assignment_target_mutates_cjs_exports(&expr.left)
         {
             self.record_cjs_assignment(false);
         }
