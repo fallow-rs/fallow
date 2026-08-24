@@ -88,7 +88,7 @@ pub use css_in_js::{
 };
 pub use css_metrics::{compute_css_analytics, parse_css_color_rgb};
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
-pub use mdx::extract_mdx_statements;
+pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
 pub use sfc::{
     SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
     is_sfc_file,
@@ -96,6 +96,7 @@ pub use sfc::{
 pub use sfc_css::{
     scoped_unused_classes, sfc_preprocessor_virtual_stylesheet, sfc_virtual_stylesheet,
 };
+pub use source_map::ExtractionResult;
 pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
 
 #[expect(

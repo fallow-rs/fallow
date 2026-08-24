@@ -1,0 +1,8 @@
+{
+  "name": "issue-2387-convex-custom-functions",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "convex": "1.0.0"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "issue-2393-mdx-statements",
+  "type": "module",
+  "main": "docs/page.mdx"
+}

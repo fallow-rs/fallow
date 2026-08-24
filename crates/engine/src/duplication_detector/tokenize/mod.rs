@@ -53,7 +53,7 @@ fn tokenize_file_inner(
     strip_types: bool,
     skip_imports: bool,
 ) -> FileTokens {
-    use fallow_extract::{extract_astro_frontmatter, extract_mdx_statements, is_sfc_file};
+    use fallow_extract::{extract_astro_frontmatter, is_sfc_file};
 
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
@@ -64,7 +64,7 @@ fn tokenize_file_inner(
         return tokenize_astro(source, strip_types, skip_imports, extract_astro_frontmatter);
     }
     if ext == "mdx" {
-        return tokenize_mdx(source, strip_types, skip_imports, extract_mdx_statements);
+        return tokenize_mdx(source, strip_types, skip_imports);
     }
     if matches!(ext, "css" | "scss" | "sass" | "less") {
         return tokenize_style_source(source);
@@ -189,25 +189,27 @@ fn tokenize_astro(
 }
 
 /// Tokenize MDX import/export statements.
-fn tokenize_mdx(
-    source: &str,
-    strip_types: bool,
-    skip_imports: bool,
-    extract_fn: fn(&str) -> String,
-) -> FileTokens {
-    let statements = extract_fn(source);
-    if !statements.is_empty() {
+fn tokenize_mdx(source: &str, strip_types: bool, skip_imports: bool) -> FileTokens {
+    let statements = fallow_extract::extract_mdx_statements_mapped(source);
+    if !statements.body.is_empty() {
         let allocator = Allocator::default();
-        let parser_return = Parser::new(&allocator, &statements, SourceType::jsx()).parse();
+        let parser_return = Parser::new(&allocator, &statements.body, SourceType::tsx()).parse();
 
         let mut extractor = TokenExtractor::new(strip_types, skip_imports);
         extractor.visit_program(&parser_return.program);
+        for token in &mut extractor.tokens {
+            token.span = statements.remap_span(token.span);
+        }
+        for span in &mut extractor.function_spans {
+            *span = statements.remap_span(*span);
+        }
+        for span in &mut extractor.atomic_invocation_spans {
+            *span = statements.remap_span(*span);
+        }
 
         return FileTokens {
             tokens: extractor.tokens,
-            // MDX statements are compacted before parsing, so their spans do
-            // not map back to the original source yet.
-            function_spans: Vec::new(),
+            function_spans: extractor.function_spans,
             atomic_invocation_spans: extractor.atomic_invocation_spans,
             source: source.to_string(),
             line_count: source.lines().count().max(1),

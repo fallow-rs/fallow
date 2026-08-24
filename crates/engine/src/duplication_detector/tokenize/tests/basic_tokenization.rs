@@ -72,7 +72,7 @@ function declared() {
 }
 
 #[test]
-fn offsets_function_spans_in_sfc_sections_and_excludes_mdx() {
+fn offsets_function_spans_in_embedded_script_sections() {
     let sfc_source = "<template><div /></template>\n<script>\nconst nested = () => 1;\n</script>";
     let sfc = tokenize_file(&PathBuf::from("component.vue"), sfc_source, false);
     assert_eq!(sfc.function_spans.len(), 1);
@@ -91,12 +91,14 @@ fn offsets_function_spans_in_sfc_sections_and_excludes_mdx() {
         "() => 2"
     );
 
-    let mdx = tokenize_file(
-        &PathBuf::from("page.mdx"),
-        "export const render = () => 1\n\n# Title\n",
-        false,
+    let mdx_source = "# Title\n\nexport const render = () => 1\n";
+    let mdx = tokenize_file(&PathBuf::from("page.mdx"), mdx_source, false);
+    assert_eq!(mdx.function_spans.len(), 1);
+    let span = mdx.function_spans[0];
+    assert_eq!(
+        &mdx_source[span.start as usize..span.end as usize],
+        "() => 1"
     );
-    assert!(mdx.function_spans.is_empty());
 }
 
 #[test]
@@ -385,6 +387,32 @@ fn tokenize_mdx_without_statements_returns_empty() {
     assert!(
         result.tokens.is_empty(),
         "MDX without imports/exports should produce no tokens"
+    );
+}
+
+#[test]
+fn tokenize_mdx_recovers_rejected_blocks_and_maps_source_spans() {
+    let source = "# Title\n\nimport data from './the-api' before you begin.\n\nexport const meta = {\n  title: 'Mapped',\n  enabled: true,\n};\n";
+    let result = tokenize_file(&PathBuf::from("page.mdx"), source, false);
+
+    assert!(
+        !result.tokens.is_empty(),
+        "the valid export should tokenize"
+    );
+    let export_offset = u32::try_from(source.find("export const").unwrap()).unwrap();
+    assert!(
+        result
+            .tokens
+            .iter()
+            .all(|token| token.span.start >= export_offset),
+        "every token should map to the original export block"
+    );
+    assert!(
+        result
+            .function_spans
+            .iter()
+            .all(|span| span.start >= export_offset),
+        "function spans should use original MDX offsets"
     );
 }
 

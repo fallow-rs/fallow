@@ -1,0 +1,17 @@
+# Statement recovery
+
+Prose with an unmatched { brace must not consume later statements.
+
+import type {
+  Model,
+} from "../src/types";
+
+import /* retained comment */ "../src/commented";
+
+import ("../src/lazy");
+
+export {
+  value as default,
+} from "../src/values";
+
+export type PageModel = Model;

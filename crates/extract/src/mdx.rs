@@ -104,6 +104,17 @@ pub fn extract_mdx_statements(source: &str) -> String {
     extract_mdx_source(source).extraction().body
 }
 
+/// Extract accepted MDX statements while retaining byte mappings to the
+/// original document.
+///
+/// Dead-code extraction and duplication tokenization share this exact
+/// classification so a rejected prose-shaped block cannot make the two
+/// analyzers disagree about which statements exist.
+#[must_use]
+pub fn extract_mdx_statements_mapped(source: &str) -> ExtractionResult {
+    accepted_mdx_source(source).1
+}
+
 fn extract_mdx_source(source: &str) -> MdxScan<'_> {
     let mut scanner = MdxStatementScanner::default();
     for (line_start, line) in lines_with_offsets(source) {
@@ -112,13 +123,19 @@ fn extract_mdx_source(source: &str) -> MdxScan<'_> {
     scanner.into_scan()
 }
 
+fn accepted_mdx_source(source: &str) -> (MdxScan<'_>, ExtractionResult) {
+    let mut scan = extract_mdx_source(source);
+    scan.demote_rejected_blocks();
+    let extraction = scan.extraction();
+    (scan, extraction)
+}
+
 #[derive(Default)]
 struct MdxStatementScanner<'a> {
     blocks: Vec<StatementBlock<'a>>,
     prose_lines: Vec<(usize, &'a str)>,
     code_lines: Vec<&'a str>,
-    in_multiline: bool,
-    brace_depth: i32,
+    collecting_statement: bool,
     code_fence: Option<CodeFence>,
 }
 
@@ -131,13 +148,22 @@ impl<'a> MdxStatementScanner<'a> {
             return;
         }
 
-        if self.in_multiline {
-            self.push_multiline_line(line_start, line, trimmed);
+        let statement_line = line.trim_end_matches(['\r', '\n']);
+        if self.collecting_statement {
+            // A new top-level statement is a recovery boundary. An invalid
+            // prose-shaped block must not swallow the next real import or
+            // export merely because it left a delimiter open.
+            if is_top_level_statement_start(statement_line) {
+                self.collecting_statement = false;
+                self.push_statement_start(line_start, line, statement_line);
+            } else {
+                self.push_multiline_line(line_start, line);
+            }
             return;
         }
 
-        if is_statement_start(trimmed) {
-            self.push_statement_start(line_start, line, trimmed);
+        if is_top_level_statement_start(statement_line) {
+            self.push_statement_start(line_start, line, statement_line);
             return;
         }
 
@@ -158,7 +184,7 @@ impl<'a> MdxStatementScanner<'a> {
             return true;
         }
 
-        if self.in_multiline {
+        if self.collecting_statement {
             return false;
         }
 
@@ -170,22 +196,15 @@ impl<'a> MdxStatementScanner<'a> {
         false
     }
 
-    fn push_statement_start(&mut self, line_start: usize, line: &'a str, trimmed: &str) {
+    fn push_statement_start(&mut self, line_start: usize, line: &'a str, statement: &str) {
         self.blocks.push(vec![(line_start, line)]);
-        self.brace_depth = brace_delta(trimmed);
-        if self.brace_depth > 0 && !has_source_clause(trimmed) {
-            self.in_multiline = true;
-        }
+        self.collecting_statement = !parses_as_typescript(statement);
     }
 
-    fn push_multiline_line(&mut self, line_start: usize, line: &'a str, trimmed: &str) {
+    fn push_multiline_line(&mut self, line_start: usize, line: &'a str) {
         if let Some(block) = self.blocks.last_mut() {
             block.push((line_start, line));
-        }
-        self.brace_depth += brace_delta(trimmed);
-        if self.brace_depth <= 0 || trimmed.ends_with(';') || has_source_clause(trimmed) {
-            self.in_multiline = false;
-            self.brace_depth = 0;
+            self.collecting_statement = !statement_block_is_accepted(block);
         }
     }
 
@@ -318,21 +337,25 @@ const EXPORT_DECLARATION_KEYWORDS: [&str; 13] = [
 /// keyword and carries no recognised shape.
 fn is_statement_start(trimmed: &str) -> bool {
     if let Some(rest) = statement_keyword_rest(trimmed, "import") {
-        return is_import_statement_rest(rest) || parses_as_javascript(trimmed);
+        return is_import_statement_rest(rest) || parses_as_typescript(trimmed);
     }
     if let Some(rest) = statement_keyword_rest(trimmed, "export") {
-        return is_export_statement_rest(rest) || parses_as_javascript(trimmed);
+        return is_export_statement_rest(rest) || parses_as_typescript(trimmed);
     }
     false
 }
 
+fn is_top_level_statement_start(line: &str) -> bool {
+    line.trim_start().len() == line.len() && is_statement_start(line)
+}
+
 /// The text after the `keyword` at the start of the line, trimmed. The keyword
-/// has to be followed by whitespace or `{`, the two openings the line scan has
-/// always accepted (`import {`, `import{`), so `important` is not a candidate.
+/// has to be followed by whitespace, `{`, or `(`, so `important` is not a
+/// candidate while the standard dynamic-import spelling `import('./x')` is.
 fn statement_keyword_rest<'a>(trimmed: &'a str, keyword: &str) -> Option<&'a str> {
     let rest = trimmed.strip_prefix(keyword)?;
     let next = rest.chars().next()?;
-    (next.is_whitespace() || next == '{').then(|| rest.trim_start())
+    (next.is_whitespace() || next == '{' || next == '(').then(|| rest.trim_start())
 }
 
 /// Does the text after `import` belong to a real import statement?
@@ -351,6 +374,9 @@ fn is_import_statement_rest(rest: &str) -> bool {
     }
     // A star specifier: `import * as NS from './ns'`.
     if first == '*' {
+        return true;
+    }
+    if rest.trim_end().ends_with(" from") {
         return true;
     }
     // A default (or type-only) specifier followed by its source clause:
@@ -382,14 +408,6 @@ fn leading_word(text: &str) -> &str {
         .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '$')
         .unwrap_or(text.len());
     &text[..end]
-}
-
-fn brace_delta(line: &str) -> i32 {
-    let opens = line.chars().filter(|&ch| ch == '{').count();
-    let closes = line.chars().filter(|&ch| ch == '}').count();
-    let opens = i32::try_from(opens).unwrap_or(i32::MAX);
-    let closes = i32::try_from(closes).unwrap_or(i32::MAX);
-    opens.saturating_sub(closes)
 }
 
 /// Does this line carry a source clause: a `from` keyword bounded by
@@ -436,8 +454,8 @@ fn parse_statement_body(
     }
 
     let allocator = Allocator::default();
-    let parser_return = Parser::new(&allocator, &extraction.body, SourceType::jsx()).parse();
-    let accepted = !parser_return.panicked;
+    let parser_return = Parser::new(&allocator, &extraction.body, SourceType::tsx()).parse();
+    let accepted = !parser_return.panicked && parser_return.errors.is_empty();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
     extractor.remap_spans_with(|span| extraction.remap_span(span));
@@ -455,20 +473,19 @@ fn statement_block_is_accepted(block: &[(usize, &str)]) -> bool {
     for &(_, line) in block {
         body.push_str(line);
     }
-    parses_as_javascript(&body)
+    parses_as_typescript(&body)
 }
 
-/// Does the JavaScript parser accept this source on its own, with the same
+/// Does the TypeScript/JSX parser accept this source on its own, with the same
 /// source type the MDX statement body is parsed with?
 ///
 /// "Accept" means the parse was not fatal, the criterion the whole-body parse
 /// uses: a head the parser recovers from is classified the way that parse
 /// would have treated it anyway.
-fn parses_as_javascript(source: &str) -> bool {
+fn parses_as_typescript(source: &str) -> bool {
     let allocator = Allocator::default();
-    !Parser::new(&allocator, source, SourceType::jsx())
-        .parse()
-        .panicked
+    let parsed = Parser::new(&allocator, source, SourceType::tsx()).parse();
+    !parsed.panicked && parsed.errors.is_empty()
 }
 
 fn lines_with_offsets(source: &str) -> impl Iterator<Item = (usize, &str)> {
@@ -518,24 +535,9 @@ pub(crate) fn is_mdx_file(path: &Path) -> bool {
 pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
-    let mut scan = extract_mdx_source(source);
-
-    let mut extraction = scan.extraction();
-    let (mut info, accepted) =
+    let (scan, extraction) = accepted_mdx_source(source);
+    let (mut info, _) =
         parse_statement_body(&extraction, file_id, content_hash, parsed_suppressions);
-    // A rejected body is an empty program, so without this the file would keep
-    // none of its imports (issue #2376). Retry with the rejected blocks moved
-    // to prose; the retry can only add statements back. The rejected module
-    // info is discarded, so its suppressions move on to the retry instead of
-    // being cloned for every MDX file.
-    if !accepted && scan.demote_rejected_blocks() {
-        let parsed_suppressions = crate::suppress::ParsedSuppressions {
-            suppressions: std::mem::take(&mut info.suppressions),
-            unknown_kinds: std::mem::take(&mut info.unknown_suppression_kinds),
-        };
-        extraction = scan.extraction();
-        info = parse_statement_body(&extraction, file_id, content_hash, parsed_suppressions).0;
-    }
     let (body_accesses, body_whole_object_uses) = collect_body_usage(&scan, &info.imports);
     extend_member_accesses(&mut info, body_accesses);
     extend_whole_object_uses(&mut info, body_whole_object_uses);
@@ -940,17 +942,15 @@ import { Visible } from './Visible'
         );
     }
 
-    /// Issue #2376 fallback: the statement body is parsed with the JSX source
-    /// type, which rejects a TS-only `import type` clause. Before the
-    /// fallback that lost every import of the file; now only the type-only
-    /// clause is dropped.
+    /// Issue #2393: the TSX statement parser keeps both the type-only and the
+    /// runtime import.
     #[test]
     fn type_only_import_clause_no_longer_drops_the_other_imports() {
         let source = "import type { Meta } from './meta'\n\nimport { Card } from './card'\n";
         assert_eq!(
             import_sources(source),
-            vec!["./card".to_string()],
-            "the runtime import must survive the rejected type-only clause"
+            vec!["./meta".to_string(), "./card".to_string()],
+            "both imports must survive"
         );
     }
 
@@ -1030,6 +1030,7 @@ import { Visible } from './Visible'
             "export /* keep */ const commented = 1",
             "export /* keep */ function render() {}",
             "import ('./dynamic')",
+            "export = contents;",
         ] {
             assert!(is_statement_start(line), "{line:?} should be a statement");
         }
@@ -1042,7 +1043,6 @@ import { Visible } from './Visible'
             "export /* only */ what the reader needs to see.",
             "export FALLOW_FORMAT=json",
             "export PATH=\"$BUN_INSTALL/bin:$PATH\"",
-            "export = contents;",
             "export being referenced.",
             "import json, sys",
         ] {
@@ -1503,5 +1503,63 @@ import { Visible } from './Visible'
             "only import-local roots record; got {accesses:?}"
         );
         assert!(body_whole_object_uses(source).is_empty());
+    }
+
+    #[test]
+    fn issue_2393_accepts_typescript_and_dynamic_import_statements() {
+        let source = "import type { Meta } from './meta'\nimport('./dynamic')\n\n# Docs\n";
+        let info = parse_mdx_to_module(fallow_types::discover::FileId(0), source, 0);
+        assert_eq!(
+            info.imports
+                .iter()
+                .map(|import| import.source.as_str())
+                .collect::<Vec<_>>(),
+            vec!["./meta"]
+        );
+        assert_eq!(
+            info.dynamic_imports
+                .iter()
+                .map(|import| import.source.as_str())
+                .collect::<Vec<_>>(),
+            vec!["./dynamic"]
+        );
+    }
+
+    #[test]
+    fn issue_2393_ignores_indented_documentation_imports() {
+        let source =
+            "import { Used } from './used'\n\n- step\n    import { Example } from './example'\n";
+        assert_eq!(import_sources(source), vec!["./used".to_string()]);
+    }
+
+    #[test]
+    fn issue_2393_recovers_a_statement_after_rejected_brace_prose() {
+        let source = "import { the following keys:\n\nimport { Card } from './card'\n";
+        assert_eq!(import_sources(source), vec!["./card".to_string()]);
+    }
+
+    #[test]
+    fn issue_2393_keeps_imports_after_a_multiline_comment() {
+        let source = "import { A } from './a' /*\nthe docs are here */\nimport { B } from './b'\n";
+        assert_eq!(
+            import_sources(source),
+            vec!["./a".to_string(), "./b".to_string()]
+        );
+    }
+
+    #[test]
+    fn issue_2393_does_not_end_an_object_at_from_inside_a_string() {
+        let source =
+            "export const meta = {\n  note: 'copied from \"the docs\"',\n  title: 'Q',\n}\n";
+        assert_eq!(export_names(source), vec!["meta".to_string()]);
+    }
+
+    #[test]
+    fn issue_2393_accepts_wrapped_import_source_clauses() {
+        let source = "import Wide from\n  './wide'\nimport { A }\n  from './a'\n";
+        assert_eq!(
+            import_sources(source),
+            vec!["./wide".to_string(), "./a".to_string()]
+        );
     }
 }
