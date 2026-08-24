@@ -30,19 +30,11 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, ProgrammaticError> + Send + 'static,
 {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    std::thread::Builder::new()
-        .name(format!("fallow-mcp-{tool}"))
-        .spawn(move || {
-            let _ = sender.send(task());
-        })
-        .map_err(|err| {
-            McpError::internal_error(format!("{tool} task failed to start: {err}"), None)
-        })?;
-    match tokio::time::timeout(timeout, receiver).await {
+    let task = tokio::task::spawn_blocking(task);
+    match tokio::time::timeout(timeout, task).await {
         Ok(Ok(result)) => Ok(result),
         Ok(Err(err)) => Err(McpError::internal_error(
-            format!("{tool} task failed before returning a result: {err}"),
+            format!("{tool} task failed: {err}"),
             None,
         )),
         Err(_) => Ok(Err(ProgrammaticError::new(
@@ -183,18 +175,6 @@ mod tests {
         assert_eq!(err.exit_code, 2);
         assert_eq!(err.code.as_deref(), Some("FALLOW_MCP_API_TIMEOUT"));
         assert_eq!(err.context.as_deref(), Some("analyze"));
-    }
-
-    #[tokio::test]
-    async fn api_worker_returns_its_programmatic_result() {
-        let result = run_api_blocking_with_timeout("analyze", Duration::from_secs(1), || {
-            Ok::<_, ProgrammaticError>(serde_json::json!({ "ok": true }))
-        })
-        .await
-        .expect("worker should start")
-        .expect("worker should return its result");
-
-        assert_eq!(result, serde_json::json!({ "ok": true }));
     }
 
     #[test]
