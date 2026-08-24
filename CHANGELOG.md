@@ -112,10 +112,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   star; `export type * as ns` exposes the namespace object in type space, so
   it forwards `ns.default`. Plain `export *` and `export * as ns` inside an
   ambient body are unchanged, and so are the ambient named re-export forms and
-  `import()` type references. The chain behind the target (its own `export *`
-  and `export * as sub` sources) is credited exactly as the plain star credits
-  it, in both namespaces. Warm caches invalidate (`CACHE_VERSION` 279 to 280,
-  `GRAPH_CACHE_VERSION` 43 to 44).
+  `import()` type references. Two more findings move into line with the plain
+  ambient star: a file whose ambient body only carries `export type *` no
+  longer takes part in a re-export cycle finding, and when the declaring file
+  is unreachable the target's own export rows report alongside the
+  unused-file rows. Known limitation: the value-meaning erasure reaches the
+  target's own exports only. Names the target re-exports through its own
+  `export *` or `export * as sub` chain are still credited in both
+  namespaces, exactly as the plain star credits them, so the value half of a
+  same-name type and value pair one hop behind the target stops reporting
+  while the same pair on the target keeps reporting. Warm caches invalidate
+  (`CACHE_VERSION` 279 to 280, `GRAPH_CACHE_VERSION` 43 to 44).
 
 - **A namespace import handed over whole (a call argument, a JSX attribute
   value, an alias, an initializer) now credits every export of its target**

@@ -50,9 +50,9 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   export. `export type *` and `export type * as ns` record the same shape with
   the import's type-only-star flag set, so the graph credits the same star
   surface in the type namespace alone. Because ambient bodies are erased at
-  runtime, a re-export from a bare
-  specifier inside one counts as type-only package usage. Exported namespaces
-  and `declare global` keep their existing behavior.
+  runtime, a re-export from a bare specifier inside one counts as type-only
+  package usage. Exported namespaces and `declare global` keep their existing
+  behavior.
 - A namespace declared without the `export` keyword (`namespace Foo {}`,
   `declare namespace Foo {}`, legacy `module Foo {}`, dotted
   `namespace A.B.C {}`, and namespaces nested in those or in `declare global`)

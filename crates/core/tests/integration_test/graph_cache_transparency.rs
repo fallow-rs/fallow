@@ -446,15 +446,19 @@ fn warm_graph_cache_hit_skips_import_resolution() {
     );
 }
 
-#[test]
+/// Force the resolver-payload reuse path: the manifest keeps matching
+/// `matches_resolution_inputs` while the persisted graph is unusable, so the
+/// graph is rebuilt from the cached `ResolvedProject` alone. Every import field
+/// the graph reads must survive that mirror, so the rebuilt output has to match
+/// the cold output exactly.
 #[expect(
     deprecated,
     reason = "trace timings are still the internal contract for this cache performance gate"
 )]
-fn resolver_cache_hit_rebuilds_graph_when_file_ids_shift() {
+fn assert_resolver_cache_hit_matches_cold(fixture: &str) {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path("barrel-exports"), &root);
+    copy_tree(&fixture_path(fixture), &root);
     let cache_dir = temp.path().join("cache");
 
     let config = create_config_with_cache(root, cache_dir.clone());
@@ -504,6 +508,19 @@ fn resolver_cache_hit_rebuilds_graph_when_file_ids_shift() {
         "resolver-cache hit must rebuild the graph, got {}ms",
         warm_timings.build_graph_ms
     );
+}
+
+#[test]
+fn resolver_cache_hit_rebuilds_graph_when_file_ids_shift() {
+    assert_resolver_cache_hit_matches_cold("barrel-exports");
+}
+
+#[test]
+fn resolver_cache_hit_preserves_ambient_type_only_star_lane() {
+    // Issue #2375: the type-only-star flag rides on `ImportInfo`, so a graph
+    // rebuilt from the cached resolver payload alone must still credit the
+    // ambient `export type *` target in the type lane only.
+    assert_resolver_cache_hit_matches_cold("issue-2375-ambient-type-star");
 }
 
 /// Resolve a real-world benchmark fixture path. These are gitignored symlinks

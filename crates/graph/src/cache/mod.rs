@@ -380,6 +380,8 @@ pub struct CachedImportInfo {
     local_name: String,
     /// Whether this import is type-only.
     is_type_only: bool,
+    /// Whether this whole-module import only carries the target's type meanings.
+    is_type_only_star: bool,
     /// Whether this import originated from a style context.
     from_style: bool,
     /// Span of the full import declaration.
@@ -395,6 +397,7 @@ impl From<&ImportInfo> for CachedImportInfo {
             imported_name: info.imported_name.clone(),
             local_name: info.local_name.clone(),
             is_type_only: info.is_type_only,
+            is_type_only_star: info.is_type_only_star,
             from_style: info.from_style,
             span: span_to_pair(info.span),
             source_span: span_to_pair(info.source_span),
@@ -409,7 +412,7 @@ impl From<CachedImportInfo> for ImportInfo {
             imported_name: info.imported_name,
             local_name: info.local_name,
             is_type_only: info.is_type_only,
-            is_type_only_star: false,
+            is_type_only_star: info.is_type_only_star,
             from_style: info.from_style,
             span: pair_to_span(info.span),
             source_span: pair_to_span(info.source_span),
@@ -1027,6 +1030,28 @@ mod tests {
             span: Span::new(0, 0),
             source_span: Span::new(0, 0),
         }
+    }
+
+    #[test]
+    fn cached_import_info_round_trip_keeps_every_field() {
+        // The resolver payload is replayed into a fresh graph build, so any
+        // field the mirror drops silently changes analysis behaviour behind a
+        // cache hit. Compare the debug rendering so a future field that is not
+        // mirrored fails here instead of in a warm-only output diff.
+        let original = ImportInfo {
+            source: "./impl".to_string(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
+            local_name: "ns".to_string(),
+            is_type_only: true,
+            is_type_only_star: true,
+            from_style: true,
+            span: Span::new(3, 41),
+            source_span: Span::new(17, 25),
+        };
+
+        let restored = ImportInfo::from(CachedImportInfo::from(&original));
+
+        assert_eq!(format!("{restored:?}"), format!("{original:?}"));
     }
 
     #[test]
