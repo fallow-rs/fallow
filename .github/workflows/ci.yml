@@ -281,7 +281,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A cold Rust cache can leave the NAPI release build finishing just after
+    # the previous 20-minute limit on merged commits.
+    timeout-minutes: 30
     permissions:
       contents: read
 

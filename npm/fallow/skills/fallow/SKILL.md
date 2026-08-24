@@ -1,12 +1,12 @@
 ---
 name: fallow
-description: Codebase intelligence for TypeScript and JavaScript. Static analysis of code and styles reports changed-code risk, cleanup opportunities, duplication, circular dependencies, complexity hotspots, architecture boundaries, design-system drift, feature flags, and opt-in security candidates. Runtime coverage can merge production execution data for hot-path review, cold-path deletion confidence, and stale-flag evidence. 123 framework plugins, zero configuration, sub-second static analysis. Use when asked to audit PR risk, find unused code or dependencies, detect duplicates, check styling consistency, inspect architecture boundaries, merge runtime coverage, auto-fix supported issues, or run fallow.
+description: Codebase intelligence for TypeScript and JavaScript. Static analysis of code and styles reports changed-code risk, cleanup opportunities, duplication, circular dependencies, complexity hotspots, architecture boundaries, design-system drift, feature flags, and opt-in security candidates. Runtime coverage can merge production execution data for hot-path review, cold-path deletion confidence, and stale-flag evidence. Broad framework plugin coverage, zero configuration, sub-second static analysis. Use when asked to audit PR risk, find unused code or dependencies, detect duplicates, check styling consistency, inspect architecture boundaries, merge runtime coverage, auto-fix supported issues, or run fallow.
 license: MIT
 ---
 
 # Fallow: codebase intelligence for TypeScript and JavaScript
 
-Codebase intelligence for TypeScript and JavaScript. The static layer analyzes code and styles and reports quality, changed-code risk, cleanup opportunities, circular dependencies, code duplication, complexity hotspots, architecture boundary violations, design-system styling drift, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same `fallow health` report for hot-path review, cold-path deletion confidence, and stale-flag evidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. 123 framework plugins, zero configuration, sub-second static analysis.
+Codebase intelligence for TypeScript and JavaScript. The static layer analyzes code and styles and reports quality, changed-code risk, cleanup opportunities, circular dependencies, code duplication, complexity hotspots, architecture boundary violations, design-system styling drift, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same `fallow health` report for hot-path review, cold-path deletion confidence, and stale-flag evidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. Broad framework plugin coverage, zero configuration, sub-second static analysis.
 
 ## When to Use
 - Find cleanup opportunities: unused files, exports, types, members, dependencies, or stale flags.
@@ -42,8 +42,8 @@ cargo install fallow-cli   # build from source
 
 ## Agent Rules
 
-1. **Always use `--format json --quiet 2>/dev/null`** for machine-readable output and parse it as JSON. Compact JSON is the default; never depend on whitespace or add `--pretty` in agent pipelines. The `2>/dev/null` discards stderr so progress messages and threshold warnings don't corrupt the JSON on stdout. Never use `2>&1`
-2. **Always append `|| true`** to every fallow command. Exit code 1 means "issues found" (normal), not a runtime error. Without `|| true`, the Bash tool treats exit 1 as failure and cancels parallel commands. Only exit code 2 is a real error (invalid config, parse failure)
+1. **Always use `--format json --quiet`** for machine-readable output and parse stdout as JSON. Compact JSON is the default; never depend on whitespace or add `--pretty` in agent pipelines. Keep stderr separate so diagnostics remain visible; never merge it into the JSON stream with `2>&1`.
+2. **Preserve and interpret the exit status.** Codes 0 and 1 are successful analysis outcomes: 0 is clean and 1 means findings. Treat every other code according to `fallow schema.exit_codes`. Do not force a successful status, because that hides validation, license, setup, network, and security-gate outcomes.
 3. **Use `--explain`** to include a `_meta` object in JSON output with metric definitions, ranges, and interpretation hints. In human format, `--explain` prints a `Description:` line under each section header.
 4. **Use the root `kind` field** to identify typed JSON envelopes (`dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, etc.).
 5. **Use issue type filters** (`--unused-exports`, `--unused-files`, etc.) to limit output scope
@@ -257,7 +257,7 @@ fallow list --entry-points --format json --quiet
 fallow list --plugins --format json --quiet
 ```
 
-Shows detected entry points and active framework plugins (123 built-in: Next.js, Vite, Ember, Wuchale, Jest, Storybook, Tailwind, PandaCSS, Contentlayer, tap, tsd, etc.).
+Shows detected entry points and active framework plugins. Read `fallow schema.plugins.count` when the exact current registry size matters.
 
 ### Production-only analysis
 ```bash
@@ -428,11 +428,7 @@ fallow hooks install --target git   # pre-commit gate; --branch <ref> sets the f
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success, no error-severity issues |
-| 1 | Error-severity issues found |
-| 2 | Runtime error (invalid config, parse failure, or `fix` without `--yes` in non-TTY) |
+Codes 0 and 1 are successful analysis outcomes: 0 is clean and 1 means findings. Read `fallow schema.exit_codes` for validation, resource, runtime, network, security-gate, and upload failures instead of maintaining another copied table.
 
 When `--format json` is active and exit code is 2, errors are emitted as JSON on stdout:
 ```json
@@ -441,7 +437,7 @@ When `--format json` is active and exit code is 2, errors are emitted as JSON on
 
 ## Configuration
 
-Fallow reads config from project root: `.fallowrc.json` > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`. Both `.fallowrc.json` and `.fallowrc.jsonc` accept JSON-with-comments syntax (same parser); the `.jsonc` extension lets editors auto-detect JSONC syntax highlighting. Most projects work with zero configuration thanks to 123 auto-detecting framework plugins.
+Fallow reads config from project root: `.fallowrc.json` > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`. Both `.fallowrc.json` and `.fallowrc.jsonc` accept JSON-with-comments syntax (same parser); the `.jsonc` extension lets editors auto-detect JSONC syntax highlighting. Most projects work with zero configuration thanks to auto-detecting framework plugins; read `fallow schema.plugins` for the current registry.
 
 ```jsonc
 {
@@ -478,7 +474,7 @@ export const deprecatedHelper = () => {};
 ## Key Gotchas
 
 - **`fix --yes` is required** in non-TTY (agent) environments. Without it, `fix` exits with code 2
-- **Zero config by default.** 123 framework plugins auto-detect, including Wuchale config, Contentlayer content roots, tap and tsd test entry points. Don't create config unless customization is needed
+- **Zero config by default.** Built-in framework plugins auto-detect, including Wuchale config, Contentlayer content roots, tap and tsd test entry points. Read `fallow schema.plugins` for the current registry and don't create config unless customization is needed
 - **Syntactic analysis only.** No TypeScript compiler, so fully dynamic `import(variable)` is not resolved
 - **Function overloads are deduplicated.** TypeScript function overload signatures are merged into a single export (not reported as separate unused exports)
 - **Re-export chains are resolved.** Exports through barrel files are tracked, not falsely flagged

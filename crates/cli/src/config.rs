@@ -9,11 +9,7 @@ use std::process::ExitCode;
 use fallow_config::{FallowConfig, OutputFormat};
 
 use crate::error::emit_error;
-
-/// Exit code for `--path` when no config file was found (there is no path to
-/// print). The default resolved-config view instead succeeds and prints the
-/// effective defaults, because a zero-config project is fully supported.
-const EXIT_NO_CONFIG: u8 = 3;
+use crate::exit_codes::RESOURCE_UNAVAILABLE_EXIT_CODE as EXIT_NO_CONFIG;
 
 /// Run the `fallow config` subcommand.
 ///

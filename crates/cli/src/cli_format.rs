@@ -1,3 +1,4 @@
+use clap::ValueEnum;
 use fallow_config::OutputFormat;
 
 use super::{Cli, Command, CoverageCli, ImpactCli, RulePackCli};
@@ -10,6 +11,7 @@ pub enum Format {
     Json,
     Sarif,
     Compact,
+    #[value(alias = "md")]
     Markdown,
     #[value(
         name = "codeclimate",
@@ -73,22 +75,7 @@ pub fn format_from_env() -> Option<Format> {
 }
 
 pub fn parse_format_arg(value: &str) -> Option<Format> {
-    match value.to_lowercase().as_str() {
-        "json" => Some(Format::Json),
-        "human" => Some(Format::Human),
-        "sarif" => Some(Format::Sarif),
-        "compact" => Some(Format::Compact),
-        "markdown" | "md" => Some(Format::Markdown),
-        "codeclimate" | "gitlab-codequality" | "gitlab-code-quality" => Some(Format::CodeClimate),
-        "pr-comment-github" => Some(Format::PrCommentGithub),
-        "pr-comment-gitlab" => Some(Format::PrCommentGitlab),
-        "review-github" => Some(Format::ReviewGithub),
-        "review-gitlab" => Some(Format::ReviewGitlab),
-        "badge" => Some(Format::Badge),
-        "github-annotations" => Some(Format::GithubAnnotations),
-        "github-summary" => Some(Format::GithubSummary),
-        _ => None,
-    }
+    Format::from_str(value, true).ok()
 }
 
 /// Read `FALLOW_QUIET` env var: "1" or "true" means quiet.

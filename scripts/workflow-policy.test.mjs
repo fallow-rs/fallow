@@ -228,7 +228,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
 
   assert.doesNotMatch(workflowWithoutWindowsJobs, /windows-latest|windows-11-arm|macos-latest/);
   assert.match(checkJob, /runs-on: ubuntu-latest/);
-  assert.match(checkJob, /timeout-minutes: 20/);
+  assert.match(checkJob, /timeout-minutes: 30/);
   assert.doesNotMatch(checkJob, /matrix\.|windows-latest|macos-latest/);
   assert.match(vscodePackageTargetsJob, /runs-on: ubuntu-latest/);
   assert.match(vscodeTargetHostJob, /linux-x64[\s\S]*win32-x64[\s\S]*darwin-x64/u);

@@ -185,7 +185,7 @@ For machine consumption, add `--format json --quiet` to any command, parse the J
 | `json` | The machine contract: one compact typed JSON document on stdout (`--pretty` indents it) |
 | `sarif` | GitHub Code Scanning and other SARIF consumers |
 | `compact` | One grep-friendly line per finding |
-| `markdown` (`md` accepted via `FALLOW_FORMAT`) | Markdown report |
+| `markdown` (alias `md`) | Markdown report |
 | `codeclimate` (aliases `gitlab-codequality`, `gitlab-code-quality`) | GitLab Code Quality report |
 | `github-annotations` | Workflow-command annotations; render on fork PRs without a write token |
 | `github-summary` | Job-summary markdown for `$GITHUB_STEP_SUMMARY` |
@@ -205,8 +205,16 @@ type-aware refinement, audit verdicts, and one authoritative finding set.
 | 0 | Clean, or audit verdict pass or warn |
 | 1 | Findings, or audit verdict fail (a normal outcome) |
 | 2 | Validation or runtime error (JSON error envelope on stdout with `--format json`) |
+| 3 | Requested resource unavailable: `config --path` found no config, or a license is unavailable or invalid |
+| 4 | Runtime coverage sidecar is unavailable, unverifiable, protocol-incompatible, or terminated unexpectedly |
+| 5 | Runtime coverage input could not be prepared or parsed |
+| 6 | Runtime coverage sidecar reported an internal error |
 | 7 | Network failure (license and cloud operations) |
 | 8 | Security gate hit (`fallow security --gate`) |
+| 10 | Coverage inventory or static-findings upload input or project validation failed |
+| 11 | Coverage inventory or static-findings upload exceeded the server payload limit |
+| 12 | Coverage inventory or static-findings upload authentication or authorization was rejected |
+| 13 | Coverage inventory or static-findings upload failed after retries or returned another server error |
 
 Rule severity maps onto exit codes: `error` fails CI (the default), `warn` exits 0, `off` skips the rule ([rules reference](https://docs.fallow.tools/configuration/rules)).
 

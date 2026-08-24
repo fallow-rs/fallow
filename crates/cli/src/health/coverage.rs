@@ -27,6 +27,10 @@ use tempfile::TempDir;
 use url::Url;
 
 use crate::error::emit_error;
+use crate::exit_codes::{
+    RESOURCE_UNAVAILABLE_EXIT_CODE, RUNTIME_COVERAGE_INPUT_EXIT_CODE,
+    RUNTIME_COVERAGE_INTERNAL_EXIT_CODE, RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
+};
 use crate::health::scoring::IstanbulCoverage;
 use crate::license::verifying_key;
 use fallow_engine::health::RuntimeCoverageOptions;
@@ -214,16 +218,30 @@ pub fn prepare_options(
                 watermark: None,
             });
         }
-        Err(err) => return Err(emit_error(&format!("license: {err}"), 3, output)),
+        Err(err) => {
+            return Err(emit_error(
+                &format!("license: {err}"),
+                RESOURCE_UNAVAILABLE_EXIT_CODE,
+                output,
+            ));
+        }
     };
 
     let key = match verifying_key() {
         Ok(key) => key,
-        Err(message) => return Err(emit_error(&message, 3, output)),
+        Err(message) => {
+            return Err(emit_error(&message, RESOURCE_UNAVAILABLE_EXIT_CODE, output));
+        }
     };
     let status = match load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS) {
         Ok(status) => status,
-        Err(err) => return Err(emit_error(&format!("license: {err}"), 3, output)),
+        Err(err) => {
+            return Err(emit_error(
+                &format!("license: {err}"),
+                RESOURCE_UNAVAILABLE_EXIT_CODE,
+                output,
+            ));
+        }
     };
 
     validate_license_status(&status, &key, output)?;
@@ -269,8 +287,9 @@ pub(super) fn analyze(
     options: &RuntimeCoverageOptions,
     input: &RuntimeCoverageAnalysisInput<'_>,
 ) -> Result<RuntimeCoverageReport, u8> {
-    let sidecar = discover_sidecar(Some(input.root))
-        .map_err(|message| emit_printed(&message, 4, input.output))?;
+    let sidecar = discover_sidecar(Some(input.root)).map_err(|message| {
+        emit_printed(&message, RUNTIME_COVERAGE_SIDECAR_EXIT_CODE, input.output)
+    })?;
     analyze_with_transport(options, input, |request, quiet, output| {
         run_sidecar(&sidecar, request, quiet, output)
     })
@@ -281,8 +300,9 @@ pub(super) fn analyze_with_transport(
     input: &RuntimeCoverageAnalysisInput<'_>,
     transport: impl FnOnce(&Request, bool, OutputFormat) -> Result<Response, u8>,
 ) -> Result<RuntimeCoverageReport, u8> {
-    let prepared_sources = prepare_coverage_sources(&options.path)
-        .map_err(|message| emit_printed(&message, 5, input.output))?;
+    let prepared_sources = prepare_coverage_sources(&options.path).map_err(|message| {
+        emit_printed(&message, RUNTIME_COVERAGE_INPUT_EXIT_CODE, input.output)
+    })?;
     let static_signals =
         build_static_signal_index(input.modules, input.analysis_output, input.file_paths)
             .map_err(|message| emit_printed(&message, 2, input.output))?;
@@ -317,7 +337,7 @@ fn validate_license_status(
     match status {
         LicenseStatus::Missing => Err(emit_error(
             "Continuous runtime monitoring requires a valid license or trial. Run: fallow license activate --trial --email you@company.com",
-            3,
+            RESOURCE_UNAVAILABLE_EXIT_CODE,
             output,
         )),
         LicenseStatus::HardFail {
@@ -326,12 +346,12 @@ fn validate_license_status(
             &format!(
                 "license expired {days_since_expiry} days ago. Refresh with: fallow license refresh"
             ),
-            3,
+            RESOURCE_UNAVAILABLE_EXIT_CODE,
             output,
         )),
         _ if !status.permits(&Feature::RuntimeCoverage) => Err(emit_error(
             "License is valid but does not include continuous runtime monitoring. Upgrade at fallow.tools/upgrade.",
-            3,
+            RESOURCE_UNAVAILABLE_EXIT_CODE,
             output,
         )),
         _ => Ok(()),
@@ -1727,7 +1747,8 @@ fn run_sidecar(
     quiet: bool,
     output: OutputFormat,
 ) -> Result<Response, u8> {
-    verify_sidecar_signature(sidecar).map_err(|message| emit_printed(&message, 4, output))?;
+    verify_sidecar_signature(sidecar)
+        .map_err(|message| emit_printed(&message, RUNTIME_COVERAGE_SIDECAR_EXIT_CODE, output))?;
 
     let mut command = Command::new(sidecar);
     command
@@ -1737,7 +1758,7 @@ fn run_sidecar(
     let mut child = crate::signal::ScopedChild::spawn(&mut command).map_err(|err| {
         emit_printed(
             &format!("failed to spawn {}: {err}", sidecar.display()),
-            4,
+            RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
             output,
         )
     })?;
@@ -1746,9 +1767,13 @@ fn run_sidecar(
         write_sidecar_request(stdin, request, output)?;
     }
 
-    let output_data = child
-        .wait_with_output()
-        .map_err(|err| emit_printed(&format!("failed to wait for sidecar: {err}"), 4, output))?;
+    let output_data = child.wait_with_output().map_err(|err| {
+        emit_printed(
+            &format!("failed to wait for sidecar: {err}"),
+            RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
+            output,
+        )
+    })?;
 
     if !output_data.stderr.is_empty() && !quiet {
         let stderr = String::from_utf8_lossy(&output_data.stderr);
@@ -1764,7 +1789,7 @@ fn decode_sidecar_response(bytes: &[u8], output: OutputFormat) -> Result<Respons
     let response: Response = serde_json::from_slice(bytes).map_err(|err| {
         emit_printed(
             &format!("failed to parse sidecar response: {err}"),
-            4,
+            RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
             output,
         )
     })?;
@@ -1795,14 +1820,14 @@ fn write_sidecar_request(
     if let Err(err) = serde_json::to_writer(&mut stdin, request) {
         return Err(emit_printed(
             &format!("failed to serialize sidecar request: {err}"),
-            4,
+            RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
             output,
         ));
     }
     if let Err(err) = stdin.flush() {
         return Err(emit_printed(
             &format!("failed to flush sidecar request: {err}"),
-            4,
+            RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
             output,
         ));
     }
@@ -1816,30 +1841,34 @@ fn check_sidecar_exit_status(
 ) -> Result<(), u8> {
     match output_data.status.code() {
         Some(0) => Ok(()),
-        Some(4) => Err(emit_printed(
+        Some(code) if code == i32::from(RUNTIME_COVERAGE_SIDECAR_EXIT_CODE) => Err(emit_printed(
             &stderr_message(&output_data.stderr, "sidecar protocol mismatch"),
-            4,
+            RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
             output,
         )),
-        Some(5) => Err(emit_printed(
+        Some(code) if code == i32::from(RUNTIME_COVERAGE_INPUT_EXIT_CODE) => Err(emit_printed(
             &stderr_message(
                 &output_data.stderr,
                 "failed to parse runtime coverage input",
             ),
-            5,
+            RUNTIME_COVERAGE_INPUT_EXIT_CODE,
             output,
         )),
-        Some(6) => Err(emit_printed(
+        Some(code) if code == i32::from(RUNTIME_COVERAGE_INTERNAL_EXIT_CODE) => Err(emit_printed(
             &stderr_message(&output_data.stderr, "sidecar internal error"),
-            6,
+            RUNTIME_COVERAGE_INTERNAL_EXIT_CODE,
             output,
         )),
         Some(code) => Err(emit_printed(
             &stderr_message(&output_data.stderr, "sidecar execution failed"),
-            u8::try_from(code).unwrap_or(4),
+            u8::try_from(code).unwrap_or(RUNTIME_COVERAGE_SIDECAR_EXIT_CODE),
             output,
         )),
-        None => Err(emit_printed("sidecar terminated by signal", 4, output)),
+        None => Err(emit_printed(
+            "sidecar terminated by signal",
+            RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
+            output,
+        )),
     }
 }
 
@@ -1859,7 +1888,11 @@ fn check_response_protocol(response: &Response, output: OutputFormat) -> Result<
                 response.protocol_version, PROTOCOL_VERSION
             )
         };
-        return Err(emit_printed(&message, 4, output));
+        return Err(emit_printed(
+            &message,
+            RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
+            output,
+        ));
     }
     Ok(())
 }

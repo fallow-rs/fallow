@@ -22,10 +22,7 @@ use ureq::tls::{PemItem, RootCerts, TlsConfig};
 /// Default fallow cloud API base URL.
 pub const DEFAULT_API_URL: &str = "https://api.fallow.cloud";
 
-/// Exit code for network failures (connect error, timeout, auth rejection).
-/// Used by any subcommand that reaches fallow cloud; keeps error classification
-/// consistent across `license` and `coverage` surfaces.
-pub const NETWORK_EXIT_CODE: u8 = 7;
+pub use crate::exit_codes::NETWORK_EXIT_CODE;
 
 /// Environment variable pointing at a PEM trust bundle for fallow cloud calls.
 pub const CA_BUNDLE_ENV: &str = "FALLOW_CA_BUNDLE";

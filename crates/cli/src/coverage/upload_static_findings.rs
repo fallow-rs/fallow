@@ -37,7 +37,12 @@ use crate::api::{
     parse_error_envelope, response_message_suffix, sanitize_network_error,
     try_api_agent_with_timeout,
 };
-use crate::coverage::upload_common;
+use crate::coverage::{
+    COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE as EXIT_AUTH_REJECTED,
+    COVERAGE_UPLOAD_PAYLOAD_TOO_LARGE_EXIT_CODE as EXIT_PAYLOAD_TOO_LARGE,
+    COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE as EXIT_SERVER_ERROR,
+    COVERAGE_UPLOAD_VALIDATION_EXIT_CODE as EXIT_VALIDATION, upload_common,
+};
 
 /// Log prefix used on every human-facing line from this subcommand.
 /// Matches the pattern established by sibling commands so CI log parsers can
@@ -58,14 +63,6 @@ const UPLOAD_TOTAL_TIMEOUT_SECS: u64 = 30;
 const KIND_UNUSED_EXPORT: &str = "unused_export";
 /// Stable wire-format kind for a dead file finding.
 const KIND_DEAD_FILE: &str = "dead_file";
-
-/// Exit codes. Documented in `fallow coverage upload-static-findings --help`.
-/// User-fixable errors are separated from transient server errors so CI
-/// pipelines can distinguish retry vs fail-the-build.
-const EXIT_VALIDATION: u8 = 10;
-const EXIT_PAYLOAD_TOO_LARGE: u8 = 11;
-const EXIT_AUTH_REJECTED: u8 = 12;
-const EXIT_SERVER_ERROR: u8 = 13;
 
 /// Arguments for `fallow coverage upload-static-findings`.
 #[derive(Clone, Default)]

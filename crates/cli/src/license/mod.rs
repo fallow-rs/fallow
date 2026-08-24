@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::{
     NETWORK_EXIT_CODE, api_url, http_status_message, sanitize_network_error, try_api_agent,
 };
+use crate::exit_codes::RESOURCE_UNAVAILABLE_EXIT_CODE as LICENSE_UNAVAILABLE_EXIT_CODE;
 use crate::json_style::JsonStyle;
 
 /// Ed25519 verification key for fallow license JWT validation.
@@ -205,11 +206,16 @@ fn run_activate(args: &ActivateArgs, json: bool, json_style: JsonStyle) -> ExitC
         }
         Err(LicenseError::Truncated { .. }) => fail(
             &format!("{}", LicenseError::Truncated { actual: jwt.len() }),
-            3,
+            LICENSE_UNAVAILABLE_EXIT_CODE,
             json,
             json_style,
         ),
-        Err(err) => fail(&format!("failed to verify JWT: {err}"), 3, json, json_style),
+        Err(err) => fail(
+            &format!("failed to verify JWT: {err}"),
+            LICENSE_UNAVAILABLE_EXIT_CODE,
+            json,
+            json_style,
+        ),
     }
 }
 
@@ -222,11 +228,18 @@ fn run_status(json: bool, json_style: JsonStyle) -> ExitCode {
         Ok(status) => {
             emit_status(&status, LicenseKind::Status, json, json_style);
             match status {
-                LicenseStatus::HardFail { .. } | LicenseStatus::Missing => ExitCode::from(3),
+                LicenseStatus::HardFail { .. } | LicenseStatus::Missing => {
+                    ExitCode::from(LICENSE_UNAVAILABLE_EXIT_CODE)
+                }
                 _ => ExitCode::SUCCESS,
             }
         }
-        Err(err) => fail(&format!("{err}"), 3, json, json_style),
+        Err(err) => fail(
+            &format!("{err}"),
+            LICENSE_UNAVAILABLE_EXIT_CODE,
+            json,
+            json_style,
+        ),
     }
 }
 

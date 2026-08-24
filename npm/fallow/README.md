@@ -28,7 +28,7 @@ npx fallow fix --dry-run         # Preview automatic cleanup
 
 ## Output and exit codes
 
-Add `--format json --quiet` to any command for one typed JSON document on stdout. Exit code 1 means findings, not failure; 0 is clean (or an audit pass or warn verdict); 2 is a validation or runtime error, reported as a JSON error envelope rather than a stack trace.
+Add `--format json --quiet` to any command for one typed JSON document on stdout. Exit code 1 means findings, not failure; 0 is clean (or an audit pass or warn verdict); 2 is a validation or runtime error, reported as a JSON error envelope rather than a stack trace. License, coverage setup, network, and security-gate workflows use additional documented codes; read `fallow schema.exit_codes` instead of suppressing the process status.
 
 Parsing the output in TypeScript? Import the typed shapes, version-pinned to the CLI you install:
 

@@ -49,6 +49,7 @@ mod combined;
 mod config;
 mod coverage;
 mod dupes;
+mod exit_codes;
 pub mod explain;
 mod fix;
 mod flags;

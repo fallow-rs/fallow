@@ -645,7 +645,7 @@ Focus on findings that are BOTH dead code and duplicated:
 
 ## Custom Plugin Setup
 
-For frameworks not covered by the 123 built-in plugins.
+For frameworks not covered by the current built-in registry from `fallow schema.plugins`.
 
 ### Option 1: Inline framework config
 
@@ -717,7 +717,7 @@ fallow dead-code --format sarif --quiet > fallow.sarif
 fallow dead-code --ci > fallow.sarif
 ```
 
-The `--ci` flag is equivalent to `--format sarif --fail-on-issues --quiet`. Note: `--fail-on-issues` means exit code 1 if issues exist, in CI scripts use `continue-on-error: true` or `|| true` to ensure the SARIF upload step still runs.
+The `--ci` flag is equivalent to `--format sarif --fail-on-issues --quiet`. Exit code 1 means findings exist. Capture that status, let the SARIF upload step run, then reapply the captured status in a final gate step. Do not discard every outcome, because validation and execution failures need to remain distinguishable from findings.
 
 ---
 

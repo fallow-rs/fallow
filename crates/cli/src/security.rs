@@ -33,17 +33,15 @@ use fallow_types::envelope::{ElapsedMs, ToolVersion};
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::{
     AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
-    SecurityFindingKind, TraceHop, TraceHopRole,
-};
-use fallow_types::results::{
-    SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity,
-    SecurityUnresolvedCalleeDiagnostic, TaintConfidence,
+    SecurityFindingKind, SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity,
+    SecurityUnresolvedCalleeDiagnostic, TaintConfidence, TraceHop, TraceHopRole,
 };
 use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
 use crate::error::emit_error;
+use crate::exit_codes::SECURITY_GATE_EXIT_CODE;
 use crate::health::HealthOptions;
 use crate::load_config_for_analysis;
 use fallow_output::{
@@ -865,7 +863,7 @@ fn security_exit_code(
 ) -> ExitCode {
     if let Some(gate) = &output.gate {
         if gate.verdict == SecurityGateVerdict::Fail {
-            ExitCode::from(8)
+            ExitCode::from(SECURITY_GATE_EXIT_CODE)
         } else {
             ExitCode::SUCCESS
         }

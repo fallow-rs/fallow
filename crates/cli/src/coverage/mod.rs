@@ -43,6 +43,11 @@ mod upload_source_maps;
 mod upload_static_findings;
 
 const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/runtime-coverage";
+pub use crate::exit_codes::{
+    COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE, COVERAGE_UPLOAD_PAYLOAD_TOO_LARGE_EXIT_CODE,
+    COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE, COVERAGE_UPLOAD_VALIDATION_EXIT_CODE,
+    RUNTIME_COVERAGE_SIDECAR_EXIT_CODE as COVERAGE_SETUP_FAILED_EXIT_CODE,
+};
 const SETUP_STATE_SCHEMA_VERSION: u8 = 1;
 
 /// Subcommands for `fallow coverage`.
@@ -634,7 +639,7 @@ fn run_setup_sidecar_step(
         return Err(exit);
     }
     let path = runtime_coverage::discover_sidecar(Some(root))
-        .map_err(|message| setup_error_exit(&message, 4))?;
+        .map_err(|message| setup_error_exit(&message, COVERAGE_SETUP_FAILED_EXIT_CODE))?;
     record_sidecar_state(setup_state, path)
         .and_then(|()| save_setup_state(root, setup_state))
         .map_err(|message| setup_error_exit(&message, 2))
@@ -1157,7 +1162,7 @@ fn offer_trial_if_needed(root: &Path, args: SetupArgs) -> Option<ExitCode> {
         }
         Err(message) => {
             eprintln!("fallow coverage setup: {message}");
-            Some(ExitCode::from(7))
+            Some(ExitCode::from(crate::api::NETWORK_EXIT_CODE))
         }
     }
 }
@@ -1210,7 +1215,7 @@ fn handle_sidecar_step(
                 }
                 Err(message) => {
                     eprintln!("fallow coverage setup: {message}");
-                    Some(ExitCode::from(4))
+                    Some(ExitCode::from(COVERAGE_SETUP_FAILED_EXIT_CODE))
                 }
             }
         }

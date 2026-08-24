@@ -5923,18 +5923,32 @@
     "sarif",
     "compact",
     "markdown",
+    "md",
     "codeclimate",
     "gitlab-codequality",
+    "gitlab-code-quality",
     "pr-comment-github",
     "pr-comment-gitlab",
     "review-github",
     "review-gitlab",
-    "badge"
+    "badge",
+    "github-annotations",
+    "github-summary"
   ],
   "exit_codes": {
     "0": "Success (no error-severity issues found)",
-    "1": "Error-severity issues found (per rules config, or --fail-on-issues promotes warn→error)",
-    "2": "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}"
+    "1": "Error-severity issues found (per rules config, or --fail-on-issues promotes warn to error)",
+    "2": "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}",
+    "3": "Requested resource unavailable: config --path found no config, or a license is missing, invalid, or beyond its offline hard-fail window",
+    "4": "Runtime coverage sidecar is unavailable, unverifiable, protocol-incompatible, or terminated unexpectedly",
+    "5": "Runtime coverage input could not be prepared or parsed",
+    "6": "Runtime coverage sidecar reported an internal error",
+    "7": "Network or cloud request failed during a license, coverage, or CI operation",
+    "8": "Security gate matched a candidate selected by --gate",
+    "10": "Coverage inventory or static-findings upload input or project validation failed",
+    "11": "Coverage inventory or static-findings upload exceeded the server payload limit",
+    "12": "Coverage inventory or static-findings upload authentication or authorization was rejected",
+    "13": "Coverage inventory or static-findings upload failed after retries or returned another server error"
   },
   "environment_variables": {
     "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge/github-annotations/github-summary). CLI --format flag overrides this.",

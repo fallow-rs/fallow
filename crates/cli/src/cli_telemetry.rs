@@ -4,6 +4,7 @@ use fallow_config::OutputFormat;
 
 use super::{Cli, Command, setup_tracing};
 use crate::cli_format::FormatConfig;
+use crate::exit_codes::{COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE, RESOURCE_UNAVAILABLE_EXIT_CODE};
 use crate::{api, cache_notice, output_runtime, telemetry, update_check};
 
 #[derive(Clone, Copy)]
@@ -52,13 +53,13 @@ pub fn fallback_failure_reason_for(
     if exit_code == ExitCode::from(api::NETWORK_EXIT_CODE) {
         return Some(telemetry::FailureReason::Network);
     }
-    if exit_code == ExitCode::from(12) {
+    if exit_code == ExitCode::from(COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE) {
         return Some(telemetry::FailureReason::Auth);
     }
     if matches!(
         run.context.analysis_mode,
         telemetry::AnalysisMode::ProductionCoverage
-    ) && exit_code == ExitCode::from(3)
+    ) && exit_code == ExitCode::from(RESOURCE_UNAVAILABLE_EXIT_CODE)
     {
         return Some(telemetry::FailureReason::Auth);
     }

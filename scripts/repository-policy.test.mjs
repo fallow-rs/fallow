@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { checkRepositorySigningKeyParity } from "./signing-key-parity.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+
+const markdownFilesUnder = (root) =>
+  readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      return markdownFilesUnder(path);
+    }
+    return entry.name.endsWith(".md") ? [path] : [];
+  });
 
 const dependabotUpdate = (config, ecosystem, directory) => {
   const update = config
@@ -95,6 +105,50 @@ test("root Node API overview follows the published declarations", () => {
   const firstFunction = exportedNodeFunctions(declarations)[0];
   const neuteredReadme = readme.replace(`\`${firstFunction}\``, "`removedFunction`");
   assert.deepEqual(missingDocumentedNodeFunctions(declarations, neuteredReadme), [firstFunction]);
+});
+
+test("canonical Fallow skill follows the published Node API", () => {
+  const declarations = readFileSync("crates/napi/types/index.d.ts", "utf8");
+  const skill = readFileSync(".agents/skills/fallow/SKILL.md", "utf8");
+  const section = markdownSection(skill, "Node.js Bindings");
+  const missing = exportedNodeFunctions(declarations).filter(
+    (functionName) => !section.includes(`\`${functionName}\``),
+  );
+
+  assert.deepEqual(missing, [], `canonical Fallow skill is missing: ${missing.join(", ")}`);
+});
+
+test("Fallow skills preserve exit status and avoid volatile plugin counts", () => {
+  const skillEntrypoints = [".agents/skills/fallow/SKILL.md", "npm/fallow/skills/fallow/SKILL.md"];
+
+  for (const path of skillEntrypoints) {
+    const skill = readFileSync(path, "utf8");
+    assert.doesNotMatch(
+      skill,
+      /always append `\|\| true`|append `\|\| true` to every/iu,
+      `${path} must preserve the Fallow exit status`,
+    );
+    assert.match(
+      skill,
+      /do not force a successful status/iu,
+      `${path} must reject blanket suppression`,
+    );
+    assert.doesNotMatch(skill, /2>\/dev\/null/u, `${path} must preserve stderr diagnostics`);
+  }
+
+  const skillPaths = [".agents/skills/fallow", "npm/fallow/skills/fallow"].flatMap(
+    markdownFilesUnder,
+  );
+  for (const path of skillPaths) {
+    const skill = readFileSync(path, "utf8");
+    assert.doesNotMatch(
+      skill,
+      /\b\d+\s+(?:(?:auto-detecting|built-in)\s+)?(?:framework\s+)?plugins\b/iu,
+      `${path} must resolve the current plugin count from fallow schema`,
+    );
+    assert.doesNotMatch(skill, /\|\| true/u, `${path} must preserve the Fallow exit status`);
+    assert.doesNotMatch(skill, /2>\/dev\/null/u, `${path} must preserve stderr diagnostics`);
+  }
 });
 
 test("NAPI declarations have one canonical public source", () => {

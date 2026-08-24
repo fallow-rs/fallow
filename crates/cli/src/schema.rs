@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use clap::CommandFactory;
+use clap::{CommandFactory, ValueEnum};
 #[cfg(test)]
 use fallow_output::issue_output_contracts;
 use fallow_output::{TsAliasMeta, issue_output_contract_by_code};
@@ -9,6 +9,7 @@ use fallow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
 use fallow_types::suppress::IssueKind;
 
 use crate::Cli;
+use crate::cli_format::Format;
 use crate::explain::{
     CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, SECURITY_RULES, rule_docs_url,
 };
@@ -71,12 +72,8 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
             "file": "// fallow-ignore-file [issue-type]",
             "note": "Omit [issue-type] to suppress all issue types. Unknown tokens are silently ignored."
         },
-        "output_formats": ["human", "json", "sarif", "compact", "markdown", "codeclimate", "gitlab-codequality", "pr-comment-github", "pr-comment-gitlab", "review-github", "review-gitlab", "badge"],
-        "exit_codes": {
-            "0": "Success (no error-severity issues found)",
-            "1": "Error-severity issues found (per rules config, or --fail-on-issues promotes warn→error)",
-            "2": "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}"
-        },
+        "output_formats": output_formats_schema(),
+        "exit_codes": exit_codes_schema(),
         "environment_variables": environment_variables_schema(),
         "severity_levels": ["error", "warn", "off"],
         "field_notes": {
@@ -104,6 +101,78 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
         "plugins": plugins_schema(),
         "task_matrix": task_matrix_schema(),
     })
+}
+
+fn output_formats_schema() -> Vec<String> {
+    let mut formats = Vec::new();
+    for format in Format::value_variants() {
+        let Some(possible_value) = format.to_possible_value() else {
+            continue;
+        };
+        formats.extend(possible_value.get_name_and_aliases().map(str::to_owned));
+    }
+    formats
+}
+
+fn exit_codes_schema() -> serde_json::Value {
+    let entries = [
+        (0, "Success (no error-severity issues found)"),
+        (
+            1,
+            "Error-severity issues found (per rules config, or --fail-on-issues promotes warn to error)",
+        ),
+        (
+            2,
+            "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}",
+        ),
+        (
+            crate::exit_codes::RESOURCE_UNAVAILABLE_EXIT_CODE,
+            "Requested resource unavailable: config --path found no config, or a license is missing, invalid, or beyond its offline hard-fail window",
+        ),
+        (
+            crate::exit_codes::RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
+            "Runtime coverage sidecar is unavailable, unverifiable, protocol-incompatible, or terminated unexpectedly",
+        ),
+        (
+            crate::exit_codes::RUNTIME_COVERAGE_INPUT_EXIT_CODE,
+            "Runtime coverage input could not be prepared or parsed",
+        ),
+        (
+            crate::exit_codes::RUNTIME_COVERAGE_INTERNAL_EXIT_CODE,
+            "Runtime coverage sidecar reported an internal error",
+        ),
+        (
+            crate::exit_codes::NETWORK_EXIT_CODE,
+            "Network or cloud request failed during a license, coverage, or CI operation",
+        ),
+        (
+            crate::exit_codes::SECURITY_GATE_EXIT_CODE,
+            "Security gate matched a candidate selected by --gate",
+        ),
+        (
+            crate::exit_codes::COVERAGE_UPLOAD_VALIDATION_EXIT_CODE,
+            "Coverage inventory or static-findings upload input or project validation failed",
+        ),
+        (
+            crate::exit_codes::COVERAGE_UPLOAD_PAYLOAD_TOO_LARGE_EXIT_CODE,
+            "Coverage inventory or static-findings upload exceeded the server payload limit",
+        ),
+        (
+            crate::exit_codes::COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE,
+            "Coverage inventory or static-findings upload authentication or authorization was rejected",
+        ),
+        (
+            crate::exit_codes::COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE,
+            "Coverage inventory or static-findings upload failed after retries or returned another server error",
+        ),
+    ];
+
+    serde_json::Value::Object(
+        entries
+            .into_iter()
+            .map(|(code, description)| (code.to_string(), description.into()))
+            .collect(),
+    )
 }
 
 /// Agent-discoverability task-to-command matrix (R2). One row per agent
@@ -985,6 +1054,20 @@ mod tests {
     }
 
     #[test]
+    fn schema_documents_public_special_exit_codes() {
+        let schema = schema();
+        let exit_codes = schema["exit_codes"].as_object().unwrap();
+        let mut actual = exit_codes.keys().map(String::as_str).collect::<Vec<_>>();
+        actual.sort_unstable();
+        assert_eq!(
+            actual,
+            [
+                "0", "1", "10", "11", "12", "13", "2", "3", "4", "5", "6", "7", "8"
+            ]
+        );
+    }
+
+    #[test]
     fn schema_has_name_and_version() {
         let schema = schema();
         assert_eq!(schema["name"], "fallow");
@@ -1770,13 +1853,17 @@ mod tests {
             "sarif",
             "compact",
             "markdown",
+            "md",
             "codeclimate",
             "gitlab-codequality",
+            "gitlab-code-quality",
             "pr-comment-github",
             "pr-comment-gitlab",
             "review-github",
             "review-gitlab",
             "badge",
+            "github-annotations",
+            "github-summary",
         ] {
             assert!(
                 formats.iter().any(|f| f.as_str().unwrap() == expected),
