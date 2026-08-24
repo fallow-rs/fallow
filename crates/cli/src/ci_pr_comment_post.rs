@@ -307,7 +307,8 @@ fn apply_github_pr_comment_plan(
                 .ok_or_else(|| "create plan did not include a body".to_owned())?;
             let url = format!("{api}/repos/{repo}/issues/{pr}/comments");
             let payload = serde_json::json!({ "body": body });
-            github_create_json(agent, &url, token, &payload).map(|_| ())
+            github_create_json(agent, &url, token, &payload)
+                .and_then(|value| validate_created_comment(&value, body, "GitHub"))
         }
         fallow_output::PrCommentPostAction::Update => {
             let body = plan
@@ -342,7 +343,8 @@ fn apply_gitlab_mr_comment_plan(
                 .ok_or_else(|| "create plan did not include a body".to_owned())?;
             let url = format!("{api}/projects/{encoded_project}/merge_requests/{mr}/notes");
             let payload = serde_json::json!({ "body": body });
-            gitlab_create_json(agent, &url, token, &payload).map(|_| ())
+            gitlab_create_json(agent, &url, token, &payload)
+                .and_then(|value| validate_created_comment(&value, body, "GitLab"))
         }
         fallow_output::PrCommentPostAction::Update => {
             let body = plan
@@ -362,6 +364,18 @@ fn apply_gitlab_mr_comment_plan(
     }
 }
 
+fn validate_created_comment(
+    value: &Value,
+    expected_body: &str,
+    provider: &str,
+) -> Result<(), String> {
+    let confirmed = value.get("id").and_then(Value::as_u64).is_some()
+        && value.get("body").and_then(Value::as_str) == Some(expected_body);
+    confirmed.then_some(()).ok_or_else(|| {
+        format!("{provider} comment response did not confirm the created comment: {value}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,6 +393,19 @@ mod tests {
         assert_eq!(
             gitlab_project_id(Some("group/project")).as_deref(),
             Ok("group/project")
+        );
+    }
+
+    #[test]
+    fn created_comment_response_requires_id_and_exact_body() {
+        assert!(validate_created_comment(&serde_json::json!({}), "body", "GitHub").is_err());
+        assert!(
+            validate_created_comment(
+                &serde_json::json!({ "id": 7, "body": "body" }),
+                "body",
+                "GitLab",
+            )
+            .is_ok()
         );
     }
 }

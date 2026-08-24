@@ -139,8 +139,10 @@ fn post_github_review(
     }
     let payload = github_review_payload(envelope, &comments);
     let url = format!("{api}/repos/{repo}/pulls/{pr}/reviews");
-    match github_create_json(&agent, &url, &token, &payload) {
-        Ok(_) => {
+    match github_create_json(&agent, &url, &token, &payload)
+        .and_then(|value| validate_github_review_response(&value))
+    {
+        Ok(()) => {
             result.action = "post_review";
             result.comments_posted = comments.len();
         }
@@ -235,7 +237,8 @@ fn post_gitlab_inline_comment(
     {
         let payload = serde_json::json!({ "body": body, "position": position });
         let url = format!("{api}/projects/{encoded_project}/merge_requests/{mr}/discussions");
-        return gitlab_create_json(agent, &url, token, &payload).map(|_| ());
+        return gitlab_create_json(agent, &url, token, &payload)
+            .and_then(|value| validate_gitlab_discussion_response(&value));
     }
     let path = position
         .get("new_path")
@@ -247,8 +250,30 @@ fn post_gitlab_inline_comment(
         .unwrap_or(1);
     let fallback_body = format!("Warning: **{path}:{line}**\n\n{body}");
     let payload = serde_json::json!({ "body": fallback_body });
-    let url = format!("{api}/projects/{encoded_project}/merge_requests/{mr}/notes");
-    gitlab_create_json(agent, &url, token, &payload).map(|_| ())
+    let url = format!("{api}/projects/{encoded_project}/merge_requests/{mr}/discussions");
+    gitlab_create_json(agent, &url, token, &payload)
+        .and_then(|value| validate_gitlab_discussion_response(&value))
+}
+
+fn validate_github_review_response(value: &Value) -> Result<(), String> {
+    value
+        .get("id")
+        .and_then(Value::as_u64)
+        .map(|_| ())
+        .ok_or_else(|| {
+            format!("GitHub review response did not confirm a numeric review id: {value}")
+        })
+}
+
+fn validate_gitlab_discussion_response(value: &Value) -> Result<(), String> {
+    value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(|_| ())
+        .ok_or_else(|| {
+            format!("GitLab discussion response did not confirm a discussion id: {value}")
+        })
 }
 
 fn attach_reconcile_result(result: &mut PostReviewResult, stale: &[String], applied: ApplyResult) {
@@ -395,5 +420,15 @@ mod tests {
         assert_eq!(payload["event"], "COMMENT");
         assert_eq!(payload["comments"][0]["path"], "src/a.ts");
         assert_eq!(payload["comments"][0]["side"], "RIGHT");
+    }
+
+    #[test]
+    fn create_response_validation_requires_provider_identity() {
+        assert!(validate_github_review_response(&serde_json::json!({})).is_err());
+        assert!(validate_gitlab_discussion_response(&serde_json::json!({})).is_err());
+        assert!(validate_github_review_response(&serde_json::json!({ "id": 7 })).is_ok());
+        assert!(
+            validate_gitlab_discussion_response(&serde_json::json!({ "id": "thread-7" })).is_ok()
+        );
     }
 }

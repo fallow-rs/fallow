@@ -624,6 +624,12 @@ struct GitlabDiscussion {
     has_resolution_marker: bool,
 }
 
+#[derive(Debug)]
+struct GitlabAuthenticatedUser {
+    id: u64,
+    username: String,
+}
+
 #[derive(Debug, Default)]
 struct ReconcilePlan {
     current: Vec<String>,
@@ -1403,6 +1409,7 @@ fn load_gitlab_state(
     let api = api.trim_end_matches('/').to_owned();
     let agent = try_api_agent().map_err(|err| err.to_string())?;
     let mut state = ProviderState::default();
+    let mut all_discussions = Vec::new();
 
     for page in 1..=100 {
         let url = format!(
@@ -1416,9 +1423,7 @@ fn load_gitlab_state(
         if discussions.is_empty() {
             break;
         }
-        for discussion in discussions {
-            collect_gitlab_discussion_fingerprints(&mut state, discussion, opts.review_id)?;
-        }
+        all_discussions.extend(discussions.iter().cloned());
         if discussions.len() < 100 {
             break;
         }
@@ -1429,7 +1434,68 @@ fn load_gitlab_state(
             );
         }
     }
+    let authenticated_user = if needs_gitlab_authenticated_user(&all_discussions) {
+        Some(load_gitlab_authenticated_user(&agent, &api, &token)?)
+    } else {
+        None
+    };
+    for discussion in &all_discussions {
+        collect_gitlab_discussion_fingerprints(
+            &mut state,
+            discussion,
+            opts.review_id,
+            authenticated_user.as_ref(),
+        )?;
+    }
     Ok(state)
+}
+
+fn needs_gitlab_authenticated_user(discussions: &[Value]) -> bool {
+    if !matches!(
+        std::env::var("FALLOW_BOT_LOGIN"),
+        Err(std::env::VarError::NotPresent)
+    ) {
+        return false;
+    }
+    discussions
+        .iter()
+        .filter_map(|discussion| discussion.get("notes").and_then(Value::as_array))
+        .flatten()
+        .any(|note| {
+            let body = note.get("body").and_then(Value::as_str).unwrap_or("");
+            let has_marker = extract_fallow_fingerprint(body).is_some()
+                || body.contains("fallow-resolved-fingerprint:");
+            has_marker
+                && !gitlab_note_has_native_bot_metadata(note)
+                && note
+                    .get("author")
+                    .and_then(|author| author.get("id"))
+                    .and_then(Value::as_u64)
+                    .is_some()
+        })
+}
+
+fn load_gitlab_authenticated_user(
+    agent: &ureq::Agent,
+    api: &str,
+    token: &str,
+) -> Result<GitlabAuthenticatedUser, String> {
+    let value = gitlab_get_json(agent, &format!("{api}/user"), token)?;
+    let id = value
+        .get("id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "GitLab current-user response did not contain a numeric id".to_owned())?;
+    let username = value
+        .get("username")
+        .and_then(Value::as_str)
+        .filter(|username| !username.is_empty())
+        .ok_or_else(|| {
+            "GitLab current-user response did not contain a non-empty username".to_owned()
+        })?;
+    Ok(GitlabAuthenticatedUser {
+        id,
+        username: username.to_owned(),
+    })
 }
 
 /// Record one GitLab discussion lifecycle and its own resolution marker.
@@ -1437,6 +1503,7 @@ fn collect_gitlab_discussion_fingerprints(
     state: &mut ProviderState,
     discussion: &Value,
     review_id: Option<&ReviewId>,
+    authenticated_user: Option<&GitlabAuthenticatedUser>,
 ) -> Result<(), String> {
     let discussion_id = discussion
         .get("id")
@@ -1454,7 +1521,7 @@ fn collect_gitlab_discussion_fingerprints(
         .ok_or_else(|| format!("GitLab discussion {discussion_id} did not contain a root note"))?;
     {
         let body = root.get("body").and_then(Value::as_str).unwrap_or("");
-        if is_gitlab_bot_note(root)
+        if is_gitlab_bot_note(root, authenticated_user)
             && let Some(fingerprint) = extract_fallow_fingerprint(body)
         {
             if fallow_output::parse_review_id_marker(body)?.as_ref() != review_id {
@@ -1483,7 +1550,7 @@ fn collect_gitlab_discussion_fingerprints(
             let mut has_resolution_marker = false;
             for note in notes {
                 let note_body = note.get("body").and_then(Value::as_str).unwrap_or("");
-                if !is_gitlab_bot_note(note) {
+                if !is_gitlab_bot_note(note, authenticated_user) {
                     continue;
                 }
                 let Some(marker) = parse_resolution_marker(note_body)? else {
@@ -2105,11 +2172,10 @@ fn is_github_bot_comment(comment: &Value) -> bool {
 
 /// Determine whether a GitLab MR discussion note was authored by a bot.
 ///
-/// Without an explicit login, GitLab's native `system: true` or `author.bot`
-/// metadata is the compatibility trust boundary. Setting `FALLOW_BOT_LOGIN`
-/// narrows ownership to that exact username and supports project/PAT notes
-/// that lack native bot metadata.
-fn is_gitlab_bot_note(note: &Value) -> bool {
+/// Without an explicit login, GitLab's native bot metadata and the identity
+/// returned for the authenticated token are trusted. Setting
+/// `FALLOW_BOT_LOGIN` narrows ownership to that exact username.
+fn is_gitlab_bot_note(note: &Value, authenticated_user: Option<&GitlabAuthenticatedUser>) -> bool {
     let author = note.get("author");
     let username = author
         .and_then(|a| a.get("username"))
@@ -2122,6 +2188,17 @@ fn is_gitlab_bot_note(note: &Value) -> bool {
         Err(std::env::VarError::NotUnicode(_)) => return false,
         Err(std::env::VarError::NotPresent) => {}
     }
+    if gitlab_note_has_native_bot_metadata(note) {
+        return true;
+    }
+    authenticated_user.is_some_and(|user| {
+        author.and_then(|a| a.get("id")).and_then(Value::as_u64) == Some(user.id)
+            || username == Some(user.username.as_str())
+    })
+}
+
+fn gitlab_note_has_native_bot_metadata(note: &Value) -> bool {
+    let author = note.get("author");
     note.get("system").and_then(Value::as_bool).unwrap_or(false)
         || author.and_then(|a| a.get("bot")).and_then(Value::as_bool) == Some(true)
 }
@@ -2477,12 +2554,12 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let system_note = serde_json::json!({ "system": true });
-        assert!(is_gitlab_bot_note(&system_note));
+        assert!(is_gitlab_bot_note(&system_note, None));
         let bot_author = serde_json::json!({
             "system": false,
             "author": { "bot": true, "username": "project-bot" },
         });
-        assert!(is_gitlab_bot_note(&bot_author));
+        assert!(is_gitlab_bot_note(&bot_author, None));
     }
 
     #[test]
@@ -2494,7 +2571,7 @@ mod tests {
             "system": false,
             "author": { "bot": false, "username": "alice" },
         });
-        assert!(!is_gitlab_bot_note(&human));
+        assert!(!is_gitlab_bot_note(&human, None));
     }
 
     #[test]
@@ -2995,8 +3072,8 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        let error =
-            collect_gitlab_discussion_fingerprints(&mut state, &discussion, None).unwrap_err();
+        let error = collect_gitlab_discussion_fingerprints(&mut state, &discussion, None, None)
+            .unwrap_err();
         assert!(error.contains("string id"));
         assert!(state.fingerprints.is_empty());
     }
@@ -3010,7 +3087,7 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None).unwrap();
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None, None).unwrap();
         assert!(state.fingerprints.contains("fp-gitlab"));
         let lifecycle = &state.gitlab_discussions_by_fingerprint["fp-gitlab"][0];
         assert_eq!(lifecycle.discussion_id, "disc-99");
@@ -3030,7 +3107,7 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None).unwrap();
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None, None).unwrap();
         assert!(state.gitlab_discussions_by_fingerprint["fp-resolved"][0].has_resolution_marker);
     }
 
@@ -3048,7 +3125,7 @@ mod tests {
             ]
         });
         let mut state = ProviderState::default();
-        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None).unwrap();
+        collect_gitlab_discussion_fingerprints(&mut state, &discussion, None, None).unwrap();
         assert!(!state.gitlab_discussions_by_fingerprint["fp-human"][0].has_resolution_marker);
     }
 
@@ -3058,6 +3135,7 @@ mod tests {
         let error = collect_gitlab_discussion_fingerprints(
             &mut state,
             &serde_json::json!({ "id": "disc-empty", "notes": [] }),
+            None,
             None,
         )
         .unwrap_err();
@@ -3077,6 +3155,7 @@ mod tests {
                     "author": { "bot": true }
                 }]
             }),
+            None,
             None,
         )
         .unwrap_err();
@@ -3364,10 +3443,13 @@ mod tests {
         assert!(!is_github_bot_comment(&serde_json::json!({
             "user": { "type": "Bot", "login": "foreign[bot]" }
         })));
-        assert!(!is_gitlab_bot_note(&serde_json::json!({
-            "system": false,
-            "author": { "bot": true, "username": "foreign-bot" }
-        })));
+        assert!(!is_gitlab_bot_note(
+            &serde_json::json!({
+                "system": false,
+                "author": { "bot": true, "username": "foreign-bot" }
+            }),
+            None
+        ));
         // SAFETY: Restore the process environment after the scoped override.
         unsafe {
             std::env::remove_var("FALLOW_BOT_LOGIN");
@@ -3415,7 +3497,7 @@ mod tests {
         unsafe {
             std::env::set_var("FALLOW_BOT_LOGIN", "fallow-gl-bot");
         }
-        assert!(is_gitlab_bot_note(&note));
+        assert!(is_gitlab_bot_note(&note, None));
         // SAFETY: Restore the process environment after the scoped override.
         unsafe {
             std::env::remove_var("FALLOW_BOT_LOGIN");
@@ -3431,7 +3513,7 @@ mod tests {
             "system": false,
             "author": { "bot": false, "username": "contributor" },
         });
-        assert!(!is_gitlab_bot_note(&note));
+        assert!(!is_gitlab_bot_note(&note, None));
     }
 
     // --- read_json_response: non-2xx path (lines 1288-1303) ---
@@ -3667,8 +3749,9 @@ mod tests {
         let mut scoped = ProviderState::default();
         let mut unscoped = ProviderState::default();
 
-        collect_gitlab_discussion_fingerprints(&mut scoped, &discussion, Some(&frontend)).unwrap();
-        collect_gitlab_discussion_fingerprints(&mut unscoped, &discussion, None).unwrap();
+        collect_gitlab_discussion_fingerprints(&mut scoped, &discussion, Some(&frontend), None)
+            .unwrap();
+        collect_gitlab_discussion_fingerprints(&mut unscoped, &discussion, None, None).unwrap();
 
         assert!(!scoped.fingerprints.contains("abcdef0123456789"));
         assert!(

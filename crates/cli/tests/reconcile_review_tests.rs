@@ -385,7 +385,17 @@ fn run_post_review(
     api_url: &str,
     envelope_dir: &tempfile::TempDir,
 ) -> common::CommandOutput {
-    let output = Command::new(fallow_bin())
+    run_post_review_with_identity(provider_args, api_url, envelope_dir, None)
+}
+
+fn run_post_review_with_identity(
+    provider_args: &[&str],
+    api_url: &str,
+    envelope_dir: &tempfile::TempDir,
+    bot_login: Option<&str>,
+) -> common::CommandOutput {
+    let mut command = Command::new(fallow_bin());
+    command
         .args(["--format", "json", "--quiet", "ci", "post-review"])
         .args(provider_args)
         .args(["--api-url", api_url])
@@ -398,9 +408,11 @@ fn run_post_review(
         .env("GITHUB_SHA", "eeeeeee123")
         .env("GITLAB_TOKEN", "test-token")
         .env("CI_COMMIT_SHA", "eeeeeee123")
-        .env_remove("FALLOW_BOT_LOGIN")
-        .output()
-        .expect("run fallow post-review");
+        .env_remove("FALLOW_BOT_LOGIN");
+    if let Some(bot_login) = bot_login {
+        command.env("FALLOW_BOT_LOGIN", bot_login);
+    }
+    let output = command.output().expect("run fallow post-review");
     common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -929,6 +941,15 @@ fn gitlab_discussions(body: &'static str) -> MockResponse {
     }
 }
 
+fn gitlab_current_user() -> MockResponse {
+    MockResponse {
+        method: "GET",
+        path_contains: "/user",
+        status: 200,
+        body: r#"{"id":42,"username":"project-bot"}"#,
+    }
+}
+
 fn gitlab_discussion_preflight(discussion_id: &str) -> MockResponse {
     match discussion_id {
         "d1" => MockResponse {
@@ -1221,6 +1242,116 @@ fn gitlab_post_review_creates_new_discussion_for_reopened_resolved_lifecycle() {
     assert_eq!(json["action"], "post_review");
     assert_eq!(json["comments_posted"], 1);
     assert_eq!(json["comments_skipped"], 0);
+    assert_eq!(server.join().expect("server thread").len(), 2);
+}
+
+#[test]
+fn gitlab_overview_fallback_has_one_complete_lifecycle() {
+    let current = write_raw_envelope(&serde_json::json!({
+        "body": "<!-- fallow-review -->",
+        "comments": [{
+            "fingerprint": "old",
+            "body": "<!-- fallow-fingerprint: old -->",
+            "position": {
+                "new_path": "src/index.ts",
+                "new_line": 1,
+                "position_type": "text"
+            }
+        }]
+    }));
+    let clean = write_envelope(&[]);
+    let active = r#"[{"id":"d1","resolved":false,"notes":[{"body":"Warning: **src/index.ts:1**\n\n<!-- fallow-fingerprint: old -->","resolved":false,"system":false,"author":{"id":42,"username":"project-bot"}}]}]"#;
+    let resolved = r#"[{"id":"d1","resolved":true,"notes":[{"body":"Warning: **src/index.ts:1**\n\n<!-- fallow-fingerprint: old -->","resolved":true,"system":false,"author":{"id":42,"username":"project-bot"}},{"body":"<!-- fallow-resolved-fingerprint: old@eeeeeee -->","system":false,"author":{"id":42,"username":"project-bot"}}]}]"#;
+    let (api_url, server) = serve(vec![
+        gitlab_discussions("[]"),
+        MockResponse {
+            method: "POST",
+            path_contains: "/projects/group%2Frepo/merge_requests/7/discussions",
+            status: 201,
+            body: r#"{"id":"d1"}"#,
+        },
+        gitlab_discussions(active),
+        gitlab_discussions(active),
+        gitlab_discussion_preflight("d1"),
+        gitlab_discussion_resolution("d1"),
+        gitlab_resolution_note(
+            "d1",
+            r#"{"id":10,"body":"<!-- fallow-resolved-fingerprint: old@eeeeeee -->"}"#,
+        ),
+        gitlab_discussions(resolved),
+    ]);
+    let args = [
+        "--provider",
+        "gitlab",
+        "--mr",
+        "7",
+        "--project-id",
+        "group/repo",
+    ];
+
+    let created = parse_json(&run_post_review_with_identity(
+        &args,
+        &api_url,
+        &current,
+        Some("project-bot"),
+    ));
+    assert_eq!(created["comments_posted"], 1);
+
+    let rerun = parse_json(&run_post_review_with_identity(
+        &args,
+        &api_url,
+        &current,
+        Some("project-bot"),
+    ));
+    assert_eq!(rerun["comments_posted"], 0);
+    assert_eq!(rerun["comments_skipped"], 1);
+
+    let disappeared = parse_json(&run_post_review_with_identity(
+        &args,
+        &api_url,
+        &clean,
+        Some("project-bot"),
+    ));
+    assert_eq!(disappeared["resolution_comments_posted"], 1);
+    assert_eq!(disappeared["threads_resolved"], 1);
+
+    let final_rerun = parse_json(&run_post_review_with_identity(
+        &args,
+        &api_url,
+        &clean,
+        Some("project-bot"),
+    ));
+    assert_eq!(final_rerun["resolution_comments_posted"], 0);
+    assert_eq!(final_rerun["threads_resolved"], 0);
+    assert_eq!(server.join().expect("server thread").len(), 8);
+}
+
+#[test]
+fn gitlab_authenticated_token_owner_controls_default_marker_ownership() {
+    let current = write_envelope(&["old"]);
+    let (api_url, server) = serve(vec![
+        gitlab_discussions(
+            r#"[{"id":"d1","resolved":false,"notes":[{"body":"<!-- fallow-fingerprint: old -->","resolved":false,"system":false,"author":{"id":42,"username":"project-bot"}}]}]"#,
+        ),
+        gitlab_current_user(),
+    ]);
+
+    let output = run_reconcile(
+        &[
+            "--provider",
+            "gitlab",
+            "--mr",
+            "7",
+            "--project-id",
+            "group/repo",
+            "--dry-run",
+        ],
+        &api_url,
+        &current,
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["existing_fingerprints"], 1);
+    assert_eq!(json["new_fingerprints"], 0);
     assert_eq!(server.join().expect("server thread").len(), 2);
 }
 

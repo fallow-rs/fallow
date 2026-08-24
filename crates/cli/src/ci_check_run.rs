@@ -62,7 +62,17 @@ pub(super) fn post_check_run(
     let mut results = Vec::new();
     for payload in &payloads {
         match github_create_json(&agent, &url, &token, payload) {
-            Ok(value) => results.push(value),
+            Ok(value) => match validate_github_check_run_response(&value, payload) {
+                Ok(()) => results.push(value),
+                Err(e) => {
+                    return emit_error_with_style(
+                        &e,
+                        crate::api::NETWORK_EXIT_CODE,
+                        output,
+                        json_style,
+                    );
+                }
+            },
             Err(e) => {
                 return emit_error_with_style(
                     &e,
@@ -79,6 +89,16 @@ pub(super) fn post_check_run(
         output,
         json_style,
     )
+}
+
+fn validate_github_check_run_response(value: &Value, payload: &Value) -> Result<(), String> {
+    let confirmed = value.get("id").and_then(Value::as_u64).is_some()
+        && value.get("name").and_then(Value::as_str) == payload.get("name").and_then(Value::as_str)
+        && value.get("head_sha").and_then(Value::as_str)
+            == payload.get("head_sha").and_then(Value::as_str);
+    confirmed.then_some(()).ok_or_else(|| {
+        format!("GitHub check-run response did not confirm the created check run: {value}")
+    })
 }
 
 fn read_decision(path: &Path) -> Result<fallow_output::PrDecisionSurface, String> {
@@ -246,6 +266,19 @@ mod tests {
         assert_eq!(
             payload["output"]["annotations"][0]["annotation_level"],
             "warning"
+        );
+    }
+
+    #[test]
+    fn check_run_response_requires_identity_and_target() {
+        let payload = serde_json::json!({ "name": "Fallow", "head_sha": "abc123" });
+        assert!(validate_github_check_run_response(&serde_json::json!({}), &payload).is_err());
+        assert!(
+            validate_github_check_run_response(
+                &serde_json::json!({ "id": 1, "name": "Fallow", "head_sha": "abc123" }),
+                &payload,
+            )
+            .is_ok()
         );
     }
 
