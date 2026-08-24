@@ -293,6 +293,7 @@ impl McpServer {
                     "root": root.display().to_string(),
                     "complexity": true,
                     "max_crap": 10.0,
+                    "threads": 1,
                     "no_cache": true
                 }
             }
@@ -319,6 +320,7 @@ impl McpServer {
                 "name": "analyze",
                 "arguments": {
                     "root": root.display().to_string(),
+                    "threads": 1,
                     "no_cache": true
                 }
             }
