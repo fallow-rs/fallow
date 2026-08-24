@@ -287,17 +287,17 @@ fn crediting_export_references(
             graph.effective_bindings_share_declaration_group(candidate.binding(), surface.binding())
         });
     if !same_binding {
-        return (
-            namespace,
-            references.clone(),
-            vec![namespaced_references(namespace, references)],
-        );
+        return (namespace, references, Vec::new());
     }
     let other_references = direct_export_references(graph, root, file_id, export_name, other);
-    let by_namespace = vec![
-        namespaced_references(namespace, references.clone()),
-        namespaced_references(other, other_references.clone()),
-    ];
+    let by_namespace = if references.is_empty() || other_references.is_empty() {
+        Vec::new()
+    } else {
+        vec![
+            namespaced_references(namespace, references.clone()),
+            namespaced_references(other, other_references.clone()),
+        ]
+    };
     if references.is_empty() && !other_references.is_empty() {
         (other, other_references, by_namespace)
     } else {
@@ -1762,6 +1762,23 @@ mod tests {
         );
         assert_eq!(trace.direct_references[0].kind, "named import");
         assert_eq!(trace.reason, "Used by 1 file(s)");
+    }
+
+    #[test]
+    fn trace_omits_redundant_single_namespace_evidence() {
+        let graph = source_consumer_graph(vec![named_foo_export(false)], false, false, Vec::new());
+
+        let trace = trace_export(&graph, Path::new("/project"), "src/source.ts", "Foo")
+            .expect("value export exists");
+
+        assert_eq!(
+            trace.namespace,
+            fallow_types::semantic::SemanticNamespace::Value
+        );
+        assert_eq!(trace.direct_references.len(), 1);
+        assert!(trace.direct_references_by_namespace.is_empty());
+        let json = serde_json::to_value(&trace).expect("serialize trace");
+        assert!(json.get("direct_references_by_namespace").is_none());
     }
 
     #[test]
