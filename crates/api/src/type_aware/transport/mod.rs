@@ -898,7 +898,7 @@ for await (const line of lines) {
             revision: 0,
             cancellation: Some(Arc::clone(&cancellation)),
         };
-        let request_root = canonical_root.clone();
+        let request_root = canonical_root;
         let request = std::thread::spawn(move || {
             let error = session
                 .run_semantic_request::<_, serde_json::Value>(
