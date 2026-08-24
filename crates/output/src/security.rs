@@ -863,19 +863,47 @@ mod tests {
     }
 
     #[test]
-    fn saved_security_validator_accepts_pre_2390_type_aware_counts() {
+    fn saved_security_validator_accepts_legacy_v7_type_aware_payload() {
         let mut envelope = current_security_envelope();
-        let mut type_aware = serde_json::to_value(fallow_types::envelope::TypeAwareMeta::default())
-            .expect("serialize type-aware metadata");
-        let abstention_reasons = type_aware["abstention_reasons"]
-            .as_object_mut()
-            .expect("abstention reason object");
-        abstention_reasons.remove("unreachable_evidence");
-        abstention_reasons.remove("non_crediting_evidence");
-        envelope["_meta"] = json!({"type_aware": type_aware});
+        envelope["schema_version"] = json!("7");
+        envelope["_meta"] = json!({
+            "type_aware": {
+                "executed": true,
+                "protocol_version": 6,
+                "sidecar_version": "0.6.0",
+                "backend": "typescript-go",
+                "backend_version": "7.0.0-dev",
+                "selected_tsconfigs": ["tsconfig.json"],
+                "candidate_count": 1,
+                "confirmed_used_count": 0,
+                "contract_preserved_count": 0,
+                "no_static_references_count": 1,
+                "fix_eligible_count": 0,
+                "unresolved_count": 0,
+                "abstained_count": 0,
+                "abstention_reasons": {
+                    "no_project": 0,
+                    "ambiguous_project": 0,
+                    "blocking_diagnostics": 0,
+                    "svelte_virtual_module_exports": 0,
+                    "unknown_symbol": 0,
+                    "unsupported_syntax": 0,
+                    "capacity": 0
+                },
+                "projects": [],
+                "warning_count": 0,
+                "warnings": [],
+                "elapsed_ms": 4,
+                "phase_timings_ms": {
+                    "project_setup": 1,
+                    "diagnostics": 1,
+                    "symbol_scan": 2
+                }
+            }
+        });
 
         validate_saved_security_envelope(&envelope)
-            .expect("pre-2390 current-version type-aware metadata stays readable");
+            .expect("legacy schema 7 type-aware metadata stays readable");
     }
 
     #[test]

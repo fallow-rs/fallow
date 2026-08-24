@@ -35,6 +35,11 @@ fn every_css_module_spelling_credits_exact_or_whole_class_maps() {
         ("src/theme.module.less", "lessUnused"),
         ("src/theme.module.sass", "sassUnused"),
         ("src/alias.module.css", "aliasUnused"),
+        (
+            "src/shadow-extensionless.module.css",
+            "extensionlessShadowSpare",
+        ),
+        ("src/shadow-aliased.module.css", "aliasedShadowSpare"),
     ] {
         assert!(
             unused

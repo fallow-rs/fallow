@@ -1458,12 +1458,12 @@
           "default": "error"
         },
         "unused-dependency-overrides": {
-          "description": "A pnpm `overrides:` / `pnpm.overrides` entry whose target package no\nworkspace `package.json` declares. Defaults to `warn`.",
+          "description": "A pnpm, npm, or Bun override entry whose target package no workspace\n`package.json` declares and the active readable lockfile does not\nresolve. Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "misconfigured-dependency-overrides": {
-          "description": "A pnpm `overrides:` / `pnpm.overrides` entry whose key or value cannot\nbe parsed into a valid pnpm shape. Defaults to `error`.",
+          "description": "A pnpm, npm, or Bun override or Bun `resolutions` entry whose key or\nvalue cannot be parsed in its declaration source's grammar. Defaults to\n`error`.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },

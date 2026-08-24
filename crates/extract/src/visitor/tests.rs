@@ -5923,6 +5923,37 @@ fn default_import_whole_object_handoffs_are_distinct_from_member_accesses() {
 }
 
 #[test]
+fn shadowed_default_import_name_does_not_record_object_usage() {
+    let info = parse(
+        "import value from './value';\n\
+         function inspect(value) {\n\
+           const { shadowedDestructure } = value;\n\
+           return [hand(value), value.shadowedMember, shadowedDestructure];\n\
+         }\n\
+         value.used;\n\
+         inspect({ shadowedDestructure: 1, shadowedMember: 2 });",
+    );
+
+    assert!(info.semantic_facts.iter().all(|fact| !matches!(
+        fact,
+        SemanticFact::DefaultImportWholeObjectUse(use_fact)
+            if use_fact.local_name == "value"
+    )));
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "value" && access.member == "used")
+    );
+    assert!(info.member_accesses.iter().all(|access| {
+        access.object != "value"
+            || !matches!(
+                access.member.as_str(),
+                "shadowedMember" | "shadowedDestructure"
+            )
+    }));
+}
+
+#[test]
 fn css_module_default_import_destructure_records_member_accesses() {
     let info = parse(
         "import styles from './Card.module.css';\n\
@@ -6589,6 +6620,8 @@ fn cjs_object_map_provenance_fails_closed_for_ambiguous_forms() {
         "module.exports = { default: 1 }; module['exports'] = { other: 2 };",
         "module.exports = { default: 1 }; exports['extra'] = 2;",
         "module.exports += { default: 1 };",
+        "module.exports = { default: 1 }; module.exports.default++;",
+        "module.exports = { default: 1 }; delete module.exports.default;",
         "module.exports = { default: 1, ...extra };",
         "module.exports = { ['default']: 1 };",
         "module.exports = { default: 1, default: 2 };",

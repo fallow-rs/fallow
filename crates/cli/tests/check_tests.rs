@@ -356,6 +356,13 @@ fn type_aware_preserves_reachable_aliases_and_reports_actual_unused_export() {
         .expect("confirmed unused export");
     assert_eq!(actually_unused["actions"][0]["auto_fixable"], true);
 
+    assert!(
+        typed_exports
+            .iter()
+            .any(|issue| issue["export_name"] == "mixedNonCrediting"),
+        "mixed unreachable-read and bare-re-export evidence must not hide dead code: {typed_exports:?}"
+    );
+
     let decisions = typed["_meta"]["type_aware"]["candidate_decisions"]
         .as_array()
         .expect("candidate decisions");
@@ -367,6 +374,12 @@ fn type_aware_preserves_reachable_aliases_and_reports_actual_unused_export() {
         unused_decision["decision"],
         "confirmed-no-static-references"
     );
+
+    let mixed_decision = decisions
+        .iter()
+        .find(|decision| decision["subject"]["exported_name"] == "mixedNonCrediting")
+        .expect("mixed non-crediting evidence decision");
+    assert_eq!(mixed_decision["decision"], "retained-abstained");
 }
 
 #[test]

@@ -7,8 +7,13 @@ import compound from './compound.cjs';
 import handoff from './handoff.cjs';
 import { default as aliasedMember } from './aliased-member.cjs';
 import { default as aliasedHandoff } from './aliased-handoff.cjs';
+import shadowed from './shadowed.cjs';
 
 const hand = (value: unknown): unknown => value;
+const previewShadowed = (shadowed: { shadowSpare: string }): unknown[] => [
+  hand(shadowed),
+  shadowed.shadowSpare,
+];
 
 export const app = [
   thing,
@@ -22,4 +27,6 @@ export const app = [
   aliasedMember.aliasMemberUsed,
   aliasedHandoff.aliasHandoffUsed,
   hand(aliasedHandoff),
+  shadowed.shadowUsed,
+  previewShadowed,
 ];

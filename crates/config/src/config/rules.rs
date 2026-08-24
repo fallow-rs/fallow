@@ -312,15 +312,17 @@ pub struct RulesConfig {
     /// Defaults to `error`; suppressible only via `ignoreCatalogReferences`.
     #[serde(default, alias = "unresolved-catalog-reference")]
     pub unresolved_catalog_references: Severity,
-    /// A pnpm `overrides:` / `pnpm.overrides` entry whose target package no
-    /// workspace `package.json` declares. Defaults to `warn`.
+    /// A pnpm, npm, or Bun override entry whose target package no workspace
+    /// `package.json` declares and the active readable lockfile does not
+    /// resolve. Defaults to `warn`.
     #[serde(
         default = "Severity::default_warn",
         alias = "unused-dependency-override"
     )]
     pub unused_dependency_overrides: Severity,
-    /// A pnpm `overrides:` / `pnpm.overrides` entry whose key or value cannot
-    /// be parsed into a valid pnpm shape. Defaults to `error`.
+    /// A pnpm, npm, or Bun override or Bun `resolutions` entry whose key or
+    /// value cannot be parsed in its declaration source's grammar. Defaults to
+    /// `error`.
     #[serde(default, alias = "misconfigured-dependency-override")]
     pub misconfigured_dependency_overrides: Severity,
     /// Opt-in (default off): a `"use client"` file that transitively imports a

@@ -26,6 +26,16 @@ impl ModuleInfoExtractor {
             .any(|scope| scope.contains(name))
     }
 
+    pub(in crate::visitor) fn namespace_like_binding_is_shadowed(&self, name: &str) -> bool {
+        (self.namespace_import_locals.contains(name)
+            || self.default_import_locals.contains(name)
+            || self
+                .namespace_binding_names
+                .iter()
+                .any(|local| local == name))
+            && self.nested_scope_shadows(name)
+    }
+
     pub(super) fn record_sanitizer_binding(&mut self, name: &str, scope: Option<SanitizerScope>) {
         if self.is_module_scope() {
             self.module_sanitizer_bindings

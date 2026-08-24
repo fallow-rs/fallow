@@ -15,3 +15,5 @@ export type Complex<T> = T extends Api<infer Value> ? Value : never;
 export const runtimeOnly = 1;
 
 export const actuallyUnused = 2;
+
+export const mixedNonCrediting = 3;

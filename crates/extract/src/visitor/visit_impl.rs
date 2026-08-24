@@ -907,6 +907,9 @@ impl ModuleInfoExtractor {
             return;
         }
         let name = ident.name.as_str();
+        if self.namespace_like_binding_is_shadowed(name) {
+            return;
+        }
         if self.default_import_locals.contains(name)
             && self
                 .default_import_whole_object_uses
@@ -2183,6 +2186,27 @@ impl<'a> ModuleInfoExtractor {
             || Self::is_cjs_exports_expression(&member.object)
     }
 
+    fn is_static_cjs_assignment_target(member: &StaticMemberExpression<'_>) -> bool {
+        (member.property.name == "exports"
+            && matches!(
+                &member.object,
+                Expression::Identifier(identifier) if identifier.name == "module"
+            ))
+            || Self::is_cjs_exports_expression(&member.object)
+    }
+
+    fn is_cjs_mutation_expression(expression: &Expression<'_>) -> bool {
+        match expression {
+            Expression::StaticMemberExpression(member) => {
+                Self::is_static_cjs_assignment_target(member)
+            }
+            Expression::ComputedMemberExpression(member) => {
+                Self::is_computed_cjs_assignment_target(member)
+            }
+            _ => Self::is_cjs_exports_expression(expression),
+        }
+    }
+
     fn is_cjs_es_module_marker_call(call: &CallExpression<'_>) -> bool {
         let Expression::StaticMemberExpression(callee) = &call.callee else {
             return false;
@@ -3372,6 +3396,31 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_assignment_expression(self, expr);
     }
 
+    fn visit_update_expression(&mut self, expr: &UpdateExpression<'a>) {
+        let mutates_cjs_exports = match &expr.argument {
+            SimpleAssignmentTarget::StaticMemberExpression(member) => {
+                Self::is_static_cjs_assignment_target(member)
+            }
+            SimpleAssignmentTarget::ComputedMemberExpression(member) => {
+                Self::is_computed_cjs_assignment_target(member)
+            }
+            _ => false,
+        };
+        if mutates_cjs_exports {
+            self.record_cjs_assignment(false);
+        }
+        walk::walk_update_expression(self, expr);
+    }
+
+    fn visit_unary_expression(&mut self, expr: &UnaryExpression<'a>) {
+        if matches!(expr.operator, UnaryOperator::Delete)
+            && Self::is_cjs_mutation_expression(&expr.argument)
+        {
+            self.record_cjs_assignment(false);
+        }
+        walk::walk_unary_expression(self, expr);
+    }
+
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
         if is_import_meta_env_object(&expr.object) {
             self.member_accesses.push(MemberAccess {
@@ -3419,12 +3468,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             // it resolves against the same class's binding key (issue #1821);
             // stripped back to `this.` before emission. A bare `this` object and
             // any non-`this` receiver pass through unchanged.
-            let object = self.qualify_this_scope(&object_name);
-            self.record_walk_order_member_access(&object, expr.property.name.as_str());
-            self.member_accesses.push(MemberAccess {
-                object,
-                member: expr.property.name.to_string(),
-            });
+            if !self.namespace_like_binding_is_shadowed(&object_name) {
+                let object = self.qualify_this_scope(&object_name);
+                self.record_walk_order_member_access(&object, expr.property.name.as_str());
+                self.member_accesses.push(MemberAccess {
+                    object,
+                    member: expr.property.name.to_string(),
+                });
+            }
         }
         if matches!(expr.object, Expression::Super(_))
             && let Some(Some(super_local)) = self.class_super_stack.last()
@@ -3454,6 +3505,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 });
         }
         if let Expression::Identifier(obj) = &expr.object {
+            let shadowed = self.namespace_like_binding_is_shadowed(obj.name.as_str());
             if (self.route_loader_data_bindings.contains(obj.name.as_str())
                 || obj.name == "loaderData")
                 && let Expression::StringLiteral(lit) = &expr.expression
@@ -3463,13 +3515,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     member: lit.value.to_string(),
                 });
             }
-            if let Expression::StringLiteral(lit) = &expr.expression {
+            if let Expression::StringLiteral(lit) = &expr.expression
+                && !shadowed
+            {
                 self.member_accesses.push(MemberAccess {
                     object: obj.name.to_string(),
                     member: lit.value.to_string(),
                 });
                 self.mark_structured_namespace_reference(obj);
-            } else {
+            } else if !shadowed {
                 self.record_whole_object_identifier_use(obj.name.as_str());
             }
         }
@@ -3477,7 +3531,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_ts_qualified_name(&mut self, it: &TSQualifiedName<'a>) {
-        if let TSTypeName::IdentifierReference(obj) = &it.left {
+        if let TSTypeName::IdentifierReference(obj) = &it.left
+            && !self.namespace_like_binding_is_shadowed(obj.name.as_str())
+        {
             self.member_accesses.push(MemberAccess {
                 object: obj.name.to_string(),
                 member: it.right.name.to_string(),

@@ -488,6 +488,9 @@ impl ModuleInfoExtractor {
         declarator: &VariableDeclarator<'_>,
         ident_name: &str,
     ) {
+        if self.namespace_like_binding_is_shadowed(ident_name) {
+            return;
+        }
         if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
             if obj_pat.rest.is_some() {
                 self.whole_object_uses.push(ident_name.to_string());

@@ -1124,7 +1124,9 @@ impl ModuleInfoExtractor {
     pub(crate) fn record_jsx_member_tag_accesses(&mut self, member: &JSXMemberExpression<'_>) {
         let mut current = member;
         loop {
-            if let Some(object_name) = jsx_member_object_name(&current.object) {
+            if let Some(object_name) = jsx_member_object_name(&current.object)
+                && !self.namespace_like_binding_is_shadowed(&object_name)
+            {
                 let object = self.qualify_this_scope(&object_name);
                 self.record_walk_order_member_access(&object, current.property.name.as_str());
                 self.member_accesses.push(MemberAccess {

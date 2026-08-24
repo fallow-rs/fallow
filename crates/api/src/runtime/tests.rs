@@ -278,11 +278,10 @@ fn run_combined_returns_typed_sections_before_json() {
 /// diagnostics its run recorded even when the dead-code section is switched
 /// off, the way the CLI's `--skip check` and `--only health` do.
 ///
-/// The health run records them inside its own dead-code precompute, AFTER
-/// `HealthProgrammaticOutput::workspace_diagnostics` was captured, so the
-/// section lists alone come back empty and only the closing registry leg sees
-/// the entry. Each case gets its own project root because the diagnostics
-/// registry is process-wide and keyed on the root.
+/// The health run captures diagnostics after its own dead-code precompute, so
+/// the section-owned lists are sufficient and the combined serializer does not
+/// need to reread process-global history. Each case gets its own project root
+/// to keep the analysis inputs independent.
 #[test]
 fn combined_programmatic_json_carries_diagnostics_without_a_dead_code_section() {
     for (name, dead_code, duplication) in [

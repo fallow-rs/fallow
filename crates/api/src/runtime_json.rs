@@ -92,7 +92,6 @@ pub fn serialize_combined_programmatic_json(
 /// `--only health`, `--only dupes`) still reports what its remaining analyses
 /// recorded.
 ///
-/// [`fallow_config::registry_diagnostics_to_fold`] closes the fold, exactly as
 /// Each section carries the diagnostics owned by its run. The combined root
 /// unions those values without importing process-global history.
 fn combined_workspace_diagnostics(
@@ -204,15 +203,11 @@ pub fn serialize_audit_programmatic_json(
 /// The sub-result is a `CheckOutput` body, so it carries the run's
 /// `workspace_diagnostics[]` the way the standalone `dead-code` envelope and
 /// the combined `check` section do. The two audit routes agree on everything
-/// the dead-code analysis records: this one serializes the typed list, which
-/// the runtime already built from the session's own capture plus
-/// [`fallow_config::registry_diagnostics_to_fold`] after the analyze pass, and
-/// the CLI audit path folds `CheckResult::workspace_diagnostics` with that same
-/// filtered registry leg at serialization time. That closing read is the CLI's
-/// only extra leg and can only add an entry recorded after the analysis
-/// captured its list; because the leg drops walk-recorded kinds, a per-analysis
-/// `production` split (which makes the run's walks disagree about which files
-/// exist) cannot make the two routes answer differently (issue #2366).
+/// the dead-code analysis records. The programmatic route serializes the typed
+/// output's by-value session snapshot, while the CLI route serializes the same
+/// snapshot from `CheckResult`. Neither route rereads process-global diagnostic
+/// history while building the envelope, so output is independent of call order
+/// and of later analysis walks in the same process.
 fn serialize_audit_dead_code(
     output: &DeadCodeProgrammaticOutput,
     base_snapshot: Option<&crate::AuditProgrammaticKeySnapshot>,

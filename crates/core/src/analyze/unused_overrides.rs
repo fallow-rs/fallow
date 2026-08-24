@@ -1,5 +1,5 @@
-//! Detection of unused and misconfigured pnpm and npm dependency-override
-//! entries.
+//! Detection of unused and misconfigured pnpm, npm, and Bun
+//! dependency-override entries.
 //!
 //! pnpm supports forcing transitive dependency versions through two
 //! equivalent locations:
@@ -33,16 +33,16 @@
 //!    lockfile (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`,
 //!    or `bun.lock`). Overrides targeting resolved transitive packages are
 //!    treated as used because CVE-fix pins often exist only in the lockfile.
-//!    When the only lockfile is bun's legacy binary `bun.lockb`, resolution
-//!    ground truth is unreadable, so no unused-override findings are emitted
-//!    at all rather than degrading to declaration-only analysis that would
-//!    flag every transitive-only pin. That skip is announced through a
-//!    `bun-lockb-override-resolution-skipped` workspace diagnostic anchored
-//!    at the root `package.json` (issue #2358).
+//!    When Bun resolution ground truth is unreadable because only the legacy
+//!    binary `bun.lockb` exists or the text `bun.lock` is malformed, no
+//!    unused-override findings are emitted rather than degrading to
+//!    declaration-only analysis that would flag every transitive-only pin.
+//!    A workspace diagnostic names the unreadable lockfile and the recovery
+//!    step.
 //!
 //! 2. **`misconfigured-dependency-overrides`**: an override whose key cannot
-//!    be parsed or whose value is empty. `pnpm install` refuses to honor
-//!    these entries; fallow surfaces the issue statically.
+//!    be parsed or whose value is empty. The active package manager may reject
+//!    or ignore these entries; fallow surfaces the issue statically.
 //!
 //! Suppression is config-only via `ignoreDependencyOverrides: [{ package,
 //! source? }]`. Inline suppression is structurally impossible because
@@ -278,12 +278,12 @@ enum BunLockfileFailure {
 
 /// Parse `pnpm-lock.yaml`, `package-lock.json` / `npm-shrinkwrap.json`, and
 /// `bun.lock` and collect package names from resolved package keys plus
-/// dependency maps. Malformed or missing lockfiles degrade to an empty set,
-/// preserving the package.json-only fallback for projects without a lockfile.
-/// The one exception is bun's binary `bun.lockb` without any parseable text
-/// lockfile alongside it: resolution exists but is unreadable, so
-/// `resolution_unavailable` is set and callers skip the unused analysis
-/// instead of flagging every transitive-only override.
+/// dependency maps. Missing lockfiles preserve the package.json-only fallback.
+/// An unreadable Bun lockfile is different: a binary `bun.lockb`, or a text
+/// `bun.lock` that fails to parse, sets `resolution_unavailable` when no
+/// readable pnpm or npm lockfile provides independent resolution ground truth.
+/// Callers then skip unused analysis instead of flagging every transitive-only
+/// override.
 fn collect_lockfile_packages(
     config: &ResolvedConfig,
     declared_manager: Option<DeclaredPackageManager>,
@@ -561,13 +561,12 @@ fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
     Some(key[..name_end].to_string())
 }
 
-/// Record the skip diagnostic for a root where bun's binary `bun.lockb` is
-/// present and `collect_lockfile_packages` found no parseable text lockfile
-/// to use instead: the manifest declares overrides, but resolution ground
-/// truth is unreadable, so the unused-override check does not run. Reaches
-/// `workspace_diagnostics[]` JSON and one deduplicated stderr warning, the
-/// same channel as a malformed `pnpm-workspace.yaml`, so the absence of
-/// findings is explained instead of silent (issue #2358).
+/// Record the matching skip diagnostic when Bun resolution ground truth is
+/// unreadable and no pnpm or npm lockfile can replace it. Binary `bun.lockb`
+/// anchors the diagnostic at the manifest because the lockfile cannot be read;
+/// malformed text `bun.lock` anchors it at that file. Both reach
+/// `workspace_diagnostics[]` and one deduplicated stderr warning, so the
+/// absence of unused-override findings is explicit.
 fn report_bun_override_resolution_skipped(config: &ResolvedConfig, failure: BunLockfileFailure) {
     let (path, kind) = match failure {
         BunLockfileFailure::Binary => (
@@ -600,9 +599,8 @@ fn should_emit_override_warning(config: &ResolvedConfig) -> bool {
 /// Emit one `UnusedDependencyOverride` for every parseable override whose
 /// target package (and parent, when present) is not declared in any workspace
 /// `package.json` or resolved in any recognized lockfile. When resolution is
-/// unavailable (bun.lockb without a parseable text lockfile beside it), emits
-/// nothing and records the `bun-lockb-override-resolution-skipped` workspace
-/// diagnostic instead.
+/// unavailable because Bun lockfile data is unreadable, emits nothing and
+/// records the matching workspace diagnostic instead.
 #[must_use]
 #[deprecated(
     since = "2.76.0",

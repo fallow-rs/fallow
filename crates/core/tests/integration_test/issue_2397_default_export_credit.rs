@@ -77,6 +77,12 @@ fn proven_commonjs_object_maps_narrow_plain_default_imports() {
         }),
         "the named-default spelling must retain precise object-map narrowing: {unused:?}"
     );
+    assert!(
+        unused
+            .iter()
+            .any(|(path, name)| { path.ends_with("src/shadowed.cjs") && name == "shadowSpare" }),
+        "a shadowed local must not credit the imported object map: {unused:?}"
+    );
 }
 
 #[test]

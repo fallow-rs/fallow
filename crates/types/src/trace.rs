@@ -25,15 +25,14 @@ pub struct ExportTrace {
     /// other lane's references are listed and this field names it, so a value
     /// export whose only credit is a bound `import type` reports `type` with
     /// `is_used: true`. `is_used` and `direct_references` follow the listed
-    /// lane only, and only reachable reference sources can credit it. When the
-    /// other lane resolves to a separate same-name declaration the preferred
-    /// lane is kept, including a declaration merge that splits across lanes
-    /// such as an `interface` next to a same-name `class`, where dead-code
-    /// credits the class through the merge and the trace can still report it
-    /// unused. A merge that stays one binding, such as a `class` next to a
-    /// same-name `namespace`, is covered. `semantic.target.namespace` names
-    /// the lane the declaration itself occupies and can therefore differ from
-    /// this field. Producers always emit the field; the schema permits
+    /// lane only, and only reachable reference sources can credit it. Legal
+    /// declaration merges share one declaration group across lanes, including
+    /// an `interface` next to a same-name `class` and a `class` next to a
+    /// same-name `namespace`, so references to either lane credit the merged
+    /// declaration. Distinct same-name declarations outside a merge remain
+    /// separate and keep the preferred lane. `semantic.target.namespace`
+    /// names the lane the declaration itself occupies and can therefore differ
+    /// from this field. Producers always emit the field; the schema permits
     /// omission by payloads created before namespaces were exposed.
     #[cfg_attr(feature = "schema", schemars(default))]
     pub namespace: crate::semantic::SemanticNamespace,

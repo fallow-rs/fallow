@@ -339,7 +339,10 @@ fn retain_non_crediting_evidence(
         .evidence
         .iter()
         .all(|evidence| evidence.role.contains("re-export"));
-    if !only_unreachable && !only_re_exports {
+    let all_non_crediting = decision.evidence.iter().all(|evidence| {
+        unreachable_files.contains(&evidence.path) || evidence.role.contains("re-export")
+    });
+    if !all_non_crediting {
         return decision;
     }
     let (action, assertion, explanation) = if only_unreachable {
@@ -348,11 +351,17 @@ fn retain_non_crediting_evidence(
             "retained-unreachable-evidence",
             "came only from files unreachable from analyzed entry points",
         )
-    } else {
+    } else if only_re_exports {
         (
             "Confirm that a reachable consumer reads the re-exported binding before removing it.",
             "retained-non-crediting-evidence",
             "consisted only of re-export declarations with no proven consumer read",
+        )
+    } else {
+        (
+            "Confirm that a reachable consumer reads this binding before removing it.",
+            "retained-non-crediting-evidence",
+            "combined reads from unreachable files with re-export declarations that had no proven reachable consumer",
         )
     };
     decision.decision = SemanticCandidateDecisionKind::RetainedAbstained;
@@ -506,5 +515,24 @@ mod tests {
             SemanticCandidateDecisionKind::RetainedAbstained
         );
         assert_eq!(decision.reason_code, None);
+    }
+
+    #[test]
+    fn mixed_unreachable_and_re_export_evidence_cannot_refute_dead_code() {
+        let unreachable = BTreeSet::from([PathBuf::from("src/orphan.ts")]);
+        let mut candidate = confirmed_used("src/orphan.ts");
+        let mut re_export = candidate.evidence[0].clone();
+        re_export.path = PathBuf::from("src/barrel.ts");
+        re_export.role = "re-export".to_string();
+        candidate.evidence.push(re_export);
+        let mut query_summary = summary();
+
+        let decision = retain_non_crediting_evidence(candidate, &unreachable, &mut query_summary);
+
+        assert_eq!(
+            decision.decision,
+            SemanticCandidateDecisionKind::RetainedAbstained
+        );
+        assert_eq!(query_summary.status, SemanticCompleteness::Partial);
     }
 }
