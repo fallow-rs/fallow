@@ -58,13 +58,7 @@ jobs:
       - name: Build current CLI for MCP tests
         run: cargo build -p fallow-cli --bin fallow
 
-      - name: Diagnose MCP typed analyze with its analysis pool
-        continue-on-error: true
-        run: cargo test -p fallow-mcp --test typed_route_env_coverage analyze_typed_route_reads_max_file_size_from_the_process_environment -- --exact --nocapture --test-threads=1
-
-      - name: Diagnose MCP typed analyze without its analysis pool
-        env:
-          FALLOW_MCP_BYPASS_ANALYSIS_POOL: '1'
+      - name: Diagnose MCP typed analyze output assembly
         run: cargo test -p fallow-mcp --test typed_route_env_coverage analyze_typed_route_reads_max_file_size_from_the_process_environment -- --exact --nocapture --test-threads=1
 
       - name: Run workspace tests

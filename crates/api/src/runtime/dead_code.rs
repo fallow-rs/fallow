@@ -124,9 +124,14 @@ pub(super) fn run_dead_code_with_session(
     let mut results = analysis.results;
     let unfiltered_unused_files = results.unused_files.clone();
 
+    debug_mcp_phase("dead-code scope starting");
     apply_dead_code_scope(options, resolved, session, changed_files, &mut results)?;
+    debug_mcp_phase("dead-code scope returned");
     apply_dead_code_filters(&options.filters, &mut results);
+    debug_mcp_phase("dead-code filters returned");
     post_filter(&mut results);
+    debug_mcp_phase("dead-code post-filter returned");
+    debug_mcp_phase("dead-code type-aware refinement starting");
     let type_aware_meta = refine_with_unfiltered_unused_files(
         &options.analysis.type_aware,
         &options.filters,
@@ -134,7 +139,9 @@ pub(super) fn run_dead_code_with_session(
         &mut results,
         unfiltered_unused_files,
     )?;
+    debug_mcp_phase("dead-code type-aware refinement returned");
 
+    debug_mcp_phase("dead-code output build starting");
     Ok(build_dead_code_programmatic_output(
         options,
         resolved,
@@ -273,6 +280,7 @@ fn build_dead_code_programmatic_output(
     start: Instant,
 ) -> DeadCodeProgrammaticOutput {
     let root = session.root();
+    debug_mcp_phase("dead-code next steps starting");
     let next_steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
         results: &results,
@@ -283,12 +291,16 @@ fn build_dead_code_programmatic_output(
         audit_changed: fallow_engine::churn::is_git_repo(root),
         has_external_plugins: !fallow_config::discover_external_plugins(root, &[]).is_empty(),
     });
+    debug_mcp_phase("dead-code next steps returned");
+    debug_mcp_phase("dead-code config-fixable starting");
     let config_fixable =
         fallow_config::is_config_fixable(&resolved.root, resolved.config_path.as_ref());
+    debug_mcp_phase("dead-code config-fixable returned");
     let mut meta = options.analysis.explain.then(check_meta);
     if let Some(type_aware) = type_aware_meta {
         meta.get_or_insert_with(Default::default).type_aware = Some(type_aware);
     }
+    debug_mcp_phase("dead-code check output starting");
     let output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -299,6 +311,7 @@ fn build_dead_code_programmatic_output(
         workspace_diagnostics: session.current_workspace_diagnostics(),
         next_steps,
     });
+    debug_mcp_phase("dead-code check output returned");
     DeadCodeProgrammaticOutput {
         output,
         root: session.root().to_path_buf(),
