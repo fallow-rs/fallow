@@ -184,6 +184,12 @@ jobs:
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           version: 10.33.0
+      - name: Initialize pnpm store on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $store = pnpm store path --silent
+          New-Item -ItemType Directory -Force -Path $store | Out-Null
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'

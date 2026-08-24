@@ -369,6 +369,10 @@ test("release runs Windows correctness and lifecycle verification without creden
   assert.match(job, /cargo fmt --all -- --check/);
   assert.match(job, /npm run publish:prepare/);
   assert.match(job, /cd crates\/napi && npm test/);
+  assert.match(
+    vscodeTargetJob,
+    /name: Initialize pnpm store on Windows[\s\S]*if: runner\.os == 'Windows'[\s\S]*pnpm store path --silent[\s\S]*New-Item -ItemType Directory -Force -Path \$store/,
+  );
   assert.match(vscodeTargetJob, /verify:vsix/);
   assert.match(vscodeTargetJob, /FALLOW_LSP_BIN:/);
   assert.match(vscodePackageJob, /name: validation-vscode-targets/);
