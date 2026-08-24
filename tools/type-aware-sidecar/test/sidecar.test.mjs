@@ -2044,22 +2044,22 @@ test("protocol v7 ignores dangling re-export declarations but credits their cons
   const cases = [
     {
       name: "single dangling barrel",
-      barrels: [['src/barrel.ts', 'export { helper } from "./source";\n']],
+      barrels: [["src/barrel.ts", 'export { helper } from "./source";\n']],
       consumer: undefined,
       expected: "confirmed-no-static-references",
     },
     {
       name: "multiple dangling barrels",
       barrels: [
-        ['src/first.ts', 'export { helper } from "./source";\n'],
-        ['src/second.ts', 'export { helper } from "./source";\n'],
+        ["src/first.ts", 'export { helper } from "./source";\n'],
+        ["src/second.ts", 'export { helper } from "./source";\n'],
       ],
       consumer: undefined,
       expected: "confirmed-no-static-references",
     },
     {
       name: "consumer through barrel",
-      barrels: [['src/barrel.ts', 'export { helper } from "./source";\n']],
+      barrels: [["src/barrel.ts", 'export { helper } from "./source";\n']],
       consumer: 'import { helper } from "./barrel";\nexport const used = helper;\n',
       expected: "confirmed-used",
     },
