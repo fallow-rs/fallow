@@ -58,12 +58,14 @@ jobs:
       - name: Build current CLI for MCP tests
         run: cargo build -p fallow-cli --bin fallow
 
-      - name: Diagnose MCP typed route in debug profile
-        continue-on-error: true
-        run: cargo test -p fallow-mcp --test typed_route_env_coverage analyze_typed_route_reads_max_file_size_from_the_process_environment -- --exact --nocapture --test-threads=1
+      - name: Run MCP typed route environment tests
+        run: cargo test -p fallow-mcp --test typed_route_env_coverage -- --test-threads=1
 
-      - name: Run MCP typed route in release profile
-        run: cargo test --release -p fallow-mcp --test typed_route_env_coverage analyze_typed_route_reads_max_file_size_from_the_process_environment -- --exact --nocapture --test-threads=1
+      - name: Run workspace tests
+        run: cargo test --workspace --exclude fallow-mcp --lib --bins --tests --examples
+
+      - name: Run remaining MCP tests
+        run: cargo test -p fallow-mcp --lib --bins --test version --examples
 
       - name: Run runtime-coverage integration tests
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests

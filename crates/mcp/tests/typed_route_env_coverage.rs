@@ -101,8 +101,8 @@ fn trace_symbol_typed_route_does_not_credit_an_unreachable_consumer() {
 }
 
 /// Each fixture launches an analysis server with production thread defaults.
-/// Serial execution prevents the debug Windows release runner from multiplying
-/// those pools while preserving the route behavior under test.
+/// Serial execution prevents Windows test runners from multiplying those pools
+/// while preserving the route behavior under test.
 fn lock_mcp_server_test() -> MutexGuard<'static, ()> {
     MCP_SERVER_TEST_LOCK
         .lock()
@@ -248,9 +248,6 @@ impl McpServer {
         with_type_aware_sidecar: bool,
     ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
-        command
-            .env("FALLOW_MCP_PHASE_DEBUG", "1")
-            .env("FALLOW_TIMEOUT_SECS", "15");
         if with_type_aware_sidecar {
             configure_type_aware_sidecar(&mut command);
         }
@@ -271,7 +268,7 @@ impl McpServer {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::null())
             .spawn()
             .expect("spawn fallow-mcp");
 
