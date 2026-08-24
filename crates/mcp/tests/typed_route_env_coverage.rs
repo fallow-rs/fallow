@@ -61,7 +61,7 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
     let project = tempfile::tempdir().expect("project dir");
     write_large_file_project(project.path());
 
-    let mut with_env = McpServer::start_with_options(false, Some("1"));
+    let mut with_env = McpServer::start_with_options(false, Some("1"), false);
     let limited = with_env.analyze(project.path());
     assert!(
         limited["workspace_diagnostics"]
@@ -72,7 +72,7 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
         "FALLOW_MAX_FILE_SIZE must reach the typed analyze route: {limited}"
     );
 
-    let mut without_env = McpServer::start_with_options(false, None);
+    let mut without_env = McpServer::start_with_options(false, None, false);
     let unlimited = without_env.analyze(project.path());
     assert!(
         unlimited["unused_files"]
@@ -88,7 +88,7 @@ fn trace_symbol_typed_route_does_not_credit_an_unreachable_consumer() {
     let project = tempfile::tempdir().expect("project dir");
     write_type_aware_trace_project(project.path());
 
-    let mut server = McpServer::start(false);
+    let mut server = McpServer::start_type_aware();
     let trace = server.trace_symbol(project.path(), "src/lonely.ts", "helper");
 
     assert_eq!(trace["is_used"], false);
@@ -235,12 +235,22 @@ struct McpServer {
 
 impl McpServer {
     fn start(with_coverage_env: bool) -> Self {
-        Self::start_with_options(with_coverage_env, None)
+        Self::start_with_options(with_coverage_env, None, false)
     }
 
-    fn start_with_options(with_coverage_env: bool, max_file_size: Option<&str>) -> Self {
+    fn start_type_aware() -> Self {
+        Self::start_with_options(false, None, true)
+    }
+
+    fn start_with_options(
+        with_coverage_env: bool,
+        max_file_size: Option<&str>,
+        with_type_aware_sidecar: bool,
+    ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
-        configure_type_aware_sidecar(&mut command);
+        if with_type_aware_sidecar {
+            configure_type_aware_sidecar(&mut command);
+        }
         if with_coverage_env {
             command
                 .env("FALLOW_COVERAGE", COVERAGE_FILE)
