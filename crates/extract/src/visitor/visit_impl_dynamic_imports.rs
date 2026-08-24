@@ -96,7 +96,7 @@ impl<'a> ModuleInfoExtractor {
     pub(super) fn record_import_callback_dynamic_imports(&mut self, expr: &CallExpression<'_>) {
         if let Some(then_cb) = try_extract_import_then_callback(expr) {
             if let Some(local) = &then_cb.local_name {
-                self.namespace_binding_names.push(local.clone());
+                self.record_namespace_binding_name(local.clone());
             }
             self.handled_import_spans.insert(then_cb.import_span);
             self.push_dynamic_import_branches(

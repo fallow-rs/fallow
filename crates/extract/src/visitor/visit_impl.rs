@@ -1668,7 +1668,7 @@ impl<'a> ModuleInfoExtractor {
             self.node_path_namespace_bindings.insert(local.clone());
         }
         if is_css_module_import_source(source) {
-            self.namespace_binding_names.push(local.clone());
+            self.record_namespace_binding_name(local.clone());
         }
         self.imports.push(ImportInfo {
             source: source.to_string(),
@@ -1704,7 +1704,7 @@ impl<'a> ModuleInfoExtractor {
             self.node_url_file_url_to_path_bindings
                 .insert(local.clone());
         }
-        self.namespace_binding_names.push(local.clone());
+        self.record_namespace_binding_name(local.clone());
         self.imports.push(ImportInfo {
             source: source.to_string(),
             imported_name: ImportedName::Namespace,
@@ -2705,6 +2705,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.namespace_depth == 0 && self.push_function_type_alias_scope(&stmt.body);
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
+            self.scoped_namespace_binding_names
+                .push(FxHashSet::default());
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
             self.sanitizer_binding_stack.push(FxHashMap::default());
@@ -2726,6 +2728,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
             self.sanitizer_binding_stack.pop();
             self.literal_allowlist_binding_stack.pop();

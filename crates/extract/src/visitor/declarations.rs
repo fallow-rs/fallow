@@ -375,7 +375,7 @@ impl ModuleInfoExtractor {
             }
             BindingPattern::BindingIdentifier(id) => {
                 let local = id.name.to_string();
-                self.namespace_binding_names.push(local.clone());
+                self.record_namespace_binding_name(local.clone());
                 self.require_calls.push(RequireCallInfo {
                     source: source.to_string(),
                     span: call.span,
@@ -423,7 +423,7 @@ impl ModuleInfoExtractor {
             return;
         };
         let local = decl.id.name.to_string();
-        self.namespace_binding_names.push(local.clone());
+        self.record_namespace_binding_name(local.clone());
         self.import_equals_bindings.push(local.clone());
         self.require_calls.push(RequireCallInfo {
             source: reference.expression.value.to_string(),
@@ -531,7 +531,7 @@ impl ModuleInfoExtractor {
             }
             BindingPattern::BindingIdentifier(id) => {
                 let local = id.name.to_string();
-                self.namespace_binding_names.push(local.clone());
+                self.record_namespace_binding_name(local.clone());
                 self.push_dynamic_import_branches(sources, import_expr.span, &[], Some(&local));
                 self.handled_import_spans.insert(import_expr.span);
             }
