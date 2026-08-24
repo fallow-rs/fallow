@@ -20,20 +20,21 @@ use super::{
     NoGroupResolver, RuntimeCoverageOptions, RuntimeCoverageSeamInput, validate_health_churn_file,
 };
 
-/// Run health analysis without a presentation grouping resolver.
-///
-/// This runner owns config loading, discovery, parser-cache use, parsing, and
-/// command-neutral health execution for API and NAPI callers. CLI-only concerns
-/// still stay outside this path: runtime coverage sidecar execution, grouping
-/// resolver construction, process-global telemetry, and error rendering.
+/// Config and source discovery prepared before entering an analysis thread pool.
+pub struct PreparedUngroupedHealth {
+    session: AnalysisSession,
+    config_ms: f64,
+}
+
+/// Load health config and discover project sources without nesting that work
+/// inside the analysis Rayon pool.
 ///
 /// # Errors
 ///
-/// Returns the health command exit code for invalid inputs or analysis failures.
-pub fn run_ungrouped_health(
+/// Returns the health command exit code for invalid inputs or config failures.
+pub fn prepare_ungrouped_health(
     options: &HealthExecutionOptions<'_>,
-    ws_roots: Option<Vec<PathBuf>>,
-) -> Result<HealthAnalysisResult<NoGroupResolver>, HealthError> {
+) -> Result<PreparedUngroupedHealth, HealthError> {
     validate_health_churn_file(options)?;
 
     let start = Instant::now();
@@ -53,7 +54,41 @@ pub fn run_ungrouped_health(
     .map_err(|_| HealthError::message("failed to load health project config", 2))?;
     let config_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-    let session = AnalysisSession::from_config(project_config);
+    Ok(PreparedUngroupedHealth {
+        session: AnalysisSession::from_config(project_config),
+        config_ms,
+    })
+}
+
+/// Run health analysis without a presentation grouping resolver.
+///
+/// This runner owns config loading, discovery, parser-cache use, parsing, and
+/// command-neutral health execution for API and NAPI callers. CLI-only concerns
+/// still stay outside this path: runtime coverage sidecar execution, grouping
+/// resolver construction, process-global telemetry, and error rendering.
+///
+/// # Errors
+///
+/// Returns the health command exit code for invalid inputs or analysis failures.
+pub fn run_ungrouped_health(
+    options: &HealthExecutionOptions<'_>,
+    ws_roots: Option<Vec<PathBuf>>,
+) -> Result<HealthAnalysisResult<NoGroupResolver>, HealthError> {
+    let prepared = prepare_ungrouped_health(options)?;
+    run_prepared_ungrouped_health(options, ws_roots, prepared)
+}
+
+/// Run health analysis after config and source discovery have completed.
+///
+/// # Errors
+///
+/// Returns the health command exit code for analysis failures.
+pub fn run_prepared_ungrouped_health(
+    options: &HealthExecutionOptions<'_>,
+    ws_roots: Option<Vec<PathBuf>>,
+    prepared: PreparedUngroupedHealth,
+) -> Result<HealthAnalysisResult<NoGroupResolver>, HealthError> {
+    let PreparedUngroupedHealth { session, config_ms } = prepared;
     let changed_files = options
         .changed_since
         .and_then(|git_ref| session.changed_files_since(git_ref).ok());

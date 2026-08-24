@@ -270,18 +270,23 @@ impl ProgrammaticHealthRunner for EngineHealthRunner {
         options: &ComplexityOptions,
     ) -> Result<ProgrammaticHealthRun, ProgrammaticError> {
         let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-        resolved.install(|| run_programmatic_health_on_engine(&resolved, options))
+        let health_options = derive_programmatic_health_execution_options(&resolved, options);
+        let prepared = fallow_engine::health::prepare_ungrouped_health(&health_options)
+            .map_err(|error| programmatic_health_error("health", error))?;
+        resolved.install(|| run_programmatic_health_on_engine(&resolved, options, prepared))
     }
 }
 
 fn run_programmatic_health_on_engine(
     resolved: &ProgrammaticAnalysisContext,
     options: &ComplexityOptions,
+    prepared: fallow_engine::health::PreparedUngroupedHealth,
 ) -> ProgrammaticResult<ProgrammaticHealthRun> {
     let health_options = derive_programmatic_health_execution_options(resolved, options);
-    let result = fallow_engine::health::run_ungrouped_health(
+    let result = fallow_engine::health::run_prepared_ungrouped_health(
         &health_options,
         resolved.workspace_roots.clone(),
+        prepared,
     )
     .map_err(|error| programmatic_health_error("health", error))?;
 

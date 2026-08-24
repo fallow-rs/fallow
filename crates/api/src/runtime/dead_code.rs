@@ -44,7 +44,10 @@ pub(super) struct DeadCodeProgrammaticRunWithArtifacts {
 /// failures.
 pub fn run_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
-    resolved.install(|| run_dead_code_inner(options, &resolved, |_| {}))
+    let start = Instant::now();
+    let session = load_dead_code_session(options, &resolved)?;
+    resolved
+        .install(|| run_dead_code_with_session(options, &resolved, &session, None, |_| {}, start))
 }
 
 /// Run circular-dependency analysis and return typed API output before JSON.
@@ -56,8 +59,18 @@ pub fn run_circular_dependencies(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<CircularDependenciesProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
+    let start = Instant::now();
+    let session = load_dead_code_session(options, &resolved)?;
     resolved.install(|| {
-        run_dead_code_inner(options, &resolved, keep_circular_dependencies).map(Into::into)
+        run_dead_code_with_session(
+            options,
+            &resolved,
+            &session,
+            None,
+            keep_circular_dependencies,
+            start,
+        )
+        .map(Into::into)
     })
 }
 
@@ -70,19 +83,19 @@ pub fn run_boundary_violations(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<BoundaryViolationsProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
-    resolved.install(|| {
-        run_dead_code_inner(options, &resolved, keep_boundary_violations).map(Into::into)
-    })
-}
-
-fn run_dead_code_inner(
-    options: &DeadCodeOptions,
-    resolved: &ProgrammaticAnalysisContext,
-    post_filter: impl FnOnce(&mut AnalysisResults),
-) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let start = Instant::now();
-    let session = load_dead_code_session(options, resolved)?;
-    run_dead_code_with_session(options, resolved, &session, None, post_filter, start)
+    let session = load_dead_code_session(options, &resolved)?;
+    resolved.install(|| {
+        run_dead_code_with_session(
+            options,
+            &resolved,
+            &session,
+            None,
+            keep_boundary_violations,
+            start,
+        )
+        .map(Into::into)
+    })
 }
 
 pub(super) fn run_dead_code_with_session(
