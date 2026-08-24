@@ -19,7 +19,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -32,11 +31,9 @@ const COVERAGE_ROOT: &str = "/ci/workspace";
 const COVERAGE_FILE: &str = "artifacts/coverage-final.json";
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_mins(3);
-static MCP_SERVER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn check_health_typed_route_reads_coverage_from_the_process_environment() {
-    let _guard = lock_mcp_server_test();
     let project = tempfile::tempdir().expect("project dir");
     write_project(project.path());
 
@@ -57,7 +54,6 @@ fn check_health_typed_route_reads_coverage_from_the_process_environment() {
 
 #[test]
 fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
-    let _guard = lock_mcp_server_test();
     let project = tempfile::tempdir().expect("project dir");
     write_large_file_project(project.path());
 
@@ -84,7 +80,6 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
 
 #[test]
 fn trace_symbol_typed_route_does_not_credit_an_unreachable_consumer() {
-    let _guard = lock_mcp_server_test();
     let project = tempfile::tempdir().expect("project dir");
     write_type_aware_trace_project(project.path());
 
@@ -98,15 +93,6 @@ fn trace_symbol_typed_route_does_not_credit_an_unreachable_consumer() {
     );
     assert_eq!(trace["semantic"]["status"], "partial");
     assert_eq!(trace["semantic"]["references"][0]["path"], "src/orphan.ts");
-}
-
-/// Each fixture launches an analysis server with production thread defaults.
-/// Serial execution prevents Windows test runners from multiplying those pools
-/// while preserving the route behavior under test.
-fn lock_mcp_server_test() -> MutexGuard<'static, ()> {
-    MCP_SERVER_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// `coverage_source` of the `branchy` finding from a `check_health` call on a
@@ -248,9 +234,6 @@ impl McpServer {
         with_type_aware_sidecar: bool,
     ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
-        command
-            .env("FALLOW_MCP_PHASE_DEBUG", "1")
-            .env("FALLOW_TIMEOUT_SECS", "20");
         if with_type_aware_sidecar {
             configure_type_aware_sidecar(&mut command);
         }
@@ -271,7 +254,7 @@ impl McpServer {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::null())
             .spawn()
             .expect("spawn fallow-mcp");
 

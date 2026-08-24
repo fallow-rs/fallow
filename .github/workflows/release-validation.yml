@@ -55,17 +55,8 @@ jobs:
       - name: Test Windows child-process wiring
         run: node --test tools/type-aware-sidecar/test/windows-child-process.test.mjs
 
-      - name: Build current CLI for MCP tests
-        run: cargo build -p fallow-cli --bin fallow
-
-      - name: Diagnose MCP typed analyze output assembly
-        run: cargo test -p fallow-mcp --test typed_route_env_coverage analyze_typed_route_reads_max_file_size_from_the_process_environment -- --exact --nocapture --test-threads=1
-
       - name: Run workspace tests
-        run: cargo test --workspace --exclude fallow-mcp --lib --bins --tests --examples
-
-      - name: Run remaining MCP tests
-        run: cargo test -p fallow-mcp --lib --bins --test version --examples
+        run: cargo test --workspace --lib --bins --tests --examples
 
       - name: Run runtime-coverage integration tests
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests

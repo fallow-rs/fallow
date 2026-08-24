@@ -6,7 +6,7 @@
 use rustc_hash::FxHashMap;
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
@@ -29,6 +29,8 @@ static SPAWN_HOOK: OnceLock<ChurnSpawnHook> = OnceLock::new();
 fn git_command() -> Command {
     let mut command = Command::new("git");
     crate::git_env::clear_ambient_git_env(&mut command);
+    // Long-lived embedders keep protocol stdin open, which Git for Windows can inherit and hold.
+    command.stdin(Stdio::null());
     command
 }
 

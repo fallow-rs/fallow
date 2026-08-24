@@ -79,7 +79,6 @@ pub use hotspots::{
 };
 pub use pipeline::{HealthPipelineInputs, HealthScopeInputs};
 pub use runner::{
-    PreparedUngroupedHealth, prepare_ungrouped_health, run_prepared_ungrouped_health,
     run_ungrouped_health, run_ungrouped_health_with_session,
     run_ungrouped_health_with_session_artifacts,
 };

@@ -43,19 +43,8 @@ pub(super) struct DeadCodeProgrammaticRunWithArtifacts {
 /// options, config load failures, analysis failures, or git changed-file
 /// failures.
 pub fn run_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
-    debug_mcp_phase("dead-code context starting");
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
-    debug_mcp_phase("dead-code context returned");
-    let start = Instant::now();
-    debug_mcp_phase("dead-code session starting");
-    let session = load_dead_code_session(options, &resolved)?;
-    debug_mcp_phase("dead-code session returned");
-    resolved.install(|| {
-        debug_mcp_phase("dead-code installed closure entered");
-        let result = run_dead_code_with_session(options, &resolved, &session, None, |_| {}, start);
-        debug_mcp_phase("dead-code installed closure returned");
-        result
-    })
+    resolved.install(|| run_dead_code_inner(options, &resolved, |_| {}))
 }
 
 /// Run circular-dependency analysis and return typed API output before JSON.
@@ -67,18 +56,8 @@ pub fn run_circular_dependencies(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<CircularDependenciesProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
-    let start = Instant::now();
-    let session = load_dead_code_session(options, &resolved)?;
     resolved.install(|| {
-        run_dead_code_with_session(
-            options,
-            &resolved,
-            &session,
-            None,
-            keep_circular_dependencies,
-            start,
-        )
-        .map(Into::into)
+        run_dead_code_inner(options, &resolved, keep_circular_dependencies).map(Into::into)
     })
 }
 
@@ -91,19 +70,19 @@ pub fn run_boundary_violations(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<BoundaryViolationsProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
-    let start = Instant::now();
-    let session = load_dead_code_session(options, &resolved)?;
     resolved.install(|| {
-        run_dead_code_with_session(
-            options,
-            &resolved,
-            &session,
-            None,
-            keep_boundary_violations,
-            start,
-        )
-        .map(Into::into)
+        run_dead_code_inner(options, &resolved, keep_boundary_violations).map(Into::into)
     })
+}
+
+fn run_dead_code_inner(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    post_filter: impl FnOnce(&mut AnalysisResults),
+) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
+    let start = Instant::now();
+    let session = load_dead_code_session(options, resolved)?;
+    run_dead_code_with_session(options, resolved, &session, None, post_filter, start)
 }
 
 pub(super) fn run_dead_code_with_session(
@@ -114,24 +93,17 @@ pub(super) fn run_dead_code_with_session(
     post_filter: impl FnOnce(&mut AnalysisResults),
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
-    debug_mcp_phase("dead-code session analysis starting");
     let analysis = session.analyze_dead_code().map_err(|err| {
         ProgrammaticError::new(format!("dead-code analysis failed: {err}"), 2)
             .with_code("FALLOW_DEAD_CODE_FAILED")
             .with_context("dead-code")
     })?;
-    debug_mcp_phase("dead-code session analysis returned");
     let mut results = analysis.results;
     let unfiltered_unused_files = results.unused_files.clone();
 
-    debug_mcp_phase("dead-code scope starting");
     apply_dead_code_scope(options, resolved, session, changed_files, &mut results)?;
-    debug_mcp_phase("dead-code scope returned");
     apply_dead_code_filters(&options.filters, &mut results);
-    debug_mcp_phase("dead-code filters returned");
     post_filter(&mut results);
-    debug_mcp_phase("dead-code post-filter returned");
-    debug_mcp_phase("dead-code type-aware refinement starting");
     let type_aware_meta = refine_with_unfiltered_unused_files(
         &options.analysis.type_aware,
         &options.filters,
@@ -139,9 +111,7 @@ pub(super) fn run_dead_code_with_session(
         &mut results,
         unfiltered_unused_files,
     )?;
-    debug_mcp_phase("dead-code type-aware refinement returned");
 
-    debug_mcp_phase("dead-code output build starting");
     Ok(build_dead_code_programmatic_output(
         options,
         resolved,
@@ -150,12 +120,6 @@ pub(super) fn run_dead_code_with_session(
         type_aware_meta,
         start,
     ))
-}
-
-fn debug_mcp_phase(message: &str) {
-    if std::env::var_os("FALLOW_MCP_PHASE_DEBUG").is_some() {
-        eprintln!("FALLOW_MCP_PHASE: {message}");
-    }
 }
 
 pub(super) fn run_dead_code_with_session_artifacts(
@@ -280,7 +244,6 @@ fn build_dead_code_programmatic_output(
     start: Instant,
 ) -> DeadCodeProgrammaticOutput {
     let root = session.root();
-    debug_mcp_phase("dead-code next steps starting");
     let next_steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
         results: &results,
@@ -291,16 +254,12 @@ fn build_dead_code_programmatic_output(
         audit_changed: fallow_engine::churn::is_git_repo(root),
         has_external_plugins: !fallow_config::discover_external_plugins(root, &[]).is_empty(),
     });
-    debug_mcp_phase("dead-code next steps returned");
-    debug_mcp_phase("dead-code config-fixable starting");
     let config_fixable =
         fallow_config::is_config_fixable(&resolved.root, resolved.config_path.as_ref());
-    debug_mcp_phase("dead-code config-fixable returned");
     let mut meta = options.analysis.explain.then(check_meta);
     if let Some(type_aware) = type_aware_meta {
         meta.get_or_insert_with(Default::default).type_aware = Some(type_aware);
     }
-    debug_mcp_phase("dead-code check output starting");
     let output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -311,7 +270,6 @@ fn build_dead_code_programmatic_output(
         workspace_diagnostics: session.current_workspace_diagnostics(),
         next_steps,
     });
-    debug_mcp_phase("dead-code check output returned");
     DeadCodeProgrammaticOutput {
         output,
         root: session.root().to_path_buf(),

@@ -583,10 +583,8 @@ impl AnalysisSession {
         retain_graph: bool,
         retain_files: bool,
     ) -> EngineResult<SharedDeadCodeAnalysisArtifacts> {
-        debug_mcp_phase("session parse starting");
         let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity);
-        debug_mcp_phase("session parse returned");
-        let result = run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
+        run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
             config: &self.config,
             discovery: &self.discovery,
             modules,
@@ -595,9 +593,7 @@ impl AnalysisSession {
             retain_graph,
             retain_modules: need_complexity,
             retain_files,
-        });
-        debug_mcp_phase("session pipeline returned");
-        result
+        })
     }
 
     /// Run dead-code analysis and return the session-scoped reuse artifacts.
@@ -943,16 +939,11 @@ fn run_engine_owned_dead_code_pipeline(
         retain_modules,
         retain_files,
     } = input;
-    debug_mcp_phase("pipeline prelude starting");
     let prelude = core_backend::prepare_dead_code_backend_prelude(config, discovery)?;
-    debug_mcp_phase("pipeline prelude returned");
     let prelude_timings = prelude.timings();
     let entry_points = core_backend::discover_dead_code_entry_points(&prelude);
-    debug_mcp_phase("pipeline graph starting");
     let (resolved, graph) = resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
-    debug_mcp_phase("pipeline graph returned");
 
-    debug_mcp_phase("pipeline detectors starting");
     let mut detector = core_backend::run_dead_code_detectors(
         &prelude,
         &graph.graph,
@@ -961,7 +952,6 @@ fn run_engine_owned_dead_code_pipeline(
         collect_usages,
         &entry_points,
     );
-    debug_mcp_phase("pipeline detectors returned");
     crate::dead_code::filter_configured_ignored_findings(&mut detector.results, config);
     let profile =
         core_backend::dead_code_pipeline_profile(core_backend::DeadCodePipelineProfileInput {
@@ -990,12 +980,6 @@ fn run_engine_owned_dead_code_pipeline(
         script_used_packages,
         file_hashes,
     })
-}
-
-fn debug_mcp_phase(message: &str) {
-    if std::env::var_os("FALLOW_MCP_PHASE_DEBUG").is_some() {
-        eprintln!("FALLOW_MCP_PHASE: {message}");
-    }
 }
 
 fn resolve_or_build_dead_code_graph(

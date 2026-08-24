@@ -1,7 +1,7 @@
 //! Changed-file helpers owned by the engine boundary.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
 use fallow_types::{
@@ -496,7 +496,8 @@ fn git_path_from_bytes(path: &[u8]) -> PathBuf {
 fn git_command(cwd: &Path, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     clear_ambient_git_env(&mut command);
-    command.args(args).current_dir(cwd);
+    // Changed-file probes are non-interactive and must not inherit protocol stdin.
+    command.stdin(Stdio::null()).args(args).current_dir(cwd);
     command
 }
 

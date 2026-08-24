@@ -1202,7 +1202,8 @@ fn base_worktree_path() -> EngineResult<PathBuf> {
 fn git_command(root: &Path) -> Command {
     let mut command = Command::new("git");
     crate::changed_files::clear_ambient_git_env(&mut command);
-    command.arg("-C").arg(root);
+    // Repository probes never consume input and must not retain an embedder's protocol stdin.
+    command.stdin(Stdio::null()).arg("-C").arg(root);
     command
 }
 
