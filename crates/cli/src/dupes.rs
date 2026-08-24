@@ -381,7 +381,7 @@ fn execute_dupes_inner(
                 &dupes_config,
                 effective_changed_files,
             );
-            workspace_diagnostics = session.current_workspace_diagnostics();
+            workspace_diagnostics = session.workspace_diagnostics().to_vec();
             analysis
         }
     };
@@ -749,6 +749,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     let ctx = report::ReportContext {
         root: &result.config.root,
         rules: &result.config.rules,
+        workspace_diagnostics: &result.workspace_diagnostics,
         elapsed: result.elapsed,
         quiet: input.quiet,
         explain: input.explain,

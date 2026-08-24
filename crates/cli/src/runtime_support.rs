@@ -508,15 +508,6 @@ fn partial_rules_config_has_values(rules: &PartialRulesConfig) -> bool {
         .unwrap_or(false)
 }
 
-/// Read the workspace-discovery diagnostics produced by the most recent
-/// `load_config_for_analysis` call for `root`. Thin re-export over
-/// [`fallow_config::workspace_diagnostics_for`] so call sites inside the
-/// CLI crate (`report::json::build_json*`) keep a stable module-local path.
-#[must_use]
-pub fn workspace_diagnostics_for(root: &Path) -> Vec<fallow_config::WorkspaceDiagnostic> {
-    fallow_config::workspace_diagnostics_for(root)
-}
-
 /// Read `FALLOW_CACHE_MAX_SIZE` (megabytes) into `Option<u32>`, returning
 /// `None` when the env var is unset or fails to parse as a positive integer.
 /// Resolved here rather than as a clap flag because the cache cap is a

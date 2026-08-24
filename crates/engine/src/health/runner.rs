@@ -63,6 +63,11 @@ pub fn run_ungrouped_health(
             .then(|| session.analyze_dead_code_with_parsed_modules(&parts.modules))
             .transpose()
             .map_err(|_| HealthError::message("analysis failed", 2))?;
+    let workspace_diagnostics = if pre_computed_analysis.is_some() {
+        session.current_workspace_diagnostics()
+    } else {
+        parts.workspace_diagnostics
+    };
 
     run_ungrouped_health_from_parts(HealthRunPartsInput {
         options,
@@ -71,7 +76,7 @@ pub fn run_ungrouped_health(
         files: parts.files,
         modules: parts.modules,
         workspaces: parts.workspaces,
-        workspace_diagnostics: parts.workspace_diagnostics,
+        workspace_diagnostics,
         parse_ms: parts.parse_ms,
         parse_cpu_ms: parts.parse_cpu_ms,
         changed_files,
@@ -130,6 +135,11 @@ pub fn run_ungrouped_health_with_session_artifacts(
     });
     let parts = session.shared_parsed_parts(true);
     let shared_parse = parts.parse_ms == 0.0;
+    let workspace_diagnostics = if pre_computed_analysis.is_some() {
+        session.current_workspace_diagnostics()
+    } else {
+        parts.workspace_diagnostics
+    };
 
     let styling_artifacts = options.css.then(|| session.styling_analysis_artifacts());
     run_ungrouped_health_from_parts(HealthRunPartsInput {
@@ -139,7 +149,7 @@ pub fn run_ungrouped_health_with_session_artifacts(
         files: parts.files,
         modules: parts.modules,
         workspaces: parts.workspaces,
-        workspace_diagnostics: parts.workspace_diagnostics,
+        workspace_diagnostics,
         parse_ms: parts.parse_ms,
         parse_cpu_ms: parts.parse_cpu_ms,
         changed_files,

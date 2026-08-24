@@ -438,7 +438,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/unused-dependency-override",
-    "description": "Override `axios` forces version `^1.6.0` but `axios` is not declared by any workspace package or resolved in pnpm-lock.yaml (may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth)",
+    "description": "Override `axios` forces version `^1.6.0` but `axios` is not declared by any workspace package or resolved in the lockfile (may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth)",
     "categories": [
       "Bug Risk"
     ],

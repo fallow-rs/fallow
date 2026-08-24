@@ -810,7 +810,7 @@ fn sarif_unused_dependency_override_fields(
 ) -> SarifFields {
     let finding = &finding.entry;
     let mut message = format!(
-        "Override `{}` forces version `{}` but `{}` is not declared by any workspace package or resolved in pnpm-lock.yaml",
+        "Override `{}` forces version `{}` but `{}` is not declared by any workspace package or resolved in the lockfile",
         finding.raw_key, finding.version_range, finding.target_package,
     );
     if let Some(hint) = &finding.hint {

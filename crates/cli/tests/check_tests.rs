@@ -1156,13 +1156,12 @@ fn trace_reports_the_type_lane_credit_of_a_value_only_export() {
     );
 }
 
-/// Issue #2371: the checker proof beside the syntactic trace covers the lane
-/// the declaration occupies, and the sidecar does not model a cross-lane
-/// import as a reference. The payload must stay readable across that gap: the
-/// root trace reports the credit, `semantic.target.namespace` names the lane
-/// the narrower proof covers, and the human proof line says so.
+/// Issue #2371: the checker proof beside the syntactic trace follows the local
+/// alias read through a type-only import. The proof stays scoped to the value
+/// declaration occupied by `helper`, while the root graph trace reports its
+/// type-lane credit.
 #[test]
-fn type_aware_trace_scopes_the_proof_that_misses_the_type_lane_credit() {
+fn type_aware_trace_proves_typeof_read_through_type_only_import() {
     let dir = tempfile::tempdir().expect("temporary project");
     let root = dir.path();
     write_type_only_import_probe(root);
@@ -1191,10 +1190,7 @@ fn type_aware_trace_scopes_the_proof_that_misses_the_type_lane_credit() {
         "the proof covers the declaration's own lane: {}",
         trace["semantic"]
     );
-    // Deliberate negative control: the sidecar does not credit a cross-lane
-    // import, so the proof is narrower than the graph here. It pins the known
-    // gap, not a behaviour this change introduces.
-    assert_eq!(trace["semantic"]["assertion"], "no-references-found");
+    assert_eq!(trace["semantic"]["assertion"], "references-found");
 
     let human = run_fallow_raw_with_type_aware_sidecar(&[
         "dead-code",
@@ -1208,8 +1204,9 @@ fn type_aware_trace_scopes_the_proof_that_misses_the_type_lane_credit() {
     ]);
     let stderr = redact_paths(&human.stderr, root);
     assert!(
-        stderr.contains("Type-aware proof: no-references-found (complete, value namespace only)"),
-        "the proof line names the lane it covers; stderr: {stderr}"
+        stderr.contains("Type-aware proof: references-found (complete)")
+            && stderr.contains("src/index.ts:2:23 (value-reference, Value)"),
+        "the proof lists the value read through the local alias; stderr: {stderr}"
     );
 }
 
@@ -1716,15 +1713,11 @@ fn combined_json_root_carries_a_diagnostic_only_the_dupes_walk_recorded() {
     assert_eq!(skipped[0]["path"], "src/huge.test.ts");
 }
 
-/// Issue #2366: each analysis contributes the workspace-discovery list ITS OWN
-/// config load produced, which is the list `fallow list --workspaces` reports.
-/// That makes the combined root the only analysis envelope in agreement with
-/// the workspace listing: the standalone `dead-code` / `check` / `health` /
-/// `dupes` envelopes read the process diagnostics registry, which a later
-/// re-stash in the same run can leave without the entry. Pin only the
-/// agreement, so closing that separate registry-read gap does not break this.
+/// Issues #2366 and #2396: every standalone analysis envelope carries the
+/// workspace-discovery list captured by its own run, matching both the
+/// workspace listing and the combined root.
 #[test]
-fn combined_json_root_agrees_with_the_workspace_listing_on_undeclared_workspaces() {
+fn analysis_envelopes_agree_with_the_workspace_listing_on_undeclared_workspaces() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(dir.path().join("packages/inner/src")).expect("create inner package");
     std::fs::create_dir_all(dir.path().join("src")).expect("create src");
@@ -1787,6 +1780,79 @@ fn combined_json_root_agrees_with_the_workspace_listing_on_undeclared_workspaces
         combined["workspace_diagnostics"]
     );
     assert_eq!(undeclared[0]["path"], "packages/inner");
+
+    for command in ["dead-code", "check", "health", "dupes"] {
+        let output = parse_json(&run_fallow_raw(&[
+            command,
+            "--root",
+            root,
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]));
+        let diagnostics = output["workspace_diagnostics"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let undeclared = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["kind"] == "undeclared-workspace")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            undeclared.len(),
+            1,
+            "{command} reports the run-owned undeclared workspace: {}",
+            output["workspace_diagnostics"]
+        );
+        assert_eq!(undeclared[0]["path"], "packages/inner");
+    }
+
+    for command in [
+        vec![
+            "security",
+            "--root",
+            root,
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+        vec![
+            "security",
+            "--root",
+            root,
+            "--summary",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+        vec![
+            "security",
+            "--root",
+            root,
+            "--no-cache",
+            "blind-spots",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ] {
+        let output = parse_json(&run_fallow_raw(&command));
+        let undeclared = output["workspace_diagnostics"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|diagnostic| diagnostic["kind"] == "undeclared-workspace")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            undeclared.len(),
+            1,
+            "security-family output reports its run-owned diagnostic: {output}"
+        );
+        assert_eq!(undeclared[0]["path"], "packages/inner");
+    }
 }
 
 /// Issue #2366: two overlapping workspace globs (`["pkgs/*", "pkgs/a*"]`, the

@@ -323,7 +323,7 @@ fn code_execute_schema_contains_expected_properties() {
 }
 
 #[test]
-fn code_execute_description_lists_combined_host_call() {
+fn code_execute_description_distinguishes_combined_from_subprocess_tools() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "code_execute").unwrap();
@@ -332,6 +332,14 @@ fn code_execute_description_lists_combined_host_call() {
     assert!(
         description.contains("combined"),
         "code_execute description must list the combined host call"
+    );
+    assert!(
+        description.contains("analyze, findDupes, checkHealth, and audit stay subprocess-backed"),
+        "the description must list only the four subprocess-backed calls: {description}"
+    );
+    assert!(
+        !description.contains("analyze, combined, findDupes"),
+        "combined is API-backed in Code Mode: {description}"
     );
 }
 

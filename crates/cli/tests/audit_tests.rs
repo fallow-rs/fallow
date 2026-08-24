@@ -6183,6 +6183,37 @@ fn audit_json_dead_code_section_carries_analysis_stage_workspace_diagnostics() {
     assert_dead_code_section_carries_bun_lockb_skip(&parse_json(&output));
 }
 
+#[test]
+fn audit_warns_once_for_a_head_and_base_override_skip() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = bun_lockb_audit_repo(&tmp);
+
+    let output = Command::new(fallow_bin())
+        .args([
+            "audit",
+            "--root",
+            dir.to_str().expect("fixture path should be UTF-8"),
+            "--base",
+            "HEAD",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ])
+        .env("RUST_LOG", "warn")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run audit warning repro");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr
+            .matches("Skipped dependency-override resolution")
+            .count(),
+        1,
+        "the base snapshot must not repeat a current-tree warning: {stderr}"
+    );
+}
+
 /// Issue #2366: under a per-analysis `production` split the audit family's
 /// walks disagree about which files exist, and the last walk to run replaces
 /// the process registry's source-discovery set. The dead-code section must

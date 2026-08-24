@@ -273,6 +273,18 @@ mod issue_2355_astro_mdx_member_tags;
 mod issue_2376_mdx_import_prose;
 #[path = "integration_test/issue_2377_whole_object_use.rs"]
 mod issue_2377_whole_object_use;
+#[path = "integration_test/issue_2387_convex_custom_functions.rs"]
+mod issue_2387_convex_custom_functions;
+#[path = "integration_test/issue_2390_trace_consistency.rs"]
+mod issue_2390_trace_consistency;
+#[path = "integration_test/issue_2391_namespace_credit.rs"]
+mod issue_2391_namespace_credit;
+#[path = "integration_test/issue_2393_mdx_statements.rs"]
+mod issue_2393_mdx_statements;
+#[path = "integration_test/issue_2395_css_module_credit.rs"]
+mod issue_2395_css_module_credit;
+#[path = "integration_test/issue_2397_default_export_credit.rs"]
+mod issue_2397_default_export_credit;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]

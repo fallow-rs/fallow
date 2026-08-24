@@ -2515,10 +2515,10 @@ impl UnusedDependencyOverrideFinding {
         actions.push(IssueAction::Fix(FixAction {
             kind: FixActionType::RemoveDependencyOverride,
             auto_fixable: false,
-            description: "Remove the override entry from its declaration source (pnpm-workspace.yaml overrides, pnpm.overrides, or the package.json overrides object)"
+            description: "Remove the package-manager override entry from its declaration source"
                 .to_string(),
             note: Some(
-                "Conservative static check; verify against a frozen-lockfile install (`pnpm install --frozen-lockfile`, `npm ci`, or `bun install --frozen-lockfile`) before removing in case the override targets a transitive dependency (CVE-fix pattern)"
+                "Conservative static check; verify against the active package manager's frozen-lockfile install before removing in case the override targets a transitive dependency (CVE-fix pattern)"
                     .to_string(),
             ),
             available_in_catalogs: None,
@@ -2572,7 +2572,7 @@ impl MisconfiguredDependencyOverrideFinding {
             kind: FixActionType::FixDependencyOverride,
             auto_fixable: false,
             description:
-                "Fix the override key or value: pnpm refuses to honor entries with an unparsable key or empty value"
+                "Fix the package-manager override key or value: invalid entries are rejected or ignored"
                     .to_string(),
             note: Some(
                 "Common shapes: bare `pkg`, scoped `@scope/pkg`, version-selector `pkg@<2`, parent-chain `parent>child`. Valid values include semver ranges, `-` (removal), `$ref` (self-ref), and `npm:alias@^1`."

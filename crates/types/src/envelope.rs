@@ -439,6 +439,10 @@ pub struct TypeAwareAbstentionCounts {
     pub unsupported_syntax: usize,
     /// Candidates retained because the bounded semantic request reached capacity.
     pub capacity: usize,
+    /// Candidates whose checker evidence came only from unreachable files.
+    pub unreachable_evidence: usize,
+    /// Candidates whose checker evidence consisted only of non-crediting declarations.
+    pub non_crediting_evidence: usize,
 }
 
 /// How a TypeScript project was selected for semantic refinement.

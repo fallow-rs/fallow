@@ -989,7 +989,7 @@ fn check_sections_catalog() -> Vec<SectionSpec> {
         SectionSpec {
             name: "Unused dependency overrides",
             key: "unused_dependency_overrides",
-            header: "`pnpm.overrides` entries forcing a version no workspace package depends on. Some entries may be intentional pins for transitive CVEs; the hint column flags those.\n\n| Override | Forces | Source | Location | Hint |\n|----------|--------|--------|----------|------|\n",
+            header: "Package-manager override entries forcing a version no workspace package depends on. Some entries may be intentional pins for transitive CVEs; the hint column flags those.\n\n| Override | Forces | Source | Location | Hint |\n|----------|--------|--------|----------|------|\n",
             row: |it| {
                 format!(
                     "| {} | {} -> {} | {} | {} | {} |",
@@ -1005,7 +1005,7 @@ fn check_sections_catalog() -> Vec<SectionSpec> {
         SectionSpec {
             name: "Misconfigured dependency overrides",
             key: "misconfigured_dependency_overrides",
-            header: "`pnpm.overrides` entries with an unparsable key or empty value. `pnpm install` will reject these.\n\n| Override | Value | Source | Location | Reason |\n|----------|-------|--------|----------|--------|\n",
+            header: "Package-manager override entries with an unparsable key or empty value. The active package manager will reject or ignore these.\n\n| Override | Value | Source | Location | Reason |\n|----------|-------|--------|----------|--------|\n",
             row: |it| {
                 format!(
                     "| {} | {} | {} | {} | {} |",

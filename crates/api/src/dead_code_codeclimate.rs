@@ -1304,7 +1304,7 @@ fn push_unused_dependency_override_issues(
             &finding.raw_key,
         ]);
         let mut description = format!(
-            "Override `{}` forces version `{}` but `{}` is not declared by any workspace package or resolved in pnpm-lock.yaml",
+            "Override `{}` forces version `{}` but `{}` is not declared by any workspace package or resolved in the lockfile",
             finding.raw_key, finding.version_range, finding.target_package,
         );
         if let Some(hint) = &finding.hint {

@@ -392,6 +392,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
     let ctx = report::ReportContext {
         root: &config.root,
         rules: &config.rules,
+        workspace_diagnostics: &[],
         elapsed,
         quiet: opts.quiet,
         explain: opts.explain,

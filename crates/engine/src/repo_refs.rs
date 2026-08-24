@@ -1083,6 +1083,8 @@ pub fn auto_detect_audit_base_ref(root: &Path) -> Option<ResolvedAuditBase> {
 #[must_use]
 pub fn short_head_sha(root: &Path) -> Option<String> {
     run_git(root, &["rev-parse", "--short", "HEAD"])
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 /// Resolve a concrete `--changed-workspaces` ref for project-level next steps.
@@ -1280,6 +1282,19 @@ mod tests {
     #[test]
     fn current_user_identities_empty_when_git_config_is_unavailable() {
         assert!(current_user_identities(Path::new("/repo")).is_empty());
+    }
+
+    #[test]
+    fn short_head_sha_omits_git_line_ending() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        fs::write(repo.join("tracked.txt"), "committed\n").expect("write tracked file");
+        commit_all(&repo, "initial");
+
+        let sha = short_head_sha(&repo).expect("HEAD sha");
+        assert_eq!(sha, sha.trim());
+        assert!(!sha.is_empty());
     }
 
     #[cfg(unix)]

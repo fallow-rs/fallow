@@ -181,6 +181,15 @@ pub struct CombinedParams {
 
     /// Maximum CRAP score threshold.
     pub max_crap: Option<f64>,
+
+    /// Istanbul coverage file or directory used by the health section.
+    /// When omitted, `FALLOW_COVERAGE` and then `health.coverage` apply.
+    pub coverage: Option<String>,
+
+    /// Absolute prefix to strip from Istanbul coverage paths.
+    /// When omitted, `FALLOW_COVERAGE_ROOT` and then `health.coverageRoot`
+    /// apply.
+    pub coverage_root: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]

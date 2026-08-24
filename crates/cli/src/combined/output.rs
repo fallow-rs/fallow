@@ -781,25 +781,6 @@ fn print_combined_json(
     emit_combined_json_output(&output, json_style)
 }
 
-/// Root the diagnostics registry is keyed on: the resolved config root, which
-/// every section shares, with the CLI root as the fallback.
-fn combined_diagnostics_root<'a>(input: &CombinedJsonPrintInput<'a>) -> &'a std::path::Path {
-    input
-        .check_result
-        .map(|result| result.config.root.as_path())
-        .or_else(|| {
-            input
-                .health_result
-                .map(|result| result.config.root.as_path())
-        })
-        .or_else(|| {
-            input
-                .dupes_result
-                .map(|result| result.config.root.as_path())
-        })
-        .unwrap_or(input.root)
-}
-
 /// Union of what each analysis in the combined run recorded, deduplicated on
 /// kind plus path.
 ///
@@ -811,15 +792,7 @@ fn combined_diagnostics_root<'a>(input: &CombinedJsonPrintInput<'a>) -> &'a std:
 /// envelope of the same project and, when two walks run concurrently, differs
 /// between runs of the same command. Every section instead carries the list its
 /// own analysis observed, captured from that walk's return value, so the union
-/// is the same on every run. [`fallow_config::registry_diagnostics_to_fold`]
-/// closes the fold: it covers anything recorded after the last section captured
-/// its list (a parse-stage `source-read-failure`, an analysis-stage kind the
-/// health run's dead-code precompute recorded) while dropping walk-recorded
-/// kinds, which reach an envelope only from their own walk's snapshot. Reading
-/// it outside the `check` section is what lets `--skip check`, `--only health`,
-/// and `--only dupes` report the diagnostics their analyses recorded. The
-/// programmatic combined route folds the same three section lists in the same
-/// order and closes with the same read, so the two routes agree (issue #2366).
+/// is the same on every run and cannot import process-global history.
 fn combined_workspace_diagnostics(
     input: &CombinedJsonPrintInput<'_>,
 ) -> Vec<fallow_config::WorkspaceDiagnostic> {
@@ -833,9 +806,6 @@ fn combined_workspace_diagnostics(
         input
             .dupes_result
             .map(|result| result.workspace_diagnostics.clone()),
-        Some(fallow_config::registry_diagnostics_to_fold(
-            combined_diagnostics_root(input),
-        )),
     ]
     .into_iter()
     .flatten()

@@ -1258,7 +1258,7 @@ fn format_unresolved_catalog_reference(
     out
 }
 
-/// Render unused pnpm dependency overrides as a two-tier block: a headline row
+/// Render unused dependency overrides as a two-tier block: a headline row
 /// shows `raw_key  source  path:line`, then an indented detail row shows the
 /// forced version, target package, and optional CVE hint that the
 /// conservative-static algorithm flags.
@@ -1317,9 +1317,9 @@ fn push_unused_dependency_overrides_section(input: UnusedDependencyOverridesInpu
     );
 }
 
-/// Render misconfigured pnpm dependency overrides as a two-tier block: a
+/// Render misconfigured dependency overrides as a two-tier block: a
 /// headline row shows `raw_key  source  path:line`, then an indented detail
-/// row shows the parsed reason. pnpm refuses to install on these shapes so the
+/// row shows the parsed reason. Package managers reject or ignore these shapes, so the
 /// rule defaults to error.
 fn push_misconfigured_dependency_overrides_section(
     lines: &mut Vec<String>,
@@ -3297,6 +3297,11 @@ fn push_summary_dependency_parts(parts: &mut Vec<String>, results: &AnalysisResu
         results.test_only_dependencies.len(),
         "test-only dependencies",
     );
+    push_summary_part(
+        parts,
+        results.misconfigured_dependency_overrides.len(),
+        "misconfigured dependency overrides",
+    );
 }
 
 fn push_summary_graph_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
@@ -4660,6 +4665,25 @@ mod tests {
         assert!(footer.contains("1 export"));
         assert!(footer.contains("1 circular"));
         assert!(!footer.contains("unused file"));
+    }
+
+    #[test]
+    fn summary_footer_counts_misconfigured_dependency_overrides() {
+        let mut results = AnalysisResults::default();
+        results.misconfigured_dependency_overrides.push(
+            MisconfiguredDependencyOverrideFinding::with_actions(MisconfiguredDependencyOverride {
+                raw_key: "bad>".to_string(),
+                target_package: None,
+                raw_value: "^1".to_string(),
+                reason: DependencyOverrideMisconfigReason::UnparsableKey,
+                source: DependencyOverrideSource::PnpmPackageJson,
+                path: PathBuf::from("/project/package.json"),
+                line: 3,
+            }),
+        );
+        assert!(
+            build_summary_footer(&results, 0, 0).contains("1 misconfigured dependency override")
+        );
     }
 
     #[test]

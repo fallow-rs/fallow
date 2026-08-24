@@ -161,11 +161,11 @@ fn section_dependency_footer_text(title: &str) -> Option<(&'static str, &'static
             "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
         )),
         "Unused dependency overrides" => Some((
-            "pnpm `overrides:` entries whose target package is not declared by any workspace package or resolved in pnpm-lock.yaml",
+            "package-manager override entries whose target package is not declared by any workspace package or resolved in the lockfile",
             "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides",
         )),
         "Misconfigured dependency overrides" => Some((
-            "pnpm `overrides:` entries with an unparsable key or empty value (pnpm install will error)",
+            "package-manager override entries with an unparsable key or empty value",
             "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides",
         )),
         t if t.starts_with("Type-only") => Some((

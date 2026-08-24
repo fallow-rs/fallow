@@ -1185,6 +1185,7 @@ pub fn benchmark_dead_code_json(
         regression: result.regression.as_ref(),
         baseline_matched: result.baseline_matched,
         config_fixable: result.config_fixable,
+        workspace_diagnostics: &result.workspace_diagnostics,
         json_style: crate::json_style::JsonStyle::Compact,
     })
     .map_err(|_| ExitCode::from(2))?;
@@ -1245,6 +1246,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         report_ctx: report::ReportContext {
             root: &result.config.root,
             rules: &result.config.rules,
+            workspace_diagnostics: &result.workspace_diagnostics,
             elapsed: result.elapsed,
             quiet: opts.quiet,
             explain: opts.explain,

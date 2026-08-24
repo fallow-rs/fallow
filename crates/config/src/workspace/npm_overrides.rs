@@ -368,7 +368,9 @@ impl NpmOverridesJsonScan {
         if ch == '"' {
             self.in_string = false;
             if self.collecting_key {
-                self.last_key = Some(std::mem::take(&mut self.key_buf));
+                let raw_key = std::mem::take(&mut self.key_buf);
+                let quoted = format!("\"{raw_key}\"");
+                self.last_key = serde_json::from_str(&quoted).ok().or(Some(raw_key));
                 self.collecting_key = false;
             }
             return;
@@ -493,6 +495,19 @@ mod tests {
         let parsed = data.entries[0].parsed_key.as_ref().unwrap();
         assert_eq!(parsed.target_package, "@types/react");
         assert_eq!(parsed.target_version_selector.as_deref(), Some("<18"));
+    }
+
+    #[test]
+    fn escaped_json_override_key_keeps_its_source_line() {
+        let json = r#"{
+  "overrides": {
+    "left\u002dpad": "^1.3.0"
+  }
+}"#;
+        let data = parse_npm_package_json_overrides(json);
+        assert_eq!(data.entries.len(), 1);
+        assert_eq!(data.entries[0].raw_key, "left-pad");
+        assert_eq!(data.entries[0].line, 3);
     }
 
     #[test]

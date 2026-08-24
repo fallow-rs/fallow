@@ -437,12 +437,12 @@ fn push_unresolved_catalog_reference_diagnostics(
     }
 }
 
-/// Emit diagnostics for unused and misconfigured pnpm dependency-override
+/// Emit diagnostics for unused and misconfigured package-manager override
 /// findings. Both finding types carry an absolute `path` (matching the
 /// `UnresolvedCatalogReference` convention so `--changed-since` and per-file
 /// overrides.rules can compare directly). `Uri::from_file_path` accepts the
 /// path as-is. Severity matches the default rule severity: unused =
-/// `WARNING`, misconfigured = `ERROR` (pnpm refuses to install).
+/// `WARNING`, misconfigured = `ERROR` (the package manager rejects or ignores it).
 fn push_dependency_override_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -451,7 +451,7 @@ fn push_dependency_override_diagnostics(
     push_misconfigured_dependency_override_diagnostics(map, results);
 }
 
-/// Push WARNING diagnostics for unused pnpm dependency overrides.
+/// Push WARNING diagnostics for unused dependency overrides.
 fn push_unused_dependency_override_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -464,7 +464,7 @@ fn push_unused_dependency_override_diagnostics(
         };
         let line = finding.line.saturating_sub(1);
         let mut message = format!(
-            "Unused dependency override: `{}` forces `{}` to `{}` but it is not declared by any workspace package or resolved in pnpm-lock.yaml",
+            "Unused dependency override: `{}` forces `{}` to `{}` but it is not declared by any workspace package or resolved in the lockfile",
             finding.raw_key, finding.target_package, finding.version_range,
         );
         if let Some(hint) = &finding.hint {
@@ -484,7 +484,7 @@ fn push_unused_dependency_override_diagnostics(
     }
 }
 
-/// Push ERROR diagnostics for misconfigured pnpm dependency overrides.
+/// Push ERROR diagnostics for misconfigured dependency overrides.
 fn push_misconfigured_dependency_override_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,

@@ -421,6 +421,7 @@ pub fn benchmark_security_blind_spots_json(
         },
         meta: None,
         gate: None,
+        workspace_diagnostics: Vec::new(),
         security_findings: Vec::new(),
         attack_surface: None,
         unresolved_edge_files: 0,
@@ -485,6 +486,11 @@ fn build_security_command_output(
         &config.root,
         opts.surface,
     );
+    let workspace_diagnostics = analysis
+        .workspace_diagnostics
+        .into_iter()
+        .map(|diagnostic| diagnostic.into_root_relative(&config.root))
+        .collect();
 
     let output = build_security_output(SecurityOutputInput {
         opts,
@@ -498,6 +504,7 @@ fn build_security_command_output(
         unresolved_edge_files,
         unresolved_callee_sites,
         unresolved_callee_diagnostics,
+        workspace_diagnostics,
     });
     Ok((output, effective_severities))
 }
@@ -520,6 +527,7 @@ struct SecurityOutputInput<'a, 'b> {
     unresolved_edge_files: usize,
     unresolved_callee_sites: usize,
     unresolved_callee_diagnostics: Option<SecurityUnresolvedCalleeDiagnostics>,
+    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
 fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
@@ -560,7 +568,10 @@ fn build_survivors_output(
     opts: &SecuritySurvivorsOptions<'_>,
     started: Instant,
 ) -> Result<SecuritySurvivorsOutput, String> {
-    let candidates = load_candidate_map(opts.candidates)?;
+    let CandidateInput {
+        candidates,
+        workspace_diagnostics,
+    } = load_candidate_map(opts.candidates)?;
     let verdicts = load_verdicts(opts.verdicts)?;
     let mut seen = BTreeSet::new();
     let mut survivors = BTreeMap::new();
@@ -604,6 +615,7 @@ fn build_survivors_output(
         schema_version: SecuritySurvivorsSchemaVersion::V2,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(started.elapsed().as_millis() as u64),
+        workspace_diagnostics,
         summary: SecuritySurvivorsSummary {
             candidates: candidates.len(),
             verdicts: verdicts.len(),
@@ -617,8 +629,25 @@ fn build_survivors_output(
     })
 }
 
-fn load_candidate_map(path: &Path) -> Result<BTreeMap<String, SecurityFinding>, String> {
+struct CandidateInput {
+    candidates: BTreeMap<String, SecurityFinding>,
+    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+}
+
+fn load_candidate_map(path: &Path) -> Result<CandidateInput, String> {
     let value = load_json_file(path, "candidate")?;
+    let workspace_diagnostics = value
+        .get("workspace_diagnostics")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|err| {
+            format!(
+                "Candidate file {} contains malformed workspace diagnostics: {err}",
+                path.display()
+            )
+        })?
+        .unwrap_or_default();
     let Some(findings) = value
         .get("security_findings")
         .and_then(serde_json::Value::as_array)
@@ -653,7 +682,10 @@ fn load_candidate_map(path: &Path) -> Result<BTreeMap<String, SecurityFinding>, 
             ));
         }
     }
-    Ok(candidates)
+    Ok(CandidateInput {
+        candidates,
+        workspace_diagnostics,
+    })
 }
 
 fn load_verdicts(path: &Path) -> Result<Vec<SecurityVerifierVerdict>, String> {
@@ -746,6 +778,7 @@ fn build_security_output(input: SecurityOutputInput<'_, '_>) -> SecurityOutput {
         gate: input
             .gate_mode
             .map(|mode| security_gate_output(mode, input.findings.len())),
+        workspace_diagnostics: input.workspace_diagnostics,
         security_findings: input.findings,
         attack_surface: input.attack_surface,
         unresolved_edge_files: input.unresolved_edge_files,
@@ -1326,6 +1359,7 @@ fn remap_cache_dir_for_base_worktree(
 
 struct SecurityAnalysisState {
     results: AnalysisResults,
+    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
     modules: Option<Vec<ModuleInfo>>,
     files: Option<Vec<DiscoveredFile>>,
     analysis_output: Option<fallow_engine::dead_code::DeadCodeAnalysisArtifacts>,
@@ -1343,6 +1377,7 @@ fn analyze_security_candidates(
             .analyze_dead_code_with_artifacts(false, false)
             .map(|output| SecurityAnalysisState {
                 results: output.results,
+                workspace_diagnostics: session.current_workspace_diagnostics(),
                 modules: None,
                 files: None,
                 analysis_output: None,
@@ -1358,6 +1393,7 @@ fn analyze_security_candidates(
             let results = output.results.clone();
             SecurityAnalysisState {
                 results,
+                workspace_diagnostics: session.current_workspace_diagnostics(),
                 modules,
                 files,
                 analysis_output: Some(output),
@@ -2089,6 +2125,7 @@ fn build_blind_spots_output(output: &SecurityOutput) -> SecurityBlindSpotsOutput
         schema_version: SecurityBlindSpotsSchemaVersion::V1,
         version: output.version.clone(),
         elapsed_ms: output.elapsed_ms,
+        workspace_diagnostics: output.workspace_diagnostics.clone(),
         summary: SecurityBlindSpotsSummary {
             unresolved_edge_files: output.unresolved_edge_files,
             unresolved_callee_sites,
@@ -3210,6 +3247,7 @@ mod tests {
             config: test_output_config(),
             meta: None,
             gate: None,
+            workspace_diagnostics: Vec::new(),
             security_findings: findings,
             attack_surface: None,
             unresolved_edge_files,
@@ -3230,6 +3268,7 @@ mod tests {
                 verdict,
                 new_count,
             }),
+            workspace_diagnostics: Vec::new(),
             security_findings: vec![],
             attack_surface: None,
             unresolved_edge_files: 0,
@@ -3373,6 +3412,11 @@ mod tests {
             &candidates,
             serde_json::json!({
                 "kind": "security",
+                "workspace_diagnostics": [{
+                    "kind": "undeclared-workspace",
+                    "path": "packages/orphan",
+                    "message": "Workspace is not declared."
+                }],
                 "security_findings": [
                     survivor_candidate_json("sec-a", "src/a.ts", 10, SecurityFindingKind::TaintedSink, Some("ssrf")),
                     survivor_candidate_json("sec-b", "src/b.ts", 11, SecurityFindingKind::TaintedSink, Some("redos-regex")),
@@ -3411,6 +3455,10 @@ mod tests {
             serde_json::from_str(&render_survivors_json(&output)).expect("json");
 
         assert_eq!(rendered["kind"], "security-survivors");
+        assert_eq!(
+            rendered["workspace_diagnostics"][0]["path"],
+            "packages/orphan"
+        );
         assert!(rendered["survivors"]["sec-a"].is_object());
         assert!(rendered["survivors"]["sec-b"].is_null());
         assert!(rendered["needs_human_review"]["sec-c"].is_object());

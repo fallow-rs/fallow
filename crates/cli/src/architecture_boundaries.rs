@@ -880,7 +880,7 @@ fn list_surfaces_reuse_session_discovery() {
         if source_path == "crates/cli/src/list.rs" {
             assert!(
                 source.contains("session.workspaces()")
-                    && source.contains("session.current_workspace_diagnostics()"),
+                    && source.contains("session.workspace_diagnostics()"),
                 "{source_path} must reuse AnalysisSession workspace metadata when a session already exists"
             );
         }
@@ -2097,17 +2097,12 @@ fn source_discovery_diagnostics_reach_sessions_by_value_not_through_the_registry
     );
 }
 
-/// Issue #2366: every fold of an analysis's own diagnostics with the process
-/// registry must read the registry through `registry_diagnostics_to_fold`.
-///
-/// A raw read imports whichever walk in the run wrote last. Under a
-/// per-analysis `production` split that walk looked at a different file set, so
-/// the audit family reported a `skipped-large-file` its dead-code analysis
-/// never saw while the MCP `audit` tool, which serializes the typed list,
-/// reported none. Pin the filtered leg at all four fold sites so a raw read
-/// cannot come back.
+/// Issues #2366, #2392, and #2396: only the session may fold its own discovery
+/// diagnostics with the filtered process-registry leg. Output routes receive
+/// the diagnostics owned by the stage they serialize and must not re-read the
+/// process registry, otherwise call order can leak stale analysis-stage state.
 #[test]
-fn diagnostics_folds_read_the_registry_through_the_filtered_leg() {
+fn diagnostics_outputs_use_stage_owned_lists_after_the_session_fold() {
     let registry = read_source_without_line_comments("crates/config/src/workspace/diagnostics.rs")
         .expect("read diagnostics registry");
     assert!(
@@ -2116,28 +2111,38 @@ fn diagnostics_folds_read_the_registry_through_the_filtered_leg() {
         "the registry owns the fold leg and the walk-recorded filter it applies"
     );
 
-    for (path, site) in [
-        (
-            "crates/engine/src/session.rs",
-            "the engine session's live read",
-        ),
+    let session = read_source_without_line_comments("crates/engine/src/session.rs")
+        .expect("read engine session");
+    assert!(
+        session.contains("registry_diagnostics_to_fold("),
+        "the engine session's live read must use the filtered registry leg"
+    );
+
+    for (path, site, owned_marker) in [
         (
             "crates/cli/src/report/json.rs",
             "the CLI audit family's dead-code section",
+            "analysis_diagnostics.to_vec()",
         ),
         (
             "crates/cli/src/combined/output.rs",
             "the CLI combined root fold",
+            "result.workspace_diagnostics.clone()",
         ),
         (
             "crates/api/src/runtime_json.rs",
             "the programmatic combined root fold",
+            "dead_code.output.workspace_diagnostics.clone()",
         ),
     ] {
         let source = read_source_without_line_comments(path).expect("read fold site");
         assert!(
-            source.contains("registry_diagnostics_to_fold("),
-            "{site} ({path}) must close its fold with the filtered registry leg"
+            !source.contains("registry_diagnostics_to_fold("),
+            "{site} ({path}) must not re-read process-global diagnostics"
+        );
+        assert!(
+            source.contains(owned_marker),
+            "{site} ({path}) must compose diagnostics from stage-owned lists"
         );
     }
 }

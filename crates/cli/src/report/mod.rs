@@ -99,6 +99,8 @@ pub(crate) fn build_walkthrough_human(
 pub(crate) struct ReportContext<'a> {
     pub(crate) root: &'a Path,
     pub(crate) rules: &'a RulesConfig,
+    /// Workspace diagnostics captured by the analysis that owns this report.
+    pub(crate) workspace_diagnostics: &'a [fallow_config::WorkspaceDiagnostic],
     pub(crate) elapsed: Duration,
     pub(crate) quiet: bool,
     pub(crate) explain: bool,
@@ -243,6 +245,7 @@ pub(crate) struct CheckJsonRenderInput<'a> {
     pub(crate) regression: Option<&'a crate::regression::RegressionOutcome>,
     pub(crate) baseline_matched: Option<(usize, usize)>,
     pub(crate) config_fixable: bool,
+    pub(crate) workspace_diagnostics: &'a [fallow_config::WorkspaceDiagnostic],
     pub(crate) json_style: crate::json_style::JsonStyle,
 }
 
@@ -258,6 +261,7 @@ pub(crate) fn render_check_json(
         regression: input.regression,
         baseline_matched: input.baseline_matched,
         config_fixable: input.config_fixable,
+        workspace_diagnostics: input.workspace_diagnostics,
         json_style: input.json_style,
     })
 }
@@ -367,6 +371,7 @@ pub(crate) fn print_results(
             regression,
             baseline_matched: ctx.baseline_matched,
             config_fixable: ctx.config_fixable,
+            workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
         }),
         OutputFormat::Compact => {
@@ -428,6 +433,7 @@ fn print_check_github_format(
         ctx.config_fixable,
         None,
         fallow_api::CheckJsonExtraOutputs::default(),
+        ctx.workspace_diagnostics,
     ) {
         Ok(envelope) => print_github_format(
             github_annotations::EnvelopeKind::DeadCode,
@@ -494,6 +500,7 @@ fn print_grouped_results(
             type_aware: ctx.type_aware,
             resolver,
             config_fixable: ctx.config_fixable,
+            workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
         }),
         OutputFormat::Compact => {
@@ -555,9 +562,14 @@ pub(crate) fn print_duplication_report(
             }
             ExitCode::SUCCESS
         }
-        OutputFormat::Json => {
-            json::print_duplication_json(report, ctx.root, ctx.elapsed, ctx.explain, ctx.json_style)
-        }
+        OutputFormat::Json => json::print_duplication_json(
+            report,
+            ctx.root,
+            ctx.elapsed,
+            ctx.explain,
+            ctx.workspace_diagnostics,
+            ctx.json_style,
+        ),
         OutputFormat::Compact => {
             compact::print_duplication_compact(report, ctx.root);
             ExitCode::SUCCESS
@@ -585,7 +597,13 @@ fn print_dupes_github_format(
     ctx: &ReportContext<'_>,
     target: GithubTarget,
 ) -> ExitCode {
-    match json::api_duplication_json_document(report, ctx.root, ctx.elapsed, ctx.explain) {
+    match json::api_duplication_json_document(
+        report,
+        ctx.root,
+        ctx.elapsed,
+        ctx.explain,
+        ctx.workspace_diagnostics,
+    ) {
         Ok(envelope) => print_github_format(
             github_annotations::EnvelopeKind::Dupes,
             &envelope,
@@ -639,6 +657,7 @@ fn print_grouped_duplication_report(
             ctx.root,
             ctx.elapsed,
             ctx.explain,
+            ctx.workspace_diagnostics,
             ctx.json_style,
         ),
         OutputFormat::Sarif => sarif::print_grouped_duplication_sarif(report, ctx.root, resolver),
@@ -810,6 +829,7 @@ pub(crate) fn print_health_report(
                 ctx.elapsed,
                 ctx.explain,
                 ctx.type_aware,
+                ctx.workspace_diagnostics,
                 ctx.json_style,
             ),
             None => json::print_health_json(
@@ -818,6 +838,7 @@ pub(crate) fn print_health_report(
                 ctx.elapsed,
                 ctx.explain,
                 ctx.type_aware,
+                ctx.workspace_diagnostics,
                 ctx.json_style,
             ),
         },
@@ -853,8 +874,14 @@ fn print_health_github_format(
     ctx: &ReportContext<'_>,
     target: GithubTarget,
 ) -> ExitCode {
-    match json::api_health_json_document(report, ctx.root, ctx.elapsed, ctx.explain, ctx.type_aware)
-    {
+    match json::api_health_json_document(
+        report,
+        ctx.root,
+        ctx.elapsed,
+        ctx.explain,
+        ctx.type_aware,
+        ctx.workspace_diagnostics,
+    ) {
         Ok(envelope) => print_github_format(
             github_annotations::EnvelopeKind::Health,
             &envelope,
@@ -1160,6 +1187,7 @@ mod tests {
         ReportContext {
             root,
             rules,
+            workspace_diagnostics: &[],
             elapsed: Duration::default(),
             quiet: true,
             explain: false,

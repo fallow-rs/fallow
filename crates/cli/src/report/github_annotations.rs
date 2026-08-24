@@ -950,7 +950,7 @@ fn collect_check_catalog(env: &Value, out: &mut Vec<Annotation>) {
             Anchor::line_only(item),
             "Misconfigured dependency override".to_owned(),
             format!(
-                "Override `{}` -> `{}` is malformed ({reason}). `pnpm install` will reject this entry.\n\nFix the key/value to match pnpm's override grammar, or remove the entry.",
+                "Override `{}` -> `{}` is malformed ({reason}). The active package manager will reject or ignore this entry.\n\nFix the key or value to match its override grammar, or remove the entry.",
                 s(item, "raw_key"),
                 s(item, "raw_value"),
             ),

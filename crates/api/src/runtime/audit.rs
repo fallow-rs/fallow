@@ -173,10 +173,14 @@ pub(super) fn resolve_audit_base_ref(
 }
 
 fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> AnalysisOptions {
+    let production_override = options
+        .analysis
+        .production_override
+        .or_else(|| options.production.then_some(true));
     AnalysisOptions {
         changed_since: Some(base_ref.to_string()),
-        production: options.production,
-        production_override: options.production.then_some(true),
+        production: production_override.unwrap_or(options.production),
+        production_override,
         ..options.analysis.clone()
     }
 }
@@ -979,6 +983,24 @@ mod tests {
         ] {
             assert!(health_may_consume_dead_code_artifacts(&options, &config));
         }
+    }
+
+    #[test]
+    fn audit_analysis_preserves_explicit_false_production_override() {
+        let options = AuditOptions {
+            production: false,
+            analysis: AnalysisOptions {
+                production: true,
+                production_override: Some(false),
+                ..AnalysisOptions::default()
+            },
+            ..AuditOptions::default()
+        };
+
+        let analysis = analysis_options_for_audit(&options, "HEAD");
+
+        assert_eq!(analysis.production_override, Some(false));
+        assert!(!analysis.production);
     }
 
     #[test]

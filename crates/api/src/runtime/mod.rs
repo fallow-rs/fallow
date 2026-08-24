@@ -283,7 +283,7 @@ fn run_programmatic_health_on_engine(
         &health_options,
         resolved.workspace_roots.clone(),
     )
-    .map_err(|_| generic_health_error("health"))?;
+    .map_err(|error| programmatic_health_error("health", error))?;
 
     Ok(programmatic_health_run_from_engine_result(result))
 }
@@ -335,7 +335,7 @@ pub(super) fn run_health_with_session_artifacts(
         pre_computed_analysis,
         pre_computed_duplication,
     )
-    .map_err(|_| generic_health_error("health"))?;
+    .map_err(|error| programmatic_health_error("health", error))?;
 
     Ok(assemble_health_programmatic_output(
         options,
@@ -343,12 +343,21 @@ pub(super) fn run_health_with_session_artifacts(
     ))
 }
 
-fn generic_health_error(command: &str) -> ProgrammaticError {
+fn programmatic_health_error(
+    command: &str,
+    error: fallow_engine::health::HealthError,
+) -> ProgrammaticError {
+    let (message, exit_code) = match error {
+        fallow_engine::health::HealthError::Message { message, exit_code } => (message, exit_code),
+        fallow_engine::health::HealthError::Printed(exit_code) => {
+            (format!("{command} failed"), exit_code)
+        }
+    };
     let code = format!(
         "FALLOW_{}_FAILED",
         command.replace('-', "_").to_ascii_uppercase()
     );
-    ProgrammaticError::new(format!("{command} failed"), 2)
+    ProgrammaticError::new(message, exit_code)
         .with_code(code)
         .with_context(format!("fallow {command}"))
         .with_help(format!(

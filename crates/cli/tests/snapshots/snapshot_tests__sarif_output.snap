@@ -1259,7 +1259,7 @@ expression: redact_sarif_version(&json_str)
           "ruleId": "fallow/unused-dependency-override",
           "level": "warning",
           "message": {
-            "text": "Override `axios` forces version `^1.6.0` but `axios` is not declared by any workspace package or resolved in pnpm-lock.yaml (may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth)"
+            "text": "Override `axios` forces version `^1.6.0` but `axios` is not declared by any workspace package or resolved in the lockfile (may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth)"
           },
           "locations": [
             {

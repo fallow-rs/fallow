@@ -105,6 +105,14 @@ pub enum WorkspaceDiagnosticKind {
     /// channel so the skip is visible in `workspace_diagnostics[]` JSON and
     /// as a stderr warning.
     BunLockbOverrideResolutionSkipped,
+    /// Dependency-override resolution was skipped because bun's text
+    /// `bun.lock` exists but could not be parsed and no readable pnpm or npm
+    /// lockfile was available as independent resolution ground truth.
+    BunLockOverrideResolutionSkipped,
+    /// A bun manifest declares both `overrides` and a non-empty `resolutions`
+    /// object. Bun applies `overrides` and ignores `resolutions`, so fallow
+    /// reports the shadowed configuration without offering removal advice.
+    BunResolutionsShadowedByOverrides,
 }
 
 impl WorkspaceDiagnosticKind {
@@ -122,6 +130,8 @@ impl WorkspaceDiagnosticKind {
             Self::SkippedMinifiedFile { .. } => "skipped-minified-file",
             Self::SourceReadFailure { .. } => "source-read-failure",
             Self::BunLockbOverrideResolutionSkipped => "bun-lockb-override-resolution-skipped",
+            Self::BunLockOverrideResolutionSkipped => "bun-lock-override-resolution-skipped",
+            Self::BunResolutionsShadowedByOverrides => "bun-resolutions-shadowed-by-overrides",
         }
     }
 
@@ -180,9 +190,10 @@ impl WorkspaceDiagnosticKind {
     #[must_use]
     pub const fn is_analysis_stage(&self) -> bool {
         match self {
-            Self::MalformedPnpmWorkspaceYaml { .. } | Self::BunLockbOverrideResolutionSkipped => {
-                true
-            }
+            Self::MalformedPnpmWorkspaceYaml { .. }
+            | Self::BunLockbOverrideResolutionSkipped
+            | Self::BunLockOverrideResolutionSkipped
+            | Self::BunResolutionsShadowedByOverrides => true,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
@@ -484,6 +495,17 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              --save-text-lockfile (bun 1.2 or newer) to write a text bun.lock, or delete the stale \
              bun.lockb if this repository no longer uses bun."
         ),
+        WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped => format!(
+            "Skipped dependency-override resolution because '{display}' could not be parsed and \
+             no readable pnpm or npm lockfile was available, so unused-dependency-overrides \
+             findings are not reported. Run bun install to regenerate the text lockfile, then \
+             rerun fallow."
+        ),
+        WorkspaceDiagnosticKind::BunResolutionsShadowedByOverrides => format!(
+            "'{display}' declares both `overrides` and non-empty `resolutions`; bun applies \
+             `overrides` and ignores `resolutions`. Move the intended pins into `overrides` or \
+             remove the shadowed `resolutions` entries."
+        ),
     }
 }
 
@@ -620,6 +642,26 @@ mod tests {
     }
 
     #[test]
+    fn bun_override_diagnostic_ids_and_messages_are_actionable() {
+        let root = Path::new("/project");
+        let malformed = WorkspaceDiagnostic::new(
+            root,
+            root.join("bun.lock"),
+            WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped,
+        );
+        assert_eq!(malformed.kind.id(), "bun-lock-override-resolution-skipped");
+        assert!(malformed.message.contains("regenerate"));
+
+        let shadowed = WorkspaceDiagnostic::new(
+            root,
+            root.join("package.json"),
+            WorkspaceDiagnosticKind::BunResolutionsShadowedByOverrides,
+        );
+        assert_eq!(shadowed.kind.id(), "bun-resolutions-shadowed-by-overrides");
+        assert!(shadowed.message.contains("ignores `resolutions`"));
+    }
+
+    #[test]
     fn into_root_relative_strips_the_root_and_keeps_outside_paths_absolute() {
         let root = Path::new("/project");
         let inside = WorkspaceDiagnostic::new(
@@ -646,6 +688,8 @@ mod tests {
                 error: "bad yaml".to_owned(),
             },
             WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+            WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped,
+            WorkspaceDiagnosticKind::BunResolutionsShadowedByOverrides,
         ];
         for kind in &analysis_stage {
             assert!(
@@ -906,6 +950,8 @@ mod tests {
             WorkspaceDiagnosticKind::UndeclaredWorkspace,
             WorkspaceDiagnosticKind::TsconfigReferenceDirMissing,
             WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+            WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped,
+            WorkspaceDiagnosticKind::BunResolutionsShadowedByOverrides,
         ] {
             assert!(
                 !kind.is_source_walk_recorded(),

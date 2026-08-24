@@ -176,11 +176,20 @@ pub fn parse_pnpm_package_json_overrides(source: &str) -> PnpmOverrideData {
 #[must_use]
 pub fn parse_override_key(key: &str) -> Option<ParsedOverrideKey> {
     let trimmed = key.trim();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || trimmed.starts_with('>') {
         return None;
     }
 
-    let (parent_part, target_part) = if let Some(idx) = trimmed.rfind('>') {
+    let delimiter = trimmed
+        .as_bytes()
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, byte)| {
+            (*byte == b'>' && !matches!(trimmed.as_bytes()[index - 1], b' ' | b'|' | b'@'))
+                .then_some(index)
+        });
+    let (parent_part, target_part) = if let Some(idx) = delimiter {
         (Some(trimmed[..idx].trim()), trimmed[idx + 1..].trim())
     } else {
         (None, trimmed)
@@ -487,6 +496,14 @@ mod tests {
         let parsed = parse_override_key("@types/react@<18").unwrap();
         assert_eq!(parsed.target_package, "@types/react");
         assert_eq!(parsed.target_version_selector.as_deref(), Some("<18"));
+    }
+
+    #[test]
+    fn parse_target_with_greater_than_version_selector() {
+        let parsed = parse_override_key("a>b@>=1").unwrap();
+        assert_eq!(parsed.parent_package.as_deref(), Some("a"));
+        assert_eq!(parsed.target_package, "b");
+        assert_eq!(parsed.target_version_selector.as_deref(), Some(">=1"));
     }
 
     #[test]

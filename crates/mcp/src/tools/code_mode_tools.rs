@@ -6,15 +6,16 @@ use crate::params::{
 };
 
 use fallow_api::{
-    AnalysisOptions, CombinedOptions, ComplexityOptions, DuplicationMode, DuplicationOptions,
-    RootEnvelopeMode, run_combined, serialize_combined_programmatic_json,
+    AnalysisOptions, CombinedOptions, ComplexityOptions, CoverageInputs, DuplicationMode,
+    DuplicationOptions, RootEnvelopeMode, run_combined, serialize_combined_programmatic_json,
     serialize_explain_programmatic_json,
 };
 
 use super::super::{
     analyze::run_analyze_api_value,
     api_runtime::{
-        changed_since_from_param, env_diff_file, non_empty_path, workspace_patterns_from_param,
+        changed_since_from_param, env_diff_file, non_empty_path, resolve_typed_coverage_inputs,
+        workspace_patterns_from_param,
     },
     audit::run_audit_api_value,
     build_analyze_args, build_audit_args, build_check_changed_args,
@@ -485,21 +486,32 @@ fn run_combined_api_value(params: &CombinedParams) -> Result<Option<serde_json::
 }
 
 fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptions, String> {
-    Ok(CombinedOptions {
-        analysis: AnalysisOptions {
-            root: non_empty_path(params.root.as_deref()),
-            config_path: non_empty_path(params.config.as_deref()),
-            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-            no_cache: params.no_cache.unwrap_or(false),
-            threads: params.threads,
-            production: params.production.unwrap_or(false),
-            production_override: params.production,
-            changed_since: changed_since_from_param(params.changed_since.as_deref()),
-            diff_file: env_diff_file(),
-            workspace: workspace_patterns_from_param(params.workspace.as_deref()),
-            explain: true,
-            ..AnalysisOptions::default()
+    let analysis = AnalysisOptions {
+        root: non_empty_path(params.root.as_deref()),
+        config_path: non_empty_path(params.config.as_deref()),
+        allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
+        no_cache: params.no_cache.unwrap_or(false),
+        threads: params.threads,
+        production: params.production.unwrap_or(false),
+        production_override: params.production,
+        changed_since: changed_since_from_param(params.changed_since.as_deref()),
+        diff_file: env_diff_file(),
+        workspace: workspace_patterns_from_param(params.workspace.as_deref()),
+        explain: true,
+        ..AnalysisOptions::default()
+    };
+    let coverage = resolve_typed_coverage_inputs(
+        &analysis,
+        CoverageInputs {
+            coverage: non_empty_path(params.coverage.as_deref()),
+            coverage_root: non_empty_path(params.coverage_root.as_deref()),
         },
+        None,
+        "combined.coverage_root",
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(CombinedOptions {
+        analysis,
         include_entry_exports: params.include_entry_exports.unwrap_or(false),
         duplication_options: DuplicationOptions {
             mode: combined_duplication_mode(params.dupes_mode.as_deref())?,
@@ -517,6 +529,8 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
             max_cyclomatic: params.max_cyclomatic,
             max_cognitive: params.max_cognitive,
             max_crap: params.max_crap,
+            coverage: coverage.coverage,
+            coverage_root: coverage.coverage_root,
             complexity: params.complexity.unwrap_or(true),
             file_scores: params.file_scores.unwrap_or(true),
             hotspots: params.hotspots.unwrap_or(true),
@@ -709,6 +723,25 @@ mod tests {
         assert!(options.health_options.hotspots);
         assert!(options.health_options.targets);
         assert!(!options.health_options.score);
+    }
+
+    #[test]
+    fn combined_params_forward_explicit_coverage_inputs() {
+        let options = combined_options_from_params(&CombinedParams {
+            coverage: Some("artifacts/coverage-final.json".to_string()),
+            coverage_root: Some("/ci/workspace".to_string()),
+            ..CombinedParams::default()
+        })
+        .expect("combined options");
+
+        assert_eq!(
+            options.health_options.coverage.as_deref(),
+            Some(std::path::Path::new("artifacts/coverage-final.json"))
+        );
+        assert_eq!(
+            options.health_options.coverage_root.as_deref(),
+            Some(std::path::Path::new("/ci/workspace"))
+        );
     }
 
     #[test]

@@ -34,6 +34,7 @@ pub(super) struct PrintJsonInput<'a> {
     pub(super) regression: Option<&'a crate::regression::RegressionOutcome>,
     pub(super) baseline_matched: Option<(usize, usize)>,
     pub(super) config_fixable: bool,
+    pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
 }
 
@@ -58,6 +59,7 @@ pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_js
         input.config_fixable,
         check_output_meta(input.explain, input.type_aware),
         check_json_extras(input.regression, None, input.baseline_matched),
+        input.workspace_diagnostics,
     )?;
     input.json_style.serialize(&output)
 }
@@ -72,6 +74,7 @@ pub(super) struct PrintGroupedJsonInput<'a> {
     pub(super) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
     pub(super) resolver: &'a OwnershipResolver,
     pub(super) config_fixable: bool,
+    pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
 }
 
@@ -84,7 +87,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
         config_fixable: input.config_fixable,
         meta: check_output_meta(input.explain, input.type_aware),
-        workspace_diagnostics: workspace_diagnostics_for_output(input.root),
+        workspace_diagnostics: input.workspace_diagnostics.to_vec(),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
             input.original,
             input.root,
@@ -521,6 +524,7 @@ fn api_check_json_document_with_config_fixable_and_meta(
         config_fixable,
         meta,
         CheckJsonExtraOutputs::default(),
+        &[],
     )
 }
 
@@ -531,6 +535,7 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
     config_fixable: bool,
     meta: Option<fallow_types::envelope::Meta>,
     extras: CheckJsonExtraOutputs,
+    workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_check_json(CheckJsonOutputInput {
         results,
@@ -539,7 +544,7 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
         config_fixable,
         meta,
         extras,
-        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
             results,
             root,
@@ -554,15 +559,8 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
 /// Build the `CheckOutput` body the audit family embeds as its `dead_code`
 /// section.
 ///
-/// `analysis_diagnostics` is the dead-code analysis's OWN
-/// `workspace_diagnostics[]`, folded with the registry leg the same way
-/// `combined_workspace_diagnostics` folds the combined root. The registry read
-/// alone reports whichever walk in the run wrote last, so under a per-analysis
-/// `production` split the audit envelope would otherwise be narrower than the
-/// run and than the MCP `audit` tool, which serializes the typed list. The leg
-/// is [`fallow_config::registry_diagnostics_to_fold`], not a raw registry read,
-/// so the same split cannot make it BROADER either by importing a file the
-/// dead-code walk never looked at from the health or dupes walk (issue #2366).
+/// `analysis_diagnostics` is the dead-code analysis's own by-value diagnostic
+/// list. Rendering must not import process history from another analysis run.
 pub fn api_check_json_payload_with_config_fixable(
     results: &AnalysisResults,
     root: &Path,
@@ -576,15 +574,8 @@ pub fn api_check_json_payload_with_config_fixable(
         elapsed,
         config_fixable,
         extras: CheckJsonExtraOutputs::default(),
-        workspace_diagnostics: fallow_types::workspace::merge_workspace_diagnostics(
-            analysis_diagnostics.to_vec(),
-            fallow_config::registry_diagnostics_to_fold(root),
-        ),
+        workspace_diagnostics: analysis_diagnostics.to_vec(),
     })
-}
-
-fn workspace_diagnostics_for_output(root: &Path) -> Vec<WorkspaceDiagnostic> {
-    crate::runtime_support::workspace_diagnostics_for(root)
 }
 
 pub fn check_json_extras(
@@ -702,6 +693,7 @@ pub(super) fn api_health_json_document(
     elapsed: Duration,
     explain: bool,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     let output = fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         report: report.clone(),
@@ -711,7 +703,7 @@ pub(super) fn api_health_json_document(
         type_aware: type_aware.cloned(),
         grouped_by: None,
         groups: None,
-        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps: fallow_output::build_health_next_steps(
             crate::report::suggestions::health_next_steps_input(
                 report,
@@ -733,6 +725,7 @@ fn api_grouped_health_json_document(
     elapsed: Duration,
     explain: bool,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         report: report.clone(),
@@ -742,7 +735,7 @@ fn api_grouped_health_json_document(
         type_aware: type_aware.cloned(),
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         groups: Some(grouping.groups.clone()),
-        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps: fallow_output::build_health_next_steps(
             crate::report::suggestions::health_next_steps_input(
                 report,
@@ -762,9 +755,17 @@ pub(super) fn print_health_json(
     elapsed: Duration,
     explain: bool,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    match api_health_json_document(report, root, elapsed, explain, type_aware) {
+    match api_health_json_document(
+        report,
+        root,
+        elapsed,
+        explain,
+        type_aware,
+        workspace_diagnostics,
+    ) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize health report: {e}");
@@ -784,9 +785,18 @@ pub(super) fn print_grouped_health_json(
     elapsed: Duration,
     explain: bool,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    match api_grouped_health_json_document(report, grouping, root, elapsed, explain, type_aware) {
+    match api_grouped_health_json_document(
+        report,
+        grouping,
+        root,
+        elapsed,
+        explain,
+        type_aware,
+        workspace_diagnostics,
+    ) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped health report: {e}");
@@ -800,6 +810,7 @@ pub(super) fn api_duplication_json_document(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     let payload = DupesReportPayload::from_report(report);
     let next_steps = crate::report::suggestions::build_dupes_next_steps(
@@ -813,7 +824,7 @@ pub(super) fn api_duplication_json_document(
         root,
         elapsed,
         meta: explain.then(fallow_output::dupes_meta),
-        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -825,9 +836,10 @@ pub(super) fn print_duplication_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    match api_duplication_json_document(report, root, elapsed, explain) {
+    match api_duplication_json_document(report, root, elapsed, explain, workspace_diagnostics) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize duplication report: {e}");
@@ -842,6 +854,7 @@ fn api_grouped_duplication_json_document(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     let payload = DupesReportPayload::from_report(report);
     let next_steps = crate::report::suggestions::build_dupes_next_steps(
@@ -856,7 +869,7 @@ fn api_grouped_duplication_json_document(
         root,
         elapsed,
         meta: explain.then(fallow_output::dupes_meta),
-        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -878,9 +891,17 @@ pub(super) fn print_grouped_duplication_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    match api_grouped_duplication_json_document(report, grouping, root, elapsed, explain) {
+    match api_grouped_duplication_json_document(
+        report,
+        grouping,
+        root,
+        elapsed,
+        explain,
+        workspace_diagnostics,
+    ) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped duplication report: {e}");
@@ -1311,6 +1332,7 @@ mod tests {
             Duration::ZERO,
             false,
             None,
+            &[],
         )
         .expect("grouped health JSON should serialize");
 
@@ -2237,6 +2259,7 @@ mod tests {
             false,
             check_output_meta(false, Some(&type_aware)),
             CheckJsonExtraOutputs::default(),
+            &[],
         )
         .expect("type-aware metadata should serialize");
 

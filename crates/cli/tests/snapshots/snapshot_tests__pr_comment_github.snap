@@ -41,7 +41,7 @@ Found **29** findings.
 | minor | `fallow/test-only-dependency` | `package.json`:12 | Package 'msw' is only imported by test files \(consider moving to devDependencies\) |
 | major | `fallow/unresolved-catalog-reference` | `packages/app/package.json`:14 | Package 'old-react' is referenced via \`catalog:react17\` but catalog 'react17' does not declare it; \`pnpm install\` will fail \(available in: react18\) |
 | minor | `fallow/unused-catalog-entry` | `pnpm-workspace.yaml`:6 | Catalog entry 'is-even' is not referenced by any workspace package |
-| minor | `fallow/unused-dependency-override` | `pnpm-workspace.yaml`:9 | Override \`axios\` forces version \`^1.6.0\` but \`axios\` is not declared by any workspace package or resolved in pnpm-lock.yaml \(may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth\) |
+| minor | `fallow/unused-dependency-override` | `pnpm-workspace.yaml`:9 | Override \`axios\` forces version \`^1.6.0\` but \`axios\` is not declared by any workspace package or resolved in the lockfile \(may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth\) |
 | minor | `fallow/empty-catalog-group` | `pnpm-workspace.yaml`:10 | Catalog group 'react17' has no entries |
 | minor | `fallow/unused-catalog-entry` | `pnpm-workspace.yaml`:12 | Catalog entry 'old-thing' \(catalog 'legacy'\) is not referenced by any workspace package |
 | major | `fallow/unlisted-dependency` | `src/cli.ts`:2 | Package 'chalk' is imported but not listed in package.json |

@@ -79,7 +79,7 @@ pub fn config_for_project_with_load_options(
         validate_boundaries_and_rule_packs(root, &config)?;
     }
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-    let resolved = config.resolve(
+    let mut resolved = config.resolve(
         root.to_path_buf(),
         OutputFormat::Human,
         threads,
@@ -87,6 +87,7 @@ pub fn config_for_project_with_load_options(
         true,
         None,
     );
+    apply_max_file_size_env(&mut resolved);
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
     Ok(ProjectConfig {
@@ -170,7 +171,7 @@ pub fn config_for_project_analysis(
         config.production = production.into();
     }
     validate_config(root, &config)?;
-    let resolved = config.resolve(
+    let mut resolved = config.resolve(
         root.to_path_buf(),
         options.output,
         options.threads,
@@ -178,6 +179,7 @@ pub fn config_for_project_analysis(
         options.quiet,
         None,
     );
+    apply_max_file_size_env(&mut resolved);
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
     Ok(ProjectConfig {
@@ -187,6 +189,16 @@ pub fn config_for_project_analysis(
         workspace_diagnostics,
         workspace_discovery_ms: Some(workspace_discovery_ms),
     })
+}
+
+fn apply_max_file_size_env(config: &mut ResolvedConfig) {
+    let max_file_size_mb = std::env::var("FALLOW_MAX_FILE_SIZE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok());
+    if let Some(max_file_size_mb) = max_file_size_mb {
+        config.max_file_size_bytes =
+            fallow_config::resolve_max_file_size_bytes(Some(max_file_size_mb));
+    }
 }
 
 pub(crate) fn collect_workspace_metadata(

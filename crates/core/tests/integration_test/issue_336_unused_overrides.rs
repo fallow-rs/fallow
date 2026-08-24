@@ -379,11 +379,10 @@ fn transitive_only_targets_in_npm_shrinkwrap_are_used() {
     );
 }
 
-/// A malformed text `bun.lock` deliberately degrades to declaration-only
-/// analysis (matching the pnpm/npm malformed-lockfile philosophy), so the
-/// transitive-only override is flagged again, with the bun-flavored hint.
+/// A malformed text `bun.lock` fails closed because declaration-only analysis
+/// cannot distinguish a transitive-only pin from a removable override.
 #[test]
-fn malformed_bun_lock_degrades_to_declaration_only_with_bun_hint() {
+fn malformed_bun_lock_skips_removal_advice_with_a_diagnostic() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     write_bun_repro_package_json(root, r#"{ "ws": "^8.21.0" }"#);
@@ -397,19 +396,19 @@ fn malformed_bun_lock_degrades_to_declaration_only_with_bun_hint() {
         .iter()
         .map(|f| f.entry.target_package.as_str())
         .collect();
-    assert_eq!(
-        flagged,
-        vec!["ws"],
-        "a malformed bun.lock degrades to declaration-only analysis"
-    );
-    let hint = results.unused_dependency_overrides[0]
-        .entry
-        .hint
-        .as_deref()
-        .expect("unused override carries a hint");
     assert!(
-        hint.contains("bun install"),
-        "hint should name bun for a bun.lock repo; got {hint:?}"
+        flagged.is_empty(),
+        "an unreadable lockfile must not produce removal advice: {flagged:?}"
+    );
+    assert!(
+        fallow_config::workspace_diagnostics_for(root)
+            .iter()
+            .any(|diagnostic| {
+                matches!(
+                    diagnostic.kind,
+                    fallow_config::WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped
+                )
+            })
     );
 }
 

@@ -115,7 +115,7 @@ pub(super) fn run_duplication_report_with_session(
             total_issues: None,
             groups: None,
             meta: resolved.explain_enabled().then(dupes_meta),
-            workspace_diagnostics: session.current_workspace_diagnostics(),
+            workspace_diagnostics: session.workspace_diagnostics().to_vec(),
             next_steps,
         });
     Ok(DuplicationProgrammaticOutput {

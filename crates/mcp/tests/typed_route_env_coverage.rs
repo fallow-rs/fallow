@@ -52,6 +52,32 @@ fn check_health_typed_route_reads_coverage_from_the_process_environment() {
     );
 }
 
+#[test]
+fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_large_file_project(project.path());
+
+    let mut with_env = McpServer::start_with_options(false, Some("1"));
+    let limited = with_env.analyze(project.path());
+    assert!(
+        limited["workspace_diagnostics"]
+            .as_array()
+            .is_some_and(|diagnostics| diagnostics.iter().any(|diagnostic| {
+                diagnostic["kind"] == "skipped-large-file" && diagnostic["path"] == "src/huge.ts"
+            })),
+        "FALLOW_MAX_FILE_SIZE must reach the typed analyze route: {limited}"
+    );
+
+    let mut without_env = McpServer::start_with_options(false, None);
+    let unlimited = without_env.analyze(project.path());
+    assert!(
+        unlimited["unused_files"]
+            .as_array()
+            .is_some_and(|files| files.iter().any(|file| file["path"] == "src/huge.ts")),
+        "the same file stays analyzable under the default limit: {unlimited}"
+    );
+}
+
 /// `coverage_source` of the `branchy` finding from a `check_health` call on a
 /// server started with or without the coverage variables.
 fn branchy_coverage_source(root: &Path, with_env: bool) -> Option<String> {
@@ -129,6 +155,20 @@ fn write_project(root: &Path) {
     .expect("write coverage");
 }
 
+fn write_large_file_project(root: &Path) {
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"mcp-env-max-file-size","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::write(root.join("src/index.ts"), "export const entry = true;\n").expect("write entry");
+    let mut source = String::from("export const huge = '");
+    source.push_str(&"x".repeat(1_100_000));
+    source.push_str("';\n");
+    std::fs::write(root.join("src/huge.ts"), source).expect("write large source");
+}
+
 /// The built `fallow-mcp` binary as a child process, spoken to over the stdio
 /// transport's newline-delimited JSON-RPC.
 struct McpServer {
@@ -139,6 +179,10 @@ struct McpServer {
 
 impl McpServer {
     fn start(with_coverage_env: bool) -> Self {
+        Self::start_with_options(with_coverage_env, None)
+    }
+
+    fn start_with_options(with_coverage_env: bool, max_file_size: Option<&str>) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
         if with_coverage_env {
             command
@@ -148,6 +192,11 @@ impl McpServer {
             command
                 .env_remove("FALLOW_COVERAGE")
                 .env_remove("FALLOW_COVERAGE_ROOT");
+        }
+        if let Some(max_file_size) = max_file_size {
+            command.env("FALLOW_MAX_FILE_SIZE", max_file_size);
+        } else {
+            command.env_remove("FALLOW_MAX_FILE_SIZE");
         }
         let mut child = command
             .stdin(Stdio::piped())
@@ -216,6 +265,29 @@ impl McpServer {
             .as_str()
             .unwrap_or_else(|| panic!("text content: {response}"));
         serde_json::from_str(text).expect("health payload")
+    }
+
+    fn analyze(&mut self, root: &Path) -> serde_json::Value {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "analyze",
+                "arguments": {
+                    "root": root.display().to_string(),
+                    "no_cache": true
+                }
+            }
+        });
+        self.send(&serde_json::to_string(&request).expect("serialize request"));
+        let response = self.response(2);
+        let result = &response["result"];
+        assert_ne!(result["isError"], true, "analyze must succeed: {response}");
+        let text = result["content"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| panic!("text content: {response}"));
+        serde_json::from_str(text).expect("analyze payload")
     }
 
     fn send(&mut self, message: &str) {

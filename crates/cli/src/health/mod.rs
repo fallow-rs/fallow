@@ -294,7 +294,11 @@ fn execute_health_with_config_and_seams(
     let files = parts.files;
     let modules = parts.modules;
     let workspaces = parts.workspaces;
-    let workspace_diagnostics = parts.workspace_diagnostics;
+    let workspace_diagnostics = if pre_computed_analysis.is_some() {
+        session.current_workspace_diagnostics()
+    } else {
+        parts.workspace_diagnostics
+    };
     let parse_ms = parts.parse_ms;
     let parse_cpu_ms = parts.parse_cpu_ms;
 
@@ -578,6 +582,7 @@ fn health_report_context(
     report::ReportContext {
         root: &result.config.root,
         rules: &result.config.rules,
+        workspace_diagnostics: &result.workspace_diagnostics,
         elapsed: result.elapsed,
         quiet: options.quiet,
         explain: options.explain,

@@ -210,7 +210,7 @@ fn collect_list_data(
     let session_workspaces = session.as_ref().map(|session| session.workspaces());
     let session_workspace_diagnostics = session
         .as_ref()
-        .map(|session| session.current_workspace_diagnostics());
+        .map(|session| session.workspace_diagnostics().to_vec());
 
     let plugin_result = collect_plugin_result(
         opts,

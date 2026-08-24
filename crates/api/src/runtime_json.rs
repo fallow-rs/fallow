@@ -48,12 +48,8 @@ pub fn serialize_combined_programmatic_json(
         envelope_mode,
         telemetry_analysis_run_id,
     } = output;
-    let workspace_diagnostics = combined_workspace_diagnostics(
-        dead_code.as_ref(),
-        health.as_ref(),
-        duplication.as_ref(),
-        &root,
-    );
+    let workspace_diagnostics =
+        combined_workspace_diagnostics(dead_code.as_ref(), health.as_ref(), duplication.as_ref());
     crate::serialize_combined_json(crate::CombinedJsonOutputInput {
         check: dead_code
             .as_ref()
@@ -97,18 +93,12 @@ pub fn serialize_combined_programmatic_json(
 /// recorded.
 ///
 /// [`fallow_config::registry_diagnostics_to_fold`] closes the fold, exactly as
-/// the CLI's fold does, because a section list is captured when its analysis
-/// finishes and an analysis can record after that: the health run's own
-/// dead-code precompute records the analysis-stage kinds after
-/// `HealthProgrammaticOutput::workspace_diagnostics` was taken, so a
-/// `dead_code: false` run would otherwise report an empty array where the CLI's
-/// `--skip check` reports the diagnostic. The leg drops walk-recorded kinds, so
-/// it cannot import another walk's file set (issue #2366).
+/// Each section carries the diagnostics owned by its run. The combined root
+/// unions those values without importing process-global history.
 fn combined_workspace_diagnostics(
     dead_code: Option<&DeadCodeProgrammaticOutput>,
     health: Option<&HealthProgrammaticOutput>,
     duplication: Option<&DuplicationProgrammaticOutput>,
-    root: &Path,
 ) -> Vec<WorkspaceDiagnostic> {
     let merged = merge_workspace_diagnostics(
         dead_code.map_or_else(Vec::new, |dead_code| {
@@ -116,38 +106,12 @@ fn combined_workspace_diagnostics(
         }),
         health.map_or_else(Vec::new, |health| health.workspace_diagnostics.clone()),
     );
-    let merged = merge_workspace_diagnostics(
+    merge_workspace_diagnostics(
         merged,
         duplication.map_or_else(Vec::new, |duplication| {
             duplication.output.workspace_diagnostics.clone()
         }),
-    );
-    merge_workspace_diagnostics(
-        merged,
-        fallow_config::registry_diagnostics_to_fold(combined_diagnostics_root(
-            dead_code,
-            health,
-            duplication,
-            root,
-        )),
     )
-}
-
-/// Root the diagnostics registry is keyed on: the root a section resolved,
-/// which is the resolved config root the run recorded against, with the
-/// combined output's own root as the fallback. Mirrors the CLI's
-/// `combined_diagnostics_root`.
-fn combined_diagnostics_root<'a>(
-    dead_code: Option<&'a DeadCodeProgrammaticOutput>,
-    health: Option<&'a HealthProgrammaticOutput>,
-    duplication: Option<&'a DuplicationProgrammaticOutput>,
-    root: &'a Path,
-) -> &'a Path {
-    dead_code
-        .map(|dead_code| dead_code.root.as_path())
-        .or_else(|| health.map(|health| health.root.as_path()))
-        .or_else(|| duplication.map(|duplication| duplication.root.as_path()))
-        .unwrap_or(root)
 }
 
 /// Serialize typed decision-surface output into the stable JSON contract.
