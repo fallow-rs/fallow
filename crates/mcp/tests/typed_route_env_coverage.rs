@@ -32,6 +32,7 @@ const COVERAGE_ROOT: &str = "/ci/workspace";
 const COVERAGE_FILE: &str = "artifacts/coverage-final.json";
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_mins(3);
+const ANALYSIS_THREADS: usize = 2;
 static MCP_SERVER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
@@ -306,7 +307,7 @@ impl McpServer {
                     "root": root.display().to_string(),
                     "complexity": true,
                     "max_crap": 10.0,
-                    "threads": 1,
+                    "threads": ANALYSIS_THREADS,
                     "no_cache": true
                 }
             }
@@ -333,7 +334,7 @@ impl McpServer {
                 "name": "analyze",
                 "arguments": {
                     "root": root.display().to_string(),
-                    "threads": 1,
+                    "threads": ANALYSIS_THREADS,
                     "no_cache": true
                 }
             }
