@@ -43,11 +43,19 @@ pub(super) struct DeadCodeProgrammaticRunWithArtifacts {
 /// options, config load failures, analysis failures, or git changed-file
 /// failures.
 pub fn run_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
+    debug_mcp_phase("dead-code context starting");
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
+    debug_mcp_phase("dead-code context returned");
     let start = Instant::now();
+    debug_mcp_phase("dead-code session starting");
     let session = load_dead_code_session(options, &resolved)?;
-    resolved
-        .install(|| run_dead_code_with_session(options, &resolved, &session, None, |_| {}, start))
+    debug_mcp_phase("dead-code session returned");
+    resolved.install(|| {
+        debug_mcp_phase("dead-code installed closure entered");
+        let result = run_dead_code_with_session(options, &resolved, &session, None, |_| {}, start);
+        debug_mcp_phase("dead-code installed closure returned");
+        result
+    })
 }
 
 /// Run circular-dependency analysis and return typed API output before JSON.
@@ -106,11 +114,13 @@ pub(super) fn run_dead_code_with_session(
     post_filter: impl FnOnce(&mut AnalysisResults),
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
+    debug_mcp_phase("dead-code session analysis starting");
     let analysis = session.analyze_dead_code().map_err(|err| {
         ProgrammaticError::new(format!("dead-code analysis failed: {err}"), 2)
             .with_code("FALLOW_DEAD_CODE_FAILED")
             .with_context("dead-code")
     })?;
+    debug_mcp_phase("dead-code session analysis returned");
     let mut results = analysis.results;
     let unfiltered_unused_files = results.unused_files.clone();
 
@@ -133,6 +143,12 @@ pub(super) fn run_dead_code_with_session(
         type_aware_meta,
         start,
     ))
+}
+
+fn debug_mcp_phase(message: &str) {
+    if std::env::var_os("FALLOW_MCP_PHASE_DEBUG").is_some() {
+        eprintln!("FALLOW_MCP_PHASE: {message}");
+    }
 }
 
 pub(super) fn run_dead_code_with_session_artifacts(

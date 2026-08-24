@@ -154,6 +154,10 @@ pub fn validate_analysis_config_path(config_path: Option<&Path>) -> Programmatic
 impl ProgrammaticAnalysisContext {
     /// Run work inside the per-call Rayon pool.
     pub fn install<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
+        if std::env::var_os("FALLOW_MCP_BYPASS_ANALYSIS_POOL").is_some() {
+            eprintln!("FALLOW_MCP_PHASE: analysis pool bypassed");
+            return f();
+        }
         self.pool.install(f)
     }
 
