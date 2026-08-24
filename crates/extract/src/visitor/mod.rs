@@ -341,6 +341,8 @@ pub(crate) struct ModuleInfoExtractor {
     handled_require_spans: FxHashSet<Span>,
     handled_import_spans: FxHashSet<Span>,
     namespace_binding_names: Vec<String>,
+    module_namespace_binding_names: FxHashSet<String>,
+    scoped_namespace_binding_names: Vec<FxHashSet<String>>,
     /// The `import * as NS from '...'` locals of this program, pre-registered
     /// from the top-level statement list before the body walk: an import
     /// declaration is legal after the code that reads it, so walk order cannot
