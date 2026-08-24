@@ -56,7 +56,10 @@ jobs:
         run: node --test tools/type-aware-sidecar/test/windows-child-process.test.mjs
 
       - name: Run workspace tests
-        run: cargo test --workspace --lib --bins --tests --examples
+        run: cargo test --workspace --exclude fallow-mcp --lib --bins --tests --examples
+
+      - name: Run MCP tests without workspace contention
+        run: cargo test -p fallow-mcp --lib --bins --tests --examples
 
       - name: Run runtime-coverage integration tests
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests

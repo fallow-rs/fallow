@@ -364,7 +364,14 @@ test("release runs Windows correctness and lifecycle verification without creden
     job,
     /name: Install type-aware sidecar dependencies[\s\S]*npm ci --prefix tools\/type-aware-sidecar --no-audit --no-fund --ignore-scripts[\s\S]*name: Run workspace tests/,
   );
-  assert.match(job, /cargo test --workspace --lib --bins --tests --examples/);
+  assert.match(
+    job,
+    /cargo test --workspace --exclude fallow-mcp --lib --bins --tests --examples/,
+  );
+  assert.match(
+    job,
+    /name: Run MCP tests without workspace contention[\s\S]*cargo test -p fallow-mcp --lib --bins --tests --examples/,
+  );
   assert.match(job, /cargo clippy --workspace --all-targets -- -D warnings/);
   assert.match(job, /cargo fmt --all -- --check/);
   assert.match(job, /npm run publish:prepare/);
