@@ -19,7 +19,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -32,12 +31,9 @@ const COVERAGE_ROOT: &str = "/ci/workspace";
 const COVERAGE_FILE: &str = "artifacts/coverage-final.json";
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_mins(3);
-const ANALYSIS_THREADS: usize = 2;
-static MCP_SERVER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn check_health_typed_route_reads_coverage_from_the_process_environment() {
-    let _guard = lock_mcp_server_test();
     let project = tempfile::tempdir().expect("project dir");
     write_project(project.path());
 
@@ -58,7 +54,6 @@ fn check_health_typed_route_reads_coverage_from_the_process_environment() {
 
 #[test]
 fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
-    let _guard = lock_mcp_server_test();
     let project = tempfile::tempdir().expect("project dir");
     write_large_file_project(project.path());
 
@@ -85,7 +80,6 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
 
 #[test]
 fn trace_symbol_typed_route_does_not_credit_an_unreachable_consumer() {
-    let _guard = lock_mcp_server_test();
     let project = tempfile::tempdir().expect("project dir");
     write_type_aware_trace_project(project.path());
 
@@ -99,14 +93,6 @@ fn trace_symbol_typed_route_does_not_credit_an_unreachable_consumer() {
     );
     assert_eq!(trace["semantic"]["status"], "partial");
     assert_eq!(trace["semantic"]["references"][0]["path"], "src/orphan.ts");
-}
-
-/// These tests each launch an analysis server. Running the servers together
-/// can exhaust the constrained Windows release runner before its MCP deadline.
-fn lock_mcp_server_test() -> MutexGuard<'static, ()> {
-    MCP_SERVER_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// `coverage_source` of the `branchy` finding from a `check_health` call on a
@@ -307,7 +293,6 @@ impl McpServer {
                     "root": root.display().to_string(),
                     "complexity": true,
                     "max_crap": 10.0,
-                    "threads": ANALYSIS_THREADS,
                     "no_cache": true
                 }
             }
@@ -334,7 +319,6 @@ impl McpServer {
                 "name": "analyze",
                 "arguments": {
                     "root": root.display().to_string(),
-                    "threads": ANALYSIS_THREADS,
                     "no_cache": true
                 }
             }
