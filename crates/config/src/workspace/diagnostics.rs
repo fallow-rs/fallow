@@ -1055,11 +1055,17 @@ mod tests {
 
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].message, diag.message);
+        // The key embeds `diag.path` through a raw `Display`, so the expected
+        // tail carries the platform separator: the stored path is rebuilt from
+        // its components and renders with backslashes on Windows.
+        let expected_tail = Path::new("packages").join("scratch");
         assert!(
             plans[0]
                 .dedupe_key
                 .contains("::glob-matched-no-package-json::")
-                && plans[0].dedupe_key.ends_with("packages/scratch"),
+                && plans[0]
+                    .dedupe_key
+                    .ends_with(&expected_tail.display().to_string()),
             "per-instance key is `root::kind::path`, not the `-agg::pattern` form: {}",
             plans[0].dedupe_key
         );
