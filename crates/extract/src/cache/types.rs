@@ -989,7 +989,14 @@ use crate::MemberKind;
 /// runtime dependency classification. Warm 278 caches hold the module without
 /// that require call and without those facts, so the target would stay
 /// reported as an unused file on upgrade.
-pub(super) const CACHE_VERSION: u32 = 279;
+///
+/// Bumped to 280 for issue #2375: `export type *` and `export type * as ns`
+/// inside a `declare module '...'` body now record the same bindingless
+/// whole-module import the plain ambient star records, flagged as a type-only
+/// star, instead of a file-level type-only star re-export. Warm 279 caches
+/// replay that re-export, so the declaring file would keep laundering the
+/// target's value exports into its own surface.
+pub(super) const CACHE_VERSION: u32 = 280;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -1424,6 +1431,9 @@ pub struct CachedImport {
     pub(crate) local_name: String,
     /// Whether this is a type-only import.
     pub(crate) is_type_only: bool,
+    /// Whether this whole-module import forwards type meanings only
+    /// (`export type *` inside a `declare module '...'` body).
+    pub(crate) is_type_only_star: bool,
     /// Whether this import originated from an SFC `<style>` block / `<style src>` (CSS context).
     pub(crate) from_style: bool,
     /// Import kind: 0=Named, 1=Default, 2=Namespace, 3=SideEffect.

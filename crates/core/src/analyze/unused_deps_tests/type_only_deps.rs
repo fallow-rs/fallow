@@ -52,6 +52,7 @@ fn type_only_dep_not_detected_when_runtime_import_exists() {
                     imported_name: ImportedName::Named("z".to_string()),
                     local_name: "z".to_string(),
                     is_type_only: true,
+                    is_type_only_star: false,
                     from_style: false,
                     span: oxc_span::Span::new(0, 20),
                     source_span: oxc_span::Span::default(),
@@ -84,6 +85,7 @@ fn type_only_dep_not_detected_when_runtime_import_exists() {
                     imported_name: ImportedName::Named("z".to_string()),
                     local_name: "z".to_string(),
                     is_type_only: false, // runtime import
+                    is_type_only_star: false,
                     from_style: false,
                     span: oxc_span::Span::new(0, 20),
                     source_span: oxc_span::Span::default(),

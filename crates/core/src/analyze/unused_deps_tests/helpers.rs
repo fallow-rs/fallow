@@ -136,6 +136,7 @@ pub(super) fn build_graph_with_npm_import_sources(
                 imported_name: ImportedName::Named("default".to_string()),
                 local_name: format!("import_{i}"),
                 is_type_only: *is_type_only,
+                is_type_only_star: false,
                 from_style: false,
                 span: oxc_span::Span::new((i * 20) as u32, (i * 20 + 15) as u32),
                 source_span: oxc_span::Span::default(),

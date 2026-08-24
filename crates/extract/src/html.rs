@@ -174,6 +174,7 @@ fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleP
             imported_name: ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
+            is_type_only_star: false,
             from_style: false,
             span: Span::default(),
             source_span: Span::default(),

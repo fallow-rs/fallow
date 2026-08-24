@@ -721,9 +721,11 @@ impl ImportNamespaceUse {
 /// A type-only import credits type space: `import type { x }` narrows its
 /// binding with the `type` keyword, and a type-only import without a binding
 /// (an ambient named re-export, an `import()` type reference) stays there as
-/// well. The one exception is the ambient star form (issue #2357): `export *`
-/// inside a `declare module '...'` body forwards every export of the target in
-/// both meanings, so it credits both namespaces.
+/// well. The one exception is the plain ambient star form (issue #2357):
+/// `export *` inside a `declare module '...'` body forwards every export of
+/// the target in both meanings, so it credits both namespaces. Its
+/// `export type *` spelling (issue #2375) forwards the same names with every
+/// value meaning erased, so it stays in type space with the rest.
 fn desired_import_namespaces(
     sym: &ImportedSymbol,
     source_mod: Option<&&ResolvedModule>,
@@ -731,7 +733,7 @@ fn desired_import_namespaces(
     if sym.is_type_only {
         return ImportNamespaceUse {
             uses_type: true,
-            uses_value: sym.is_ambient_star(),
+            uses_value: sym.is_value_bearing_ambient_star(),
             classified: true,
         };
     }
@@ -804,6 +806,10 @@ pub(super) fn attach_symbol_reference(
             // (issue #2357), which forwards the ES star surface: every named
             // export and never `default`. The `export * as ns` form records
             // the namespace object's `default` member as a separate import.
+            // Its `export type *` spelling forwards the same surface in the
+            // type namespace alone (issue #2375), a lane
+            // `desired_import_namespaces` decides; the surface itself, and the
+            // closure seed below, are the same either way.
             // Both observe the whole module, so the target's own `export *`
             // and `export * as ns` chains are credited downstream through the
             // exposed-namespace closure (issue #2372 for the runtime form).
@@ -1361,6 +1367,7 @@ mod tests {
                         imported_name: ImportedName::Named("foo".to_string()),
                         local_name: "foo".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1430,6 +1437,7 @@ mod tests {
                         imported_name: ImportedName::Namespace,
                         local_name: "utils".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1525,6 +1533,7 @@ mod tests {
                         imported_name: ImportedName::Namespace,
                         local_name: "utils".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1584,6 +1593,7 @@ mod tests {
             local_name: String::new(),
             import_span: oxc_span::Span::new(0, 10),
             is_type_only: true,
+            is_type_only_star: false,
             mechanism: ModuleLoadMechanism::EsModule,
         }
     }
@@ -1615,6 +1625,18 @@ mod tests {
             (true, false),
             "`import type {{ Foo }}` restricts its binding to type space"
         );
+
+        for imported_name in [ImportedName::Namespace, ImportedName::Default] {
+            let type_star = ImportedSymbol {
+                is_type_only_star: true,
+                ..unbound_type_only_symbol(imported_name.clone())
+            };
+            assert_eq!(
+                desired_import_namespaces(&type_star, None).namespaces(),
+                (true, false),
+                "`export type *` ({imported_name:?}) erases every value meaning (issue #2375)"
+            );
+        }
     }
 
     /// Target module for the ambient star tests: `Foo` is both an interface
@@ -1682,9 +1704,17 @@ mod tests {
             imported_name,
             local_name: String::new(),
             is_type_only: true,
+            is_type_only_star: false,
             from_style: false,
             span: oxc_span::Span::new(0, 10),
             source_span: oxc_span::Span::default(),
+        }
+    }
+
+    fn ambient_type_star_import(imported_name: ImportedName) -> ImportInfo {
+        ImportInfo {
+            is_type_only_star: true,
+            ..ambient_import(imported_name)
         }
     }
 
@@ -1753,6 +1783,54 @@ mod tests {
     }
 
     #[test]
+    fn attach_ref_ambient_type_only_star_credits_the_star_surface_in_type_space_only() {
+        // Issue #2375: `declare module 'pkg' { export type * from './impl' }`
+        // forwards the same names as the plain star with every value meaning
+        // erased, so the const half of the `Foo` pair keeps reporting while
+        // the interface half is credited, and `default` stays unforwarded.
+        let graph = ambient_star_graph(vec![ambient_type_star_import(ImportedName::Namespace)]);
+
+        assert_eq!(
+            lanes_of(&graph, "Foo", true),
+            vec![(ReferenceKind::NamespaceImport, ExportNamespace::Type)],
+            "the interface half is credited in the type namespace"
+        );
+        assert!(
+            lanes_of(&graph, "Foo", false).is_empty(),
+            "the const half has a type declaration to shadow it, so it keeps reporting"
+        );
+        assert_eq!(
+            lanes_of(&graph, "bar", false),
+            vec![(ReferenceKind::NamespaceImport, ExportNamespace::Type)],
+            "a value-only export is still forwarded, reachable as `typeof bar`"
+        );
+        assert!(
+            lanes_of(&graph, "default", false).is_empty(),
+            "`export type *` forwards no `default`, exactly like the plain star"
+        );
+    }
+
+    #[test]
+    fn attach_ref_ambient_type_only_namespace_star_credits_default_in_type_space() {
+        // `export type * as ns` exposes the namespace object in type space,
+        // so `ns.default` reaches the target's default export there.
+        let graph = ambient_star_graph(vec![
+            ambient_type_star_import(ImportedName::Namespace),
+            ambient_type_star_import(ImportedName::Default),
+        ]);
+
+        assert_eq!(
+            lanes_of(&graph, "default", false),
+            vec![(ReferenceKind::DefaultImport, ExportNamespace::Type)],
+            "the default is credited in the type namespace and nowhere else"
+        );
+        assert!(
+            lanes_of(&graph, "Foo", false).is_empty(),
+            "the extra default import leaves the named surface in type space"
+        );
+    }
+
+    #[test]
     fn attach_ref_unbound_named_type_only_import_credits_type_space_only() {
         // `declare module 'pkg' { export { Foo } from './impl' }` (#2349) and
         // `import('./impl').Foo` record an unbound type-only named import. It
@@ -1812,6 +1890,7 @@ mod tests {
                             imported_name: ImportedName::Namespace,
                             local_name: "utils".to_string(),
                             is_type_only: false,
+                            is_type_only_star: false,
                             from_style: false,
                             span: oxc_span::Span::new(0, 10),
                             source_span: oxc_span::Span::default(),
@@ -1906,6 +1985,7 @@ mod tests {
                         imported_name: ImportedName::Default,
                         local_name: "styles".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -2001,6 +2081,7 @@ mod tests {
                         imported_name: ImportedName::Default,
                         local_name: "Component".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -2061,6 +2142,7 @@ mod tests {
                     imported_name: ImportedName::Named("FC".to_string()),
                     local_name: "FC".to_string(),
                     is_type_only: true,
+                    is_type_only_star: false,
                     from_style: false,
                     span: oxc_span::Span::new(0, 10),
                     source_span: oxc_span::Span::default(),

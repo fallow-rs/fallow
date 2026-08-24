@@ -968,6 +968,7 @@ mod tests {
                 imported_name: ImportedName::Named("value".to_owned()),
                 local_name: "value".to_owned(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),

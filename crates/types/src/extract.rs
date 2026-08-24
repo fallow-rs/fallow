@@ -3012,6 +3012,16 @@ pub struct ImportInfo {
     pub local_name: String,
     /// Whether this is a type-only import (`import type`).
     pub is_type_only: bool,
+    /// Whether this whole-module import forwards type meanings only.
+    ///
+    /// Set for `export type *` and `export type * as ns` inside a
+    /// `declare module '...'` body (issue #2375). Those forms record the same
+    /// bindingless whole-module shape the plain ambient star records
+    /// (issue #2357), but the star they stand for erases every value meaning,
+    /// so the graph credits the target's star surface in the type namespace
+    /// alone. Every other import leaves this false: `is_type_only` already
+    /// decides their namespace on its own.
+    pub is_type_only_star: bool,
     /// Whether this import originated from a CSS-context.
     pub from_style: bool,
     /// Source span of the import declaration.
@@ -3477,6 +3487,7 @@ mod tests {
                 imported_name: ImportedName::Default,
                 local_name: "childProcess".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: span(),
                 source_span: span(),
@@ -4718,6 +4729,7 @@ mod tests {
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(), // empty = side-effect import
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: true,
                 span: span(),
                 source_span: span(),
@@ -4727,6 +4739,7 @@ mod tests {
                 imported_name: ImportedName::Default,
                 local_name: "React".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: span(),
                 source_span: span(),
@@ -4748,6 +4761,7 @@ mod tests {
                 imported_name: ImportedName::Named("foo".to_string()),
                 local_name: "foo".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: span(),
                 source_span: span(),
@@ -4757,6 +4771,7 @@ mod tests {
                 imported_name: ImportedName::Named("bar".to_string()),
                 local_name: "bar".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: span(),
                 source_span: span(),
@@ -4766,6 +4781,7 @@ mod tests {
                 imported_name: ImportedName::Named("foo".to_string()),
                 local_name: "foo".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: span(),
                 source_span: span(),

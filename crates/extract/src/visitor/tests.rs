@@ -5663,6 +5663,7 @@ fn assert_ambient_star_credits_whole_module(
     info: &ModuleInfo,
     source: &str,
     forwards_default: bool,
+    is_type_only_star: bool,
 ) {
     assert!(
         info.exports.is_empty() && info.re_exports.is_empty(),
@@ -5689,6 +5690,10 @@ fn assert_ambient_star_credits_whole_module(
             entry.local_name
         );
         assert!(entry.is_type_only, "ambient bodies are erased at runtime");
+        assert_eq!(
+            entry.is_type_only_star, is_type_only_star,
+            "the `export type *` spelling decides the lane the graph credits: {entry:?}"
+        );
     }
 }
 
@@ -5705,7 +5710,7 @@ fn ambient_module_star_re_export_credits_whole_target_without_file_surface() {
          }\n\
          export {};\n",
     );
-    assert_ambient_star_credits_whole_module(&info, "./impl", false);
+    assert_ambient_star_credits_whole_module(&info, "./impl", false, false);
 }
 
 #[test]
@@ -5718,42 +5723,37 @@ fn ambient_module_namespace_star_re_export_credits_whole_target_without_file_sur
          }\n\
          export {};\n",
     );
-    assert_ambient_star_credits_whole_module(&info, "./impl", true);
+    assert_ambient_star_credits_whole_module(&info, "./impl", true, false);
 }
 
 #[test]
-fn ambient_module_type_only_star_re_export_keeps_file_level_shape() {
-    // `export type *` forwards type meanings only. The whole-module import
-    // shape carries no type modifier and the graph would credit the value
-    // meaning as well, so the type-only star keeps its pre-existing
-    // file-level type-only star re-export instead.
+fn ambient_module_type_only_star_re_export_records_a_type_only_whole_module_import() {
+    // Issue #2375: `export type *` forwards the same names as the plain star
+    // with every value meaning erased. It takes the same whole-module shape,
+    // flagged so the graph credits the target's star surface in type space
+    // alone, and it must not leave a file-level star re-export behind to
+    // launder the target's value exports into the declaring file's surface.
     let info = parse(
         "declare module 'pkg' {\n\
            export type * from './impl';\n\
          }\n\
          export {};\n",
     );
-    assert!(
-        info.imports.iter().all(|i| i.source != "./impl"),
-        "a type-only ambient star must not record the whole-module import shape: {:?}",
-        info.imports
+    assert_ambient_star_credits_whole_module(&info, "./impl", false, true);
+}
+
+#[test]
+fn ambient_module_type_only_namespace_star_re_export_forwards_the_default_in_type_space() {
+    // `export type * as ns` exposes the namespace object in type space, whose
+    // `default` member is the target's default export, so that form records
+    // the extra default import the plain `export type *` never does.
+    let info = parse(
+        "declare module 'pkg' {\n\
+           export type * as impl from './impl';\n\
+         }\n\
+         export {};\n",
     );
-    let stars: Vec<_> = info
-        .re_exports
-        .iter()
-        .filter(|re| re.source == "./impl")
-        .collect();
-    assert_eq!(
-        stars.len(),
-        1,
-        "expected the file-level type-only star re-export: {:?}",
-        info.re_exports
-    );
-    assert!(
-        stars[0].is_type_only && stars[0].imported_name == "*" && stars[0].exported_name == "*",
-        "the star must stay a type-only `*` re-export: {:?}",
-        stars[0]
-    );
+    assert_ambient_star_credits_whole_module(&info, "./impl", true, true);
 }
 
 #[test]

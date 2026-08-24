@@ -491,6 +491,7 @@ mod tests {
                 imported_name,
                 local_name: "target".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: oxc_span::Span::new(0, 10),
                 source_span: oxc_span::Span::default(),

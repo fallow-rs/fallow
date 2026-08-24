@@ -154,6 +154,15 @@ error by suppressing a downstream detector.
   (#2349), explicitly type-only ambient re-exports, and `import()` type
   references in TypeScript and JSDoc, so the value half of a same-name type
   and value pair reached only that way still reports.
+- The `export type *` and `export type * as ns` spellings of that star
+  (issue #2375) carry the same shape with the import's type-only-star flag
+  set. They forward the same names with every value meaning erased, so they
+  credit the star surface in the type namespace alone: the type half of a
+  same-name pair is credited while its value half keeps reporting, and a
+  value-only export is credited through the type-space fallback lane, the
+  same credit the ambient `export type { x }` form gives. They seed the
+  exposed namespace closure like the plain star, so the chain behind the
+  target keeps the full namespace-object exposure.
 - The exposed namespace closure
   (`ModuleGraph::collect_exposed_namespace_targets`, issues #2357, #2372,
   #2373) is seed-agnostic. Its seeds are every target whose whole namespace

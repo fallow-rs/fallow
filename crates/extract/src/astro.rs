@@ -841,6 +841,7 @@ fn extend_processed_script_src_imports(
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: tag_span,
                 source_span: Span::new(

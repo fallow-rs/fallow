@@ -215,6 +215,7 @@ pub(super) fn synthesize_platform_family_edges(
                         imported_name: ImportedName::SideEffect,
                         local_name: String::new(),
                         is_type_only: re_export.info.is_type_only,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::default(),
                         source_span: oxc_span::Span::default(),

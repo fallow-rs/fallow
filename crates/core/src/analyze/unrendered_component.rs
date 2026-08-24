@@ -887,6 +887,7 @@ mod tests {
                 imported_name: ImportedName::Default,
                 local_name: "Widget".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: Span::default(),
                 source_span: Span::default(),

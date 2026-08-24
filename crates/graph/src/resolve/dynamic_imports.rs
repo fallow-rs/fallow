@@ -174,6 +174,7 @@ fn dynamic_import_with(
             imported_name,
             local_name,
             is_type_only: false,
+            is_type_only_star: false,
             from_style: false,
             span: imp.span,
             source_span: Span::default(),

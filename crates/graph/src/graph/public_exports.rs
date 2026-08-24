@@ -305,6 +305,7 @@ mod tests {
                 imported_name: ImportedName::Named(name.to_string()),
                 local_name: name.to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: oxc_span::Span::new(0, 10),
                 source_span: oxc_span::Span::default(),

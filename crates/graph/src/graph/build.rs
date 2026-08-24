@@ -97,6 +97,7 @@ fn collect_import_edge(
                 local_name: import.info.local_name.clone(),
                 import_span: import.info.span,
                 is_type_only: import.info.is_type_only,
+                is_type_only_star: import.info.is_type_only_star,
                 mechanism: if import.target.is_commonjs_require() {
                     ModuleLoadMechanism::CommonJsRequire
                 } else {
@@ -134,6 +135,7 @@ fn collect_edges_for_module(
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: re_export.info.is_type_only,
+                    is_type_only_star: false,
                     mechanism: ModuleLoadMechanism::EsModule,
                 });
         }
@@ -166,6 +168,7 @@ fn collect_edges_for_module(
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: false,
+                    is_type_only_star: false,
                     mechanism: pattern.mechanism,
                 });
         }
@@ -988,6 +991,7 @@ mod tests {
                 imported_name,
                 local_name: "localVar".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: oxc_span::Span::new(0, 10),
                 source_span: oxc_span::Span::default(),
@@ -1109,6 +1113,7 @@ mod tests {
                 imported_name: ImportedName::Named("FC".to_string()),
                 local_name: "FC".to_string(),
                 is_type_only: true,
+                is_type_only_star: false,
                 from_style: false,
                 span: oxc_span::Span::new(0, 10),
                 source_span: oxc_span::Span::default(),
@@ -1160,6 +1165,7 @@ mod tests {
                         imported_name: ImportedName::Named("c".to_string()),
                         local_name: "c".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 5),
                         source_span: oxc_span::Span::default(),
@@ -1172,6 +1178,7 @@ mod tests {
                         imported_name: ImportedName::Named("a".to_string()),
                         local_name: "a".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(10, 15),
                         source_span: oxc_span::Span::default(),

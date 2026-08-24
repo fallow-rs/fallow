@@ -1,0 +1,9 @@
+{
+  "name": "issue-2375-ambient-type-star",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/ambient.d.ts",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

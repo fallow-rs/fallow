@@ -47,9 +47,10 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   target's full ES star surface for that shape (see
   `docs/reference/detection-internals.md`). The `export * as ns` form adds one
   type-space default import because `ns.default` reaches the target's default
-  export. `export type *` inside the body keeps its file-level type-only star
-  re-export, because the whole-module import shape carries no type modifier.
-  Because ambient bodies are erased at runtime, a re-export from a bare
+  export. `export type *` and `export type * as ns` record the same shape with
+  the import's type-only-star flag set, so the graph credits the same star
+  surface in the type namespace alone. Because ambient bodies are erased at
+  runtime, a re-export from a bare
   specifier inside one counts as type-only package usage. Exported namespaces
   and `declare global` keep their existing behavior.
 - A namespace declared without the `export` keyword (`namespace Foo {}`,

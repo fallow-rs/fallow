@@ -912,6 +912,7 @@ fn module_to_cached_roundtrip_imports() {
                 imported_name: ImportedName::Named("foo".to_string()),
                 local_name: "foo".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: Span::new(0, 10),
                 source_span: Span::new(5, 10),
@@ -921,6 +922,7 @@ fn module_to_cached_roundtrip_imports() {
                 imported_name: ImportedName::Default,
                 local_name: "React".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: Span::new(15, 30),
                 source_span: Span::new(20, 30),
@@ -930,6 +932,7 @@ fn module_to_cached_roundtrip_imports() {
                 imported_name: ImportedName::Namespace,
                 local_name: "all".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: Span::new(35, 50),
                 source_span: Span::new(40, 50),
@@ -939,6 +942,7 @@ fn module_to_cached_roundtrip_imports() {
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: Span::new(55, 70),
                 source_span: Span::new(60, 70),
@@ -1740,19 +1744,36 @@ fn cache_version_mismatch_returns_none() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn module_to_cached_roundtrip_type_only_import() {
     let module = ModuleInfo {
         file_id: FileId(0),
         exports: vec![].into(),
-        imports: vec![ImportInfo {
-            source: "./types".to_string(),
-            imported_name: ImportedName::Named("Foo".to_string()),
-            local_name: "Foo".to_string(),
-            is_type_only: true,
-            from_style: false,
-            span: Span::new(0, 10),
-            source_span: Span::new(5, 10),
-        }],
+        imports: vec![
+            ImportInfo {
+                source: "./types".to_string(),
+                imported_name: ImportedName::Named("Foo".to_string()),
+                local_name: "Foo".to_string(),
+                is_type_only: true,
+                is_type_only_star: false,
+                from_style: false,
+                span: Span::new(0, 10),
+                source_span: Span::new(5, 10),
+            },
+            ImportInfo {
+                source: "./impl".to_string(),
+                imported_name: ImportedName::Namespace,
+                local_name: String::new(),
+                is_type_only: true,
+                is_type_only_star: true,
+                from_style: false,
+                span: Span::new(20, 40),
+                source_span: Span::new(30, 40),
+            },
+        ],
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
@@ -1834,6 +1855,14 @@ fn module_to_cached_roundtrip_type_only_import() {
     assert!(restored.imports[0].is_type_only);
     assert_eq!(restored.imports[0].span.start, 0);
     assert_eq!(restored.imports[0].span.end, 10);
+    assert!(
+        !restored.imports[0].is_type_only_star,
+        "a bound `import type {{ Foo }}` is not the ambient type star"
+    );
+    assert!(
+        restored.imports[1].is_type_only_star,
+        "the ambient `export type *` shape must survive the cache round trip (issue #2375)"
+    );
 }
 
 #[test]
@@ -3881,6 +3910,7 @@ fn module_to_cached_roundtrip_source_span() {
             imported_name: ImportedName::Named("foo".to_string()),
             local_name: "foo".to_string(),
             is_type_only: false,
+            is_type_only_star: false,
             from_style: false,
             span: Span::new(0, 30),
             source_span: Span::new(25, 33),

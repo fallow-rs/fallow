@@ -2630,6 +2630,7 @@ mod tests {
                     imported_name: ImportedName::Namespace,
                     local_name: "shared".to_string(),
                     is_type_only: false,
+                    is_type_only_star: false,
                     from_style: false,
                     span: oxc_span::Span::new(0, 20),
                     source_span: oxc_span::Span::new(8, 20),

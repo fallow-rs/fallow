@@ -482,6 +482,7 @@ mod tests {
                 imported_name: ImportedName::Named("dep".to_string()),
                 local_name: "dep".to_string(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),

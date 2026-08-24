@@ -241,6 +241,7 @@ fn import(source: &str, imported: ImportedName, local: &str, is_type_only: bool)
         imported_name: imported,
         local_name: local.to_string(),
         is_type_only,
+        is_type_only_star: false,
         from_style: false,
         span: oxc_span::Span::new(0, 10),
         source_span: oxc_span::Span::new(0, 10),

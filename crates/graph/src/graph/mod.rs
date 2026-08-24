@@ -222,6 +222,9 @@ pub struct ImportedSymbol {
     /// Whether this import is type-only (`import type { ... }`).
     /// Used to skip type-only edges in circular dependency detection.
     pub is_type_only: bool,
+    /// Whether the ambient star this symbol stands for is spelled
+    /// `export type *` (issue #2375), which forwards type meanings only.
+    pub is_type_only_star: bool,
     /// Runtime module mechanism that created this symbol edge.
     mechanism: ModuleLoadMechanism,
 }
@@ -233,10 +236,11 @@ impl ImportedSymbol {
     /// its `default` member (recorded for the `export * as ns` form).
     ///
     /// The ambient body is erased at runtime, so package usage stays
-    /// type-only, but the star forwards every export of the target in both
-    /// meanings, so the graph credits the type and the value namespace. Every
-    /// other type-only symbol, bound (`import type { x }`) or not (an ambient
-    /// named re-export, an `import()` type reference), credits type space only.
+    /// type-only, but the star forwards every export of the target, so the
+    /// graph credits its star surface instead of narrowing to imported names.
+    /// Every other type-only symbol, bound (`import type { x }`) or not (an
+    /// ambient named re-export, an `import()` type reference), credits the
+    /// names it actually imports.
     #[must_use]
     pub(crate) fn is_ambient_star(&self) -> bool {
         self.is_type_only
@@ -245,6 +249,18 @@ impl ImportedSymbol {
                 self.imported_name,
                 ImportedName::Namespace | ImportedName::Default
             )
+    }
+
+    /// Whether this ambient star forwards both meanings of every name it
+    /// carries.
+    ///
+    /// `export *` inside the body re-exports the target's value and type
+    /// declarations alike, so it credits both namespaces. `export type *`
+    /// erases every value meaning (issue #2375), so it credits type space
+    /// only, exactly like the ambient named re-exports of issue #2349.
+    #[must_use]
+    pub(crate) fn is_value_bearing_ambient_star(&self) -> bool {
+        self.is_ambient_star() && !self.is_type_only_star
     }
 }
 
@@ -1019,7 +1035,7 @@ impl ModuleGraph {
                     symbol.import_span == reference.import_span
                         && (namespace == ExportNamespace::Type
                             || !symbol.is_type_only
-                            || symbol.is_ambient_star())
+                            || symbol.is_value_bearing_ambient_star())
                         && match &symbol.imported_name {
                             ImportedName::Named(imported) => names.contains(imported.as_str()),
                             ImportedName::Default => names.contains("default"),
@@ -1360,6 +1376,7 @@ mod tests {
                         imported_name: ImportedName::Named("foo".to_string()),
                         local_name: "foo".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1499,6 +1516,7 @@ mod tests {
                         imported_name: ImportedName::Named("runtimeOnly".to_string()),
                         local_name: "runtimeOnly".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1533,6 +1551,7 @@ mod tests {
                         imported_name: ImportedName::Named("covered".to_string()),
                         local_name: "covered".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1550,6 +1569,7 @@ mod tests {
                         imported_name: ImportedName::Named("runtimeOnly".to_string()),
                         local_name: "runtimeOnly".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1667,6 +1687,7 @@ mod tests {
                         imported_name: ImportedName::Namespace,
                         local_name: "utils".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1745,6 +1766,7 @@ mod tests {
                             imported_name: ImportedName::Namespace,
                             local_name: "utils".to_string(),
                             is_type_only: false,
+                            is_type_only_star: false,
                             from_style: false,
                             span: oxc_span::Span::new(0, 10),
                             source_span: oxc_span::Span::default(),
@@ -1757,6 +1779,7 @@ mod tests {
                             imported_name: ImportedName::Named("foo".to_string()),
                             local_name: "foo".to_string(),
                             is_type_only: false,
+                            is_type_only_star: false,
                             from_style: false,
                             span: oxc_span::Span::new(11, 20),
                             source_span: oxc_span::Span::default(),
@@ -1845,6 +1868,7 @@ mod tests {
                         imported_name: ImportedName::Named("foo".to_string()),
                         local_name: "foo".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1924,6 +1948,7 @@ mod tests {
                         imported_name: ImportedName::Default,
                         local_name: "React".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -1936,6 +1961,7 @@ mod tests {
                         imported_name: ImportedName::Named("merge".to_string()),
                         local_name: "merge".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(15, 30),
                         source_span: oxc_span::Span::default(),
@@ -2100,6 +2126,7 @@ mod tests {
                             imported_name: ImportedName::Named("Foo".to_string()),
                             local_name: "Foo".to_string(),
                             is_type_only: true,
+                            is_type_only_star: false,
                             from_style: false,
                             span: oxc_span::Span::new(10, 20),
                             source_span: oxc_span::Span::default(),
@@ -2112,6 +2139,7 @@ mod tests {
                             imported_name: ImportedName::Named("foo".to_string()),
                             local_name: "foo".to_string(),
                             is_type_only: false,
+                            is_type_only_star: false,
                             from_style: false,
                             span: oxc_span::Span::new(50, 60),
                             source_span: oxc_span::Span::default(),
@@ -2181,6 +2209,7 @@ mod tests {
                         imported_name: ImportedName::Named("FC".to_string()),
                         local_name: "FC".to_string(),
                         is_type_only: true,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -2193,6 +2222,7 @@ mod tests {
                         imported_name: ImportedName::Named("useState".to_string()),
                         local_name: "useState".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(15, 30),
                         source_span: oxc_span::Span::default(),
@@ -2236,6 +2266,7 @@ mod tests {
                         imported_name: ImportedName::Default,
                         local_name: "Utils".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -2305,6 +2336,7 @@ mod tests {
                         imported_name: ImportedName::SideEffect,
                         local_name: String::new(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
@@ -2388,6 +2420,7 @@ mod tests {
                         imported_name: ImportedName::Named("helper".to_string()),
                         local_name: "helper".to_string(),
                         is_type_only: false,
+                        is_type_only_star: false,
                         from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),

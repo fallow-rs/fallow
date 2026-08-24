@@ -50,6 +50,7 @@ pub fn extract_graphql_imports(source: &str) -> Vec<ImportInfo> {
             imported_name: ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
+            is_type_only_star: false,
             from_style: false,
             span: cap
                 .get(0)

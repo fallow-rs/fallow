@@ -1590,6 +1590,7 @@ impl<'a> ModuleInfoExtractor {
             imported_name: ImportedName::Named(s.imported.name().to_string()),
             local_name: s.local.name.to_string(),
             is_type_only: is_type_only || s.import_kind.is_type(),
+            is_type_only_star: false,
             from_style: false,
             span: s.span,
             source_span,
@@ -1618,6 +1619,7 @@ impl<'a> ModuleInfoExtractor {
             imported_name: ImportedName::Default,
             local_name: local,
             is_type_only,
+            is_type_only_star: false,
             from_style: false,
             span: s.span,
             source_span,
@@ -1652,6 +1654,7 @@ impl<'a> ModuleInfoExtractor {
             imported_name: ImportedName::Namespace,
             local_name: local,
             is_type_only,
+            is_type_only_star: false,
             from_style: false,
             span: s.span,
             source_span,
@@ -2241,6 +2244,7 @@ impl<'a> ModuleInfoExtractor {
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),
@@ -2253,6 +2257,7 @@ impl<'a> ModuleInfoExtractor {
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),
@@ -2600,6 +2605,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
+                is_type_only_star: false,
                 from_style: false,
                 span: decl.span,
                 source_span,
@@ -2669,6 +2675,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         imported_name: ImportedName::SideEffect,
                         local_name: String::new(),
                         is_type_only: true,
+                        is_type_only_star: false,
                         from_style: false,
                         span: decl.span,
                         source_span: source.span,
@@ -2680,6 +2687,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                             imported_name: ImportedName::Named(spec.local.name().to_string()),
                             local_name: String::new(),
                             is_type_only: true,
+                            is_type_only_star: false,
                             from_style: false,
                             span: spec.span,
                             source_span: source.span,
@@ -2831,20 +2839,23 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // surface (see the ambient guard in `visit_export_named_declaration`),
         // while a bare side-effect edge would drop the credit entirely. A
         // type-space namespace import with no local binding is the star
-        // surface: the graph credits every named export of the target in both
-        // meanings, and a bare specifier counts as type-only package usage.
-        // `export *` never forwards `default`; `export * as ns` forwards the
-        // namespace object, whose `default` member is the target's default
-        // export, so that form records it as its own import. `export type *`
-        // forwards type meanings only; the whole-module shape carries no type
-        // modifier, so it keeps the file-level type-only star re-export.
-        if self.ambient_module_depth > 0 && !decl.export_kind.is_type() {
+        // surface: the graph credits every named export of the target, and a
+        // bare specifier counts as type-only package usage. `export *` never
+        // forwards `default`; `export * as ns` forwards the namespace object,
+        // whose `default` member is the target's default export, so that form
+        // records it as its own import. `export type *` takes the same shape
+        // with `is_type_only_star` set (issue #2375): it forwards the same
+        // names with every value meaning erased, so the graph credits that
+        // surface in the type namespace alone instead of in both.
+        if self.ambient_module_depth > 0 {
             let source = decl.source.value.to_string();
+            let is_type_only_star = decl.export_kind.is_type();
             self.imports.push(ImportInfo {
                 source: source.clone(),
                 imported_name: ImportedName::Namespace,
                 local_name: String::new(),
                 is_type_only: true,
+                is_type_only_star,
                 from_style: false,
                 span: decl.span,
                 source_span: decl.source.span,
@@ -2855,6 +2866,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     imported_name: ImportedName::Default,
                     local_name: String::new(),
                     is_type_only: true,
+                    is_type_only_star,
                     from_style: false,
                     span: decl.span,
                     source_span: decl.source.span,
@@ -3132,6 +3144,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             imported_name,
             local_name: String::new(),
             is_type_only: true,
+            is_type_only_star: false,
             from_style: false,
             span: node.span,
             source_span,
@@ -4424,6 +4437,7 @@ impl ModuleInfoExtractor {
             imported_name: ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
+            is_type_only_star: false,
             from_style: false,
             span: oxc_span::Span::default(),
             source_span: oxc_span::Span::default(),

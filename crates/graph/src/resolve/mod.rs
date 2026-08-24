@@ -746,6 +746,7 @@ fn synthetic_auto_import_info(name: &str, kind: AutoImportKind) -> ImportInfo {
         imported_name,
         local_name: name.to_string(),
         is_type_only: false,
+        is_type_only_star: false,
         from_style: false,
         span: Span::default(),
         source_span: Span::default(),

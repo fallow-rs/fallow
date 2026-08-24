@@ -193,6 +193,7 @@ mod tests {
                     imported_name: ImportedName::Named("helper".to_string()),
                     local_name: "helper".to_string(),
                     is_type_only: false,
+                    is_type_only_star: false,
                     from_style: false,
                     span: Span::new(0, 10),
                     source_span: Span::default(),

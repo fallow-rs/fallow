@@ -187,7 +187,14 @@ pub use store::GraphCacheStore;
 /// CommonJS namespace import edge, and the references it credits are baked into
 /// the persisted graph. Warm 42 caches hold the module without that edge, so
 /// the target would stay reported as an unused file on upgrade.
-pub const GRAPH_CACHE_VERSION: u32 = 43;
+///
+/// Bumped to 44 for issue #2375: `export type *` inside a `declare module`
+/// body now carries a type-only-star symbol edge instead of a file-level star
+/// re-export, and the type-lane-only credit it hands the target is baked into
+/// the persisted graph. Warm 43 caches hold the re-export edge, the laundered
+/// entry surface, and the value-lane credits, and a graph-cache hit skips the
+/// build entirely.
+pub const GRAPH_CACHE_VERSION: u32 = 44;
 
 /// Cached form of a resolved target.
 ///
@@ -402,6 +409,7 @@ impl From<CachedImportInfo> for ImportInfo {
             imported_name: info.imported_name,
             local_name: info.local_name,
             is_type_only: info.is_type_only,
+            is_type_only_star: false,
             from_style: info.from_style,
             span: pair_to_span(info.span),
             source_span: pair_to_span(info.source_span),
@@ -1014,6 +1022,7 @@ mod tests {
             imported_name: fallow_types::extract::ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
+            is_type_only_star: false,
             from_style: false,
             span: Span::new(0, 0),
             source_span: Span::new(0, 0),
