@@ -59,6 +59,7 @@ fn resolve_programmatic_analysis_context_inner(
     let root = resolve_analysis_root(options.root.as_deref())?;
     validate_analysis_config_path(options.config_path.as_deref())?;
     let threads = options.threads.unwrap_or_else(default_threads);
+    debug_mcp_phase("analysis pool build starting");
     let pool = fallow_engine::thread_pool::worker_pool_builder(threads)
         .build()
         .map_err(|err| {
@@ -66,6 +67,7 @@ fn resolve_programmatic_analysis_context_inner(
                 .with_code("FALLOW_THREAD_POOL_INIT_FAILED")
                 .with_context("analysis.threads")
         })?;
+    debug_mcp_phase("analysis pool build returned");
     let diff = options
         .diff_file
         .as_deref()
@@ -154,7 +156,10 @@ pub fn validate_analysis_config_path(config_path: Option<&Path>) -> Programmatic
 impl ProgrammaticAnalysisContext {
     /// Run work inside the per-call Rayon pool.
     pub fn install<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
-        self.pool.install(f)
+        debug_mcp_phase("analysis pool install starting");
+        let result = self.pool.install(f);
+        debug_mcp_phase("analysis pool install returned");
+        result
     }
 
     /// Resolved analysis root.
@@ -221,6 +226,12 @@ impl ProgrammaticAnalysisContext {
     #[must_use]
     pub const fn explain_enabled(&self) -> bool {
         self.explain
+    }
+}
+
+fn debug_mcp_phase(message: &str) {
+    if std::env::var_os("FALLOW_MCP_PHASE_DEBUG").is_some() {
+        eprintln!("FALLOW_MCP_PHASE: {message}");
     }
 }
 

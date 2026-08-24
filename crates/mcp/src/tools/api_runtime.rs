@@ -30,7 +30,12 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, ProgrammaticError> + Send + 'static,
 {
-    let task = tokio::task::spawn_blocking(task);
+    let task = tokio::task::spawn_blocking(move || {
+        debug_mcp_phase("typed task starting");
+        let result = task();
+        debug_mcp_phase("typed task returned");
+        result
+    });
     match tokio::time::timeout(timeout, task).await {
         Ok(Ok(result)) => Ok(result),
         Ok(Err(err)) => Err(McpError::internal_error(
@@ -46,6 +51,12 @@ where
             "Set FALLOW_TIMEOUT_SECS to increase the response deadline. API-backed analysis may finish in-process after the MCP timeout response.",
         )
         .with_context(tool))),
+    }
+}
+
+fn debug_mcp_phase(message: &str) {
+    if std::env::var_os("FALLOW_MCP_PHASE_DEBUG").is_some() {
+        eprintln!("FALLOW_MCP_PHASE: {message}");
     }
 }
 

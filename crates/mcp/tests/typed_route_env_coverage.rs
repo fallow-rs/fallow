@@ -248,6 +248,9 @@ impl McpServer {
         with_type_aware_sidecar: bool,
     ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
+        command
+            .env("FALLOW_MCP_PHASE_DEBUG", "1")
+            .env("FALLOW_TIMEOUT_SECS", "15");
         if with_type_aware_sidecar {
             configure_type_aware_sidecar(&mut command);
         }
@@ -268,7 +271,7 @@ impl McpServer {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::inherit())
             .spawn()
             .expect("spawn fallow-mcp");
 
