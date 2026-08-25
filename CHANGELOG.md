@@ -43,6 +43,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is tracked by git. `init --agents` and `hooks install --target agent` are
   unchanged and remain the single-piece commands underneath.
 
+- **The MCP server exposes reference material as resources.** `fallow-mcp`
+  now declares the `resources` capability next to `tools`. Agents can list and
+  read `fallow://tools` (the tool manifest with CLI fallbacks),
+  `fallow://issue-types` (every issue type with its zero-config default
+  severity, opt-in and fixable flags, and docs URL), `fallow://explain` (an
+  index) plus the `fallow://explain/{issue_type}` template (the same document
+  `fallow explain <issue-type> --format json` prints), `fallow://task-matrix`
+  (which read-only command to run before a task), and
+  `fallow://schema/config`, `fallow://schema/plugin`, and
+  `fallow://schema/rule-pack` (the JSON Schemas). Everything is rendered
+  in-process, is JSON, and carries `fallow_version`, so a client can cache by
+  URI and invalidate on server version; unknown URIs and issue types return a
+  structured `resource_not_found` error with the known URIs or the nearest
+  issue types. `fallow schema` gains a matching `mcp_resources` block and the
+  shipped skill reference gains a generated resource table.
 - **size-limit presets, plugins, and config files are recognized**
   ([#2413](https://github.com/fallow-rs/fallow/pull/2413)). size-limit loads
   `@size-limit/*` and `size-limit-*` packages from `package.json` by convention

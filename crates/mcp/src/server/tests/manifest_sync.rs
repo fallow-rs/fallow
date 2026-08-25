@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 
-use fallow_types::mcp_manifest::MCP_TOOLS;
+use fallow_types::mcp_manifest::{MCP_RESOURCES, MCP_TOOLS};
 use fallow_types::suppress::DEAD_CODE_FILTER_FLAGS;
 
 use super::super::FallowMcp;
@@ -109,6 +109,75 @@ fn manifest_read_only_matches_live_annotations() {
             entry.name
         );
     }
+}
+
+/// The shared resource manifest must match the live catalogue in both
+/// directions (names and URIs), and the MIME type each row advertises must be
+/// the one the live reader returns; `fallow schema`'s `mcp_resources` block
+/// and the generated skill reference are projections of this manifest.
+#[test]
+fn resource_manifest_matches_live_catalogue_both_directions() {
+    let live_resources = crate::resources::list_resources();
+    let live_templates = crate::resources::list_resource_templates();
+
+    let live: BTreeSet<(String, String)> = live_resources
+        .iter()
+        .map(|r| (r.name.clone(), r.uri.clone()))
+        .chain(
+            live_templates
+                .iter()
+                .map(|t| (t.name.clone(), t.uri_template.clone())),
+        )
+        .collect();
+    let manifest: BTreeSet<(String, String)> = MCP_RESOURCES
+        .iter()
+        .map(|r| (r.name.to_string(), r.uri.to_string()))
+        .collect();
+    assert_eq!(
+        live, manifest,
+        "fallow_types::mcp_manifest::MCP_RESOURCES must list exactly the resources and \
+         templates the MCP server serves; update the shared manifest when adding, renaming, or \
+         removing a resource"
+    );
+
+    for entry in MCP_RESOURCES {
+        let live_mime = if entry.template {
+            live_templates
+                .iter()
+                .find(|t| t.uri_template == entry.uri)
+                .and_then(|t| t.mime_type.clone())
+        } else {
+            live_resources
+                .iter()
+                .find(|r| r.uri == entry.uri)
+                .and_then(|r| r.mime_type.clone())
+        };
+        assert_eq!(
+            live_mime.as_deref(),
+            Some(entry.mime_type),
+            "manifest mime_type for {} diverges from the live catalogue",
+            entry.uri
+        );
+        assert_eq!(
+            entry.template,
+            live_templates.iter().any(|t| t.uri_template == entry.uri),
+            "manifest template flag for {} diverges from where the server lists it",
+            entry.uri
+        );
+    }
+
+    let sample = crate::resources::read_resource("fallow://explain/unused-export")
+        .expect("template expansion reads");
+    let [rmcp::model::ResourceContents::TextResourceContents { mime_type, .. }] =
+        sample.contents.as_slice()
+    else {
+        panic!("template expansion returns one text content");
+    };
+    let template = MCP_RESOURCES
+        .iter()
+        .find(|r| r.template)
+        .expect("explain template in manifest");
+    assert_eq!(mime_type.as_deref(), Some(template.mime_type));
 }
 
 #[test]

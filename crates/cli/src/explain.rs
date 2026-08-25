@@ -14,7 +14,7 @@ use crate::report::sink::outln;
 pub use fallow_api::{
     CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, RuleGuide, SECURITY_RULES,
     coverage_analyze_meta, coverage_setup_meta, rule_by_id, rule_by_token, rule_docs_url,
-    rule_guide, security_meta, serialize_explain_programmatic_json,
+    rule_guide, rule_severity_key, security_meta, serialize_explain_programmatic_json,
 };
 
 /// Run the standalone explain subcommand.

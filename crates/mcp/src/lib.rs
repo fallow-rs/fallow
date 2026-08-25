@@ -14,6 +14,7 @@ use rmcp::transport::stdio;
 use tracing_subscriber::EnvFilter;
 
 mod params;
+mod resources;
 mod server;
 mod tools;
 

@@ -1714,6 +1714,24 @@ pub fn counted_result_issue_metas() -> impl Iterator<Item = &'static IssueResult
     result_issue_metas().filter(|meta| meta.counts_in_total)
 }
 
+/// Canonical issue codes `fallow fix` can rewrite automatically. Shared by the
+/// `fallow schema` `issue_types` rows (`fixable`) and the `fallow://issue-types`
+/// MCP resource so the two surfaces never disagree on fixability.
+pub const FIXABLE_ISSUE_CODES: &[&str] = &[
+    "unused-export",
+    "unused-enum-member",
+    "unused-dependency",
+    "unused-dev-dependency",
+    "unused-optional-dependency",
+    "unused-catalog-entry",
+];
+
+/// Whether `fallow fix` can rewrite findings of a canonical issue code.
+#[must_use]
+pub fn issue_is_fixable(code: &str) -> bool {
+    FIXABLE_ISSUE_CODES.contains(&code)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -1721,6 +1739,18 @@ mod tests {
     use crate::results::TOTAL_ISSUE_RESULT_KEYS;
 
     use super::*;
+
+    #[test]
+    fn fixable_codes_are_canonical_issue_codes() {
+        for code in FIXABLE_ISSUE_CODES {
+            assert!(
+                issue_meta_by_code(code).is_some(),
+                "fixable code {code} is not a canonical ISSUE_KIND_META code"
+            );
+        }
+        assert!(issue_is_fixable("unused-export"));
+        assert!(!issue_is_fixable("unused-file"));
+    }
 
     #[test]
     fn known_names_round_trip_through_metadata() {

@@ -2,7 +2,7 @@
 
 The fallow MCP server (`fallow-mcp`) exposes fallow's analyses as agent tools. This is the full catalogue: each tool's kind, license, nearest CLI fallback, key params, plus the agent guidance the live tool schemas do not carry (CLI-fallback mapping, runtime-coverage confidence tiers, and `next_steps` dispatch). SKILL.md keeps only a short pointer; load this file when driving fallow through MCP.
 
-The `generated:mcp-tools` table below is regenerated from `fallow schema` by scripts/generate-agent-docs.mjs; edit the curated Description cells in place, never the identity columns.
+The `generated:mcp-tools` and `generated:mcp-resources` tables below are regenerated from `fallow schema` by scripts/generate-agent-docs.mjs; edit the curated Description cells in place, never the identity columns.
 
 ## Tool catalogue
 
@@ -47,6 +47,23 @@ When using fallow via MCP (`fallow-mcp`), the following tools are available:
 | `trace_dependency` | trace | free | `fallow dead-code --trace-dependency <package> --format json --quiet` | `package_name` | Trace where a dependency is imported (`fallow dead-code --trace-dependency PACKAGE --format json`). Required `package_name`. Returns importing files, type-only importers, total import count, `used_in_scripts` (true when invoked from package.json scripts or CI configs), and `is_used` (combined import + script signal; mirrors the unused-deps detector so build tools like `microbundle` or `vitest` are not falsely flagged as unused). Use before removing a dependency or moving between `dependencies` and `devDependencies` |
 | `trace_clone` | trace | free | `fallow dupes --trace <file:line> --format json --quiet` | `file`, `line`, `fingerprint`, `near`, `min_occurrences` | Deep-dive a duplicate-code clone group (`fallow dupes --trace <spec> --format json`). Address by exactly one of: `file` + `line` (a source location), or `fingerprint` (a `dup:<id>` from a prior `find_dupes` `clone_groups[].fingerprint`, usually `dup:<8hex>` and widened only on rare report collisions). Returns the matched clone instance plus every clone group containing it; each traced group carries its `fingerprint`, an extract-function `suggestion` with estimated savings, and a best-effort `suggested_name` (omitted when no confident name). Supports `mode`, `near`, `min_tokens`, `min_lines`, `min_occurrences`, `threshold`, `skip_local`, `cross_language`, `ignore_imports`. Use the same `near` value as the originating `find_dupes` call. Use to consolidate duplication when you need exact sibling locations and a refactor target |
 <!-- generated:mcp-tools:end -->
+
+## Resource catalogue
+
+Resources are the server's read-only reference channel: compile-time material an agent can list (`resources/list`, `resources/templates/list`) and read (`resources/read`) without spending a tool call or running analysis. Every payload is JSON and carries `fallow_version`, so cache by URI and invalidate when the server version changes. The catalogue is static (no `subscribe`, no `listChanged`). Read `fallow://explain/{issue_type}` instead of calling `fallow_explain` when you only need the reference document; `issue_type` accepts the bare id (`unused-export`), the namespaced rule id (`security/sql-injection`), or the CLI filter spelling (`unused-exports`). An unknown URI or issue type returns a structured `resource_not_found` error listing the known URIs or the nearest issue types.
+
+<!-- generated:mcp-resources:start -->
+| Resource | Name | Kind | MIME | Description |
+|---|---|---|---|---|
+| `fallow://tools` | `tools` | static | `application/json` | MCP tool manifest: name, kind, one-line description, nearest CLI fallback, key params, license, and read-only flag for every tool |
+| `fallow://issue-types` | `issue-types` | static | `application/json` | Every issue type with its command, category, config key, zero-config default severity, opt-in flag, fixable flag, docs URL, and explain resource URI |
+| `fallow://explain` | `explain` | static | `application/json` | Index of every explainable issue type with its one-line summary and the fallow://explain/{issue_type} URI to read |
+| `fallow://task-matrix` | `task-matrix` | static | `application/json` | Agent task-to-command matrix: which read-only fallow command to run before deleting, refactoring, committing, or scoping work |
+| `fallow://schema/config` | `schema-config` | static | `application/json` | JSON Schema of the fallow config file (same document as fallow config-schema) |
+| `fallow://schema/plugin` | `schema-plugin` | static | `application/json` | JSON Schema of a user-authored external plugin (same document as fallow plugin-schema) |
+| `fallow://schema/rule-pack` | `schema-rule-pack` | static | `application/json` | JSON Schema of a declarative rule pack (same document as fallow rule-pack-schema) |
+| `fallow://explain/{issue_type}` | `explain-issue-type` | template | `application/json` | Explain document for one issue type (same payload as fallow explain <issue-type> --format json): name, summary, rationale, example, fix guidance, docs URL |
+<!-- generated:mcp-resources:end -->
 
 ## How type-aware proof relates to the root trace
 

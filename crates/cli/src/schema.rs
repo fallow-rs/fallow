@@ -4,14 +4,15 @@ use clap::{CommandFactory, ValueEnum};
 #[cfg(test)]
 use fallow_output::issue_output_contracts;
 use fallow_output::{TsAliasMeta, issue_output_contract_by_code};
-use fallow_types::issue_meta::{ISSUE_KIND_META, issue_meta_by_code};
-use fallow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
+use fallow_types::issue_meta::{ISSUE_KIND_META, issue_is_fixable, issue_meta_by_code};
+use fallow_types::mcp_manifest::{MCP_RESOURCES, MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
 use fallow_types::suppress::IssueKind;
 
 use crate::Cli;
 use crate::cli_format::Format;
 use crate::explain::{
     CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, SECURITY_RULES, rule_docs_url,
+    rule_severity_key,
 };
 
 pub fn run_schema(json_style: crate::json_style::JsonStyle) -> ExitCode {
@@ -98,6 +99,7 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
         "taste_choices": crate::onboarding::taste_choices_schema(),
         "security_categories": security_categories_schema(),
         "mcp_tools": mcp_tools_schema(),
+        "mcp_resources": mcp_resources_schema(),
         "plugins": plugins_schema(),
         "task_matrix": task_matrix_schema(),
     })
@@ -185,22 +187,17 @@ fn task_matrix_schema() -> serde_json::Value {
     serde_json::Value::Array(
         crate::task_matrix::TASK_MATRIX
             .iter()
-            .map(|row| {
-                serde_json::json!({
-                    "task": row.task,
-                    "command": row.command,
-                    "note": row.note,
-                })
-            })
+            .map(fallow_types::task_matrix::TaskRow::to_json)
             .collect(),
     )
 }
 
 /// Per-issue-type metadata that cannot be derived from the explain rule
-/// registry: CLI filter flag, fixability, suppression-comment shape, and
-/// caveats. A rule without an arm in the per-command meta functions below
-/// gets safe defaults (no filter flag, not fixable, not suppressible);
-/// add an arm when a new rule has any of those capabilities.
+/// registry: CLI filter flag, suppression-comment shape, and caveats.
+/// Fixability comes from the shared `FIXABLE_ISSUE_CODES` list. A rule without
+/// an arm in the per-command meta functions below gets safe defaults (no
+/// filter flag, not suppressible); add an arm when a new rule has any of those
+/// capabilities.
 #[derive(Default)]
 struct IssueTypeMeta {
     label: Option<&'static str>,
@@ -227,7 +224,10 @@ struct IssueTypeMeta {
 
 impl IssueTypeMeta {
     fn from_shared(bare_id: &str) -> Self {
-        let mut meta = Self::default();
+        let mut meta = Self {
+            fixable: issue_is_fixable(bare_id),
+            ..Self::default()
+        };
         if let Some(shared) = issue_meta_by_code(bare_id) {
             meta.label = Some(shared.label);
             meta.config_key = shared.config_key;
@@ -281,15 +281,11 @@ fn security_categories_schema() -> serde_json::Value {
 
 fn issue_types_schema() -> serde_json::Value {
     // A flat map of config_key -> default severity string, serialized ONCE from
-    // RulesConfig::default(). This is the single source of default severities
-    // and covers every rule that has a `rules.*` config field, including rules
-    // that carry no distinct IssueKind (e.g. unused-optional-dependency, whose
-    // finding folds into another kind but which is independently configurable).
-    // Infallible in practice (a flat struct of Severity enums); the empty-map
-    // fallback keeps this panic-free and simply yields null default_severity if
-    // serialization ever changed shape.
-    let default_severities = serde_json::to_value(fallow_config::RulesConfig::default())
-        .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
+    // RulesConfig::default() through the shared fallow-api accessor. It covers
+    // every rule that has a `rules.*` config field, including rules that carry
+    // no distinct IssueKind (e.g. unused-optional-dependency, whose finding
+    // folds into another kind but which is independently configurable).
+    let default_severities = fallow_api::schemas::default_rule_severities();
     let mut rows = Vec::new();
     for rule in CHECK_RULES {
         rows.push(issue_type_row(rule, "dead-code", &default_severities));
@@ -341,16 +337,13 @@ fn issue_type_row(
         .registry_index
         .and_then(|i| ISSUE_KIND_META.get(i))
         .and_then(|m| m.kind);
-    // Default severity comes from the rule that GATES this finding: its own
-    // `config_key` when it is a 1:1 rule, else the suppression token's rule when
-    // the finding is gated by a shared rule (every tainted-sink category is
-    // gated by `security-sink`; coverage findings by `coverage-gaps`). This lets
-    // opt-in command families (security, coverage) expose default_severity/opt_in
-    // like any other rule instead of reading as null. Stays null only for
-    // findings with no `rules.*` gate at all (complexity, duplication metrics).
-    let severity_key = meta
-        .config_key
-        .or_else(|| meta.suppress.map(|(token, _)| token));
+    // Default severity comes from the rule that GATES this finding (see
+    // `fallow_api::rule_severity_key`, shared with the MCP issue-type resource).
+    // This lets opt-in command families (security, coverage) expose
+    // default_severity/opt_in like any other rule instead of reading as null.
+    // Stays null only for findings with no `rules.*` gate at all (complexity,
+    // duplication metrics).
+    let severity_key = rule_severity_key(rule);
     let default_severity = severity_key
         .and_then(|key| default_severities.get(key))
         .and_then(serde_json::Value::as_str)
@@ -421,18 +414,16 @@ fn apply_dead_code_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
     apply_source_issue_meta(bare_id, m);
     apply_dependency_issue_meta(bare_id, m);
     apply_architecture_issue_meta(bare_id, m);
-    apply_catalog_issue_meta(bare_id, m);
 }
 
 fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
-        "unused-export" | "unused-enum-member" => {
-            m.fixable = true;
-        }
         "private-type-leak" => {
             m.note = Some("Opt-in API hygiene check; the rule defaults to off");
         }
-        "unused-file"
+        "unused-export"
+        | "unused-enum-member"
+        | "unused-file"
         | "unused-type"
         | "unresolved-import"
         | "missing-suppression-reason"
@@ -477,7 +468,6 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
 fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
         "unused-dependency" | "unused-dev-dependency" | "unused-optional-dependency" => {
-            m.fixable = true;
             m.note = Some(
                 "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
             );
@@ -516,20 +506,6 @@ fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
         "invalid-client-export" | "mixed-client-server-barrel" | "misplaced-directive" => {
             m.note = Some("Requires the project to declare next");
         }
-        _ => return false,
-    }
-    true
-}
-
-fn apply_catalog_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
-    match bare_id {
-        "unused-catalog-entry" => {
-            m.fixable = true;
-        }
-        "empty-catalog-group"
-        | "unresolved-catalog-reference"
-        | "unused-dependency-override"
-        | "misconfigured-dependency-override" => {}
         _ => return false,
     }
     true
@@ -611,23 +587,28 @@ fn apply_security_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
 fn mcp_tools_schema() -> serde_json::Value {
     let tools: Vec<serde_json::Value> = MCP_TOOLS
         .iter()
-        .map(|tool| {
-            serde_json::json!({
-                "name": tool.name,
-                "kind": tool.kind,
-                "description": tool.description,
-                "cli_command": tool.cli_command,
-                "key_params": tool.key_params,
-                "license": tool.license.as_str(),
-                "license_note": tool.license_note,
-                "read_only": tool.read_only,
-            })
-        })
+        .map(fallow_types::mcp_manifest::McpToolInfo::to_json)
         .collect();
     serde_json::json!({
         "server": "fallow-mcp",
         "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list. cli_command is the nearest CLI fallback, not a full MCP input-schema projection",
         "tools": tools,
+    })
+}
+
+/// MCP resource catalogue (`resources/list` plus `resources/templates/list`),
+/// projected from the shared `fallow_types::mcp_manifest::MCP_RESOURCES`
+/// manifest so the capability manifest, the generated skill reference, and the
+/// live server agree on URIs, names, and MIME types.
+fn mcp_resources_schema() -> serde_json::Value {
+    let resources: Vec<serde_json::Value> = MCP_RESOURCES
+        .iter()
+        .map(fallow_types::mcp_manifest::McpResourceInfo::to_json)
+        .collect();
+    serde_json::json!({
+        "server": "fallow-mcp",
+        "note": "Read-only reference material served in-process by fallow-mcp; every JSON payload carries fallow_version. Rows with template: true are RFC 6570 URI templates listed under resources/templates/list; the catalogue is static, so the server declares neither subscribe nor listChanged",
+        "resources": resources,
     })
 }
 
@@ -1830,6 +1811,35 @@ mod tests {
     }
 
     #[test]
+    fn mcp_resources_block_lists_every_manifest_resource() {
+        let schema = schema();
+        let block = &schema["mcp_resources"];
+        assert_eq!(block["server"], "fallow-mcp");
+        assert!(block["note"].is_string());
+        let resources = block["resources"].as_array().unwrap();
+        assert_eq!(resources.len(), MCP_RESOURCES.len());
+        for (row, manifest) in resources.iter().zip(MCP_RESOURCES) {
+            let obj = row.as_object().unwrap();
+            for key in ["uri", "name", "description", "mime_type", "template"] {
+                assert!(
+                    obj.contains_key(key),
+                    "mcp resource {} missing key {key}",
+                    row["uri"]
+                );
+            }
+            assert_eq!(row["uri"], manifest.uri);
+            assert_eq!(row["name"], manifest.name);
+            assert_eq!(row["mime_type"], manifest.mime_type);
+            assert_eq!(row["template"], manifest.template);
+        }
+        let template = resources
+            .iter()
+            .find(|r| r["template"] == true)
+            .expect("explain template in mcp_resources");
+        assert_eq!(template["uri"], "fallow://explain/{issue_type}");
+    }
+
+    #[test]
     fn plugins_block_reflects_live_registry() {
         let schema = schema();
         let block = &schema["plugins"];
@@ -1954,7 +1964,7 @@ mod tests {
             let after_fallow = row.command.strip_prefix("fallow ").unwrap_or(row.command);
             let first_token = after_fallow.split_whitespace().next().unwrap_or("");
             assert!(
-                !crate::task_matrix::MUTATING_COMMANDS.contains(&first_token),
+                !fallow_types::task_matrix::MUTATING_COMMANDS.contains(&first_token),
                 "task matrix command '{}' names mutating token '{first_token}'",
                 row.command
             );

@@ -13,7 +13,9 @@
  *
  * references/mcp.md carries the `generated:mcp-tools:*` section (moved out of
  * SKILL.md so the always-loaded entry file stays lean; SKILL.md keeps only a
- * pointer). CLI reference sections use `generated:flags:*` markers for global
+ * pointer) and the `generated:mcp-resources:*` section (the resource
+ * catalogue the server lists under resources/list and
+ * resources/templates/list). CLI reference sections use `generated:flags:*` markers for global
  * flags, bare `fallow` combined-mode flags, command-local flags, and the
  * dead-code issue filter table.
  *
@@ -23,9 +25,9 @@
  * Merge-splice contract:
  * - IDENTITY columns are always regenerated from the manifest (row set, ids,
  *   filter flags, fixable, suppress comments; kind/license/key-params on
- *   mcp-tools).
+ *   mcp-tools; name/MIME/template on mcp-resources).
  * - CURATED columns (`Purpose` and `Key Flags` on commands, `Description` on
- *   issue-types and mcp-tools) are hand-owned: existing cells are preserved
+ *   issue-types, mcp-tools, and mcp-resources) are hand-owned: existing cells are preserved
  *   across regenerations, keyed by the row id in the first column. New rows
  *   seed the curated cell from the manifest; rows whose id left the manifest
  *   are dropped. Note the asymmetry: `Key params` on mcp-tools regenerates
@@ -68,7 +70,7 @@ const SKILL_SECTION_IDS = ["commands", "issue-types", "task-matrix"];
 // catalogue is reference-grade and (when the server is connected) already
 // advertised via live tool schemas, so it does not belong in the always-loaded
 // entry file. SKILL.md keeps only a short pointer section.
-const MCP_REFERENCE_SECTION_IDS = ["mcp-tools"];
+const MCP_REFERENCE_SECTION_IDS = ["mcp-tools", "mcp-resources"];
 const CLI_REFERENCE_SECTION_IDS = [
   "flags:global",
   "flags:fallow-combined",
@@ -391,6 +393,22 @@ const renderMcpToolsSection = (schema, existing) => {
   return renderTable(headers, rows);
 };
 
+/** MCP resource catalogue: concrete resources and RFC 6570 templates the
+ * server lists under resources/list and resources/templates/list. Identity
+ * columns (URI, name, kind, MIME) regenerate every run; Description is curated
+ * per URI like the mcp-tools table. */
+const renderMcpResourcesSection = (schema, existing) => {
+  const headers = ["Resource", "Name", "Kind", "MIME", "Description"];
+  const rows = (schema.mcp_resources?.resources ?? []).map((resource) => [
+    code(resource.uri),
+    code(resource.name),
+    resource.template ? "template" : "static",
+    code(resource.mime_type),
+    curatedCell(existing, resource.uri, "Description", resource.description),
+  ]);
+  return renderTable(headers, rows);
+};
+
 /** Agent task-to-command matrix (R2). Fully regenerated from the manifest;
  * no curated columns. The Run cell backticks the command and appends the note
  * after a semicolon when present. Same two-column table as the Rust
@@ -557,6 +575,7 @@ const RENDERERS = {
   commands: renderCommandsSection,
   "issue-types": renderIssueTypesSection,
   "mcp-tools": renderMcpToolsSection,
+  "mcp-resources": renderMcpResourcesSection,
   "task-matrix": renderTaskMatrixSection,
   "flags:global": renderGlobalFlagsSection,
   "flags:fallow-combined": renderCombinedFlagsSection,

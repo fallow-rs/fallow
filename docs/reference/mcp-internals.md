@@ -21,6 +21,62 @@ subprocess safety.
 Do not hand-copy the complete tool list into durable prose. Read
 `MCP_TOOLS` or generated user documentation for the current inventory.
 
+## Resources
+
+Resources are the server's read-only, cacheable reference channel: compile-time
+material an agent lists once (`resources/list`, `resources/templates/list`)
+and reads by URI (`resources/read`) without spending a tool call or running
+analysis. Tools remain the surface for anything that depends on a project
+root.
+
+Sources of truth:
+
+- `crates/types/src/mcp_manifest.rs` owns the resource catalogue
+  (`MCP_RESOURCES`: URI, name, description, MIME type, template flag) and the
+  URI scheme constants. Catalogue order is wire order.
+- `crates/mcp/src/resources.rs` renders every payload in-process and owns the
+  `fallow://explain/{issue_type}` template expansion. The logic lives in free
+  functions because rmcp's `RequestContext` cannot be constructed in tests;
+  the `ServerHandler` methods in `crates/mcp/src/server/mod.rs` are one-line
+  delegators.
+- Payload data comes from shared crates only: `fallow_types::mcp_manifest`
+  (tools), `fallow_api::explain` plus `fallow_types::issue_meta` (issue types,
+  explain index, explain documents), `fallow_types::task_matrix` (task
+  matrix), and `fallow_api::schemas` (config, plugin, and rule-pack JSON
+  Schemas, plus zero-config rule severities). `fallow schema` reads the same
+  sources, so the `mcp_resources`, `mcp_tools`, `issue_types`, and
+  `task_matrix` manifest blocks and the resources agree by construction.
+
+Contract rules:
+
+- Every resource is `application/json` and every payload carries a top-level
+  `fallow_version`, so a cached copy is self-describing; clients cache by URI
+  and invalidate on server version. MCP has no cache headers.
+- The catalogue is compile-time constant. Declare neither `subscribe` nor
+  `listChanged`; a client that sees them opens subscriptions the server
+  never notifies.
+- Static resources carry an exact `size` and `audience: ["assistant"]`
+  annotations with a higher `priority` on `fallow://tools` and
+  `fallow://task-matrix` than on the schemas. No `lastModified`: compiled-in
+  data has no meaningful mtime.
+- The URI family is the authority (`fallow://tools`, not `fallow:///tools`).
+  The exact strings are pinned as literals in
+  `crates/mcp/src/server/tests/resources.rs`; the difference is invisible in
+  prose and breaks template matching on the wire.
+- Schema resources are the CLI schema documents (`fallow config-schema`,
+  `fallow plugin-schema`, `fallow rule-pack-schema`) with `fallow_version`
+  prepended; the explain template is the `fallow_explain` tool payload with
+  `fallow_version` prepended.
+- Unknown URIs and unknown issue types return a structured
+  `resource_not_found` error whose `data` lists the known URIs and templates,
+  or the nearest explain URIs plus the index URI.
+- Adding a resource: add the `MCP_RESOURCES` row, add its renderer arm in
+  `crates/mcp/src/resources.rs`, pin the URI in the resource tests, and run
+  `npm run generate:contracts` so `capabilities.json` and the generated
+  `references/mcp.md` resource table update. `manifest_sync.rs` fails until
+  the manifest and the live catalogue agree on names, URIs, MIME types, and
+  template placement.
+
 ## Contract rules
 
 - Prefer typed API execution. Use CLI subprocess fallback only where the policy
@@ -70,4 +126,7 @@ npm run verify:fast
 ```
 
 Tool changes require a protocol-level test plus a real MCP invocation when the
-execution path changes.
+execution path changes. Resource changes are covered by
+`crates/mcp/src/server/tests/resources.rs` (catalogue, reader, errors) and the
+spawned-binary `crates/mcp/tests/resources.rs` (initialize, `resources/list`,
+`resources/templates/list`, `resources/read`).

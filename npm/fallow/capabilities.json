@@ -6998,6 +6998,68 @@
       }
     ]
   },
+  "mcp_resources": {
+    "server": "fallow-mcp",
+    "note": "Read-only reference material served in-process by fallow-mcp; every JSON payload carries fallow_version. Rows with template: true are RFC 6570 URI templates listed under resources/templates/list; the catalogue is static, so the server declares neither subscribe nor listChanged",
+    "resources": [
+      {
+        "uri": "fallow://tools",
+        "name": "tools",
+        "description": "MCP tool manifest: name, kind, one-line description, nearest CLI fallback, key params, license, and read-only flag for every tool",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://issue-types",
+        "name": "issue-types",
+        "description": "Every issue type with its command, category, config key, zero-config default severity, opt-in flag, fixable flag, docs URL, and explain resource URI",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://explain",
+        "name": "explain",
+        "description": "Index of every explainable issue type with its one-line summary and the fallow://explain/{issue_type} URI to read",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://task-matrix",
+        "name": "task-matrix",
+        "description": "Agent task-to-command matrix: which read-only fallow command to run before deleting, refactoring, committing, or scoping work",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://schema/config",
+        "name": "schema-config",
+        "description": "JSON Schema of the fallow config file (same document as fallow config-schema)",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://schema/plugin",
+        "name": "schema-plugin",
+        "description": "JSON Schema of a user-authored external plugin (same document as fallow plugin-schema)",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://schema/rule-pack",
+        "name": "schema-rule-pack",
+        "description": "JSON Schema of a declarative rule pack (same document as fallow rule-pack-schema)",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://explain/{issue_type}",
+        "name": "explain-issue-type",
+        "description": "Explain document for one issue type (same payload as fallow explain <issue-type> --format json): name, summary, rationale, example, fix guidance, docs URL",
+        "mime_type": "application/json",
+        "template": true
+      }
+    ]
+  },
   "plugins": {
     "count": 124,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",

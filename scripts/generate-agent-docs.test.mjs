@@ -236,6 +236,24 @@ const SCHEMA = {
       },
     ],
   },
+  mcp_resources: {
+    resources: [
+      {
+        uri: "fallow://tools",
+        name: "tools",
+        description: "Tool manifest",
+        mime_type: "application/json",
+        template: false,
+      },
+      {
+        uri: "fallow://explain/{issue_type}",
+        name: "explain-issue-type",
+        description: "Explain | document",
+        mime_type: "application/json",
+        template: true,
+      },
+    ],
+  },
   task_matrix: [
     {
       task: "delete an unused export or file",
@@ -325,6 +343,15 @@ Hand-written intro stays.
 |---|---|---|---|---|
 | \`analyze\` | analysis | free | \`issue_types\` | Curated long analyze prose with call hints |
 <!-- generated:mcp-tools:end -->
+
+## Resource catalogue
+
+<!-- generated:mcp-resources:start -->
+| Resource | Name | Kind | MIME | Description |
+|---|---|---|---|---|
+| \`fallow://tools\` | \`tools\` | static | \`application/json\` | Curated tools resource prose |
+| \`fallow://removed\` | \`removed\` | static | \`application/json\` | Gone |
+<!-- generated:mcp-resources:end -->
 
 Hand-written outro stays.
 `;
@@ -433,6 +460,19 @@ test("mcp-tools regenerates in references/mcp.md: curated preserved, identity + 
   assert.ok(out.includes("| `list_boundaries` | introspection | free | - |"));
   // Hand-written prose outside the markers is untouched.
   assert.ok(out.startsWith("# Fallow MCP Server Reference"));
+  assert.ok(out.trimEnd().endsWith("Hand-written outro stays."));
+});
+
+test("mcp-resources regenerates in references/mcp.md: curated preserved, template rows added, removed rows dropped", () => {
+  const out = regenerateMcpReferenceMd(DOC_MCP_REFERENCE, SCHEMA);
+  assert.equal(regenerateMcpReferenceMd(out, SCHEMA), out);
+  assert.ok(out.includes("Curated tools resource prose"));
+  assert.ok(
+    out.includes(
+      "| `fallow://explain/{issue_type}` | `explain-issue-type` | template | `application/json` | Explain \\| document |",
+    ),
+  );
+  assert.ok(!out.includes("fallow://removed"));
   assert.ok(out.trimEnd().endsWith("Hand-written outro stays."));
 });
 

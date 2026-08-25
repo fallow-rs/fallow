@@ -414,6 +414,76 @@ pub fn rule_by_id(id: &str) -> Option<&'static RuleDef> {
         .find(|r| r.id == id)
 }
 
+/// Every registered rule in registry order: dead-code, health, duplication,
+/// flags, then security. The order is the `fallow schema` `issue_types` order
+/// and the `fallow://issue-types` resource order.
+pub fn all_rules() -> impl Iterator<Item = &'static RuleDef> {
+    CHECK_RULES
+        .iter()
+        .chain(HEALTH_RULES.iter())
+        .chain(DUPES_RULES.iter())
+        .chain(FLAGS_RULES.iter())
+        .chain(SECURITY_RULES.iter())
+}
+
+/// The command family a rule reports under (`dead-code`, `health`, `dupes`,
+/// `flags`, or `security`), derived from the registry array that owns it.
+/// Membership is by id (unique across registries); the registries are
+/// `const` slices, so pointer identity is not stable across uses.
+#[must_use]
+pub fn rule_command(rule: &RuleDef) -> &'static str {
+    let owns = |rules: &[RuleDef]| rules.iter().any(|candidate| candidate.id == rule.id);
+    if owns(HEALTH_RULES) {
+        "health"
+    } else if owns(DUPES_RULES) {
+        "dupes"
+    } else if owns(FLAGS_RULES) {
+        "flags"
+    } else if owns(SECURITY_RULES) {
+        "security"
+    } else {
+        "dead-code"
+    }
+}
+
+/// The rule id without its `fallow/` or `security/` namespace prefix, which
+/// is the canonical issue code (`unused-export`, `sql-injection`).
+#[must_use]
+pub fn bare_rule_id(rule: &RuleDef) -> &'static str {
+    rule.id.split_once('/').map_or(rule.id, |(_, bare)| bare)
+}
+
+/// The `rules.*` config key whose default severity gates findings of `rule`:
+/// the rule's own `config_key` for a 1:1 rule, else the key of the shared rule
+/// its suppression token names (every tainted-sink catalogue category is gated
+/// by `security-sink`, coverage findings by `coverage-gaps`). `None` for
+/// findings with no `rules.*` gate at all (complexity and duplication
+/// metrics, refactoring targets, runtime-coverage verdicts); a suppression
+/// token that is not a `rules.*` key (`code-duplication`, `feature-flag`)
+/// yields `None` too, so every returned key resolves in
+/// [`crate::schemas::default_rule_severities`].
+///
+/// Shared by `fallow schema` and the `fallow://issue-types` MCP resource so
+/// the two never disagree on which default severity a finding inherits.
+#[must_use]
+pub fn rule_severity_key(rule: &RuleDef) -> Option<&'static str> {
+    let bare = bare_rule_id(rule);
+    let candidate = fallow_types::issue_meta::issue_meta_by_code(bare)
+        .and_then(|meta| meta.config_key.or(meta.suppress_token))
+        .or_else(|| match rule_command(rule) {
+            "security" => Some(if bare == "client-server-leak" {
+                "security-client-server-leak"
+            } else {
+                "security-sink"
+            }),
+            "health" if matches!(bare, "untested-file" | "untested-export") => {
+                Some("coverage-gaps")
+            }
+            _ => None,
+        })?;
+    crate::schemas::is_rule_severity_key(candidate).then_some(candidate)
+}
+
 /// Build the docs URL for a rule.
 #[must_use]
 pub fn rule_docs_url(rule: &RuleDef) -> String {
@@ -1277,6 +1347,82 @@ mod tests {
 
     fn dupes_meta() -> Value {
         meta_value(fallow_output::dupes_meta())
+    }
+
+    #[test]
+    fn all_rules_walks_every_registry_in_order() {
+        let ids: Vec<&str> = all_rules().map(|rule| rule.id).collect();
+        let expected: Vec<&str> = CHECK_RULES
+            .iter()
+            .chain(HEALTH_RULES)
+            .chain(DUPES_RULES)
+            .chain(FLAGS_RULES)
+            .chain(SECURITY_RULES)
+            .map(|rule| rule.id)
+            .collect();
+        assert_eq!(ids, expected);
+        let mut unique = ids.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(
+            unique.len(),
+            ids.len(),
+            "duplicate rule id across registries"
+        );
+    }
+
+    #[test]
+    fn rule_command_names_the_owning_registry() {
+        assert_eq!(rule_command(&CHECK_RULES[0]), "dead-code");
+        assert_eq!(rule_command(&HEALTH_RULES[0]), "health");
+        assert_eq!(rule_command(&DUPES_RULES[0]), "dupes");
+        assert_eq!(rule_command(&FLAGS_RULES[0]), "flags");
+        assert_eq!(rule_command(&SECURITY_RULES[0]), "security");
+    }
+
+    #[test]
+    fn severity_key_follows_the_gating_rule() {
+        let by_id = |id: &str| rule_by_id(id).unwrap();
+        assert_eq!(bare_rule_id(by_id("fallow/unused-export")), "unused-export");
+        assert_eq!(
+            bare_rule_id(by_id("security/sql-injection")),
+            "sql-injection"
+        );
+        assert_eq!(
+            rule_severity_key(by_id("fallow/unused-export")),
+            Some("unused-exports")
+        );
+        assert_eq!(
+            rule_severity_key(by_id("fallow/untested-file")),
+            Some("coverage-gaps")
+        );
+        assert_eq!(
+            rule_severity_key(by_id("security/sql-injection")),
+            Some("security-sink")
+        );
+        assert_eq!(
+            rule_severity_key(by_id("security/client-server-leak")),
+            Some("security-client-server-leak")
+        );
+        assert_eq!(
+            rule_severity_key(by_id("fallow/high-cyclomatic-complexity")),
+            None
+        );
+        assert_eq!(
+            rule_severity_key(by_id("fallow/code-duplication")),
+            None,
+            "a suppression token that is not a rules.* key never becomes a severity key"
+        );
+        let defaults = crate::schemas::default_rule_severities();
+        for rule in all_rules() {
+            if let Some(key) = rule_severity_key(rule) {
+                assert!(
+                    defaults.get(key).is_some_and(serde_json::Value::is_string),
+                    "severity key {key} for {} is not a rules.* config key",
+                    rule.id
+                );
+            }
+        }
     }
 
     #[test]

@@ -62,6 +62,24 @@ pub struct McpToolInfo {
     pub read_only: bool,
 }
 
+impl McpToolInfo {
+    /// The `fallow schema` `mcp_tools` row for this tool, also served verbatim
+    /// inside the `fallow://tools` MCP resource so both projections agree.
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "kind": self.kind,
+            "description": self.description,
+            "cli_command": self.cli_command,
+            "key_params": self.key_params,
+            "license": self.license.as_str(),
+            "license_note": self.license_note,
+            "read_only": self.read_only,
+        })
+    }
+}
+
 /// Free/paid nuance attached to runtime-coverage capabilities. Shared with
 /// the `fallow schema` issue-type rows so the wording cannot drift.
 pub const RUNTIME_COVERAGE_LICENSE_NOTE: &str = "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).";
@@ -475,6 +493,113 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+    },
+];
+
+/// Static metadata for one MCP resource (or resource template).
+///
+/// Resources are the read-only, cacheable reference channel of the MCP
+/// server: compile-time reference material (tool manifest, issue-type
+/// registry, task matrix, JSON Schemas, explain documents) that an agent can
+/// list and read without spending a tool call. The catalogue is constant, so
+/// the server declares neither `subscribe` nor `listChanged`.
+#[derive(Debug, Clone, Copy)]
+pub struct McpResourceInfo {
+    /// Wire URI (`fallow://...`), or an RFC 6570 URI template when
+    /// `template` is true.
+    pub uri: &'static str,
+    /// Programmatic resource name.
+    pub name: &'static str,
+    /// One-line agent-facing description.
+    pub description: &'static str,
+    /// MIME type of the read payload.
+    pub mime_type: &'static str,
+    /// Whether `uri` is a template listed under `resources/templates/list`
+    /// instead of a concrete resource under `resources/list`.
+    pub template: bool,
+}
+
+impl McpResourceInfo {
+    /// The `fallow schema` `mcp_resources` row for this resource.
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "uri": self.uri,
+            "name": self.name,
+            "description": self.description,
+            "mime_type": self.mime_type,
+            "template": self.template,
+        })
+    }
+}
+
+/// URI scheme every fallow resource lives under. The authority (`tools`,
+/// `explain`, ...) carries the resource family, matching what shipping MCP
+/// servers do; `fallow:///tools` (empty authority) is NOT the same URI.
+pub const MCP_RESOURCE_SCHEME: &str = "fallow://";
+
+/// RFC 6570 template of the per-issue-type explain resource.
+pub const MCP_EXPLAIN_RESOURCE_TEMPLATE: &str = "fallow://explain/{issue_type}";
+
+/// All resources exposed by the fallow MCP server, in catalogue order.
+/// Concrete resources first, templates last; `resources/list` and
+/// `resources/templates/list` preserve this order.
+pub const MCP_RESOURCES: &[McpResourceInfo] = &[
+    McpResourceInfo {
+        uri: "fallow://tools",
+        name: "tools",
+        description: "MCP tool manifest: name, kind, one-line description, nearest CLI fallback, key params, license, and read-only flag for every tool",
+        mime_type: "application/json",
+        template: false,
+    },
+    McpResourceInfo {
+        uri: "fallow://issue-types",
+        name: "issue-types",
+        description: "Every issue type with its command, category, config key, zero-config default severity, opt-in flag, fixable flag, docs URL, and explain resource URI",
+        mime_type: "application/json",
+        template: false,
+    },
+    McpResourceInfo {
+        uri: "fallow://explain",
+        name: "explain",
+        description: "Index of every explainable issue type with its one-line summary and the fallow://explain/{issue_type} URI to read",
+        mime_type: "application/json",
+        template: false,
+    },
+    McpResourceInfo {
+        uri: "fallow://task-matrix",
+        name: "task-matrix",
+        description: "Agent task-to-command matrix: which read-only fallow command to run before deleting, refactoring, committing, or scoping work",
+        mime_type: "application/json",
+        template: false,
+    },
+    McpResourceInfo {
+        uri: "fallow://schema/config",
+        name: "schema-config",
+        description: "JSON Schema of the fallow config file (same document as fallow config-schema)",
+        mime_type: "application/json",
+        template: false,
+    },
+    McpResourceInfo {
+        uri: "fallow://schema/plugin",
+        name: "schema-plugin",
+        description: "JSON Schema of a user-authored external plugin (same document as fallow plugin-schema)",
+        mime_type: "application/json",
+        template: false,
+    },
+    McpResourceInfo {
+        uri: "fallow://schema/rule-pack",
+        name: "schema-rule-pack",
+        description: "JSON Schema of a declarative rule pack (same document as fallow rule-pack-schema)",
+        mime_type: "application/json",
+        template: false,
+    },
+    McpResourceInfo {
+        uri: MCP_EXPLAIN_RESOURCE_TEMPLATE,
+        name: "explain-issue-type",
+        description: "Explain document for one issue type (same payload as fallow explain <issue-type> --format json): name, summary, rationale, example, fix guidance, docs URL",
+        mime_type: "application/json",
+        template: true,
     },
 ];
 
@@ -899,6 +1024,63 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), total, "duplicate tool name in MCP_TOOLS");
+    }
+
+    #[test]
+    fn resource_uris_and_names_are_unique_and_under_the_fallow_scheme() {
+        let mut uris: Vec<&str> = MCP_RESOURCES.iter().map(|r| r.uri).collect();
+        let mut names: Vec<&str> = MCP_RESOURCES.iter().map(|r| r.name).collect();
+        let total = uris.len();
+        uris.sort_unstable();
+        uris.dedup();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(uris.len(), total, "duplicate resource uri in MCP_RESOURCES");
+        assert_eq!(
+            names.len(),
+            total,
+            "duplicate resource name in MCP_RESOURCES"
+        );
+        for resource in MCP_RESOURCES {
+            assert!(
+                resource.uri.starts_with(MCP_RESOURCE_SCHEME),
+                "resource {} must live under {MCP_RESOURCE_SCHEME}",
+                resource.uri
+            );
+            assert!(
+                !resource.uri.starts_with("fallow:///"),
+                "resource {} must carry its family as the URI authority, not an empty authority",
+                resource.uri
+            );
+            assert_eq!(
+                resource.uri.contains('{'),
+                resource.template,
+                "resource {} template flag must match the presence of a URI template variable",
+                resource.uri
+            );
+            assert!(
+                !resource.description.is_empty() && !resource.description.contains('\n'),
+                "resource {} needs a one-line description",
+                resource.uri
+            );
+            assert_eq!(resource.mime_type, "application/json");
+        }
+    }
+
+    #[test]
+    fn resource_catalogue_lists_concrete_resources_before_templates() {
+        let first_template = MCP_RESOURCES
+            .iter()
+            .position(|r| r.template)
+            .expect("at least one template");
+        assert!(
+            MCP_RESOURCES[first_template..].iter().all(|r| r.template),
+            "templates must trail the concrete resources so list order stays deterministic"
+        );
+        assert_eq!(
+            MCP_RESOURCES[first_template].uri,
+            MCP_EXPLAIN_RESOURCE_TEMPLATE
+        );
     }
 
     #[test]
