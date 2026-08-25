@@ -144,7 +144,7 @@ fn install_for(ctx: &Ctx, harness: Harness, command: Option<&McpCommand>) -> Vec
         };
         return vec![
             StepReport::new(Some(harness), Step::Mcp, StepStatus::Skipped, ctx.scope())
-                .path(&ctx.root, &base.join(relative))
+                .path(ctx, &base.join(relative))
                 .reason("mcp_entry_unavailable")
                 .detail(
                     "no fallow-mcp launcher found: install fallow through npm or put fallow-mcp on PATH",
@@ -276,7 +276,7 @@ fn json_step(
     } else {
         StepStatus::Removed
     };
-    let base = StepReport::new(Some(harness), Step::Mcp, status, scope).path(&ctx.root, path);
+    let base = StepReport::new(Some(harness), Step::Mcp, status, scope).path(ctx, path);
     match merge_json_server(path, "mcpServers", entry, ctx.dry_run, ctx.force) {
         Ok(FileOutcome::Changed) => base,
         Ok(FileOutcome::Unchanged) => base.with_status(StepStatus::Unchanged),
@@ -288,7 +288,7 @@ fn json_step(
             .reason("invalid_json")
             .detail("existing file is not valid JSON; fix it or pass --force to rewrite it"),
         Err(message) => {
-            StepReport::failed(Some(harness), Step::Mcp, scope, message).path(&ctx.root, path)
+            StepReport::failed(Some(harness), Step::Mcp, scope, message).path(ctx, path)
         }
     }
 }
@@ -302,7 +302,7 @@ fn approval_step(ctx: &Ctx, mode: Mode) -> StepReport {
         StepStatus::Written,
         Scope::Local,
     )
-    .path(&ctx.root, &path);
+    .path(ctx, &path);
     if mode == Mode::Install && !ctx.approve {
         return base
             .with_status(StepStatus::Skipped)
@@ -335,7 +335,7 @@ fn approval_step(ctx: &Ctx, mode: Mode) -> StepReport {
             .reason("invalid_json")
             .detail("existing file is not valid JSON; fix it or pass --force to rewrite it"),
         Err(message) => StepReport::failed(Some(Harness::Claude), Step::Mcp, Scope::Local, message)
-            .path(&ctx.root, &path),
+            .path(ctx, &path),
     }
 }
 
@@ -352,8 +352,8 @@ fn codex_step(ctx: &Ctx, command: Option<&McpCommand>) -> StepReport {
     } else {
         StepStatus::Removed
     };
-    let base = StepReport::new(Some(Harness::Codex), Step::Mcp, status, ctx.scope())
-        .path(&ctx.root, &path);
+    let base =
+        StepReport::new(Some(Harness::Codex), Step::Mcp, status, ctx.scope()).path(ctx, &path);
     let base = if command.is_some() && !ctx.user {
         base.detail(
             "applies once Codex trusts this project; the codex mcp add next step works immediately",
@@ -372,7 +372,7 @@ fn codex_step(ctx: &Ctx, command: Option<&McpCommand>) -> StepReport {
             .reason("invalid_toml")
             .detail("existing file is not valid TOML; fix it or pass --force to rewrite it"),
         Err(message) => StepReport::failed(Some(Harness::Codex), Step::Mcp, ctx.scope(), message)
-            .path(&ctx.root, &path),
+            .path(ctx, &path),
     }
 }
 

@@ -98,7 +98,7 @@ pub fn install(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
                 .into_iter()
                 .map(|target| {
                     StepReport::new(target.harness, Step::Skill, StepStatus::Skipped, target.scope)
-                        .path(&ctx.root, &target.dir)
+                        .path(ctx, &target.dir)
                         .reason(reason)
                         .detail(
                             "install fallow through npm so the skill ships with the binary, or build fallow from a full checkout",
@@ -268,7 +268,7 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
         StepStatus::Written,
         target.scope,
     )
-    .path(&ctx.root, &target.dir);
+    .path(ctx, &target.dir);
     let base = match target.harness {
         Some(_) => base,
         None if target.covers.is_empty() => base,
@@ -297,7 +297,7 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
         Ok(files) => files,
         Err(message) => {
             return StepReport::failed(target.harness, Step::Skill, target.scope, message)
-                .path(&ctx.root, &target.dir);
+                .path(ctx, &target.dir);
         }
     };
 
@@ -321,7 +321,7 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
                 target.scope,
                 error.to_string(),
             )
-            .path(&ctx.root, &path);
+            .path(ctx, &path);
         }
         if let Err(error) = std::fs::write(&path, bytes) {
             return StepReport::failed(
@@ -330,7 +330,7 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
                 target.scope,
                 error.to_string(),
             )
-            .path(&ctx.root, &path);
+            .path(ctx, &path);
         }
     }
 
@@ -369,7 +369,7 @@ fn uninstall_one(ctx: &Ctx, target: &Target) -> StepReport {
         StepStatus::Removed,
         target.scope,
     )
-    .path(&ctx.root, &target.dir);
+    .path(ctx, &target.dir);
     match inspect(&target.dir) {
         SkillState::Absent => {
             return base
@@ -399,7 +399,7 @@ fn uninstall_one(ctx: &Ctx, target: &Target) -> StepReport {
                     target.scope,
                     error.to_string(),
                 )
-                .path(&ctx.root, &path);
+                .path(ctx, &path);
             }
         }
     }

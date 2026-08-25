@@ -171,7 +171,7 @@ fn install_is_idempotent_and_uninstall_round_trips() {
     let codex = fs::read_to_string(dir.join(".codex/config.toml")).unwrap();
     assert!(codex.contains("[mcp_servers.fallow]"));
     assert!(
-        json["next_steps"]
+        json["next_actions"]
             .as_array()
             .unwrap()
             .iter()
@@ -245,7 +245,7 @@ fn nothing_detected_writes_only_neutral_files() {
     assert!(!dir.join(".claude").exists());
     assert!(!dir.join(".mcp.json").exists());
     assert!(
-        json["next_steps"]
+        json["next_actions"]
             .as_array()
             .unwrap()
             .iter()

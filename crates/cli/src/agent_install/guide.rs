@@ -62,11 +62,11 @@ pub fn uninstall(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
 
 fn install_agents_guide(ctx: &Ctx) -> StepReport {
     let path = ctx.root.join(AGENTS_FILE);
-    let base = StepReport::new(None, Step::Guide, StepStatus::Written, Scope::Shared)
-        .path(&ctx.root, &path);
+    let base =
+        StepReport::new(None, Step::Guide, StepStatus::Written, Scope::Shared).path(ctx, &path);
     let existing = match read_optional_text(&path) {
         Ok(existing) => existing,
-        Err(error) => return failed(&ctx.root, &path, error),
+        Err(error) => return failed(ctx, &path, error),
     };
 
     if existing.is_none() {
@@ -76,14 +76,14 @@ fn install_agents_guide(ctx: &Ctx) -> StepReport {
         let info = crate::init::detect_project(&ctx.root);
         let guide = crate::init::build_agents_guide(&info);
         if let Err(error) = std::fs::write(&path, guide) {
-            return failed(&ctx.root, &path, error);
+            return failed(ctx, &path, error);
         }
         if let Err(error) = upsert_managed_block(&path, false) {
-            return failed(&ctx.root, &path, error);
+            return failed(ctx, &path, error);
         }
         return match stamp_authored(&path) {
             Ok(()) => base.detail("scaffolded with the fallow task map"),
-            Err(error) => failed(&ctx.root, &path, error),
+            Err(error) => failed(ctx, &path, error),
         };
     }
 
@@ -99,7 +99,7 @@ fn install_agents_guide(ctx: &Ctx) -> StepReport {
         Ok(AgentsOutcome::Removed | AgentsOutcome::NotPresent) => {
             base.with_status(StepStatus::Unchanged)
         }
-        Err(error) => failed(&ctx.root, &path, error),
+        Err(error) => failed(ctx, &path, error),
     }
 }
 
@@ -111,10 +111,10 @@ fn install_claude_import(ctx: &Ctx) -> StepReport {
         StepStatus::Written,
         Scope::Shared,
     )
-    .path(&ctx.root, &path);
+    .path(ctx, &path);
     let existing = match read_optional_text(&path) {
         Ok(existing) => existing,
-        Err(error) => return failed(&ctx.root, &path, error),
+        Err(error) => return failed(ctx, &path, error),
     };
 
     let Some(existing) = existing else {
@@ -129,7 +129,7 @@ fn install_claude_import(ctx: &Ctx) -> StepReport {
         );
         return match std::fs::write(&path, content) {
             Ok(()) => base.detail("created with an @AGENTS.md import"),
-            Err(error) => failed(&ctx.root, &path, error),
+            Err(error) => failed(ctx, &path, error),
         };
     };
 
@@ -157,14 +157,14 @@ fn install_claude_import(ctx: &Ctx) -> StepReport {
     next.push_str(&import_block());
     match std::fs::write(&path, next) {
         Ok(()) => base.detail("appended an @AGENTS.md import block"),
-        Err(error) => failed(&ctx.root, &path, error),
+        Err(error) => failed(ctx, &path, error),
     }
 }
 
 fn uninstall_agents_guide(ctx: &Ctx) -> StepReport {
     let path = ctx.root.join(AGENTS_FILE);
-    let base = StepReport::new(None, Step::Guide, StepStatus::Removed, Scope::Shared)
-        .path(&ctx.root, &path);
+    let base =
+        StepReport::new(None, Step::Guide, StepStatus::Removed, Scope::Shared).path(ctx, &path);
     let existing = match read_optional_text(&path) {
         Ok(Some(existing)) => existing,
         Ok(None) => {
@@ -172,7 +172,7 @@ fn uninstall_agents_guide(ctx: &Ctx) -> StepReport {
                 .with_status(StepStatus::Unchanged)
                 .detail("not present");
         }
-        Err(error) => return failed(&ctx.root, &path, error),
+        Err(error) => return failed(ctx, &path, error),
     };
     if authored_unmodified(&existing) {
         if ctx.dry_run {
@@ -180,7 +180,7 @@ fn uninstall_agents_guide(ctx: &Ctx) -> StepReport {
         }
         return match std::fs::remove_file(&path) {
             Ok(()) => base.detail("deleted the file fallow authored"),
-            Err(error) => failed(&ctx.root, &path, error),
+            Err(error) => failed(ctx, &path, error),
         };
     }
     match remove_managed_block(&path, ctx.dry_run) {
@@ -190,7 +190,7 @@ fn uninstall_agents_guide(ctx: &Ctx) -> StepReport {
             .reason("managed_block_malformed")
             .detail("fallow markers are out of order; repair AGENTS.md by hand"),
         Ok(_) => base.with_status(StepStatus::Unchanged),
-        Err(error) => failed(&ctx.root, &path, error),
+        Err(error) => failed(ctx, &path, error),
     }
 }
 
@@ -202,7 +202,7 @@ fn uninstall_claude_import(ctx: &Ctx) -> StepReport {
         StepStatus::Removed,
         Scope::Shared,
     )
-    .path(&ctx.root, &path);
+    .path(ctx, &path);
     let existing = match read_optional_text(&path) {
         Ok(Some(existing)) => existing,
         Ok(None) => {
@@ -210,7 +210,7 @@ fn uninstall_claude_import(ctx: &Ctx) -> StepReport {
                 .with_status(StepStatus::Unchanged)
                 .detail("not present");
         }
-        Err(error) => return failed(&ctx.root, &path, error),
+        Err(error) => return failed(ctx, &path, error),
     };
     if authored_unmodified(&existing) {
         if ctx.dry_run {
@@ -218,7 +218,7 @@ fn uninstall_claude_import(ctx: &Ctx) -> StepReport {
         }
         return match std::fs::remove_file(&path) {
             Ok(()) => base.detail("deleted the file fallow authored"),
-            Err(error) => failed(&ctx.root, &path, error),
+            Err(error) => failed(ctx, &path, error),
         };
     }
     let Some((start, end)) = import_block_bounds(&existing) else {
@@ -237,7 +237,7 @@ fn uninstall_claude_import(ctx: &Ctx) -> StepReport {
     next.push_str(tail);
     match std::fs::write(&path, next) {
         Ok(()) => base.detail("@AGENTS.md import block removed; file kept"),
-        Err(error) => failed(&ctx.root, &path, error),
+        Err(error) => failed(ctx, &path, error),
     }
 }
 
@@ -337,6 +337,6 @@ impl StepReport {
     }
 }
 
-fn failed(root: &Path, path: &Path, error: impl std::fmt::Display) -> StepReport {
-    StepReport::failed(None, Step::Guide, Scope::Shared, error.to_string()).path(root, path)
+fn failed(ctx: &Ctx, path: &Path, error: impl std::fmt::Display) -> StepReport {
+    StepReport::failed(None, Step::Guide, Scope::Shared, error.to_string()).path(ctx, path)
 }

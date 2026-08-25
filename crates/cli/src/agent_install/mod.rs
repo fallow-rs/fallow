@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use serde::Serialize;
 
 pub use crate::setup_hooks::Mode;
-use crate::setup_hooks::{display_rel, home_dir};
+use crate::setup_hooks::home_dir;
 
 pub use status::run_agent_status;
 
@@ -157,8 +157,8 @@ impl StepReport {
         }
     }
 
-    pub fn path(mut self, root: &Path, path: &Path) -> Self {
-        self.path = Some(display_rel(root, path));
+    pub fn path(mut self, ctx: &Ctx, path: &Path) -> Self {
+        self.path = Some(display_path(&ctx.root, ctx.home.as_deref(), path));
         self
     }
 
@@ -182,12 +182,29 @@ impl StepReport {
     }
 }
 
-/// A follow-up the user or agent should run after the install.
+/// A follow-up the user or agent may run after the install. Unlike the
+/// read-only `next_steps[]` of analysis commands, these can mutate harness
+/// config, which `mutating` states per entry.
 #[derive(Clone, Debug, Serialize)]
-pub struct NextStep {
+pub struct NextAction {
     pub id: &'static str,
     pub command: String,
     pub reason: String,
+    pub mutating: bool,
+}
+
+/// Render a path relative to the project root, as `~/...` under the home
+/// directory, and absolute only when it is under neither.
+pub fn display_path(root: &Path, home: Option<&Path>, path: &Path) -> String {
+    if let Ok(rel) = path.strip_prefix(root) {
+        return rel.display().to_string().replace('\\', "/");
+    }
+    if let Some(home) = home
+        && let Ok(rel) = path.strip_prefix(home)
+    {
+        return format!("~/{}", rel.display().to_string().replace('\\', "/"));
+    }
+    path.display().to_string()
 }
 
 /// Options for `fallow agent install`.
@@ -258,7 +275,7 @@ struct Report {
     detected: bool,
     evidence: Vec<hosts::Detection>,
     steps: Vec<StepReport>,
-    next_steps: Vec<NextStep>,
+    next_actions: Vec<NextAction>,
 }
 
 /// Pick the project root: an explicit `--root` is used as given; otherwise
@@ -338,7 +355,7 @@ pub fn run_agent_install(
         steps.extend(hooks::install(&ctx, &harnesses));
     }
 
-    let next_steps = next_steps(&ctx, &harnesses, detected, mcp_command.as_ref(), &steps);
+    let next_actions = next_actions(&ctx, &harnesses, detected, mcp_command.as_ref(), &steps);
     let report = Report {
         root: root.display().to_string(),
         mode: "install",
@@ -347,7 +364,7 @@ pub fn run_agent_install(
         detected,
         evidence,
         steps,
-        next_steps,
+        next_actions,
     };
     render(&report, output, json_style)
 }
@@ -386,42 +403,45 @@ pub fn run_agent_uninstall(
         detected,
         evidence,
         steps,
-        next_steps: Vec::new(),
+        next_actions: Vec::new(),
     };
     render(&report, output, json_style)
 }
 
-fn next_steps(
+fn next_actions(
     ctx: &Ctx,
     harnesses: &[Harness],
     detected: bool,
     mcp_command: Option<&mcp::McpCommand>,
     steps: &[StepReport],
-) -> Vec<NextStep> {
-    let mut next: Vec<NextStep> = Vec::new();
+) -> Vec<NextAction> {
+    let mut next: Vec<NextAction> = Vec::new();
     if detected && harnesses.is_empty() {
-        next.push(NextStep {
+        next.push(NextAction {
             id: "choose-harness",
             command: "fallow agent install --harness claude".to_string(),
             reason: "No harness was detected; pass --harness claude, codex, or cursor to wire one explicitly."
                 .to_string(),
+            mutating: true,
         });
     }
     if let Some(command) = mcp_command {
         if harnesses.contains(&Harness::Codex) {
-            next.push(NextStep {
+            next.push(NextAction {
                 id: "codex-mcp-add",
                 command: format!("codex mcp add fallow -- {}", command.shell_words()),
                 reason: "A project-level .codex/config.toml only applies once Codex trusts the project; the user-level entry works immediately."
                     .to_string(),
+                mutating: true,
             });
         }
         if harnesses.contains(&Harness::Claude) && ctx.user {
-            next.push(NextStep {
+            next.push(NextAction {
                 id: "claude-mcp-add-user",
                 command: format!("claude mcp add --scope user fallow -- {}", command.shell_words()),
                 reason: "fallow does not edit ~/.claude.json; register the user-scope server through the Claude CLI."
                     .to_string(),
+                mutating: true,
             });
         }
         let approval_skipped = steps.iter().any(|step| {
@@ -430,20 +450,22 @@ fn next_steps(
                 && step.reason == Some("approval_not_requested")
         });
         if approval_skipped {
-            next.push(NextStep {
+            next.push(NextAction {
                 id: "claude-approve-mcp",
                 command: "fallow agent install --harness claude --approve".to_string(),
                 reason: "Claude Code asks before starting a project-scoped MCP server; --approve records that approval for you in .claude/settings.local.json."
                     .to_string(),
+                mutating: true,
             });
         }
     }
     if !has_config_file(&ctx.root) {
-        next.push(NextStep {
+        next.push(NextAction {
             id: "recommend-config",
             command: "fallow recommend --format json".to_string(),
             reason: "No fallow config was found; recommend proposes one from the detected stack without writing anything."
                 .to_string(),
+            mutating: false,
         });
     }
     next
@@ -496,9 +518,15 @@ fn render(
 }
 
 fn print_human(report: &Report) {
+    eprint!("{}", render_human(report));
+}
+
+fn render_human(report: &Report) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
     let suffix = if report.dry_run { " (dry run)" } else { "" };
-    eprintln!("fallow agent {}{suffix}", report.mode);
-    eprintln!("  root: {}", report.root);
+    let _ = writeln!(out, "fallow agent {}{suffix}", report.mode);
+    let _ = writeln!(out, "  root: {}", report.root);
     let names: Vec<&str> = report.harnesses.iter().map(|h| h.as_str()).collect();
     let origin = if report.detected {
         "detected"
@@ -506,46 +534,90 @@ fn print_human(report: &Report) {
         "from --harness"
     };
     if names.is_empty() {
-        eprintln!("  harnesses: none {origin}; harness-neutral files only");
+        let _ = writeln!(
+            out,
+            "  harnesses: none {origin}; harness-neutral files only"
+        );
     } else {
-        eprintln!("  harnesses: {} ({origin})", names.join(", "));
+        let _ = writeln!(out, "  harnesses: {} ({origin})", names.join(", "));
     }
 
-    let shared: Vec<&StepReport> = report
+    let shared_header = if report.mode == "install" {
+        "Shared with your team (commit these):"
+    } else {
+        "Shared with your team:"
+    };
+    for (header, scope) in [
+        (shared_header, Scope::Shared),
+        ("Local to you:", Scope::Local),
+    ] {
+        let rows: Vec<&StepReport> = report
+            .steps
+            .iter()
+            .filter(|step| step.scope == scope)
+            .collect();
+        if rows.is_empty() {
+            continue;
+        }
+        out.push('\n');
+        let _ = writeln!(out, "{header}");
+        for step in rows {
+            out.push_str(&render_step(step, report.dry_run));
+        }
+    }
+
+    let refused = report
         .steps
         .iter()
-        .filter(|step| step.scope == Scope::Shared)
-        .collect();
-    let local: Vec<&StepReport> = report
+        .filter(|step| step.status == StepStatus::Refused)
+        .count();
+    let failed = report
         .steps
         .iter()
-        .filter(|step| step.scope == Scope::Local)
-        .collect();
-    if !shared.is_empty() {
-        eprintln!();
-        eprintln!("Shared with your team (commit these):");
-        for step in shared {
-            print_step(step, report.dry_run);
+        .filter(|step| step.status == StepStatus::Failed)
+        .count();
+    if refused + failed > 0 {
+        out.push('\n');
+        let mut parts: Vec<String> = Vec::new();
+        if refused > 0 {
+            parts.push(format!(
+                "{refused} step{} refused (existing content is not fallow-managed; pass --force to replace it)",
+                if refused == 1 { "" } else { "s" }
+            ));
+        }
+        if failed > 0 {
+            parts.push(format!(
+                "{failed} step{} failed",
+                if failed == 1 { "" } else { "s" }
+            ));
+        }
+        let _ = writeln!(
+            out,
+            "{}; every other step still ran. Exit code 2.",
+            parts.join(", ")
+        );
+    } else if report.mode == "uninstall"
+        && report
+            .steps
+            .iter()
+            .all(|step| matches!(step.status, StepStatus::Unchanged | StepStatus::Skipped))
+    {
+        out.push('\n');
+        let _ = writeln!(out, "Nothing to remove.");
+    }
+
+    if !report.next_actions.is_empty() {
+        out.push('\n');
+        let _ = writeln!(out, "Next:");
+        for next in &report.next_actions {
+            let _ = writeln!(out, "  {}", next.command);
+            let _ = writeln!(out, "    {}", next.reason);
         }
     }
-    if !local.is_empty() {
-        eprintln!();
-        eprintln!("Local to you:");
-        for step in local {
-            print_step(step, report.dry_run);
-        }
-    }
-    if !report.next_steps.is_empty() {
-        eprintln!();
-        eprintln!("Next steps:");
-        for next in &report.next_steps {
-            eprintln!("  {}", next.command);
-            eprintln!("    {}", next.reason);
-        }
-    }
+    out
 }
 
-fn print_step(step: &StepReport, dry_run: bool) {
+fn render_step(step: &StepReport, dry_run: bool) -> String {
     let status = match (step.status, dry_run) {
         (StepStatus::Written, true) => "would write",
         (StepStatus::Written, false) => "written",
@@ -572,9 +644,9 @@ fn print_step(step: &StepReport, dry_run: bool) {
         note.push_str(detail);
     }
     if note.is_empty() {
-        eprintln!("  {path:<40}  {status:<12} {label}");
+        format!("  {path:<40}  {status:<13}  {label}\n")
     } else {
-        eprintln!("  {path:<40}  {status:<12} {label}  {note}");
+        format!("  {path:<40}  {status:<13}  {label:<16}  {note}\n")
     }
 }
 

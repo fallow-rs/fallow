@@ -93,10 +93,8 @@ fn claude_steps(
         };
         steps.push(
             StepReport::new(Some(harness), Step::Hooks, settings_status, ctx.scope())
-                .path(&ctx.root, &claude.settings_path)
-                .detail(crate::setup_hooks::describe_settings(
-                    &claude.settings_outcome,
-                )),
+                .path(ctx, &claude.settings_path)
+                .detail("PreToolUse gate handler"),
         );
         let (script_status, reason) = match claude.script_outcome {
             ScriptOutcome::Created | ScriptOutcome::Updated => (StepStatus::Written, None),
@@ -105,12 +103,11 @@ fn claude_steps(
             ScriptOutcome::UserEditedPreserved => (StepStatus::Refused, Some("user_edited")),
         };
         let mut script = StepReport::new(Some(harness), Step::Hooks, script_status, ctx.scope())
-            .path(&ctx.root, &claude.script_path)
-            .detail(crate::setup_hooks::describe_script(
-                &claude.script_outcome,
-                ctx.dry_run,
-                ctx.mode,
-            ));
+            .path(ctx, &claude.script_path)
+            .detail("gate script");
+        if matches!(claude.script_outcome, ScriptOutcome::UserEditedPreserved) {
+            script.detail = Some("no fallow marker; pass --force to replace it".to_string());
+        }
         script.reason = reason;
         steps.push(script);
     }
@@ -128,11 +125,13 @@ fn codex_step(ctx: &Ctx, harness: Harness, codex: &crate::setup_hooks::CodexRepo
             }
         };
         let detail = match codex.outcome {
-            AgentsOutcome::Unchanged => "task map block already present".to_string(),
-            _ => crate::setup_hooks::describe_agents(&codex.outcome, ctx.dry_run, ctx.mode),
+            AgentsOutcome::MalformedPreserved => {
+                "fallow markers are out of order; repair AGENTS.md by hand".to_string()
+            }
+            _ => "gate block".to_string(),
         };
         let mut step = StepReport::new(Some(harness), Step::Hooks, status, Scope::Shared)
-            .path(&ctx.root, &codex.agents_path)
+            .path(ctx, &codex.agents_path)
             .detail(detail);
         step.reason = reason;
         step

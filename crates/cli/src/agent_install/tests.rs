@@ -415,6 +415,91 @@ fn cursor_hooks_are_reported_unsupported() {
 }
 
 #[test]
+fn display_path_uses_root_then_home_then_absolute() {
+    let root = Path::new("/work/app");
+    let home = Path::new("/home/me");
+    assert_eq!(
+        display_path(root, Some(home), Path::new("/work/app/.mcp.json")),
+        ".mcp.json"
+    );
+    assert_eq!(
+        display_path(root, Some(home), Path::new("/home/me/.codex/config.toml")),
+        "~/.codex/config.toml"
+    );
+    assert_eq!(
+        display_path(root, None, Path::new("/elsewhere/x")),
+        "/elsewhere/x"
+    );
+}
+
+#[test]
+fn human_report_groups_scopes_and_summarizes_refusals() {
+    let report = Report {
+        root: "/work/app".to_string(),
+        mode: "install",
+        dry_run: true,
+        harnesses: vec![Harness::Claude],
+        detected: true,
+        evidence: Vec::new(),
+        steps: vec![
+            StepReport::new(None, Step::Guide, StepStatus::Written, Scope::Shared)
+                .detail("scaffold with the fallow task map")
+                .with_path("AGENTS.md"),
+            StepReport::new(
+                Some(Harness::Claude),
+                Step::Mcp,
+                StepStatus::Skipped,
+                Scope::Local,
+            )
+            .reason("approval_not_requested")
+            .detail("pass --approve to pre-approve the project MCP server for yourself")
+            .with_path(".claude/settings.local.json"),
+            StepReport::new(
+                Some(Harness::Claude),
+                Step::Skill,
+                StepStatus::Refused,
+                Scope::Shared,
+            )
+            .reason("skill_name_taken")
+            .with_path(".claude/skills/fallow"),
+        ],
+        next_actions: vec![NextAction {
+            id: "recommend-config",
+            command: "fallow recommend --format json".to_string(),
+            reason: "No fallow config was found.".to_string(),
+            mutating: false,
+        }],
+    };
+    let text = render_human(&report);
+    let expected = "\
+fallow agent install (dry run)
+  root: /work/app
+  harnesses: claude (detected)
+
+Shared with your team (commit these):
+  AGENTS.md                                 would write    guide             scaffold with the fallow task map
+  .claude/skills/fallow                     refused        skill (claude)    skill_name_taken
+
+Local to you:
+  .claude/settings.local.json               skipped        mcp (claude)      approval_not_requested: pass --approve to pre-approve the project MCP server for yourself
+
+1 step refused (existing content is not fallow-managed; pass --force to replace it); every other step still ran. Exit code 2.
+
+Next:
+  fallow recommend --format json
+    No fallow config was found.
+";
+    assert_eq!(text, expected);
+}
+
+impl StepReport {
+    fn with_path(mut self, path: &str) -> Self {
+        self.path = Some(path.to_string());
+        self
+    }
+}
+
+#[test]
 fn resolve_root_prefers_git_toplevel_unless_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let root = dunce::canonicalize(dir.path()).unwrap();

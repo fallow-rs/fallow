@@ -5,9 +5,9 @@ use std::process::ExitCode;
 
 use serde::Serialize;
 
-use super::{Harness, Step, hosts, mcp, resolve_root, skill};
+use super::{Harness, NextAction, Step, display_path, hosts, mcp, resolve_root, skill};
 use crate::setup_hooks::{
-    build_hooks_status, display_rel, find_managed_block_bounds, home_dir, read_optional_text,
+    build_hooks_status, find_managed_block_bounds, home_dir, read_optional_text,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -38,6 +38,7 @@ struct StatusReport {
     fallow_version: &'static str,
     detected: Vec<hosts::Detection>,
     surfaces: Vec<SurfaceStatus>,
+    next_actions: Vec<NextAction>,
 }
 
 /// Entry point for `fallow agent status`.
@@ -49,11 +50,14 @@ pub fn run_agent_status(
 ) -> ExitCode {
     let root = resolve_root(root, root_explicit);
     let home = home_dir();
+    let surfaces = surfaces(&root, home.as_deref());
+    let next_actions = status_next_actions(&surfaces);
     let report = StatusReport {
         root: root.display().to_string(),
         fallow_version: env!("CARGO_PKG_VERSION"),
         detected: hosts::detect(&root, home.as_deref()),
-        surfaces: surfaces(&root, home.as_deref()),
+        surfaces,
+        next_actions,
     };
     match output {
         fallow_config::OutputFormat::Json => match json_style.serialize(&report) {
@@ -69,7 +73,7 @@ pub fn run_agent_status(
             ),
         },
         fallow_config::OutputFormat::Human => {
-            print_human(&report);
+            print!("{}", render_human(&report));
             ExitCode::SUCCESS
         }
         _ => crate::error::emit_error("agent status supports human and json output", 2, output),
@@ -80,9 +84,9 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     let mut rows: Vec<SurfaceStatus> = Vec::new();
 
     let agents = root.join("AGENTS.md");
-    rows.push(guide_row(root, &agents, None));
+    rows.push(guide_row(root, home, &agents, None));
     let claude_md = root.join("CLAUDE.md");
-    rows.push(claude_import_row(root, &claude_md));
+    rows.push(claude_import_row(root, home, &claude_md));
 
     for (harness, dir) in [
         (None, root.join(".agents").join("skills").join("fallow")),
@@ -91,7 +95,7 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
             root.join(".claude").join("skills").join("fallow"),
         ),
     ] {
-        rows.push(skill_row(root, harness, &dir));
+        rows.push(skill_row(root, home, harness, &dir));
     }
     if let Some(home) = home {
         for (harness, dir) in [
@@ -102,25 +106,32 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
             ),
         ] {
             if skill::inspect(&dir) != skill::SkillState::Absent {
-                rows.push(skill_row(root, harness, &dir));
+                rows.push(skill_row(root, Some(home), harness, &dir));
             }
         }
     }
 
     rows.push(mcp_row(
         root,
+        home,
         Harness::Claude,
         &root.join(mcp::claude_project_file()),
     ));
-    rows.push(mcp_row(root, Harness::Codex, &root.join(mcp::codex_file())));
+    rows.push(mcp_row(
+        root,
+        home,
+        Harness::Codex,
+        &root.join(mcp::codex_file()),
+    ));
     if let Some(home) = home {
         let user_codex = home.join(mcp::codex_file());
         if mcp::registered_command(&user_codex, Harness::Codex).is_some() {
-            rows.push(mcp_row(root, Harness::Codex, &user_codex));
+            rows.push(mcp_row(root, Some(home), Harness::Codex, &user_codex));
         }
     }
     rows.push(mcp_row(
         root,
+        home,
         Harness::Cursor,
         &root.join(mcp::cursor_file()),
     ));
@@ -131,7 +142,12 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     rows
 }
 
-fn guide_row(root: &Path, path: &Path, harness: Option<Harness>) -> SurfaceStatus {
+fn guide_row(
+    root: &Path,
+    home: Option<&Path>,
+    path: &Path,
+    harness: Option<Harness>,
+) -> SurfaceStatus {
     let text = read_optional_text(path).ok().flatten();
     let (state, detail) = match text.as_deref() {
         None => (SurfaceState::Absent, None),
@@ -152,12 +168,12 @@ fn guide_row(root: &Path, path: &Path, harness: Option<Harness>) -> SurfaceStatu
         harness,
         step: Step::Guide,
         state,
-        path: display_rel(root, path),
+        path: display_path(root, home, path),
         detail,
     }
 }
 
-fn claude_import_row(root: &Path, path: &Path) -> SurfaceStatus {
+fn claude_import_row(root: &Path, home: Option<&Path>, path: &Path) -> SurfaceStatus {
     let text = read_optional_text(path).ok().flatten();
     let (state, detail) = match text.as_deref() {
         None => (SurfaceState::Absent, None),
@@ -174,12 +190,17 @@ fn claude_import_row(root: &Path, path: &Path) -> SurfaceStatus {
         harness: Some(Harness::Claude),
         step: Step::Guide,
         state,
-        path: display_rel(root, path),
+        path: display_path(root, home, path),
         detail,
     }
 }
 
-fn skill_row(root: &Path, harness: Option<Harness>, dir: &Path) -> SurfaceStatus {
+fn skill_row(
+    root: &Path,
+    home: Option<&Path>,
+    harness: Option<Harness>,
+    dir: &Path,
+) -> SurfaceStatus {
     let (state, detail) = match skill::inspect(dir) {
         skill::SkillState::Absent => (SurfaceState::Absent, None),
         skill::SkillState::Foreign => (
@@ -208,12 +229,12 @@ fn skill_row(root: &Path, harness: Option<Harness>, dir: &Path) -> SurfaceStatus
         harness,
         step: Step::Skill,
         state,
-        path: display_rel(root, dir),
+        path: display_path(root, home, dir),
         detail,
     }
 }
 
-fn mcp_row(root: &Path, harness: Harness, path: &Path) -> SurfaceStatus {
+fn mcp_row(root: &Path, home: Option<&Path>, harness: Harness, path: &Path) -> SurfaceStatus {
     let (state, detail) = match mcp::registered_command(path, harness) {
         Some(command) => (SurfaceState::Installed, Some(command.shell_words())),
         None if path.is_file() => (SurfaceState::Absent, Some("no fallow entry".to_string())),
@@ -223,7 +244,7 @@ fn mcp_row(root: &Path, harness: Harness, path: &Path) -> SurfaceStatus {
         harness: Some(harness),
         step: Step::Mcp,
         state,
-        path: display_rel(root, path),
+        path: display_path(root, home, path),
         detail,
     }
 }
@@ -252,21 +273,53 @@ fn hook_row(
     }
 }
 
-fn print_human(report: &StatusReport) {
-    eprintln!("fallow agent status");
-    eprintln!("  root: {}", report.root);
+fn status_next_actions(surfaces: &[SurfaceStatus]) -> Vec<NextAction> {
+    let mut next: Vec<NextAction> = Vec::new();
+    if surfaces
+        .iter()
+        .any(|row| matches!(row.state, SurfaceState::Absent | SurfaceState::Stale))
+    {
+        next.push(NextAction {
+            id: "agent-install",
+            command: "fallow agent install --dry-run".to_string(),
+            reason: "Shows what agent install would write for the absent or stale surfaces above; drop --dry-run to apply."
+                .to_string(),
+            mutating: false,
+        });
+    }
+    if surfaces
+        .iter()
+        .any(|row| row.state == SurfaceState::Foreign)
+    {
+        next.push(NextAction {
+            id: "agent-install-force",
+            command: "fallow agent install --force".to_string(),
+            reason: "Foreign surfaces were not written by fallow; --force replaces them, otherwise they are left alone."
+                .to_string(),
+            mutating: true,
+        });
+    }
+    next
+}
+
+fn render_human(report: &StatusReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "fallow agent status");
+    let _ = writeln!(out, "  root: {}", report.root);
     if report.detected.is_empty() {
-        eprintln!("  detected: none");
+        let _ = writeln!(out, "  detected: none");
     } else {
         for detection in &report.detected {
-            eprintln!(
+            let _ = writeln!(
+                out,
                 "  detected: {} ({})",
                 detection.harness.as_str(),
                 detection.evidence.join(", ")
             );
         }
     }
-    eprintln!();
+    out.push('\n');
     for row in &report.surfaces {
         let label = match row.harness {
             Some(harness) => format!("{} ({})", row.step.as_str(), harness.as_str()),
@@ -279,8 +332,25 @@ fn print_human(report: &StatusReport) {
             SurfaceState::Foreign => "foreign",
         };
         match &row.detail {
-            Some(detail) => eprintln!("  {:<40}  {state:<10} {label}  {detail}", row.path),
-            None => eprintln!("  {:<40}  {state:<10} {label}", row.path),
+            Some(detail) => {
+                let _ = writeln!(
+                    out,
+                    "  {:<40}  {state:<10}  {label:<16}  {detail}",
+                    row.path
+                );
+            }
+            None => {
+                let _ = writeln!(out, "  {:<40}  {state:<10}  {label}", row.path);
+            }
         }
     }
+    if !report.next_actions.is_empty() {
+        out.push('\n');
+        let _ = writeln!(out, "Next:");
+        for next in &report.next_actions {
+            let _ = writeln!(out, "  {}", next.command);
+            let _ = writeln!(out, "    {}", next.reason);
+        }
+    }
+    out
 }

@@ -393,11 +393,11 @@ Human output groups paths under "Shared with your team (commit these)" and "Loca
     {"harness": null, "step": "guide", "status": "written", "scope": "shared", "path": "AGENTS.md"},
     {"harness": "claude", "step": "mcp", "status": "skipped", "scope": "local", "path": ".claude/settings.local.json", "reason": "approval_not_requested"}
   ],
-  "next_steps": [{"id": "codex-mcp-add", "command": "codex mcp add fallow -- npx --no fallow-mcp", "reason": "..."}]
+  "next_actions": [{"id": "codex-mcp-add", "command": "codex mcp add fallow -- npx --no fallow-mcp", "reason": "...", "mutating": true}]
 }
 ```
 
-`status` values: `written`, `removed`, `unchanged`, `skipped`, `refused`, `failed`. Exit code 2 when any step is `refused` or `failed`; every other step still runs.
+`status` values: `written`, `removed`, `unchanged`, `skipped`, `refused`, `failed`. Exit code 2 when any step is `refused` or `failed`; every other step still runs. `next_actions` is deliberately not `next_steps`: entries flagged `mutating: true` write harness config when run, unlike the read-only `next_steps[]` of the analysis commands.
 
 ### Examples
 
