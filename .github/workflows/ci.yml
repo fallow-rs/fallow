@@ -115,6 +115,8 @@ jobs:
               - 'crates/mcp/src/tools/mod.rs'
               - 'crates/mcp/src/tools/process_tree.rs'
               - 'crates/mcp/Cargo.toml'
+              - 'crates/config/**'
+              - 'crates/types/**'
               - '.github/actions/setup-rust/**'
               - '.github/workflows/ci.yml'
               - 'scripts/workflow-policy.test.mjs'
@@ -382,6 +384,8 @@ jobs:
         run: cargo test -p fallow-mcp completed_success_cleans_descendant_process_tree
       - name: Test CLI subprocess cleanup
         run: cargo test -p fallow-cli windows_job_object_terminates_descendants_without_taskkill_lookup
+      - name: Test config and workspace diagnostic path handling
+        run: cargo test -p fallow-config -p fallow-types --lib
       - name: Clippy platform-specific paths
         run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
 

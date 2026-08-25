@@ -244,6 +244,11 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.ok(windowsRustPaths.includes("crates/cli/src/signal/**"));
   assert.ok(windowsRustPaths.includes("crates/cli/src/type_aware.rs"));
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
+  // Path rendering lives across both crates (`Display`, `join`, `components`),
+  // and a separator regression there is invisible until the weekly Release
+  // Validation runs the full suite on Windows.
+  assert.ok(windowsRustPaths.includes("crates/config/**"));
+  assert.ok(windowsRustPaths.includes("crates/types/**"));
   assert.match(windowsRustJob, /cargo test -p fallow-engine changed_files::tests/);
   assert.match(windowsRustJob, /cargo test -p fallow-engine churn::tests/);
   assert.match(windowsRustJob, /cargo test -p fallow-engine repo_refs::tests/);
@@ -260,6 +265,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     windowsRustJob,
     /cargo test -p fallow-cli windows_job_object_terminates_descendants_without_taskkill_lookup/,
   );
+  assert.match(windowsRustJob, /^[ \t]+run: cargo test -p fallow-config -p fallow-types --lib$/m);
   assert.match(
     windowsRustJob,
     /^[ \t]+run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings$/m,
