@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`fallow impact statusline` now says when the Impact store was written by a
+  newer Fallow.** An older binary reading a newer store printed the generic
+  `data unavailable` line, which read as lost history. It now prints
+  `data from newer fallow · upgrade this fallow`, so the fix is visible in the
+  status bar and a statusline wrapper can retry with a current binary. Corrupt
+  or unreadable stores keep the `data unavailable` line.
+
 ## [3.18.0] - 2026-08-25
 
 ### Added

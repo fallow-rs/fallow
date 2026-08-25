@@ -384,11 +384,14 @@ pub fn load(root: &Path) -> ImpactStore {
     }
 }
 
-/// A stable failure state for status-bar callers. The statusline loader never
+/// Stable failure states for status-bar callers. The statusline loader never
 /// logs the store path or substitutes corrupt/newer data with an empty report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatuslineLoadError {
+    /// The store is unreadable or corrupt.
     DataUnavailable,
+    /// The store was written by a newer Fallow whose schema this build cannot read.
+    NewerSchema,
 }
 
 /// Load Impact state without writes, warnings, or path-bearing diagnostics.
@@ -413,7 +416,7 @@ fn parse_statusline_store(content: &str) -> Result<ImpactStore, StatuslineLoadEr
     let store = serde_json::from_str::<ImpactStore>(content)
         .map_err(|_| StatuslineLoadError::DataUnavailable)?;
     if store.schema_version > STORE_SCHEMA_VERSION {
-        return Err(StatuslineLoadError::DataUnavailable);
+        return Err(StatuslineLoadError::NewerSchema);
     }
     Ok(store)
 }
@@ -2114,6 +2117,14 @@ pub fn render_statusline_unavailable() -> String {
     "fallow impact  data unavailable".to_owned()
 }
 
+/// Render the exact stable state used when the store comes from a newer Fallow.
+/// Naming the cause lets a status-bar wrapper retry with a newer binary and
+/// tells the user which fix applies.
+#[must_use]
+pub fn render_statusline_newer_schema() -> String {
+    "fallow impact  data from newer fallow · upgrade this fallow".to_owned()
+}
+
 fn statusline_trend_segment(trend: &TrendSummary) -> String {
     let magnitude = trend.total_delta.unsigned_abs();
     match trend.direction {
@@ -3027,6 +3038,10 @@ mod tests {
         assert_eq!(
             render_statusline_unavailable(),
             "fallow impact  data unavailable"
+        );
+        assert_eq!(
+            render_statusline_newer_schema(),
+            "fallow impact  data from newer fallow · upgrade this fallow"
         );
     }
 
@@ -5370,7 +5385,7 @@ mod tests {
         );
         assert!(matches!(
             load_statusline(root),
-            Err(StatuslineLoadError::DataUnavailable)
+            Err(StatuslineLoadError::NewerSchema)
         ));
     }
 

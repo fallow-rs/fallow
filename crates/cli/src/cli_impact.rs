@@ -109,6 +109,7 @@ pub fn render_impact_statusline(root: &Path) -> ExitCode {
         Err(impact::StatuslineLoadError::DataUnavailable) => {
             impact::render_statusline_unavailable()
         }
+        Err(impact::StatuslineLoadError::NewerSchema) => impact::render_statusline_newer_schema(),
     };
     println!("{rendered}");
     ExitCode::SUCCESS
