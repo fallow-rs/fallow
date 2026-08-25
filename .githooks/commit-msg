@@ -4,9 +4,11 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# A fresh worktree has no node_modules; CI still runs commitlint, so skip
+# locally instead of aborting the commit with a message that reads as a warning.
 if [ ! -x node_modules/.bin/commitlint ]; then
-  echo "commitlint is not installed. Run: npm install"
-  exit 1
+  echo "commit-msg: commitlint is not installed, skipping local check (CI still enforces it). Run: npm ci" >&2
+  exit 0
 fi
 
 node_modules/.bin/commitlint --edit "$1"

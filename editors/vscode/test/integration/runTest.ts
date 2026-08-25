@@ -5,7 +5,10 @@ import { runTests } from "@vscode/test-electron";
 
 const extensionDevelopmentPath = path.resolve(__dirname, "../../..");
 const extensionTestsPath = path.resolve(__dirname, "suite/index.js");
-const vscodeTestCachePath = path.join(os.tmpdir(), "fallow-vscode-test-cache");
+const vscodeTestCachePath = path.resolve(
+  process.env["FALLOW_VSCODE_TEST_CACHE_PATH"] ??
+    path.join(os.tmpdir(), "fallow-vscode-test-cache"),
+);
 const fixtureWorkspacePath = path.resolve(
   extensionDevelopmentPath,
   "test/integration/fixtures/workspace/package.json"

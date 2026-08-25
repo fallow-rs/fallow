@@ -38,13 +38,12 @@ js_ts_changed=$(
 
 if [ -n "$js_ts_changed" ]; then
   if [ ! -d node_modules ]; then
-    echo "JS/TS files staged but node_modules is missing. Run \`npm install\` first." >&2
-    exit 1
+    echo "pre-commit: JS/TS files staged but node_modules is missing; skipping oxlint and oxfmt (CI still enforces them). Run: npm ci" >&2
+  else
+    echo "Running oxlint..."
+    npm run --silent lint:js
+
+    echo "Running oxfmt --check..."
+    npm run --silent fmt:js:check
   fi
-
-  echo "Running oxlint..."
-  npm run --silent lint:js
-
-  echo "Running oxfmt --check..."
-  npm run --silent fmt:js:check
 fi
