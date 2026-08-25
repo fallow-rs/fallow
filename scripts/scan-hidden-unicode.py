@@ -25,9 +25,12 @@ heuristic. Stdlib only.
 
 from __future__ import annotations
 
+import fnmatch
+import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -154,15 +157,33 @@ def committed_surface(staged_only: bool) -> list[Path]:
     return [p for p in files if p.suffix in COMMITTED_EXTS and p.is_file()]
 
 
+def _walk_pruned(base: Path) -> Iterator[Path]:
+    """Yield files under base without descending into AGENT_SKIP_DIRS.
+
+    Path.glob("**") walks target/ and node_modules/ before the skip filter can
+    reject them, which cost 10-25s per session start on a built checkout.
+    """
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [name for name in dirnames if name not in AGENT_SKIP_DIRS]
+        for name in filenames:
+            yield Path(dirpath) / name
+
+
 def agent_surface() -> list[Path]:
     seen: set[Path] = set()
     for pattern in AGENT_GLOBS:
+        if "**/" in pattern:
+            prefix, _, tail = pattern.partition("**/")
+            base = REPO_ROOT / prefix if prefix else REPO_ROOT
+            if not base.is_dir():
+                continue
+            for path in _walk_pruned(base):
+                if fnmatch.fnmatch(path.name, tail) and path.is_file():
+                    seen.add(path)
+            continue
         for path in REPO_ROOT.glob(pattern):
-            if not path.is_file():
-                continue
-            if any(part in AGENT_SKIP_DIRS for part in path.relative_to(REPO_ROOT).parts):
-                continue
-            seen.add(path)
+            if path.is_file():
+                seen.add(path)
     return sorted(seen)
 
 
