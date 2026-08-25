@@ -139,7 +139,15 @@ pub const TASK_MATRIX: &[TaskRow] = &[
         reason = "read only by the matrix exclusion tests in this crate"
     )
 )]
-pub const MUTATING_COMMANDS: &[&str] = &["fix", "init", "hooks", "migrate", "setup-hooks", "watch"];
+pub const MUTATING_COMMANDS: &[&str] = &[
+    "agent",
+    "fix",
+    "init",
+    "hooks",
+    "migrate",
+    "setup-hooks",
+    "watch",
+];
 
 /// Render the task-to-command matrix as a Markdown table. Used by the
 /// `init --agents` template and the `hooks install --target agent` managed

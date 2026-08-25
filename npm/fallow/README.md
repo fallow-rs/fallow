@@ -89,7 +89,7 @@ The bundled `fallow-mcp` server lives in `node_modules/.bin/` when installed as 
 }
 ```
 
-Swap `npx` for `pnpm exec` or `yarn` to match your package manager; a globally installed `fallow-mcp` works as `"command": "fallow-mcp"` directly. See the [MCP integration guide](https://docs.fallow.tools/integrations/mcp).
+Swap `npx` for `pnpm exec` or `yarn` to match your package manager; a globally installed `fallow-mcp` works as `"command": "fallow-mcp"` directly. See the [MCP integration guide](https://docs.fallow.tools/integrations/mcp). `npx fallow agent install` writes this registration for you, together with the skill, an `AGENTS.md` task map, and the commit/push gate, for every harness it detects (Claude Code, Codex, Cursor); `--dry-run` shows the plan first.
 
 The package also ships a version-matched agent skill under `skills/fallow`, and `fallow/capabilities.json` mirrors `fallow schema` for tools that need CLI and issue-surface metadata without spawning the binary. TanStack Intent discovers both from `node_modules`:
 

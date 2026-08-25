@@ -1106,6 +1106,11 @@
       "flags": []
     },
     {
+      "name": "agent",
+      "description": "Wire fallow into the coding-agent harnesses used by this project in one pass (AGENTS.md task map, skill, MCP server, commit/push gate), or show and remove what was installed. `fallow init --agents` and `fallow hooks install --target agent` remain the single-piece commands underneath",
+      "flags": []
+    },
+    {
       "name": "ci",
       "description": "CI helpers for PR/MR feedback envelopes",
       "flags": []

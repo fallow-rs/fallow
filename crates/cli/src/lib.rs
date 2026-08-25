@@ -34,10 +34,12 @@ mod base_worktree;
 pub use base_worktree::canonical_root_hash;
 mod walkthrough_state;
 use fallow_engine::baseline;
+mod agent_install;
 mod cache_notice;
 mod check;
 mod ci;
 mod ci_template;
+mod cli_agent;
 mod cli_format;
 mod cli_hooks;
 mod cli_impact;
@@ -94,6 +96,7 @@ mod watch;
 use check::{CheckOptions, IssueFilters, TraceOptions};
 /// Structured error output for CLI and JSON formats.
 pub(crate) mod error;
+use cli_agent::{AgentCli, run_agent_command};
 #[cfg(test)]
 use cli_format::parse_format_arg;
 use cli_format::{Format, FormatConfig};
@@ -188,6 +191,7 @@ Project inspection:
 
 Setup and configuration:
   init              Create a fallow config, optionally with a Git hook
+  agent             Wire fallow into Claude Code, Codex, or Cursor in one pass
   audit-cache       Maintain reusable audit base-snapshot caches
   recommend         Recommend a project-tailored config for an agent to author
   migrate           Migrate knip, jscpd, or stylelint config to fallow
@@ -969,6 +973,16 @@ enum Command {
     Hooks {
         #[command(subcommand)]
         subcommand: HooksCli,
+    },
+
+    /// Wire fallow into the coding-agent harnesses used by this project in
+    /// one pass (AGENTS.md task map, skill, MCP server, commit/push gate), or
+    /// show and remove what was installed. `fallow init --agents` and
+    /// `fallow hooks install --target agent` remain the single-piece
+    /// commands underneath.
+    Agent {
+        #[command(subcommand)]
+        subcommand: AgentCli,
     },
 
     /// CI helpers for PR/MR feedback envelopes.
@@ -3469,6 +3483,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Hooks { subcommand } => {
             run_hooks_command(root, subcommand, output, dispatch.json_style)
         }
+        Command::Agent { subcommand } => dispatch_agent_command(dispatch, subcommand),
         Command::Ci { subcommand } => {
             ci::run(map_ci_subcommand(subcommand), output, dispatch.json_style)
         }
@@ -4184,6 +4199,16 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             top,
             trace,
         },
+    )
+}
+
+fn dispatch_agent_command(dispatch: &DispatchContext<'_>, subcommand: AgentCli) -> ExitCode {
+    run_agent_command(
+        dispatch.root,
+        dispatch.cli.root.is_some(),
+        subcommand,
+        dispatch.output,
+        dispatch.json_style,
     )
 }
 

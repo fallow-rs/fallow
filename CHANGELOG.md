@@ -19,6 +19,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is advisory and does not participate in bare analysis, audit gates, SARIF,
   editor diagnostics, or auto-fix.
 
+- **`fallow agent install` wires a project's coding-agent harnesses in one
+  pass.** Onboarding an agent previously meant `fallow init --agents`,
+  `fallow hooks install --target agent`, hand-copying the MCP snippet from the
+  README, and knowing that a skill ships under `node_modules/fallow/skills`.
+  The new `agent` command detects Claude Code, Codex, and Cursor from the
+  project, the home directory, and the session environment (or takes
+  `--harness`), then writes what each one reads: an `AGENTS.md` task map (plus
+  an `@AGENTS.md` import in `CLAUDE.md` for Claude Code), the fallow skill
+  under `.claude/skills/` or `.agents/skills/` (a small pointer to the
+  project's own `node_modules/fallow` copy when it exists, otherwise a
+  version-matched copy embedded in the binary), the MCP server registration
+  in `.mcp.json`, `.codex/config.toml`, or `.cursor/mcp.json` (only after
+  probing that a `fallow-mcp` launcher exists), and the commit/push gate. Every
+  file or block carries a versioned `fallow:agent-install` marker, re-running
+  is byte-stable, `--dry-run` prints the plan, the human summary groups paths
+  into "shared with your team" and "local to you", and JSON output lists every
+  step with a `status` and `reason`. `fallow agent status` reports installed,
+  stale, absent, and foreign surfaces; `fallow agent uninstall` removes managed
+  content and deletes a file fallow authored only while it still matches what
+  fallow wrote. Pre-approving the project MCP server for Claude Code stays
+  opt-in through `--approve` and is refused when `.claude/settings.local.json`
+  is tracked by git. `init --agents` and `hooks install --target agent` are
+  unchanged and remain the single-piece commands underneath.
+
 - **size-limit presets, plugins, and config files are recognized**
   ([#2413](https://github.com/fallow-rs/fallow/pull/2413)). size-limit loads
   `@size-limit/*` and `size-limit-*` packages from `package.json` by convention

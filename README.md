@@ -145,6 +145,7 @@ Adopting on an existing codebase? `fallow audit` fails only on findings a change
 | `fallow report --from results.json` | Re-render saved JSON as SARIF, CodeClimate, GitHub output, or GitHub/GitLab PR feedback without re-analyzing |
 | `fallow ci ...` | PR/MR feedback helpers (comments, reviews, check runs) |
 | `fallow ci-template gitlab --vendor` | Vendor the GitLab CI template for offline runners |
+| `fallow agent install` | One-pass agent onboarding for Claude Code, Codex, and Cursor (`status`, `uninstall`, `--dry-run`) |
 | `fallow hooks install --target git` | Managed pre-commit hook; `--target agent` writes agent-gate hooks |
 | `fallow rule-pack init` | Declarative policy rule packs (`list`, `test`, `schema`) |
 | `fallow plugin-check` | Dry-run an external framework plugin |
@@ -241,10 +242,10 @@ The JSON contract and exit codes above are the agent interface.
 
 The [MCP server](https://docs.fallow.tools/integrations/mcp) covers analysis, audit, health, duplication, tracing, fix preview and apply, boundary guard checks, and target inspection; every tool documents its nearest CLI fallback, and a bounded read-only Code Mode sandbox composes analysis calls without filesystem or network access.
 
+- `npx fallow agent install` wires the detected harnesses (Claude Code, Codex, Cursor) in one pass: an `AGENTS.md` task map (plus a `CLAUDE.md` import), the fallow skill, the MCP server registration, and the commit/push gate. Every write is marked, `--dry-run` shows the plan, `status` and `uninstall` cover the same surfaces
 - [`npx fallow recommend --format json`](https://docs.fallow.tools/cli/recommend) is the onboarding entry point: it returns the detected stack, a proposed config, and every decision with its tier and rationale, and it ships the subjective choices as ready-to-ask questions with options and tradeoffs. An agent authors `.fallowrc.json` from evidence and asks the user only what fallow will not decide
 - A version-matched agent skill ships in the npm package under `node_modules/fallow/skills/fallow` ([agent skills](https://docs.fallow.tools/integrations/agent-skills), companion repo [fallow-skills](https://github.com/fallow-rs/fallow-skills))
-- `npx fallow init --agents` scaffolds an AGENTS.md with a task-to-command matrix
-- `npx fallow hooks install --target agent` gates `git commit` and `git push` on `fallow audit` ([hooks](https://docs.fallow.tools/integrations/claude-hooks))
+- `npx fallow init --agents` scaffolds an AGENTS.md with a task-to-command matrix, and `npx fallow hooks install --target agent` gates `git commit` and `git push` on `fallow audit` ([hooks](https://docs.fallow.tools/integrations/claude-hooks)); both are the single-piece commands underneath `agent install`
 - A compliance loop with a copy-paste agent prompt: [docs/fallow-compliance.md](docs/fallow-compliance.md)
 - To verify security candidates from an agent harness, follow [docs/security-agent-verification.md](docs/security-agent-verification.md)
 - Never run `fallow watch` in an agent loop; it does not exit. Telemetry is off by default and opt-in only, with `DO_NOT_TRACK` honored ([docs/telemetry.md](docs/telemetry.md))

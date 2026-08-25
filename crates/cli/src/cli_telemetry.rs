@@ -271,6 +271,7 @@ pub fn telemetry_workflow_for_command(
             Command::SimilarCode { .. }
             | Command::Init { .. }
             | Command::Hooks { .. }
+            | Command::Agent { .. }
             | Command::ConfigSchema
             | Command::PluginSchema
             | Command::PluginCheck

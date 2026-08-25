@@ -453,7 +453,7 @@ fn next_steps_are_read_only_and_placeholder_free() {
             !command.contains('<') && !command.contains('>'),
             "command must be placeholder-free: {command}"
         );
-        for verb in ["fix", "init", "hooks", "migrate", "setup-hooks"] {
+        for verb in ["agent", "fix", "init", "hooks", "migrate", "setup-hooks"] {
             assert!(
                 !command.split_whitespace().any(|token| token == verb),
                 "command must be read-only: {command}"
