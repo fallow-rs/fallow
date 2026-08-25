@@ -122,6 +122,7 @@ pub mod registry {
         "lint-staged",
         "lefthook",
         "simple-git-hooks",
+        "size-limit",
         "svgo",
         "svgr",
         "graphql-codegen",
