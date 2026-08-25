@@ -11,6 +11,7 @@ use crate::graph::{
     AmbiguityParticipants, EffectiveExportResolution, ExportNamespace, ExportSymbol, ModuleGraph,
     ModuleNode,
 };
+use crate::resolve::{has_react_native_plugin, platform_family_key};
 use crate::results::{
     DuplicateExport, DuplicateLocation, ExportUsage, PrivateTypeLeak, ReferenceLocation,
     StaleSuppression, SuppressionOrigin, UnusedExport,
@@ -73,6 +74,13 @@ fn is_tanstack_router_active(
             .iter()
             .any(|plugin| plugin == TANSTACK_ROUTER_PLUGIN_NAME)
     })
+}
+
+/// Whether Metro platform-extension resolution is in effect, which is the only
+/// situation where sibling `<stem>.<platform><ext>` files are one module
+/// selected per platform rather than independent duplicates.
+fn is_react_native_active(plugin_result: Option<&crate::plugins::AggregatedPluginResult>) -> bool {
+    plugin_result.is_some_and(|pr| has_react_native_plugin(&pr.active_plugins))
 }
 
 struct CompiledUsedExportRule<'a> {
@@ -1067,6 +1075,7 @@ pub(super) fn find_duplicate_exports_with_plugins(
     let dynamic_re_export_sources = build_dynamic_re_export_source_map(graph, resolved_modules);
     let export_locations =
         collect_duplicate_export_locations(graph, config, suppressions, plugin_result);
+    let collapse_platform_families = is_react_native_active(plugin_result);
 
     let mut sorted_locations: Vec<_> = export_locations.into_iter().collect();
     sorted_locations.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1080,6 +1089,7 @@ pub(super) fn find_duplicate_exports_with_plugins(
                 &dynamic_re_export_sources,
                 graph,
                 line_offsets_by_file,
+                collapse_platform_families,
             )
         })
         .collect()
@@ -1238,14 +1248,16 @@ fn is_css_module_path(path: &std::path::Path) -> bool {
 }
 
 /// Evaluate one same-name export group into an optional duplicate finding:
-/// strip re-export chain members, partition the remaining origins into
-/// importer-connected components, and collect the surviving locations.
+/// strip re-export chain members, collapse Metro platform-extension families
+/// when `collapse_platform_families` is set, partition the remaining origins
+/// into importer-connected components, and collect the surviving locations.
 fn evaluate_duplicate_export_group(
     name: String,
     locations: Vec<ExportEntry>,
     dynamic_re_export_sources: &DynamicReExportSources,
     graph: &ModuleGraph,
     line_offsets_by_file: &LineOffsetsMap<'_>,
+    collapse_platform_families: bool,
 ) -> Option<DuplicateExport> {
     if locations.len() <= 1 {
         return None;
@@ -1266,6 +1278,14 @@ fn evaluate_duplicate_export_group(
             )
         })
         .collect();
+
+    // Collapse after the re-export strip so a barrel that re-exports from the
+    // platform winner is still recognized as a chain member of the family.
+    let independent_entries = if collapse_platform_families {
+        collapse_platform_family_entries(independent_entries)
+    } else {
+        independent_entries
+    };
 
     if independent_entries.len() <= 1 {
         return None;
@@ -1296,6 +1316,81 @@ fn evaluate_duplicate_export_group(
         export_name: name,
         locations: surviving_locations,
     })
+}
+
+/// Keep one member per Metro platform-extension family in `entries`.
+///
+/// With the React Native or Expo plugin active the resolver credits an import
+/// of `./UserMenu` to every family member, so `UserMenu.tsx` and
+/// `UserMenu.ios.tsx` share each importer and would otherwise partition into
+/// one duplicate component. The variants are one module selected per
+/// platform, not independent origins. The base file stands in for the family
+/// when present (it is Metro's fallback on every other platform), otherwise
+/// the lowest path, so a genuine duplicate elsewhere is still reported
+/// against a stable member. Entry order is preserved.
+fn collapse_platform_family_entries(entries: Vec<ExportEntry>) -> Vec<ExportEntry> {
+    let keep = platform_family_keep_mask(&entries);
+    entries
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(entry, keep)| keep.then_some(entry))
+        .collect()
+}
+
+/// Mark which of `entries` survive family collapsing: every entry outside a
+/// family, and every entry of each family's representative file.
+fn platform_family_keep_mask(entries: &[ExportEntry]) -> Vec<bool> {
+    let mut families: FxHashMap<(&std::path::Path, &str), Vec<(usize, bool)>> =
+        FxHashMap::default();
+    for (i, entry) in entries.iter().enumerate() {
+        let Some(key) = platform_family_key(&entry.path) else {
+            continue;
+        };
+        families
+            .entry((key.parent, key.base))
+            .or_default()
+            .push((i, key.is_platform_variant));
+    }
+
+    let mut keep = vec![true; entries.len()];
+    for members in families.into_values() {
+        let Some(representative) = platform_family_representative(entries, &members) else {
+            continue;
+        };
+        for &(i, _) in &members {
+            if entries[i].file_id != representative {
+                keep[i] = false;
+            }
+        }
+    }
+    keep
+}
+
+/// Pick the file that stands in for one family, or `None` when `members` do
+/// not form a family: a single file (possibly with both a value and a type
+/// entry), or same-stem files without any platform variant, which Metro never
+/// treats as a family.
+fn platform_family_representative(
+    entries: &[ExportEntry],
+    members: &[(usize, bool)],
+) -> Option<FileId> {
+    let distinct_files: FxHashSet<FileId> =
+        members.iter().map(|&(i, _)| entries[i].file_id).collect();
+    if distinct_files.len() < 2 || !members.iter().any(|&(_, is_variant)| is_variant) {
+        return None;
+    }
+    let base_members = members
+        .iter()
+        .filter(|&&(_, is_variant)| !is_variant)
+        .map(|&(i, _)| &entries[i]);
+    let representative = match base_members.min_by_key(|entry| &entry.path) {
+        Some(base) => base,
+        None => members
+            .iter()
+            .map(|&(i, _)| &entries[i])
+            .min_by_key(|entry| &entry.path)?,
+    };
+    Some(representative.file_id)
 }
 
 fn is_re_export_chain_member(

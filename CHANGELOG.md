@@ -32,6 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   status bar and a statusline wrapper can retry with a current binary. Corrupt
   or unreadable stores keep the `data unavailable` line.
 
+### Fixed
+
+- **React Native and Expo platform-extension families are no longer reported
+  as duplicate exports** (Closes
+  [#2407](https://github.com/fallow-rs/fallow/issues/2407)). Since 3.11.0 an
+  import of `./UserMenu` credits every member of a Metro family
+  (`UserMenu.tsx`, `UserMenu.ios.tsx`, `UserMenu.web.tsx`, ...), which made
+  the siblings share an importer and surface in `duplicate-exports` as a pair.
+  With the `react-native` or `expo` plugin active, `dead-code` now folds each
+  family into one representative (the base file when present, otherwise the
+  lowest path) before duplicate detection. A genuine duplicate in an unrelated
+  file is still reported and names that file next to the family
+  representative. Projects without those plugins keep the previous output.
+
 ## [3.18.0] - 2026-08-25
 
 ### Added

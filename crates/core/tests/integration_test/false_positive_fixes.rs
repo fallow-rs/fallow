@@ -637,6 +637,201 @@ export const app = UserMenu;
     );
 }
 
+/// Write a small project whose `src/index.ts` entry imports the given files.
+/// `manifest` is the full `package.json` body so a test can opt in or out of
+/// the React Native plugin.
+fn write_platform_family_project(root: &std::path::Path, manifest: &str, files: &[(&str, &str)]) {
+    std::fs::write(root.join("package.json"), manifest).expect("package json");
+    for (relative, source) in files {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().expect("file parent")).expect("file dir");
+        std::fs::write(path, source).expect("project file");
+    }
+}
+
+const REACT_NATIVE_FAMILY_MANIFEST: &str = r#"{
+    "name": "react-native-platform-family-duplicates",
+    "private": true,
+    "main": "src/index.ts",
+    "dependencies": {
+        "react-native": "0.80.0"
+    }
+}"#;
+
+const PLAIN_FAMILY_MANIFEST: &str = r#"{
+    "name": "plain-platform-suffix-siblings",
+    "private": true,
+    "main": "src/index.ts"
+}"#;
+
+fn duplicate_locations(
+    results: &fallow_types::results::AnalysisResults,
+    name: &str,
+) -> Option<Vec<String>> {
+    results
+        .duplicate_exports
+        .iter()
+        .find(|d| d.export.export_name == name)
+        .map(|d| {
+            d.export
+                .locations
+                .iter()
+                .map(|location| location.path.to_string_lossy().replace('\\', "/"))
+                .collect()
+        })
+}
+
+#[test]
+fn react_native_platform_family_is_not_a_duplicate_export() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write_platform_family_project(
+        root,
+        REACT_NATIVE_FAMILY_MANIFEST,
+        &[
+            (
+                "src/index.ts",
+                "import { UserMenu } from \"./components/UserMenu\";\nexport const app = UserMenu;\n",
+            ),
+            (
+                "src/components/UserMenu.tsx",
+                "export const UserMenu = 'default';\n",
+            ),
+            (
+                "src/components/UserMenu.ios.tsx",
+                "export const UserMenu = 'ios';\n",
+            ),
+        ],
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_eq!(
+        duplicate_locations(&results, "UserMenu"),
+        None,
+        "one Metro platform-extension family is a single module selected per platform, not a duplicate"
+    );
+}
+
+#[test]
+fn react_native_web_platform_family_is_not_a_duplicate_export() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write_platform_family_project(
+        root,
+        REACT_NATIVE_FAMILY_MANIFEST,
+        &[
+            (
+                "src/index.ts",
+                "import { UserMenu } from \"./components/UserMenu\";\nexport const app = UserMenu;\n",
+            ),
+            (
+                "src/components/UserMenu.tsx",
+                "export const UserMenu = 'native';\n",
+            ),
+            (
+                "src/components/UserMenu.web.tsx",
+                "export const UserMenu = 'web';\n",
+            ),
+        ],
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_eq!(
+        duplicate_locations(&results, "UserMenu"),
+        None,
+        "a `.web` variant next to the base file is a platform family too"
+    );
+}
+
+#[test]
+fn react_native_platform_family_still_reports_unrelated_duplicate() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write_platform_family_project(
+        root,
+        REACT_NATIVE_FAMILY_MANIFEST,
+        &[
+            (
+                "src/index.ts",
+                "import { UserMenu } from \"./components/UserMenu\";\nimport { UserMenu as LegacyUserMenu } from \"./legacy/UserMenu\";\nexport const app = [UserMenu, LegacyUserMenu];\n",
+            ),
+            (
+                "src/components/UserMenu.tsx",
+                "export const UserMenu = 'default';\n",
+            ),
+            (
+                "src/components/UserMenu.ios.tsx",
+                "export const UserMenu = 'ios';\n",
+            ),
+            (
+                "src/legacy/UserMenu.tsx",
+                "export const UserMenu = 'legacy';\n",
+            ),
+        ],
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let locations = duplicate_locations(&results, "UserMenu")
+        .expect("a genuine duplicate outside the family must still be reported");
+    assert!(
+        locations
+            .iter()
+            .any(|path| path.ends_with("src/legacy/UserMenu.tsx")),
+        "the finding must name the unrelated file: {locations:?}"
+    );
+    assert!(
+        locations
+            .iter()
+            .any(|path| path.ends_with("src/components/UserMenu.tsx")),
+        "the family is represented by its base file: {locations:?}"
+    );
+    assert!(
+        !locations
+            .iter()
+            .any(|path| path.ends_with("src/components/UserMenu.ios.tsx")),
+        "platform variants collapse into the family representative: {locations:?}"
+    );
+}
+
+#[test]
+fn platform_suffix_siblings_without_mobile_plugin_stay_duplicate_exports() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write_platform_family_project(
+        root,
+        PLAIN_FAMILY_MANIFEST,
+        &[
+            (
+                "src/index.ts",
+                "import { Foo } from \"./components/Foo\";\nimport { Foo as IosFoo } from \"./components/Foo.ios\";\nexport const app = [Foo, IosFoo];\n",
+            ),
+            ("src/components/Foo.tsx", "export const Foo = 'default';\n"),
+            ("src/components/Foo.ios.tsx", "export const Foo = 'ios';\n"),
+        ],
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let locations = duplicate_locations(&results, "Foo")
+        .expect("without the React Native or Expo plugin a `.ios` suffix is just a file name");
+    assert!(
+        locations
+            .iter()
+            .any(|path| path.ends_with("src/components/Foo.tsx"))
+            && locations
+                .iter()
+                .any(|path| path.ends_with("src/components/Foo.ios.tsx")),
+        "both sibling files must be reported: {locations:?}"
+    );
+}
+
 #[test]
 fn missing_react_native_extends_resolves_explicit_js_alias_to_platform_source() {
     let dir = tempfile::tempdir().expect("temp dir");

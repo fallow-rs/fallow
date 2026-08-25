@@ -8,8 +8,9 @@ use super::types::{RN_PLATFORM_PREFIXES, ResolveResult, ResolvedImport, Resolved
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ImportInfo, ImportedName};
 
-/// Check if React Native or Expo plugins are active.
-fn has_react_native_plugin(active_plugins: &[String]) -> bool {
+/// Whether the React Native or Expo plugin is active, the gate for every
+/// Metro platform-extension behavior in the resolver and its consumers.
+pub fn has_react_native_plugin(active_plugins: &[String]) -> bool {
     active_plugins
         .iter()
         .any(|p| p == "react-native" || p == "expo")
@@ -40,6 +41,41 @@ fn strip_platform_segment(stem: &str) -> (&str, bool) {
     (stem, false)
 }
 
+/// Where a source file sits in a Metro platform-extension family: the
+/// directory and base stem shared by `<stem>.<platform><ext>` and
+/// `<stem><ext>`, plus whether this member carries a platform segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlatformFamilyKey<'a> {
+    /// Directory containing the file.
+    pub parent: &'a Path,
+    /// File stem with the source extension and any platform segment removed.
+    pub base: &'a str,
+    /// Whether the file name carries a platform segment (`.ios`, `.web`, ...).
+    pub is_platform_variant: bool,
+}
+
+/// Classify `path` by its Metro platform-extension family.
+///
+/// Membership is syntactic: files sharing `parent` and `base` belong to the
+/// same family, and the caller decides whether enough members exist for the
+/// family to matter. Returns `None` for files outside the Metro source
+/// extensions, names without a stem, and paths without a parent directory.
+pub fn platform_family_key(path: &Path) -> Option<PlatformFamilyKey<'_>> {
+    let name = path.file_name()?.to_str()?;
+    let (stem, ext) = split_source_ext(name);
+    ext?;
+    let (base, is_platform_variant) = strip_platform_segment(stem);
+    if base.is_empty() {
+        return None;
+    }
+    let parent = path.parent()?;
+    Some(PlatformFamilyKey {
+        parent,
+        base,
+        is_platform_variant,
+    })
+}
+
 /// Whether an import specifier explicitly names a platform variant
 /// (e.g. `./UserMenu.ios` or `./UserMenu.ios.tsx`), in which case the author
 /// targeted one variant and the family must not be credited as a whole.
@@ -62,24 +98,13 @@ impl PlatformFamilies {
     fn build(files: &[DiscoveredFile]) -> Self {
         let mut grouped: FxHashMap<(&Path, &str), Vec<(FileId, bool)>> = FxHashMap::default();
         for file in files {
-            let Some(name) = file.path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            let (stem, ext) = split_source_ext(name);
-            if ext.is_none() {
-                continue;
-            }
-            let (base, is_platform) = strip_platform_segment(stem);
-            if base.is_empty() {
-                continue;
-            }
-            let Some(parent) = file.path.parent() else {
+            let Some(key) = platform_family_key(&file.path) else {
                 continue;
             };
             grouped
-                .entry((parent, base))
+                .entry((key.parent, key.base))
                 .or_default()
-                .push((file.id, is_platform));
+                .push((file.id, key.is_platform_variant));
         }
 
         let mut family_of = FxHashMap::default();
@@ -411,6 +436,48 @@ mod tests {
         assert!(!specifier_names_platform_variant("./UserMenu"));
         assert!(!specifier_names_platform_variant("./UserMenu.tsx"));
         assert!(!specifier_names_platform_variant("./ios/UserMenu"));
+    }
+
+    #[test]
+    fn test_platform_family_key_marks_platform_variants() {
+        let key = platform_family_key(Path::new("src/components/UserMenu.ios.tsx"))
+            .expect("source file has a family key");
+        assert_eq!(key.parent, Path::new("src/components"));
+        assert_eq!(key.base, "UserMenu");
+        assert!(key.is_platform_variant);
+
+        let key = platform_family_key(Path::new("src/components/UserMenu.tsx"))
+            .expect("source file has a family key");
+        assert_eq!(key.parent, Path::new("src/components"));
+        assert_eq!(key.base, "UserMenu");
+        assert!(!key.is_platform_variant);
+    }
+
+    #[test]
+    fn test_platform_family_key_covers_every_platform_and_source_extension() {
+        for platform in RN_PLATFORM_PREFIXES {
+            for ext in RN_SOURCE_EXTS {
+                let path = format!("src/Button{platform}{ext}");
+                let key = platform_family_key(Path::new(&path)).expect("family key");
+                assert_eq!(key.base, "Button", "{path}");
+                assert!(key.is_platform_variant, "{path}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_platform_family_key_rejects_non_source_files() {
+        assert_eq!(platform_family_key(Path::new("src/UserMenu.css")), None);
+        assert_eq!(
+            platform_family_key(Path::new("src/UserMenu.ios.json")),
+            None
+        );
+        assert_eq!(platform_family_key(Path::new("src/UserMenu.ios")), None);
+        assert_eq!(
+            platform_family_key(Path::new("src/.ios.tsx")),
+            None,
+            "a bare platform segment has no base stem"
+        );
     }
 
     fn discovered(id: u32, path: &str) -> DiscoveredFile {

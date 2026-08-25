@@ -32,6 +32,7 @@ pub use fallbacks::extract_package_name_from_node_modules_path;
 pub use path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
 };
+pub use react_native::{PlatformFamilyKey, has_react_native_plugin, platform_family_key};
 pub use types::{
     OUTPUT_DIRS, ResolveResult, ResolvedImport, ResolvedModule, ResolvedProject, ResolvedReExport,
     ResolvedReplacedModuleTarget, ResolvedSourceEdge,
