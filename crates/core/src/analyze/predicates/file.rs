@@ -127,6 +127,7 @@ const CONFIG_FILE_PREFIXES: &[&str] = &[
     "release-it.",
     "release.config.",
     "contentlayer.config.",
+    ".size-limit.",
     "next-env.d.",
     "env.d.",
     "vite-env.d.",
@@ -263,6 +264,18 @@ mod tests {
     fn config_file_dotrc_pattern() {
         assert!(is_config_file(std::path::Path::new(".eslintrc.js")));
         assert!(is_config_file(std::path::Path::new(".babelrc.json")));
+    }
+
+    #[test]
+    fn config_file_size_limit_dotfile_without_rc() {
+        // size-limit searches `.size-limit.<ext>` from the package it runs in,
+        // so a hoisted monorepo keeps the config inside a workspace package where
+        // the root plugin's always-used globs never reach.
+        assert!(is_config_file(std::path::Path::new(".size-limit.js")));
+        assert!(is_config_file(std::path::Path::new(
+            "packages/lib/.size-limit.ts"
+        )));
+        assert!(!is_config_file(std::path::Path::new("size-limit.js")));
     }
 
     #[test]

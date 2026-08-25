@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **size-limit presets, plugins, and config files are recognized**
+  ([#2413](https://github.com/fallow-rs/fallow/pull/2413)). size-limit loads
+  `@size-limit/*` and `size-limit-*` packages from `package.json` by convention
+  rather than by import, so a project that declared `@size-limit/preset-small-lib`
+  next to `size-limit` previously needed `ignoreDependencies` entries. A new
+  built-in `size-limit` plugin activates from the `size-limit` dependency,
+  credits every declared `@size-limit/*` and `size-limit-*` package, treats
+  `size-limit` itself as a tooling dependency, and keeps every config form
+  size-limit searches reachable (`.size-limit` and the `.json`, `.js`, `.cjs`,
+  `.mjs`, `.ts`, `.cts`, and `.mts` variants), including a config inside a
+  workspace package when the tool is hoisted to the monorepo root. A
+  `"size-limit"` array in `package.json` needs no config file. Thanks to
+  [@robinvdvleuten](https://github.com/robinvdvleuten) for the contribution.
+
 ### Changed
 
 - **`fallow impact statusline` now says when the Impact store was written by a

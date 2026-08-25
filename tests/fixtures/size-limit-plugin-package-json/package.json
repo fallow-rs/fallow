@@ -1,0 +1,17 @@
+{
+  "name": "size-limit-plugin-package-json",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "devDependencies": {
+    "@size-limit/file": "13.0.3",
+    "size-limit": "13.0.3",
+    "unused-control": "1.0.0"
+  },
+  "size-limit": [
+    {
+      "path": "src/index.js",
+      "limit": "1 kB"
+    }
+  ]
+}

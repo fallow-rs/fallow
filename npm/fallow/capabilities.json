@@ -6935,7 +6935,7 @@
     ]
   },
   "plugins": {
-    "count": 123,
+    "count": 124,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -7043,6 +7043,7 @@
       "lint-staged",
       "lefthook",
       "simple-git-hooks",
+      "size-limit",
       "svgo",
       "svgr",
       "graphql-codegen",

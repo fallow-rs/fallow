@@ -1,0 +1,11 @@
+{
+  "name": "@size-limit-plugin-workspace/lib",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "size": "size-limit"
+  },
+  "devDependencies": {
+    "unused-control": "1.0.0"
+  }
+}

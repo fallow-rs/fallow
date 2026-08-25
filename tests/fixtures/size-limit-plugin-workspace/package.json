@@ -1,0 +1,10 @@
+{
+  "name": "size-limit-plugin-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "@size-limit/preset-small-lib": "13.0.3",
+    "size-limit": "13.0.3"
+  }
+}
