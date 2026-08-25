@@ -40,11 +40,6 @@
       }
     ]
   },
-  "statusLine": {
-    "type": "command",
-    "command": "python3.13 \"$CLAUDE_PROJECT_DIR\"/.claude/tt-statusline.py 2>/dev/null || python3 \"$CLAUDE_PROJECT_DIR\"/.claude/tt-statusline.py 2>/dev/null || python \"$CLAUDE_PROJECT_DIR\"/.claude/tt-statusline.py",
-    "refreshInterval": 5
-  },
   "enabledPlugins": {
     "trigger-tree@trigger-tree": true
   },

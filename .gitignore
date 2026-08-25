@@ -86,7 +86,6 @@ editors/vscode/LICENSE
 !.claude/skills/
 !.claude/rules/
 !.claude/agents/
-!.claude/tt-statusline.py
 
 # Codex
 .codex/

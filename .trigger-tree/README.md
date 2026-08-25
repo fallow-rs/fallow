@@ -10,8 +10,7 @@ shared project configuration.
 Both clients use trigger-tree v1.23.2 from tag commit
 `78a801629f0b11f403737e0ae9e5c2bfa827a6bb`.
 
-Version 1.23.2 supports Python 3.10 through 3.14. The project status line
-prefers `python3.13`, then falls back to `python3` and `python`.
+Version 1.23.2 supports Python 3.10 through 3.14.
 
 Claude Code declares the tagged marketplace and enabled plugin in
 `.claude/settings.json`.
