@@ -88,6 +88,29 @@ fn guide_uninstall_deletes_authored_files_but_keeps_edited_ones() {
 }
 
 #[test]
+fn guide_uninstall_strips_import_from_an_edited_authored_claude_md() {
+    let dir = tempfile::tempdir().unwrap();
+    let install = ctx(dir.path(), Mode::Install);
+    guide::install(&install, &[Harness::Claude]);
+    let path = dir.path().join("CLAUDE.md");
+    let mut edited = std::fs::read_to_string(&path).unwrap();
+    edited.push_str("\n## Mine\n\nKeep me.\n");
+    std::fs::write(&path, edited).unwrap();
+
+    let uninstall = ctx(dir.path(), Mode::Uninstall);
+    let steps = guide::uninstall(&uninstall, &[Harness::Claude]);
+    let claude = steps
+        .iter()
+        .find(|s| s.path.as_deref() == Some("CLAUDE.md"))
+        .unwrap();
+    assert_eq!(claude.status, StepStatus::Removed, "{steps:?}");
+    let kept = std::fs::read_to_string(&path).unwrap();
+    assert!(kept.contains("Keep me."));
+    assert!(!kept.contains("@AGENTS.md"), "{kept}");
+    assert!(!kept.contains("claude-import"), "{kept}");
+}
+
+#[test]
 fn guide_appends_import_block_to_existing_claude_md_and_removes_it_again() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("CLAUDE.md"), "# Mine\n\nRules.\n").unwrap();

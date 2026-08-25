@@ -121,8 +121,12 @@ fn install_claude_import(ctx: &Ctx) -> StepReport {
         if ctx.dry_run {
             return base.detail("create with an @AGENTS.md import");
         }
-        let body = format!("{IMPORT_LINE}\n");
-        let content = format!("{}\n{body}", authored_marker_prefix_line(&body));
+        let body = import_block();
+        let content = format!(
+            "{}
+{body}",
+            authored_marker_prefix_line(&normalized_for_hash(&body))
+        );
         return match std::fs::write(&path, content) {
             Ok(()) => base.detail("created with an @AGENTS.md import"),
             Err(error) => failed(&ctx.root, &path, error),

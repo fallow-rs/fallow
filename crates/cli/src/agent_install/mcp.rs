@@ -136,9 +136,12 @@ fn install_for(ctx: &Ctx, harness: Harness, command: Option<&McpCommand>) -> Vec
             Harness::Codex => CODEX_FILE,
             Harness::Cursor => CURSOR_FILE,
         };
-        let base = ctx
-            .scope_base()
-            .map_or_else(|_| ctx.root.clone(), Path::to_path_buf);
+        let base = if harness == Harness::Claude {
+            ctx.root.clone()
+        } else {
+            ctx.scope_base()
+                .map_or_else(|_| ctx.root.clone(), Path::to_path_buf)
+        };
         return vec![
             StepReport::new(Some(harness), Step::Mcp, StepStatus::Skipped, ctx.scope())
                 .path(&ctx.root, &base.join(relative))
@@ -451,10 +454,6 @@ fn merge_json_into(
         }
     }
     let after = serialize_json(&value)?;
-    if after == before && read_optional_text(path).ok().flatten().as_deref() == Some(after.as_str())
-    {
-        return Ok(FileOutcome::Unchanged);
-    }
     if after == before {
         return Ok(FileOutcome::Unchanged);
     }
