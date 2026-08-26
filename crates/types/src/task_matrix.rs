@@ -145,8 +145,15 @@ impl TaskRow {
 
 /// Mutating command tokens the matrix must never reference (R1 read-only
 /// principle). Shared with the CLI schema exclusion test.
-pub const MUTATING_COMMANDS: &[&str] =
-    &["agent", "fix", "init", "hooks", "migrate", "setup-hooks", "watch"];
+pub const MUTATING_COMMANDS: &[&str] = &[
+    "agent",
+    "fix",
+    "init",
+    "hooks",
+    "migrate",
+    "setup-hooks",
+    "watch",
+];
 
 /// The first command token after the `fallow` prefix, or the empty string for
 /// a bare flag-fragment row.
