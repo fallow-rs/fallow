@@ -3,7 +3,10 @@
 //! Detection is capability-based (which config directories exist, which
 //! session variables are set), separate from the vendor sniffing telemetry
 //! does. A harness is selected when any project, home, or session signal is
-//! present; nothing is fabricated when no signal exists.
+//! present; nothing is fabricated when no signal exists. `AGENTS.md` is
+//! deliberately not a signal: Codex, Cursor, and fallow itself all write it,
+//! so a harness-neutral install must not turn into a Codex detection on the
+//! next run.
 
 use std::path::Path;
 
@@ -75,7 +78,7 @@ const fn project_signals(harness: Harness) -> &'static [(&'static str, SignalKin
             ("CLAUDE.md", SignalKind::File),
             (".mcp.json", SignalKind::File),
         ],
-        Harness::Codex => &[(".codex", SignalKind::Dir), ("AGENTS.md", SignalKind::File)],
+        Harness::Codex => &[(".codex", SignalKind::Dir)],
         Harness::Cursor => &[(".cursor", SignalKind::Dir)],
     }
 }

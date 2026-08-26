@@ -348,7 +348,7 @@ fallow hooks uninstall --target agent
 
 ## `agent`: One-Pass Agent Onboarding
 
-Wires fallow into the coding-agent harnesses a project uses. `install` detects Claude Code, Codex, and Cursor from the project (`.claude/`, `CLAUDE.md`, `.mcp.json`, `.codex/`, `AGENTS.md`, `.cursor/`), the home directory, and the session environment (`CLAUDECODE`, `CODEX_THREAD_ID`, `CURSOR_AGENT`), or takes `--harness`. When nothing is detected only harness-neutral files are written (`AGENTS.md` and `.agents/skills/fallow`).
+Wires fallow into the coding-agent harnesses a project uses. `install` detects Claude Code, Codex, and Cursor from the project (`.claude/`, `CLAUDE.md`, `.mcp.json`, `.codex/`, `.cursor/`; `AGENTS.md` is not a signal because every harness and fallow itself write it), the home directory, and the session environment (`CLAUDECODE`, `CODEX_THREAD_ID`, `CURSOR_AGENT`), or takes `--harness`. When nothing is detected only harness-neutral files are written (`AGENTS.md` and `.agents/skills/fallow`).
 
 Steps per harness:
 
