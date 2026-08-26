@@ -577,6 +577,7 @@ jobs:
             'skills/fallow/references/cli-reference.md',
             'skills/fallow/references/gotchas.md',
             'skills/fallow/references/patterns.md',
+            'skills/fallow/references/similar-code.md',
             'schema.json',
             'capabilities.json',
             'issue-registry.json',
