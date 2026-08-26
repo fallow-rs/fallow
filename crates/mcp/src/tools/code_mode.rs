@@ -424,6 +424,7 @@ struct CodeModeCall {
 fn classify_host_error(message: &str) -> &'static str {
     if message.contains("does not expose fix tools")
         || message.contains("unsupported code mode fallow tool")
+        || message.contains("similar-code is not exposed through Code Mode")
     {
         return "unsupported_tool";
     }
@@ -456,6 +457,21 @@ mod tests {
     fn fix_tools_are_not_allowed_in_code_mode() {
         assert!(CodeModeTool::from_name("fix_apply").is_err());
         assert!(CodeModeTool::from_name("fix_preview").is_err());
+    }
+
+    #[test]
+    fn similar_code_routes_to_standalone_mcp_tools() {
+        for tool in ["find_similar_code", "inspect_similar_code"] {
+            let error =
+                CodeModeTool::from_name(tool).expect_err("Code Mode must reject similar-code");
+            assert!(error.contains("standalone MCP find_similar_code or inspect_similar_code"));
+            assert!(error.contains("dedicated 15-minute timeout"));
+        }
+        assert!(
+            !CODE_MODE_ALIASES
+                .iter()
+                .any(|(alias, _)| { matches!(*alias, "findSimilarCode" | "inspectSimilarCode") })
+        );
     }
 
     #[test]
@@ -960,6 +976,30 @@ mod tests {
     }
 
     #[test]
+    fn code_mode_returns_standalone_guidance_for_similar_code_dispatch() {
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "return fallow.run('find_similar_code', {});".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(10_000),
+            },
+        )
+        .expect_err("Code Mode must reject similar-code dispatch");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode JSON");
+        assert_eq!(json["ok"], false);
+        assert!(
+            json["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("standalone MCP find_similar_code"))
+        );
+        assert_eq!(json["calls"][0]["tool"], "find_similar_code");
+        assert_eq!(json["calls"][0]["error_kind"], "unsupported_tool");
+    }
+
+    #[test]
     fn fix_apply_returns_no_fix_tools_error() {
         let Err(err) = CodeModeTool::from_name("fix_apply") else {
             panic!("expected Err for fix_apply")
@@ -1020,6 +1060,16 @@ mod tests {
     fn classify_unsupported_tool_via_unsupported_code_mode() {
         assert_eq!(
             classify_host_error("unsupported code mode fallow tool 'bad_name'"),
+            "unsupported_tool"
+        );
+    }
+
+    #[test]
+    fn classify_similar_code_guidance_as_unsupported_tool() {
+        assert_eq!(
+            classify_host_error(
+                "similar-code is not exposed through Code Mode's 30-second window; use the standalone MCP tools"
+            ),
             "unsupported_tool"
         );
     }

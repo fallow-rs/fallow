@@ -1,28 +1,32 @@
 //! CLI adapter for opt-in local similar-code discovery.
 
 use std::fmt::Write as _;
-use std::io::{IsTerminal as _, Write as _};
+use std::io::{IsTerminal as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Subcommand;
 use fallow_api::{
-    AnalysisOptions, SimilarCodeInspectOptions, SimilarCodeOptions, inspect_similar_code,
-    review_similar_code, run_similar_code,
+    AnalysisOptions, SimilarCodeCandidateSnapshot, SimilarCodeInspectOptions, SimilarCodeOptions,
+    inspect_similar_code, parse_similar_code_candidate_snapshot, review_similar_code,
+    run_similar_code, select_similar_code_candidate_snapshot,
 };
 use fallow_config::OutputFormat;
 use fallow_output::{
     SimilarCodeCacheClearOutput, SimilarCodeCacheClearSchemaVersion, SimilarCodeCompletionStatus,
-    SimilarCodeDomainOutcome, SimilarCodeInspectOutput, SimilarCodeOutput, SimilarCodeReviewOutput,
-    SimilarCodeReviewedCandidate, SimilarCodeStatusOutput, SimilarCodeStatusSchemaVersion,
-    SimilarCodeVerdictMatch, serialize_similar_code_cache_clear_json_output,
-    serialize_similar_code_inspect_json_output, serialize_similar_code_json_output,
-    serialize_similar_code_review_json_output, serialize_similar_code_status_json_output,
+    SimilarCodeDiagnosticDomain, SimilarCodeDomainOutcome, SimilarCodeInspectOutput,
+    SimilarCodeOutput, SimilarCodeReviewOutput, SimilarCodeReviewedCandidate,
+    SimilarCodeStatusOutput, SimilarCodeStatusSchemaVersion, SimilarCodeVerdictMatch,
+    serialize_similar_code_cache_clear_json_output, serialize_similar_code_inspect_json_output,
+    serialize_similar_code_json_output, serialize_similar_code_review_json_output,
+    serialize_similar_code_status_json_output,
 };
 use fallow_types::envelope::ToolVersion;
 
 use crate::error::emit_error_with_style;
 use crate::json_style::JsonStyle;
+
+const MAX_CANDIDATE_INPUT_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Subcommand)]
 pub enum SimilarCodeSubcommand {
@@ -42,6 +46,17 @@ pub enum SimilarCodeSubcommand {
         /// Snapshot-stable candidate identity from `fallow similar-code`.
         #[arg(value_name = "CANDIDATE_ID")]
         candidate_id: String,
+        /// Raw discovery JSON containing the selected candidate.
+        #[arg(
+            long,
+            value_name = "PATH",
+            required_unless_present = "candidate_snapshot_stdin",
+            conflicts_with = "candidate_snapshot_stdin"
+        )]
+        candidates: Option<PathBuf>,
+        /// Internal filesystem-free handoff used by the standalone MCP tool.
+        #[arg(long, hide = true)]
+        candidate_snapshot_stdin: bool,
     },
     /// Join candidate JSON with a separate human or agent verdict document.
     Review {
@@ -55,7 +70,7 @@ pub enum SimilarCodeSubcommand {
         #[arg(long)]
         require_verdict_for_each_candidate: bool,
     },
-    /// Manage the project-local vector cache. Model artifacts are unaffected.
+    /// Manage the user-local, project-namespaced vector cache. Model artifacts are unaffected.
     Cache {
         #[command(subcommand)]
         subcommand: SimilarCodeCacheSubcommand,
@@ -108,10 +123,29 @@ pub fn run(input: SimilarCodeCliInput<'_>) -> ExitCode {
         Some(SimilarCodeSubcommand::Setup { local: _, yes }) => {
             run_setup(yes, input.output, input.json_style)
         }
-        Some(SimilarCodeSubcommand::Inspect { candidate_id }) => {
+        Some(SimilarCodeSubcommand::Inspect {
+            candidate_id,
+            candidates,
+            candidate_snapshot_stdin,
+        }) => {
+            let snapshot = match load_inspect_snapshot(
+                &candidate_id,
+                candidates.as_deref(),
+                candidate_snapshot_stdin,
+            ) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return failure(
+                        &error.message,
+                        error.exit_code,
+                        input.output,
+                        input.json_style,
+                    );
+                }
+            };
             let options = SimilarCodeInspectOptions {
-                similar_code: similar_code_options,
-                candidate_id,
+                analysis: similar_code_options.analysis,
+                snapshot,
             };
             match inspect_similar_code(&options) {
                 Ok(output) => emit_inspect(output, input.output, input.json_style),
@@ -152,7 +186,7 @@ pub fn run(input: SimilarCodeCliInput<'_>) -> ExitCode {
                     );
                 } else {
                     eprintln!(
-                        "fallow: similar-code inference runs locally and offline. The first run may take minutes; subsequent runs reuse the local vector cache."
+                        "fallow: similar-code inference runs locally and offline. The first run may take minutes; subsequent runs reuse the user-local project cache."
                     );
                 }
             }
@@ -167,6 +201,112 @@ pub fn run(input: SimilarCodeCliInput<'_>) -> ExitCode {
             }
         }
     }
+}
+
+fn load_inspect_snapshot(
+    candidate_id: &str,
+    candidates: Option<&Path>,
+    candidate_snapshot_stdin: bool,
+) -> Result<SimilarCodeCandidateSnapshot, fallow_api::ProgrammaticError> {
+    if let Some(path) = candidates {
+        let bytes = read_bounded_candidate_file(path)?;
+        return select_similar_code_candidate_snapshot(&bytes, candidate_id);
+    }
+    if !candidate_snapshot_stdin {
+        return Err(
+            fallow_api::ProgrammaticError::new("inspect requires --candidates", 2)
+                .with_code("FALLOW_SIMILAR_CODE_CANDIDATE_INPUT_INVALID")
+                .with_context("similarCode.candidates"),
+        );
+    }
+    let mut snapshot_json = Vec::new();
+    std::io::stdin()
+        .take(MAX_CANDIDATE_INPUT_BYTES + 1)
+        .read_to_end(&mut snapshot_json)
+        .map_err(|error| {
+            fallow_api::ProgrammaticError::new(
+                format!("failed to read candidate snapshot from stdin: {error}"),
+                2,
+            )
+            .with_code("FALLOW_SIMILAR_CODE_CANDIDATE_INPUT_INVALID")
+            .with_context("similarCode.candidates")
+        })?;
+    parse_similar_code_candidate_snapshot(&snapshot_json, candidate_id)
+}
+
+fn read_bounded_candidate_file(path: &Path) -> Result<Vec<u8>, fallow_api::ProgrammaticError> {
+    let file = std::fs::File::open(path).map_err(|error| {
+        candidate_file_error(format!("failed to read {}: {error}", path.display()))
+    })?;
+    let metadata = file.metadata().map_err(|error| {
+        candidate_file_error(format!("failed to inspect {}: {error}", path.display()))
+    })?;
+    if metadata.len() > MAX_CANDIDATE_INPUT_BYTES {
+        return Err(candidate_file_error(
+            "similar-code candidate input exceeded the 16 MiB limit",
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    file.take(MAX_CANDIDATE_INPUT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            candidate_file_error(format!("failed to read {}: {error}", path.display()))
+        })?;
+    if bytes.len() as u64 > MAX_CANDIDATE_INPUT_BYTES {
+        return Err(candidate_file_error(
+            "similar-code candidate input exceeded the 16 MiB limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn candidate_file_error(message: impl Into<String>) -> fallow_api::ProgrammaticError {
+    fallow_api::ProgrammaticError::new(message, 2)
+        .with_code("FALLOW_SIMILAR_CODE_CANDIDATE_INPUT_INVALID")
+        .with_context("similarCode.candidates")
+}
+
+fn read_bounded_verdict_file(path: &Path) -> Result<Vec<u8>, fallow_api::ProgrammaticError> {
+    let file = std::fs::File::open(path).map_err(|error| {
+        review_file_error(format!(
+            "failed to read similar-code verdict input {}: {error}",
+            path.display()
+        ))
+    })?;
+    let metadata = file.metadata().map_err(|error| {
+        review_file_error(format!(
+            "failed to inspect similar-code verdict input {}: {error}",
+            path.display()
+        ))
+    })?;
+    if metadata.len() > MAX_CANDIDATE_INPUT_BYTES {
+        return Err(review_file_error(
+            "similar-code verdict input exceeded the 16 MiB limit",
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    file.take(MAX_CANDIDATE_INPUT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            review_file_error(format!(
+                "failed to read similar-code verdict input {}: {error}",
+                path.display()
+            ))
+        })?;
+    if bytes.len() as u64 > MAX_CANDIDATE_INPUT_BYTES {
+        return Err(review_file_error(
+            "similar-code verdict input exceeded the 16 MiB limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn review_file_error(message: impl Into<String>) -> fallow_api::ProgrammaticError {
+    fallow_api::ProgrammaticError::new(message, 2)
+        .with_code("FALLOW_SIMILAR_CODE_REVIEW_INVALID")
+        .with_context("similarCode.review")
 }
 
 fn options(input: &SimilarCodeCliInput<'_>) -> SimilarCodeOptions {
@@ -241,6 +381,11 @@ fn run_setup(yes: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCode
             return failure("similar-code setup cancelled", 2, output, json_style);
         }
     }
+    if !matches!(output, OutputFormat::Json) {
+        eprintln!(
+            "Downloading and verifying pinned model artifacts. This may take several minutes."
+        );
+    }
     match fallow_api::similar_code::setup_local() {
         Ok(status) => {
             if matches!(output, OutputFormat::Json) {
@@ -263,26 +408,16 @@ fn run_review(
     output: OutputFormat,
     json_style: JsonStyle,
 ) -> ExitCode {
-    let candidate_json = match std::fs::read(candidates) {
+    let candidate_json = match read_bounded_candidate_file(candidates) {
         Ok(bytes) => bytes,
         Err(error) => {
-            return failure(
-                &format!("failed to read {}: {error}", candidates.display()),
-                2,
-                output,
-                json_style,
-            );
+            return failure(&error.message, error.exit_code, output, json_style);
         }
     };
-    let verdict_json = match std::fs::read(verdicts) {
+    let verdict_json = match read_bounded_verdict_file(verdicts) {
         Ok(bytes) => bytes,
         Err(error) => {
-            return failure(
-                &format!("failed to read {}: {error}", verdicts.display()),
-                2,
-                output,
-                json_style,
-            );
+            return failure(&error.message, error.exit_code, output, json_style);
         }
     };
     match review_similar_code(&candidate_json, &verdict_json, require_all) {
@@ -351,6 +486,7 @@ fn status_output(
         schema_version: SimilarCodeStatusSchemaVersion::V1,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_owned()),
         protocol_version: status.protocol_version,
+        embedding_semantics_version: status.embedding_semantics_version,
         companion_version: status.sidecar_version,
         model_ready: status.model_ready,
         model_id: status.model_id,
@@ -431,14 +567,7 @@ fn emit_discovery(output: SimilarCodeOutput, format: OutputFormat, style: JsonSt
             candidate.right.start_line,
             candidate.right.name
         );
-        crate::report::sink::outln!(
-            "  Inspect: {}",
-            inspect_command(
-                output.generation.threshold,
-                output.generation.min_lines,
-                &candidate.candidate_id
-            )
-        );
+        crate::report::sink::outln!("  Inspect: {}", inspect_command(&candidate.candidate_id));
     }
     crate::report::sink::outln!("");
     if output.completion.status == SimilarCodeCompletionStatus::Complete {
@@ -448,13 +577,59 @@ fn emit_discovery(output: SimilarCodeOutput, format: OutputFormat, style: JsonSt
             "Completion: Partial (use --format json to inspect skipped work)"
         );
     }
+    crate::report::sink::outln!(
+        "Cache: {:?} ({} hits, {} misses, {} writes)",
+        output.completion.cache.status,
+        output.completion.cache.hits,
+        output.completion.cache.misses,
+        output.completion.cache.writes
+    );
+    for diagnostic in output
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.domain == SimilarCodeDiagnosticDomain::Cache)
+    {
+        crate::report::sink::outln!("Cache advisory: {}", diagnostic.message);
+    }
     ExitCode::SUCCESS
 }
 
-fn inspect_command(threshold: f64, min_lines: u64, candidate_id: &str) -> String {
-    format!(
-        "fallow similar-code --threshold {threshold} --min-lines {min_lines} inspect {candidate_id}"
-    )
+fn inspect_command(candidate_id: &str) -> String {
+    let arguments = [
+        "fallow".to_owned(),
+        "similar-code".to_owned(),
+        "inspect".to_owned(),
+        render_cli_argument(candidate_id),
+        "--candidates".to_owned(),
+        "similar-code.json".to_owned(),
+    ];
+    arguments.join(" ")
+}
+
+fn render_cli_argument(argument: &str) -> String {
+    if !argument.is_empty()
+        && argument
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_./:-".contains(&byte))
+    {
+        return argument.to_owned();
+    }
+
+    #[cfg(windows)]
+    return render_powershell_argument(argument);
+
+    #[cfg(not(windows))]
+    render_posix_argument(argument)
+}
+
+#[cfg(any(test, not(windows)))]
+fn render_posix_argument(argument: &str) -> String {
+    format!("'{}'", argument.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(any(test, windows))]
+fn render_powershell_argument(argument: &str) -> String {
+    format!("'{}'", argument.replace('\'', "''"))
 }
 
 fn emit_inspect(
@@ -676,7 +851,11 @@ mod tests {
         SimilarCodeVerdict, SimilarCodeVerdictMatch, SimilarCodeVerificationStatus,
     };
 
-    use super::{inspect_command, render_reviewed_candidate, review_summary};
+    use super::{
+        MAX_CANDIDATE_INPUT_BYTES, inspect_command, read_bounded_candidate_file,
+        read_bounded_verdict_file, render_posix_argument, render_powershell_argument,
+        render_reviewed_candidate, review_summary,
+    };
 
     fn reviewed_candidate(
         verdict: Option<SimilarCodeVerdict>,
@@ -721,10 +900,99 @@ mod tests {
     }
 
     #[test]
-    fn inspect_command_preserves_effective_discovery_parameters() {
+    fn inspect_command_requires_the_original_candidate_document() {
         assert_eq!(
-            inspect_command(0.6, 7, "similar-code:candidate:v1:abc"),
-            "fallow similar-code --threshold 0.6 --min-lines 7 inspect similar-code:candidate:v1:abc"
+            inspect_command("similar-code:candidate:v1:abc"),
+            "fallow similar-code inspect similar-code:candidate:v1:abc --candidates similar-code.json"
+        );
+    }
+
+    #[test]
+    fn candidate_file_is_rejected_before_oversized_allocation() {
+        let temp = tempfile::tempdir().expect("temporary candidate directory");
+        let path = temp.path().join("similar-code.json");
+        let file = std::fs::File::create(&path).expect("candidate fixture");
+        file.set_len(MAX_CANDIDATE_INPUT_BYTES + 1)
+            .expect("oversized sparse candidate fixture");
+
+        let error = read_bounded_candidate_file(&path).expect_err("oversized input must fail");
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_SIMILAR_CODE_CANDIDATE_INPUT_INVALID")
+        );
+        assert!(error.message.contains("16 MiB limit"));
+    }
+
+    #[test]
+    fn verdict_file_is_rejected_before_oversized_allocation() {
+        let temp = tempfile::tempdir().expect("temporary verdict directory");
+        let path = temp.path().join("verdicts.json");
+        let file = std::fs::File::create(&path).expect("verdict fixture");
+        file.set_len(MAX_CANDIDATE_INPUT_BYTES + 1)
+            .expect("oversized sparse verdict fixture");
+
+        let error = read_bounded_verdict_file(&path).expect_err("oversized input must fail");
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_SIMILAR_CODE_REVIEW_INVALID")
+        );
+        assert_eq!(error.context.as_deref(), Some("similarCode.review"));
+        assert!(
+            error
+                .message
+                .contains("verdict input exceeded the 16 MiB limit")
+        );
+    }
+
+    #[test]
+    fn inspect_command_quotes_untrusted_candidate_identity() {
+        let command = inspect_command("similar-code:candidate:v1:$(touch marker)");
+        assert!(command.contains("'similar-code:candidate:v1:$(touch marker)'"));
+        assert!(!command.contains("--threshold"));
+        assert!(!command.contains("--file"));
+    }
+
+    #[test]
+    fn posix_cli_arguments_prevent_shell_substitution() {
+        assert_eq!(
+            render_posix_argument("src/$(touch marker).ts"),
+            "'src/$(touch marker).ts'"
+        );
+        assert_eq!(
+            render_posix_argument("src/`touch marker`.ts"),
+            "'src/`touch marker`.ts'"
+        );
+        assert_eq!(render_posix_argument("src/$VAR.ts"), "'src/$VAR.ts'");
+        assert_eq!(
+            render_posix_argument("src/\"quoted\".ts"),
+            "'src/\"quoted\".ts'"
+        );
+        assert_eq!(render_posix_argument("src/it's.ts"), "'src/it'\"'\"'s.ts'");
+        assert_eq!(
+            render_posix_argument("src/line\nbreak.ts"),
+            "'src/line\nbreak.ts'"
+        );
+    }
+
+    #[test]
+    fn powershell_cli_arguments_prevent_shell_substitution() {
+        assert_eq!(
+            render_powershell_argument("src/$(touch marker).ts"),
+            "'src/$(touch marker).ts'"
+        );
+        assert_eq!(
+            render_powershell_argument("src/`touch marker`.ts"),
+            "'src/`touch marker`.ts'"
+        );
+        assert_eq!(render_powershell_argument("src/$VAR.ts"), "'src/$VAR.ts'");
+        assert_eq!(
+            render_powershell_argument("src/\"quoted\".ts"),
+            "'src/\"quoted\".ts'"
+        );
+        assert_eq!(render_powershell_argument("src/it's.ts"), "'src/it''s.ts'");
+        assert_eq!(
+            render_powershell_argument("src/line\nbreak.ts"),
+            "'src/line\nbreak.ts'"
         );
     }
 

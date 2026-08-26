@@ -1,0 +1,61 @@
+{
+  "$schema": "fallow-semantic-clone-candle-baseline/v1",
+  "corpus_revision": "0290537e84752f8bd1dac11fe6417064d82e46f9",
+  "provider": {
+    "runtime": "fallow-similar-code",
+    "execution": "candle-f32-cpu",
+    "source_left_machine": false,
+    "wire_protocol_version": 2,
+    "embedding_semantics_version": 1
+  },
+  "model": {
+    "id": "jinaai/jina-embeddings-v2-base-code",
+    "revision": "516f4baf13dec4ddddda8631e019b5737c8bc250",
+    "artifact": "f32-safetensors",
+    "dimensions": 768,
+    "max_tokens": 1024,
+    "normalization": "mean-pooling-l2"
+  },
+  "comparison": {
+    "metric": "cosine-similarity",
+    "threshold": 0.8,
+    "absolute_tolerance": 0.001
+  },
+  "cases": [
+    {
+      "id": "different-algorithm-ts-02",
+      "similarity": 0.654979,
+      "selected": false
+    },
+    {
+      "id": "refactored-structure-ts-02",
+      "similarity": 0.980465,
+      "selected": true
+    },
+    {
+      "id": "renamed-identifiers-ts-02",
+      "similarity": 0.850407,
+      "selected": true
+    },
+    {
+      "id": "same-identifiers-ts-02",
+      "similarity": 0.700874,
+      "selected": false
+    },
+    {
+      "id": "same-boilerplate-ts-05",
+      "similarity": 0.636186,
+      "selected": false
+    },
+    {
+      "id": "shared-fragments-ts-02",
+      "similarity": 0.28745,
+      "selected": false
+    },
+    {
+      "id": "unrelated-ts-02",
+      "similarity": 0.263868,
+      "selected": false
+    }
+  ]
+}

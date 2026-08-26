@@ -161,8 +161,8 @@ pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
     BoundariesListing, CombinedOutput, FallowOutput, ImpactOutput, ListBoundariesOutput,
     ListEntryPointOutput, ListOutput, ListPluginOutput, ReviewBriefWireOutput, SecurityGate,
-    SecurityOutput, SecurityOutputConfig, SecuritySummaryOutput, SimilarCodeOutput, TraceOutput,
-    WorkspacesOutput,
+    SecurityOutput, SecurityOutputConfig, SecuritySummaryOutput, SimilarCodeCandidateSnapshot,
+    SimilarCodeOutput, TraceOutput, WorkspacesOutput,
 };
 pub use runtime::{
     AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
@@ -177,10 +177,11 @@ pub use runtime::{
     TraceExportOutput, TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOutput,
     TraceFileProgrammaticOutput, benchmark_trace_clone_compact_json,
     benchmark_trace_graph_family_compact_json, inspect_similar_code, load_health_config,
-    review_similar_code, run_audit, run_boundary_violations, run_circular_dependencies,
-    run_combined, run_complexity_with_runner, run_dead_code, run_decision_surface, run_duplication,
-    run_feature_flags, run_health, run_health_with_runner, run_similar_code, run_trace_clone,
-    run_trace_dependency, run_trace_export, run_trace_file, serialize_health_report_json,
+    parse_similar_code_candidate_snapshot, review_similar_code, run_audit, run_boundary_violations,
+    run_circular_dependencies, run_combined, run_complexity_with_runner, run_dead_code,
+    run_decision_surface, run_duplication, run_feature_flags, run_health, run_health_with_runner,
+    run_similar_code, run_trace_clone, run_trace_dependency, run_trace_export, run_trace_file,
+    select_similar_code_candidate_snapshot, serialize_health_report_json,
 };
 pub use runtime_json::{
     serialize_audit_programmatic_json, serialize_boundary_violations_programmatic_json,
@@ -661,8 +662,9 @@ pub struct SimilarCodeOptions {
     pub min_lines: Option<usize>,
     /// Cap on displayed candidates after the full bounded comparison.
     pub top: Option<usize>,
-    /// Restrict reported pairs to those where at least one side matches one of
-    /// these project-relative files. The full comparison corpus is retained.
+    /// Restrict work and reported pairs to those where at least one side matches
+    /// one of these project-relative files. Deterministic background context is
+    /// retained only within the bounded scoped comparison budget.
     pub files: Vec<PathBuf>,
     /// Exact companion binary resolved and signature-verified by an official
     /// distribution adapter such as the Node loader. `None` uses trusted
@@ -675,10 +677,11 @@ pub struct SimilarCodeOptions {
 /// Options for one similar-code candidate inspection packet.
 #[derive(Debug, Clone)]
 pub struct SimilarCodeInspectOptions {
-    /// Discovery options used to reproduce the candidate snapshot.
-    pub similar_code: SimilarCodeOptions,
-    /// Snapshot-stable candidate identity returned by discovery.
-    pub candidate_id: String,
+    /// Shared project and configuration options used only for source validation
+    /// and deterministic enrichment. Inspect never reruns provider retrieval.
+    pub analysis: AnalysisOptions,
+    /// Bounded candidate handoff selected from the original discovery output.
+    pub snapshot: fallow_output::SimilarCodeCandidateSnapshot,
 }
 
 /// Options for export trace analysis.

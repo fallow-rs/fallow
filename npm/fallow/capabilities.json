@@ -6586,12 +6586,11 @@
       {
         "name": "inspect_similar_code",
         "kind": "trace",
-        "description": "Reproduce one semantic candidate and collect bounded source-grounded evidence for agent verification",
-        "cli_command": "fallow similar-code --threshold <threshold> --min-lines <min-lines> inspect <candidate-id> --format json --quiet",
+        "description": "Inspect one exact candidate snapshot without rerunning retrieval or global ranking",
+        "cli_command": "fallow similar-code inspect <candidate-id> --candidates <report.json> --format json --quiet",
         "key_params": [
           "candidate_id",
-          "threshold",
-          "min_lines"
+          "snapshot"
         ],
         "license": "free",
         "license_note": null,

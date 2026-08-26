@@ -2,4 +2,10 @@
 
 "use strict";
 
-require("../scripts/run-binary").run(process.argv.slice(2));
+require("../scripts/run-binary")
+  .run(process.argv.slice(2))
+  .catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`fallow-similar-code: ${message}\n`);
+    process.exit(1);
+  });

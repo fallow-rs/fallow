@@ -46,7 +46,7 @@ impl SimilarCodeInvocation {
     }
 
     const fn allows_analysis_options(self) -> bool {
-        matches!(self, Self::Discovery | Self::Inspect)
+        matches!(self, Self::Discovery)
     }
 
     const fn allows_output_file(self) -> bool {
@@ -372,7 +372,7 @@ Commands:
   setup    Download and verify the pinned local model
   inspect  Reproduce and inspect one unverified candidate
   review   Join candidate JSON with a separate verdict document
-  cache    Manage the project-local vector cache
+  cache    Manage the user-local, project-namespaced vector cache
   help     Print this message or the help of a command
 
 Options:
@@ -428,7 +428,7 @@ Options:
 const INSPECT_HELP: &str = "\
 Reproduce and inspect one unverified candidate with bounded source evidence.
 
-Usage: fallow similar-code [OPTIONS] inspect <CANDIDATE_ID>
+Usage: fallow similar-code [OPTIONS] inspect <CANDIDATE_ID> --candidates <PATH>
 
 Arguments:
   <CANDIDATE_ID>  Snapshot-stable candidate identity from fallow similar-code
@@ -437,22 +437,10 @@ Options:
   -r, --root <ROOT>                       Project root directory
   -c, --config <CONFIG>                   Path to config file
       --allow-remote-extends              Allow trusted config files to extend HTTPS URLs
+      --candidates <PATH>                 Raw discovery JSON containing this candidate
   -f, --format <FORMAT>                   Output format: human or json [default: human]
       --pretty                            Indent JSON output
   -q, --quiet                             Suppress progress output
-      --no-cache                          Disable incremental vector caching
-      --threads <THREADS>                 Number of parser threads
-      --changed-since <REF>               Reproduce the original changed-file scope
-      --diff-file <PATH>                  Reproduce the original line-level scope
-      --diff-stdin                        Read the unified diff from stdin
-  -w, --workspace <WORKSPACE>             Reproduce the original workspace scope
-      --changed-workspaces <REF>          Reproduce the original changed-workspace scope
-      --max-file-size <MB>                Skip source files larger than this many megabytes
-      --explain                           Include metric and model interpretation metadata
-      --threshold <0..1>                  Reuse the discovery threshold
-      --min-lines <N>                     Reuse the discovery minimum source lines
-      --top <N>                           Reuse the discovery candidate cap
-      --file <PATH>                       Reuse the discovery file scope
   -o, --output-file <PATH>                Write the report to a file instead of stdout
   -h, --help                              Print help
 ";
@@ -474,7 +462,7 @@ Options:
 ";
 
 const CACHE_HELP: &str = "\
-Manage the project-local vector cache. Model artifacts are unaffected.
+Manage the user-local, project-namespaced vector cache. Model artifacts are unaffected.
 
 Usage: fallow similar-code cache <COMMAND>
 
@@ -686,10 +674,10 @@ mod tests {
                 "similar-code",
                 "--root",
                 ".",
-                "--threshold",
-                "0.8",
                 "inspect",
                 "candidate-id",
+                "--candidates",
+                "candidates.json",
             ],
             vec![
                 "fallow",

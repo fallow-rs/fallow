@@ -12,8 +12,8 @@ use serde::Serialize;
 
 use crate::cache::{ModelPaths, cache_root, inspect_cache};
 use crate::constants::{
-    DOWNLOAD_BYTES, MODEL_DIMENSIONS, MODEL_HUB_URL, MODEL_ID, MODEL_LICENSE, MODEL_LICENSE_URL,
-    MODEL_MAX_TOKENS, MODEL_REVISION, PROTOCOL_VERSION,
+    DOWNLOAD_BYTES, EMBEDDING_SEMANTICS_VERSION, MODEL_DIMENSIONS, MODEL_HUB_URL, MODEL_ID,
+    MODEL_LICENSE, MODEL_LICENSE_URL, MODEL_MAX_TOKENS, MODEL_REVISION, PROTOCOL_VERSION,
 };
 
 #[derive(Parser)]
@@ -47,6 +47,7 @@ enum Command {
 #[derive(Serialize)]
 struct StatusOutput {
     protocol_version: u32,
+    embedding_semantics_version: u32,
     sidecar_version: &'static str,
     model_ready: bool,
     model_id: &'static str,
@@ -138,6 +139,7 @@ fn status_output(paths: &ModelPaths, downloaded: Option<bool>) -> StatusOutput {
     let status = inspect_cache(paths, true);
     StatusOutput {
         protocol_version: PROTOCOL_VERSION,
+        embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
         sidecar_version: env!("CARGO_PKG_VERSION"),
         model_ready: status.ready,
         model_id: MODEL_ID,
@@ -205,7 +207,11 @@ mod tests {
         let directory = tempfile::tempdir().expect("tempdir");
         let paths = ModelPaths::from_cache_root(directory.path());
         let status = status_output(&paths, None);
-        assert_eq!(status.protocol_version, 1);
+        assert_eq!(status.protocol_version, PROTOCOL_VERSION);
+        assert_eq!(
+            status.embedding_semantics_version,
+            EMBEDDING_SEMANTICS_VERSION
+        );
         assert_eq!(status.model_revision, MODEL_REVISION);
         assert_eq!(status.dimensions, 768);
         assert_eq!(status.max_tokens, 1024);

@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
-  "wire_protocol_version": 1,
+  "wire_protocol_version": 2,
   "extraction_semantics_version": 1,
+  "embedding_semantics_version": 1,
   "analysis_operation": "embed-functions",
   "status_operation": "status",
   "setup_operation": "setup-local",

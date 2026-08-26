@@ -19,6 +19,9 @@ fn main() {
     let wire = value["wire_protocol_version"]
         .as_u64()
         .expect("wire protocol version");
+    let embedding_semantics = value["embedding_semantics_version"]
+        .as_u64()
+        .expect("embedding semantics version");
     let model = &value["model"];
     let model_id = model["id"].as_str().expect("model id");
     let revision = model["revision"].as_str().expect("model revision");
@@ -44,6 +47,7 @@ fn main() {
 
     let generated = format!(
         "pub const PROTOCOL_VERSION: u32 = {wire};\n\
+         pub const EMBEDDING_SEMANTICS_VERSION: u32 = {embedding_semantics};\n\
          pub const ANALYSIS_OPERATION: &str = {operation:?};\n\
          pub const MODEL_ID: &str = {model_id:?};\n\
          pub const MODEL_REVISION: &str = {revision:?};\n\

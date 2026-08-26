@@ -37,6 +37,8 @@ pub(super) struct EmbedBatchRequest<'a> {
     pub operation: &'static str,
     /// Wire protocol version.
     pub protocol_version: u32,
+    /// Required embedding calculation semantics.
+    pub embedding_semantics_version: u32,
     /// Required immutable model revision.
     pub model_revision: &'static str,
     /// Expected embedding width.
@@ -74,6 +76,8 @@ pub(super) struct EmbedBatchTiming {
 pub(super) struct EmbedBatchResponse {
     /// Wire protocol version used by the provider.
     pub protocol_version: u32,
+    /// Embedding calculation semantics used by the provider.
+    pub embedding_semantics_version: u32,
     /// Immutable model revision used by the provider.
     pub model_revision: String,
     /// Returned embedding width.
@@ -129,6 +133,7 @@ pub(super) struct EmbedCompletion {
 pub(super) enum EmbedErrorCode {
     InvalidRequest,
     ProtocolMismatch,
+    EmbeddingSemanticsMismatch,
     ModelRevisionMismatch,
     DimensionMismatch,
     MaxTokensMismatch,
@@ -160,6 +165,8 @@ pub(super) struct EmbedFunctionError {
 pub struct SimilarCodeProviderStatus {
     /// Wire protocol version implemented by the sidecar.
     pub protocol_version: u32,
+    /// Embedding calculation semantics implemented by the sidecar.
+    pub embedding_semantics_version: u32,
     /// Installed sidecar package version.
     pub sidecar_version: String,
     /// Whether every pinned model artifact is present and valid.

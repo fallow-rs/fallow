@@ -1,22 +1,27 @@
 //! Bounded persistent cache for source-derived local embeddings.
 
+use std::fs::{File, OpenOptions};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use fallow_engine::source::similar_code::SimilarCodeSourceDigest;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use sha2::{Digest, Sha256};
 
 use super::protocol::{
-    EXTRACTION_SEMANTICS_VERSION, MODEL_DIMENSIONS, MODEL_ID, MODEL_MAX_TOKENS,
-    MODEL_NORMALIZATION, MODEL_REVISION, WIRE_PROTOCOL_VERSION,
+    EMBEDDING_SEMANTICS_VERSION, EXTRACTION_SEMANTICS_VERSION, MODEL_DIMENSIONS, MODEL_ID,
+    MODEL_MAX_TOKENS, MODEL_NORMALIZATION, MODEL_REVISION, WIRE_PROTOCOL_VERSION,
 };
 
-const MAGIC: &[u8; 8] = b"FSCVEC02";
+const MAGIC: &[u8; 8] = b"FSCVEC03";
 const TOKEN_TRUNCATED_FLAG: u8 = 1;
 const MAX_CACHE_BYTES: usize = 64 * 1024 * 1024;
-const HEADER_BYTES: usize = 8 + 4 + 4 + 4 + 32 + 4;
+const HEADER_BYTES: usize = 8 + 4 + 4 + 4 + 4 + 32 + 4;
+const MAX_TEMP_FILE_ATTEMPTS: usize = 32;
 
-/// Why a persistent vector cache was or was not reused.
+static CACHE_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CacheLoadState {
     Disabled,
@@ -31,72 +36,80 @@ pub(super) struct CachedVector {
     pub(super) token_truncated: bool,
 }
 
-pub(super) struct VectorCache {
+#[derive(Debug, Clone)]
+struct CacheLocation {
+    root: PathBuf,
     path: PathBuf,
+    lock_path: PathBuf,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct CacheSaveOutcome {
+    pub(super) durable_writes: usize,
+    pub(super) problem: Option<String>,
+}
+
+pub(super) struct VectorCache {
+    location: Option<CacheLocation>,
     entries: FxHashMap<SimilarCodeSourceDigest, CachedVector>,
+    active: FxHashSet<SimilarCodeSourceDigest>,
+    pending: FxHashSet<SimilarCodeSourceDigest>,
     dirty: bool,
-    disabled: bool,
+    disabled_problem: Option<String>,
     pub(super) load_state: CacheLoadState,
 }
 
 impl VectorCache {
-    fn empty(path: PathBuf, load_state: CacheLoadState) -> Self {
+    fn disabled(problem: Option<String>) -> Self {
         Self {
-            path,
+            location: None,
             entries: FxHashMap::default(),
+            active: FxHashSet::default(),
+            pending: FxHashSet::default(),
+            dirty: false,
+            disabled_problem: problem,
+            load_state: CacheLoadState::Disabled,
+        }
+    }
+
+    fn empty(location: CacheLocation, load_state: CacheLoadState) -> Self {
+        Self {
+            location: Some(location),
+            entries: FxHashMap::default(),
+            active: FxHashSet::default(),
+            pending: FxHashSet::default(),
             dirty: load_state == CacheLoadState::Corrupt,
-            disabled: false,
+            disabled_problem: None,
             load_state,
         }
     }
 
-    pub(super) fn load(cache_dir: &Path, disabled: bool) -> Self {
-        let path = cache_path(cache_dir);
+    pub(super) fn load(provider_cache_dir: &Path, project_root: &Path, disabled: bool) -> Self {
         if disabled {
-            return Self {
-                path,
-                entries: FxHashMap::default(),
+            return Self::disabled(None);
+        }
+        let location = match trusted_cache_location(provider_cache_dir, project_root) {
+            Ok(location) => location,
+            Err(problem) => return Self::disabled(Some(problem)),
+        };
+        match read_cache(&location.path) {
+            CacheRead::Missing => Self::empty(location, CacheLoadState::Missing),
+            CacheRead::Corrupt => Self::empty(location, CacheLoadState::Corrupt),
+            CacheRead::Unsafe(problem) => Self::disabled(Some(problem)),
+            CacheRead::Hit(entries) => Self {
+                location: Some(location),
+                entries,
+                active: FxHashSet::default(),
+                pending: FxHashSet::default(),
                 dirty: false,
-                disabled: true,
-                load_state: CacheLoadState::Disabled,
-            };
-        }
-        let metadata = match std::fs::metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error)
-                if error.kind() == std::io::ErrorKind::NotFound
-                    && std::fs::symlink_metadata(&path).is_err() =>
-            {
-                return Self::empty(path, CacheLoadState::Missing);
-            }
-            Err(_) => return Self::empty(path, CacheLoadState::Corrupt),
-        };
-        if !metadata.is_file() || metadata.len() > MAX_CACHE_BYTES as u64 {
-            return Self::empty(path, CacheLoadState::Corrupt);
-        }
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) if bytes.len() <= MAX_CACHE_BYTES => bytes,
-            Err(error)
-                if error.kind() == std::io::ErrorKind::NotFound
-                    && std::fs::symlink_metadata(&path).is_err() =>
-            {
-                return Self::empty(path, CacheLoadState::Missing);
-            }
-            Ok(_) | Err(_) => return Self::empty(path, CacheLoadState::Corrupt),
-        };
-        let Some(entries) = decode_cache(&bytes) else {
-            return Self::empty(path, CacheLoadState::Corrupt);
-        };
-        Self {
-            path,
-            entries,
-            dirty: false,
-            disabled: false,
-            load_state: CacheLoadState::Hit,
+                disabled_problem: None,
+                load_state: CacheLoadState::Hit,
+            },
         }
     }
 
-    pub(super) fn get(&self, digest: &SimilarCodeSourceDigest) -> Option<&CachedVector> {
+    pub(super) fn get(&mut self, digest: &SimilarCodeSourceDigest) -> Option<&CachedVector> {
+        self.active.insert(*digest);
         self.entries.get(digest)
     }
 
@@ -106,9 +119,11 @@ impl VectorCache {
         values: Vec<f32>,
         token_truncated: bool,
     ) -> bool {
-        if self.disabled
+        self.active.insert(digest);
+        if self.location.is_none()
             || values.len() != MODEL_DIMENSIONS
             || values.iter().any(|value| !value.is_finite())
+            || values.iter().all(|value| *value == 0.0)
         {
             return false;
         }
@@ -120,48 +135,126 @@ impl VectorCache {
             return false;
         }
         self.entries.insert(digest, entry);
+        self.pending.insert(digest);
         self.dirty = true;
         true
     }
 
-    pub(super) fn save(&mut self) -> Result<bool, String> {
-        if self.disabled || !self.dirty {
-            return Ok(false);
+    pub(super) fn save(&mut self) -> CacheSaveOutcome {
+        let Some(location) = self.location.clone() else {
+            return CacheSaveOutcome {
+                durable_writes: 0,
+                problem: self.disabled_problem.clone(),
+            };
+        };
+        if !self.dirty {
+            return CacheSaveOutcome::default();
         }
-        let bytes = encode_cache(&self.entries);
-        let parent = self
-            .path
-            .parent()
-            .ok_or_else(|| "similar-code vector cache has no parent directory".to_owned())?;
-        std::fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "failed to create similar-code vector cache {}: {error}",
-                parent.display()
-            )
-        })?;
-        fallow_config::atomic_write(&self.path, &bytes).map_err(|error| {
-            format!(
-                "failed to publish similar-code vector cache {}: {error}",
-                self.path.display()
-            )
-        })?;
+        if let Err(problem) = ensure_secure_parent(&location) {
+            return CacheSaveOutcome {
+                durable_writes: 0,
+                problem: Some(problem),
+            };
+        }
+        let _lock = match try_cache_lock(&location.lock_path) {
+            Ok(Some(lock)) => lock,
+            Ok(None) => {
+                return CacheSaveOutcome {
+                    durable_writes: 0,
+                    problem: Some(
+                        "similar-code vector cache lock is contended; persistence was skipped"
+                            .to_owned(),
+                    ),
+                };
+            }
+            Err(problem) => {
+                return CacheSaveOutcome {
+                    durable_writes: 0,
+                    problem: Some(problem),
+                };
+            }
+        };
+
+        let disk_entries = match read_cache(&location.path) {
+            CacheRead::Hit(entries) => entries,
+            CacheRead::Missing | CacheRead::Corrupt => FxHashMap::default(),
+            CacheRead::Unsafe(problem) => {
+                return CacheSaveOutcome {
+                    durable_writes: 0,
+                    problem: Some(problem),
+                };
+            }
+        };
+        let mut merged = disk_entries.clone();
+        for digest in &self.active {
+            if let Some(entry) = self.entries.get(digest) {
+                merged.insert(*digest, entry.clone());
+            }
+        }
+        let ordered = select_entries(&merged, &self.active, max_records());
+        let durable_writes = ordered
+            .iter()
+            .filter(|(digest, entry)| {
+                self.pending.contains(digest) && disk_entries.get(digest) != Some(entry)
+            })
+            .count();
+        let bytes = encode_ordered(&ordered);
+        if let Err(error) = atomic_replace_cache_no_follow(&location.path, &bytes) {
+            return CacheSaveOutcome {
+                durable_writes: 0,
+                problem: Some(format!(
+                    "failed to publish similar-code vector cache {}: {error}",
+                    location.path.display()
+                )),
+            };
+        }
+
+        self.entries = ordered.into_iter().collect();
+        self.pending.clear();
         self.dirty = false;
-        Ok(true)
+        CacheSaveOutcome {
+            durable_writes,
+            problem: None,
+        }
     }
 }
 
-pub(super) fn clear(cache_dir: &Path) -> Result<bool, String> {
-    let directory = cache_path(cache_dir)
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| "similar-code vector cache has no parent directory".to_owned())?;
-    if !directory.exists() {
+#[expect(
+    clippy::filetype_is_file,
+    reason = "cache mutation accepts only regular files and rejects symlinks and special files"
+)]
+pub(super) fn clear(provider_cache_dir: &Path, project_root: &Path) -> Result<bool, String> {
+    let location = trusted_cache_location(provider_cache_dir, project_root)?;
+    let Some(parent) = location.path.parent() else {
+        return Err("similar-code vector cache has no parent directory".to_owned());
+    };
+    if !parent.exists() {
         return Ok(false);
     }
-    std::fs::remove_dir_all(&directory).map_err(|error| {
+    ensure_secure_parent(&location)?;
+    let Some(_lock) = try_cache_lock(&location.lock_path)? else {
+        return Err("similar-code vector cache lock is contended; retry cache clear".to_owned());
+    };
+    let metadata = match std::fs::symlink_metadata(&location.path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect similar-code vector cache {}: {error}",
+                location.path.display()
+            ));
+        }
+    };
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "similar-code vector cache {} is not a regular file",
+            location.path.display()
+        ));
+    }
+    std::fs::remove_file(&location.path).map_err(|error| {
         format!(
             "failed to remove similar-code vector cache {}: {error}",
-            directory.display()
+            location.path.display()
         )
     })?;
     Ok(true)
@@ -178,15 +271,292 @@ pub(super) fn parameter_digest() -> [u8; 32] {
     hasher.update((MODEL_MAX_TOKENS as u64).to_le_bytes());
     hasher.update(WIRE_PROTOCOL_VERSION.to_le_bytes());
     hasher.update(EXTRACTION_SEMANTICS_VERSION.to_le_bytes());
+    hasher.update(EMBEDDING_SEMANTICS_VERSION.to_le_bytes());
     hasher.finalize().into()
 }
 
-fn cache_path(cache_dir: &Path) -> PathBuf {
-    cache_dir
-        .join("similar-code")
-        .join("v1")
-        .join(MODEL_REVISION)
-        .join("vectors.bin")
+fn trusted_cache_location(
+    provider_cache_dir: &Path,
+    project_root: &Path,
+) -> Result<CacheLocation, String> {
+    if !provider_cache_dir.is_absolute() {
+        return Err("similar-code vector persistence requires an absolute user cache".to_owned());
+    }
+    let cache_root = provider_cache_dir
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| "similar-code provider returned an invalid user cache path".to_owned())?;
+    let metadata = std::fs::symlink_metadata(cache_root).map_err(|error| {
+        format!(
+            "similar-code user cache {} is unavailable: {error}",
+            cache_root.display()
+        )
+    })?;
+    if !metadata.file_type().is_dir() {
+        return Err(format!(
+            "similar-code user cache {} is not a trusted directory",
+            cache_root.display()
+        ));
+    }
+    let canonical_cache_root = dunce::canonicalize(cache_root).map_err(|error| {
+        format!(
+            "failed to resolve similar-code user cache {}: {error}",
+            cache_root.display()
+        )
+    })?;
+    let canonical_project = dunce::canonicalize(project_root).map_err(|error| {
+        format!(
+            "failed to resolve similar-code project root {}: {error}",
+            project_root.display()
+        )
+    })?;
+    if canonical_cache_root.starts_with(&canonical_project)
+        || canonical_project.starts_with(&canonical_cache_root)
+    {
+        return Err(
+            "similar-code vector persistence is disabled because the user cache overlaps the project"
+                .to_owned(),
+        );
+    }
+
+    let namespace = project_namespace(&canonical_project);
+    let directory = canonical_cache_root
+        .join("vectors")
+        .join(format!("v{WIRE_PROTOCOL_VERSION}"))
+        .join(namespace)
+        .join(MODEL_REVISION);
+    Ok(CacheLocation {
+        root: canonical_cache_root,
+        path: directory.join("vectors.bin"),
+        lock_path: directory.join("vectors.lock"),
+    })
+}
+
+fn project_namespace(project_root: &Path) -> String {
+    let digest = Sha256::digest(project_root.as_os_str().as_encoded_bytes());
+    hex(&digest)
+}
+
+fn ensure_secure_parent(location: &CacheLocation) -> Result<(), String> {
+    let parent = location
+        .path
+        .parent()
+        .ok_or_else(|| "similar-code vector cache has no parent directory".to_owned())?;
+    let relative = parent
+        .strip_prefix(&location.root)
+        .map_err(|_| "similar-code vector cache escaped the verified user cache root".to_owned())?;
+    let mut current = location.root.clone();
+    for component in relative.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_dir() => {}
+            Ok(_) => {
+                return Err(format!(
+                    "similar-code vector cache directory {} is not trusted",
+                    current.display()
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&current).map_err(|error| {
+                    format!(
+                        "failed to create similar-code vector cache {}: {error}",
+                        current.display()
+                    )
+                })?;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "failed to inspect similar-code vector cache {}: {error}",
+                    current.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[expect(
+    clippy::filetype_is_file,
+    reason = "the advisory lock must be a regular file, never a symlink or special file"
+)]
+fn try_cache_lock(path: &Path) -> Result<Option<File>, String> {
+    if let Ok(metadata) = std::fs::symlink_metadata(path)
+        && !metadata.file_type().is_file()
+    {
+        return Err(format!(
+            "similar-code vector cache lock {} is not a regular file",
+            path.display()
+        ));
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|error| {
+            format!(
+                "failed to open similar-code vector cache lock {}: {error}",
+                path.display()
+            )
+        })?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(format!(
+            "failed to lock similar-code vector cache {}: {error}",
+            path.display()
+        )),
+    }
+}
+
+enum CacheRead {
+    Missing,
+    Corrupt,
+    Unsafe(String),
+    Hit(FxHashMap<SimilarCodeSourceDigest, CachedVector>),
+}
+
+#[expect(
+    clippy::filetype_is_file,
+    reason = "cache reads accept only regular files and reject symlinks and special files"
+)]
+fn read_cache(path: &Path) -> CacheRead {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return CacheRead::Missing,
+        Err(_) => return CacheRead::Corrupt,
+    };
+    if !metadata.file_type().is_file() {
+        return CacheRead::Unsafe(format!(
+            "similar-code vector cache {} is not a regular file; persistence was disabled",
+            path.display()
+        ));
+    }
+    if metadata.len() > MAX_CACHE_BYTES as u64 {
+        return CacheRead::Corrupt;
+    }
+    match std::fs::read(path) {
+        Ok(bytes) if bytes.len() <= MAX_CACHE_BYTES => {
+            decode_cache(&bytes).map_or(CacheRead::Corrupt, CacheRead::Hit)
+        }
+        Ok(_) | Err(_) => CacheRead::Corrupt,
+    }
+}
+
+#[expect(
+    clippy::filetype_is_file,
+    reason = "cache publication accepts only regular destination files and rejects symlinks"
+)]
+fn atomic_replace_cache_no_follow(path: &Path, content: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "similar-code vector cache has no parent directory".to_owned())?;
+    let mut temporary = None;
+    for _ in 0..MAX_TEMP_FILE_ATTEMPTS {
+        let sequence = CACHE_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".vectors.bin.{}.{}.tmp",
+            std::process::id(),
+            sequence
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                temporary = Some((candidate, file));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(format!(
+                    "failed to create temporary similar-code vector cache in {}: {error}",
+                    parent.display()
+                ));
+            }
+        }
+    }
+    let Some((temporary_path, mut temporary_file)) = temporary else {
+        return Err(format!(
+            "failed to reserve a temporary similar-code vector cache in {}",
+            parent.display()
+        ));
+    };
+
+    let publish = (|| {
+        temporary_file.write_all(content).map_err(|error| {
+            format!(
+                "failed to write temporary similar-code vector cache {}: {error}",
+                temporary_path.display()
+            )
+        })?;
+        temporary_file.sync_all().map_err(|error| {
+            format!(
+                "failed to sync temporary similar-code vector cache {}: {error}",
+                temporary_path.display()
+            )
+        })?;
+        drop(temporary_file);
+
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_file() => {
+                std::fs::set_permissions(&temporary_path, metadata.permissions()).map_err(
+                    |error| {
+                        format!(
+                            "failed to preserve similar-code vector cache permissions {}: {error}",
+                            path.display()
+                        )
+                    },
+                )?;
+            }
+            Ok(_) => {
+                return Err(format!(
+                    "similar-code vector cache {} is not a regular file; persistence was disabled",
+                    path.display()
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "failed to inspect similar-code vector cache {} before publication: {error}",
+                    path.display()
+                ));
+            }
+        }
+
+        std::fs::rename(&temporary_path, path).map_err(|error| {
+            format!(
+                "failed to atomically replace similar-code vector cache {}: {error}",
+                path.display()
+            )
+        })?;
+        sync_cache_directory(parent)?;
+        Ok(())
+    })();
+
+    if publish.is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
+    publish
+}
+
+#[cfg(unix)]
+fn sync_cache_directory(path: &Path) -> Result<(), String> {
+    File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| {
+            format!(
+                "failed to sync similar-code vector cache directory {}: {error}",
+                path.display()
+            )
+        })
+}
+
+#[cfg(not(unix))]
+fn sync_cache_directory(_path: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 fn record_bytes() -> usize {
@@ -200,18 +570,46 @@ fn max_records() -> usize {
         .unwrap_or(0)
 }
 
-fn encode_cache(entries: &FxHashMap<SimilarCodeSourceDigest, CachedVector>) -> Vec<u8> {
-    let mut ordered = entries.iter().collect::<Vec<_>>();
-    ordered.sort_by_key(|(digest, _)| **digest);
-    ordered.truncate(max_records());
-    let mut bytes = Vec::with_capacity(HEADER_BYTES + ordered.len() * record_bytes());
+fn select_entries(
+    entries: &FxHashMap<SimilarCodeSourceDigest, CachedVector>,
+    active: &FxHashSet<SimilarCodeSourceDigest>,
+    limit: usize,
+) -> Vec<(SimilarCodeSourceDigest, CachedVector)> {
+    let mut active_entries = entries
+        .iter()
+        .filter(|(digest, _)| active.contains(digest))
+        .map(|(digest, entry)| (*digest, entry.clone()))
+        .collect::<Vec<_>>();
+    let mut inactive_entries = entries
+        .iter()
+        .filter(|(digest, _)| !active.contains(digest))
+        .map(|(digest, entry)| (*digest, entry.clone()))
+        .collect::<Vec<_>>();
+    active_entries.sort_by_key(|(digest, _)| *digest);
+    inactive_entries.sort_by_key(|(digest, _)| *digest);
+    active_entries.extend(inactive_entries);
+    active_entries.truncate(limit);
+    active_entries
+}
+
+#[cfg(test)]
+fn encode_cache(
+    entries: &FxHashMap<SimilarCodeSourceDigest, CachedVector>,
+    active: &FxHashSet<SimilarCodeSourceDigest>,
+) -> Vec<u8> {
+    encode_ordered(&select_entries(entries, active, max_records()))
+}
+
+fn encode_ordered(entries: &[(SimilarCodeSourceDigest, CachedVector)]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(HEADER_BYTES + entries.len() * record_bytes());
     bytes.extend_from_slice(MAGIC);
     bytes.extend_from_slice(&WIRE_PROTOCOL_VERSION.to_le_bytes());
     bytes.extend_from_slice(&EXTRACTION_SEMANTICS_VERSION.to_le_bytes());
+    bytes.extend_from_slice(&EMBEDDING_SEMANTICS_VERSION.to_le_bytes());
     bytes.extend_from_slice(&(MODEL_DIMENSIONS as u32).to_le_bytes());
     bytes.extend_from_slice(&parameter_digest());
-    bytes.extend_from_slice(&(ordered.len() as u32).to_le_bytes());
-    for (digest, entry) in ordered {
+    bytes.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    for (digest, entry) in entries {
         bytes.extend_from_slice(digest.as_bytes());
         bytes.push(u8::from(entry.token_truncated) * TOKEN_TRUNCATED_FLAG);
         for value in &entry.values {
@@ -228,12 +626,14 @@ fn decode_cache(bytes: &[u8]) -> Option<FxHashMap<SimilarCodeSourceDigest, Cache
     let mut cursor = 8usize;
     let protocol = take_u32(bytes, &mut cursor)?;
     let extraction = take_u32(bytes, &mut cursor)?;
+    let embedding = take_u32(bytes, &mut cursor)?;
     let dimensions = take_u32(bytes, &mut cursor)? as usize;
     let parameters: [u8; 32] = bytes.get(cursor..cursor + 32)?.try_into().ok()?;
     cursor += 32;
     let count = take_u32(bytes, &mut cursor)? as usize;
     if protocol != WIRE_PROTOCOL_VERSION
         || extraction != EXTRACTION_SEMANTICS_VERSION
+        || embedding != EMBEDDING_SEMANTICS_VERSION
         || dimensions != MODEL_DIMENSIONS
         || parameters != parameter_digest()
         || count > max_records()
@@ -259,6 +659,9 @@ fn decode_cache(bytes: &[u8]) -> Option<FxHashMap<SimilarCodeSourceDigest, Cache
             }
             values.push(value);
         }
+        if values.iter().all(|value| *value == 0.0) {
+            return None;
+        }
         let entry = CachedVector {
             values,
             token_truncated: flags & TOKEN_TRUNCATED_FLAG != 0,
@@ -276,6 +679,17 @@ fn take_u32(bytes: &[u8], cursor: &mut usize) -> Option<u32> {
     Some(value)
 }
 
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().fold(
+        String::with_capacity(bytes.len().saturating_mul(2)),
+        |mut output, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(output, "{byte:02x}");
+            output
+        },
+    )
+}
+
 #[cfg(test)]
 #[expect(
     clippy::unwrap_used,
@@ -283,6 +697,36 @@ fn take_u32(bytes: &[u8], cursor: &mut usize) -> Option<u32> {
 )]
 mod tests {
     use super::*;
+
+    struct Fixture {
+        _temp: tempfile::TempDir,
+        provider_cache_dir: PathBuf,
+        project_root: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let temp = tempfile::tempdir().unwrap();
+            let cache_root = temp.path().join("user-cache");
+            let provider_cache_dir = cache_root.join("models").join(MODEL_REVISION);
+            let project_root = temp.path().join("project");
+            std::fs::create_dir_all(&cache_root).unwrap();
+            std::fs::create_dir_all(&project_root).unwrap();
+            Self {
+                _temp: temp,
+                provider_cache_dir,
+                project_root,
+            }
+        }
+
+        fn load(&self, disabled: bool) -> VectorCache {
+            VectorCache::load(&self.provider_cache_dir, &self.project_root, disabled)
+        }
+
+        fn location(&self) -> CacheLocation {
+            trusted_cache_location(&self.provider_cache_dir, &self.project_root).unwrap()
+        }
+    }
 
     fn vector(value: f32) -> Vec<f32> {
         vec![value; MODEL_DIMENSIONS]
@@ -295,112 +739,218 @@ mod tests {
         }
     }
 
+    fn entries(rows: &[(u8, f32)]) -> FxHashMap<SimilarCodeSourceDigest, CachedVector> {
+        rows.iter()
+            .map(|(digest, value)| {
+                (
+                    SimilarCodeSourceDigest::new([*digest; 32]),
+                    entry(*value, false),
+                )
+            })
+            .collect()
+    }
+
     #[test]
-    fn round_trip_uses_full_digest_and_fixed_parameters() {
+    fn round_trip_uses_full_digest_and_versioned_parameters() {
         let digest = SimilarCodeSourceDigest::new([7; 32]);
-        let mut entries = FxHashMap::default();
-        entries.insert(digest, entry(0.25, true));
-        let decoded = decode_cache(&encode_cache(&entries)).unwrap();
+        let mut values = FxHashMap::default();
+        values.insert(digest, entry(0.25, true));
+        let decoded = decode_cache(&encode_cache(&values, &FxHashSet::default())).unwrap();
         assert_eq!(decoded[&digest], entry(0.25, true));
+
+        let mut drifted = encode_cache(&values, &FxHashSet::default());
+        drifted[16] ^= 1;
+        assert!(decode_cache(&drifted).is_none());
     }
 
     #[test]
-    fn corruption_and_parameter_drift_are_misses() {
+    fn zero_magnitude_cache_vectors_are_rejected() {
+        let digest = SimilarCodeSourceDigest::new([8; 32]);
+        let mut values = FxHashMap::default();
+        values.insert(digest, entry(0.0, false));
+
+        assert!(decode_cache(&encode_cache(&values, &FxHashSet::default())).is_none());
+    }
+
+    #[test]
+    fn repository_local_cache_bytes_are_never_loaded() {
+        let fixture = Fixture::new();
         let digest = SimilarCodeSourceDigest::new([9; 32]);
-        let mut entries = FxHashMap::default();
-        entries.insert(digest, entry(0.5, false));
-        let mut bytes = encode_cache(&entries);
-        bytes[20] ^= 1;
-        assert!(decode_cache(&bytes).is_none());
+        let project_cache = fixture
+            .project_root
+            .join(".fallow/similar-code/v1/vectors.bin");
+        std::fs::create_dir_all(project_cache.parent().unwrap()).unwrap();
+        let mut values = FxHashMap::default();
+        values.insert(digest, entry(0.5, false));
+        std::fs::write(&project_cache, encode_cache(&values, &FxHashSet::default())).unwrap();
+
+        let mut cache = fixture.load(false);
+        assert_eq!(cache.load_state, CacheLoadState::Missing);
+        assert!(cache.get(&digest).is_none());
+        assert!(project_cache.exists());
     }
 
     #[test]
-    fn save_atomically_replaces_an_existing_cache() {
+    fn project_overlapping_cache_disables_persistence_without_disabling_vectors() {
+        let fixture = Fixture::new();
+        let project_cache = fixture.project_root.join("cache");
+        std::fs::create_dir_all(&project_cache).unwrap();
+        let provider_cache_dir = project_cache.join("models").join(MODEL_REVISION);
+        let mut cache = VectorCache::load(&provider_cache_dir, &fixture.project_root, false);
+        assert_eq!(cache.load_state, CacheLoadState::Disabled);
+        assert!(!cache.insert(SimilarCodeSourceDigest::new([1; 32]), vector(0.5), false));
+        assert!(cache.save().problem.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_namespace_preserves_non_utf8_path_identity() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let left = PathBuf::from(std::ffi::OsString::from_vec(vec![b'/', 0xff]));
+        let right = PathBuf::from(std::ffi::OsString::from_vec(vec![b'/', 0xfe]));
+        assert_ne!(project_namespace(&left), project_namespace(&right));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_user_cache_root_disables_persistence() {
+        use std::os::unix::fs::symlink;
+
         let temp = tempfile::tempdir().unwrap();
+        let actual = temp.path().join("actual-cache");
+        let linked = temp.path().join("linked-cache");
+        let project_root = temp.path().join("project");
+        std::fs::create_dir_all(&actual).unwrap();
+        std::fs::create_dir_all(&project_root).unwrap();
+        symlink(&actual, &linked).unwrap();
+        let provider_cache_dir = linked.join("models").join(MODEL_REVISION);
+
+        let cache = VectorCache::load(&provider_cache_dir, &project_root, false);
+        assert_eq!(cache.load_state, CacheLoadState::Disabled);
+        assert!(
+            cache
+                .disabled_problem
+                .unwrap()
+                .contains("not a trusted directory")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_cache_leaf_is_preserved_and_persistence_fails_closed() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = Fixture::new();
+        let location = fixture.location();
+        ensure_secure_parent(&location).unwrap();
+        let target = fixture.project_root.join("cache-symlink-target");
+        std::fs::write(&target, b"must remain unchanged").unwrap();
+
+        let mut cache = fixture.load(false);
+        assert!(cache.insert(SimilarCodeSourceDigest::new([6; 32]), vector(0.5), false));
+        symlink(&target, &location.path).unwrap();
+
+        let outcome = cache.save();
+        assert_eq!(outcome.durable_writes, 0);
+        assert!(outcome.problem.unwrap().contains("not a regular file"));
+        assert!(
+            atomic_replace_cache_no_follow(&location.path, b"replacement")
+                .unwrap_err()
+                .contains("not a regular file")
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), b"must remain unchanged");
+        assert!(
+            std::fs::symlink_metadata(&location.path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+
+        let mut disabled = fixture.load(false);
+        assert_eq!(disabled.load_state, CacheLoadState::Disabled);
+        assert!(
+            disabled
+                .save()
+                .problem
+                .unwrap()
+                .contains("persistence was disabled")
+        );
+    }
+
+    #[test]
+    fn save_rereads_and_merges_a_concurrent_writer() {
+        let fixture = Fixture::new();
         let first = SimilarCodeSourceDigest::new([1; 32]);
         let second = SimilarCodeSourceDigest::new([2; 32]);
-        let mut cache = VectorCache::load(temp.path(), false);
-        assert!(cache.insert(first, vector(0.25), true));
-        assert!(cache.save().unwrap());
+        let mut left = fixture.load(false);
+        let mut right = fixture.load(false);
+        assert!(left.insert(first, vector(0.25), true));
+        assert!(right.insert(second, vector(0.5), false));
+        assert_eq!(left.save().durable_writes, 1);
+        assert_eq!(right.save().durable_writes, 1);
 
-        let mut cache = VectorCache::load(temp.path(), false);
-        assert!(cache.insert(second, vector(0.5), false));
-        assert!(cache.save().unwrap());
-
-        let cache = VectorCache::load(temp.path(), false);
-        assert_eq!(cache.get(&first), Some(&entry(0.25, true)));
-        assert_eq!(cache.get(&second), Some(&entry(0.5, false)));
+        let mut merged = fixture.load(false);
+        assert_eq!(merged.get(&first), Some(&entry(0.25, true)));
+        assert_eq!(merged.get(&second), Some(&entry(0.5, false)));
     }
 
     #[test]
-    fn old_and_malformed_cache_records_are_rejected() {
-        let digest = SimilarCodeSourceDigest::new([3; 32]);
-        let mut entries = FxHashMap::default();
-        entries.insert(digest, entry(0.75, true));
-
-        let mut old = encode_cache(&entries);
-        old[..8].copy_from_slice(b"FSCVEC01");
-        assert!(decode_cache(&old).is_none());
-
-        let mut malformed = encode_cache(&entries);
-        malformed[HEADER_BYTES + 32] = 2;
-        assert!(decode_cache(&malformed).is_none());
+    fn active_entries_win_deterministic_saturation() {
+        let values = entries(&[(1, 0.1), (2, 0.2), (3, 0.3), (4, 0.4)]);
+        let active = [
+            SimilarCodeSourceDigest::new([3; 32]),
+            SimilarCodeSourceDigest::new([4; 32]),
+        ]
+        .into_iter()
+        .collect();
+        let selected = select_entries(&values, &active, 3);
+        let digests = selected
+            .iter()
+            .map(|(digest, _)| digest.as_bytes()[0])
+            .collect::<Vec<_>>();
+        assert_eq!(digests, vec![3, 4, 1]);
     }
 
     #[test]
-    fn corrupt_cache_is_atomically_rewritten_without_new_vectors() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = cache_path(temp.path());
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, b"invalid cache").unwrap();
+    fn lock_contention_reports_no_durable_writes() {
+        let fixture = Fixture::new();
+        let location = fixture.location();
+        ensure_secure_parent(&location).unwrap();
+        let held = try_cache_lock(&location.lock_path).unwrap().unwrap();
+        let mut cache = fixture.load(false);
+        assert!(cache.insert(SimilarCodeSourceDigest::new([4; 32]), vector(0.25), false));
+        let outcome = cache.save();
+        assert_eq!(outcome.durable_writes, 0);
+        assert!(outcome.problem.unwrap().contains("contended"));
+        drop(held);
+        assert_eq!(cache.save().durable_writes, 1);
+    }
 
-        let mut cache = VectorCache::load(temp.path(), false);
+    #[test]
+    fn corrupt_cache_is_rewritten_without_claiming_vector_writes() {
+        let fixture = Fixture::new();
+        let location = fixture.location();
+        ensure_secure_parent(&location).unwrap();
+        std::fs::write(&location.path, b"invalid cache").unwrap();
+
+        let mut cache = fixture.load(false);
         assert_eq!(cache.load_state, CacheLoadState::Corrupt);
-        assert!(cache.save().unwrap());
-
-        let cache = VectorCache::load(temp.path(), false);
-        assert_eq!(cache.load_state, CacheLoadState::Hit);
-        assert!(cache.entries.is_empty());
+        assert_eq!(cache.save().durable_writes, 0);
+        assert!(matches!(read_cache(&location.path), CacheRead::Hit(_)));
     }
 
     #[test]
-    fn oversized_present_cache_is_corrupt_and_rewritten() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = cache_path(temp.path());
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let file = std::fs::File::create(&path).unwrap();
-        file.set_len((MAX_CACHE_BYTES as u64) + 1).unwrap();
+    fn clear_is_idempotent_and_keeps_the_permanent_lock() {
+        let fixture = Fixture::new();
+        let digest = SimilarCodeSourceDigest::new([5; 32]);
+        let mut cache = fixture.load(false);
+        assert!(cache.insert(digest, vector(0.5), false));
+        assert_eq!(cache.save().durable_writes, 1);
+        let location = fixture.location();
 
-        let mut cache = VectorCache::load(temp.path(), false);
-        assert_eq!(cache.load_state, CacheLoadState::Corrupt);
-        assert!(cache.save().unwrap());
-
-        let cache = VectorCache::load(temp.path(), false);
-        assert_eq!(cache.load_state, CacheLoadState::Hit);
-        assert!(cache.entries.is_empty());
-    }
-
-    #[test]
-    fn disabled_and_unchanged_entries_are_not_counted_as_writes() {
-        let digest = SimilarCodeSourceDigest::new([4; 32]);
-        let temp = tempfile::tempdir().unwrap();
-        let mut disabled = VectorCache::load(temp.path(), true);
-        assert!(!disabled.insert(digest, vector(0.25), false));
-
-        let mut cache = VectorCache::load(temp.path(), false);
-        assert!(cache.insert(digest, vector(0.25), false));
-        assert!(!cache.insert(digest, vector(0.25), false));
-        assert!(cache.insert(digest, vector(0.25), true));
-    }
-
-    #[test]
-    fn clear_is_idempotent() {
-        let temp = tempfile::tempdir().unwrap();
-        assert!(!clear(temp.path()).unwrap());
-        let path = cache_path(temp.path());
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, b"cache").unwrap();
-        assert!(clear(temp.path()).unwrap());
-        assert!(!clear(temp.path()).unwrap());
+        assert!(clear(&fixture.provider_cache_dir, &fixture.project_root).unwrap());
+        assert!(location.lock_path.exists());
+        assert!(!clear(&fixture.provider_cache_dir, &fixture.project_root).unwrap());
     }
 }

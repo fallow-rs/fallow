@@ -128,11 +128,11 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "inspect_similar_code",
         kind: "trace",
-        description: "Reproduce one semantic candidate and collect bounded source-grounded evidence for agent verification",
+        description: "Inspect one exact candidate snapshot without rerunning retrieval or global ranking",
         cli_command: Some(
-            "fallow similar-code --threshold <threshold> --min-lines <min-lines> inspect <candidate-id> --format json --quiet",
+            "fallow similar-code inspect <candidate-id> --candidates <report.json> --format json --quiet",
         ),
-        key_params: &["candidate_id", "threshold", "min_lines"],
+        key_params: &["candidate_id", "snapshot"],
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
@@ -739,7 +739,7 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         napi_export: None,
         mcp_tool: Some("inspect_similar_code"),
         omission_note: Some(
-            "Source-grounded verification of one similar-code candidate. MCP shells out to `fallow similar-code inspect`; discovery is the aligned run_similar_code / detectSimilarCode / find_similar_code capability, while this bounded evidence packet has no standalone api runner or napi export.",
+            "Source-grounded verification of one exact similar-code candidate snapshot. MCP shells out to `fallow similar-code inspect`; discovery is the aligned run_similar_code / detectSimilarCode / find_similar_code capability, while this bounded evidence packet has no standalone run_* API runner or napi export.",
         ),
     },
     CapabilityParityRow {

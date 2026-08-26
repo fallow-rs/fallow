@@ -5,11 +5,12 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use std::time::Duration;
 
 use super::{
-    push_global, push_remote_extends, push_str_flag, run_tool_with_timeout,
-    timeout_duration_with_default, validation_error_body,
+    push_global, push_remote_extends, push_str_flag, run_tool_with_stdin_timeout,
+    run_tool_with_timeout, timeout_duration_with_default, validation_error_body,
 };
 
 const SIMILAR_CODE_TIMEOUT_SECS: u64 = 15 * 60;
+const MAX_CANDIDATE_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
 fn similar_code_timeout() -> Duration {
     timeout_duration_with_default(SIMILAR_CODE_TIMEOUT_SECS)
@@ -28,17 +29,35 @@ pub async fn run_find_similar_code(
     }
 }
 
-/// Reproduce one candidate and return its bounded evidence packet.
+/// Inspect one exact candidate snapshot and return its bounded evidence packet.
 pub async fn run_inspect_similar_code(
     binary: &str,
     params: InspectSimilarCodeParams,
 ) -> Result<CallToolResult, McpError> {
     match build_inspect_similar_code_args(&params) {
         Ok(args) => {
-            run_tool_with_timeout(
+            let snapshot = match serde_json::to_vec(&params.snapshot) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(
+                        validation_error_body(format!(
+                            "failed to serialize candidate snapshot: {error}"
+                        )),
+                    )]));
+                }
+            };
+            if snapshot.len() > MAX_CANDIDATE_SNAPSHOT_BYTES {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(
+                    validation_error_body(format!(
+                        "candidate snapshot exceeds the {MAX_CANDIDATE_SNAPSHOT_BYTES}-byte limit"
+                    )),
+                )]));
+            }
+            run_tool_with_stdin_timeout(
                 binary,
                 "inspect_similar_code",
                 &args,
+                snapshot,
                 similar_code_timeout(),
             )
             .await
@@ -49,7 +68,7 @@ pub async fn run_inspect_similar_code(
 
 /// Build CLI arguments for `find_similar_code`.
 pub fn build_find_similar_code_args(params: &FindSimilarCodeParams) -> Result<Vec<String>, String> {
-    build_args(params, None)
+    build_args(params)
 }
 
 /// Build CLI arguments for `inspect_similar_code`.
@@ -59,27 +78,34 @@ pub fn build_inspect_similar_code_args(
     if params.candidate_id.trim().is_empty() {
         return Err(validation_error_body("candidate_id must not be empty"));
     }
-    let common = FindSimilarCodeParams {
-        root: params.root.clone(),
-        config: params.config.clone(),
-        allow_remote_extends: params.allow_remote_extends,
-        workspace: params.workspace.clone(),
-        changed_since: params.changed_since.clone(),
-        changed_workspaces: params.changed_workspaces.clone(),
-        paths: params.paths.clone(),
-        threshold: params.threshold,
-        min_lines: params.min_lines,
-        top: params.top,
-        no_cache: params.no_cache,
-        threads: params.threads,
-    };
-    build_args(&common, Some(params.candidate_id.trim()))
+    if params.snapshot.candidate.candidate_id != params.candidate_id.trim() {
+        return Err(validation_error_body(
+            "snapshot candidate identity must match candidate_id",
+        ));
+    }
+    let mut args = vec![
+        "similar-code".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+        "--quiet".to_owned(),
+    ];
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        None,
+        None,
+    );
+    push_remote_extends(&mut args, params.allow_remote_extends);
+    args.extend([
+        "inspect".to_owned(),
+        params.candidate_id.trim().to_owned(),
+        "--candidate-snapshot-stdin".to_owned(),
+    ]);
+    Ok(args)
 }
 
-fn build_args(
-    params: &FindSimilarCodeParams,
-    candidate_id: Option<&str>,
-) -> Result<Vec<String>, String> {
+fn build_args(params: &FindSimilarCodeParams) -> Result<Vec<String>, String> {
     if has_value(params.workspace.as_deref()) && has_value(params.changed_workspaces.as_deref()) {
         return Err(validation_error_body(
             "workspace and changed_workspaces are mutually exclusive for similar-code tools",
@@ -141,9 +167,6 @@ fn build_args(
     }
     if let Some(top) = params.top {
         args.extend(["--top".to_owned(), top.to_string()]);
-    }
-    if let Some(candidate_id) = candidate_id {
-        args.extend(["inspect".to_owned(), candidate_id.to_owned()]);
     }
     Ok(args)
 }

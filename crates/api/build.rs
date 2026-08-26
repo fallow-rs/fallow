@@ -39,6 +39,7 @@ struct SimilarCodeProtocolManifest {
     schema_version: u32,
     wire_protocol_version: u32,
     extraction_semantics_version: u32,
+    embedding_semantics_version: u32,
     analysis_operation: String,
     status_operation: String,
     setup_operation: String,
@@ -155,6 +156,7 @@ fn generate_similar_code_protocol(
     }
     if manifest.wire_protocol_version == 0
         || manifest.extraction_semantics_version == 0
+        || manifest.embedding_semantics_version == 0
         || manifest.model.dimensions == 0
         || manifest.model.max_tokens == 0
         || manifest.model.artifacts.is_empty()
@@ -198,6 +200,7 @@ fn generate_similar_code_protocol(
         "// Generated from crates/api/similar-code-protocol.json. Do not edit.\n\
          pub(super) const WIRE_PROTOCOL_VERSION: u32 = {};\n\
          pub(super) const EXTRACTION_SEMANTICS_VERSION: u32 = {};\n\
+         pub(super) const EMBEDDING_SEMANTICS_VERSION: u32 = {};\n\
          pub(super) const ANALYSIS_OPERATION: &str = {};\n\
          pub(super) const STATUS_OPERATION: &str = {};\n\
          pub(super) const SETUP_OPERATION: &str = {};\n\
@@ -213,6 +216,7 @@ fn generate_similar_code_protocol(
          pub(super) const SIDECAR_PACKAGE: &str = {};\n",
         manifest.wire_protocol_version,
         manifest.extraction_semantics_version,
+        manifest.embedding_semantics_version,
         rust_string(&manifest.analysis_operation),
         rust_string(&manifest.status_operation),
         rust_string(&manifest.setup_operation),

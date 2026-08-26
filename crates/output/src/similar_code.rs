@@ -72,6 +72,8 @@ pub struct SimilarCodeStatusOutput {
     pub version: ToolVersion,
     /// Companion protocol version.
     pub protocol_version: u32,
+    /// Embedding calculation semantics implemented by the companion.
+    pub embedding_semantics_version: u32,
     /// Exact companion package version.
     pub companion_version: String,
     /// Whether every pinned model artifact is ready and verified.
@@ -102,7 +104,7 @@ pub struct SimilarCodeStatusOutput {
     pub downloaded: Option<bool>,
 }
 
-/// Result of explicitly clearing the derived project-local vector cache.
+/// Result of explicitly clearing the derived project-namespaced vector cache.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SimilarCodeCacheClearOutput {
@@ -182,18 +184,32 @@ pub struct SimilarCodeGenerationParameters {
     pub parameter_sha256: String,
 }
 
+/// Effective endpoint scope used for corpus admission and pair retention.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SimilarCodeScopeProvenance {
+    /// Whether file, changed-file, diff, or workspace scoping was active.
+    pub active: bool,
+    /// Sorted project-root-relative paths satisfying every active predicate.
+    pub paths: Vec<String>,
+}
+
 /// Complete provenance needed to reproduce candidate generation.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SimilarCodeGeneration {
     /// Version of extraction and normalization semantics used for both IDs.
     pub extraction_semantics_version: u32,
+    /// Version of the calculation that produces model embeddings.
+    pub embedding_semantics_version: u32,
     /// Local provider provenance.
     pub provider: SimilarCodeProviderProvenance,
     /// Immutable model provenance.
     pub model: SimilarCodeModelProvenance,
     /// Effective generation parameters.
     pub parameters: SimilarCodeGenerationParameters,
+    /// Materialized endpoint scope needed to reproduce scoped discovery.
+    pub scope: SimilarCodeScopeProvenance,
     /// Minimum cosine similarity admitted into the candidate set.
     pub threshold: f64,
     /// Minimum source line count admitted into function extraction.
@@ -592,6 +608,24 @@ impl<'de> Deserialize<'de> for SimilarCodeOutput {
             diagnostics: wire.diagnostics,
         })
     }
+}
+
+/// Bounded handoff for inspecting one immutable discovery candidate without
+/// rerunning global retrieval or ranking.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct SimilarCodeCandidateSnapshot {
+    /// Schema version of the discovery envelope that produced the candidate.
+    pub schema_version: SimilarCodeSchemaVersion,
+    /// Immutable provider, model, parameter, and scope provenance.
+    pub generation: SimilarCodeGeneration,
+    /// The exact unverified candidate selected from discovery.
+    pub candidate: SimilarCodeCandidate,
+    /// Original discovery completeness and limit accounting.
+    pub completion: SimilarCodeCompletion,
+    /// Original non-severity discovery diagnostics.
+    pub diagnostics: Vec<SimilarCodeDiagnostic>,
 }
 
 /// One named graph reference used in an inspect packet.
@@ -1053,10 +1087,11 @@ mod tests {
     fn generation() -> SimilarCodeGeneration {
         SimilarCodeGeneration {
             extraction_semantics_version: 1,
+            embedding_semantics_version: 1,
             provider: SimilarCodeProviderProvenance {
                 provider: SimilarCodeProvider::OfficialLocalCompanion,
                 companion_version: "3.9.0".to_string(),
-                protocol_version: 1,
+                protocol_version: 2,
                 source_left_machine: false,
             },
             model: SimilarCodeModelProvenance {
@@ -1073,6 +1108,10 @@ mod tests {
                 batch_size: 8,
                 max_tokens: 1024,
                 parameter_sha256: "def".to_string(),
+            },
+            scope: SimilarCodeScopeProvenance {
+                active: true,
+                paths: vec!["src/a.ts".to_string()],
             },
             threshold: 0.8,
             min_lines: 3,

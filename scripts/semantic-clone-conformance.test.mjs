@@ -11,10 +11,23 @@ import {
   runConformance,
   validateFallowReport,
 } from "./semantic-clone-conformance.mjs";
+import {
+  ABSOLUTE_TOLERANCE,
+  buildRequest as buildCandleRequest,
+  compareEvidence as compareCandleEvidence,
+  parseArgs as parseCandleArgs,
+  validateBaselineShape as validateCandleBaselineShape,
+  validateResponse as validateCandleResponse,
+} from "./semantic-clone-candle-conformance.mjs";
 import { parseArgs as parseModelArgs } from "./semantic-clone-model-evidence.mjs";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
 const MANIFEST = resolve(REPO_ROOT, "tests/semantic-clone-corpus/manifest.json");
+const PROTOCOL_MANIFEST = resolve(REPO_ROOT, "crates/api/similar-code-protocol.json");
+const CANDLE_BASELINE = resolve(
+  REPO_ROOT,
+  "tests/semantic-clone-corpus/evidence/jina-v2-code-f32-candle.json",
+);
 
 const countLines = (path) => {
   const contents = readFileSync(path, "utf8");
@@ -238,4 +251,88 @@ test("model evidence requires locked runtime provenance", () => {
       ]),
     /requires cold, warm, or unknown/,
   );
+});
+
+test("Candle conformance sends the versioned production embedding contract", () => {
+  const loaded = loadManifest(MANIFEST, { includeCandidateEvidence: false });
+  const protocol = JSON.parse(readFileSync(PROTOCOL_MANIFEST, "utf8"));
+  const { caseKeys, request } = buildCandleRequest(loaded, protocol);
+
+  assert.equal(request.operation, protocol.analysis_operation);
+  assert.equal(request.protocol_version, protocol.wire_protocol_version);
+  assert.equal(request.embedding_semantics_version, protocol.embedding_semantics_version);
+  assert.equal(request.model_revision, protocol.model.revision);
+  assert.equal(request.functions.length, loaded.manifest.cases.length * 2);
+  assert.equal(caseKeys.size, loaded.manifest.cases.length);
+  assert.ok(request.functions.every((entry) => !Object.hasOwn(entry, "fixture")));
+});
+
+test("Candle conformance rejects incomplete or stale sidecar responses", () => {
+  const protocol = JSON.parse(readFileSync(PROTOCOL_MANIFEST, "utf8"));
+  const request = { functions: [{ key: 0, source: "function a() {}" }] };
+  const response = {
+    protocol_version: protocol.wire_protocol_version,
+    embedding_semantics_version: protocol.embedding_semantics_version,
+    model_revision: protocol.model.revision,
+    dimensions: protocol.model.dimensions,
+    status: "complete",
+    completion: { embedded_functions: 1 },
+    vectors: [{ key: 0, values: Array(protocol.model.dimensions).fill(0.1) }],
+  };
+
+  assert.equal(validateCandleResponse(response, request, protocol).size, 1);
+  assert.throws(
+    () =>
+      validateCandleResponse(
+        { ...response, embedding_semantics_version: protocol.embedding_semantics_version + 1 },
+        request,
+        protocol,
+      ),
+    /embedding semantics differ/,
+  );
+  assert.throws(
+    () => validateCandleResponse({ ...response, status: "partial" }, request, protocol),
+    /was not complete/,
+  );
+});
+
+test("committed Candle baseline is compact, complete, and tolerance bounded", () => {
+  const loaded = loadManifest(MANIFEST, { includeCandidateEvidence: false });
+  const protocol = JSON.parse(readFileSync(PROTOCOL_MANIFEST, "utf8"));
+  const baseline = JSON.parse(readFileSync(CANDLE_BASELINE, "utf8"));
+
+  validateCandleBaselineShape(baseline, loaded, protocol);
+  assert.equal(baseline.comparison.absolute_tolerance, ABSOLUTE_TOLERANCE);
+  assert.ok(Buffer.byteLength(JSON.stringify(baseline)) < 4096);
+  assert.ok(
+    baseline.cases.every(
+      (entry) => Object.keys(entry).toSorted().join(",") === "id,selected,similarity",
+    ),
+  );
+
+  const withinTolerance = structuredClone(baseline);
+  withinTolerance.cases[0].similarity += ABSOLUTE_TOLERANCE / 2;
+  compareCandleEvidence(withinTolerance, baseline, loaded, protocol);
+
+  const drifted = structuredClone(baseline);
+  drifted.cases[0].similarity += ABSOLUTE_TOLERANCE * 2;
+  assert.throws(
+    () => compareCandleEvidence(drifted, baseline, loaded, protocol),
+    /similarity drift/,
+  );
+});
+
+test("Candle conformance arguments require explicit values", () => {
+  const parsed = parseCandleArgs([
+    "--sidecar-bin",
+    "/tmp/fallow-similar-code",
+    "--baseline",
+    "/tmp/baseline.json",
+    "--pretty",
+  ]);
+  assert.equal(parsed.sidecarBin, "/tmp/fallow-similar-code");
+  assert.equal(parsed.baseline, "/tmp/baseline.json");
+  assert.equal(parsed.pretty, true);
+  assert.throws(() => parseCandleArgs(["--write-baseline"]), /requires a path/);
+  assert.throws(() => parseCandleArgs(["--unknown"]), /unknown argument/);
 });

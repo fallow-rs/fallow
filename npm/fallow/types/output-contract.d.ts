@@ -13283,9 +13283,14 @@ export interface SimilarCodeGeneration {
  * Version of extraction and normalization semantics used for both IDs.
  */
 extraction_semantics_version: number
+/**
+ * Version of the calculation that produces model embeddings.
+ */
+embedding_semantics_version: number
 provider: SimilarCodeProviderProvenance
 model: SimilarCodeModelProvenance
 parameters: SimilarCodeGenerationParameters
+scope: SimilarCodeScopeProvenance
 /**
  * Minimum cosine similarity admitted into the candidate set.
  */
@@ -13366,6 +13371,19 @@ max_tokens: number
  * Digest over the complete effective generation parameter set.
  */
 parameter_sha256: string
+}
+/**
+ * Effective endpoint scope used for corpus admission and pair retention.
+ */
+export interface SimilarCodeScopeProvenance {
+/**
+ * Whether file, changed-file, diff, or workspace scoping was active.
+ */
+active: boolean
+/**
+ * Sorted project-root-relative paths satisfying every active predicate.
+ */
+paths: string[]
 }
 /**
  * One unverified semantic similar-code candidate.

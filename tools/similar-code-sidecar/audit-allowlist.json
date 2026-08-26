@@ -1,0 +1,51 @@
+{
+  "$schema": "fallow-similar-code-audit-allowlist/v1",
+  "owner": "tools/similar-code-sidecar",
+  "review_by": "2026-11-30",
+  "release_binary_max_bytes": 12582912,
+  "advisories": [
+    {
+      "id": "RUSTSEC-2024-0436",
+      "package": "paste",
+      "version": "1.0.15",
+      "kind": "unmaintained",
+      "reason": "The production Candle and tokenizers dependency chains still require paste, and neither current released dependency nor either official upstream main branch removes both chains.",
+      "removal_condition": "Remove this allowlist as soon as released Candle, gemm, and tokenizers versions compatible with the production JinaBERT implementation remove every paste edge. Re-run F32 conformance, the release platform matrix, cargo audit, license checks, and the release binary size gate before accepting that update.",
+      "approved_chains": [
+        "candle-core 0.11.0 -> gemm 0.19.0 -> paste 1.0.15",
+        "tokenizers 0.22.2 -> paste 1.0.15"
+      ],
+      "upstream_evidence": {
+        "checked_on": "2026-08-26",
+        "candle_release": {
+          "version": "0.11.0",
+          "release_revision": "31f35b147389700ed2a178ee66a91c3cc25cc80d",
+          "main_revision": "81f247a8985e0b5b6c7c7c5b35c07dc685e005e9",
+          "release_checksum": "5ecb245093b0f791b89d3420c3df9c6d49c60ab63ba54db896bf8a3baf486706",
+          "crates_io_source": "https://crates.io/api/v1/crates/candle-core",
+          "release_source": "https://github.com/huggingface/candle/blob/31f35b147389700ed2a178ee66a91c3cc25cc80d/Cargo.toml",
+          "main_source": "https://github.com/huggingface/candle/blob/81f247a8985e0b5b6c7c7c5b35c07dc685e005e9/Cargo.toml",
+          "observation": "The latest crates.io release and current official main still select gemm 0.19.0 and tokenizers 0.22.0."
+        },
+        "gemm_upstream": {
+          "latest_release": "0.19.0",
+          "main_revision": "86102c5b712737978371ac9ef7a11982f686d7bc",
+          "release_checksum": "aa0673db364b12263d103b68337a68fbecc541d6f6b61ba72fe438654709eacb",
+          "crates_io_source": "https://crates.io/api/v1/crates/gemm",
+          "main_source": "https://github.com/sarah-ek/gemm/blob/86102c5b712737978371ac9ef7a11982f686d7bc/Cargo.toml",
+          "observation": "The latest release and current official main manifest still depend on paste."
+        },
+        "tokenizers_upstream": {
+          "latest_release": "0.23.1",
+          "release_revision": "7f1623b90b5adfb9bc327d4c3468d2f70bbce262",
+          "main_revision": "d5827816baedcbf1cb5b452dea8048150b6872df",
+          "release_checksum": "44e5bea67576e04b6ff8564c5d9e09c2ef0cf476502245f2f120e497769d3112",
+          "crates_io_source": "https://crates.io/api/v1/crates/tokenizers",
+          "release_source": "https://github.com/huggingface/tokenizers/blob/7f1623b90b5adfb9bc327d4c3468d2f70bbce262/tokenizers/Cargo.toml",
+          "main_source": "https://github.com/huggingface/tokenizers/blob/d5827816baedcbf1cb5b452dea8048150b6872df/tokenizers/Cargo.toml",
+          "observation": "The latest release and current official main manifest still depend on paste."
+        }
+      }
+    }
+  ]
+}

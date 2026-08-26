@@ -127,11 +127,13 @@ invariants in this file.
     public verifier checks every exact target before the final release gate.
 11. Monitor the specific workflow run through `status=completed` and
     `conclusion=success`; a successful watch command alone is not sufficient
-    evidence. Require the `Publish VS Code Marketplace targets`, `Publish Open
-    VSX targets`, `Verify public VS Code registry targets`, and `Release ready
-    for signed tag` jobs to pass. The public verifier requires the exact
-    universal plus six platform tuples and normalized payloads from both
-    registries, without accepting a universal fallback.
+    evidence. Require `similar-code-conformance` to validate the exact Linux x64
+    sidecar artifact against the committed F32 Candle baseline before
+    `release-verified` passes. Also require the `Publish VS Code Marketplace
+    targets`, `Publish Open VSX targets`, `Verify public VS Code registry targets`,
+    and `Release ready for signed tag` jobs to pass. The public verifier requires
+    the exact universal plus six platform tuples and normalized payloads from
+    both registries, without accepting a universal fallback.
     Download the `release-assets` artifact from that exact run and confirm it
     is non-empty. Confirm it contains the seven target VSIX files,
     `inventory.json`, and `SHA256SUMS`. Only then create and push the signed tag

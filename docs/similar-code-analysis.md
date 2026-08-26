@@ -32,8 +32,11 @@ npx fallow similar-code --format json --quiet > similar-code.json
 
 Inference stays local and offline. A cold run may take several minutes on a
 large repository because every admitted function needs an embedding. Later
-runs reuse the project-local vector cache. `--file` and `--top` limit returned
-candidates, not the full-corpus indexing needed for unbiased comparison.
+runs reuse a user-local vector cache namespaced by the canonical project root.
+File, changed-file, diff, and workspace scopes prioritize matching functions
+before hard limits and compare only pairs with at least one fully matching
+endpoint. A deterministic background sample preserves useful context inside the
+comparison budget. `--top` limits only the returned candidates.
 
 Each `candidates[]` entry contains two root-relative function locations, a
 model-specific cosine score and band, `candidate_id`, `review_key`, explicit
@@ -43,17 +46,21 @@ digest, parameters, cache accounting, limits, skips, and per-phase completion.
 Only `completion.status: "complete"` makes an empty candidate list conclusive
 for the admitted scope.
 
-Inspect one candidate before judging it:
+Use that same unchanged discovery document to inspect one exact candidate before
+judging it. Do not rerun discovery between inspection and review:
 
 ```bash
-npx fallow similar-code --threshold <threshold> --min-lines <min_lines> \
-  inspect <candidate_id> --format json --quiet
+npx fallow similar-code inspect <candidate_id> \
+  --candidates similar-code.json --format json --quiet
 ```
 
-Run inspect from the same project root and reuse the discovery scope plus the
-effective `generation.threshold` and `generation.min_lines` values. Human
-output prints the calibrated part of the command, and MCP callers must pass the
-same discovery options.
+The candidate document is a bounded snapshot handoff. Inspect selects exactly
+that `candidate_id` from the original envelope and does not rerun provider
+retrieval or global ranking. It re-extracts only the candidate's two endpoints
+from the current project root and requires both `source_sha256` values to still
+match. Changed, missing, ambiguous, or out-of-root source fails closed instead
+of silently inspecting a different candidate. Human output prints the complete
+snapshot-based command.
 
 Inspect reproduces the candidate against the current source and adds bounded
 source windows plus deterministic context where available: graph relationship,
@@ -81,7 +88,8 @@ Write a separate verdict document:
 }
 ```
 
-Join it without changing the raw candidate document:
+Join it without changing the raw discovery document. `inspect` and `review`
+must receive the same `similar-code.json` snapshot:
 
 ```bash
 npx fallow similar-code review \
@@ -102,13 +110,27 @@ Unknown judgments use `null`. The domain outcome is one of
 MCP exposes two read-only tools:
 
 - `find_similar_code` returns the raw candidate envelope. Scope it with
-  `files`, `workspace`, `changed_since`, `threshold`, `min_lines`, or `top`.
-- `inspect_similar_code` reproduces one `candidate_id` and returns its inspect
-  packet.
+  `paths`, `workspace`, `changed_since`, `threshold`, `min_lines`, or `top`.
+- `inspect_similar_code` accepts one `candidate_id` plus a typed `snapshot`
+  containing the unchanged discovery `schema_version`, `generation`, selected
+  `candidate`, `completion`, and `diagnostics`, then returns its inspect packet.
+
+For scoped discovery, `generation.scope.paths` is the sorted materialized scope
+that actually reached analysis. It is provenance for auditing the run, not an
+argument list to replay. Construct the MCP snapshot directly from the discovery
+envelope and selected candidate. Inspect validates the snapshot endpoints
+against current source without repeating global retrieval or ranking. The CLI's
+candidate action renders the bounded `--candidates` command. An empty path list
+with `active: false` means discovery was unscoped.
 
 Both tools use a dedicated 15-minute subprocess window so a cold local run does
 not require a generic timeout override. Operators can still set
 `FALLOW_TIMEOUT_SECS` to choose a different bound.
+
+Code Mode intentionally exposes neither tool because its maximum 30-second
+execution window cannot satisfy the cold-run contract. Call the standalone MCP
+tools directly; `fallow.run("find_similar_code", ...)` and the former
+convenience aliases are not supported.
 
 Neither tool downloads a model, writes verdicts, edits source, or turns a score
 into a finding. If setup is missing, ask the user to run
@@ -116,7 +138,9 @@ into a finding. If setup is missing, ask the user to run
 tests, callers, and side effects before it authors a verdict. It should abstain
 with `needs-human-review` when the evidence is insufficient.
 
-The Node API exposes `detectSimilarCode(options)`. The npm loader resolves the
+The Node API exposes `detectSimilarCode(options)` and a precise
+`SimilarCodeReport` declaration for generation provenance, completion, skips,
+diagnostics, and candidate actions. The npm loader resolves the
 exact companion package, verifies its detached Ed25519 signature and embedded
 digest, then supplies the trusted provider path to the Rust API. It does not
 search project commands or `PATH`.
@@ -142,7 +166,7 @@ pinned model and remains a discovery cutoff, not a universal quality score.
 Clear derived project vectors without removing the user-level model:
 
 ```bash
-npx fallow similar-code cache clear
+npx fallow similar-code cache clear --yes
 ```
 
 ## Trust and privacy boundary

@@ -129,6 +129,9 @@ pub type ReviewBriefWireOutput = fallow_output::ReviewBriefWireOutput<
 /// Raw opt-in semantic similar-code candidate envelope.
 pub type SimilarCodeOutput = fallow_output::SimilarCodeOutput;
 
+/// Bounded exact-candidate handoff for source-grounded inspection.
+pub type SimilarCodeCandidateSnapshot = fallow_output::SimilarCodeCandidateSnapshot;
+
 /// Bounded source-grounded packet for one semantic candidate.
 pub type SimilarCodeInspectOutput = fallow_output::SimilarCodeInspectOutput;
 

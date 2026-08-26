@@ -632,6 +632,97 @@ jobs:
     permissions:
       contents: read
 
+  similar-code-conformance:
+    name: Similar-code production conformance
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '22'
+
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+        with:
+          tool: cargo-audit
+
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+        with:
+          tool: cargo-deny
+
+      - name: Download exact Linux x64 similar-code provider
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fallow-similar-code-linux-x64-gnu
+          path: ${{ runner.temp }}/fallow-similar-code
+
+      - name: Prepare exact provider and isolated model cache
+        run: |
+          echo "SIDECAR_BIN=$RUNNER_TEMP/fallow-similar-code/fallow-similar-code-linux-x64-gnu" >> "$GITHUB_ENV"
+          echo "FALLOW_SIMILAR_CODE_CACHE_DIR=$RUNNER_TEMP/fallow-similar-code-cache" >> "$GITHUB_ENV"
+
+      - name: Verify signed provider and release size ceiling
+        env:
+          ED25519_BINARY_SIGNING_PUBLIC_KEY: ${{ vars.ED25519_BINARY_SIGNING_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          chmod +x "$SIDECAR_BIN"
+          node .github/scripts/verify-binary.mjs "$SIDECAR_BIN" "${SIDECAR_BIN}.sig"
+          actual_bytes=$(stat --format=%s "$SIDECAR_BIN")
+          maximum_bytes=$(jq -r '.release_binary_max_bytes' tools/similar-code-sidecar/audit-allowlist.json)
+          if [ "$actual_bytes" -gt "$maximum_bytes" ]; then
+            echo "::error::Similar-code provider is ${actual_bytes} bytes, above ${maximum_bytes}"
+            exit 1
+          fi
+          echo "Similar-code provider size: ${actual_bytes} bytes" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify temporary dependency audit ownership
+        run: |
+          set -euo pipefail
+          node scripts/check-similar-code-sidecar-audit.mjs
+          cargo audit \
+            --file tools/similar-code-sidecar/Cargo.lock \
+            --deny unmaintained \
+            --ignore RUSTSEC-2024-0436
+          cargo deny \
+            --manifest-path tools/similar-code-sidecar/Cargo.toml \
+            check licenses
+
+      - name: Cache verified pinned model artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ${{ runner.temp }}/fallow-similar-code-cache
+          key: similar-code-model-516f4baf13dec4ddddda8631e019b5737c8bc250-semantics-v1
+
+      - name: Set up the exact production model
+        run: |
+          "$SIDECAR_BIN" setup --local --json
+
+      - name: Compare production Candle output with the compact baseline
+        run: |
+          node scripts/semantic-clone-candle-conformance.mjs \
+            --sidecar-bin "$SIDECAR_BIN" \
+            --pretty > similar-code-candle-conformance.json
+          jq -r '
+            ["## Similar-code production conformance", "", "| Case | Similarity | Selected |", "| --- | ---: | :---: |"],
+            (.cases[] | "| \(.id) | \(.similarity) | \(.selected) |")
+          ' similar-code-candle-conformance.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload compact production conformance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: similar-code-candle-conformance
+          path: similar-code-candle-conformance.json
+          if-no-files-found: error
+          retention-days: 30
+          include-hidden-files: false
+
   release-assets:
     name: Stage GitHub Release assets
     needs: [release-verified, vscode-prep, vscode-host-smoke]
@@ -733,7 +824,7 @@ jobs:
   # never install).
   release-verified:
     name: Release verified
-    needs: [build, validate]
+    needs: [build, validate, similar-code-conformance]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: {}

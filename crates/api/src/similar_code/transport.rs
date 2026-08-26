@@ -6,16 +6,19 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use super::protocol::{
-    ANALYSIS_OPERATION, EmbedBatchRequest, EmbedBatchResponse, EmbedCompletionStatus,
-    EmbedErrorCode, EmbedFunctionRequest, MODEL_DIMENSIONS, MODEL_MAX_TOKENS, MODEL_REVISION,
-    SIDECAR_BINARY, SimilarCodeProviderStatus, WIRE_PROTOCOL_VERSION,
+    ANALYSIS_OPERATION, EMBEDDING_SEMANTICS_VERSION, EmbedBatchRequest, EmbedBatchResponse,
+    EmbedCompletionStatus, EmbedErrorCode, EmbedFunctionRequest, MODEL_DIMENSIONS,
+    MODEL_MAX_TOKENS, MODEL_REVISION, SIDECAR_BINARY, SimilarCodeProviderStatus,
+    WIRE_PROTOCOL_VERSION,
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
-const COMMAND_TIMEOUT: Duration = Duration::from_mins(10);
+const STATUS_COMMAND_TIMEOUT: Duration = Duration::from_mins(2);
+const SETUP_COMMAND_TIMEOUT: Duration = Duration::from_mins(55);
 const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 64 * 1024;
@@ -91,17 +94,28 @@ fn binary_names(binary: &str) -> Vec<String> {
 }
 
 pub(super) fn provider_status(sidecar: &Path) -> Result<SimilarCodeProviderStatus, String> {
-    run_command_json(sidecar, &["status", "--json"], false)
+    run_command_json(
+        sidecar,
+        &["status", "--json"],
+        false,
+        STATUS_COMMAND_TIMEOUT,
+    )
 }
 
 pub(super) fn setup_provider(sidecar: &Path) -> Result<SimilarCodeProviderStatus, String> {
-    run_command_json(sidecar, &["setup", "--local", "--json"], true)
+    run_command_json(
+        sidecar,
+        &["setup", "--local", "--json"],
+        true,
+        SETUP_COMMAND_TIMEOUT,
+    )
 }
 
 fn run_command_json<Response: DeserializeOwned>(
     sidecar: &Path,
     args: &[&str],
     allow_download: bool,
+    command_timeout: Duration,
 ) -> Result<Response, String> {
     let mut command = provider_command(sidecar, allow_download)?;
     command.args(args).stdin(Stdio::null());
@@ -124,7 +138,7 @@ fn run_command_json<Response: DeserializeOwned>(
     let stderr_reader = std::thread::spawn(move || {
         read_bounded(stderr, MAX_STDERR_BYTES, "stderr", stderr_terminator)
     });
-    let timeout = ProcessTimeout::start(terminator, COMMAND_TIMEOUT);
+    let timeout = ProcessTimeout::start(terminator, command_timeout);
     let status = child
         .wait()
         .map_err(|error| format!("failed to wait for similar-code provider: {error}"));
@@ -134,7 +148,7 @@ fn run_command_json<Response: DeserializeOwned>(
     timeout_result?;
     let status = status?;
     if !status.success() {
-        return Err(provider_exit_error(&status.to_string(), &stderr));
+        return Err(provider_exit_error(&status.to_string(), &stdout, &stderr));
     }
     serde_json::from_slice(&stdout)
         .map_err(|error| format!("failed to parse similar-code provider response: {error}"))
@@ -183,6 +197,14 @@ impl ProviderSession {
         &mut self,
         functions: &[(u32, &str)],
     ) -> Result<EmbedBatchResponse, String> {
+        self.embed_with_timeout(functions, REQUEST_TIMEOUT)
+    }
+
+    fn embed_with_timeout(
+        &mut self,
+        functions: &[(u32, &str)],
+        request_timeout: Duration,
+    ) -> Result<EmbedBatchResponse, String> {
         let functions = functions
             .iter()
             .map(|(key, source)| EmbedFunctionRequest { key: *key, source })
@@ -190,6 +212,7 @@ impl ProviderSession {
         let request = EmbedBatchRequest {
             operation: ANALYSIS_OPERATION,
             protocol_version: WIRE_PROTOCOL_VERSION,
+            embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
             model_revision: MODEL_REVISION,
             dimensions: MODEL_DIMENSIONS,
             max_tokens: MODEL_MAX_TOKENS,
@@ -203,19 +226,7 @@ impl ProviderSession {
             ));
         }
         bytes.push(b'\n');
-        self.stdin
-            .write_all(&bytes)
-            .and_then(|()| self.stdin.flush())
-            .map_err(|error| format!("failed to write similar-code request: {error}"))?;
-
-        let timeout = ProcessTimeout::start(self.terminator.clone(), REQUEST_TIMEOUT);
-        let mut response_bytes = Vec::new();
-        self.stdout
-            .by_ref()
-            .take((MAX_RESPONSE_BYTES + 1) as u64)
-            .read_until(b'\n', &mut response_bytes)
-            .map_err(|error| format!("failed to read similar-code response: {error}"))?;
-        timeout.finish()?;
+        let response_bytes = self.exchange(&bytes, request_timeout)?;
         if response_bytes.is_empty() {
             return Err("similar-code provider closed without a response".to_owned());
         }
@@ -228,6 +239,33 @@ impl ProviderSession {
             .map_err(|error| format!("failed to parse similar-code response: {error}"))?;
         validate_embed_response(&response, &functions)?;
         Ok(response)
+    }
+
+    fn exchange(&mut self, bytes: &[u8], request_timeout: Duration) -> Result<Vec<u8>, String> {
+        let timeout = ProcessTimeout::start(self.terminator.clone(), request_timeout);
+        let mut response_bytes = Vec::new();
+        let io_result = self
+            .stdin
+            .write_all(bytes)
+            .and_then(|()| self.stdin.flush())
+            .map_err(|error| format!("failed to write similar-code request: {error}"))
+            .and_then(|()| {
+                self.stdout
+                    .by_ref()
+                    .take((MAX_RESPONSE_BYTES + 1) as u64)
+                    .read_until(b'\n', &mut response_bytes)
+                    .map_err(|error| format!("failed to read similar-code response: {error}"))
+            });
+        let timeout_result = timeout.finish();
+        if let Err(error) = timeout_result {
+            self.terminate();
+            return Err(error);
+        }
+        if let Err(error) = io_result {
+            self.terminate();
+            return Err(error);
+        }
+        Ok(response_bytes)
     }
 
     fn terminate(&mut self) {
@@ -258,6 +296,7 @@ fn validate_embed_response(
     request: &[EmbedFunctionRequest<'_>],
 ) -> Result<(), String> {
     if response.protocol_version != WIRE_PROTOCOL_VERSION
+        || response.embedding_semantics_version != EMBEDDING_SEMANTICS_VERSION
         || response.model_revision != MODEL_REVISION
         || response.dimensions != MODEL_DIMENSIONS
     {
@@ -371,6 +410,7 @@ pub(super) fn embed_problem(response: &EmbedBatchResponse) -> String {
         .map(|error| match error.code {
             EmbedErrorCode::InvalidRequest => "invalid-request",
             EmbedErrorCode::ProtocolMismatch => "protocol-mismatch",
+            EmbedErrorCode::EmbeddingSemanticsMismatch => "embedding-semantics-mismatch",
             EmbedErrorCode::ModelRevisionMismatch => "model-revision-mismatch",
             EmbedErrorCode::DimensionMismatch => "dimension-mismatch",
             EmbedErrorCode::MaxTokensMismatch => "max-tokens-mismatch",
@@ -474,7 +514,30 @@ fn join_reader(
         .map_err(|_| format!("similar-code provider {stream} reader panicked"))?
 }
 
-fn provider_exit_error(status: &str, stderr: &[u8]) -> String {
+#[derive(Deserialize)]
+struct SidecarErrorEnvelope {
+    protocol_version: u32,
+    kind: String,
+    error: SidecarErrorDetail,
+}
+
+#[derive(Deserialize)]
+struct SidecarErrorDetail {
+    code: String,
+    message: String,
+}
+
+fn provider_exit_error(status: &str, stdout: &[u8], stderr: &[u8]) -> String {
+    if let Ok(envelope) = serde_json::from_slice::<SidecarErrorEnvelope>(stdout)
+        && envelope.protocol_version == WIRE_PROTOCOL_VERSION
+        && envelope.kind == "similar-code-sidecar-error"
+        && !envelope.error.message.trim().is_empty()
+    {
+        return format!(
+            "similar-code provider exited with status {status} ({}): {}",
+            envelope.error.code, envelope.error.message
+        );
+    }
     let detail = String::from_utf8_lossy(stderr)
         .chars()
         .take(2_000)
@@ -536,6 +599,9 @@ impl ProcessTimeout {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     #[test]
     fn discovery_only_accepts_a_sibling_file() {
         let temp = tempfile::tempdir().unwrap();
@@ -571,5 +637,43 @@ mod tests {
         assert!(BASE_ENV.contains(&"FALLOW_SIMILAR_CODE_CACHE_DIR"));
         assert!(BASE_ENV.contains(&"LOCALAPPDATA"));
         assert!(BASE_ENV.contains(&"XDG_CACHE_HOME"));
+    }
+
+    #[test]
+    fn setup_timeout_matches_the_direct_wrapper_budget() {
+        assert_eq!(STATUS_COMMAND_TIMEOUT, Duration::from_mins(2));
+        assert_eq!(SETUP_COMMAND_TIMEOUT, Duration::from_mins(55));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn request_timeout_bounds_blocked_provider_stdin_and_reaps_process() {
+        const SERIALIZATION_HEADROOM_BYTES: usize = 1024;
+
+        let temp = tempfile::tempdir().unwrap();
+        let sidecar = temp.path().join("fallow-similar-code");
+        std::fs::write(&sidecar, "#!/bin/sh\nsleep 5\n").unwrap();
+        let mut permissions = std::fs::metadata(&sidecar).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&sidecar, permissions).unwrap();
+
+        let mut session = ProviderSession::spawn(&sidecar).unwrap();
+        let source = "x".repeat(MAX_REQUEST_BYTES - SERIALIZATION_HEADROOM_BYTES);
+        let error = session
+            .embed_with_timeout(&[(0, &source)], Duration::from_millis(250))
+            .unwrap_err();
+
+        assert!(error.contains("timed out after 0.25 seconds"), "{error}");
+        assert!(session.child.is_none(), "timed-out provider was not reaped");
+    }
+
+    #[test]
+    fn provider_exit_prefers_the_typed_sidecar_error() {
+        let stdout = br#"{"protocol_version":2,"kind":"similar-code-sidecar-error","error":{"code":"sidecar-error","message":"response header timed out","retryable":false}}"#;
+
+        assert_eq!(
+            provider_exit_error("exit status: 2", stdout, b"generic stderr"),
+            "similar-code provider exited with status exit status: 2 (sidecar-error): response header timed out"
+        );
     }
 }

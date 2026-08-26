@@ -327,7 +327,40 @@ fn code_execute_schema_contains_expected_properties() {
 }
 
 #[test]
-fn code_execute_description_distinguishes_combined_from_subprocess_tools() {
+fn inspect_similar_code_schema_requires_the_exact_candidate_snapshot() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools
+        .iter()
+        .find(|tool| tool.name == "inspect_similar_code")
+        .unwrap();
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+
+    assert_required_fields(&schema, &["candidate_id", "snapshot"]);
+    let serialized = serde_json::to_string(&schema).unwrap();
+    for field in [
+        "generation",
+        "candidate",
+        "completion",
+        "diagnostics",
+        "source_sha256",
+    ] {
+        assert!(
+            serialized.contains(field),
+            "snapshot schema is missing {field}"
+        );
+    }
+    let properties = schema["properties"].as_object().unwrap();
+    for removed in ["changed_since", "paths", "threshold", "min_lines", "top"] {
+        assert!(
+            !properties.contains_key(removed),
+            "inspect schema still exposes reranking field {removed}"
+        );
+    }
+}
+
+#[test]
+fn code_execute_description_routes_similar_code_to_standalone_tools() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "code_execute").unwrap();
@@ -338,8 +371,16 @@ fn code_execute_description_distinguishes_combined_from_subprocess_tools() {
         "code_execute description must list the combined host call"
     );
     assert!(
-        description.contains("analyze, findSimilarCode, inspectSimilarCode, findDupes, checkHealth, and audit stay subprocess-backed"),
-        "the description must list only the six subprocess-backed calls: {description}"
+        description.contains("analyze, findDupes, checkHealth, and audit stay subprocess-backed"),
+        "the description must list only the four subprocess-backed calls: {description}"
+    );
+    assert!(
+        description.contains("standalone find_similar_code and inspect_similar_code MCP tools"),
+        "the description must route similar-code to the standalone tools: {description}"
+    );
+    assert!(
+        !description.contains("findSimilarCode") && !description.contains("inspectSimilarCode"),
+        "Code Mode must not advertise similar-code aliases: {description}"
     );
     assert!(
         !description.contains("analyze, combined, findDupes"),

@@ -37,7 +37,10 @@ pub use dead_code::{run_boundary_violations, run_circular_dependencies, run_dead
 pub use decision_surface::run_decision_surface;
 pub use duplication::run_duplication;
 pub use feature_flags::run_feature_flags;
-pub use similar_code::{inspect_similar_code, review_similar_code, run_similar_code};
+pub use similar_code::{
+    inspect_similar_code, parse_similar_code_candidate_snapshot, review_similar_code,
+    run_similar_code, select_similar_code_candidate_snapshot,
+};
 pub use trace::{
     TraceCloneBenchmarkResult, benchmark_trace_clone_compact_json,
     benchmark_trace_graph_family_compact_json, run_trace_clone, run_trace_dependency,

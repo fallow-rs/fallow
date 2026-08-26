@@ -23006,6 +23006,10 @@
           "type": "integer",
           "description": "Companion protocol version."
         },
+        "embedding_semantics_version": {
+          "type": "integer",
+          "description": "Embedding calculation semantics implemented by the companion."
+        },
         "companion_version": {
           "type": "string",
           "description": "Exact companion package version."
@@ -23069,6 +23073,7 @@
         "schema_version",
         "version",
         "protocol_version",
+        "embedding_semantics_version",
         "companion_version",
         "model_ready",
         "model_id",
@@ -23109,7 +23114,7 @@
         "removed",
         "model_removed"
       ],
-      "description": "Result of explicitly clearing the derived project-local vector cache."
+      "description": "Result of explicitly clearing the derived project-namespaced vector cache."
     },
     "SimilarCodeVerdictInput": {
       "type": "object",
@@ -23180,6 +23185,10 @@
           "type": "integer",
           "description": "Version of extraction and normalization semantics used for both IDs."
         },
+        "embedding_semantics_version": {
+          "type": "integer",
+          "description": "Version of the calculation that produces model embeddings."
+        },
         "provider": {
           "description": "Local provider provenance.",
           "$ref": "#/definitions/SimilarCodeProviderProvenance"
@@ -23192,6 +23201,10 @@
           "description": "Effective generation parameters.",
           "$ref": "#/definitions/SimilarCodeGenerationParameters"
         },
+        "scope": {
+          "description": "Materialized endpoint scope needed to reproduce scoped discovery.",
+          "$ref": "#/definitions/SimilarCodeScopeProvenance"
+        },
         "threshold": {
           "type": "number",
           "description": "Minimum cosine similarity admitted into the candidate set."
@@ -23203,9 +23216,11 @@
       },
       "required": [
         "extraction_semantics_version",
+        "embedding_semantics_version",
         "provider",
         "model",
         "parameters",
+        "scope",
         "threshold",
         "min_lines"
       ],
@@ -24380,6 +24395,27 @@
         }
       ],
       "description": "Version singleton for vector-cache clear output."
+    },
+    "SimilarCodeScopeProvenance": {
+      "type": "object",
+      "properties": {
+        "active": {
+          "type": "boolean",
+          "description": "Whether file, changed-file, diff, or workspace scoping was active."
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Sorted project-root-relative paths satisfying every active predicate."
+        }
+      },
+      "required": [
+        "active",
+        "paths"
+      ],
+      "description": "Effective endpoint scope used for corpus admission and pair retention."
     }
   }
 }

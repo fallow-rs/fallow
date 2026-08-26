@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::cache::ModelPaths;
 use crate::constants::{
     ANALYSIS_OPERATION, DEFAULT_MAX_FUNCTIONS, DEFAULT_MAX_SOURCE_BYTES_PER_FUNCTION,
-    DEFAULT_MAX_TOTAL_SOURCE_BYTES, DEFAULT_TIMEOUT_MS, HARD_MAX_FUNCTIONS,
-    HARD_MAX_SOURCE_BYTES_PER_FUNCTION, HARD_MAX_TIMEOUT_MS, HARD_MAX_TOTAL_SOURCE_BYTES,
-    MAX_BATCH_SIZE, MAX_JSONL_LINE_BYTES, MODEL_DIMENSIONS, MODEL_MAX_TOKENS, MODEL_REVISION,
-    PROTOCOL_VERSION,
+    DEFAULT_MAX_TOTAL_SOURCE_BYTES, DEFAULT_TIMEOUT_MS, EMBEDDING_SEMANTICS_VERSION,
+    HARD_MAX_FUNCTIONS, HARD_MAX_SOURCE_BYTES_PER_FUNCTION, HARD_MAX_TIMEOUT_MS,
+    HARD_MAX_TOTAL_SOURCE_BYTES, MAX_BATCH_SIZE, MAX_JSONL_LINE_BYTES, MODEL_DIMENSIONS,
+    MODEL_MAX_TOKENS, MODEL_REVISION, PROTOCOL_VERSION,
 };
 use crate::model::{EmbedError, LocalModel};
 
@@ -19,6 +19,7 @@ use crate::model::{EmbedError, LocalModel};
 struct EmbedRequest {
     operation: String,
     protocol_version: u32,
+    embedding_semantics_version: u32,
     model_revision: String,
     dimensions: usize,
     max_tokens: usize,
@@ -91,6 +92,7 @@ impl RequestLimits {
 #[derive(Serialize)]
 struct EmbedResponse {
     protocol_version: u32,
+    embedding_semantics_version: u32,
     model_revision: &'static str,
     dimensions: usize,
     vectors: Vec<VectorOutput>,
@@ -150,6 +152,7 @@ struct FunctionError {
 enum ErrorCode {
     InvalidRequest,
     ProtocolMismatch,
+    EmbeddingSemanticsMismatch,
     ModelRevisionMismatch,
     DimensionMismatch,
     MaxTokensMismatch,
@@ -221,6 +224,13 @@ fn process_request(
             requested_functions,
         );
     }
+    if request.embedding_semantics_version != EMBEDDING_SEMANTICS_VERSION {
+        return error_response_with_limits(
+            ErrorCode::EmbeddingSemanticsMismatch,
+            limits,
+            requested_functions,
+        );
+    }
     if request.model_revision != MODEL_REVISION {
         return error_response_with_limits(
             ErrorCode::ModelRevisionMismatch,
@@ -252,6 +262,7 @@ fn process_request(
     if request.functions.is_empty() {
         return EmbedResponse {
             protocol_version: PROTOCOL_VERSION,
+            embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
             model_revision: MODEL_REVISION,
             dimensions: MODEL_DIMENSIONS,
             vectors: Vec::new(),
@@ -352,6 +363,7 @@ fn process_request(
     let truncated = vectors.iter().filter(|vector| vector.truncated).count();
     EmbedResponse {
         protocol_version: PROTOCOL_VERSION,
+        embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
         model_revision: MODEL_REVISION,
         dimensions: MODEL_DIMENSIONS,
         timing: Timing { inference_ms },
@@ -378,6 +390,7 @@ fn error_response(code: ErrorCode, key: Option<u32>, retryable: bool) -> EmbedRe
     let limits = RequestLimits::default().applied();
     EmbedResponse {
         protocol_version: PROTOCOL_VERSION,
+        embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
         model_revision: MODEL_REVISION,
         dimensions: MODEL_DIMENSIONS,
         vectors: Vec::new(),
@@ -518,6 +531,7 @@ mod tests {
         let request = EmbedRequest {
             operation: ANALYSIS_OPERATION.to_string(),
             protocol_version: PROTOCOL_VERSION,
+            embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
             model_revision: MODEL_REVISION.to_string(),
             dimensions: MODEL_DIMENSIONS,
             max_tokens: MODEL_MAX_TOKENS,
@@ -537,6 +551,7 @@ mod tests {
         let request = serde_json::json!({
             "operation": ANALYSIS_OPERATION,
             "protocol_version": PROTOCOL_VERSION,
+            "embedding_semantics_version": EMBEDDING_SEMANTICS_VERSION,
             "model_revision": MODEL_REVISION,
             "dimensions": MODEL_DIMENSIONS,
             "max_tokens": MODEL_MAX_TOKENS,
@@ -562,6 +577,7 @@ mod tests {
         let request = EmbedRequest {
             operation: ANALYSIS_OPERATION.to_string(),
             protocol_version: PROTOCOL_VERSION + 1,
+            embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
             model_revision: MODEL_REVISION.to_string(),
             dimensions: MODEL_DIMENSIONS,
             max_tokens: MODEL_MAX_TOKENS,
@@ -573,6 +589,28 @@ mod tests {
         assert!(matches!(
             response.errors[0].code,
             ErrorCode::ProtocolMismatch
+        ));
+    }
+
+    #[test]
+    fn embedding_semantics_mismatch_is_typed() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = ModelPaths::from_cache_root(directory.path());
+        let request = EmbedRequest {
+            operation: ANALYSIS_OPERATION.to_string(),
+            protocol_version: PROTOCOL_VERSION,
+            embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION + 1,
+            model_revision: MODEL_REVISION.to_string(),
+            dimensions: MODEL_DIMENSIONS,
+            max_tokens: MODEL_MAX_TOKENS,
+            functions: Vec::new(),
+            limits: RequestLimits::default(),
+        };
+        let response = process_request(request, &paths, &mut None);
+        assert!(matches!(response.status, CompletionStatus::Error));
+        assert!(matches!(
+            response.errors[0].code,
+            ErrorCode::EmbeddingSemanticsMismatch
         ));
     }
 
@@ -598,6 +636,7 @@ mod tests {
         let request = EmbedRequest {
             operation: ANALYSIS_OPERATION.to_string(),
             protocol_version: PROTOCOL_VERSION,
+            embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
             model_revision: MODEL_REVISION.to_string(),
             dimensions: MODEL_DIMENSIONS,
             max_tokens: MODEL_MAX_TOKENS,
@@ -627,6 +666,7 @@ mod tests {
         let request = EmbedRequest {
             operation: ANALYSIS_OPERATION.to_string(),
             protocol_version: PROTOCOL_VERSION,
+            embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
             model_revision: MODEL_REVISION.to_string(),
             dimensions: MODEL_DIMENSIONS,
             max_tokens: MODEL_MAX_TOKENS - 1,

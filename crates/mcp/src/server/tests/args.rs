@@ -590,21 +590,12 @@ fn find_similar_code_rejects_invalid_threshold() {
 
 #[test]
 fn inspect_similar_code_requires_and_forwards_candidate_id() {
-    let params = InspectSimilarCodeParams {
-        candidate_id: "sc_abc123".to_owned(),
-        root: Some("/repo".to_owned()),
-        config: None,
-        allow_remote_extends: None,
-        workspace: None,
-        changed_since: None,
-        changed_workspaces: None,
-        paths: None,
-        threshold: None,
-        min_lines: None,
-        top: None,
-        no_cache: None,
-        threads: None,
-    };
+    let params: InspectSimilarCodeParams = serde_json::from_value(serde_json::json!({
+        "candidate_id": "sc_abc123",
+        "root": "/repo",
+        "snapshot": similar_code_snapshot_json("sc_abc123"),
+    }))
+    .unwrap();
     let args = build_inspect_similar_code_args(&params).unwrap();
     assert_eq!(
         args,
@@ -617,8 +608,101 @@ fn inspect_similar_code_requires_and_forwards_candidate_id() {
             "/repo",
             "inspect",
             "sc_abc123",
+            "--candidate-snapshot-stdin",
         ]
     );
+}
+
+fn similar_code_snapshot_json(candidate_id: &str) -> serde_json::Value {
+    let location = |path: &str| {
+        serde_json::json!({
+            "path": path,
+            "name": "candidate",
+            "start_line": 1,
+            "start_column": 1,
+            "end_line": 3,
+            "end_column": 2,
+            "source_sha256": "00".repeat(32),
+        })
+    };
+    serde_json::json!({
+        "schema_version": "1",
+        "generation": {
+            "extraction_semantics_version": 1,
+            "embedding_semantics_version": 1,
+            "provider": {
+                "provider": "official-local-companion",
+                "companion_version": "3.18.0",
+                "protocol_version": 2,
+                "source_left_machine": false,
+            },
+            "model": {
+                "model_id": "model",
+                "revision": "revision",
+                "artifact_sha256": "digest",
+                "license": "Apache-2.0",
+                "dimensions": 768,
+            },
+            "parameters": {
+                "dtype": "f32",
+                "pooling": "mean",
+                "normalized": true,
+                "batch_size": 1,
+                "max_tokens": 1024,
+                "parameter_sha256": "parameters",
+            },
+            "scope": { "active": false, "paths": [] },
+            "threshold": 0.8,
+            "min_lines": 3,
+        },
+        "candidate": {
+            "candidate_id": candidate_id,
+            "review_key": "review-key",
+            "left": location("src/a.ts"),
+            "right": location("src/b.ts"),
+            "similarity": 0.9,
+            "similarity_band": "high",
+            "verification_status": "unverified",
+            "enrichment": {
+                "graph_relationship": "not-requested",
+                "entry_point_reachability": "not-requested",
+                "callers": "not-requested",
+                "callees": "not-requested",
+                "ownership": "not-requested",
+                "churn": "not-requested",
+                "tests": "not-requested",
+                "deterministic_clone_coverage": "not-requested",
+                "runtime": "not-requested",
+            },
+            "actions": [],
+        },
+        "completion": {
+            "status": "complete",
+            "phases": [],
+            "limits": {
+                "max_files": 1,
+                "max_functions": 2,
+                "max_source_bytes": 1,
+                "max_function_bytes": 1,
+                "max_batch_size": 1,
+                "max_vector_bytes": 1,
+                "max_comparisons": 1,
+                "max_candidates": 1,
+                "max_neighbors_per_function": 1,
+                "timeout_ms": 1,
+            },
+            "skips": [],
+            "cache": {
+                "status": "disabled",
+                "hits": 0,
+                "misses": 0,
+                "writes": 0,
+                "invalid_entries": 0,
+            },
+            "provider_inference_ms": 0,
+        },
+        "diagnostics": [],
+    })
 }
 
 #[test]

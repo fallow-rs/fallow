@@ -4,8 +4,7 @@
 //! or public output behavior. Orchestration validates provider consent and then
 //! passes vectors into this deterministic layer.
 
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, VecDeque};
+use std::collections::VecDeque;
 use std::fmt;
 use std::mem::size_of;
 
@@ -37,6 +36,8 @@ pub struct SimilarCodeSelectionInput<'a> {
     pub location: &'a FunctionLocation,
     /// Full SHA-256 digest of the exact source fragment.
     pub source_sha256: SimilarCodeSourceDigest,
+    /// Whether this function satisfies every active reporting-scope predicate.
+    pub in_scope: bool,
 }
 
 /// Hard limits for one candidate-evaluation run.
@@ -48,7 +49,7 @@ pub struct SimilarCodeLimits {
     pub max_functions: usize,
     /// Maximum pairwise cosine comparisons.
     pub max_comparisons: usize,
-    /// Maximum threshold-passing pairs retained before neighbor filtering.
+    /// Maximum candidates retained after per-function neighbor filtering.
     pub max_candidates: usize,
     /// Maximum retained candidates involving any one function.
     pub max_neighbors_per_function: usize,
@@ -101,6 +102,8 @@ pub struct SimilarCodeSkip {
 pub struct SimilarCodeCorpusSelection {
     /// Indices into the caller's input slice, in stable occurrence order.
     pub selected_indices: Vec<usize>,
+    /// Scope membership aligned with `selected_indices`.
+    pub selected_in_scope: Vec<bool>,
     /// Typed omissions caused by function, vector-memory, or comparison limits.
     pub skipped: Vec<SimilarCodeSkip>,
 }
@@ -204,12 +207,21 @@ pub enum SimilarCodeError {
         /// Source location shared by the duplicate inputs.
         location: FunctionLocation,
     },
-    /// Preselected vector count did not match the source selection contract.
+    /// Preselected vector or scope count did not match the source selection contract.
     SelectionLengthMismatch {
-        /// Number of vectors expected from selected source indices.
+        /// Number of aligned entries expected from selected source indices.
         expected: usize,
-        /// Number of provider vectors supplied.
+        /// Number of aligned entries supplied.
         actual: usize,
+    },
+    /// A caller-supplied preselection exceeded one current hard limit.
+    SelectionLimitExceeded {
+        /// Limit that the preselection exceeded.
+        reason: SimilarCodeSkipReason,
+        /// Observed functions, bytes, or comparisons.
+        observed: usize,
+        /// Maximum admitted functions, bytes, or comparisons.
+        limit: usize,
     },
 }
 
@@ -255,7 +267,15 @@ impl fmt::Display for SimilarCodeError {
             ),
             Self::SelectionLengthMismatch { expected, actual } => write!(
                 formatter,
-                "similar-code selection expected {expected} vectors, received {actual}"
+                "similar-code selection expected {expected} aligned entries, received {actual}"
+            ),
+            Self::SelectionLimitExceeded {
+                reason,
+                observed,
+                limit,
+            } => write!(
+                formatter,
+                "similar-code preselection exceeded {reason:?}: observed {observed}, limit {limit}"
             ),
         }
     }
@@ -382,32 +402,7 @@ struct ScoredPair {
 struct SelectedVector {
     index: usize,
     inverse_norm: f64,
-}
-
-impl PartialEq for ScoredPair {
-    fn eq(&self, other: &Self) -> bool {
-        self.left == other.left
-            && self.right == other.right
-            && self.similarity.to_bits() == other.similarity.to_bits()
-    }
-}
-
-impl Eq for ScoredPair {}
-
-impl PartialOrd for ScoredPair {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ScoredPair {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .similarity
-            .total_cmp(&self.similarity)
-            .then_with(|| self.left.cmp(&other.left))
-            .then_with(|| self.right.cmp(&other.right))
-    }
+    in_scope: bool,
 }
 
 /// Validate vectors without generating pair candidates.
@@ -439,16 +434,14 @@ pub fn evaluate_similar_code(
     if !threshold.is_finite() || !(-1.0..=1.0).contains(&threshold) {
         return Err(SimilarCodeError::InvalidThreshold);
     }
-
     let mut skips = FxHashMap::default();
     let selected = select_vectors(vectors, limits, extraction_semantics_version, &mut skips)?;
-    let (ranked, comparisons_performed) =
-        score_pairs(vectors, &selected, threshold, limits, &mut skips);
+    let (ranked, comparisons_performed) = score_pairs(vectors, &selected, threshold, limits);
     let candidates = build_candidates(
         vectors,
         &selected,
         ranked,
-        limits.max_neighbors_per_function,
+        limits,
         extraction_semantics_version,
         &mut skips,
     );
@@ -478,10 +471,8 @@ pub fn evaluate_similar_code(
 
 /// Evaluate only the vectors produced for a prior source-corpus selection.
 ///
-/// `vectors` must follow `selection.selected_indices` order. The regular
-/// evaluator runs the same selection helper again over this bounded subset,
-/// while this wrapper preserves the pre-inference omissions in completion
-/// evidence.
+/// `vectors` must follow `selection.selected_indices` order. This preserves
+/// both the pre-inference omissions and scope membership selected by the caller.
 pub fn evaluate_selected_similar_code(
     vectors: &[FunctionVector],
     selection: &SimilarCodeCorpusSelection,
@@ -489,6 +480,12 @@ pub fn evaluate_selected_similar_code(
     limits: SimilarCodeLimits,
     extraction_semantics_version: u32,
 ) -> Result<SimilarCodeEvaluation, SimilarCodeError> {
+    if selection.selected_in_scope.len() != selection.selected_indices.len() {
+        return Err(SimilarCodeError::SelectionLengthMismatch {
+            expected: selection.selected_indices.len(),
+            actual: selection.selected_in_scope.len(),
+        });
+    }
     if vectors.len() != selection.selected_indices.len() {
         return Err(SimilarCodeError::SelectionLengthMismatch {
             expected: selection.selected_indices.len(),
@@ -496,8 +493,60 @@ pub fn evaluate_selected_similar_code(
         });
     }
 
-    let mut evaluation =
-        evaluate_similar_code(vectors, threshold, limits, extraction_semantics_version)?;
+    if limits.dimensions == 0 {
+        return Err(SimilarCodeError::ZeroDimensions);
+    }
+    if !threshold.is_finite() || !(-1.0..=1.0).contains(&threshold) {
+        return Err(SimilarCodeError::InvalidThreshold);
+    }
+    validate_preselection_limits(&selection.selected_in_scope, limits)?;
+    let selection_inputs = vectors
+        .iter()
+        .zip(&selection.selected_in_scope)
+        .map(|(vector, &in_scope)| SimilarCodeSelectionInput {
+            location: &vector.location,
+            source_sha256: vector.source_sha256,
+            in_scope,
+        })
+        .collect::<Vec<_>>();
+    validated_occurrence_identities(&selection_inputs)?;
+    let selected = vectors
+        .iter()
+        .zip(&selection.selected_in_scope)
+        .enumerate()
+        .map(|(index, (vector, &in_scope))| {
+            let inverse_norm =
+                validate_vector(vector, limits.dimensions, extraction_semantics_version)?;
+            Ok(SelectedVector {
+                index,
+                inverse_norm,
+                in_scope,
+            })
+        })
+        .collect::<Result<Vec<_>, SimilarCodeError>>()?;
+    let mut skips = FxHashMap::default();
+    let (ranked, comparisons_performed) = score_pairs(vectors, &selected, threshold, limits);
+    let candidates = build_candidates(
+        vectors,
+        &selected,
+        ranked,
+        limits,
+        extraction_semantics_version,
+        &mut skips,
+    );
+    let mut evaluation = SimilarCodeEvaluation {
+        candidates,
+        completion: SimilarCodeCompletion {
+            status: SimilarCodeCompletionStatus::Complete,
+            limits,
+            functions_considered: selected.len(),
+            comparisons_performed,
+            skipped: skips
+                .into_iter()
+                .map(|(reason, count)| SimilarCodeSkip { reason, count })
+                .collect(),
+        },
+    };
     let mut skipped = evaluation
         .completion
         .skipped
@@ -521,13 +570,46 @@ pub fn evaluate_selected_similar_code(
     Ok(evaluation)
 }
 
+fn validate_preselection_limits(
+    selected_in_scope: &[bool],
+    limits: SimilarCodeLimits,
+) -> Result<(), SimilarCodeError> {
+    let functions = selected_in_scope.len();
+    if functions > limits.max_functions {
+        return Err(SimilarCodeError::SelectionLimitExceeded {
+            reason: SimilarCodeSkipReason::FunctionLimit,
+            observed: functions,
+            limit: limits.max_functions,
+        });
+    }
+    let vector_bytes = functions.saturating_mul(vector_bytes(limits.dimensions));
+    if vector_bytes > limits.max_vector_bytes {
+        return Err(SimilarCodeError::SelectionLimitExceeded {
+            reason: SimilarCodeSkipReason::VectorMemoryLimit,
+            observed: vector_bytes,
+            limit: limits.max_vector_bytes,
+        });
+    }
+    let scoped_functions = selected_in_scope
+        .iter()
+        .filter(|&&in_scope| in_scope)
+        .count();
+    let comparisons = scoped_pair_count(functions, scoped_functions);
+    if comparisons > limits.max_comparisons {
+        return Err(SimilarCodeError::SelectionLimitExceeded {
+            reason: SimilarCodeSkipReason::ComparisonLimit,
+            observed: comparisons,
+            limit: limits.max_comparisons,
+        });
+    }
+    Ok(())
+}
+
 /// Select a deterministic fair corpus before provider inference.
 ///
-/// Selection uses only normalized source occurrence and full source digest.
-/// The hash-ranked subset is then returned in stable occurrence order. Every
-/// pair in the selected corpus fits inside `max_comparisons`, so callers can
-/// embed only `selected_indices` and the evaluator can exhaustively compare the
-/// resulting vectors.
+/// In-scope functions receive deterministic priority, while both the scoped and
+/// background partitions use normalized source occurrence plus full source
+/// digest for fair selection. The subset is returned in stable occurrence order.
 pub fn select_similar_code_corpus(
     functions: &[SimilarCodeSelectionInput<'_>],
     limits: SimilarCodeLimits,
@@ -536,6 +618,74 @@ pub fn select_similar_code_corpus(
         return Err(SimilarCodeError::ZeroDimensions);
     }
 
+    let scoped_functions = functions
+        .iter()
+        .filter(|function| function.in_scope)
+        .count();
+    if scoped_functions == 0 {
+        return Ok(SimilarCodeCorpusSelection {
+            selected_indices: Vec::new(),
+            selected_in_scope: Vec::new(),
+            skipped: Vec::new(),
+        });
+    }
+
+    let occurrence_identities = validated_occurrence_identities(functions)?;
+
+    let memory_function_limit = limits
+        .max_vector_bytes
+        .checked_div(vector_bytes(limits.dimensions))
+        .unwrap_or(0);
+    let function_limit = functions.len().min(limits.max_functions);
+    let memory_considered = function_limit.min(memory_function_limit);
+    let considered = functions_within_scoped_comparison_budget(
+        memory_considered,
+        scoped_functions,
+        limits.max_comparisons,
+    );
+
+    let order = selected_corpus_order(functions, &occurrence_identities, considered);
+
+    let mut skips = FxHashMap::default();
+    record_skip(
+        &mut skips,
+        SimilarCodeSkipReason::FunctionLimit,
+        functions.len().saturating_sub(function_limit),
+    );
+    record_skip(
+        &mut skips,
+        SimilarCodeSkipReason::VectorMemoryLimit,
+        function_limit.saturating_sub(memory_considered),
+    );
+    record_skip(
+        &mut skips,
+        SimilarCodeSkipReason::ComparisonLimit,
+        scoped_pair_count(memory_considered, scoped_functions.min(memory_considered))
+            .saturating_sub(scoped_pair_count(
+                considered,
+                scoped_functions.min(considered),
+            )),
+    );
+    let mut skipped = skips
+        .into_iter()
+        .map(|(reason, count)| SimilarCodeSkip { reason, count })
+        .collect::<Vec<_>>();
+    skipped.sort_by_key(|skip| skip.reason);
+
+    let selected_in_scope = order
+        .iter()
+        .map(|&index| functions[index].in_scope)
+        .collect();
+    Ok(SimilarCodeCorpusSelection {
+        selected_indices: order,
+        selected_in_scope,
+        skipped,
+    })
+}
+
+fn validated_occurrence_identities(
+    functions: &[SimilarCodeSelectionInput<'_>],
+) -> Result<Vec<String>, SimilarCodeError> {
     let occurrence_identities = functions
         .iter()
         .map(|function| occurrence_identity_for_location(function.location))
@@ -557,18 +707,16 @@ pub fn select_similar_code_corpus(
             });
         }
     }
+    Ok(occurrence_identities)
+}
 
-    let memory_function_limit = limits
-        .max_vector_bytes
-        .checked_div(vector_bytes(limits.dimensions))
-        .unwrap_or(0);
-    let function_limit = functions.len().min(limits.max_functions);
-    let memory_considered = function_limit.min(memory_function_limit);
-    let considered = functions_within_comparison_budget(memory_considered, limits.max_comparisons);
-
+fn selected_corpus_order(
+    functions: &[SimilarCodeSelectionInput<'_>],
+    occurrence_identities: &[String],
+    considered: usize,
+) -> Vec<usize> {
     let selection_keys = functions.iter().map(selection_key).collect::<Vec<_>>();
-    let mut order = (0..functions.len()).collect::<Vec<_>>();
-    order.sort_by(|&left, &right| {
+    let compare_selection = |&left: &usize, &right: &usize| {
         selection_keys[left]
             .cmp(&selection_keys[right])
             .then_with(|| {
@@ -577,9 +725,19 @@ pub fn select_similar_code_corpus(
                     .cmp(&functions[right].source_sha256)
             })
             .then_with(|| occurrence_identities[left].cmp(&occurrence_identities[right]))
-    });
-    order.truncate(considered);
-    order.sort_by(|&left, &right| {
+    };
+    let mut scoped = (0..functions.len())
+        .filter(|&index| functions[index].in_scope)
+        .collect::<Vec<_>>();
+    let mut background = (0..functions.len())
+        .filter(|&index| !functions[index].in_scope)
+        .collect::<Vec<_>>();
+    scoped.sort_by(compare_selection);
+    background.sort_by(compare_selection);
+    scoped.truncate(considered);
+    background.truncate(considered.saturating_sub(scoped.len()));
+    scoped.extend(background);
+    scoped.sort_by(|&left, &right| {
         occurrence_identities[left]
             .cmp(&occurrence_identities[right])
             .then_with(|| {
@@ -588,33 +746,7 @@ pub fn select_similar_code_corpus(
                     .cmp(&functions[right].source_sha256)
             })
     });
-
-    let mut skips = FxHashMap::default();
-    record_skip(
-        &mut skips,
-        SimilarCodeSkipReason::FunctionLimit,
-        functions.len().saturating_sub(function_limit),
-    );
-    record_skip(
-        &mut skips,
-        SimilarCodeSkipReason::VectorMemoryLimit,
-        function_limit.saturating_sub(memory_considered),
-    );
-    record_skip(
-        &mut skips,
-        SimilarCodeSkipReason::ComparisonLimit,
-        pair_count(memory_considered).saturating_sub(pair_count(considered)),
-    );
-    let mut skipped = skips
-        .into_iter()
-        .map(|(reason, count)| SimilarCodeSkip { reason, count })
-        .collect::<Vec<_>>();
-    skipped.sort_by_key(|skip| skip.reason);
-
-    Ok(SimilarCodeCorpusSelection {
-        selected_indices: order,
-        skipped,
-    })
+    scoped
 }
 
 fn select_vectors(
@@ -628,6 +760,7 @@ fn select_vectors(
         .map(|vector| SimilarCodeSelectionInput {
             location: &vector.location,
             source_sha256: vector.source_sha256,
+            in_scope: true,
         })
         .collect::<Vec<_>>();
     let selection = select_similar_code_corpus(&functions, limits)?;
@@ -637,7 +770,8 @@ fn select_vectors(
     selection
         .selected_indices
         .into_iter()
-        .map(|index| {
+        .zip(selection.selected_in_scope)
+        .map(|(index, in_scope)| {
             let inverse_norm = validate_vector(
                 &vectors[index],
                 limits.dimensions,
@@ -646,6 +780,7 @@ fn select_vectors(
             Ok(SelectedVector {
                 index,
                 inverse_norm,
+                in_scope,
             })
         })
         .collect::<Result<Vec<_>, SimilarCodeError>>()
@@ -656,15 +791,18 @@ fn score_pairs(
     selected: &[SelectedVector],
     threshold: f64,
     limits: SimilarCodeLimits,
-    skips: &mut FxHashMap<SimilarCodeSkipReason, usize>,
 ) -> (Vec<ScoredPair>, usize) {
-    let possible_comparisons = pair_count(selected.len());
+    let scoped_functions = selected.iter().filter(|vector| vector.in_scope).count();
+    let possible_comparisons = scoped_pair_count(selected.len(), scoped_functions);
     debug_assert!(possible_comparisons <= limits.max_comparisons);
     let mut comparisons_performed = 0usize;
-    let mut retained = BinaryHeap::with_capacity(limits.max_candidates.min(possible_comparisons));
+    let mut ranked = Vec::with_capacity(possible_comparisons);
 
     for left in 0..selected.len() {
         for right in left + 1..selected.len() {
+            if !selected[left].in_scope && !selected[right].in_scope {
+                continue;
+            }
             comparisons_performed += 1;
             let similarity = cosine_similarity(
                 &vectors[selected[left].index],
@@ -675,20 +813,14 @@ fn score_pairs(
             if similarity < threshold {
                 continue;
             }
-            retain_pair(
-                &mut retained,
-                ScoredPair {
-                    left,
-                    right,
-                    similarity,
-                },
-                limits.max_candidates,
-                skips,
-            );
+            ranked.push(ScoredPair {
+                left,
+                right,
+                similarity,
+            });
         }
     }
 
-    let mut ranked = retained.into_vec();
     ranked.sort_by(|left, right| {
         right
             .similarity
@@ -699,39 +831,24 @@ fn score_pairs(
     (ranked, comparisons_performed)
 }
 
-fn retain_pair(
-    retained: &mut BinaryHeap<ScoredPair>,
-    pair: ScoredPair,
-    max_candidates: usize,
-    skips: &mut FxHashMap<SimilarCodeSkipReason, usize>,
-) {
-    if max_candidates == 0 {
-        record_skip(skips, SimilarCodeSkipReason::CandidateLimit, 1);
-        return;
-    }
-    if retained.len() < max_candidates {
-        retained.push(pair);
-        return;
-    }
-    if retained.peek().is_some_and(|worst| pair < *worst) {
-        retained.pop();
-        retained.push(pair);
-    }
-    record_skip(skips, SimilarCodeSkipReason::CandidateLimit, 1);
-}
-
 fn build_candidates(
     vectors: &[FunctionVector],
     selected: &[SelectedVector],
     ranked: Vec<ScoredPair>,
-    max_neighbors: usize,
+    limits: SimilarCodeLimits,
     extraction_semantics_version: u32,
     skips: &mut FxHashMap<SimilarCodeSkipReason, usize>,
 ) -> Vec<SimilarCodeCandidate> {
     let mut neighbors = vec![0usize; selected.len()];
-    let mut candidates = Vec::with_capacity(ranked.len());
+    let mut candidates = Vec::with_capacity(ranked.len().min(limits.max_candidates));
     for pair in ranked {
-        if neighbors[pair.left] >= max_neighbors || neighbors[pair.right] >= max_neighbors {
+        if candidates.len() >= limits.max_candidates {
+            record_skip(skips, SimilarCodeSkipReason::CandidateLimit, 1);
+            continue;
+        }
+        if neighbors[pair.left] >= limits.max_neighbors_per_function
+            || neighbors[pair.right] >= limits.max_neighbors_per_function
+        {
             record_skip(skips, SimilarCodeSkipReason::NeighborLimit, 1);
             continue;
         }
@@ -938,14 +1055,24 @@ const fn pair_count(functions: usize) -> usize {
     functions.saturating_mul(functions.saturating_sub(1)) / 2
 }
 
-fn functions_within_comparison_budget(max_functions: usize, max_comparisons: usize) -> usize {
+const fn scoped_pair_count(functions: usize, scoped_functions: usize) -> usize {
+    pair_count(functions).saturating_sub(pair_count(functions.saturating_sub(scoped_functions)))
+}
+
+fn functions_within_scoped_comparison_budget(
+    max_functions: usize,
+    scoped_functions: usize,
+    max_comparisons: usize,
+) -> usize {
+    if scoped_functions == 0 {
+        return 0;
+    }
     let mut low = 0usize;
     let mut high = max_functions;
     while low < high {
         let middle = low + (high - low).div_ceil(2);
-        let middle_wide = u128::try_from(middle).unwrap_or(u128::MAX);
-        let comparisons = middle_wide.saturating_mul(middle_wide.saturating_sub(1)) / 2;
-        if comparisons <= u128::try_from(max_comparisons).unwrap_or(u128::MAX) {
+        let comparisons = scoped_pair_count(middle, scoped_functions.min(middle));
+        if comparisons <= max_comparisons {
             low = middle;
         } else {
             high = middle.saturating_sub(1);
@@ -1152,6 +1279,7 @@ mod tests {
             .map(|vector| SimilarCodeSelectionInput {
                 location: &vector.location,
                 source_sha256: vector.source_sha256,
+                in_scope: true,
             })
             .collect::<Vec<_>>();
         let corpus = select_similar_code_corpus(&inputs, bounded).unwrap();
@@ -1188,6 +1316,209 @@ mod tests {
         assert_eq!(selected, expected);
         assert_eq!(result.completion.skipped, corpus.skipped);
         assert_eq!(result, direct);
+    }
+
+    #[test]
+    fn scoped_functions_receive_priority_inside_the_comparison_budget() {
+        let vectors = (0..6)
+            .map(|index| vector(&format!("src/{index}.ts"), index, 1.0, 0.0))
+            .collect::<Vec<_>>();
+        let mut bounded = limits();
+        bounded.max_functions = vectors.len();
+        bounded.max_comparisons = 3;
+        let inputs = vectors
+            .iter()
+            .enumerate()
+            .map(|(index, vector)| SimilarCodeSelectionInput {
+                location: &vector.location,
+                source_sha256: vector.source_sha256,
+                in_scope: index == 5,
+            })
+            .collect::<Vec<_>>();
+
+        let selection = select_similar_code_corpus(&inputs, bounded).unwrap();
+
+        assert!(selection.selected_indices.contains(&5));
+        assert_eq!(selection.selected_indices.len(), 4);
+        assert_eq!(
+            selection
+                .selected_in_scope
+                .iter()
+                .filter(|&&value| value)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn empty_scope_does_not_admit_or_embed_background_functions() {
+        let vectors = (0..6)
+            .map(|index| vector(&format!("src/{index}.ts"), index, 1.0, 0.0))
+            .collect::<Vec<_>>();
+        let inputs = vectors
+            .iter()
+            .map(|vector| SimilarCodeSelectionInput {
+                location: &vector.location,
+                source_sha256: vector.source_sha256,
+                in_scope: false,
+            })
+            .collect::<Vec<_>>();
+
+        let mut bounded = limits();
+        bounded.max_functions = 1;
+        bounded.max_vector_bytes = vector_bytes(DIMENSIONS);
+        bounded.max_comparisons = 0;
+        let selection = select_similar_code_corpus(&inputs, bounded).unwrap();
+
+        assert!(selection.selected_indices.is_empty());
+        assert!(selection.selected_in_scope.is_empty());
+        assert!(selection.skipped.is_empty());
+    }
+
+    #[test]
+    fn scoped_evaluation_rejects_background_only_pairs() {
+        let vectors = vec![
+            vector("src/scoped.ts", 1, 1.0, 0.0),
+            vector("src/background-a.ts", 2, 1.0, 0.0),
+            vector("src/background-b.ts", 3, 1.0, 0.0),
+        ];
+        let selection = SimilarCodeCorpusSelection {
+            selected_indices: vec![0, 1, 2],
+            selected_in_scope: vec![true, false, false],
+            skipped: Vec::new(),
+        };
+
+        let result = evaluate_selected_similar_code(
+            &vectors,
+            &selection,
+            0.9,
+            limits(),
+            EXTRACTION_SEMANTICS_VERSION,
+        )
+        .unwrap();
+
+        assert_eq!(result.completion.comparisons_performed, 2);
+        assert_eq!(result.candidates.len(), 2);
+        assert!(result.candidates.iter().all(|candidate| {
+            candidate.left.file == "src/scoped.ts" || candidate.right.file == "src/scoped.ts"
+        }));
+    }
+
+    #[test]
+    fn preselected_evaluation_enforces_every_hard_corpus_limit() {
+        let vectors = vec![
+            vector("src/a.ts", 1, 1.0, 0.0),
+            vector("src/b.ts", 2, 1.0, 0.0),
+            vector("src/c.ts", 3, 1.0, 0.0),
+        ];
+        let selection = SimilarCodeCorpusSelection {
+            selected_indices: vec![0, 1, 2],
+            selected_in_scope: vec![true, true, true],
+            skipped: Vec::new(),
+        };
+
+        let mut bounded = limits();
+        bounded.max_functions = 2;
+        assert!(matches!(
+            evaluate_selected_similar_code(
+                &vectors,
+                &selection,
+                0.9,
+                bounded,
+                EXTRACTION_SEMANTICS_VERSION,
+            ),
+            Err(SimilarCodeError::SelectionLimitExceeded {
+                reason: SimilarCodeSkipReason::FunctionLimit,
+                ..
+            })
+        ));
+
+        bounded = limits();
+        bounded.max_vector_bytes = vector_bytes(DIMENSIONS) * 2;
+        assert!(matches!(
+            evaluate_selected_similar_code(
+                &vectors,
+                &selection,
+                0.9,
+                bounded,
+                EXTRACTION_SEMANTICS_VERSION,
+            ),
+            Err(SimilarCodeError::SelectionLimitExceeded {
+                reason: SimilarCodeSkipReason::VectorMemoryLimit,
+                ..
+            })
+        ));
+
+        bounded = limits();
+        bounded.max_comparisons = 2;
+        assert!(matches!(
+            evaluate_selected_similar_code(
+                &vectors,
+                &selection,
+                0.9,
+                bounded,
+                EXTRACTION_SEMANTICS_VERSION,
+            ),
+            Err(SimilarCodeError::SelectionLimitExceeded {
+                reason: SimilarCodeSkipReason::ComparisonLimit,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn preselected_evaluation_rejects_duplicate_physical_functions() {
+        let duplicate = vector("src/a.ts", 1, 1.0, 0.0);
+        let vectors = vec![duplicate.clone(), duplicate];
+        let selection = SimilarCodeCorpusSelection {
+            selected_indices: vec![0, 1],
+            selected_in_scope: vec![true, true],
+            skipped: Vec::new(),
+        };
+
+        assert!(matches!(
+            evaluate_selected_similar_code(
+                &vectors,
+                &selection,
+                0.9,
+                limits(),
+                EXTRACTION_SEMANTICS_VERSION,
+            ),
+            Err(SimilarCodeError::DuplicateFunctionIdentity { .. })
+        ));
+    }
+
+    #[test]
+    fn neighbor_filter_backfills_before_the_global_candidate_limit() {
+        let mut bounded = limits();
+        bounded.max_comparisons = 6;
+        bounded.max_candidates = 2;
+        bounded.max_neighbors_per_function = 1;
+
+        let result = evaluate_similar_code(
+            &[
+                vector("src/a.ts", 1, 1.0, 0.0),
+                vector("src/b.ts", 2, 1.0, 0.0),
+                vector("src/c.ts", 3, 1.0, 0.0),
+                vector("src/d.ts", 4, 1.0, 0.0),
+            ],
+            0.9,
+            bounded,
+            EXTRACTION_SEMANTICS_VERSION,
+        )
+        .unwrap();
+
+        assert_eq!(result.candidates.len(), 2);
+        assert!(result.completion.skipped.iter().any(|skip| {
+            skip.reason == SimilarCodeSkipReason::NeighborLimit && skip.count == 4
+        }));
+        assert!(
+            !result
+                .completion
+                .skipped
+                .iter()
+                .any(|skip| skip.reason == SimilarCodeSkipReason::CandidateLimit)
+        );
     }
 
     #[test]

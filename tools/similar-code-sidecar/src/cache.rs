@@ -7,9 +7,12 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::constants::{ARTIFACTS, MODEL_ID, MODEL_REVISION, PROTOCOL_VERSION};
+use crate::constants::{
+    ARTIFACTS, EMBEDDING_SEMANTICS_VERSION, MODEL_ID, MODEL_REVISION, PROTOCOL_VERSION,
+};
 
 const MANIFEST_FILE: &str = "manifest.json";
+const INSTALLED_MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug)]
 pub struct ModelPaths {
@@ -46,6 +49,7 @@ impl ModelPaths {
 pub struct InstalledManifest {
     pub schema_version: u32,
     pub protocol_version: u32,
+    pub embedding_semantics_version: u32,
     pub model_id: String,
     pub model_revision: String,
     pub artifacts: Vec<InstalledArtifact>,
@@ -137,8 +141,9 @@ pub fn inspect_cache(paths: &ModelPaths, verify_hashes: bool) -> CacheStatus {
 
 pub fn expected_manifest() -> InstalledManifest {
     InstalledManifest {
-        schema_version: 1,
+        schema_version: INSTALLED_MANIFEST_SCHEMA_VERSION,
         protocol_version: PROTOCOL_VERSION,
+        embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,
         model_id: MODEL_ID.to_string(),
         model_revision: MODEL_REVISION.to_string(),
         artifacts: ARTIFACTS
@@ -324,7 +329,12 @@ mod tests {
     #[test]
     fn expected_manifest_tracks_protocol_artifacts() {
         let manifest = expected_manifest();
+        assert_eq!(manifest.schema_version, INSTALLED_MANIFEST_SCHEMA_VERSION);
         assert_eq!(manifest.protocol_version, PROTOCOL_VERSION);
+        assert_eq!(
+            manifest.embedding_semantics_version,
+            EMBEDDING_SEMANTICS_VERSION
+        );
         assert_eq!(manifest.model_revision, MODEL_REVISION);
         assert_eq!(manifest.artifacts.len(), ARTIFACTS.len());
     }

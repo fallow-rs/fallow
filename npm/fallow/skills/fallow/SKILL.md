@@ -1,6 +1,6 @@
 ---
 name: fallow
-description: Codebase intelligence for TypeScript and JavaScript. Static analysis of code and styles reports changed-code risk, cleanup opportunities, duplication, circular dependencies, complexity hotspots, architecture boundaries, design-system drift, feature flags, and opt-in security candidates. Runtime coverage can merge production execution data for hot-path review, cold-path deletion confidence, and stale-flag evidence. Broad framework plugin coverage, zero configuration, sub-second static analysis. Use when asked to audit PR risk, find unused code or dependencies, detect duplicates, check styling consistency, inspect architecture boundaries, merge runtime coverage, auto-fix supported issues, or run fallow.
+description: Codebase intelligence for TypeScript and JavaScript. Static analysis reports changed-code risk, cleanup opportunities, duplication, circular dependencies, complexity hotspots, architecture boundaries, design-system drift, feature flags, and opt-in security candidates. Optional local similar-code discovery finds functions that may implement the same intent despite different syntax. Runtime coverage can merge production execution data. Use when asked to audit PR risk, find unused code or dependencies, compare semantically similar functions, detect duplicates, inspect architecture boundaries, merge runtime coverage, auto-fix supported issues, or run fallow.
 license: MIT
 ---
 
@@ -11,6 +11,7 @@ Codebase intelligence for TypeScript and JavaScript. The static layer analyzes c
 ## When to Use
 - Find cleanup opportunities: unused files, exports, types, members, dependencies, or stale flags.
 - Detect code duplication, circular dependencies, architecture boundary issues, and complexity hotspots.
+- Find functions that may implement the same intent despite different names, syntax, or control flow (`fallow similar-code`).
 - Check styling consistency, CSS dead surface, and design-token drift.
 - Audit changed code before a commit, PR, release, or refactor.
 - Set up CI quality gates, duplication thresholds, and regression baselines.
@@ -55,7 +56,56 @@ cargo install fallow-cli   # build from source
 11. **Never enable telemetry on the user's behalf**. Fallow's product telemetry is opt-in and off by default; only the user may run `fallow telemetry enable`. You MAY set `FALLOW_AGENT_SOURCE=<allowlisted-value>` (for example `claude_code`, `codex`, `cursor`, `windsurf`, `gemini`, `cline`) so that, IF the user has already enabled telemetry, your integration is correctly attributed. Setting `FALLOW_AGENT_SOURCE` never enables telemetry by itself and uploads no codebase content.
 12. **Use type-aware analysis only for Fallow-owned project questions**. Reach for `--type-aware` to prove exact symbol use, preserve TypeScript class contracts, guard class-member cleanup, find cross-file private type leaks, suggest targeted tests, or inspect public-signature coupling. Keep `tsc --noEmit` responsible for compiler correctness and Oxlint responsible for local typed lint rules. Treat partial or unavailable semantic results as retained findings, never as deletion proof. Unknown external consumers of a published library remain outside checker-visible evidence, so preserve declared public API unless every relevant consumer project is explicitly in scope.
 13. **Use `fallow impact statusline` only for a user-facing status surface**. It intentionally emits one plain-text, path-free line and ignores `--format`. It starts no analysis, never enables Impact, and compares only whole-project scans. Do not parse this line as JSON.
-14. **Treat similar-code output as discovery only**. Never describe its score as a probability, finding, proof of equivalent behavior, or safe-refactor decision. Ask the user to run `fallow similar-code setup --local` when the pinned model is missing. Agents must not authorize setup. Inspect a candidate before judging it, keep `candidate_worthy`, `behaviorally_equivalent`, and `refactor_safe` separate, and abstain when evidence is incomplete.
+14. **Treat similar-code output as discovery only**. Never describe its score as a probability, finding, proof of equivalent behavior, or safe-refactor decision. Follow the complete workflow below.
+
+## Semantic Similar-Code Workflow
+
+Similar-code is an opt-in, local semantic discovery workflow. It complements deterministic `fallow dupes`; it does not replace clone detection, tests, or human judgment.
+
+1. Check readiness with `fallow similar-code status --format json --quiet`. If the pinned model is missing, ask the user to run `fallow similar-code setup --local`. Agents must not authorize setup or run it on the user's behalf.
+2. Run discovery. Preserve its independent JSON envelope so review can reproduce the exact candidate set:
+
+   ```bash
+   fallow similar-code --file src/services/api.ts --format json --quiet > similar-code.json
+   ```
+
+   In Node, call `detectSimilarCode({ files: ["src/services/api.ts"] })`. Over MCP, call standalone `find_similar_code` with `paths: ["src/services/api.ts"]`. Do not use Code Mode for similar-code because its 30-second window cannot accommodate documented cold inference; the standalone MCP tools have a dedicated 15-minute timeout.
+3. Inspect a candidate before judging it. Hand off the original raw discovery document so inspect can select that exact candidate without rerunning global retrieval or ranking. The candidate's CLI action uses the same bounded snapshot:
+
+   ```bash
+   fallow similar-code inspect sc_example --candidates similar-code.json \
+     --format json --quiet
+   ```
+
+   Over MCP, call standalone `inspect_similar_code` with `candidate_id` and a typed `snapshot` containing the unchanged discovery `schema_version`, `generation`, selected `candidate`, `completion`, and `diagnostics`. Treat `generation.scope.paths` as discovery provenance, not as an argument list. Inspect re-extracts only the two snapshot endpoints, validates both current source hashes, and fails closed on stale source. Inspect source, callers, callees, tests, side effects, ownership, and missing evidence.
+4. Author a separate verdict document. Keep the three axes independent. `refactor_safe: true` requires `behaviorally_equivalent: true`, which requires `candidate_worthy: true`. Use `null` for an undecided axis, use `needs-human-review`, and abstain when evidence is incomplete.
+
+   ```json
+   {
+     "schema_version": "1",
+     "verdicts": [
+       {
+         "candidate_id": "sc_example",
+         "review_key": "scr_example",
+         "candidate_worthy": true,
+         "behaviorally_equivalent": false,
+         "refactor_safe": false,
+         "outcome": "related-but-distinct",
+         "rationale": "Both normalize input, but only one preserves empty values."
+       }
+     ]
+   }
+   ```
+
+5. Join raw candidates and verdicts without changing either input:
+
+   ```bash
+   fallow similar-code review --candidates similar-code.json --verdicts verdicts.json \
+     --require-verdict-for-each-candidate --format json --quiet
+   ```
+
+Only `completion.status: "complete"` makes an empty candidate list conclusive for the admitted scope. Candidates always remain advisory and unverified until the separate verdict flow supplies source-grounded judgment.
+
 ## Onboarding And Insight
 Offer setup only after a human-requested analysis shows findings and all signals match: `fallow config --path` exits 3, not CI, not a pipeline format, `fallow impact --format json --quiet` has `onboarding_declined: false`, and no offer happened this session. Ask after showing value. Choices: guard commits and PRs, baseline the existing backlog and clean by category, add AGENTS.md guidance, or keep as-is. On decline, run `fallow init --decline --quiet` and stay silent for this project. Mutate only after consent. For guards, inspect `fallow hooks status --format json --quiet`, then use `fallow hooks install --target agent` and `fallow hooks install --target git`; for large backlogs, pair the gate with `--save-baseline` / new-only guidance. Offer `fallow impact enable` as local-only value tracking, never as telemetry; also offer it once on already-configured projects when `fallow impact status --format json` has `enabled: false` and `explicit_decision: false`, and record a no with `fallow impact disable --quiet`. Surface value on clear events: if the agent gate blocked a commit or push and a later retry succeeded, mention what was contained; when `next_steps` carries id `impact-report`, run its command and relay the non-zero numbers to the user in one line. On request, summarize non-zero Impact counts. Ask about telemetry only after such a win, only if `fallow telemetry status --format json` has `explicit_decision: false`, and never run `fallow telemetry enable`.
 ## Task Cheat Sheet

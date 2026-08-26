@@ -429,6 +429,7 @@ test("release publication waits for the aggregate verification gate", () => {
   const context = indentedBlock(workflow, "release-context", 2);
   const build = indentedBlock(workflow, "build", 2);
   const validate = indentedBlock(workflow, "validate", 2);
+  const similarCodeConformance = indentedBlock(workflow, "similar-code-conformance", 2);
   const gate = indentedBlock(workflow, "release-verified", 2);
   const publishCrates = indentedBlock(workflow, "publish-crates", 2);
   const releaseAssets = indentedBlock(workflow, "release-assets", 2);
@@ -448,7 +449,20 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.doesNotMatch(workflow, /^\s+administration:/mu);
   assert.match(build, /needs: release-context/);
   assert.match(validate, /needs: release-context/);
-  assert.match(gate, /needs: \[build, validate\]/);
+  assert.match(similarCodeConformance, /needs: build/);
+  assert.match(similarCodeConformance, /permissions:\n\s+contents: read/);
+  assert.doesNotMatch(similarCodeConformance, /id-token: write|contents: write/);
+  assert.match(similarCodeConformance, /fallow-similar-code-linux-x64-gnu/);
+  assert.match(similarCodeConformance, /verify-binary\.mjs/);
+  assert.match(similarCodeConformance, /release_binary_max_bytes/);
+  assert.match(similarCodeConformance, /check-similar-code-sidecar-audit\.mjs/);
+  assert.match(similarCodeConformance, /cargo audit[\s\S]*--ignore RUSTSEC-2024-0436/u);
+  assert.match(
+    similarCodeConformance,
+    /cargo deny[\s\S]*tools\/similar-code-sidecar\/Cargo\.toml[\s\S]*check licenses/u,
+  );
+  assert.match(similarCodeConformance, /semantic-clone-candle-conformance\.mjs/);
+  assert.match(gate, /needs: \[build, validate, similar-code-conformance\]/);
   assert.match(gate, /permissions: \{\}/);
   assert.match(publishCrates, /needs: \[release-verified, release-assets\]/);
   assert.match(releaseAssets, /needs: \[release-verified, vscode-prep, vscode-host-smoke\]/);

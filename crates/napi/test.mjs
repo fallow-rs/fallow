@@ -1,9 +1,10 @@
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { strict as assert } from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 import {
   computeComplexity,
@@ -20,6 +21,24 @@ const require = createRequire(import.meta.url);
 const { typeAwareCommand } = require("./type-aware-command.js");
 
 assert.equal(typeof detectSimilarCode, "function");
+
+const napiRoot = dirname(fileURLToPath(import.meta.url));
+const napiCliRoot = dirname(require.resolve("@napi-rs/cli/package.json"));
+const typescriptRoot = dirname(
+  require.resolve("typescript/package.json", { paths: [napiCliRoot] }),
+);
+execFileSync(
+  process.execPath,
+  [
+    join(typescriptRoot, "bin", "tsc"),
+    "--project",
+    join(napiRoot, "tests", "types", "tsconfig.json"),
+  ],
+  {
+    stdio: "pipe",
+  },
+);
+console.log("  [PASS] similar-code declarations compile");
 
 function makeFixture() {
   const root = mkdtempSync(join(tmpdir(), "fallow-node-"));

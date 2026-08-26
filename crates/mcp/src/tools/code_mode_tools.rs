@@ -1,9 +1,8 @@
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CombinedParams,
-    ExplainParams, FeatureFlagsParams, FindDupesParams, FindSimilarCodeParams, HealthParams,
-    ImpactClosureParams, ImpactParams, InspectSimilarCodeParams, ListBoundariesParams,
-    ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams,
-    TraceExportParams, TraceFileParams,
+    ExplainParams, FeatureFlagsParams, FindDupesParams, HealthParams, ImpactClosureParams,
+    ImpactParams, ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams,
+    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 
 use fallow_api::{
@@ -21,10 +20,9 @@ use super::super::{
     audit::run_audit_api_value,
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
-    build_find_dupes_args, build_find_similar_code_args, build_get_blast_radius_args,
-    build_get_cleanup_candidates_args, build_get_hot_paths_args, build_get_importance_args,
-    build_health_args, build_impact_args, build_impact_closure_args,
-    build_inspect_similar_code_args, build_list_boundaries_args, build_project_info_args,
+    build_find_dupes_args, build_get_blast_radius_args, build_get_cleanup_candidates_args,
+    build_get_hot_paths_args, build_get_importance_args, build_health_args, build_impact_args,
+    build_impact_closure_args, build_list_boundaries_args, build_project_info_args,
     build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
     build_trace_export_args, build_trace_file_args,
     check_changed::run_check_changed_api_value,
@@ -46,8 +44,6 @@ pub(super) enum CodeModeTool {
     Combined,
     CheckChanged,
     SecurityCandidates,
-    FindSimilarCode,
-    InspectSimilarCode,
     FindDupes,
     ProjectInfo,
     TraceExport,
@@ -75,8 +71,10 @@ impl CodeModeTool {
             "combined" => Ok(Self::Combined),
             "check_changed" => Ok(Self::CheckChanged),
             "security_candidates" => Ok(Self::SecurityCandidates),
-            "find_similar_code" => Ok(Self::FindSimilarCode),
-            "inspect_similar_code" => Ok(Self::InspectSimilarCode),
+            "find_similar_code" | "inspect_similar_code" => Err(
+                "similar-code is not exposed through Code Mode's 30-second window; use the standalone MCP find_similar_code or inspect_similar_code tool, which has a dedicated 15-minute timeout"
+                    .to_string(),
+            ),
             "find_dupes" => Ok(Self::FindDupes),
             "project_info" => Ok(Self::ProjectInfo),
             "trace_export" => Ok(Self::TraceExport),
@@ -109,8 +107,6 @@ impl CodeModeTool {
             Self::Combined => "combined",
             Self::CheckChanged => "check_changed",
             Self::SecurityCandidates => "security_candidates",
-            Self::FindSimilarCode => "find_similar_code",
-            Self::InspectSimilarCode => "inspect_similar_code",
             Self::FindDupes => "find_dupes",
             Self::ProjectInfo => "project_info",
             Self::TraceExport => "trace_export",
@@ -150,8 +146,6 @@ pub(super) const CODE_MODE_ALIASES: &[(&str, &str)] = &[
     ("combined", "combined"),
     ("checkChanged", "check_changed"),
     ("securityCandidates", "security_candidates"),
-    ("findSimilarCode", "find_similar_code"),
-    ("inspectSimilarCode", "inspect_similar_code"),
     ("findDupes", "find_dupes"),
     ("projectInfo", "project_info"),
     ("traceExport", "trace_export"),
@@ -234,8 +228,6 @@ pub(super) fn run_api_tool(
         | CodeModeTool::FeatureFlags
         | CodeModeTool::ListBoundaries => run_report_api_tool(tool, params),
         CodeModeTool::SecurityCandidates
-        | CodeModeTool::FindSimilarCode
-        | CodeModeTool::InspectSimilarCode
         | CodeModeTool::ImpactClosure
         | CodeModeTool::Impact
         | CodeModeTool::CheckRuntimeCoverage
@@ -343,8 +335,6 @@ pub(super) fn build_tool_args(
         | CodeModeTool::Combined
         | CodeModeTool::CheckChanged
         | CodeModeTool::SecurityCandidates
-        | CodeModeTool::FindSimilarCode
-        | CodeModeTool::InspectSimilarCode
         | CodeModeTool::FindDupes
         | CodeModeTool::ProjectInfo => build_project_tool_args(tool, params),
         CodeModeTool::TraceExport
@@ -386,14 +376,6 @@ fn build_project_tool_args(
         CodeModeTool::SecurityCandidates => {
             let params: SecurityCandidatesParams = parse_params(params)?;
             build_security_candidates_args(&params)
-        }
-        CodeModeTool::FindSimilarCode => {
-            let params: FindSimilarCodeParams = parse_params(params)?;
-            build_find_similar_code_args(&params)
-        }
-        CodeModeTool::InspectSimilarCode => {
-            let params: InspectSimilarCodeParams = parse_params(params)?;
-            build_inspect_similar_code_args(&params)
         }
         CodeModeTool::FindDupes => {
             let params: FindDupesParams = parse_params(params)?;
