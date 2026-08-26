@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"size-limit"` array in `package.json` needs no config file. Thanks to
   [@robinvdvleuten](https://github.com/robinvdvleuten) for the contribution.
 
+### Deprecated
+
+- **`fallow setup-hooks`.** `fallow agent install` (every harness in one pass)
+  and `fallow hooks install --target agent` (the gate alone) cover it. The
+  command keeps working throughout fallow 3 and prints a one-line warning on
+  stderr; it is removed in the next major.
+
 ### Changed
 
 - **`fallow impact statusline` now says when the Impact store was written by a

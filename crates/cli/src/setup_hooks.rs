@@ -8,8 +8,9 @@
 //! the agent can read `_meta.docs` links and `actions`, fix the findings,
 //! and retry.
 //!
-//! This is the legacy *agent-hook* command. The clearer namespace is
-//! `fallow hooks install --target agent`. For the *git pre-commit* hook
+//! `fallow setup-hooks` itself is deprecated (removed in the next major);
+//! the engine stays because `fallow hooks install --target agent` and
+//! `fallow agent install` run through it. For the *git pre-commit* hook
 //! scaffolder, see `fallow hooks install --target git`. The two targets write
 //! to different surfaces: Git hooks write into `.git/hooks/` or `.husky/`, and
 //! agent hooks write into `.claude/` / `AGENTS.md`.

@@ -208,7 +208,7 @@ Automation and CI:
   ci-template    Print or vendor CI integration templates
   report         Re-render saved JSON as GitHub or CodeClimate output
   hooks          Install or remove fallow-managed Git and agent hooks
-  setup-hooks    Legacy agent-hook installer
+  setup-hooks    Deprecated: use `agent install` or `hooks install --target agent`
 
 Runtime coverage:
   coverage       Set up or analyze runtime coverage data
@@ -1758,16 +1758,13 @@ enum Command {
     /// `git commit` / `git push` on `fallow audit`, so the agent cleans
     /// findings before the command runs.
     ///
-    /// This is the legacy AGENT-level enforcement command. Prefer
-    /// `fallow hooks install --target agent` for new setup. It writes into
-    /// `.claude/settings.json` + `.claude/hooks/fallow-gate.sh` (and
-    /// optionally an `AGENTS.md` managed block for Codex). For a
-    /// shell-level Git pre-commit hook in `.git/hooks/`, see
-    /// `fallow hooks install --target git` instead. Both targets can be used
-    /// together: git hooks catch human commits, agent hooks catch agent
-    /// commits.
-    ///
-    /// See `/integrations/claude-hooks` in the docs for the full recipe.
+    /// Deprecated: use `fallow agent install` (one pass for every harness)
+    /// or `fallow hooks install --target agent` (the gate alone). This
+    /// command keeps working throughout fallow 3 and is removed in the next
+    /// major. It writes into `.claude/settings.json` +
+    /// `.claude/hooks/fallow-gate.sh` (and optionally an `AGENTS.md` managed
+    /// block for Codex). For a shell-level Git pre-commit hook in
+    /// `.git/hooks/`, see `fallow hooks install --target git` instead.
     SetupHooks {
         /// Target a specific agent surface (default: auto-detect).
         #[arg(long, value_enum)]
@@ -4416,6 +4413,9 @@ fn dispatch_setup_hooks_command(command: &Command, dispatch: &DispatchContext<'_
         unreachable!("setup-hooks dispatcher only handles setup-hooks commands");
     };
 
+    eprintln!(
+        "warning: `fallow setup-hooks` is deprecated and will be removed in the next major; use `fallow agent install` or `fallow hooks install --target agent`."
+    );
     setup_hooks::run_setup_hooks(&setup_hooks::SetupHooksOptions {
         root: dispatch.root,
         agent: *agent,
