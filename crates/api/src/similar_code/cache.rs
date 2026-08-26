@@ -563,6 +563,10 @@ fn sync_cache_directory(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the no-op platform implementation preserves the fallible Unix contract"
+)]
 fn sync_cache_directory(_path: &Path) -> Result<(), String> {
     Ok(())
 }
