@@ -375,11 +375,19 @@ fn ensure_secure_parent(location: &CacheLocation) -> Result<(), String> {
     Ok(())
 }
 
+struct CacheLock(File);
+
+impl Drop for CacheLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 #[expect(
     clippy::filetype_is_file,
     reason = "the advisory lock must be a regular file, never a symlink or special file"
 )]
-fn try_cache_lock(path: &Path) -> Result<Option<File>, String> {
+fn try_cache_lock(path: &Path) -> Result<Option<CacheLock>, String> {
     if let Ok(metadata) = std::fs::symlink_metadata(path)
         && !metadata.file_type().is_file()
     {
@@ -401,7 +409,7 @@ fn try_cache_lock(path: &Path) -> Result<Option<File>, String> {
             )
         })?;
     match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
+        Ok(()) => Ok(Some(CacheLock(file))),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
         Err(std::fs::TryLockError::Error(error)) => Err(format!(
             "failed to lock similar-code vector cache {}: {error}",
@@ -938,6 +946,18 @@ mod tests {
         assert_eq!(cache.load_state, CacheLoadState::Corrupt);
         assert_eq!(cache.save().durable_writes, 0);
         assert!(matches!(read_cache(&location.path), CacheRead::Hit(_)));
+    }
+
+    #[test]
+    fn save_releases_the_advisory_lock_before_returning() {
+        let fixture = Fixture::new();
+        let mut cache = fixture.load(false);
+        assert!(cache.insert(SimilarCodeSourceDigest::new([10; 32]), vector(0.5), false));
+        assert_eq!(cache.save().durable_writes, 1);
+
+        let location = fixture.location();
+        let reacquired = try_cache_lock(&location.lock_path).unwrap().unwrap();
+        drop(reacquired);
     }
 
     #[test]
