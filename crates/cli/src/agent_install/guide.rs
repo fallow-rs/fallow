@@ -9,7 +9,9 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use super::{Ctx, Harness, MARKER_PREFIX, MARKER_VERSION, Scope, Step, StepReport, StepStatus};
+use super::{
+    Ctx, Harness, MARKER_PREFIX, MARKER_VERSION, Reason, Scope, Step, StepReport, StepStatus,
+};
 use crate::setup_hooks::{
     AGENTS_BLOCK_START, AgentsOutcome, read_optional_text, remove_managed_block,
     strip_managed_block, upsert_managed_block,
@@ -36,7 +38,7 @@ pub fn install(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
     if ctx.user {
         steps.push(
             StepReport::new(None, Step::Guide, StepStatus::Skipped, Scope::Local)
-                .reason("user_scope_unsupported")
+                .reason(Reason::UserScopeUnsupported)
                 .detail("AGENTS.md and CLAUDE.md are project files; rerun without --user"),
         );
         return steps;
@@ -94,7 +96,7 @@ fn install_agents_guide(ctx: &Ctx) -> StepReport {
         Ok(AgentsOutcome::Unchanged) => base.with_status(StepStatus::Unchanged),
         Ok(AgentsOutcome::MalformedPreserved) => base
             .with_status(StepStatus::Refused)
-            .reason("managed_block_malformed")
+            .reason(Reason::ManagedBlockMalformed)
             .detail("fallow markers are out of order; repair AGENTS.md by hand"),
         Ok(AgentsOutcome::Removed | AgentsOutcome::NotPresent) => {
             base.with_status(StepStatus::Unchanged)
@@ -141,7 +143,7 @@ fn install_claude_import(ctx: &Ctx) -> StepReport {
     if existing.contains(&start) || existing.contains(&end) {
         return base
             .with_status(StepStatus::Refused)
-            .reason("managed_block_malformed")
+            .reason(Reason::ManagedBlockMalformed)
             .detail(
                 "fallow import markers exist without the import line; repair CLAUDE.md by hand",
             );
@@ -187,7 +189,7 @@ fn uninstall_agents_guide(ctx: &Ctx) -> StepReport {
         Ok(AgentsOutcome::Removed) => base.detail("fallow task map block removed; file kept"),
         Ok(AgentsOutcome::MalformedPreserved) => base
             .with_status(StepStatus::Refused)
-            .reason("managed_block_malformed")
+            .reason(Reason::ManagedBlockMalformed)
             .detail("fallow markers are out of order; repair AGENTS.md by hand"),
         Ok(_) => base.with_status(StepStatus::Unchanged),
         Err(error) => failed(ctx, &path, error),

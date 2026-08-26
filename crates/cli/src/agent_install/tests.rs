@@ -141,7 +141,7 @@ fn skill_refuses_foreign_skill_without_force() {
     let steps = skill::install(&ctx, &[Harness::Codex]);
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].status, StepStatus::Refused, "{steps:?}");
-    assert_eq!(steps[0].reason, Some("skill_name_taken"));
+    assert_eq!(steps[0].reason, Some(Reason::SkillNameTaken));
     assert_eq!(
         std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(),
         "---\nname: fallow\n---\nmaintainer skill\n"
@@ -287,10 +287,132 @@ fn mcp_json_merge_refuses_invalid_json_without_force() {
         mcp::FileOutcome::InvalidPreserved
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
+    assert!(matches!(
+        mcp::merge_json_server(&path, "mcpServers", Some(&entry), false, true).unwrap(),
+        mcp::FileOutcome::ChangedAfterBackup(_)
+    ));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".mcp.json.fallow-bak")).unwrap(),
+        "{ not json"
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(value["mcpServers"]["fallow"]["command"], "fallow-mcp");
+}
+
+#[test]
+fn mcp_foreign_entry_is_refused_unless_forced_and_never_removed_silently() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".mcp.json");
+    std::fs::write(
+        &path,
+        "{\n  \"mcpServers\": {\n    \"fallow\": { \"command\": \"./scripts/mine.sh\", \"env\": { \"FALLOW_BIN\": \"/opt/fallow\" } }\n  }\n}\n",
+    )
+    .unwrap();
+    let entry =
+        serde_json::json!({"type": "stdio", "command": "npx", "args": ["--no", "fallow-mcp"]});
+    assert_eq!(
+        mcp::merge_json_server(&path, "mcpServers", Some(&entry), false, false).unwrap(),
+        mcp::FileOutcome::Foreign
+    );
+    assert_eq!(
+        mcp::merge_json_server(&path, "mcpServers", None, false, false).unwrap(),
+        mcp::FileOutcome::Foreign
+    );
+    assert!(std::fs::read_to_string(&path).unwrap().contains("mine.sh"));
     assert_eq!(
         mcp::merge_json_server(&path, "mcpServers", Some(&entry), false, true).unwrap(),
         mcp::FileOutcome::Changed
     );
+    let registered = mcp::registered_command(&path, Harness::Claude).unwrap();
+    assert!(mcp::registered_is_managed(&registered));
+}
+
+#[test]
+fn mcp_uninstall_deletes_a_file_it_emptied_and_keeps_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let cursor = dir.path().join(".cursor").join("mcp.json");
+    let entry = serde_json::json!({"command": "fallow-mcp", "args": []});
+    assert_eq!(
+        mcp::merge_json_server(&cursor, "mcpServers", Some(&entry), false, false).unwrap(),
+        mcp::FileOutcome::Changed
+    );
+    assert_eq!(
+        mcp::merge_json_server(&cursor, "mcpServers", None, false, false).unwrap(),
+        mcp::FileOutcome::Deleted
+    );
+    assert!(!dir.path().join(".cursor").exists());
+    assert!(!mcp::mcp_json_has_servers(&cursor));
+}
+
+#[test]
+fn mcp_json_edit_keeps_the_existing_indent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".mcp.json");
+    std::fs::write(
+        &path,
+        "{\n    \"mcpServers\": {\n        \"other\": {\n            \"command\": \"x\"\n        }\n    }\n}",
+    )
+    .unwrap();
+    let entry = serde_json::json!({"command": "fallow-mcp", "args": []});
+    mcp::merge_json_server(&path, "mcpServers", Some(&entry), false, false).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("\n    \"mcpServers\": {\n        \"other\""),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n        \"fallow\": {\n            \"command\""),
+        "{text}"
+    );
+    assert!(!text.ends_with('\n'));
+}
+
+#[test]
+fn mcp_command_shapes_are_recognized_as_fallow_owned() {
+    let owned = [
+        ("npx", vec!["--no", "fallow-mcp"]),
+        ("fallow-mcp", vec![]),
+        ("/opt/homebrew/bin/fallow-mcp", vec![]),
+        ("C:\\tools\\fallow-mcp.exe", vec![]),
+        (
+            "/Users/me/.vscode/extensions/fallow/bin/fallow",
+            vec!["mcp-server"],
+        ),
+    ];
+    for (command, args) in owned {
+        let candidate = mcp::McpCommand {
+            command: command.to_string(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+            source: mcp::McpSource::Registered,
+        };
+        assert!(candidate.is_fallow_shape(), "{command} {args:?}");
+    }
+    let foreign = mcp::McpCommand {
+        command: "./scripts/my-wrapper.sh".to_string(),
+        args: Vec::new(),
+        source: mcp::McpSource::Registered,
+    };
+    assert!(!foreign.is_fallow_shape());
+}
+
+#[test]
+fn every_reason_is_documented_in_backwards_compatibility() {
+    let doc = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/backwards-compatibility.md"),
+    )
+    .unwrap();
+    for reason in Reason::ALL {
+        assert!(
+            doc.contains(&format!("`{}`", reason.as_str())),
+            "{} is missing from docs/backwards-compatibility.md",
+            reason.as_str()
+        );
+        assert_eq!(
+            serde_json::to_value(reason).unwrap(),
+            serde_json::Value::String(reason.as_str().to_string())
+        );
+    }
 }
 
 #[test]
@@ -383,7 +505,7 @@ fn approval_is_opt_in_and_lands_in_local_settings() {
         .find(|s| s.path.as_deref() == Some(".claude/settings.local.json"))
         .unwrap();
     assert_eq!(approval.status, StepStatus::Skipped);
-    assert_eq!(approval.reason, Some("approval_not_requested"));
+    assert_eq!(approval.reason, Some(Reason::ApprovalNotRequested));
     assert!(!dir.path().join(".claude/settings.local.json").exists());
 
     let with = Ctx {
@@ -402,6 +524,27 @@ fn approval_is_opt_in_and_lands_in_local_settings() {
     )
     .unwrap();
     assert_eq!(value["enabledMcpjsonServers"][0], "fallow");
+
+    std::fs::write(
+        dir.path().join(".claude/settings.local.json"),
+        "{\n  \"disabledMcpjsonServers\": [\"fallow\"]\n}\n",
+    )
+    .unwrap();
+    let steps = mcp::install(&with, &[Harness::Claude], Some(&command));
+    let approval = steps
+        .iter()
+        .find(|s| s.path.as_deref() == Some(".claude/settings.local.json"))
+        .unwrap();
+    assert_eq!(approval.status, StepStatus::Written, "{steps:?}");
+    let value: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join(".claude/settings.local.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(value["disabledMcpjsonServers"], serde_json::json!([]));
+    assert_eq!(
+        value["enabledMcpjsonServers"],
+        serde_json::json!(["fallow"])
+    );
 }
 
 #[test]
@@ -411,7 +554,7 @@ fn cursor_hooks_are_reported_unsupported() {
     let steps = hooks::install(&ctx, &[Harness::Cursor]);
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].status, StepStatus::Skipped);
-    assert_eq!(steps[0].reason, Some("unsupported_harness"));
+    assert_eq!(steps[0].reason, Some(Reason::UnsupportedHarness));
 }
 
 #[test]
@@ -430,13 +573,29 @@ fn display_path_uses_root_then_home_then_absolute() {
         display_path(root, None, Path::new("/elsewhere/x")),
         "/elsewhere/x"
     );
+    let nested_home = Path::new("/work/app/home");
+    assert_eq!(
+        display_path(
+            root,
+            Some(nested_home),
+            Path::new("/work/app/home/.codex/config.toml")
+        ),
+        "~/.codex/config.toml"
+    );
+    assert_eq!(
+        display_path(Path::new("C:\\work"), None, Path::new("D:\\other\\x.json")),
+        "D:/other/x.json"
+    );
 }
 
 #[test]
 fn human_report_groups_scopes_and_summarizes_refusals() {
     let report = Report {
+        kind: "agent-install",
+        schema_version: SCHEMA_VERSION,
+        fallow_version: env!("CARGO_PKG_VERSION"),
         root: "/work/app".to_string(),
-        mode: "install",
+        mode: Mode::Install,
         dry_run: true,
         harnesses: vec![Harness::Claude],
         detected: true,
@@ -451,7 +610,7 @@ fn human_report_groups_scopes_and_summarizes_refusals() {
                 StepStatus::Skipped,
                 Scope::Local,
             )
-            .reason("approval_not_requested")
+            .reason(Reason::ApprovalNotRequested)
             .detail("pass --approve to pre-approve the project MCP server for yourself")
             .with_path(".claude/settings.local.json"),
             StepReport::new(
@@ -460,7 +619,7 @@ fn human_report_groups_scopes_and_summarizes_refusals() {
                 StepStatus::Refused,
                 Scope::Shared,
             )
-            .reason("skill_name_taken")
+            .reason(Reason::SkillNameTaken)
             .with_path(".claude/skills/fallow"),
         ],
         next_actions: vec![NextAction {

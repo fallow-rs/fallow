@@ -30,10 +30,12 @@ pub use status::run_agent_status;
 pub const MARKER_VERSION: &str = "v1";
 /// Common prefix of every marker this command writes.
 pub const MARKER_PREFIX: &str = "fallow:agent-install";
+/// JSON envelope version of `agent install|status|uninstall`.
+pub const SCHEMA_VERSION: u32 = 1;
 
 /// A coding-agent harness fallow knows how to wire up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, clap::ValueEnum)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Harness {
     /// Claude Code: `.mcp.json`, `.claude/skills/`, `.claude/settings.json` gate, `CLAUDE.md` import.
     Claude,
@@ -78,7 +80,7 @@ pub enum HarnessArg {
 
 /// One installable piece. `--without` skips it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, clap::ValueEnum)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Step {
     /// `AGENTS.md` scaffold or task-map block, plus the `CLAUDE.md` import for Claude Code.
     Guide,
@@ -97,6 +99,88 @@ impl Step {
             Self::Skill => "skill",
             Self::Mcp => "mcp",
             Self::Hooks => "hooks",
+        }
+    }
+}
+
+/// Why a step was skipped or refused. The set is part of the JSON contract
+/// (`docs/backwards-compatibility.md`); add a variant there when adding one
+/// here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reason {
+    /// A skill named `fallow` exists at the target without a fallow marker.
+    SkillNameTaken,
+    /// The shipped skill was not available at build time (crates.io builds).
+    SkillNotEmbedded,
+    /// No `fallow-mcp` launcher could be resolved.
+    McpEntryUnavailable,
+    /// A `fallow` MCP entry exists that fallow did not write.
+    McpEntryForeign,
+    /// The only launcher is an absolute path on this machine, unfit for a shared file.
+    MachineLocalLauncher,
+    /// `--approve` was not passed.
+    ApprovalNotRequested,
+    /// `.claude/settings.local.json` is tracked by git.
+    SettingsLocalTracked,
+    /// The harness stores this under a file fallow does not edit; a command is printed instead.
+    ManualCommand,
+    /// The harness has no supported surface for this step.
+    UnsupportedHarness,
+    /// The step is project-only and `--user` was passed.
+    UserScopeUnsupported,
+    /// An existing hook script has no fallow marker.
+    UserEdited,
+    /// The file is not valid JSON.
+    InvalidJson,
+    /// The file is not valid TOML.
+    InvalidToml,
+    /// The JSON document's top level is not an object.
+    NotAnObject,
+    /// Fallow markers exist but not as a start-then-end pair.
+    ManagedBlockMalformed,
+}
+
+impl Reason {
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "read by the documentation drift test")
+    )]
+    pub const ALL: [Self; 15] = [
+        Self::SkillNameTaken,
+        Self::SkillNotEmbedded,
+        Self::McpEntryUnavailable,
+        Self::McpEntryForeign,
+        Self::MachineLocalLauncher,
+        Self::ApprovalNotRequested,
+        Self::SettingsLocalTracked,
+        Self::ManualCommand,
+        Self::UnsupportedHarness,
+        Self::UserScopeUnsupported,
+        Self::UserEdited,
+        Self::InvalidJson,
+        Self::InvalidToml,
+        Self::NotAnObject,
+        Self::ManagedBlockMalformed,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SkillNameTaken => "skill_name_taken",
+            Self::SkillNotEmbedded => "skill_not_embedded",
+            Self::McpEntryUnavailable => "mcp_entry_unavailable",
+            Self::McpEntryForeign => "mcp_entry_foreign",
+            Self::MachineLocalLauncher => "machine_local_launcher",
+            Self::ApprovalNotRequested => "approval_not_requested",
+            Self::SettingsLocalTracked => "settings_local_tracked",
+            Self::ManualCommand => "manual_command",
+            Self::UnsupportedHarness => "unsupported_harness",
+            Self::UserScopeUnsupported => "user_scope_unsupported",
+            Self::UserEdited => "user_edited",
+            Self::InvalidJson => "invalid_json",
+            Self::InvalidToml => "invalid_toml",
+            Self::NotAnObject => "not_an_object",
+            Self::ManagedBlockMalformed => "managed_block_malformed",
         }
     }
 }
@@ -122,7 +206,7 @@ pub enum StepStatus {
 /// Whether a path is normally committed with the project or stays with the
 /// person who ran the command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Scope {
     Shared,
     Local,
@@ -139,7 +223,7 @@ pub struct StepReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<&'static str>,
+    pub reason: Option<Reason>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
@@ -162,7 +246,7 @@ impl StepReport {
         self
     }
 
-    pub fn reason(mut self, reason: &'static str) -> Self {
+    pub fn reason(mut self, reason: Reason) -> Self {
         self.reason = Some(reason);
         self
     }
@@ -196,15 +280,20 @@ pub struct NextAction {
 /// Render a path relative to the project root, as `~/...` under the home
 /// directory, and absolute only when it is under neither.
 pub fn display_path(root: &Path, home: Option<&Path>, path: &Path) -> String {
-    if let Ok(rel) = path.strip_prefix(root) {
-        return rel.display().to_string().replace('\\', "/");
+    let root_rel = path.strip_prefix(root).ok();
+    let home_rel = home.and_then(|home| path.strip_prefix(home).ok());
+    let root_len = root.as_os_str().len();
+    let home_len = home.map_or(0, |home| home.as_os_str().len());
+    match (root_rel, home_rel) {
+        (Some(rel), Some(_)) if root_len >= home_len => slashes(rel),
+        (Some(rel), None) => slashes(rel),
+        (_, Some(rel)) => format!("~/{}", slashes(rel)),
+        (None, None) => slashes(path),
     }
-    if let Some(home) = home
-        && let Ok(rel) = path.strip_prefix(home)
-    {
-        return format!("~/{}", rel.display().to_string().replace('\\', "/"));
-    }
-    path.display().to_string()
+}
+
+fn slashes(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
 }
 
 /// Options for `fallow agent install`.
@@ -267,8 +356,11 @@ impl Ctx {
 
 #[derive(Serialize)]
 struct Report {
+    kind: &'static str,
+    schema_version: u32,
+    fallow_version: &'static str,
     root: String,
-    mode: &'static str,
+    mode: Mode,
     dry_run: bool,
     harnesses: Vec<Harness>,
     /// True when the harness list came from detection rather than `--harness`.
@@ -357,8 +449,11 @@ pub fn run_agent_install(
 
     let next_actions = next_actions(&ctx, &harnesses, detected, mcp_command.as_ref(), &steps);
     let report = Report {
-        root: root.display().to_string(),
-        mode: "install",
+        kind: "agent-install",
+        schema_version: SCHEMA_VERSION,
+        fallow_version: env!("CARGO_PKG_VERSION"),
+        root: slashes(&root),
+        mode: Mode::Install,
         dry_run: opts.dry_run,
         harnesses,
         detected,
@@ -396,8 +491,11 @@ pub fn run_agent_uninstall(
     steps.extend(guide::uninstall(&ctx, &harnesses));
 
     let report = Report {
-        root: root.display().to_string(),
-        mode: "uninstall",
+        kind: "agent-uninstall",
+        schema_version: SCHEMA_VERSION,
+        fallow_version: env!("CARGO_PKG_VERSION"),
+        root: slashes(&root),
+        mode: Mode::Uninstall,
         dry_run: opts.dry_run,
         harnesses,
         detected,
@@ -426,7 +524,7 @@ fn next_actions(
         });
     }
     if let Some(command) = mcp_command {
-        if harnesses.contains(&Harness::Codex) {
+        if harnesses.contains(&Harness::Codex) && !ctx.user {
             next.push(NextAction {
                 id: "codex-mcp-add",
                 command: format!("codex mcp add fallow -- {}", command.shell_words()),
@@ -447,7 +545,7 @@ fn next_actions(
         let approval_skipped = steps.iter().any(|step| {
             step.harness == Some(Harness::Claude)
                 && step.step == Step::Mcp
-                && step.reason == Some("approval_not_requested")
+                && step.reason == Some(Reason::ApprovalNotRequested)
         });
         if approval_skipped {
             next.push(NextAction {
@@ -525,7 +623,7 @@ fn render_human(report: &Report) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let suffix = if report.dry_run { " (dry run)" } else { "" };
-    let _ = writeln!(out, "fallow agent {}{suffix}", report.mode);
+    let _ = writeln!(out, "fallow agent {}{suffix}", report.mode.as_str());
     let _ = writeln!(out, "  root: {}", report.root);
     let names: Vec<&str> = report.harnesses.iter().map(|h| h.as_str()).collect();
     let origin = if report.detected {
@@ -542,7 +640,7 @@ fn render_human(report: &Report) -> String {
         let _ = writeln!(out, "  harnesses: {} ({origin})", names.join(", "));
     }
 
-    let shared_header = if report.mode == "install" {
+    let shared_header = if report.mode == Mode::Install {
         "Shared with your team (commit these):"
     } else {
         "Shared with your team:"
@@ -596,7 +694,7 @@ fn render_human(report: &Report) -> String {
             "{}; every other step still ran. Exit code 2.",
             parts.join(", ")
         );
-    } else if report.mode == "uninstall"
+    } else if report.mode == Mode::Uninstall
         && report
             .steps
             .iter()
@@ -635,7 +733,7 @@ fn render_step(step: &StepReport, dry_run: bool) -> String {
     let path = step.path.as_deref().unwrap_or("-");
     let mut note = String::new();
     if let Some(reason) = step.reason {
-        note.push_str(reason);
+        note.push_str(reason.as_str());
     }
     if let Some(detail) = &step.detail {
         if !note.is_empty() {

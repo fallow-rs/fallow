@@ -1,15 +1,24 @@
 //! MCP step: register `fallow-mcp` with each harness.
 //!
-//! The command written is probed first so a config that cannot start is
-//! never written: the project-pinned npm launcher, then `fallow-mcp` on
-//! `PATH`, then the running binary when it is the multicall build.
+//! The launcher is resolved before anything is written: the project's own
+//! `node_modules/.bin/fallow-mcp`, then `fallow-mcp` on `PATH`, then the
+//! running binary when it answers `mcp-server --version` (the npm multicall
+//! build). Only the last one is executed as a probe; the first two are
+//! resolved on disk. A launcher that would only work on this machine is never
+//! written into a file the team commits.
+//!
+//! JSON cannot carry a marker comment, so ownership of the `fallow` entry is
+//! recognized by shape: an entry whose command and args match one of the
+//! launchers fallow writes, with no extra keys, is fallow-managed. Anything
+//! else is foreign and is neither replaced nor removed without `--force`.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use super::{Ctx, Harness, Mode, Scope, Step, StepReport, StepStatus};
+use super::{Ctx, Harness, Mode, Reason, Scope, Step, StepReport, StepStatus};
 use crate::setup_hooks::read_optional_text;
 
 const SERVER_KEY: &str = "fallow";
@@ -17,6 +26,8 @@ const CLAUDE_PROJECT_FILE: &str = ".mcp.json";
 const CLAUDE_LOCAL_SETTINGS: &str = ".claude/settings.local.json";
 const CURSOR_FILE: &str = ".cursor/mcp.json";
 const CODEX_FILE: &str = ".codex/config.toml";
+const BACKUP_SUFFIX: &str = ".fallow-bak";
+const SELF_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How the MCP server should be started.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -29,21 +40,29 @@ pub struct McpCommand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum McpSource {
-    /// `npx --no fallow-mcp` against the project's own `node_modules/fallow`.
+    /// `npx --no fallow-mcp` against the project's own `node_modules/.bin`.
     NodeModules,
     /// A `fallow-mcp` executable found on `PATH`.
     Path,
     /// The running binary answers `mcp-server --version` (npm multicall build).
     SelfBinary,
+    /// Read back from a config file; provenance unknown.
+    Registered,
 }
 
 impl McpCommand {
+    /// Shell-quoted rendering for next actions. Words with whitespace or
+    /// shell-significant characters are double-quoted with `"` and `\`
+    /// escaped.
     pub fn shell_words(&self) -> String {
         std::iter::once(self.command.as_str())
             .chain(self.args.iter().map(String::as_str))
             .map(|word| {
-                if word.chars().any(char::is_whitespace) {
-                    format!("\"{word}\"")
+                let needs_quotes = word
+                    .chars()
+                    .any(|c| c.is_whitespace() || matches!(c, '"' | '\\' | '$' | '`' | '\''));
+                if needs_quotes {
+                    format!("\"{}\"", word.replace('\\', "\\\\").replace('"', "\\\""))
                 } else {
                     word.to_string()
                 }
@@ -51,17 +70,44 @@ impl McpCommand {
             .collect::<Vec<_>>()
             .join(" ")
     }
+
+    /// True when the entry has one of the shapes fallow itself writes.
+    pub fn is_fallow_shape(&self) -> bool {
+        let base = self
+            .command
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let base = base
+            .strip_suffix(".exe")
+            .or_else(|| base.strip_suffix(".cmd"))
+            .unwrap_or(&base);
+        match (self.command.as_str(), self.args.as_slice()) {
+            ("npx", [no, launcher]) => no == "--no" && launcher == "fallow-mcp",
+            (_, []) => base == "fallow-mcp",
+            (_, [sub]) => sub == "mcp-server" && base == "fallow",
+            _ => false,
+        }
+    }
 }
 
 pub fn resolve_command(root: &Path) -> Option<McpCommand> {
     resolve_command_with(
-        root.join("node_modules")
-            .join("fallow")
-            .join("package.json")
-            .is_file(),
+        node_modules_launcher_present(root),
         || find_on_path("fallow-mcp"),
         self_supports_mcp_server,
     )
+}
+
+fn node_modules_launcher_present(root: &Path) -> bool {
+    let bin = root.join("node_modules").join(".bin");
+    let candidates: &[&str] = if cfg!(windows) {
+        &["fallow-mcp.cmd", "fallow-mcp"]
+    } else {
+        &["fallow-mcp"]
+    };
+    candidates.iter().any(|name| bin.join(name).is_file())
 }
 
 pub fn resolve_command_with(
@@ -76,9 +122,17 @@ pub fn resolve_command_with(
             source: McpSource::NodeModules,
         });
     }
-    if path_lookup().is_some() {
+    if let Some(found) = path_lookup() {
+        let command = if cfg!(windows) {
+            found.file_name().map_or_else(
+                || "fallow-mcp".to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            )
+        } else {
+            "fallow-mcp".to_string()
+        };
         return Some(McpCommand {
-            command: "fallow-mcp".to_string(),
+            command,
             args: Vec::new(),
             source: McpSource::Path,
         });
@@ -105,14 +159,64 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
     })
 }
 
+/// Probe the running binary for the multicall `mcp-server` entry. Bounded by
+/// [`SELF_PROBE_TIMEOUT`] so a misbehaving build cannot hang the install;
+/// `crates/multicall/tests/server_dispatch.rs` pins that `--version` returns
+/// before the stdio handshake.
 fn self_supports_mcp_server() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let exe = dunce::canonicalize(&exe).unwrap_or(exe);
-    let output = Command::new(&exe)
+    let mut child = Command::new(&exe)
         .args(["mcp-server", "--version"])
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    output.status.success().then_some(exe)
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success().then_some(exe),
+            Ok(None) if started.elapsed() < SELF_PROBE_TIMEOUT => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Ok(None) | Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
+/// A machine-local launcher (absolute path to this binary) must not land in
+/// a file the team commits. When the binary's directory is on `PATH` the bare
+/// file name works for everyone on this machine; otherwise the step is
+/// skipped.
+fn shared_safe(command: &McpCommand) -> Result<McpCommand, StepReport> {
+    if command.source != McpSource::SelfBinary {
+        return Ok(command.clone());
+    }
+    let exe = Path::new(&command.command);
+    let dir_on_path = exe.parent().is_some_and(|dir| {
+        std::env::var_os("PATH").is_some_and(|path| {
+            std::env::split_paths(&path)
+                .any(|entry| dunce::canonicalize(&entry).ok().as_deref() == Some(dir))
+        })
+    });
+    if dir_on_path && let Some(name) = exe.file_name() {
+        return Ok(McpCommand {
+            command: name.to_string_lossy().into_owned(),
+            args: command.args.clone(),
+            source: McpSource::SelfBinary,
+        });
+    }
+    Err(StepReport::new(None, Step::Mcp, StepStatus::Skipped, Scope::Shared)
+        .reason(Reason::MachineLocalLauncher)
+        .detail(format!(
+            "the only launcher is {}, which would not work for teammates; install fallow through npm (npm i -D fallow) or put fallow-mcp on PATH",
+            command.command
+        )))
 }
 
 pub fn install(ctx: &Ctx, harnesses: &[Harness], command: Option<&McpCommand>) -> Vec<StepReport> {
@@ -129,96 +233,109 @@ pub fn uninstall(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
         .collect()
 }
 
+fn target_file(ctx: &Ctx, harness: Harness) -> Result<PathBuf, String> {
+    match harness {
+        Harness::Claude => Ok(ctx.root.join(CLAUDE_PROJECT_FILE)),
+        Harness::Cursor => Ok(ctx.scope_base()?.join(CURSOR_FILE)),
+        Harness::Codex => {
+            if ctx.user
+                && let Some(codex_home) = std::env::var_os("CODEX_HOME")
+            {
+                return Ok(PathBuf::from(codex_home).join("config.toml"));
+            }
+            Ok(ctx.scope_base()?.join(CODEX_FILE))
+        }
+    }
+}
+
 fn install_for(ctx: &Ctx, harness: Harness, command: Option<&McpCommand>) -> Vec<StepReport> {
+    let path = match target_file(ctx, harness) {
+        Ok(path) => path,
+        Err(message) => {
+            return vec![StepReport::failed(
+                Some(harness),
+                Step::Mcp,
+                Scope::Local,
+                message,
+            )];
+        }
+    };
     let Some(command) = command else {
-        let relative = match harness {
-            Harness::Claude => CLAUDE_PROJECT_FILE,
-            Harness::Codex => CODEX_FILE,
-            Harness::Cursor => CURSOR_FILE,
-        };
-        let base = if harness == Harness::Claude {
-            ctx.root.clone()
-        } else {
-            ctx.scope_base()
-                .map_or_else(|_| ctx.root.clone(), Path::to_path_buf)
-        };
         return vec![
             StepReport::new(Some(harness), Step::Mcp, StepStatus::Skipped, ctx.scope())
-                .path(ctx, &base.join(relative))
-                .reason("mcp_entry_unavailable")
+                .path(ctx, &path)
+                .reason(Reason::McpEntryUnavailable)
                 .detail(
                     "no fallow-mcp launcher found: install fallow through npm or put fallow-mcp on PATH",
                 ),
         ];
     };
+    if harness == Harness::Claude && ctx.user {
+        return vec![manual_claude_user_step(ctx, Mode::Install).detail(format!(
+            "fallow does not edit ~/.claude.json; run: claude mcp add --scope user {SERVER_KEY} -- {}",
+            command.shell_words()
+        ))];
+    }
+    let command = if ctx.scope() == Scope::Shared {
+        match shared_safe(command) {
+            Ok(command) => command,
+            Err(skipped) => {
+                let mut skipped = skipped.path(ctx, &path);
+                skipped.harness = Some(harness);
+                return vec![skipped];
+            }
+        }
+    } else {
+        command.clone()
+    };
     match harness {
-        Harness::Claude => install_claude(ctx, command),
-        Harness::Codex => vec![install_codex(ctx, command)],
-        Harness::Cursor => vec![install_cursor(ctx, command)],
+        Harness::Claude => {
+            let entry = serde_json::json!({
+                "type": "stdio",
+                "command": command.command,
+                "args": command.args,
+            });
+            vec![
+                json_step(ctx, harness, &path, Scope::Shared, Some(&entry)),
+                approval_step(ctx, Mode::Install),
+            ]
+        }
+        Harness::Cursor => {
+            let entry = serde_json::json!({
+                "command": command.command,
+                "args": command.args,
+            });
+            vec![json_step(ctx, harness, &path, ctx.scope(), Some(&entry))]
+        }
+        Harness::Codex => vec![codex_step(ctx, &path, Some(&command))],
     }
 }
 
 fn uninstall_for(ctx: &Ctx, harness: Harness) -> Vec<StepReport> {
+    let path = match target_file(ctx, harness) {
+        Ok(path) => path,
+        Err(message) => {
+            return vec![StepReport::failed(
+                Some(harness),
+                Step::Mcp,
+                Scope::Local,
+                message,
+            )];
+        }
+    };
     match harness {
         Harness::Claude => {
             if ctx.user {
                 return vec![manual_claude_user_step(ctx, Mode::Uninstall)];
             }
-            let mut steps = vec![json_step(
-                ctx,
-                harness,
-                &ctx.root.join(CLAUDE_PROJECT_FILE),
-                Scope::Shared,
-                None,
-            )];
-            steps.push(approval_step(ctx, Mode::Uninstall));
-            steps
+            vec![
+                json_step(ctx, harness, &path, Scope::Shared, None),
+                approval_step(ctx, Mode::Uninstall),
+            ]
         }
-        Harness::Codex => vec![codex_step(ctx, None)],
-        Harness::Cursor => {
-            let base = match ctx.scope_base() {
-                Ok(base) => base.to_path_buf(),
-                Err(message) => {
-                    return vec![StepReport::failed(
-                        Some(harness),
-                        Step::Mcp,
-                        Scope::Local,
-                        message,
-                    )];
-                }
-            };
-            vec![json_step(
-                ctx,
-                harness,
-                &base.join(CURSOR_FILE),
-                ctx.scope(),
-                None,
-            )]
-        }
+        Harness::Cursor => vec![json_step(ctx, harness, &path, ctx.scope(), None)],
+        Harness::Codex => vec![codex_step(ctx, &path, None)],
     }
-}
-
-fn install_claude(ctx: &Ctx, command: &McpCommand) -> Vec<StepReport> {
-    if ctx.user {
-        return vec![manual_claude_user_step(ctx, Mode::Install).detail(format!(
-            "run: claude mcp add --scope user {SERVER_KEY} -- {}",
-            command.shell_words()
-        ))];
-    }
-    let entry = serde_json::json!({
-        "type": "stdio",
-        "command": command.command,
-        "args": command.args,
-    });
-    let mut steps = vec![json_step(
-        ctx,
-        Harness::Claude,
-        &ctx.root.join(CLAUDE_PROJECT_FILE),
-        Scope::Shared,
-        Some(&entry),
-    )];
-    steps.push(approval_step(ctx, Mode::Install));
-    steps
 }
 
 fn manual_claude_user_step(ctx: &Ctx, mode: Mode) -> StepReport {
@@ -232,35 +349,60 @@ fn manual_claude_user_step(ctx: &Ctx, mode: Mode) -> StepReport {
         StepStatus::Skipped,
         Scope::Local,
     )
-    .reason("manual_command")
+    .reason(Reason::ManualCommand)
     .detail(format!(
         "fallow does not edit ~/.claude.json; run `claude mcp {verb} --scope user {SERVER_KEY}`{}",
         if ctx.dry_run { " (dry run)" } else { "" }
     ))
 }
 
-fn install_cursor(ctx: &Ctx, command: &McpCommand) -> StepReport {
-    let base = match ctx.scope_base() {
-        Ok(base) => base.to_path_buf(),
-        Err(message) => {
-            return StepReport::failed(Some(Harness::Cursor), Step::Mcp, Scope::Local, message);
-        }
+fn outcome_report(
+    base: StepReport,
+    outcome: Result<FileOutcome, String>,
+    ctx: &Ctx,
+    path: &Path,
+    invalid: Reason,
+) -> StepReport {
+    let harness = base.harness;
+    let scope = base.scope;
+    let format_name = if invalid == Reason::InvalidToml {
+        "TOML"
+    } else {
+        "JSON"
     };
-    let entry = serde_json::json!({
-        "command": command.command,
-        "args": command.args,
-    });
-    json_step(
-        ctx,
-        Harness::Cursor,
-        &base.join(CURSOR_FILE),
-        ctx.scope(),
-        Some(&entry),
-    )
-}
-
-fn install_codex(ctx: &Ctx, command: &McpCommand) -> StepReport {
-    codex_step(ctx, Some(command))
+    match outcome {
+        Ok(FileOutcome::Changed) => base,
+        Ok(FileOutcome::ChangedAfterBackup(backup)) => base.detail(format!(
+            "previous contents were not parseable and were saved to {}",
+            super::display_path(&ctx.root, ctx.home.as_deref(), &backup)
+        )),
+        Ok(FileOutcome::Deleted) => base.detail("file removed (nothing else was left in it)"),
+        Ok(FileOutcome::Unchanged) => base.with_status(StepStatus::Unchanged),
+        Ok(FileOutcome::NotPresent) => base
+            .with_status(StepStatus::Unchanged)
+            .detail("not present"),
+        Ok(FileOutcome::Foreign) => {
+            let status = if base.status == StepStatus::Removed {
+                StepStatus::Skipped
+            } else {
+                StepStatus::Refused
+            };
+            base.with_status(status)
+                .reason(Reason::McpEntryForeign)
+                .detail("the fallow entry here was not written by fallow; pass --force to replace it")
+        }
+        Ok(FileOutcome::InvalidPreserved) => base
+            .with_status(StepStatus::Refused)
+            .reason(invalid)
+            .detail(format!(
+                "existing file is not valid {format_name}; fix it or pass --force to rewrite it (the old contents are saved next to it)"
+            )),
+        Ok(FileOutcome::NotAnObject) => base
+            .with_status(StepStatus::Refused)
+            .reason(Reason::NotAnObject)
+            .detail("top level of the file is not a JSON object; fix it or pass --force to rewrite it"),
+        Err(message) => StepReport::failed(harness, Step::Mcp, scope, message).path(ctx, path),
+    }
 }
 
 /// Merge or remove `mcpServers.fallow` in a JSON config file.
@@ -277,20 +419,8 @@ fn json_step(
         StepStatus::Removed
     };
     let base = StepReport::new(Some(harness), Step::Mcp, status, scope).path(ctx, path);
-    match merge_json_server(path, "mcpServers", entry, ctx.dry_run, ctx.force) {
-        Ok(FileOutcome::Changed) => base,
-        Ok(FileOutcome::Unchanged) => base.with_status(StepStatus::Unchanged),
-        Ok(FileOutcome::NotPresent) => base
-            .with_status(StepStatus::Unchanged)
-            .detail("not present"),
-        Ok(FileOutcome::InvalidPreserved) => base
-            .with_status(StepStatus::Refused)
-            .reason("invalid_json")
-            .detail("existing file is not valid JSON; fix it or pass --force to rewrite it"),
-        Err(message) => {
-            StepReport::failed(Some(harness), Step::Mcp, scope, message).path(ctx, path)
-        }
-    }
+    let outcome = merge_json_server(path, "mcpServers", entry, ctx.dry_run, ctx.force);
+    outcome_report(base, outcome, ctx, path, Reason::InvalidJson)
 }
 
 /// Opt-in pre-approval of the project-scoped server for this user.
@@ -306,86 +436,194 @@ fn approval_step(ctx: &Ctx, mode: Mode) -> StepReport {
     if mode == Mode::Install && !ctx.approve {
         return base
             .with_status(StepStatus::Skipped)
-            .reason("approval_not_requested")
+            .reason(Reason::ApprovalNotRequested)
             .detail("pass --approve to pre-approve the project MCP server for yourself");
     }
     if is_git_tracked(&ctx.root, CLAUDE_LOCAL_SETTINGS) {
         return base
             .with_status(StepStatus::Skipped)
-            .reason("settings_local_tracked")
+            .reason(Reason::SettingsLocalTracked)
             .detail("file is tracked by git, so an approval written there would be shared; untrack it first");
     }
-    let outcome = match mode {
-        Mode::Install => merge_enabled_server(&path, true, ctx.dry_run, ctx.force),
-        Mode::Uninstall => merge_enabled_server(&path, false, ctx.dry_run, ctx.force),
-    };
     let base = if mode == Mode::Uninstall {
         base.with_status(StepStatus::Removed)
     } else {
         base
     };
-    match outcome {
-        Ok(FileOutcome::Changed) => base.detail("enabledMcpjsonServers"),
-        Ok(FileOutcome::Unchanged) => base.with_status(StepStatus::Unchanged),
-        Ok(FileOutcome::NotPresent) => base
-            .with_status(StepStatus::Unchanged)
-            .detail("not present"),
-        Ok(FileOutcome::InvalidPreserved) => base
-            .with_status(StepStatus::Refused)
-            .reason("invalid_json")
-            .detail("existing file is not valid JSON; fix it or pass --force to rewrite it"),
+    match merge_enabled_server(&path, mode == Mode::Install, ctx.dry_run, ctx.force) {
+        Ok(ApprovalOutcome::File(FileOutcome::Changed)) => base.detail("enabledMcpjsonServers"),
+        Ok(ApprovalOutcome::ClearedRejection) => base.detail(
+            "enabledMcpjsonServers (also cleared an earlier rejection in disabledMcpjsonServers)",
+        ),
+        Ok(ApprovalOutcome::File(other)) => {
+            outcome_report(base, Ok(other), ctx, &path, Reason::InvalidJson)
+        }
         Err(message) => StepReport::failed(Some(Harness::Claude), Step::Mcp, Scope::Local, message)
             .path(ctx, &path),
     }
 }
 
-fn codex_step(ctx: &Ctx, command: Option<&McpCommand>) -> StepReport {
-    let base_dir = match ctx.scope_base() {
-        Ok(base) => base.to_path_buf(),
-        Err(message) => {
-            return StepReport::failed(Some(Harness::Codex), Step::Mcp, Scope::Local, message);
-        }
-    };
-    let path = base_dir.join(CODEX_FILE);
+fn codex_step(ctx: &Ctx, path: &Path, command: Option<&McpCommand>) -> StepReport {
     let status = if command.is_some() {
         StepStatus::Written
     } else {
         StepStatus::Removed
     };
     let base =
-        StepReport::new(Some(Harness::Codex), Step::Mcp, status, ctx.scope()).path(ctx, &path);
+        StepReport::new(Some(Harness::Codex), Step::Mcp, status, ctx.scope()).path(ctx, path);
     let base = if command.is_some() && !ctx.user {
         base.detail(
-            "applies once Codex trusts this project; the codex mcp add next step works immediately",
+            "applies once Codex trusts this project; the codex mcp add next action works immediately",
         )
     } else {
         base
     };
-    match merge_codex(&path, command, ctx.dry_run, ctx.force) {
-        Ok(FileOutcome::Changed) => base,
-        Ok(FileOutcome::Unchanged) => base.with_status(StepStatus::Unchanged),
-        Ok(FileOutcome::NotPresent) => base
-            .with_status(StepStatus::Unchanged)
-            .detail("not present"),
-        Ok(FileOutcome::InvalidPreserved) => base
-            .with_status(StepStatus::Refused)
-            .reason("invalid_toml")
-            .detail("existing file is not valid TOML; fix it or pass --force to rewrite it"),
-        Err(message) => StepReport::failed(Some(Harness::Codex), Step::Mcp, ctx.scope(), message)
-            .path(ctx, &path),
+    let outcome = merge_codex(path, command, ctx.dry_run, ctx.force);
+    outcome_report(base, outcome, ctx, path, Reason::InvalidToml)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileOutcome {
+    Changed,
+    /// The file was unparsable, `--force` was given, and the old bytes were
+    /// saved to the returned path before the rewrite.
+    ChangedAfterBackup(PathBuf),
+    /// The removal left nothing behind, so the file itself was deleted.
+    Deleted,
+    Unchanged,
+    NotPresent,
+    /// A `fallow` entry exists that fallow did not write.
+    Foreign,
+    InvalidPreserved,
+    NotAnObject,
+}
+
+enum ApprovalOutcome {
+    File(FileOutcome),
+    ClearedRejection,
+}
+
+/// Formatting of an existing JSON file, so an edit does not reflow the
+/// whole document: indentation of the first indented line and whether the
+/// file ended with a newline.
+struct JsonStyle {
+    indent: Vec<u8>,
+    trailing_newline: bool,
+}
+
+impl JsonStyle {
+    fn detect(text: &str) -> Self {
+        let indent = text
+            .lines()
+            .find_map(|line| {
+                let ws: String = line
+                    .chars()
+                    .take_while(|c| *c == ' ' || *c == '\t')
+                    .collect();
+                (!ws.is_empty() && ws.len() < line.len()).then_some(ws)
+            })
+            .unwrap_or_else(|| "  ".to_string());
+        Self {
+            indent: indent.into_bytes(),
+            trailing_newline: text.is_empty() || text.ends_with('\n'),
+        }
+    }
+
+    const fn default_style() -> Self {
+        Self {
+            indent: Vec::new(),
+            trailing_newline: true,
+        }
+    }
+
+    fn render(&self, value: &serde_json::Value) -> Result<String, String> {
+        let indent: &[u8] = if self.indent.is_empty() {
+            b"  "
+        } else {
+            &self.indent
+        };
+        let mut buf = Vec::new();
+        let formatter = serde_json::ser::PrettyFormatter::with_indent(indent);
+        let mut serializer = serde_json::Serializer::with_formatter(&mut buf, formatter);
+        serde::Serialize::serialize(value, &mut serializer)
+            .map_err(|e| format!("serialize JSON: {e}"))?;
+        let mut text = String::from_utf8(buf).map_err(|e| format!("serialize JSON: {e}"))?;
+        if self.trailing_newline {
+            text.push('\n');
+        }
+        Ok(text)
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FileOutcome {
-    Changed,
-    Unchanged,
-    NotPresent,
-    InvalidPreserved,
+fn parse_json_object(
+    path: &Path,
+    existing: &str,
+    force: bool,
+    removing: bool,
+    dry_run: bool,
+) -> Result<Result<(serde_json::Value, Option<PathBuf>), FileOutcome>, String> {
+    match serde_json::from_str::<serde_json::Value>(existing) {
+        Ok(value) if value.is_object() => Ok(Ok((value, None))),
+        Ok(_) if !force => Ok(Err(FileOutcome::NotAnObject)),
+        Err(_) if !force => Ok(Err(FileOutcome::InvalidPreserved)),
+        _ if removing => Ok(Err(FileOutcome::InvalidPreserved)),
+        _ => {
+            let backup = backup_path(path);
+            if !dry_run {
+                std::fs::write(&backup, existing)
+                    .map_err(|e| format!("write backup {}: {e}", backup.display()))?;
+            }
+            Ok(Ok((serde_json::json!({}), Some(backup))))
+        }
+    }
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
+    name.push(BACKUP_SUFFIX);
+    path.with_file_name(name)
+}
+
+fn entry_is_fallow_shape(entry: &serde_json::Value, allow_type: bool) -> bool {
+    let Some(object) = entry.as_object() else {
+        return false;
+    };
+    let known = ["command", "args", "type"];
+    if object.keys().any(|key| !known.contains(&key.as_str())) {
+        return false;
+    }
+    if let Some(kind) = object.get("type")
+        && (!allow_type || kind.as_str() != Some("stdio"))
+    {
+        return false;
+    }
+    let Some(command) = object.get("command").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    let args: Vec<String> = object
+        .get("args")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    McpCommand {
+        command: command.to_string(),
+        args,
+        source: McpSource::Registered,
+    }
+    .is_fallow_shape()
 }
 
 /// Set or remove `<section>.fallow` in a JSON object file, preserving every
-/// other key and the key order.
+/// other key, the key order, and the file's indentation.
 pub fn merge_json_server(
     path: &Path,
     section: &str,
@@ -399,36 +637,28 @@ pub fn merge_json_server(
             return Ok(FileOutcome::NotPresent);
         };
         let value = serde_json::json!({ section: { SERVER_KEY: entry } });
-        return write_json(path, &value, dry_run).map(|()| FileOutcome::Changed);
+        return write_json(path, &value, &JsonStyle::default_style(), dry_run)
+            .map(|()| FileOutcome::Changed);
     };
-    let mut value: serde_json::Value = match serde_json::from_str(&existing) {
-        Ok(value) => value,
-        Err(_) if force && entry.is_some() => serde_json::json!({}),
-        Err(_) if entry.is_none() => return Ok(FileOutcome::Unchanged),
-        Err(_) => return Ok(FileOutcome::InvalidPreserved),
-    };
+    let style = JsonStyle::detect(&existing);
+    let (mut value, backup) =
+        match parse_json_object(path, &existing, force, entry.is_none(), dry_run)? {
+            Ok(parsed) => parsed,
+            Err(outcome) => return Ok(outcome),
+        };
+    let before = style.render(&value)?;
     let Some(object) = value.as_object_mut() else {
-        if !force {
-            return Ok(FileOutcome::InvalidPreserved);
-        }
-        value = serde_json::json!({});
-        return merge_json_into(path, value, section, entry, dry_run);
+        return Ok(FileOutcome::NotAnObject);
     };
-    let _ = object;
-    merge_json_into(path, value, section, entry, dry_run)
-}
-
-fn merge_json_into(
-    path: &Path,
-    mut value: serde_json::Value,
-    section: &str,
-    entry: Option<&serde_json::Value>,
-    dry_run: bool,
-) -> Result<FileOutcome, String> {
-    let before = serialize_json(&value)?;
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| format!("{}: top level is not an object", path.display()))?;
+    let current = object
+        .get(section)
+        .and_then(|servers| servers.get(SERVER_KEY));
+    if let Some(current) = current
+        && !force
+        && !entry_is_fallow_shape(current, true)
+    {
+        return Ok(FileOutcome::Foreign);
+    }
     match entry {
         Some(entry) => {
             let servers = object
@@ -451,45 +681,57 @@ fn merge_json_into(
             if servers.remove(SERVER_KEY).is_none() {
                 return Ok(FileOutcome::Unchanged);
             }
+            let nothing_left = servers.is_empty() && object.len() == 1;
+            if nothing_left {
+                return delete_file(path, dry_run).map(|()| FileOutcome::Deleted);
+            }
         }
     }
-    let after = serialize_json(&value)?;
-    if after == before {
+    let after = style.render(&value)?;
+    if after == before && backup.is_none() {
         return Ok(FileOutcome::Unchanged);
     }
-    write_json(path, &value, dry_run).map(|()| FileOutcome::Changed)
+    write_json(path, &value, &style, dry_run)?;
+    Ok(backup.map_or(FileOutcome::Changed, FileOutcome::ChangedAfterBackup))
 }
 
-/// Add or remove `fallow` in `enabledMcpjsonServers` of a Claude settings file.
+/// Add or remove `fallow` in `enabledMcpjsonServers` of a Claude settings
+/// file. Enabling also clears an earlier rejection from
+/// `disabledMcpjsonServers`, which would otherwise outrank the approval.
 fn merge_enabled_server(
     path: &Path,
     enable: bool,
     dry_run: bool,
     force: bool,
-) -> Result<FileOutcome, String> {
+) -> Result<ApprovalOutcome, String> {
     let existing = read_optional_text(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let Some(existing) = existing else {
         if !enable {
-            return Ok(FileOutcome::NotPresent);
+            return Ok(ApprovalOutcome::File(FileOutcome::NotPresent));
         }
         let value = serde_json::json!({ "enabledMcpjsonServers": [SERVER_KEY] });
-        return write_json(path, &value, dry_run).map(|()| FileOutcome::Changed);
+        return write_json(path, &value, &JsonStyle::default_style(), dry_run)
+            .map(|()| ApprovalOutcome::File(FileOutcome::Changed));
     };
-    let mut value: serde_json::Value = match serde_json::from_str(&existing) {
-        Ok(value) => value,
-        Err(_) if force && enable => serde_json::json!({}),
-        Err(_) if !enable => return Ok(FileOutcome::Unchanged),
-        Err(_) => return Ok(FileOutcome::InvalidPreserved),
+    let style = JsonStyle::detect(&existing);
+    let (mut value, backup) = match parse_json_object(path, &existing, force, !enable, dry_run)? {
+        Ok(parsed) => parsed,
+        Err(outcome) => return Ok(ApprovalOutcome::File(outcome)),
     };
-    if !value.is_object() {
-        if !force {
-            return Ok(FileOutcome::InvalidPreserved);
-        }
-        value = serde_json::json!({});
-    }
-    let before = serialize_json(&value)?;
+    let before = style.render(&value)?;
     let Some(object) = value.as_object_mut() else {
-        return Ok(FileOutcome::InvalidPreserved);
+        return Ok(ApprovalOutcome::File(FileOutcome::NotAnObject));
+    };
+    let cleared_rejection = if enable
+        && let Some(disabled) = object
+            .get_mut("disabledMcpjsonServers")
+            .and_then(serde_json::Value::as_array_mut)
+    {
+        let len = disabled.len();
+        disabled.retain(|item| item.as_str() != Some(SERVER_KEY));
+        disabled.len() != len
+    } else {
+        false
     };
     let list = object
         .entry("enabledMcpjsonServers")
@@ -505,21 +747,38 @@ fn merge_enabled_server(
             _ => {}
         }
     }
-    let after = serialize_json(&value)?;
-    if after == before {
-        return Ok(FileOutcome::Unchanged);
+    if !enable {
+        let only_empty_list = object.len() == 1
+            && object
+                .get("enabledMcpjsonServers")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(Vec::is_empty);
+        if object.is_empty() || only_empty_list {
+            return delete_file(path, dry_run)
+                .map(|()| ApprovalOutcome::File(FileOutcome::Deleted));
+        }
     }
-    write_json(path, &value, dry_run).map(|()| FileOutcome::Changed)
+    let after = style.render(&value)?;
+    if after == before && backup.is_none() {
+        return Ok(ApprovalOutcome::File(FileOutcome::Unchanged));
+    }
+    write_json(path, &value, &style, dry_run)?;
+    if cleared_rejection {
+        return Ok(ApprovalOutcome::ClearedRejection);
+    }
+    Ok(ApprovalOutcome::File(backup.map_or(
+        FileOutcome::Changed,
+        FileOutcome::ChangedAfterBackup,
+    )))
 }
 
-fn serialize_json(value: &serde_json::Value) -> Result<String, String> {
-    serde_json::to_string_pretty(value)
-        .map(|text| format!("{text}\n"))
-        .map_err(|e| format!("serialize JSON: {e}"))
-}
-
-fn write_json(path: &Path, value: &serde_json::Value, dry_run: bool) -> Result<(), String> {
-    let text = serialize_json(value)?;
+fn write_json(
+    path: &Path,
+    value: &serde_json::Value,
+    style: &JsonStyle,
+    dry_run: bool,
+) -> Result<(), String> {
+    let text = style.render(value)?;
     if dry_run {
         return Ok(());
     }
@@ -527,6 +786,55 @@ fn write_json(path: &Path, value: &serde_json::Value, dry_run: bool) -> Result<(
         std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
     }
     std::fs::write(path, text).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
+/// Delete a file that an uninstall emptied, then the `.cursor` or `.codex`
+/// directory when nothing else is left in it (both are detection evidence).
+fn delete_file(path: &Path, dry_run: bool) -> Result<(), String> {
+    if dry_run {
+        return Ok(());
+    }
+    std::fs::remove_file(path).map_err(|e| format!("remove {}: {e}", path.display()))?;
+    if let Some(parent) = path.parent()
+        && parent
+            .file_name()
+            .is_some_and(|name| name == ".cursor" || name == ".codex")
+    {
+        let _ = std::fs::remove_dir(parent);
+    }
+    Ok(())
+}
+
+fn codex_entry_is_fallow_shape(entry: &toml_edit::Item) -> bool {
+    let Some(table) = entry.as_table_like() else {
+        return false;
+    };
+    if table
+        .iter()
+        .any(|(key, _)| key != "command" && key != "args")
+    {
+        return false;
+    }
+    let Some(command) = table.get("command").and_then(toml_edit::Item::as_str) else {
+        return false;
+    };
+    let args: Vec<String> = table
+        .get("args")
+        .and_then(toml_edit::Item::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(toml_edit::Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    McpCommand {
+        command: command.to_string(),
+        args,
+        source: McpSource::Registered,
+    }
+    .is_fallow_shape()
 }
 
 /// Set or remove `[mcp_servers.fallow]` in a Codex `config.toml`, keeping
@@ -538,20 +846,35 @@ pub fn merge_codex(
     force: bool,
 ) -> Result<FileOutcome, String> {
     let existing = read_optional_text(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let (mut doc, before) = match existing {
+    let (mut doc, before, backup) = match existing {
         None => {
             if command.is_none() {
                 return Ok(FileOutcome::NotPresent);
             }
-            (toml_edit::DocumentMut::new(), String::new())
+            (toml_edit::DocumentMut::new(), String::new(), None)
         }
         Some(text) => match text.parse::<toml_edit::DocumentMut>() {
-            Ok(doc) => (doc, text),
-            Err(_) if force && command.is_some() => (toml_edit::DocumentMut::new(), text),
-            Err(_) if command.is_none() => return Ok(FileOutcome::Unchanged),
+            Ok(doc) => (doc, text, None),
+            Err(_) if force && command.is_some() => {
+                let backup = backup_path(path);
+                if !dry_run {
+                    std::fs::write(&backup, &text)
+                        .map_err(|e| format!("write backup {}: {e}", backup.display()))?;
+                }
+                (toml_edit::DocumentMut::new(), text, Some(backup))
+            }
             Err(_) => return Ok(FileOutcome::InvalidPreserved),
         },
     };
+
+    if let Some(current) = doc
+        .get("mcp_servers")
+        .and_then(|servers| servers.get(SERVER_KEY))
+        && !force
+        && !codex_entry_is_fallow_shape(current)
+    {
+        return Ok(FileOutcome::Foreign);
+    }
 
     match command {
         Some(command) => {
@@ -587,21 +910,24 @@ pub fn merge_codex(
             if servers.is_empty() {
                 doc.remove("mcp_servers");
             }
+            if doc.to_string().trim().is_empty() {
+                return delete_file(path, dry_run).map(|()| FileOutcome::Deleted);
+            }
         }
     }
 
     let after = doc.to_string();
-    if after == before {
+    if after == before && backup.is_none() {
         return Ok(FileOutcome::Unchanged);
     }
     if dry_run {
-        return Ok(FileOutcome::Changed);
+        return Ok(backup.map_or(FileOutcome::Changed, FileOutcome::ChangedAfterBackup));
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
     }
     std::fs::write(path, after).map_err(|e| format!("write {}: {e}", path.display()))?;
-    Ok(FileOutcome::Changed)
+    Ok(backup.map_or(FileOutcome::Changed, FileOutcome::ChangedAfterBackup))
 }
 
 fn is_git_tracked(root: &Path, relative: &str) -> bool {
@@ -610,6 +936,22 @@ fn is_git_tracked(root: &Path, relative: &str) -> bool {
         .current_dir(root)
         .output()
         .is_ok_and(|output| output.status.success())
+}
+
+/// True when a `.mcp.json` declares at least one server, so an emptied file
+/// left by an uninstall does not count as harness evidence.
+pub fn mcp_json_has_servers(path: &Path) -> bool {
+    read_optional_text(path)
+        .ok()
+        .flatten()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| {
+            value
+                .get("mcpServers")
+                .and_then(serde_json::Value::as_object)
+                .map(|servers| !servers.is_empty())
+        })
+        .unwrap_or(false)
 }
 
 /// Read the registered command for a harness, if any, for `agent status`.
@@ -631,10 +973,15 @@ pub fn registered_command(path: &Path, harness: Harness) -> Option<McpCommand> {
                         .collect()
                 })
                 .unwrap_or_default();
+            let source = if entry_is_fallow_shape(entry, harness == Harness::Claude) {
+                McpSource::Registered
+            } else {
+                McpSource::Path
+            };
             Some(McpCommand {
                 command,
                 args,
-                source: McpSource::Path,
+                source,
             })
         }
         Harness::Codex => {
@@ -652,13 +999,24 @@ pub fn registered_command(path: &Path, harness: Harness) -> Option<McpCommand> {
                         .collect()
                 })
                 .unwrap_or_default();
+            let source = if codex_entry_is_fallow_shape(entry) {
+                McpSource::Registered
+            } else {
+                McpSource::Path
+            };
             Some(McpCommand {
                 command,
                 args,
-                source: McpSource::Path,
+                source,
             })
         }
     }
+}
+
+/// Whether a registered entry read by [`registered_command`] has a shape
+/// fallow writes (`true`) or was written by someone else (`false`).
+pub fn registered_is_managed(command: &McpCommand) -> bool {
+    command.source == McpSource::Registered
 }
 
 pub const fn claude_project_file() -> &'static str {

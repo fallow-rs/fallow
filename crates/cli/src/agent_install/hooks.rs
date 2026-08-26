@@ -2,7 +2,7 @@
 //! `hooks install --target agent` engine so both entry points stay
 //! byte-identical.
 
-use super::{Ctx, Harness, Mode, Scope, Step, StepReport, StepStatus};
+use super::{Ctx, Harness, Mode, Reason, Scope, Step, StepReport, StepStatus};
 use crate::setup_hooks::{
     AgentsOutcome, HookAgentArg, ScriptOutcome, SettingsOutcome, SetupHooksOptions,
     execute_agent_hooks,
@@ -28,7 +28,7 @@ fn run(ctx: &Ctx, harness: Harness) -> Vec<StepReport> {
                         StepStatus::Skipped,
                         Scope::Local,
                     )
-                    .reason("user_scope_unsupported")
+                    .reason(Reason::UserScopeUnsupported)
                     .detail("the Codex gate lives in the project AGENTS.md"),
                 ];
             }
@@ -37,7 +37,7 @@ fn run(ctx: &Ctx, harness: Harness) -> Vec<StepReport> {
         Harness::Cursor => {
             return vec![
                 StepReport::new(Some(harness), Step::Hooks, StepStatus::Skipped, ctx.scope())
-                    .reason("unsupported_harness")
+                    .reason(Reason::UnsupportedHarness)
                     .detail("Cursor's beforeShellExecution hook uses a different contract; Cursor still reads AGENTS.md"),
             ];
         }
@@ -100,7 +100,7 @@ fn claude_steps(
             ScriptOutcome::Created | ScriptOutcome::Updated => (StepStatus::Written, None),
             ScriptOutcome::Removed => (StepStatus::Removed, None),
             ScriptOutcome::Unchanged | ScriptOutcome::NotPresent => (StepStatus::Unchanged, None),
-            ScriptOutcome::UserEditedPreserved => (StepStatus::Refused, Some("user_edited")),
+            ScriptOutcome::UserEditedPreserved => (StepStatus::Refused, Some(Reason::UserEdited)),
         };
         let mut script = StepReport::new(Some(harness), Step::Hooks, script_status, ctx.scope())
             .path(ctx, &claude.script_path)
@@ -121,7 +121,7 @@ fn codex_step(ctx: &Ctx, harness: Harness, codex: &crate::setup_hooks::CodexRepo
             AgentsOutcome::Removed => (StepStatus::Removed, None),
             AgentsOutcome::Unchanged | AgentsOutcome::NotPresent => (StepStatus::Unchanged, None),
             AgentsOutcome::MalformedPreserved => {
-                (StepStatus::Refused, Some("managed_block_malformed"))
+                (StepStatus::Refused, Some(Reason::ManagedBlockMalformed))
             }
         };
         let detail = match codex.outcome {

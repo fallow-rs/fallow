@@ -43,6 +43,7 @@ pub fn detect_with(
             let hit = match kind {
                 SignalKind::Dir => path.is_dir(),
                 SignalKind::File => path.is_file(),
+                SignalKind::McpJson => super::mcp::mcp_json_has_servers(&path),
             };
             if hit {
                 evidence.push(relative.to_string());
@@ -69,6 +70,9 @@ pub fn detect_with(
 enum SignalKind {
     Dir,
     File,
+    /// A `.mcp.json` that declares at least one server; an emptied file left
+    /// by an uninstall is not evidence.
+    McpJson,
 }
 
 const fn project_signals(harness: Harness) -> &'static [(&'static str, SignalKind)] {
@@ -76,7 +80,7 @@ const fn project_signals(harness: Harness) -> &'static [(&'static str, SignalKin
         Harness::Claude => &[
             (".claude", SignalKind::Dir),
             ("CLAUDE.md", SignalKind::File),
-            (".mcp.json", SignalKind::File),
+            (".mcp.json", SignalKind::McpJson),
         ],
         Harness::Codex => &[(".codex", SignalKind::Dir)],
         Harness::Cursor => &[(".cursor", SignalKind::Dir)],

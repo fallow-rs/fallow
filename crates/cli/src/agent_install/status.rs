@@ -5,7 +5,9 @@ use std::process::ExitCode;
 
 use serde::Serialize;
 
-use super::{Harness, NextAction, Step, display_path, hosts, mcp, resolve_root, skill};
+use super::{
+    Harness, NextAction, SCHEMA_VERSION, Step, display_path, hosts, mcp, resolve_root, skill,
+};
 use crate::setup_hooks::{
     build_hooks_status, find_managed_block_bounds, home_dir, read_optional_text,
 };
@@ -34,9 +36,11 @@ struct SurfaceStatus {
 
 #[derive(Serialize)]
 struct StatusReport {
-    root: String,
+    kind: &'static str,
+    schema_version: u32,
     fallow_version: &'static str,
-    detected: Vec<hosts::Detection>,
+    root: String,
+    evidence: Vec<hosts::Detection>,
     surfaces: Vec<SurfaceStatus>,
     next_actions: Vec<NextAction>,
 }
@@ -53,9 +57,11 @@ pub fn run_agent_status(
     let surfaces = surfaces(&root, home.as_deref());
     let next_actions = status_next_actions(&surfaces);
     let report = StatusReport {
-        root: root.display().to_string(),
+        kind: "agent-status",
+        schema_version: SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION"),
-        detected: hosts::detect(&root, home.as_deref()),
+        root: root.display().to_string().replace('\\', "/"),
+        evidence: hosts::detect(&root, home.as_deref()),
         surfaces,
         next_actions,
     };
@@ -236,7 +242,13 @@ fn skill_row(
 
 fn mcp_row(root: &Path, home: Option<&Path>, harness: Harness, path: &Path) -> SurfaceStatus {
     let (state, detail) = match mcp::registered_command(path, harness) {
-        Some(command) => (SurfaceState::Installed, Some(command.shell_words())),
+        Some(command) if mcp::registered_is_managed(&command) => {
+            (SurfaceState::Installed, Some(command.shell_words()))
+        }
+        Some(command) => (
+            SurfaceState::Foreign,
+            Some(format!("{} (not written by fallow)", command.shell_words())),
+        ),
         None if path.is_file() => (SurfaceState::Absent, Some("no fallow entry".to_string())),
         None => (SurfaceState::Absent, None),
     };
@@ -307,10 +319,10 @@ fn render_human(report: &StatusReport) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "fallow agent status");
     let _ = writeln!(out, "  root: {}", report.root);
-    if report.detected.is_empty() {
+    if report.evidence.is_empty() {
         let _ = writeln!(out, "  detected: none");
     } else {
-        for detection in &report.detected {
+        for detection in &report.evidence {
             let _ = writeln!(
                 out,
                 "  detected: {} ({})",

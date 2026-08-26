@@ -27,6 +27,12 @@ fn agent_temp_dir(suffix: &str) -> PathBuf {
     .unwrap();
     let shipped = dir.join("node_modules/fallow/skills/fallow");
     fs::create_dir_all(&shipped).unwrap();
+    fs::create_dir_all(dir.join("node_modules/.bin")).unwrap();
+    fs::write(
+        dir.join("node_modules/.bin/fallow-mcp"),
+        "#!/bin/sh\nexit 0\n",
+    )
+    .unwrap();
     fs::write(
         dir.join("node_modules/fallow/package.json"),
         r#"{"name": "fallow", "version": "0.0.0-test"}"#,
@@ -214,20 +220,12 @@ fn install_is_idempotent_and_uninstall_round_trips() {
     let removed = run_agent(&dir, &home, &["uninstall"]);
     assert_eq!(removed.code, 0, "stderr: {}", removed.stderr);
     let mut after = tree(&dir);
-    let residue = [
-        ".claude/settings.json",
-        ".claude/settings.local.json",
-        ".codex/config.toml",
-    ];
-    after.retain(|entry| !residue.iter().any(|name| entry.starts_with(name)));
+    after.retain(|entry| !entry.starts_with(".claude/settings.json"));
     assert_eq!(after, before);
-    for name in residue {
-        let text = fs::read_to_string(dir.join(name)).unwrap();
-        assert!(
-            !text.contains("fallow"),
-            "{name} still mentions fallow: {text}"
-        );
-    }
+    let settings = fs::read_to_string(dir.join(".claude/settings.json")).unwrap();
+    assert!(!settings.contains("fallow"), "{settings}");
+    assert!(!dir.join(".claude/settings.local.json").exists());
+    assert!(!dir.join(".codex/config.toml").exists());
     let _ = fs::remove_dir_all(&dir);
 }
 

@@ -7,7 +7,9 @@
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use super::{Ctx, Harness, MARKER_PREFIX, MARKER_VERSION, Scope, Step, StepReport, StepStatus};
+use super::{
+    Ctx, Harness, MARKER_PREFIX, MARKER_VERSION, Reason, Scope, Step, StepReport, StepStatus,
+};
 use crate::setup_hooks::read_optional_text;
 
 include!(concat!(env!("OUT_DIR"), "/embedded_skill.rs"));
@@ -135,7 +137,7 @@ enum Source {
 }
 
 impl Source {
-    fn resolve(root: &Path) -> Result<Self, &'static str> {
+    fn resolve(root: &Path) -> Result<Self, Reason> {
         let shipped = root.join(NODE_MODULES_SKILL).join("SKILL.md");
         if let Ok(Some(text)) = read_optional_text(&shipped)
             && let Some(frontmatter) = frontmatter_block(&text)
@@ -154,7 +156,7 @@ impl Source {
             });
         }
         if EMBEDDED_SKILL.is_empty() {
-            return Err("skill_not_embedded");
+            return Err(Reason::SkillNotEmbedded);
         }
         Ok(Self::Embedded)
     }
@@ -287,7 +289,7 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
         SkillState::Foreign if !ctx.force => {
             return base
                 .with_status(StepStatus::Refused)
-                .reason("skill_name_taken")
+                .reason(Reason::SkillNameTaken)
                 .detail("a skill named `fallow` already exists here without a fallow marker; pass --force to replace it");
         }
         SkillState::Absent | SkillState::Managed { .. } | SkillState::Foreign => {}
@@ -379,7 +381,7 @@ fn uninstall_one(ctx: &Ctx, target: &Target) -> StepReport {
         SkillState::Foreign if !ctx.force => {
             return base
                 .with_status(StepStatus::Skipped)
-                .reason("skill_name_taken")
+                .reason(Reason::SkillNameTaken)
                 .detail("not written by fallow; left untouched (pass --force to remove)");
         }
         SkillState::Managed { .. } | SkillState::Foreign => {}

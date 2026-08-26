@@ -361,7 +361,7 @@ Steps per harness:
 
 The skill is a small pointer to `node_modules/fallow/skills/fallow` when that copy exists (so it never drifts from the installed binary); otherwise the tree embedded in the binary is written. The MCP command is probed before anything is written: `npx --no fallow-mcp` for an npm-installed project, `fallow-mcp` from `PATH`, or the running multicall binary; when none exists the step is `skipped` with `mcp_entry_unavailable` rather than writing a config that cannot start.
 
-Every file or block carries a `<!-- fallow:agent-install v1 ... -->` marker. Re-running is byte-stable. An existing skill named `fallow` without a marker is `refused` (`skill_name_taken`) unless `--force`. `uninstall` removes managed content and deletes `AGENTS.md` or `CLAUDE.md` only while the file still matches what fallow authored.
+Every file or block carries a `<!-- fallow:agent-install v1 ... -->` marker. Re-running is byte-stable. An existing skill named `fallow` without a marker is `refused` (`skill_name_taken`) unless `--force`. JSON and TOML cannot carry a marker, so a `fallow` MCP entry counts as fallow-managed only when its command is one fallow writes; any other entry is `refused` (`mcp_entry_foreign`) and never removed without `--force`. `--force` on an unparsable config file saves the old bytes as `<file>.fallow-bak` before rewriting. `uninstall` removes managed content, deletes a config file it emptied (and an emptied `.cursor/` or `.codex/` directory), and deletes `AGENTS.md` or `CLAUDE.md` only while the file still matches what fallow authored.
 
 ### Flags
 
@@ -383,6 +383,9 @@ Human output groups paths under "Shared with your team (commit these)" and "Loca
 
 ```json
 {
+  "kind": "agent-install",
+  "schema_version": 1,
+  "fallow_version": "3.18.0",
   "root": "/abs/path",
   "mode": "install",
   "dry_run": false,
@@ -397,7 +400,7 @@ Human output groups paths under "Shared with your team (commit these)" and "Loca
 }
 ```
 
-`status` values: `written`, `removed`, `unchanged`, `skipped`, `refused`, `failed`. Exit code 2 when any step is `refused` or `failed`; every other step still runs. `next_actions` is deliberately not `next_steps`: entries flagged `mutating: true` write harness config when run, unlike the read-only `next_steps[]` of the analysis commands.
+`status` values: `written`, `removed`, `unchanged`, `skipped`, `refused`, `failed`. Exit code 2 when any step is `refused` or `failed`; every other step still runs. `kind` is `agent-install`, `agent-uninstall`, or `agent-status`; `schema_version` is `1`; `agent status` reports `surfaces[]` with `installed`, `stale`, `absent`, or `foreign`. `next_actions` is deliberately not `next_steps`: entries flagged `mutating: true` write harness config when run, unlike the read-only `next_steps[]` of the analysis commands.
 
 ### Examples
 
