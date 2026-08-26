@@ -379,19 +379,19 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-multicall
 
+      # `${{ matrix.target }}` rather than a `$FALLOW_TARGET` env var: the
+      # Windows matrix entries run under pwsh, where `$FALLOW_TARGET` expands
+      # to an empty string and cargo fails with "target was empty".
       - name: Build local similar-code provider
         if: matrix.target != 'aarch64-unknown-linux-musl'
-        run: cargo build --locked --manifest-path tools/similar-code-sidecar/Cargo.toml --target-dir target --release --target "$FALLOW_TARGET"
+        run: cargo build --locked --manifest-path tools/similar-code-sidecar/Cargo.toml --target-dir target --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-          FALLOW_TARGET: ${{ matrix.target }}
 
       - name: Build local similar-code provider (aarch64-musl via zig)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        env:
-          FALLOW_TARGET: ${{ matrix.target }}
-        run: cargo zigbuild --locked --manifest-path tools/similar-code-sidecar/Cargo.toml --target-dir target --release --target "$FALLOW_TARGET"
+        run: cargo zigbuild --locked --manifest-path tools/similar-code-sidecar/Cargo.toml --target-dir target --release --target ${{ matrix.target }}
 
       - name: Install NAPI package dependencies
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
