@@ -209,7 +209,7 @@ Runtime-coverage verdicts and the full security sink catalogue are listed by `fa
 
 Fallow ships an MCP server (`fallow-mcp`) that exposes these same analyses as agent tools. When the server is connected, its tools are already in your context with typed params and structured JSON returns, and each maps to a CLI fallback command. Prefer them when you want JSON without shelling out, or `code_execute` (Code Mode) to compose several read-only analyses in one sandboxed snippet (no single-call CLI equivalent). Otherwise use the CLI.
 
-The server also serves read-only reference resources you can read without a tool call: `fallow://tools`, `fallow://issue-types`, `fallow://explain/{issue_type}`, `fallow://task-matrix`, and the config, plugin, and rule-pack JSON Schemas. Every payload is JSON and carries `fallow_version`.
+The server also serves read-only reference resources (no subprocess, no analysis run, cacheable by URI; your client reads them through its own resource tool): `fallow://tools`, `fallow://issue-types`, `fallow://explain/{issue_type}`, `fallow://task-matrix`, and the config, plugin, and rule-pack JSON Schemas. Every payload is JSON and carries `fallow_version`.
 
 Full tool catalogue, resource catalogue, key params, runtime source-map confidence tiers, shared timeouts, and the `next_steps` dispatch mapping: **[references/mcp.md](references/mcp.md)**.
 

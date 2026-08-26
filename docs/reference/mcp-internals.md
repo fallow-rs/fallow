@@ -25,9 +25,10 @@ Do not hand-copy the complete tool list into durable prose. Read
 
 Resources are the server's read-only, cacheable reference channel: compile-time
 material an agent lists once (`resources/list`, `resources/templates/list`)
-and reads by URI (`resources/read`) without spending a tool call or running
-analysis. Tools remain the surface for anything that depends on a project
-root.
+and reads by URI (`resources/read`) with no subprocess and no analysis run;
+clients cache by URI. (Hosts such as Claude Code still read a resource through
+their own resource tool, so this is not a saved tool call.) Tools remain the
+surface for anything that depends on a project root.
 
 Sources of truth:
 
@@ -49,9 +50,12 @@ Sources of truth:
 
 Contract rules:
 
-- Every resource is `application/json` and every payload carries a top-level
-  `fallow_version`, so a cached copy is self-describing; clients cache by URI
-  and invalidate on server version. MCP has no cache headers.
+- Every resource is `application/json`. The server version travels in the
+  content item's `_meta.fallow_version`, never inside the payload, so the
+  schema documents stay valid strict JSON Schema and a cached copy is still
+  self-describing; clients cache by URI and invalidate on server version.
+  rmcp 3.1 exposes `ttl_ms` / `cache_scope` hints on the initialize result
+  only, so per-resource caching stays client-side.
 - The catalogue is compile-time constant. Declare neither `subscribe` nor
   `listChanged`; a client that sees them opens subscriptions the server
   never notifies.
@@ -63,13 +67,16 @@ Contract rules:
   The exact strings are pinned as literals in
   `crates/mcp/src/server/tests/resources.rs`; the difference is invisible in
   prose and breaks template matching on the wire.
-- Schema resources are the CLI schema documents (`fallow config-schema`,
-  `fallow plugin-schema`, `fallow rule-pack-schema`) with `fallow_version`
-  prepended; the explain template is the `fallow_explain` tool payload with
-  `fallow_version` prepended.
+- Schema resources are byte-for-byte the CLI schema documents
+  (`fallow config-schema`, `fallow plugin-schema`, `fallow rule-pack-schema`);
+  the explain template is exactly the `fallow_explain` tool payload.
 - Unknown URIs and unknown issue types return a structured
   `resource_not_found` error whose `data` lists the known URIs and templates,
-  or the nearest explain URIs plus the index URI.
+  or the nearest explain URIs plus the index URI. The wire code depends on the
+  negotiated protocol: rmcp sends `-32002` to peers on protocol versions
+  before 2026-07-28 and rewrites it to `-32602` (invalid params) for
+  2026-07-28 and later; `data` is preserved either way, so clients should key
+  on `data`, not the code.
 - Adding a resource: add the `MCP_RESOURCES` row, add its renderer arm in
   `crates/mcp/src/resources.rs`, pin the URI in the resource tests, and run
   `npm run generate:contracts` so `capabilities.json` and the generated

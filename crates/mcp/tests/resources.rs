@@ -72,7 +72,6 @@ fn resources_are_listed_and_read_over_stdio() {
     assert_eq!(template_uris, ["fallow://explain/{issue_type}"]);
 
     let task_matrix = server.read(4, "fallow://task-matrix");
-    assert_eq!(task_matrix["fallow_version"], env!("CARGO_PKG_VERSION"));
     let rows = task_matrix["rows"].as_array().expect("rows");
     assert!(
         rows.iter()
@@ -83,7 +82,6 @@ fn resources_are_listed_and_read_over_stdio() {
     let explain = server.read(5, "fallow://explain/unused-export");
     assert_eq!(explain["kind"], "explain");
     assert_eq!(explain["id"], "fallow/unused-export");
-    assert_eq!(explain["fallow_version"], env!("CARGO_PKG_VERSION"));
 
     let error = server.request(
         6,
@@ -127,6 +125,10 @@ impl Drop for McpServer {
 
 impl McpServer {
     fn start() -> Self {
+        Self::start_with("2024-11-05")
+    }
+
+    fn start_with(protocol: &str) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -151,9 +153,9 @@ impl McpServer {
             lines,
             initialize_result: serde_json::Value::Null,
         };
-        server.send(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"resources-test","version":"0"}}}"#,
-        );
+        server.send(&format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"{protocol}","capabilities":{{}},"clientInfo":{{"name":"resources-test","version":"0"}}}}}}"#
+        ));
         let response = server.response(1);
         assert!(
             response["result"]["serverInfo"].is_object(),
@@ -184,6 +186,11 @@ impl McpServer {
         assert_eq!(contents.len(), 1, "{uri} returns one content item");
         assert_eq!(contents[0]["uri"], uri);
         assert_eq!(contents[0]["mimeType"], "application/json");
+        assert_eq!(
+            contents[0]["_meta"]["fallow_version"],
+            env!("CARGO_PKG_VERSION"),
+            "{uri} carries the server version in _meta"
+        );
         let text = contents[0]["text"]
             .as_str()
             .unwrap_or_else(|| panic!("text content for {uri}: {response}"));
@@ -209,4 +216,22 @@ impl McpServer {
             }
         }
     }
+}
+
+/// Peers that negotiate protocol 2026-07-28 or later receive `-32602`
+/// (invalid params) instead of `-32002` for an unknown resource; the
+/// structured `data` survives the rewrite.
+#[test]
+fn unknown_uri_error_code_follows_the_negotiated_protocol_version() {
+    let mut server = McpServer::start_with("2026-07-28");
+    let error = server.request(
+        2,
+        "resources/read",
+        &serde_json::json!({ "uri": "fallow://nope" }),
+    );
+    assert_eq!(error["error"]["code"], -32602, "{error}");
+    assert!(
+        error["error"]["data"]["known_uris"].is_array(),
+        "structured data must survive the code rewrite: {error}"
+    );
 }

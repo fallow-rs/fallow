@@ -20,7 +20,8 @@ use fallow_api::{
 };
 use fallow_types::issue_meta::{issue_is_fixable, issue_meta_by_code};
 use fallow_types::mcp_manifest::{
-    MCP_EXPLAIN_RESOURCE_TEMPLATE, MCP_RESOURCES, MCP_TOOLS, McpResourceInfo,
+    MCP_EXPLAIN_RESOURCE_TEMPLATE, MCP_RESOURCES, MCP_TOOLS, MCP_TOOLS_KEY_PARAMS_NOTE,
+    McpResourceInfo,
 };
 use fallow_types::task_matrix::{MUTATING_COMMANDS, TASK_MATRIX};
 use rmcp::ErrorData as McpError;
@@ -33,7 +34,6 @@ const FALLOW_VERSION: &str = env!("CARGO_PKG_VERSION");
 const EXPLAIN_URI_PREFIX: &str = "fallow://explain/";
 const EXPLAIN_INDEX_URI: &str = "fallow://explain";
 const MAX_NEAREST_MATCHES: usize = 5;
-const VERSION_KEY: &str = "fallow_version";
 
 /// Priority hints for `annotations.priority`: the tool manifest and the task
 /// matrix are the entries an agent should read first, the schemas last.
@@ -67,37 +67,33 @@ fn render_static_payload(uri: &str) -> Value {
         "fallow://issue-types" => issue_types_payload(),
         EXPLAIN_INDEX_URI => explain_index_payload(),
         "fallow://task-matrix" => task_matrix_payload(),
-        "fallow://schema/config" => with_version(fallow_api::schemas::config_schema()),
-        "fallow://schema/plugin" => with_version(fallow_api::schemas::plugin_schema()),
-        "fallow://schema/rule-pack" => with_version(fallow_api::schemas::rule_pack_schema()),
+        "fallow://schema/config" => fallow_api::schemas::config_schema(),
+        "fallow://schema/plugin" => fallow_api::schemas::plugin_schema(),
+        "fallow://schema/rule-pack" => fallow_api::schemas::rule_pack_schema(),
         other => unreachable!(
             "MCP_RESOURCES lists {other} but crates/mcp/src/resources.rs has no renderer for it"
         ),
     }
 }
 
-/// Prepend `fallow_version` so a cached copy is self-describing (MCP has no
-/// cache headers; clients invalidate on server version).
-fn with_version(value: Value) -> Value {
-    let mut out = Map::new();
-    out.insert(
-        VERSION_KEY.to_string(),
+/// `_meta` attached to every content item: the server version, so a cached
+/// copy is self-describing without the payload itself carrying extra keys
+/// (the schema documents must stay valid strict JSON Schema).
+fn version_meta() -> rmcp::model::MetaObject {
+    let mut meta = Map::new();
+    meta.insert(
+        "fallow_version".to_string(),
         Value::String(FALLOW_VERSION.to_string()),
     );
-    if let Value::Object(fields) = value {
-        out.extend(fields);
-    } else {
-        out.insert("value".to_string(), value);
-    }
-    Value::Object(out)
+    rmcp::model::MetaObject(meta)
 }
 
 fn tools_payload() -> Value {
-    with_version(serde_json::json!({
+    serde_json::json!({
         "server": "fallow-mcp",
-        "note": "key_params is a curated subset; the live MCP input schemas (tools/list) are authoritative for the full parameter list. cli_command is the nearest CLI fallback, not a full MCP input-schema projection",
+        "note": MCP_TOOLS_KEY_PARAMS_NOTE,
         "tools": MCP_TOOLS.iter().map(fallow_types::mcp_manifest::McpToolInfo::to_json).collect::<Vec<_>>(),
-    }))
+    })
 }
 
 fn explain_uri(rule: &RuleDef) -> String {
@@ -132,10 +128,10 @@ fn issue_types_payload() -> Value {
             })
         })
         .collect();
-    with_version(serde_json::json!({
+    serde_json::json!({
         "note": "default_severity is the zero-config rules.* severity of the rule that gates the finding (null when no rules.* key gates it); opt_in is true when that default is off. fallow schema issue_types carries the full projection (filter flags, suppression comments, result keys, frameworks)",
         "issue_types": rows,
-    }))
+    })
 }
 
 fn explain_index_payload() -> Value {
@@ -154,19 +150,19 @@ fn explain_index_payload() -> Value {
             })
         })
         .collect();
-    with_version(serde_json::json!({
+    serde_json::json!({
         "template": MCP_EXPLAIN_RESOURCE_TEMPLATE,
         "note": "Read uri for the full explain document (rationale, example, how to fix, docs URL); issue_type accepts the bare id, the namespaced rule id, and the CLI filter spelling",
         "issue_types": rows,
-    }))
+    })
 }
 
 fn task_matrix_payload() -> Value {
-    with_version(serde_json::json!({
+    serde_json::json!({
         "note": "Read-only evidence commands to run before the listed task; command may contain <placeholder> tokens. The matrix never names a mutating command",
         "excluded_commands": MUTATING_COMMANDS,
         "rows": TASK_MATRIX.iter().map(fallow_types::task_matrix::TaskRow::to_json).collect::<Vec<_>>(),
-    }))
+    })
 }
 
 fn priority_for(uri: &str) -> f32 {
@@ -191,6 +187,7 @@ pub fn list_resources() -> Vec<Resource> {
         .iter()
         .map(|resource| {
             Resource::new(resource.info.uri, resource.info.name)
+                .with_title(resource.info.title)
                 .with_description(resource.info.description)
                 .with_mime_type(resource.info.mime_type)
                 .with_size(resource.text.len() as u64)
@@ -207,6 +204,7 @@ pub fn list_resource_templates() -> Vec<ResourceTemplate> {
         .filter(|info| info.template)
         .map(|info| {
             ResourceTemplate::new(info.uri, info.name)
+                .with_title(info.title)
                 .with_description(info.description)
                 .with_mime_type(info.mime_type)
                 .with_annotations(annotations_for(info.uri))
@@ -241,11 +239,7 @@ pub fn read_resource(uri: &str) -> Result<ReadResourceResult, McpError> {
 
 fn read_explain(uri: &str, issue_type: &str) -> Result<ReadResourceResult, McpError> {
     match serialize_explain_programmatic_json(issue_type, RootEnvelopeMode::Tagged, None) {
-        Ok(value) => Ok(json_result(
-            uri,
-            with_version(value).to_string(),
-            "application/json",
-        )),
+        Ok(value) => Ok(json_result(uri, value.to_string(), "application/json")),
         Err(error) => Err(McpError::resource_not_found(
             error.message,
             Some(serde_json::json!({
@@ -261,7 +255,9 @@ fn read_explain(uri: &str, issue_type: &str) -> Result<ReadResourceResult, McpEr
 
 fn json_result(uri: &str, text: String, mime_type: &str) -> ReadResourceResult {
     ReadResourceResult::new(vec![
-        ResourceContents::text(text, uri).with_mime_type(mime_type),
+        ResourceContents::text(text, uri)
+            .with_mime_type(mime_type)
+            .with_meta(version_meta()),
     ])
 }
 

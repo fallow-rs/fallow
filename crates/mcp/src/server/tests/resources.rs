@@ -101,13 +101,22 @@ fn static_resources_carry_size_mime_and_assistant_annotations() {
 }
 
 #[test]
-fn every_static_payload_is_json_with_fallow_version() {
-    for uri in STATIC_URIS {
-        let json = read_json(uri);
+fn every_read_carries_fallow_version_in_meta_not_in_the_payload() {
+    for uri in STATIC_URIS
+        .iter()
+        .copied()
+        .chain(std::iter::once("fallow://explain/unused-export"))
+    {
+        let result = serde_json::to_value(read_resource(uri).expect("readable"))
+            .expect("serializable result");
         assert_eq!(
-            json["fallow_version"],
+            result["contents"][0]["_meta"]["fallow_version"],
             env!("CARGO_PKG_VERSION"),
-            "{uri} must carry fallow_version"
+            "{uri} must carry fallow_version in _meta"
+        );
+        assert!(
+            read_json(uri).get("fallow_version").is_none(),
+            "{uri} payload must not carry fallow_version"
         );
     }
 }
@@ -247,9 +256,7 @@ fn schema_resources_equal_the_cli_schema_documents_plus_version() {
             fallow_api::schemas::rule_pack_schema(),
         ),
     ] {
-        let mut json = read_json(uri);
-        let object = json.as_object_mut().expect("schema object");
-        assert!(object.shift_remove("fallow_version").is_some());
+        let json = read_json(uri);
         assert_eq!(json, expected, "{uri} must be the CLI schema document");
     }
 }
@@ -262,7 +269,6 @@ fn every_registered_rule_resolves_through_the_explain_template() {
             let json = read_json(&uri);
             assert_eq!(json["kind"], "explain", "{uri}");
             assert_eq!(json["id"], rule.id, "{uri}");
-            assert_eq!(json["fallow_version"], env!("CARGO_PKG_VERSION"));
             for key in [
                 "name",
                 "summary",
@@ -279,11 +285,7 @@ fn every_registered_rule_resolves_through_the_explain_template() {
 
 #[test]
 fn explain_template_matches_the_fallow_explain_tool_payload() {
-    let mut resource = read_json("fallow://explain/unused-export");
-    resource
-        .as_object_mut()
-        .expect("object")
-        .shift_remove("fallow_version");
+    let resource = read_json("fallow://explain/unused-export");
     let tool = fallow_api::serialize_explain_programmatic_json(
         "unused-export",
         fallow_api::RootEnvelopeMode::Tagged,

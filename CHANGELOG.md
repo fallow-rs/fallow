@@ -52,9 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow explain <issue-type> --format json` prints), `fallow://task-matrix`
   (which read-only command to run before a task), and
   `fallow://schema/config`, `fallow://schema/plugin`, and
-  `fallow://schema/rule-pack` (the JSON Schemas). Everything is rendered
-  in-process, is JSON, and carries `fallow_version`, so a client can cache by
-  URI and invalidate on server version; unknown URIs and issue types return a
+  `fallow://schema/rule-pack` (the JSON Schemas, byte-identical to the CLI
+  documents). Everything is rendered in-process and is JSON; the server
+  version travels in each content item's `_meta.fallow_version`, so a client
+  can cache by URI and invalidate on server version; unknown URIs and issue types return a
   structured `resource_not_found` error with the known URIs or the nearest
   issue types. `fallow schema` gains a matching `mcp_resources` block and the
   shipped skill reference gains a generated resource table.

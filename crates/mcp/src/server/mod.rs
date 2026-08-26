@@ -284,7 +284,7 @@ impl FallowMcp {
         run_decision_surface(&self.binary, params.0).await
     }
 
-    /// Explain one fallow issue type without running analysis. Returns the rule id, name, rationale, worked example, fix guidance, and docs URL as JSON. Use this before applying fixes when an agent or reviewer needs to understand what a finding means.
+    /// Explain one fallow issue type without running analysis. Returns the rule id, name, rationale, worked example, fix guidance, and docs URL as JSON. Use this before applying fixes when an agent or reviewer needs to understand what a finding means. If your client exposes MCP resources, `fallow://explain/{issue_type}` serves the same document as a cacheable resource read.
     #[tool(annotations(read_only_hint = true, open_world_hint = false))]
     async fn fallow_explain(
         &self,

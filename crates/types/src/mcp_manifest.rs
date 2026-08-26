@@ -501,8 +501,10 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
 /// Resources are the read-only, cacheable reference channel of the MCP
 /// server: compile-time reference material (tool manifest, issue-type
 /// registry, task matrix, JSON Schemas, explain documents) that an agent can
-/// list and read without spending a tool call. The catalogue is constant, so
-/// the server declares neither `subscribe` nor `listChanged`.
+/// list and read with no subprocess and no analysis run, cacheable by URI
+/// (clients such as Claude Code still read them through their own resource
+/// tool). The catalogue is constant, so the server declares neither
+/// `subscribe` nor `listChanged`.
 #[derive(Debug, Clone, Copy)]
 pub struct McpResourceInfo {
     /// Wire URI (`fallow://...`), or an RFC 6570 URI template when
@@ -510,6 +512,8 @@ pub struct McpResourceInfo {
     pub uri: &'static str,
     /// Programmatic resource name.
     pub name: &'static str,
+    /// Human-readable title hosts show in resource pickers.
+    pub title: &'static str,
     /// One-line agent-facing description.
     pub description: &'static str,
     /// MIME type of the read payload.
@@ -526,12 +530,17 @@ impl McpResourceInfo {
         serde_json::json!({
             "uri": self.uri,
             "name": self.name,
+            "title": self.title,
             "description": self.description,
             "mime_type": self.mime_type,
             "template": self.template,
         })
     }
 }
+
+/// Shared caveat on `key_params` for the `mcp_tools` schema block and the
+/// `fallow://tools` resource, so the two never drift.
+pub const MCP_TOOLS_KEY_PARAMS_NOTE: &str = "key_params is a curated subset; the live MCP input schemas (tools/list) are authoritative for the full parameter list. cli_command is the nearest CLI fallback, not a full MCP input-schema projection";
 
 /// URI scheme every fallow resource lives under. The authority (`tools`,
 /// `explain`, ...) carries the resource family, matching what shipping MCP
@@ -548,6 +557,7 @@ pub const MCP_RESOURCES: &[McpResourceInfo] = &[
     McpResourceInfo {
         uri: "fallow://tools",
         name: "tools",
+        title: "Tool manifest",
         description: "MCP tool manifest: name, kind, one-line description, nearest CLI fallback, key params, license, and read-only flag for every tool",
         mime_type: "application/json",
         template: false,
@@ -555,6 +565,7 @@ pub const MCP_RESOURCES: &[McpResourceInfo] = &[
     McpResourceInfo {
         uri: "fallow://issue-types",
         name: "issue-types",
+        title: "Issue type registry",
         description: "Every issue type with its command, category, config key, zero-config default severity, opt-in flag, fixable flag, docs URL, and explain resource URI",
         mime_type: "application/json",
         template: false,
@@ -562,6 +573,7 @@ pub const MCP_RESOURCES: &[McpResourceInfo] = &[
     McpResourceInfo {
         uri: "fallow://explain",
         name: "explain",
+        title: "Explain index",
         description: "Index of every explainable issue type with its one-line summary and the fallow://explain/{issue_type} URI to read",
         mime_type: "application/json",
         template: false,
@@ -569,6 +581,7 @@ pub const MCP_RESOURCES: &[McpResourceInfo] = &[
     McpResourceInfo {
         uri: "fallow://task-matrix",
         name: "task-matrix",
+        title: "Agent task matrix",
         description: "Agent task-to-command matrix: which read-only fallow command to run before deleting, refactoring, committing, or scoping work",
         mime_type: "application/json",
         template: false,
@@ -576,6 +589,7 @@ pub const MCP_RESOURCES: &[McpResourceInfo] = &[
     McpResourceInfo {
         uri: "fallow://schema/config",
         name: "schema-config",
+        title: "Config JSON Schema",
         description: "JSON Schema of the fallow config file (same document as fallow config-schema)",
         mime_type: "application/json",
         template: false,
@@ -583,6 +597,7 @@ pub const MCP_RESOURCES: &[McpResourceInfo] = &[
     McpResourceInfo {
         uri: "fallow://schema/plugin",
         name: "schema-plugin",
+        title: "Plugin JSON Schema",
         description: "JSON Schema of a user-authored external plugin (same document as fallow plugin-schema)",
         mime_type: "application/json",
         template: false,
@@ -590,6 +605,7 @@ pub const MCP_RESOURCES: &[McpResourceInfo] = &[
     McpResourceInfo {
         uri: "fallow://schema/rule-pack",
         name: "schema-rule-pack",
+        title: "Rule pack JSON Schema",
         description: "JSON Schema of a declarative rule pack (same document as fallow rule-pack-schema)",
         mime_type: "application/json",
         template: false,
@@ -597,7 +613,8 @@ pub const MCP_RESOURCES: &[McpResourceInfo] = &[
     McpResourceInfo {
         uri: MCP_EXPLAIN_RESOURCE_TEMPLATE,
         name: "explain-issue-type",
-        description: "Explain document for one issue type (same payload as fallow explain <issue-type> --format json): name, summary, rationale, example, fix guidance, docs URL",
+        title: "Explain one issue type",
+        description: "Explain document for one issue type (same payload as fallow explain <issue-type> --format json): name, summary, rationale, example, fix guidance, docs URL. issue_type accepts the bare id (unused-export), the namespaced id (fallow/unused-export), or the CLI filter spelling; see fallow://explain for the index",
         mime_type: "application/json",
         template: true,
     },

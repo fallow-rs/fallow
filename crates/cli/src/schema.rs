@@ -591,7 +591,7 @@ fn mcp_tools_schema() -> serde_json::Value {
         .collect();
     serde_json::json!({
         "server": "fallow-mcp",
-        "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list. cli_command is the nearest CLI fallback, not a full MCP input-schema projection",
+        "note": fallow_types::mcp_manifest::MCP_TOOLS_KEY_PARAMS_NOTE,
         "tools": tools,
     })
 }
