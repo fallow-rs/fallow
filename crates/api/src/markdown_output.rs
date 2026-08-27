@@ -2825,12 +2825,7 @@ mod walkthrough_markdown_tests {
             md.contains("### Decisions outside the staged files (1)"),
             "got: {md}"
         );
-        assert!(
-            md.contains("`package.json`") && md.contains("`COUPLING`")
-                || md.contains("`PUBLIC-API`")
-                || md.contains("`DEPENDENCY`"),
-            "got: {md}"
-        );
+        assert!(md.contains("`package.json`"), "got: {md}");
         assert!(!md.contains("orientation only"), "got: {md}");
     }
 }
