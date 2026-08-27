@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.18.0",
+  "version": "3.19.0",
   "manifest_version": "1",
   "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "global_flags": [
@@ -1103,6 +1103,11 @@
     {
       "name": "hooks",
       "description": "Install or remove fallow-managed Git and agent hooks",
+      "flags": []
+    },
+    {
+      "name": "agent",
+      "description": "Wire fallow into the coding-agent harnesses used by this project in one pass (AGENTS.md task map, skill, MCP server, commit/push gate), or show and remove what was installed. `fallow init --agents` and `fallow hooks install --target agent` remain the single-piece commands underneath",
       "flags": []
     },
     {
@@ -6505,7 +6510,7 @@
   },
   "mcp_tools": {
     "server": "fallow-mcp",
-    "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list. cli_command is the nearest CLI fallback, not a full MCP input-schema projection",
+    "note": "key_params is a curated subset; the live MCP input schemas (tools/list) are authoritative for the full parameter list. cli_command is the nearest CLI fallback, not a full MCP input-schema projection",
     "tools": [
       {
         "name": "code_execute",
@@ -6990,6 +6995,76 @@
         "license": "free",
         "license_note": null,
         "read_only": true
+      }
+    ]
+  },
+  "mcp_resources": {
+    "server": "fallow-mcp",
+    "note": "Read-only reference material served in-process by fallow-mcp; every JSON payload carries fallow_version. Rows with template: true are RFC 6570 URI templates listed under resources/templates/list; the catalogue is static, so the server declares neither subscribe nor listChanged",
+    "resources": [
+      {
+        "uri": "fallow://tools",
+        "name": "tools",
+        "title": "Tool manifest",
+        "description": "MCP tool manifest: name, kind, one-line description, nearest CLI fallback, key params, license, and read-only flag for every tool",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://issue-types",
+        "name": "issue-types",
+        "title": "Issue type registry",
+        "description": "Every issue type with its command, category, config key, zero-config default severity, opt-in flag, fixable flag, docs URL, and explain resource URI",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://explain",
+        "name": "explain",
+        "title": "Explain index",
+        "description": "Index of every explainable issue type with its one-line summary and the fallow://explain/{issue_type} URI to read",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://task-matrix",
+        "name": "task-matrix",
+        "title": "Agent task matrix",
+        "description": "Agent task-to-command matrix: which read-only fallow command to run before deleting, refactoring, committing, or scoping work",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://schema/config",
+        "name": "schema-config",
+        "title": "Config JSON Schema",
+        "description": "JSON Schema of the fallow config file (same document as fallow config-schema)",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://schema/plugin",
+        "name": "schema-plugin",
+        "title": "Plugin JSON Schema",
+        "description": "JSON Schema of a user-authored external plugin (same document as fallow plugin-schema)",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://schema/rule-pack",
+        "name": "schema-rule-pack",
+        "title": "Rule pack JSON Schema",
+        "description": "JSON Schema of a declarative rule pack (same document as fallow rule-pack-schema)",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://explain/{issue_type}",
+        "name": "explain-issue-type",
+        "title": "Explain one issue type",
+        "description": "Explain document for one issue type (same payload as fallow explain <issue-type> --format json): name, summary, rationale, example, fix guidance, docs URL. issue_type accepts the bare id (unused-export), the namespaced id (fallow/unused-export), or the CLI filter spelling; see fallow://explain for the index",
+        "mime_type": "application/json",
+        "template": true
       }
     ]
   },

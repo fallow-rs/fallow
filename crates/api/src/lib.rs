@@ -56,6 +56,9 @@ pub mod runtime;
 mod runtime_json;
 mod runtime_output;
 pub mod sarif_output;
+/// JSON Schema documents and zero-config rule defaults re-exported from
+/// `fallow-config` for embedders such as the MCP resource surface.
+pub mod schemas;
 pub mod security_output;
 /// Local-only advisory similar-code discovery and provider status.
 pub mod similar_code;
@@ -124,9 +127,9 @@ pub use editor::{
 };
 pub use explain::{
     CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, RuleGuide, SECURITY_RULES,
-    coverage_analyze_meta, coverage_setup_meta, explain_issue_type, rule_by_id, rule_by_token,
-    rule_docs_url, rule_guide, security_meta, serialize_explain_programmatic_json,
-    unknown_explain_error,
+    all_rules, bare_rule_id, coverage_analyze_meta, coverage_setup_meta, explain_issue_type,
+    rule_by_id, rule_by_token, rule_command, rule_docs_url, rule_guide, rule_severity_key,
+    security_meta, serialize_explain_programmatic_json, unknown_explain_error,
 };
 pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};
 pub use fallow_output::{RootEnvelopeMode, serialize_similar_code_json_output};

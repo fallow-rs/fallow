@@ -31,6 +31,9 @@ an exit code.
   baselines.
 - `crates/cli/src/report/`: human and machine-readable rendering.
 - `crates/cli/src/fix/`: dry-run plans and confirmed mutations.
+- `crates/cli/src/agent_install/`: one-pass agent onboarding (`fallow agent`),
+  composed over `setup_hooks.rs` and `init.rs`; `build.rs` embeds the shipped
+  skill for installs without `node_modules/fallow`.
 - `crates/cli/src/coverage/` and `license/`: runtime coverage and license
   command orchestration.
 - `crates/cli/src/telemetry.rs`: local opt-in telemetry state and spooling.

@@ -630,10 +630,16 @@ mod tests {
     fn provider_environment_excludes_project_and_provider_overrides() {
         let mut command = Command::new("fallow-similar-code");
         restrict_environment(&mut command, false);
-        let debug = format!("{command:?}");
-        assert!(debug.contains("FALLOW_SIMILAR_CODE_OFFLINE"));
-        assert!(!debug.contains("FALLOW_SIMILAR_CODE_BIN"));
-        assert!(!debug.contains("PATH="));
+        // `Command`'s Debug output lists environment entries on Unix only, so
+        // inspect the explicit environment instead of the rendered string.
+        let set = |key: &str| {
+            command
+                .get_envs()
+                .any(|(name, value)| name == key && value.is_some())
+        };
+        assert!(set("FALLOW_SIMILAR_CODE_OFFLINE"));
+        assert!(!set("FALLOW_SIMILAR_CODE_BIN"));
+        assert!(!set("PATH"));
         assert!(BASE_ENV.contains(&"FALLOW_SIMILAR_CODE_CACHE_DIR"));
         assert!(BASE_ENV.contains(&"LOCALAPPDATA"));
         assert!(BASE_ENV.contains(&"XDG_CACHE_HOME"));

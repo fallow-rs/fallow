@@ -1,1 +1,1 @@
-{"name":"@fallow-cli/fallow-similar-code-darwin-arm64","version":"3.18.0","license":"MIT","repository":{"type":"git","url":"git+https://github.com/fallow-rs/fallow.git"},"os":["darwin"],"cpu":["arm64"],"files":["fallow-similar-code","fallow-similar-code.sig"]}
+{"name":"@fallow-cli/fallow-similar-code-darwin-arm64","version":"3.19.0","license":"MIT","repository":{"type":"git","url":"git+https://github.com/fallow-rs/fallow.git"},"os":["darwin"],"cpu":["arm64"],"files":["fallow-similar-code","fallow-similar-code.sig"]}

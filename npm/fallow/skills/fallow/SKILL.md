@@ -32,7 +32,6 @@ Codebase intelligence for TypeScript and JavaScript. The static layer analyzes c
 - Projects that are not JavaScript or TypeScript
 
 ## Prerequisites
-
 Fallow must be installed. If not available, install it:
 
 ```bash
@@ -42,7 +41,6 @@ cargo install fallow-cli   # build from source
 ```
 
 ## Agent Rules
-
 1. **Always use `--format json --quiet`** for machine-readable output and parse stdout as JSON. Compact JSON is the default; never depend on whitespace or add `--pretty` in agent pipelines. Keep stderr separate so diagnostics remain visible; never merge it into the JSON stream with `2>&1`.
 2. **Preserve and interpret the exit status.** Codes 0 and 1 are successful analysis outcomes: 0 is clean and 1 means findings. Treat every other code according to `fallow schema.exit_codes`. Do not force a successful status, because that hides validation, license, setup, network, and security-gate outcomes.
 3. **Use `--explain`** to include a `_meta` object in JSON output with metric definitions, ranges, and interpretation hints. In human format, `--explain` prints a `Description:` line under each section header.
@@ -82,7 +80,6 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 <!-- generated:task-matrix:end -->
 
 ## Commands
-
 <!-- generated:commands:start -->
 | Command | Purpose | Key Flags |
 |---|---|---|
@@ -96,6 +93,7 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 | `fix` | Auto-remove unused exports/deps | `--dry-run`, `--yes` (required in non-TTY) |
 | `init` | Generate config file, AGENTS.md agent guide, or pre-commit hook | `--toml`, `--agents`, `--hooks`, `--branch` |
 | `hooks` | Inspect, install, or remove fallow-managed Git and agent hooks | `status`, `install --target git`, `install --target agent`, `uninstall --target git`, `uninstall --target agent` |
+| `agent` | Wire fallow into Claude Code, Codex, or Cursor in one pass: AGENTS.md task map, skill, MCP server, commit/push gate; `status` and `uninstall` cover the same surfaces | `install --harness auto\|claude\|codex\|cursor`, `install --dry-run`, `install --approve`, `install --without <guide\|skill\|mcp\|hooks>`, `status`, `uninstall` |
 | `ci` | CI helpers for PR/MR feedback envelopes |  |
 | `ci reconcile-review` | Resolve stale review threads on a PR/MR by joining a typed review envelope (`--format review-github` / `review-gitlab`) against the provider's existing comments + threads. Posts an idempotent "Resolved in `<sha>`" follow-up per stale fingerprint, marker keyed on (fingerprint, short-sha) so re-runs on the same commit don't duplicate. Provider mutations are fail-fast; JSON can include `apply_hint`, `failed_fingerprints`, and `unapplied_fingerprints` when `apply_errors` is non-empty. | `--provider`, `--pr` (GH) / `--mr` (GL), `--repo` / `--project-id`, `--api-url`, `--envelope`, `--dry-run` |
 | `config-schema` | Print the JSON Schema for fallow configuration files |  |
@@ -126,14 +124,13 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 | `telemetry` | Manage opt-in, off-by-default product telemetry (never collects code, paths, or names). Agents must not enable it; only the user may | `status`, `enable`, `disable`, `inspect --example` |
 | `coverage` | Runtime coverage setup, focused analysis, and cloud inventory workflow helper | `setup`, `setup --yes`, `setup --non-interactive`, `analyze --runtime-coverage <path>`, `analyze --cloud --repo owner/repo`, `upload-inventory` |
 | `coverage upload-source-maps` | Upload build source maps from CI so bundled runtime coverage resolves to original source paths. Retries 429 `Retry-After` and transient gateway failures. Use `FALLOW_CA_BUNDLE` for complete custom PEM trust bundles. | `--dir dist`, `--git-sha <sha>`, `--repo <name>`, `--strip-path=false`, `--dry-run` |
-| `setup-hooks` | Install or remove a Claude Code PreToolUse hook that gates `git commit` / `git push` on `fallow audit`, so the agent cleans findings before the command runs | `--agent`, `--dry-run`, `--force`, `--user`, `--gitignore-claude`, `--uninstall` |
+| `setup-hooks` | Deprecated (removed in the next major): use `agent install` or `hooks install --target agent`; still installs the Claude Code PreToolUse gate with a stderr warning | `--agent`, `--dry-run`, `--force`, `--user`, `--gitignore-claude`, `--uninstall` |
 | `viz` | Render the codebase as a self-contained interactive HTML map (treemap + import graph, four lenses: dead code, duplication, boundaries, complexity, with click-through detail panels), or emit the import graph as text. Read-only. | `--out <path>`, `--no-open`, `--viz-format html\|dot\|mermaid`, `--root`, `--config`, `--production`, `--no-cache` |
 
 Run `fallow <command> --help` for the full flag list per command (see also references/cli-reference.md).
 <!-- generated:commands:end -->
 
 ## Issue Types
-
 <!-- generated:issue-types:start -->
 | Type | Filter flag | Fixable | Suppress comment | Description |
 |---|---|---|---|---|
@@ -208,11 +205,13 @@ Runtime-coverage verdicts and the full security sink catalogue are listed by `fa
 
 Fallow ships an MCP server (`fallow-mcp`) that exposes these same analyses as agent tools. When the server is connected, its tools are already in your context with typed params and structured JSON returns, and each maps to a CLI fallback command. Prefer them when you want JSON without shelling out, or `code_execute` (Code Mode) to compose several read-only analyses in one sandboxed snippet (no single-call CLI equivalent). Otherwise use the CLI.
 
-Full tool catalogue, key params, runtime source-map confidence tiers, shared timeouts, and the `next_steps` dispatch mapping: **[references/mcp.md](references/mcp.md)**.
+The server also serves read-only reference resources (no subprocess, no analysis run, cacheable by URI; your client reads them through its own resource tool): `fallow://tools`, `fallow://issue-types`, `fallow://explain/{issue_type}`, `fallow://task-matrix`, and the config, plugin, and rule-pack JSON Schemas. Every payload is JSON and carries `fallow_version`.
+
+Full tool catalogue, resource catalogue, key params, runtime source-map confidence tiers, shared timeouts, and the `next_steps` dispatch mapping: **[references/mcp.md](references/mcp.md)**.
 
 ## References
 - [CLI Reference](references/cli-reference.md): complete command and flag specifications, plus configuration field details
-- [MCP Tools](references/mcp.md): MCP server tool catalogue, CLI fallbacks, params, and agent dispatch guidance
+- [MCP Tools](references/mcp.md): MCP server tool and resource catalogues, CLI fallbacks, params, and agent dispatch guidance
 - [Gotchas](references/gotchas.md): common pitfalls, edge cases, and correct usage patterns
 - [Patterns](references/patterns.md): workflow recipes for CI, monorepos, migration, and incremental adoption
 - [Similar Code](references/similar-code.md): snapshot-stable discovery, inspection, and verdict workflow

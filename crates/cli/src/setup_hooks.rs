@@ -8,8 +8,9 @@
 //! the agent can read `_meta.docs` links and `actions`, fix the findings,
 //! and retry.
 //!
-//! This is the legacy *agent-hook* command. The clearer namespace is
-//! `fallow hooks install --target agent`. For the *git pre-commit* hook
+//! `fallow setup-hooks` itself is deprecated (removed in the next major);
+//! the engine stays because `fallow hooks install --target agent` and
+//! `fallow agent install` run through it. For the *git pre-commit* hook
 //! scaffolder, see `fallow hooks install --target git`. The two targets write
 //! to different surfaces: Git hooks write into `.git/hooks/` or `.husky/`, and
 //! agent hooks write into `.claude/` / `AGENTS.md`.
@@ -101,10 +102,20 @@ const USER_FALLOW_HANDLER_COMMAND: &str = "\"$HOME\"/.claude/hooks/fallow-gate.s
 const FALLOW_GATE_POSIX_SUFFIX: &str = "/.claude/hooks/fallow-gate.sh";
 const FALLOW_GATE_WINDOWS_SUFFIX: &str = "\\.claude\\hooks\\fallow-gate.sh";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Mode {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
     Install,
     Uninstall,
+}
+
+impl Mode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "install",
+            Self::Uninstall => "uninstall",
+        }
+    }
 }
 
 /// Entry point for the `fallow setup-hooks` subcommand.
@@ -146,6 +157,20 @@ pub fn run_setup_hooks_with_label(opts: &SetupHooksOptions<'_>, command_label: &
 
     print_summary(&report, opts, mode, command_label);
     ExitCode::SUCCESS
+}
+
+/// Resolve and execute the agent-hook plan without printing a summary.
+/// `fallow agent install` renders its own combined report from the returned
+/// [`Report`]. Returns `Ok(None)` when no surface is selected.
+pub fn execute_agent_hooks(
+    opts: &SetupHooksOptions<'_>,
+    mode: Mode,
+) -> Result<Option<Report>, String> {
+    let plan = Plan::resolve(opts, mode)?;
+    if plan.is_empty() {
+        return Ok(None);
+    }
+    plan.execute(opts, mode).map(Some)
 }
 
 /// Render read-only status for all supported hook surfaces.
@@ -203,23 +228,23 @@ struct CodexTargets {
 }
 
 #[derive(Debug, Serialize)]
-struct HooksStatusReport {
-    git: HookSurfaceStatus,
-    claude: HookSurfaceStatus,
-    codex: HookSurfaceStatus,
+pub struct HooksStatusReport {
+    pub git: HookSurfaceStatus,
+    pub claude: HookSurfaceStatus,
+    pub codex: HookSurfaceStatus,
 }
 
 #[derive(Debug, Serialize)]
-struct HookSurfaceStatus {
-    installed: bool,
-    managed_block_present: bool,
-    user_edited: bool,
-    path: String,
-    script_version: Option<String>,
-    min_version_floor: Option<String>,
+pub struct HookSurfaceStatus {
+    pub installed: bool,
+    pub managed_block_present: bool,
+    pub user_edited: bool,
+    pub path: String,
+    pub script_version: Option<String>,
+    pub min_version_floor: Option<String>,
 }
 
-fn build_hooks_status(root: &Path) -> HooksStatusReport {
+pub fn build_hooks_status(root: &Path) -> HooksStatusReport {
     HooksStatusReport {
         git: git_hook_status(root),
         claude: claude_hook_status(root),
@@ -295,7 +320,7 @@ fn codex_hook_status(root: &Path) -> HookSurfaceStatus {
     }
 }
 
-fn settings_has_fallow_handler(raw: &str) -> bool {
+pub fn settings_has_fallow_handler(raw: &str) -> bool {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
         return false;
     };
@@ -476,27 +501,27 @@ impl CodexTargets {
 }
 
 #[derive(Debug, Default)]
-struct Report {
-    claude: Option<ClaudeReport>,
-    codex: Option<CodexReport>,
+pub struct Report {
+    pub claude: Option<ClaudeReport>,
+    pub codex: Option<CodexReport>,
 }
 
 #[derive(Debug)]
-struct ClaudeReport {
-    settings_path: PathBuf,
-    settings_outcome: SettingsOutcome,
-    script_path: PathBuf,
-    script_outcome: ScriptOutcome,
+pub struct ClaudeReport {
+    pub settings_path: PathBuf,
+    pub settings_outcome: SettingsOutcome,
+    pub script_path: PathBuf,
+    pub script_outcome: ScriptOutcome,
 }
 
 #[derive(Debug)]
-struct CodexReport {
-    agents_path: PathBuf,
-    outcome: AgentsOutcome,
+pub struct CodexReport {
+    pub agents_path: PathBuf,
+    pub outcome: AgentsOutcome,
 }
 
 #[derive(Debug)]
-enum SettingsOutcome {
+pub enum SettingsOutcome {
     Created,
     Updated {
         handlers_added: usize,
@@ -510,7 +535,7 @@ enum SettingsOutcome {
 }
 
 #[derive(Debug)]
-enum ScriptOutcome {
+pub enum ScriptOutcome {
     Created,
     Updated,
     Unchanged,
@@ -520,7 +545,7 @@ enum ScriptOutcome {
 }
 
 #[derive(Debug)]
-enum AgentsOutcome {
+pub enum AgentsOutcome {
     Inserted,
     Replaced,
     Unchanged,
@@ -1056,7 +1081,7 @@ fn set_executable_bit(_path: &Path) {}
 /// Locate the managed block, requiring the end marker to appear after the
 /// start marker. Inverted or unpaired markers indicate a hand-edited file
 /// where splicing would duplicate or drop user content.
-fn find_managed_block_bounds(text: &str) -> Option<(usize, usize)> {
+pub fn find_managed_block_bounds(text: &str) -> Option<(usize, usize)> {
     let start = text.find(AGENTS_BLOCK_START)?;
     let end_offset = text[start..].find(AGENTS_BLOCK_END)?;
     Some((start, start + end_offset))
@@ -1070,7 +1095,7 @@ fn find_managed_block_bounds(text: &str) -> Option<(usize, usize)> {
 /// Development`, or `## Local development` heading (if present); failing
 /// that it is appended at the end with a horizontal-rule separator so the
 /// block reads as deliberate rather than orphaned prose.
-fn upsert_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOutcome> {
+pub fn upsert_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOutcome> {
     let existing = read_optional_text(path)?.unwrap_or_default();
     let new_block = format!(
         "{AGENTS_BLOCK_START}\n{}{AGENTS_BLOCK_END}\n",
@@ -1130,11 +1155,11 @@ fn upsert_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOut
     Ok(outcome)
 }
 
-fn remove_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOutcome> {
+pub fn remove_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOutcome> {
     let Some(existing) = read_optional_text(path)? else {
         return Ok(AgentsOutcome::NotPresent);
     };
-    let Some((start, end)) = find_managed_block_bounds(&existing) else {
+    let Some(buf) = strip_managed_block(&existing) else {
         let has_marker =
             existing.contains(AGENTS_BLOCK_START) || existing.contains(AGENTS_BLOCK_END);
         return Ok(if has_marker {
@@ -1143,6 +1168,20 @@ fn remove_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOut
             AgentsOutcome::Unchanged
         });
     };
+
+    if dry_run {
+        return Ok(AgentsOutcome::Removed);
+    }
+    std::fs::write(path, buf)?;
+    Ok(AgentsOutcome::Removed)
+}
+
+/// The text with the managed block (and the separator `upsert_managed_block`
+/// added in front of it) removed, or `None` when no well-formed block exists.
+/// Shared with `fallow agent` so its authored-content hash sees the same
+/// text before and after the block is removed.
+pub fn strip_managed_block(existing: &str) -> Option<String> {
+    let (start, end) = find_managed_block_bounds(existing)?;
     let end_line_end = existing[end..]
         .find('\n')
         .map_or(existing.len(), |offset| end + offset + 1);
@@ -1160,12 +1199,7 @@ fn remove_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOut
     let tail = &existing[end_line_end..];
     let tail = tail.strip_prefix('\n').unwrap_or(tail);
     buf.push_str(tail);
-
-    if dry_run {
-        return Ok(AgentsOutcome::Removed);
-    }
-    std::fs::write(path, buf)?;
-    Ok(AgentsOutcome::Removed)
+    Some(buf)
 }
 
 fn find_tooling_insertion_point(text: &str) -> Option<usize> {
@@ -1188,7 +1222,7 @@ fn find_tooling_insertion_point(text: &str) -> Option<usize> {
     None
 }
 
-fn ensure_gitignore_entry(root: &Path, entry: &str) -> std::io::Result<()> {
+pub fn ensure_gitignore_entry(root: &Path, entry: &str) -> std::io::Result<()> {
     let gitignore_path = root.join(".gitignore");
     let existing = read_optional_text(&gitignore_path)?.unwrap_or_default();
     let target = entry.trim_end_matches('/');
@@ -1212,7 +1246,7 @@ fn ensure_gitignore_entry(root: &Path, entry: &str) -> std::io::Result<()> {
     std::fs::write(&gitignore_path, contents)
 }
 
-fn read_optional_text(path: &Path) -> std::io::Result<Option<String>> {
+pub fn read_optional_text(path: &Path) -> std::io::Result<Option<String>> {
     match std::fs::read_to_string(path) {
         Ok(contents) => Ok(Some(contents)),
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
@@ -1220,7 +1254,7 @@ fn read_optional_text(path: &Path) -> std::io::Result<Option<String>> {
     }
 }
 
-fn home_dir() -> Option<PathBuf> {
+pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
@@ -1261,7 +1295,7 @@ fn print_summary(report: &Report, opts: &SetupHooksOptions<'_>, mode: Mode, comm
     }
 }
 
-fn describe_settings(outcome: &SettingsOutcome) -> String {
+pub fn describe_settings(outcome: &SettingsOutcome) -> String {
     match outcome {
         SettingsOutcome::Created => "created".to_string(),
         SettingsOutcome::Updated {
@@ -1305,7 +1339,7 @@ fn describe_settings(outcome: &SettingsOutcome) -> String {
     }
 }
 
-fn describe_script(outcome: &ScriptOutcome, dry_run: bool, mode: Mode) -> String {
+pub fn describe_script(outcome: &ScriptOutcome, dry_run: bool, mode: Mode) -> String {
     match (outcome, mode, dry_run) {
         (ScriptOutcome::Created, _, false) => "created".to_string(),
         (ScriptOutcome::Created, _, true) => "would create".to_string(),
@@ -1321,7 +1355,7 @@ fn describe_script(outcome: &ScriptOutcome, dry_run: bool, mode: Mode) -> String
     }
 }
 
-fn describe_agents(outcome: &AgentsOutcome, dry_run: bool, _mode: Mode) -> String {
+pub fn describe_agents(outcome: &AgentsOutcome, dry_run: bool, _mode: Mode) -> String {
     match (outcome, dry_run) {
         (AgentsOutcome::Inserted, false) => "managed block inserted".to_string(),
         (AgentsOutcome::Inserted, true) => "would insert managed block".to_string(),
@@ -1342,7 +1376,7 @@ fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-fn display_rel(root: &Path, path: &Path) -> String {
+pub fn display_rel(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .map_or_else(|_| path.display().to_string(), |p| p.display().to_string())
 }

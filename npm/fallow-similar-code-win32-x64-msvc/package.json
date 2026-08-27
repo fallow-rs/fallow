@@ -1,1 +1,1 @@
-{"name":"@fallow-cli/fallow-similar-code-win32-x64-msvc","version":"3.18.0","license":"MIT","repository":{"type":"git","url":"git+https://github.com/fallow-rs/fallow.git"},"os":["win32"],"cpu":["x64"],"files":["fallow-similar-code.exe","fallow-similar-code.exe.sig"]}
+{"name":"@fallow-cli/fallow-similar-code-win32-x64-msvc","version":"3.19.0","license":"MIT","repository":{"type":"git","url":"git+https://github.com/fallow-rs/fallow.git"},"os":["win32"],"cpu":["x64"],"files":["fallow-similar-code.exe","fallow-similar-code.exe.sig"]}

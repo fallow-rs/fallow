@@ -13,7 +13,21 @@ fn server_info_is_correct() {
     assert_eq!(info.server_info.name, "fallow-mcp");
     assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
     assert!(info.capabilities.tools.is_some());
-    assert!(info.instructions.is_some());
+    let resources = info
+        .capabilities
+        .resources
+        .as_ref()
+        .expect("resources capability must be advertised");
+    assert!(
+        resources.subscribe.is_none() && resources.list_changed.is_none(),
+        "the resource catalogue is compile-time constant; subscribe and listChanged must stay undeclared"
+    );
+    assert!(
+        info.instructions
+            .as_deref()
+            .is_some_and(|text| text.contains("fallow://task-matrix")),
+        "instructions must point agents at the resource surface"
+    );
 }
 
 #[test]

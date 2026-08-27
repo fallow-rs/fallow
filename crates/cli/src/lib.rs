@@ -34,10 +34,12 @@ mod base_worktree;
 pub use base_worktree::canonical_root_hash;
 mod walkthrough_state;
 use fallow_engine::baseline;
+mod agent_install;
 mod cache_notice;
 mod check;
 mod ci;
 mod ci_template;
+mod cli_agent;
 mod cli_format;
 mod cli_hooks;
 mod cli_impact;
@@ -94,6 +96,7 @@ mod watch;
 use check::{CheckOptions, IssueFilters, TraceOptions};
 /// Structured error output for CLI and JSON formats.
 pub(crate) mod error;
+use cli_agent::{AgentCli, run_agent_command};
 #[cfg(test)]
 use cli_format::parse_format_arg;
 use cli_format::{Format, FormatConfig};
@@ -188,6 +191,7 @@ Project inspection:
 
 Setup and configuration:
   init              Create a fallow config, optionally with a Git hook
+  agent             Wire fallow into Claude Code, Codex, or Cursor in one pass
   audit-cache       Maintain reusable audit base-snapshot caches
   recommend         Recommend a project-tailored config for an agent to author
   migrate           Migrate knip, jscpd, or stylelint config to fallow
@@ -204,7 +208,7 @@ Automation and CI:
   ci-template    Print or vendor CI integration templates
   report         Re-render saved JSON as GitHub or CodeClimate output
   hooks          Install or remove fallow-managed Git and agent hooks
-  setup-hooks    Legacy agent-hook installer
+  setup-hooks    Deprecated: use `agent install` or `hooks install --target agent`
 
 Runtime coverage:
   coverage       Set up or analyze runtime coverage data
@@ -969,6 +973,16 @@ enum Command {
     Hooks {
         #[command(subcommand)]
         subcommand: HooksCli,
+    },
+
+    /// Wire fallow into the coding-agent harnesses used by this project in
+    /// one pass (AGENTS.md task map, skill, MCP server, commit/push gate), or
+    /// show and remove what was installed. `fallow init --agents` and
+    /// `fallow hooks install --target agent` remain the single-piece
+    /// commands underneath.
+    Agent {
+        #[command(subcommand)]
+        subcommand: AgentCli,
     },
 
     /// CI helpers for PR/MR feedback envelopes.
@@ -1748,16 +1762,13 @@ enum Command {
     /// `git commit` / `git push` on `fallow audit`, so the agent cleans
     /// findings before the command runs.
     ///
-    /// This is the legacy AGENT-level enforcement command. Prefer
-    /// `fallow hooks install --target agent` for new setup. It writes into
-    /// `.claude/settings.json` + `.claude/hooks/fallow-gate.sh` (and
-    /// optionally an `AGENTS.md` managed block for Codex). For a
-    /// shell-level Git pre-commit hook in `.git/hooks/`, see
-    /// `fallow hooks install --target git` instead. Both targets can be used
-    /// together: git hooks catch human commits, agent hooks catch agent
-    /// commits.
-    ///
-    /// See `/integrations/claude-hooks` in the docs for the full recipe.
+    /// Deprecated: use `fallow agent install` (one pass for every harness)
+    /// or `fallow hooks install --target agent` (the gate alone). This
+    /// command keeps working throughout fallow 3 and is removed in the next
+    /// major. It writes into `.claude/settings.json` +
+    /// `.claude/hooks/fallow-gate.sh` (and optionally an `AGENTS.md` managed
+    /// block for Codex). For a shell-level Git pre-commit hook in
+    /// `.git/hooks/`, see `fallow hooks install --target git` instead.
     SetupHooks {
         /// Target a specific agent surface (default: auto-detect).
         #[arg(long, value_enum)]
@@ -3473,6 +3484,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Hooks { subcommand } => {
             run_hooks_command(root, subcommand, output, dispatch.json_style)
         }
+        Command::Agent { subcommand } => dispatch_agent_command(dispatch, subcommand),
         Command::Ci { subcommand } => {
             ci::run(map_ci_subcommand(subcommand), output, dispatch.json_style)
         }
@@ -4191,6 +4203,16 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
     )
 }
 
+fn dispatch_agent_command(dispatch: &DispatchContext<'_>, subcommand: AgentCli) -> ExitCode {
+    run_agent_command(
+        dispatch.root,
+        dispatch.cli.root.is_some(),
+        subcommand,
+        dispatch.output,
+        dispatch.json_style,
+    )
+}
+
 fn dispatch_init_command(command: Command, root: &Path, quiet: bool) -> ExitCode {
     let Command::Init {
         toml,
@@ -4395,6 +4417,9 @@ fn dispatch_setup_hooks_command(command: &Command, dispatch: &DispatchContext<'_
         unreachable!("setup-hooks dispatcher only handles setup-hooks commands");
     };
 
+    eprintln!(
+        "warning: `fallow setup-hooks` is deprecated and will be removed in the next major; use `fallow agent install` or `fallow hooks install --target agent`."
+    );
     setup_hooks::run_setup_hooks(&setup_hooks::SetupHooksOptions {
         root: dispatch.root,
         agent: *agent,

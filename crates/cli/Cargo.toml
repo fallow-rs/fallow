@@ -57,9 +57,9 @@ fallow-output = { workspace = true }
 fallow-process = { workspace = true }
 fallow-security = { workspace = true }
 fallow-types = { workspace = true }
-fallow-v8-coverage = { version = "3.18.0", path = "../v8-coverage" }
+fallow-v8-coverage = { version = "3.19.0", path = "../v8-coverage" }
 fallow-cov-protocol = "0.8"
-fallow-license = { version = "3.18.0", path = "../license" }
+fallow-license = { version = "3.19.0", path = "../license" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { workspace = true }
 dunce = { workspace = true }
@@ -71,6 +71,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml_ng = { workspace = true }
 toml = { workspace = true }
+toml_edit = { workspace = true }
+flate2 = { workspace = true }
 semver = { workspace = true }
 bitcode = { workspace = true }
 jsonc-parser = { workspace = true }
@@ -103,6 +105,9 @@ signal-hook = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }
+
+[build-dependencies]
+flate2 = { workspace = true }
 
 [lib]
 name = "fallow_cli"

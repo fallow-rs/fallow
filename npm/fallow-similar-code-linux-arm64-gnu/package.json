@@ -1,1 +1,1 @@
-{"name":"@fallow-cli/fallow-similar-code-linux-arm64-gnu","version":"3.18.0","license":"MIT","repository":{"type":"git","url":"git+https://github.com/fallow-rs/fallow.git"},"os":["linux"],"cpu":["arm64"],"libc":["glibc"],"files":["fallow-similar-code","fallow-similar-code.sig"]}
+{"name":"@fallow-cli/fallow-similar-code-linux-arm64-gnu","version":"3.19.0","license":"MIT","repository":{"type":"git","url":"git+https://github.com/fallow-rs/fallow.git"},"os":["linux"],"cpu":["arm64"],"libc":["glibc"],"files":["fallow-similar-code","fallow-similar-code.sig"]}

@@ -516,7 +516,7 @@ checksum = "d817e038c30374a4bcb22f94d0a8a0e216958d4c3dcde369b1439fec4bdda6e6"
 
 [[package]]
 name = "fallow-similar-code-sidecar"
-version = "3.18.0"
+version = "3.19.0"
 dependencies = [
  "candle-core",
  "candle-nn",

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.0] - 2026-08-26
+
 ### Added
 
 - **`fallow review` judgments carry an author-action label, and the guide
@@ -51,6 +53,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is advisory and does not participate in bare analysis, audit gates, SARIF,
   editor diagnostics, or auto-fix.
 
+- **`fallow agent install` wires a project's coding-agent harnesses in one
+  pass.** Onboarding an agent previously meant `fallow init --agents`,
+  `fallow hooks install --target agent`, hand-copying the MCP snippet from the
+  README, and knowing that a skill ships under `node_modules/fallow/skills`.
+  The new `agent` command detects Claude Code, Codex, and Cursor from the
+  project, the home directory, and the session environment (or takes
+  `--harness`), then writes what each one reads: an `AGENTS.md` task map (plus
+  an `@AGENTS.md` import in `CLAUDE.md` for Claude Code), the fallow skill
+  under `.claude/skills/` or `.agents/skills/` (a small pointer to the
+  project's own `node_modules/fallow` copy when it exists, otherwise a
+  version-matched copy embedded in the binary), the MCP server registration
+  in `.mcp.json`, `.codex/config.toml`, or `.cursor/mcp.json` (only after
+  probing that a `fallow-mcp` launcher exists), and the commit/push gate. Every
+  file or block carries a versioned `fallow:agent-install` marker, re-running
+  is byte-stable, `--dry-run` prints the plan, the human summary groups paths
+  into "shared with your team" and "local to you", and JSON output lists every
+  step with a `status` and `reason`. `fallow agent status` reports installed,
+  stale, absent, and foreign surfaces; `fallow agent uninstall` removes managed
+  content and deletes a file fallow authored only while it still matches what
+  fallow wrote. Pre-approving the project MCP server for Claude Code stays
+  opt-in through `--approve` and is refused when `.claude/settings.local.json`
+  is tracked by git. `init --agents` and `hooks install --target agent` are
+  unchanged and remain the single-piece commands underneath.
+
+- **The MCP server exposes reference material as resources.** `fallow-mcp`
+  now declares the `resources` capability next to `tools`. Agents can list and
+  read `fallow://tools` (the tool manifest with CLI fallbacks),
+  `fallow://issue-types` (every issue type with its zero-config default
+  severity, opt-in and fixable flags, and docs URL), `fallow://explain` (an
+  index) plus the `fallow://explain/{issue_type}` template (the same document
+  `fallow explain <issue-type> --format json` prints), `fallow://task-matrix`
+  (which read-only command to run before a task), and
+  `fallow://schema/config`, `fallow://schema/plugin`, and
+  `fallow://schema/rule-pack` (the JSON Schemas, byte-identical to the CLI
+  documents). Everything is rendered in-process and is JSON; the server
+  version travels in each content item's `_meta.fallow_version`, so a client
+  can cache by URI and invalidate on server version; unknown URIs and issue types return a
+  structured `resource_not_found` error with the known URIs or the nearest
+  issue types. `fallow schema` gains a matching `mcp_resources` block and the
+  shipped skill reference gains a generated resource table.
 - **size-limit presets, plugins, and config files are recognized**
   ([#2413](https://github.com/fallow-rs/fallow/pull/2413)). size-limit loads
   `@size-limit/*` and `size-limit-*` packages from `package.json` by convention
@@ -65,8 +107,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"size-limit"` array in `package.json` needs no config file. Thanks to
   [@robinvdvleuten](https://github.com/robinvdvleuten) for the contribution.
 
+### Deprecated
+
+- **`fallow setup-hooks`.** `fallow agent install` (every harness in one pass)
+  and `fallow hooks install --target agent` (the gate alone) cover it. The
+  command keeps working throughout fallow 3 and prints a one-line warning on
+  stderr; it is removed in the next major.
+
 ### Changed
 
+- **Fallow is listed in the official MCP Registry.** The repository ships the
+  registry's `server.json` next to an `mcpName` in the npm package, both
+  pinned to the released version by a policy test, so MCP clients that browse
+  the registry find `fallow-mcp` with its stdio launcher.
 - **`fallow impact statusline` now says when the Impact store was written by a
   newer Fallow.** An older binary reading a newer store printed the generic
   `data unavailable` line, which read as lost history. It now prints
@@ -6910,7 +6963,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.18.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.19.0...HEAD
+[3.19.0]: https://github.com/fallow-rs/fallow/compare/v3.18.0...v3.19.0
 [3.18.0]: https://github.com/fallow-rs/fallow/compare/v3.17.0...v3.18.0
 [3.17.0]: https://github.com/fallow-rs/fallow/compare/v3.16.0...v3.17.0
 [3.16.0]: https://github.com/fallow-rs/fallow/compare/v3.15.0...v3.16.0

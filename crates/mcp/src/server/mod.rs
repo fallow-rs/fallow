@@ -1,6 +1,11 @@
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    CallToolResult, ContentBlock, Implementation, ListResourceTemplatesResult, ListResourcesResult,
+    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
+    ServerInfo,
+};
+use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
@@ -279,7 +284,7 @@ impl FallowMcp {
         run_decision_surface(&self.binary, params.0).await
     }
 
-    /// Explain one fallow issue type without running analysis. Returns the rule id, name, rationale, worked example, fix guidance, and docs URL as JSON. Use this before applying fixes when an agent or reviewer needs to understand what a finding means.
+    /// Explain one fallow issue type without running analysis. Returns the rule id, name, rationale, worked example, fix guidance, and docs URL as JSON. Use this before applying fixes when an agent or reviewer needs to understand what a finding means. If your client exposes MCP resources, `fallow://explain/{issue_type}` serves the same document as a cacheable resource read.
     #[tool(annotations(read_only_hint = true, open_world_hint = false))]
     async fn fallow_explain(
         &self,
@@ -388,7 +393,12 @@ impl FallowMcp {
 #[rmcp::tool_handler]
 impl ServerHandler for FallowMcp {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
             .with_server_info(
                 Implementation::new("fallow-mcp", env!("CARGO_PKG_VERSION"))
                     .with_description("Codebase analysis for TypeScript/JavaScript projects"),
@@ -415,7 +425,36 @@ impl ServerHandler for FallowMcp {
                  feature_flags (detect feature flag patterns), \
                  list_suppressions (governance inventory of active fallow-ignore markers grouped per file; read-only, always exits 0), \
                  impact (read the local, opt-in value report: surfacing / trend / gate containment / resolved attribution; local-dev only, runs no analysis). \
-                 Picking check_health vs check_runtime_coverage: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want surfaced dead-in-production verdicts; use check_health for general complexity / hotspot / CRAP analysis without a coverage dump.",
+                 Picking check_health vs check_runtime_coverage: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want surfaced dead-in-production verdicts; use check_health for general complexity / hotspot / CRAP analysis without a coverage dump. \
+                 Resources (read-only reference material, no analysis run, safe to cache per server version): fallow://tools (tool manifest with CLI fallbacks), fallow://issue-types (every issue type with default severity, fixable flag, docs URL), fallow://explain (index) and fallow://explain/{issue_type} (the same document as fallow_explain), fallow://task-matrix (which read-only command to run before a task), and fallow://schema/config, fallow://schema/plugin, fallow://schema/rule-pack (JSON Schemas). Read a resource instead of calling fallow_explain when you only need reference material.",
             )
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        Ok(ListResourcesResult::with_all_items(
+            crate::resources::list_resources(),
+        ))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, McpError> {
+        Ok(ListResourceTemplatesResult::with_all_items(
+            crate::resources::list_resource_templates(),
+        ))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, McpError> {
+        crate::resources::read_resource(&request.uri).map(ReadResourceResponse::from)
     }
 }
