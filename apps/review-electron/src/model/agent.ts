@@ -83,7 +83,12 @@ export type AcceptedJudgment = {
 export type ValidationEnvelope = {
   stale?: boolean;
   accepted?: AcceptedJudgment[];
-  rejected?: { signal_id: string; change_anchor?: string; reason: string }[];
+  rejected?: {
+    signal_id: string;
+    change_anchor?: string;
+    reason: string;
+    invalid_value?: string;
+  }[];
   accepted_count?: number;
   rejected_count?: number;
 };

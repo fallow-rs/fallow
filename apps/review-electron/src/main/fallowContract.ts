@@ -50,6 +50,7 @@ export interface WalkthroughValidationContract {
     signal_id: string;
     change_anchor: string;
     reason: string;
+    invalid_value?: string;
   }>;
 }
 
@@ -190,7 +191,8 @@ const isRejectedJudgment = (
   isRecord(value) &&
   isString(value["signal_id"]) &&
   isString(value["change_anchor"]) &&
-  isString(value["reason"]);
+  isString(value["reason"]) &&
+  isOptional(value["invalid_value"], isString);
 
 const isWalkthroughValidationContract = (value: unknown): value is WalkthroughValidationContract =>
   hasHeader(value, "review-walkthrough-validation") &&
