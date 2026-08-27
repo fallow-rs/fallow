@@ -1479,7 +1479,12 @@ fn print_unmatched_ignore_findings_note(result: &CheckResult, quiet: bool) {
 }
 
 fn issue_severity_exit_code(result: &CheckResult, effective_rules: &RulesConfig) -> ExitCode {
-    if rules::has_error_severity_issues(&result.results, effective_rules, Some(&result.config)) {
+    if rules::has_error_severity_issues(
+        &result.results,
+        effective_rules,
+        Some(&result.config),
+        result.fail_on_issues,
+    ) {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS

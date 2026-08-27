@@ -1,4 +1,5 @@
 use fallow_config::{ResolvedConfig, RulesConfig, Severity};
+use std::path::Path;
 
 /// Remove issues whose effective severity is `Off` from the results.
 ///
@@ -429,15 +430,25 @@ fn apply_boundary_override_rules(
 /// When overrides are configured, per-file rule resolution is used for
 /// file-scoped issue types to determine if any individual issue has Error
 /// severity. Circular dependencies resolve against every file in the cycle.
+///
+/// `promote_warns` mirrors `--fail-on-issues`: `rules` is expected to arrive
+/// already promoted, and the per-file override path promotes each resolved
+/// severity after override resolution so an explicit per-path `warn` fails
+/// the run just like the base rules would.
 pub fn has_error_severity_issues(
     results: &fallow_types::results::AnalysisResults,
     rules: &RulesConfig,
     config: Option<&ResolvedConfig>,
+    promote_warns: bool,
 ) -> bool {
     let has_overrides = config.is_some_and(|c| !c.overrides.is_empty());
 
     let file_scoped_errors = if let Some(config) = config.filter(|c| !c.overrides.is_empty()) {
-        has_override_file_scoped_error(results, config)
+        let resolver = OverrideSeverities {
+            config,
+            promote_warns,
+        };
+        has_override_file_scoped_error(results, &resolver)
     } else {
         has_default_file_scoped_error(results, rules)
     };
@@ -445,72 +456,92 @@ pub fn has_error_severity_issues(
     file_scoped_errors || has_project_level_error(results, rules, has_overrides)
 }
 
+/// Per-file severity source for the override path of the exit-code check.
+///
+/// Warn-to-error promotion happens after override resolution so it reaches
+/// severities set by a per-path override, not only the base rules.
+struct OverrideSeverities<'a> {
+    config: &'a ResolvedConfig,
+    promote_warns: bool,
+}
+
+impl OverrideSeverities<'_> {
+    fn effective_rules_for(&self, path: &Path) -> RulesConfig {
+        let mut rules = self.config.resolve_rules_for_path(path);
+        if self.promote_warns {
+            promote_warns_to_errors(&mut rules);
+        }
+        rules
+    }
+}
+
 fn has_override_file_scoped_error(
     results: &fallow_types::results::AnalysisResults,
-    config: &ResolvedConfig,
+    resolver: &OverrideSeverities<'_>,
 ) -> bool {
-    has_override_dead_code_error(results, config)
-        || has_override_catalog_boundary_error(results, config)
-        || has_override_framework_error(results, config)
+    has_override_dead_code_error(results, resolver)
+        || has_override_catalog_boundary_error(results, resolver)
+        || has_override_framework_error(results, resolver)
 }
 
 fn has_override_dead_code_error(
     results: &fallow_types::results::AnalysisResults,
-    config: &ResolvedConfig,
+    resolver: &OverrideSeverities<'_>,
 ) -> bool {
-    has_override_core_dead_code_error(results, config)
-        || has_override_component_dead_code_error(results, config)
+    has_override_core_dead_code_error(results, resolver)
+        || has_override_component_dead_code_error(results, resolver)
 }
 
 /// Per-file Error check for the core (non-component) dead-code issue types.
 fn has_override_core_dead_code_error(
     results: &fallow_types::results::AnalysisResults,
-    config: &ResolvedConfig,
+    resolver: &OverrideSeverities<'_>,
 ) -> bool {
     results
         .unused_files
         .iter()
-        .any(|f| config.resolve_rules_for_path(&f.file.path).unused_files == Severity::Error)
-        || results.unused_exports.iter().any(|e| {
-            config.resolve_rules_for_path(&e.export.path).unused_exports == Severity::Error
-        })
+        .any(|f| resolver.effective_rules_for(&f.file.path).unused_files == Severity::Error)
+        || results
+            .unused_exports
+            .iter()
+            .any(|e| resolver.effective_rules_for(&e.export.path).unused_exports == Severity::Error)
         || results
             .unused_types
             .iter()
-            .any(|e| config.resolve_rules_for_path(&e.export.path).unused_types == Severity::Error)
+            .any(|e| resolver.effective_rules_for(&e.export.path).unused_types == Severity::Error)
         || results.private_type_leaks.iter().any(|e| {
-            config
-                .resolve_rules_for_path(&e.leak.path)
+            resolver
+                .effective_rules_for(&e.leak.path)
                 .private_type_leaks
                 == Severity::Error
         })
         || results.unused_enum_members.iter().any(|m| {
-            config
-                .resolve_rules_for_path(&m.member.path)
+            resolver
+                .effective_rules_for(&m.member.path)
                 .unused_enum_members
                 == Severity::Error
         })
         || results.unused_class_members.iter().any(|m| {
-            config
-                .resolve_rules_for_path(&m.member.path)
+            resolver
+                .effective_rules_for(&m.member.path)
                 .unused_class_members
                 == Severity::Error
         })
         || results.unused_store_members.iter().any(|m| {
-            config
-                .resolve_rules_for_path(&m.member.path)
+            resolver
+                .effective_rules_for(&m.member.path)
                 .unused_store_members
                 == Severity::Error
         })
         || results.unprovided_injects.iter().any(|f| {
-            config
-                .resolve_rules_for_path(&f.inject.path)
+            resolver
+                .effective_rules_for(&f.inject.path)
                 .unprovided_injects
                 == Severity::Error
         })
         || results.unresolved_imports.iter().any(|i| {
-            config
-                .resolve_rules_for_path(&i.import.path)
+            resolver
+                .effective_rules_for(&i.import.path)
                 .unresolved_imports
                 == Severity::Error
         })
@@ -519,46 +550,46 @@ fn has_override_core_dead_code_error(
 /// Per-file Error check for the component-shaped dead-code issue types.
 fn has_override_component_dead_code_error(
     results: &fallow_types::results::AnalysisResults,
-    config: &ResolvedConfig,
+    resolver: &OverrideSeverities<'_>,
 ) -> bool {
     results.unrendered_components.iter().any(|c| {
-        config
-            .resolve_rules_for_path(&c.component.path)
+        resolver
+            .effective_rules_for(&c.component.path)
             .unrendered_components
             == Severity::Error
     }) || results.unused_component_props.iter().any(|p| {
-        config
-            .resolve_rules_for_path(&p.prop.path)
+        resolver
+            .effective_rules_for(&p.prop.path)
             .unused_component_props
             == Severity::Error
     }) || results.unused_component_emits.iter().any(|e| {
-        config
-            .resolve_rules_for_path(&e.emit.path)
+        resolver
+            .effective_rules_for(&e.emit.path)
             .unused_component_emits
             == Severity::Error
     }) || results.unused_component_inputs.iter().any(|i| {
-        config
-            .resolve_rules_for_path(&i.input.path)
+        resolver
+            .effective_rules_for(&i.input.path)
             .unused_component_inputs
             == Severity::Error
     }) || results.unused_component_outputs.iter().any(|o| {
-        config
-            .resolve_rules_for_path(&o.output.path)
+        resolver
+            .effective_rules_for(&o.output.path)
             .unused_component_outputs
             == Severity::Error
     }) || results.unused_svelte_events.iter().any(|e| {
-        config
-            .resolve_rules_for_path(&e.event.path)
+        resolver
+            .effective_rules_for(&e.event.path)
             .unused_svelte_events
             == Severity::Error
     }) || results.unused_server_actions.iter().any(|a| {
-        config
-            .resolve_rules_for_path(&a.action.path)
+        resolver
+            .effective_rules_for(&a.action.path)
             .unused_server_actions
             == Severity::Error
     }) || results.unused_load_data_keys.iter().any(|k| {
-        config
-            .resolve_rules_for_path(&k.key.path)
+        resolver
+            .effective_rules_for(&k.key.path)
             .unused_load_data_keys
             == Severity::Error
     })
@@ -566,69 +597,75 @@ fn has_override_component_dead_code_error(
 
 fn has_override_catalog_boundary_error(
     results: &fallow_types::results::AnalysisResults,
-    config: &ResolvedConfig,
+    resolver: &OverrideSeverities<'_>,
 ) -> bool {
     results.stale_suppressions.iter().any(|s| {
-        let rules = config.resolve_rules_for_path(&s.path);
+        let rules = resolver.effective_rules_for(&s.path);
         if s.missing_reason {
             rules.require_suppression_reason == Severity::Error
         } else {
             rules.stale_suppressions == Severity::Error
         }
     }) || results.unresolved_catalog_references.iter().any(|r| {
-        config
-            .resolve_rules_for_path(&r.reference.path)
+        resolver
+            .effective_rules_for(&r.reference.path)
             .unresolved_catalog_references
             == Severity::Error
     }) || results.empty_catalog_groups.iter().any(|g| {
-        config
-            .resolve_rules_for_path(&g.group.path)
+        resolver
+            .effective_rules_for(&g.group.path)
             .empty_catalog_groups
             == Severity::Error
+    }) || results.boundary_violations.iter().any(|v| {
+        resolver
+            .effective_rules_for(&v.violation.from_path)
+            .boundary_violation
+            == Severity::Error
     }) || results.boundary_coverage_violations.iter().any(|v| {
-        config
-            .resolve_rules_for_path(&v.violation.path)
+        resolver
+            .effective_rules_for(&v.violation.path)
             .boundary_violation
             == Severity::Error
     }) || results.boundary_call_violations.iter().any(|v| {
-        config
-            .resolve_rules_for_path(&v.violation.path)
+        resolver
+            .effective_rules_for(&v.violation.path)
             .boundary_violation
             == Severity::Error
     }) || results.circular_dependencies.iter().any(|c| {
-        c.cycle.files.iter().any(|path| {
-            config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
-        })
+        c.cycle
+            .files
+            .iter()
+            .any(|path| resolver.effective_rules_for(path).circular_dependencies == Severity::Error)
     })
 }
 
 fn has_override_framework_error(
     results: &fallow_types::results::AnalysisResults,
-    config: &ResolvedConfig,
+    resolver: &OverrideSeverities<'_>,
 ) -> bool {
     results.invalid_client_exports.iter().any(|e| {
-        config
-            .resolve_rules_for_path(&e.export.path)
+        resolver
+            .effective_rules_for(&e.export.path)
             .invalid_client_export
             == Severity::Error
     }) || results.mixed_client_server_barrels.iter().any(|b| {
-        config
-            .resolve_rules_for_path(&b.barrel.path)
+        resolver
+            .effective_rules_for(&b.barrel.path)
             .mixed_client_server_barrel
             == Severity::Error
     }) || results.misplaced_directives.iter().any(|d| {
-        config
-            .resolve_rules_for_path(&d.directive_site.path)
+        resolver
+            .effective_rules_for(&d.directive_site.path)
             .misplaced_directive
             == Severity::Error
     }) || results.route_collisions.iter().any(|c| {
-        config
-            .resolve_rules_for_path(&c.collision.path)
+        resolver
+            .effective_rules_for(&c.collision.path)
             .route_collision
             == Severity::Error
     }) || results.dynamic_segment_name_conflicts.iter().any(|c| {
-        config
-            .resolve_rules_for_path(&c.conflict.path)
+        resolver
+            .effective_rules_for(&c.conflict.path)
             .dynamic_segment_name_conflict
             == Severity::Error
     })
@@ -1150,14 +1187,14 @@ mod tests {
     fn empty_results_no_error_issues() {
         let results = AnalysisResults::default();
         let rules = RulesConfig::default();
-        assert!(!has_error_severity_issues(&results, &rules, None));
+        assert!(!has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
     fn error_severity_with_issues_returns_true() {
         let results = make_results();
         let rules = RulesConfig::default(); // all Error
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -1219,7 +1256,7 @@ mod tests {
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
         };
-        assert!(!has_error_severity_issues(&results, &rules, None));
+        assert!(!has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -1286,10 +1323,10 @@ mod tests {
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
         };
-        assert!(!has_error_severity_issues(&results, &rules, None));
+        assert!(!has_error_severity_issues(&results, &rules, None, false));
 
         rules.unused_files = Severity::Error;
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -1308,7 +1345,7 @@ mod tests {
             unresolved_imports: Severity::Off,
             ..RulesConfig::default()
         };
-        assert!(!has_error_severity_issues(&results, &rules, None));
+        assert!(!has_error_severity_issues(&results, &rules, None, false));
     }
 
     /// Build a ResolvedConfig with overrides that turn off unused_exports for test files.
@@ -1646,7 +1683,7 @@ mod tests {
         let rules = &config.rules;
 
         assert!(
-            !has_error_severity_issues(&results, rules, Some(&config)),
+            !has_error_severity_issues(&results, rules, Some(&config), false),
             "test file override should suppress error"
         );
     }
@@ -1670,7 +1707,7 @@ mod tests {
         let rules = &config.rules;
 
         assert!(
-            has_error_severity_issues(&results, rules, Some(&config)),
+            has_error_severity_issues(&results, rules, Some(&config), false),
             "non-test file should still have Error severity"
         );
     }
@@ -1687,7 +1724,7 @@ mod tests {
         let rules = &config.rules;
 
         assert!(
-            !has_error_severity_issues(&results, rules, Some(&config)),
+            !has_error_severity_issues(&results, rules, Some(&config), false),
             "cycle files downgraded to Warn should not produce an Error verdict"
         );
     }
@@ -1704,7 +1741,7 @@ mod tests {
         let rules = &config.rules;
 
         assert!(
-            has_error_severity_issues(&results, rules, Some(&config)),
+            has_error_severity_issues(&results, rules, Some(&config), false),
             "a cycle touching any Error-severity file should still fail"
         );
     }
@@ -1723,8 +1760,77 @@ mod tests {
         let rules = &config.rules;
 
         assert!(
-            !has_error_severity_issues(&results, rules, Some(&config)),
+            !has_error_severity_issues(&results, rules, Some(&config), false),
             "boundary findings downgraded to Warn should not produce an Error verdict"
+        );
+    }
+
+    #[test]
+    fn has_error_with_override_boundary_violation_keeps_error_for_unmatched_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(boundary_violation("/project/src/live/a.ts"));
+
+        let config = config_with_boundary_override("src/generated/**", Severity::Off);
+        let rules = &config.rules;
+
+        assert!(
+            has_error_severity_issues(&results, rules, Some(&config), false),
+            "an import-direction violation outside the override must still fail the run"
+        );
+    }
+
+    #[test]
+    fn has_error_with_override_boundary_violation_off_for_matched_file() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(boundary_violation("/project/src/generated/a.ts"));
+
+        let config = config_with_boundary_override("src/generated/**", Severity::Off);
+        let rules = &config.rules;
+
+        assert!(
+            !has_error_severity_issues(&results, rules, Some(&config), false),
+            "a violation whose importer matches an Off override must not fail the run"
+        );
+    }
+
+    #[test]
+    fn has_error_with_override_promotes_per_path_warn_when_requested() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(boundary_violation("/project/src/generated/a.ts"));
+
+        let config = config_with_boundary_override("src/generated/**", Severity::Warn);
+        let mut rules = config.rules.clone();
+        promote_warns_to_errors(&mut rules);
+
+        assert!(
+            !has_error_severity_issues(&results, &rules, Some(&config), false),
+            "without promotion a per-path Warn stays a warning"
+        );
+        assert!(
+            has_error_severity_issues(&results, &rules, Some(&config), true),
+            "fail-on-issues must promote a per-path Warn after override resolution"
+        );
+    }
+
+    #[test]
+    fn has_error_with_override_promotion_leaves_off_alone() {
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(boundary_violation("/project/src/generated/a.ts"));
+
+        let config = config_with_boundary_override("src/generated/**", Severity::Off);
+        let rules = &config.rules;
+
+        assert!(
+            !has_error_severity_issues(&results, rules, Some(&config), true),
+            "promotion only lifts Warn; an Off override stays silent"
         );
     }
 
@@ -1919,7 +2025,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -1945,7 +2051,7 @@ mod tests {
             re_export_cycle: Severity::Warn,
             ..RulesConfig::default()
         };
-        assert!(!has_error_severity_issues(&results, &rules, None));
+        assert!(!has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -1963,7 +2069,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        assert!(!has_error_severity_issues(&results, &rules, None));
+        assert!(!has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -1984,7 +2090,7 @@ mod tests {
             unused_optional_dependencies: Severity::Error,
             ..RulesConfig::default()
         };
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -2000,7 +2106,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        assert!(!has_error_severity_issues(&results, &rules, None));
+        assert!(!has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -2019,7 +2125,7 @@ mod tests {
             type_only_dependencies: Severity::Error,
             ..RulesConfig::default()
         };
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     // -------------------------------------------------------------------------
@@ -3148,7 +3254,12 @@ mod tests {
             p.unused_types = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3169,7 +3280,12 @@ mod tests {
             p.unused_types = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3193,7 +3309,12 @@ mod tests {
             p.private_type_leaks = Some(Severity::Warn);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3213,7 +3334,12 @@ mod tests {
             p.unused_enum_members = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3233,7 +3359,12 @@ mod tests {
             p.unused_class_members = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3253,7 +3384,12 @@ mod tests {
             p.unused_store_members = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3272,7 +3408,12 @@ mod tests {
             p.unprovided_injects = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3291,7 +3432,12 @@ mod tests {
             p.unresolved_imports = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     // -------------------------------------------------------------------------
@@ -3320,7 +3466,12 @@ mod tests {
         });
         let rules = &config.rules;
         // Base default is Warn, so a non-matched file is also Warn: no error.
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3341,7 +3492,12 @@ mod tests {
             p.unused_component_props = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3362,7 +3518,12 @@ mod tests {
             p.unused_component_emits = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3383,7 +3544,12 @@ mod tests {
             p.unused_component_inputs = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3404,7 +3570,12 @@ mod tests {
             p.unused_component_outputs = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3423,7 +3594,12 @@ mod tests {
             p.unused_svelte_events = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3443,7 +3619,12 @@ mod tests {
             p.unused_server_actions = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3462,7 +3643,12 @@ mod tests {
             p.unused_load_data_keys = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     // -------------------------------------------------------------------------
@@ -3481,7 +3667,12 @@ mod tests {
             p.require_suppression_reason = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3494,7 +3685,12 @@ mod tests {
             p.require_suppression_reason = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3507,7 +3703,12 @@ mod tests {
             p.stale_suppressions = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3526,7 +3727,12 @@ mod tests {
             p.unresolved_catalog_references = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3543,7 +3749,12 @@ mod tests {
             p.empty_catalog_groups = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     // -------------------------------------------------------------------------
@@ -3568,7 +3779,12 @@ mod tests {
             p.invalid_client_export = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3589,7 +3805,12 @@ mod tests {
             p.mixed_client_server_barrel = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3609,7 +3830,12 @@ mod tests {
             p.misplaced_directive = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3628,7 +3854,12 @@ mod tests {
             p.route_collision = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     #[test]
@@ -3648,7 +3879,12 @@ mod tests {
             p.dynamic_segment_name_conflict = Some(Severity::Off);
         });
         let rules = &config.rules;
-        assert!(!has_error_severity_issues(&results, rules, Some(&config)));
+        assert!(!has_error_severity_issues(
+            &results,
+            rules,
+            Some(&config),
+            false
+        ));
     }
 
     // -------------------------------------------------------------------------
@@ -3666,7 +3902,7 @@ mod tests {
             require_suppression_reason: Severity::Error,
             ..RulesConfig::default()
         };
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -3733,7 +3969,7 @@ mod tests {
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
         };
-        assert!(!has_error_severity_issues(&results, &all_warn, None));
+        assert!(!has_error_severity_issues(&results, &all_warn, None, false));
     }
 
     #[test]
@@ -3758,7 +3994,7 @@ mod tests {
             unused_dependency_overrides: Severity::Error,
             ..RulesConfig::default()
         };
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -3779,7 +4015,7 @@ mod tests {
             misconfigured_dependency_overrides: Severity::Error,
             ..RulesConfig::default()
         };
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -3798,7 +4034,7 @@ mod tests {
             re_export_cycle: Severity::Error,
             ..RulesConfig::default()
         };
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -3819,7 +4055,7 @@ mod tests {
             unused_catalog_entries: Severity::Error,
             ..RulesConfig::default()
         };
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     #[test]
@@ -3838,7 +4074,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default(); // boundary_violation is Error
-        assert!(has_error_severity_issues(&results, &rules, None));
+        assert!(has_error_severity_issues(&results, &rules, None, false));
     }
 
     // -------------------------------------------------------------------------

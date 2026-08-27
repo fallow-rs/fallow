@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--fail-on-issues` now fails on boundary violations and promoted warnings
+  when per-path `overrides` exist** (Closes
+  [#2445](https://github.com/fallow-rs/fallow/issues/2445)). With any
+  `overrides` entry configured, the exit-code check switched to per-file
+  severity resolution, and that path never consulted import-direction
+  boundary violations, so an error-severity `boundary-violation` was reported
+  but exited 0. The same path also skipped the warn-to-error promotion of
+  `--fail-on-issues` (and `--ci`), so a `warn` rule plus any override exited 0
+  as well. Both now resolve per file and promote after override resolution, so
+  an explicit per-path `warn` fails a strict run just like the base rules.
+  Thanks to [@DeLuke84](https://github.com/DeLuke84) for the report.
+
 ## [3.19.0] - 2026-08-26
 
 ### Added

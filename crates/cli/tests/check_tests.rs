@@ -65,6 +65,176 @@ fn check_ci_flag_implies_fail_on_issues() {
     assert_eq!(output.code, 1, "--ci should imply --fail-on-issues");
 }
 
+/// The fixture from issue #2445: an import from the `domain` zone into the
+/// `adapter` zone that both allow-nothing rules forbid, optionally with a
+/// per-path override that matches neither side of the import.
+fn boundary_violation_project(with_unrelated_override: bool) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src/domain")).expect("create domain directory");
+    std::fs::create_dir_all(root.join("src/adapter")).expect("create adapter directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"boundary-override-repro","private":true,"type":"module"}"#,
+    )
+    .expect("write package");
+    let overrides = if with_unrelated_override {
+        r#""overrides": [{ "files": ["src/other/**"], "rules": { "unused-exports": "off" } }],"#
+    } else {
+        ""
+    };
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        format!(
+            r#"{{
+  "entry": ["src/main.ts"],
+  "rules": {{ "boundary-violation": "error" }},
+  {overrides}
+  "boundaries": {{
+    "zones": [
+      {{ "name": "domain", "patterns": ["src/domain/**"] }},
+      {{ "name": "adapter", "patterns": ["src/adapter/**"] }}
+    ],
+    "rules": [
+      {{ "from": "domain", "allow": [] }},
+      {{ "from": "adapter", "allow": [] }}
+    ]
+  }}
+}}"#
+        ),
+    )
+    .expect("write config");
+    std::fs::write(root.join("src/main.ts"), "import \"./domain/value.ts\";\n")
+        .expect("write entry point");
+    std::fs::write(
+        root.join("src/domain/value.ts"),
+        "import { adapterValue } from \"../adapter/value.ts\";\nconsole.log(adapterValue);\n",
+    )
+    .expect("write domain file");
+    std::fs::write(
+        root.join("src/adapter/value.ts"),
+        "export const adapterValue = 1;\n",
+    )
+    .expect("write adapter file");
+    dir
+}
+
+const BOUNDARY_FAIL_ARGS: &[&str] = &[
+    "--boundary-violations",
+    "--fail-on-issues",
+    "--no-cache",
+    "--format",
+    "json",
+    "--quiet",
+];
+
+#[test]
+fn boundary_violation_fails_on_issues_with_unrelated_override() {
+    let dir = boundary_violation_project(true);
+    let output = run_fallow_in_root("dead-code", dir.path(), BOUNDARY_FAIL_ARGS);
+    let json = parse_json(&output);
+    assert_eq!(
+        json["boundary_violations"].as_array().map(Vec::len),
+        Some(1),
+        "the domain -> adapter import should be reported; stdout: {}",
+        output.stdout
+    );
+    assert_eq!(
+        output.code, 1,
+        "an error-severity boundary violation must fail the run even when an unrelated per-path override exists"
+    );
+}
+
+#[test]
+fn boundary_violation_fails_on_issues_without_override() {
+    let dir = boundary_violation_project(false);
+    let output = run_fallow_in_root("dead-code", dir.path(), BOUNDARY_FAIL_ARGS);
+    assert_eq!(
+        output.code, 1,
+        "an error-severity boundary violation must fail the run"
+    );
+}
+
+/// A `warn` rule plus a per-path override that matches nothing relevant.
+fn warn_with_unrelated_override_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create source directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"warn-override-repro","private":true,"type":"module"}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+  "entry": ["src/main.ts"],
+  "rules": { "unused-exports": "warn" },
+  "overrides": [{ "files": ["src/other/**"], "rules": { "unused-files": "off" } }]
+}"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        root.join("src/main.ts"),
+        "import { used } from \"./lib.ts\";\nconsole.log(used);\n",
+    )
+    .expect("write entry point");
+    std::fs::write(
+        root.join("src/lib.ts"),
+        "export const used = 1;\nexport const unused = 2;\n",
+    )
+    .expect("write library file");
+    dir
+}
+
+#[test]
+fn warn_rule_with_unrelated_override_exits_1_with_fail_on_issues() {
+    let dir = warn_with_unrelated_override_project();
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &[
+            "--unused-exports",
+            "--fail-on-issues",
+            "--no-cache",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 1,
+        "--fail-on-issues must promote a warn rule to error even when overrides exist; stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn warn_rule_with_unrelated_override_exits_0_without_fail_on_issues() {
+    let dir = warn_with_unrelated_override_project();
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &[
+            "--unused-exports",
+            "--no-cache",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    assert!(
+        json["total_issues"].as_u64().unwrap_or(0) > 0,
+        "the unused export should be reported; stdout: {}",
+        output.stdout
+    );
+    assert_eq!(
+        output.code, 0,
+        "a warn-only run without --fail-on-issues exits 0"
+    );
+}
+
 #[test]
 fn check_json_format_produces_valid_json() {
     let output = run_fallow("check", "basic-project", &["--format", "json", "--quiet"]);
