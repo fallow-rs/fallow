@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787824951445,
+  "lastUpdate": 1787833772386,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "4a2c8cb05c0ac87bc3db8614dc7a4369d0207b41",
-          "message": "docs(quality-gates): root npm ci suffices for type-aware test targets (#2259)\n\nThe one-time setup section still led with the sidecar-local install as a\nblanket requirement. After #2246 the root package.json overrides entry keeps\nthe root typescript install in lockstep with the sidecar, so both the\ntype-aware CLI test targets and the sidecar's own node --test suite pass\nafter a root-only npm ci (verified locally without a sidecar-local install).\nDocument the two remaining cases that still need the local install: the\nsidecar bench devDependencies and an absent or out-of-lockstep root install,\nwhere the preflight exits 2 with the resolved version and the fix.\n\nRefs #2246",
-          "timestamp": "2026-08-13T16:18:36+02:00",
-          "tree_id": "3f44df2384fbdcf69e31a4b091f0baab0bae23c5",
-          "url": "https://github.com/fallow-rs/fallow/commit/4a2c8cb05c0ac87bc3db8614dc7a4369d0207b41"
-        },
-        "date": 1786631396502,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/bf98a4270ab5ce6fb9aca1e5c92a51da6dde2023"
         },
         "date": 1787824945046,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bcf333d8f9fe0753be4df17bf1a8a20be4fbdb53",
+          "message": "feat(review): author actions, test adjacency, slices, and dependency decisions (#2446)\n\nReview-brief schema 7 -> 8, all additive.\n\n- Judgments carry an author-action label (block, address, consider, fyi) validated on reentry (invalid-action with invalid_value, checked after the anchor) and echoed fenced; the guide publishes action_vocabulary and concern_vocabulary.\n- Direction units carry test_adjacency (none, untouched, changed); both tours badge NO-DIRECT-TEST; root-level test/ and tests/ count as test paths; a project with no tests gets no claims.\n- The partition reports independent_slices (connected components of the inter-unit graph) when there are two or more.\n- The dependency decision arm fires on both the CLI and the typed/MCP route: added entries and major bumps per changed package.json, batched per manifest per kind, weighted by in-repo importers (union, value and type-only), section-tagged, rename-aware, npm: aliases read at their range; a major bump ranks with a public-API change; no comment-based suppress action on a manifest anchor.\n- The human and markdown tours show decisions whose anchor is not a staged unit, so a dependency-only change never renders as \"0 files\".\n- Review app: action on judgments and feed items, invalid_value, schema pin as a floor.\n\nVerified with unit and e2e tests on the real binary, real-project runs (fallow's vscode extension bump commit, a monorepo worktree with major bumps), verify:fast, and the contract drift gate. Companion PRs fallow-skills #42/#43 and fallow-docs #21 land with the release that ships schema 8.",
+          "timestamp": "2026-08-27T14:11:13+02:00",
+          "tree_id": "f0fafc776f5a2ca0062607ff01b7d6baaa008884",
+          "url": "https://github.com/fallow-rs/fallow/commit/bcf333d8f9fe0753be4df17bf1a8a20be4fbdb53"
+        },
+        "date": 1787833768885,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
