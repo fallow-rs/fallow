@@ -18650,7 +18650,7 @@
               "type": "string"
             }
           },
-          "description": "Connected components of the inter-unit dependency graph: groups of\nmodule directories that share no import edge with any unit outside the\ngroup. Present only when there are two or more, which is when the\nchange splits along a graph-proven seam into pieces that can be\nreviewed and merged on their own; a single slice is just `order`. An\norientation fact, never a demand to split."
+          "description": "Connected components of the inter-unit dependency graph: groups of\nmodule directories that share no import edge with any unit outside the\ngroup. Present only when there are two or more; a single slice is just\n`order`. A slice proves the absence of import edges to the rest of the\nchange, nothing more: whether it can land on its own is still a\njudgment (generated files and lockstep contracts share no edge and\nstill belong together). An orientation fact, never a demand to split."
         }
       },
       "required": [

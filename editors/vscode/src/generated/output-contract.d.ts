@@ -12528,10 +12528,11 @@ order: string[]
 /**
  * Connected components of the inter-unit dependency graph: groups of
  * module directories that share no import edge with any unit outside the
- * group. Present only when there are two or more, which is when the
- * change splits along a graph-proven seam into pieces that can be
- * reviewed and merged on their own; a single slice is just `order`. An
- * orientation fact, never a demand to split.
+ * group. Present only when there are two or more; a single slice is just
+ * `order`. A slice proves the absence of import edges to the rest of the
+ * change, nothing more: whether it can land on its own is still a
+ * judgment (generated files and lockstep contracts share no edge and
+ * still belong together). An orientation fact, never a demand to split.
  */
 independent_slices?: string[][]
 }
