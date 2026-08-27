@@ -439,20 +439,30 @@ fn dependency_names(anchor: &DependencyAnchor) -> String {
 fn dependency_question(anchor: &DependencyAnchor) -> String {
     let count = anchor.entries.len();
     let names = dependency_names(anchor);
+    let plural = if count == 1 { "y" } else { "ies" };
+    // Zero importers means the package is reached through the build, a config
+    // file, or types only, so the question points there instead of at modules.
+    let reach = if anchor.importers == 0 {
+        "not imported by any in-repo module".to_string()
+    } else {
+        format!(
+            "imported by {} in-repo {}",
+            anchor.importers,
+            modules_word(anchor.importers)
+        )
+    };
     match anchor.kind {
         DependencyChangeKind::Added => format!(
-            "`{}` adds {count} third-party dependenc{} ({names}), imported by {} in-repo {}. What does each replace, and who owns the new surface?",
+            "`{}` adds {count} third-party dependenc{plural} ({names}), {reach}. What does each replace, and who owns the new surface?",
             anchor.manifest,
-            if count == 1 { "y" } else { "ies" },
-            anchor.importers,
-            modules_word(anchor.importers),
+        ),
+        DependencyChangeKind::MajorBump if anchor.importers == 0 => format!(
+            "`{}` moves {count} dependenc{plural} across a major version ({names}), {reach}. Which changelog-listed changes reach the build, config, or types?",
+            anchor.manifest,
         ),
         DependencyChangeKind::MajorBump => format!(
-            "`{}` moves {count} dependenc{} across a major version ({names}), imported by {} in-repo {}. Which changelog-listed behavior changes reach those importers?",
+            "`{}` moves {count} dependenc{plural} across a major version ({names}), {reach}. Which changelog-listed behavior changes reach those importers?",
             anchor.manifest,
-            if count == 1 { "y" } else { "ies" },
-            anchor.importers,
-            modules_word(anchor.importers),
         ),
     }
 }
@@ -731,7 +741,7 @@ mod tests {
                     from: None,
                     to: "^1.11.0".to_string(),
                 }],
-                importers: 1,
+                importers: 0,
                 out_of_diff_importers: 0,
                 line: 9,
             },
@@ -781,6 +791,12 @@ mod tests {
             added
                 .question
                 .contains("adds 1 third-party dependency (`dayjs`)")
+        );
+        assert!(
+            added
+                .question
+                .contains("not imported by any in-repo module"),
+            "zero importers points at build, config, or types, not at modules"
         );
         assert!(surface.accept_signal_id(&added.signal_id));
     }
