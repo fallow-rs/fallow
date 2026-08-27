@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787860511247,
+  "lastUpdate": 1787861352299,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "b2837f8c10b4da6bdc3282ccc517a6499afbdf58",
-          "message": "fix(graph): drop speculative mock candidates that resolve to package space (#2224)\n\nFactory-less jest.mock/vi.mock of a bare scoped specifier synthesized a __mocks__ sibling candidate that classified as an npm package, bypassing the speculative drop guard and surfacing as a phantom unlisted-dependency finding (@scope/__mocks__) that blocks gated CI in Jest projects. Drop speculative dynamic-import candidates that resolve to package space, bump GRAPH_CACHE_VERSION so warm caches stop replaying the phantom edges, and pin the behavior with resolver unit tests and an end-to-end regression test.\n\nCloses #2213",
-          "timestamp": "2026-08-12T15:48:49Z",
-          "tree_id": "348c34a0caa6ec65725906befd884c04f3ca245b",
-          "url": "https://github.com/fallow-rs/fallow/commit/b2837f8c10b4da6bdc3282ccc517a6499afbdf58"
-        },
-        "date": 1786550034445,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 10646568,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 55313,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 970653,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7604,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8347,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "Patrick.Leong.Shaw@gmail.com",
+            "name": "Patrick Shaw",
+            "username": "PatrickShaw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d877424ca12c71cb9490bfd1d05be4975285a195",
+          "message": "feat(graph): resolve Yarn Plug'n'Play projects through the PnP manifest (#2435)\n\nA Yarn Plug'n'Play install has no populated node_modules, so every bare import used to miss and fall through to the much slower tsconfig fallback. fallow now detects `.pnp.cjs` at the analyzed root or one of its ancestors, enables oxc's PnP resolution, and anchors manifest discovery to that directory, so runs started outside the project and editor sessions resolve the same way.\n\nManifests that are not inlined (`pnpEnableInlining: false`) are not supported and stay on the fallback path. The generated `.pnp.cjs` and `.pnp.loader.mjs` files are no longer discovered as project source. Bumps GRAPH_CACHE_VERSION so a warm cache does not replay the old unresolved imports.\n\nThanks to @PatrickShaw for the contribution.\n\nCloses #2444",
+          "timestamp": "2026-08-27T22:01:43+02:00",
+          "tree_id": "d12445987c0624ba10651f706fe82f4bf5e70479",
+          "url": "https://github.com/fallow-rs/fallow/commit/d877424ca12c71cb9490bfd1d05be4975285a195"
+        },
+        "date": 1787861348871,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9704307,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49329,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1171497,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8385,
             "unit": "allocations"
           }
         ]
