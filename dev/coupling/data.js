@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787860517475,
+  "lastUpdate": 1787860875519,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "73bb630b9510462e3139b3a65ba0179999380752",
-          "message": "fix(health): explain override rows a reader could not act on (#2230)\n\nOverride metrics gain an optional line_count on complexity rows so a unit-size breach claim sits next to the number it was scored on; the human override section caps at the ten most actionable rows with an overflow line while JSON, compact and markdown stay complete; and a complexity override scoped to a suppressed function reads stale instead of no_match, mirroring the CRAP semantics from #2207. Additive only; health schema stays at version 10.\n\nRefs #2163",
-          "timestamp": "2026-08-12T16:40:46+02:00",
-          "tree_id": "af0295c2558347e66c11af566af0bcfa15ecd07c",
-          "url": "https://github.com/fallow-rs/fallow/commit/73bb630b9510462e3139b3a65ba0179999380752"
-        },
-        "date": 1786545775411,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 46,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.33,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 451,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1202,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/8c3c5b7d9a26ff5e0a6c7393edcde3aaeab1397f"
         },
         "date": 1787860512832,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "Patrick.Leong.Shaw@gmail.com",
+            "name": "Patrick Shaw",
+            "username": "PatrickShaw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b0585d4b6b699447066714569c1ea5e2a612c90c",
+          "message": "fix(graph): scope a referenced tsconfig without include to its own directory (#2436)\n\nA tsconfig.json without `include` or `files` now applies only to files under its own directory when fallow follows project `references`, matching tsc's `**/*` default project scope. Previously such a referenced config matched every file in the repository, so its `paths` aliases leaked to files outside that directory and every referenced project was walked for every import.\n\nImports that only resolved through that leak are now reported as `unresolved-import` findings, which are error severity by default, and a file that was only reachable through such an import may now be reported as unused. Give the subdirectory config an explicit `include`, or move the shared aliases to a config whose directory contains the importing files. Root and workspace configs are unaffected.\n\nBumps GRAPH_CACHE_VERSION so a warm cache does not replay the old resolutions.\n\nThanks to @PatrickShaw for the contribution.",
+          "timestamp": "2026-08-27T21:58:11+02:00",
+          "tree_id": "51e192031afe2836b05808f641f708ca3cbd7f65",
+          "url": "https://github.com/fallow-rs/fallow/commit/b0585d4b6b699447066714569c1ea5e2a612c90c"
+        },
+        "date": 1787860871068,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
