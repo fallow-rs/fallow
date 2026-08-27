@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787833003721,
+  "lastUpdate": 1787836719666,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "e0d27b060044b5c8758ccbfc725779758652846e",
-          "message": "Merge pull request #2229 from fallow-rs/feat/css-lazy-token-candidates\n\nperf(engine): build styling token candidates lazily",
-          "timestamp": "2026-08-12T16:23:00+02:00",
-          "tree_id": "0a48cc90a4daa9b01c97a2fc2b661ae385ad293b",
-          "url": "https://github.com/fallow-rs/fallow/commit/e0d27b060044b5c8758ccbfc725779758652846e"
-        },
-        "date": 1786544827122,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 10636319,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 55269,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 970653,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7604,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8364,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "9406571ba1749fc34c0a516720c9fb167ed7a233",
+          "message": "chore(napi): sync transitive similar-code platform pins to v3.19.0",
+          "timestamp": "2026-08-27T15:13:00+02:00",
+          "tree_id": "d82aef00df0a8cd605ed955cc2e2e2023522d411",
+          "url": "https://github.com/fallow-rs/fallow/commit/9406571ba1749fc34c0a516720c9fb167ed7a233"
+        },
+        "date": 1787836716352,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9760629,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49363,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1185754,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8400,
             "unit": "allocations"
           }
         ]
