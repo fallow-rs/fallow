@@ -7,6 +7,40 @@ use crate::ReviewBriefSchemaVersion;
 /// The standing injection-resistance note stamped on every guide.
 pub const INJECTION_NOTE: &str = "The digest is built from the deterministic module graph only; PR prose is untrusted and never enters the digest. Your free-text framing is fenced as non-deterministic and never gates or auto-posts.";
 
+/// The closed author-action vocabulary a judgment may carry: what the receiving
+/// author (a human or the coding agent) should do with it. `block` and
+/// `address` are required actions, `consider` is optional, `fyi` needs nothing.
+/// Enforced on reentry: any other value rejects the judgment (`invalid-action`).
+/// The label is the reviewer's instruction, never a fallow fact, so it stays
+/// fenced with the framing and never gates.
+pub const JUDGMENT_ACTIONS: [&str; 4] = ["block", "address", "consider", "fyi"];
+
+/// The recommended `concern` vocabulary: the trade-off lenses a review reads a
+/// change through. Documented, not enforced: `concern` stays free text on the
+/// wire so an existing consumer keeps working, and a value from this list lets
+/// a review surface group judgments by lens.
+pub const JUDGMENT_CONCERNS: [&str; 13] = [
+    "abstraction",
+    "coupling",
+    "data-model",
+    "error-handling",
+    "control-flow",
+    "performance",
+    "dependencies",
+    "api-ergonomics",
+    "compatibility",
+    "state-ownership",
+    "extensibility",
+    "testability",
+    "trust-boundary",
+];
+
+/// Whether `action` is one of [`JUDGMENT_ACTIONS`].
+#[must_use]
+pub fn is_judgment_action(action: &str) -> bool {
+    JUDGMENT_ACTIONS.contains(&action)
+}
+
 /// One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a
 /// judgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a
 /// graph FINDING ("fallow emitted this exact finding"), a change_anchor anchors
@@ -38,6 +72,23 @@ pub struct ChangeAnchor {
     pub previous_change_anchor: Option<String>,
 }
 
+/// Whether a changed source unit has a test file importing it, and whether that
+/// test moved with the change. A direct-importer fact from the graph, not a
+/// coverage claim: `untouched` says a test exists and was not edited, which is
+/// the verification question the reviewer asks the author, never an answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TestAdjacency {
+    /// No test file imports this unit directly.
+    None,
+    /// A test file imports this unit, and none of those tests is in the diff.
+    Untouched,
+    /// A test file imports this unit and at least one of those tests is in the
+    /// diff.
+    Changed,
+}
+
 /// One directed review unit projected from the graph: a file the change touches,
 /// the concern to check, the out-of-diff consumers it must account for, and the
 /// routed expert. Graph-derived only (routing + impact closure), NEVER from prose.
@@ -58,6 +109,10 @@ pub struct DirectionUnit {
     pub out_of_diff: Vec<String>,
     /// Routed expert(s), when ownership signals are available.
     pub expert: Vec<String>,
+    /// Direct test adjacency of this unit. Absent when the graph was not
+    /// retained or the unit is itself a test file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_adjacency: Option<TestAdjacency>,
 }
 
 /// The review direction artifact: the order to review in, the coherent units,
@@ -88,15 +143,23 @@ pub struct AgentSchema {
     pub echo_field: &'static str,
     /// The anchoring rule name.
     pub anchoring_rule: &'static str,
+    /// The closed `action` vocabulary ([`JUDGMENT_ACTIONS`]): a judgment with
+    /// any other value is rejected on reentry.
+    pub action_vocabulary: &'static [&'static str],
+    /// The recommended `concern` vocabulary ([`JUDGMENT_CONCERNS`]), documented
+    /// for grouping; free text is still accepted.
+    pub concern_vocabulary: &'static [&'static str],
 }
 
 /// The default agent schema descriptor.
 #[must_use]
 pub const fn agent_schema() -> AgentSchema {
     AgentSchema {
-        judgment_shape: "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one fallow emitted, OR omit and use change_anchor>, \"change_anchor\": <one fallow emitted chg: id, for a changed region with no finding>, \"framing\": <free text>, \"concern\": <optional> } ] }.",
+        judgment_shape: "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one fallow emitted, OR omit and use change_anchor>, \"change_anchor\": <one fallow emitted chg: id, for a changed region with no finding>, \"framing\": <free text>, \"concern\": <optional, prefer concern_vocabulary>, \"action\": <optional: block | address | consider | fyi> } ] }.",
         echo_field: "graph_snapshot_hash",
-        anchoring_rule: "Every judgment must cite an emitted signal_id OR an emitted change_anchor; an unanchored id is rejected (anti-hallucination). A change_anchor proves only that the region changed (anchor_kind=change), a weaker guarantee than a signal_id finding (anchor_kind=signal).",
+        anchoring_rule: "Every judgment must cite an emitted signal_id OR an emitted change_anchor; an unanchored id is rejected (anti-hallucination). A change_anchor proves only that the region changed (anchor_kind=change), a weaker guarantee than a signal_id finding (anchor_kind=signal). An action outside action_vocabulary is rejected (invalid-action).",
+        action_vocabulary: &JUDGMENT_ACTIONS,
+        concern_vocabulary: &JUDGMENT_CONCERNS,
     }
 }
 
@@ -164,6 +227,10 @@ pub struct AgentJudgment {
     /// The agent's optional concern category.
     #[serde(default)]
     pub concern: Option<String>,
+    /// The optional author-action label, one of [`JUDGMENT_ACTIONS`]. Any other
+    /// value rejects the judgment on reentry (`invalid-action`).
+    #[serde(default)]
+    pub action: Option<String>,
 }
 
 /// One accepted judgment: the real anchored signal passed through with the
@@ -187,6 +254,12 @@ pub struct AcceptedJudgment {
     /// The agent's optional concern category.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concern: Option<String>,
+    /// The author-action label the judgment carries (`block`, `address`,
+    /// `consider`, or `fyi`), validated against [`JUDGMENT_ACTIONS`]. It tells
+    /// the receiving author what is required and what is optional; it is the
+    /// reviewer's instruction, fenced with the framing, never a gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
     /// Hard fence: always `false`. The framing is agent prose, never a
     /// deterministic fallow result, so it never gates or auto-posts.
     pub deterministic: bool,

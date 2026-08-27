@@ -439,6 +439,10 @@ pub struct CheckResult {
     /// number. Computed from the retained graph's reverse-deps on the brief path
     /// BEFORE the graph is dropped; `None` otherwise. Internal (not serialized).
     pub internal_consumers: Option<rustc_hash::FxHashMap<String, u64>>,
+    /// Per-changed-source-file direct test adjacency for the review direction.
+    /// Computed from the retained graph's reverse-deps on the brief path BEFORE
+    /// the graph is dropped; `None` otherwise. Internal (not serialized).
+    pub test_adjacency: Option<rustc_hash::FxHashMap<String, fallow_output::TestAdjacency>>,
     pub workspaces: Vec<WorkspaceInfo>,
     retained_files: Option<Vec<DiscoveredFile>>,
 }
@@ -973,6 +977,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         focus_facts: None,
         export_lines: None,
         internal_consumers: None,
+        test_adjacency: None,
         workspaces,
         retained_files: retained_files_for_cross_reference,
     }

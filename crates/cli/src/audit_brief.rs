@@ -190,6 +190,7 @@ fn build_partition_facts(result: &AuditResult) -> PartitionFacts {
     PartitionFacts {
         units,
         order: partition.order.clone(),
+        independent_slices: partition.independent_slices.clone(),
     }
 }
 
@@ -586,6 +587,21 @@ fn print_partition_human(partition: &PartitionFacts) {
     if !partition.order.is_empty() {
         let labeled: Vec<String> = partition.order.iter().map(|dir| unit_label(dir)).collect();
         eprintln!("  review order: {}", labeled.join(" \u{2192} "));
+    }
+    if partition.independent_slices.len() >= 2 {
+        let slices: Vec<String> = partition
+            .independent_slices
+            .iter()
+            .map(|slice| {
+                let labeled: Vec<String> = slice.iter().map(|dir| unit_label(dir)).collect();
+                format!("[{}]", labeled.join(", "))
+            })
+            .collect();
+        eprintln!(
+            "  independent slices: {} (no import edge between them) {}",
+            partition.independent_slices.len(),
+            slices.join(" ")
+        );
     }
 }
 

@@ -21,8 +21,8 @@
 //! pre-computes none): COUPLING / PUBLIC-API / DEPENDENCY from
 //! `digest.decisions`, OUT-OF-DIFF from the contract-break lens, OWNER / BUS-FACTOR-1
 //! from the unit's routed expert, WEAKENED from `digest.weakening`, INTRODUCED from
-//! `digest.deltas`, and VIEWED from the local viewed-state. They are render-only,
-//! never a wire field.
+//! `digest.deltas`, UNTESTED from the unit's `test_adjacency`, and VIEWED from the
+//! local viewed-state. They are render-only, never a wire field.
 
 use colored::Colorize;
 use fallow_output::{
@@ -240,6 +240,9 @@ fn synthesize_badges(unit: &DirectionUnit, input: &WalkthroughHumanInput<'_>) ->
     }
     if weakened_here(&unit.file, guide) {
         badges.push("WEAKENED".yellow().to_string());
+    }
+    if unit.test_adjacency == Some(fallow_output::TestAdjacency::None) {
+        badges.push("UNTESTED".yellow().to_string());
     }
     if input
         .viewed
@@ -539,6 +542,7 @@ mod tests {
             scoring_budget: 3,
             out_of_diff,
             expert: Vec::new(),
+            test_adjacency: None,
         }
     }
 
@@ -604,6 +608,8 @@ mod tests {
                 judgment_shape: "",
                 echo_field: "graph_snapshot_hash",
                 anchoring_rule: "",
+                action_vocabulary: &[],
+                concern_vocabulary: &[],
             },
             injection_note: INJECTION_NOTE,
         }

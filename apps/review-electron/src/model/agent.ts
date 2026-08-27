@@ -14,6 +14,8 @@ export type FeedItem = {
   note: string;
   imageRef?: string;
   verdict?: string;
+  /** What the author should do with the note; absent means "weigh it". */
+  action?: JudgmentAction;
   at: string;
 };
 
@@ -45,7 +47,18 @@ export type Judgment = {
   change_anchor?: string;
   framing: string;
   concern?: string;
+  action?: JudgmentAction;
 };
+
+/** The closed author-action vocabulary fallow validates on reentry: what the
+ * receiving author should do with a judgment. `block` and `address` are
+ * required, `consider` is optional, `fyi` needs nothing. */
+export type JudgmentAction = "block" | "address" | "consider" | "fyi";
+
+export const JUDGMENT_ACTIONS: readonly JudgmentAction[] = ["block", "address", "consider", "fyi"];
+
+export const isJudgmentAction = (value: unknown): value is JudgmentAction =>
+  typeof value === "string" && (JUDGMENT_ACTIONS as readonly string[]).includes(value);
 
 /** The payload `fallow review --walkthrough-file` ingests and graph-validates. */
 export type AgentWalkthrough = {
@@ -62,6 +75,7 @@ export type AcceptedJudgment = {
   anchor_kind?: string;
   agent_framing: string;
   concern?: string;
+  action?: JudgmentAction;
   deterministic: boolean;
 };
 
@@ -94,6 +108,8 @@ export type InlineFraming = {
   origin: FramingOrigin;
   framing: string;
   concern?: string;
+  /** The reviewer's author-action label, fenced with the framing. */
+  action?: JudgmentAction;
   /** Always false: framing is never a deterministic graph fact. */
   deterministic: boolean;
 };

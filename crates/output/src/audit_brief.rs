@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Wire version for the `fallow audit --brief --format json` envelope.
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 7;
+pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 8;
 
 /// Independently-versioned wire-version newtype for the brief envelope.
 /// Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
@@ -151,6 +151,13 @@ pub struct PartitionFacts {
     /// definitions before consumers, mechanical/leaf units last. A permutation of
     /// the `units` module directories.
     pub order: Vec<String>,
+    /// Connected components of the inter-unit dependency graph: groups of
+    /// module directories that share no import edge with any unit outside the
+    /// group. Two or more slices mean the change splits along a graph-proven
+    /// seam into pieces that can be reviewed and merged on their own. An
+    /// orientation fact, never a demand to split.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub independent_slices: Vec<Vec<String>>,
 }
 
 /// One review unit: a coherent by-module cluster of the changed set.

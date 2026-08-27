@@ -56,6 +56,12 @@ pub struct PartitionOrder {
     /// before consumers, mechanical/leaf units last, ties broken by the path
     /// sort. One entry per unit; a permutation of the `units` `module_dir` set.
     order: Vec<String>,
+    /// Connected components of the inter-unit dependency graph: groups of units
+    /// that share no import edge with any unit outside their group. Each slice
+    /// is `module_dir`-sorted; slices are sorted by their first entry. Two or
+    /// more slices mean the change splits into independently reviewable (and
+    /// mergeable) pieces along a graph-proven seam.
+    independent_slices: Vec<Vec<String>>,
 }
 
 /// The same partition + order with each unit's `FileId`s resolved to
@@ -66,6 +72,9 @@ pub struct PartitionOrderPaths {
     pub units: Vec<ReviewUnitPaths>,
     /// The dependency-sensible review order of `module_dir` strings.
     pub order: Vec<String>,
+    /// Connected components of the inter-unit dependency graph, each a sorted
+    /// list of `module_dir` strings, sorted by first entry.
+    pub independent_slices: Vec<Vec<String>>,
 }
 
 /// A [`ReviewUnit`] with `FileId`s resolved to root-relative paths.
@@ -98,8 +107,18 @@ impl ModuleGraph {
         changed_ids.sort_unstable_by_key(|f| f.0);
 
         let units = self.build_units(&changed_ids);
-        let order = self.order_units(&units, &changed_ids);
-        PartitionOrder { units, order }
+        let deps = self.unit_deps(&units, &changed_ids);
+        let order = if units.is_empty() {
+            Vec::new()
+        } else {
+            kahn_min_pick(&units, &deps)
+        };
+        let independent_slices = independent_slices(&units, &deps);
+        PartitionOrder {
+            units,
+            order,
+            independent_slices,
+        }
     }
 
     /// Group changed files by their parent directory (the module). Returns the
@@ -127,14 +146,10 @@ impl ModuleGraph {
         units
     }
 
-    /// Order the units so a unit defining what another consumes comes first, ties
-    /// broken by the `module_dir` sort. Deterministic Kahn topological sort with
-    /// a min-pick ready set.
-    fn order_units(&self, units: &[ReviewUnit], changed_ids: &[FileId]) -> Vec<String> {
-        if units.is_empty() {
-            return Vec::new();
-        }
-
+    /// Resolve the inter-unit dependency sets: `deps[c]` holds the indices of the
+    /// units `c` consumes from (its own unit excluded). Shared by the Kahn order
+    /// (definitions before consumers) and the independent-slice components.
+    fn unit_deps(&self, units: &[ReviewUnit], changed_ids: &[FileId]) -> Vec<FxHashSet<usize>> {
         // FileId -> owning unit index, for resolving inter-unit edges.
         let unit_of: FxHashMap<FileId, usize> = units
             .iter()
@@ -161,8 +176,7 @@ impl ModuleGraph {
                 }
             }
         }
-
-        kahn_min_pick(units, &deps)
+        deps
     }
 
     /// Resolve a partition + order's `FileId`s to root-relative, forward-slashed
@@ -204,9 +218,63 @@ impl ModuleGraph {
             .iter()
             .map(|dir| relativize_dir(dir, root))
             .collect();
+        let mut independent_slices: Vec<Vec<String>> = partition
+            .independent_slices
+            .iter()
+            .map(|slice| {
+                let mut dirs: Vec<String> =
+                    slice.iter().map(|dir| relativize_dir(dir, root)).collect();
+                dirs.sort();
+                dirs
+            })
+            .collect();
+        independent_slices.sort();
 
-        PartitionOrderPaths { units, order }
+        PartitionOrderPaths {
+            units,
+            order,
+            independent_slices,
+        }
     }
+}
+
+/// Connected components over the UNDIRECTED inter-unit dependency graph. A
+/// component is a set of units reachable from each other through import edges
+/// in either direction; units in different components never touch. Each slice
+/// is `module_dir`-sorted and the slices are sorted by first entry, so the
+/// output is a pure function of `(units, deps)`.
+fn independent_slices(units: &[ReviewUnit], deps: &[FxHashSet<usize>]) -> Vec<Vec<String>> {
+    let unit_count = units.len();
+    let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); unit_count];
+    for (consumer, targets) in deps.iter().enumerate() {
+        for &target in targets {
+            adjacency[consumer].push(target);
+            adjacency[target].push(consumer);
+        }
+    }
+
+    let mut component_of: Vec<Option<usize>> = vec![None; unit_count];
+    let mut slices: Vec<Vec<String>> = Vec::new();
+    for start in 0..unit_count {
+        if component_of[start].is_some() {
+            continue;
+        }
+        let component = slices.len();
+        let mut stack = vec![start];
+        let mut members: Vec<String> = Vec::new();
+        while let Some(idx) = stack.pop() {
+            if component_of[idx].is_some() {
+                continue;
+            }
+            component_of[idx] = Some(component);
+            members.push(units[idx].module_dir.clone());
+            stack.extend(adjacency[idx].iter().copied());
+        }
+        members.sort();
+        slices.push(members);
+    }
+    slices.sort();
+    slices
 }
 
 /// Deterministic Kahn topological sort: emit a unit only once every unit it
@@ -430,6 +498,39 @@ mod tests {
         assert_eq!(
             partition.order,
             vec!["/p/src/auth".to_string(), "/p/src/billing".to_string()]
+        );
+        assert_eq!(
+            partition.independent_slices,
+            vec![
+                vec!["/p/src/auth".to_string()],
+                vec!["/p/src/billing".to_string()]
+            ],
+            "no inter-unit edge: each unit is its own slice"
+        );
+    }
+
+    #[test]
+    fn connected_units_collapse_into_one_slice() {
+        // core <- mid <- app is one connected component whichever direction the
+        // edges point, so a chain never splits.
+        let graph = build_three_dir_graph();
+        let partition = graph.partition_order(&[FileId(0), FileId(1), FileId(2), FileId(3)]);
+        assert_eq!(
+            partition.independent_slices,
+            vec![vec![
+                "/p/src/app".to_string(),
+                "/p/src/core".to_string(),
+                "/p/src/mid".to_string()
+            ]]
+        );
+        let paths = graph.partition_order_with_paths(&partition, Path::new("/p"));
+        assert_eq!(
+            paths.independent_slices,
+            vec![vec![
+                "src/app".to_string(),
+                "src/core".to_string(),
+                "src/mid".to_string()
+            ]]
         );
     }
 

@@ -159,6 +159,7 @@ const FramingBlock = ({ framing: f }: { framing: InlineFraming }) => {
     <div className="space-y-0.5 rounded-md border border-border/60 bg-muted/10 p-1.5">
       <p className={tone}>{label}</p>
       <p className="text-foreground">{f.framing}</p>
+      {f.action && <p className="text-muted-foreground">action: {f.action}</p>}
       {f.concern && <p className="text-muted-foreground">concern: {f.concern}</p>}
     </div>
   );

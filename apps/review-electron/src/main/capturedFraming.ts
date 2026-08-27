@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentWalkthrough, InlineFraming, Judgment } from "../model/agent";
+import type { AgentWalkthrough, InlineFraming, Judgment, JudgmentAction } from "../model/agent";
+import { isJudgmentAction } from "../model/agent";
 import { runGuide, validateWalkthrough } from "./review";
 
 /**
@@ -25,6 +26,7 @@ export type CapturedLine = {
   signal_id: string;
   framing: string;
   concern?: string;
+  action?: JudgmentAction;
 };
 
 export const capturedFramingPath = (root: string): string =>
@@ -37,7 +39,8 @@ const isCapturedLine = (value: unknown): value is CapturedLine => {
     typeof v["signal_id"] === "string" &&
     v["signal_id"].length > 0 &&
     typeof v["framing"] === "string" &&
-    (v["concern"] === undefined || typeof v["concern"] === "string")
+    (v["concern"] === undefined || typeof v["concern"] === "string") &&
+    (v["action"] === undefined || isJudgmentAction(v["action"]))
   );
 };
 
@@ -69,12 +72,13 @@ export const readCapturedLines = async (root: string): Promise<CapturedLine[]> =
 const toJudgment = (line: CapturedLine): Judgment => {
   const judgment: Judgment = { signal_id: line.signal_id, framing: line.framing };
   if (line.concern !== undefined) judgment.concern = line.concern;
+  if (line.action !== undefined) judgment.action = line.action;
   return judgment;
 };
 
 /** Subset of the validation envelope this reader maps to inline framing. */
 type ValidatedAccepted = {
-  accepted?: { signal_id: string; agent_framing: string; concern?: string }[];
+  accepted?: { signal_id: string; agent_framing: string; concern?: string; action?: JudgmentAction }[];
 };
 
 const toCapturedFraming = (envelope: ValidatedAccepted): InlineFraming[] =>
@@ -86,6 +90,7 @@ const toCapturedFraming = (envelope: ValidatedAccepted): InlineFraming[] =>
       deterministic: false,
     };
     if (j.concern !== undefined) framing.concern = j.concern;
+    if (j.action !== undefined) framing.action = j.action;
     return framing;
   });
 

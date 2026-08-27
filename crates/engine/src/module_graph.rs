@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_output::TestAdjacency;
 use fallow_types::discover::FileId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -222,6 +223,9 @@ pub struct PartitionOrderPaths {
     pub units: Vec<ReviewUnitPaths>,
     /// File paths in dependency-sensible review order (dependencies first).
     pub order: Vec<String>,
+    /// Connected components of the inter-unit dependency graph: units that
+    /// share no import edge with any unit outside their slice.
+    pub independent_slices: Vec<Vec<String>>,
 }
 
 impl From<GraphPartitionOrderPaths> for PartitionOrderPaths {
@@ -229,6 +233,7 @@ impl From<GraphPartitionOrderPaths> for PartitionOrderPaths {
         Self {
             units: paths.units.into_iter().map(ReviewUnitPaths::from).collect(),
             order: paths.order,
+            independent_slices: paths.independent_slices,
         }
     }
 }
@@ -427,6 +432,52 @@ pub fn internal_consumers_for_changed_paths(
             })
             .count() as u64;
         map.insert(relative_key_path(&module.path, root), count);
+    }
+    Some(map)
+}
+
+/// Compute per-changed-file test adjacency for the review direction: whether a
+/// test file imports the changed module directly, and whether one of those tests
+/// is itself in the changed set. `is_test_path` classifies a root-relative,
+/// forward-slashed path; the caller owns that definition so the brief's
+/// weakening and direction surfaces agree on it. Changed test files get no
+/// entry of their own. `None` when no module matches a changed path.
+#[must_use]
+pub fn test_adjacency_for_changed_paths(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    changed_files: &FxHashSet<PathBuf>,
+    is_test_path: &dyn Fn(&str) -> bool,
+) -> Option<FxHashMap<String, TestAdjacency>> {
+    let graph = graph.as_graph();
+    let changed_norm = normalized_changed_paths(changed_files);
+    let mut map: FxHashMap<String, TestAdjacency> = FxHashMap::default();
+    for module in &graph.modules {
+        if !changed_norm.contains(&normalize_path(&module.path)) {
+            continue;
+        }
+        let rel = relative_key_path(&module.path, root);
+        if is_test_path(&rel) {
+            continue;
+        }
+        let mut adjacency = TestAdjacency::None;
+        for importer in graph.importers_of(module.file_id) {
+            let Some(node) = graph.modules.get(importer.0 as usize) else {
+                continue;
+            };
+            if !is_test_path(&relative_key_path(&node.path, root)) {
+                continue;
+            }
+            if changed_norm.contains(&normalize_path(&node.path)) {
+                adjacency = TestAdjacency::Changed;
+                break;
+            }
+            adjacency = TestAdjacency::Untouched;
+        }
+        map.insert(rel, adjacency);
+    }
+    if map.is_empty() {
+        return None;
     }
     Some(map)
 }

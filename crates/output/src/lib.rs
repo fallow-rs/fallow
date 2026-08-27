@@ -98,8 +98,9 @@ pub use audit_render::{
 pub use audit_routing::{RoutingFacts, RoutingUnit};
 pub use audit_walkthrough::{
     AcceptedJudgment, AgentJudgment, AgentSchema, AgentWalkthrough, ChangeAnchor, DirectionUnit,
-    INJECTION_NOTE, RejectedJudgment, ReviewDirection, StandardWalkthroughGuide, WalkthroughGuide,
-    WalkthroughValidation, agent_schema,
+    INJECTION_NOTE, JUDGMENT_ACTIONS, JUDGMENT_CONCERNS, RejectedJudgment, ReviewDirection,
+    StandardWalkthroughGuide, TestAdjacency, WalkthroughGuide, WalkthroughValidation, agent_schema,
+    is_judgment_action,
 };
 pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use check::{

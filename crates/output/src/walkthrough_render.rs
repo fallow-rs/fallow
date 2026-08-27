@@ -253,6 +253,7 @@ mod tests {
             scoring_budget: 1,
             out_of_diff: Vec::new(),
             expert: Vec::new(),
+            test_adjacency: None,
         }
     }
 
@@ -316,6 +317,8 @@ mod tests {
                 judgment_shape: "",
                 echo_field: "graph_snapshot_hash",
                 anchoring_rule: "",
+                action_vocabulary: &[],
+                concern_vocabulary: &[],
             },
             injection_note: INJECTION_NOTE,
         }

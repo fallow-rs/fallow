@@ -32,6 +32,7 @@ export const toInlineFraming = (
     deterministic: false,
   };
   if (judgment.concern !== undefined) framing.concern = judgment.concern;
+  if (judgment.action !== undefined) framing.action = judgment.action;
   return framing;
 };
 

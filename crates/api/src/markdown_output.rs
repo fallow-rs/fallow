@@ -2592,6 +2592,7 @@ mod walkthrough_markdown_tests {
             scoring_budget: 3,
             out_of_diff: vec!["src/consumer.ts".to_string()],
             expert: Vec::new(),
+            test_adjacency: None,
         };
         // The direction unit comes FROM the focus map's review_here in reality, so
         // mirror that here: review_here has the one source unit and triage.files
@@ -2665,6 +2666,8 @@ mod walkthrough_markdown_tests {
                 judgment_shape: "",
                 echo_field: "graph_snapshot_hash",
                 anchoring_rule: "",
+                action_vocabulary: &[],
+                concern_vocabulary: &[],
             },
             injection_note: INJECTION_NOTE,
         }

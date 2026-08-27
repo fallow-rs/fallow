@@ -4893,6 +4893,179 @@ fn e5_change_anchor_judgment_accepts_anchor_kind_change() {
 /// Done-condition (a): a clean agent JSON citing only emitted signal_ids with
 /// the correct snapshot hash is ACCEPTED with zero unanchored findings.
 #[test]
+fn action_label_round_trips_and_unknown_action_is_rejected() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let vocabulary = guide["agent_schema"]["action_vocabulary"]
+        .as_array()
+        .expect("the guide publishes the closed action vocabulary");
+    assert!(vocabulary.iter().any(|v| v == "address"));
+    assert!(
+        guide["agent_schema"]["concern_vocabulary"]
+            .as_array()
+            .is_some_and(|c| c.iter().any(|v| v == "coupling")),
+        "the guide publishes the recommended concern vocabulary"
+    );
+    let emitted = guide["digest"]["decisions"]["emitted_signal_ids"]
+        .as_array()
+        .expect("emitted_signal_ids");
+    let real = emitted[0].as_str().unwrap().to_string();
+
+    let agent = serde_json::json!({
+        "graph_snapshot_hash": guide["graph_snapshot_hash"],
+        "judgments": [
+            { "signal_id": real, "framing": "ui now depends on db; 1 module outside the diff", "concern": "coupling", "action": "address" },
+            { "signal_id": real, "framing": "label typo", "action": "must-fix" }
+        ]
+    });
+    let agent_path = tmp.path().join("agent_action.json");
+    fs::write(&agent_path, serde_json::to_string(&agent).unwrap()).unwrap();
+
+    let validation = run_walkthrough_file(tmp.path(), &agent_path);
+    assert_eq!(
+        validation["accepted_count"],
+        1,
+        "validation: {}",
+        serde_json::to_string_pretty(&validation).unwrap_or_default()
+    );
+    assert_eq!(validation["accepted"][0]["action"], "address");
+    assert_eq!(validation["accepted"][0]["concern"], "coupling");
+    assert_eq!(validation["accepted"][0]["deterministic"], false);
+    assert_eq!(validation["rejected_count"], 1);
+    assert_eq!(validation["rejected"][0]["reason"], "invalid-action");
+}
+
+/// Two changed source files: `a.ts` has an untouched test importing it, `b.ts`
+/// has no test at all. The direction units carry that adjacency as a graph
+/// fact; the test file itself is not a unit.
+fn create_test_adjacency_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "ta-test", "main": "src/a.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{ "entry": ["src/a.ts", "src/b.ts"] }"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/a.ts"), "export const a = () => 1;\n").unwrap();
+    fs::write(
+        dir.join("src/a.test.ts"),
+        "import { a } from './a';\nexport const t = a();\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/b.ts"), "export const b = () => 2;\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(dir.join("src/a.ts"), "export const a = () => 10;\n").unwrap();
+    fs::write(dir.join("src/b.ts"), "export const b = () => 20;\n").unwrap();
+    commit_all(dir, "change both sources");
+    tmp
+}
+
+#[test]
+fn direction_units_carry_test_adjacency_as_a_graph_fact() {
+    let tmp = create_test_adjacency_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let units = guide["direction"]["units"]
+        .as_array()
+        .expect("direction units");
+    let adjacency = |file: &str| -> serde_json::Value {
+        units.iter().find(|u| u["file"] == file).unwrap_or_else(|| {
+            panic!(
+                "{file} is a direction unit. guide: {}",
+                serde_json::to_string_pretty(&guide).unwrap_or_default()
+            )
+        })["test_adjacency"]
+            .clone()
+    };
+    assert_eq!(adjacency("src/a.ts"), "untouched");
+    assert_eq!(adjacency("src/b.ts"), "none");
+    assert!(
+        !units.iter().any(|u| u["file"] == "src/a.test.ts"),
+        "a test file is not a direction unit"
+    );
+}
+
+/// Three changed modules: `src/core` defines, `src/app` consumes core, and
+/// `src/tools` touches neither. The partition splits into two independent slices.
+fn create_independent_slices_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    for sub in ["src/core", "src/app", "src/tools"] {
+        fs::create_dir_all(dir.join(sub)).unwrap();
+    }
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "slices-test", "main": "src/app/main.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{ "entry": ["src/app/main.ts", "src/tools/cli.ts"] }"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/core/lib.ts"), "export const lib = () => 1;\n").unwrap();
+    fs::write(
+        dir.join("src/app/main.ts"),
+        "import { lib } from '../core/lib';\nexport const main = () => lib();\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/tools/cli.ts"),
+        "export const cli = () => 3;\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(
+        dir.join("src/core/lib.ts"),
+        "export const lib = () => 10;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/app/main.ts"),
+        "import { lib } from '../core/lib';\nexport const main = () => lib() + 1;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/tools/cli.ts"),
+        "export const cli = () => 30;\n",
+    )
+    .unwrap();
+    commit_all(dir, "change all three");
+    tmp
+}
+
+#[test]
+fn partition_reports_independent_slices_along_graph_seams() {
+    let tmp = create_independent_slices_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let slices = guide["digest"]["partition"]["independent_slices"]
+        .as_array()
+        .unwrap_or_else(|| {
+            panic!(
+                "partition carries independent_slices. guide: {}",
+                serde_json::to_string_pretty(&guide).unwrap_or_default()
+            )
+        });
+    assert_eq!(
+        slices,
+        &vec![
+            serde_json::json!(["src/app", "src/core"]),
+            serde_json::json!(["src/tools"]),
+        ],
+        "app+core share an edge, tools stands alone"
+    );
+}
+
+#[test]
 fn e5_clean_agent_json_is_accepted_zero_unanchored() {
     let tmp = create_boundary_walkthrough_fixture();
     let guide = run_walkthrough_guide(tmp.path());

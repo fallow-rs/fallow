@@ -1165,6 +1165,7 @@ fn run_audit_head_analyses(
         check.export_lines = compute_brief_export_lines(opts.root, check, changed_files);
         check.internal_consumers =
             compute_brief_internal_consumers(opts.root, check, changed_files);
+        check.test_adjacency = compute_brief_test_adjacency(opts.root, check, changed_files);
     }
     let shared_parse = if share_dead_code_parse_with_health {
         check.as_mut().and_then(|r| r.shared_parse.take())
@@ -1259,6 +1260,29 @@ fn compute_brief_internal_consumers(
         .and_then(|out| out.graph.as_ref())?;
 
     fallow_engine::module_graph::internal_consumers_for_changed_paths(graph, root, changed_files)
+}
+
+/// Precompute the per-changed-source-file direct test adjacency for the review
+/// direction from the retained graph, BEFORE health drops it. Uses the same
+/// test-path classification as the weakening scan so the two surfaces agree.
+/// `None` when the graph is not retained.
+fn compute_brief_test_adjacency(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<FxHashMap<String, fallow_output::TestAdjacency>> {
+    let graph = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())?;
+
+    fallow_engine::module_graph::test_adjacency_for_changed_paths(
+        graph,
+        root,
+        changed_files,
+        &weakening::is_test_file,
+    )
 }
 
 /// Compute the per-file focus graph facts (fan-in/out + the dynamic-dispatch /

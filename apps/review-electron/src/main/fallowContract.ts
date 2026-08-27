@@ -1,6 +1,6 @@
 import type { AuditBrief } from "../model/adapter";
 
-export const REVIEW_BRIEF_SCHEMA_VERSION = 6;
+export const REVIEW_BRIEF_SCHEMA_VERSION = 8;
 
 type JsonRecord = Record<string, unknown>;
 type Guard<T> = (value: unknown) => value is T;
@@ -43,6 +43,7 @@ export interface WalkthroughValidationContract {
     anchor_kind: string;
     agent_framing: string;
     concern?: string;
+    action?: string;
     deterministic: boolean;
   }>;
   rejected: Array<{
@@ -180,6 +181,7 @@ const isAcceptedJudgment = (
   isString(value["anchor_kind"]) &&
   isString(value["agent_framing"]) &&
   isOptional(value["concern"], isString) &&
+  isOptional(value["action"], isString) &&
   isBoolean(value["deterministic"]);
 
 const isRejectedJudgment = (

@@ -45,7 +45,7 @@ const minimumValidation = (): Record<string, unknown> => ({
 });
 
 it("tracks the current Review Brief schema version", () => {
-  expect(REVIEW_BRIEF_SCHEMA_VERSION).toBe(6);
+  expect(REVIEW_BRIEF_SCHEMA_VERSION).toBe(8);
 });
 
 describe("parseReviewContract", () => {
