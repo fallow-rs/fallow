@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787836898418,
+  "lastUpdate": 1787862384232,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8cde8ee26e9e0061403420077209b2395fb58901",
-          "message": "build(scripts): fail loudly when node resolution escapes the checkout (#2261)\n\nNode resolves bare specifiers by walking ancestor directories, and `npm run`\nextends PATH the same way. A checkout nested inside another checkout borrows\nthe outer install when it has none of its own, so lint, format, and contract\ngeneration silently ran tool versions this checkout does not pin.\n\nAdd `scripts/assert-local-resolution.mjs`, which locates the package directory\nNode would load and fails when it sits outside this checkout, naming the\nforeign path and the install command. Wire it into the JavaScript lint and\nformat scripts through npm pre-scripts and into contract generation before the\nextension codegen runs. Entrypoints that import only `node:` builtins cannot\nescape and stay untouched; the type-aware sidecar keeps its own preflight\nbecause it also checks the backend version.\n\nRefs #2246",
-          "timestamp": "2026-08-13T17:29:13+02:00",
-          "tree_id": "7bfcb387334f1739cf4335f47d80133a5e8171fd",
-          "url": "https://github.com/fallow-rs/fallow/commit/8cde8ee26e9e0061403420077209b2395fb58901"
-        },
-        "date": 1786635636083,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/9406571ba1749fc34c0a516720c9fb167ed7a233"
         },
         "date": 1787836894799,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "Patrick.Leong.Shaw@gmail.com",
+            "name": "Patrick Shaw",
+            "username": "PatrickShaw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d877424ca12c71cb9490bfd1d05be4975285a195",
+          "message": "feat(graph): resolve Yarn Plug'n'Play projects through the PnP manifest (#2435)\n\nA Yarn Plug'n'Play install has no populated node_modules, so every bare import used to miss and fall through to the much slower tsconfig fallback. fallow now detects `.pnp.cjs` at the analyzed root or one of its ancestors, enables oxc's PnP resolution, and anchors manifest discovery to that directory, so runs started outside the project and editor sessions resolve the same way.\n\nManifests that are not inlined (`pnpEnableInlining: false`) are not supported and stay on the fallback path. The generated `.pnp.cjs` and `.pnp.loader.mjs` files are no longer discovered as project source. Bumps GRAPH_CACHE_VERSION so a warm cache does not replay the old unresolved imports.\n\nThanks to @PatrickShaw for the contribution.\n\nCloses #2444",
+          "timestamp": "2026-08-27T22:01:43+02:00",
+          "tree_id": "d12445987c0624ba10651f706fe82f4bf5e70479",
+          "url": "https://github.com/fallow-rs/fallow/commit/d877424ca12c71cb9490bfd1d05be4975285a195"
+        },
+        "date": 1787862380576,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
