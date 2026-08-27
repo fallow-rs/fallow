@@ -164,6 +164,19 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **Review brief schema 8 adds author actions, test adjacency, independent
+  slices, and dependency decisions.** All additive. A `--walkthrough-file`
+  judgment may carry `action` (`block`, `address`, `consider`, `fyi`); any
+  other value is rejected with `reason: "invalid-action"`, and accepted
+  judgments echo `action` next to `agent_framing`. The guide's `agent_schema`
+  gains `action_vocabulary` and `concern_vocabulary`; `direction.units[]`
+  gains an optional `test_adjacency` (`none`, `untouched`, `changed`);
+  `partition` gains `independent_slices`; `deltas` gains `dependency_added`
+  and `dependency_major_bumped`. The `dependency` decision category, reserved
+  since the decision surface shipped, now produces decisions from changed
+  `package.json` manifests. Consumers that pinned `schema_version` to 7 must
+  accept 8.
+
 - **Trace evidence is reachability-aware and lane-complete**
   ([#2390](https://github.com/fallow-rs/fallow/issues/2390)). This supersedes
   the remaining #2371 caveats documented below. `is_used` now agrees with the

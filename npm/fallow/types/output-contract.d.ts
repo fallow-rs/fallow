@@ -988,7 +988,7 @@ export type FeatureFlagActionType = ("investigate-flag" | "suppress-line")
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
-export type ReviewBriefSchemaVersion = 7
+export type ReviewBriefSchemaVersion = 8
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
  * (abstraction / deletion / convention / irreversibility) is representable: this
@@ -1033,6 +1033,13 @@ export type DecisionSurfaceSchemaVersion = number
  * The discriminated action kinds a decision can carry.
  */
 export type DecisionActionType = ("ask-expert" | "suppress")
+/**
+ * Whether a changed source unit has a test file importing it, and whether that
+ * test moved with the change. A direct-importer fact from the graph, not a
+ * coverage claim: `untouched` says a test exists and was not edited, which is
+ * the verification question the reviewer asks the author, never an answer.
+ */
+export type TestAdjacency = ("none" | "untouched" | "changed")
 /**
  * The `fallow suppressions --format json` schema version. Independently
  * versioned from the main contract, mirroring `SecuritySchemaVersion`.
@@ -12518,6 +12525,14 @@ units: ReviewUnitFact[]
  * the `units` module directories.
  */
 order: string[]
+/**
+ * Connected components of the inter-unit dependency graph: groups of
+ * module directories that share no import edge with any unit outside the
+ * group. Two or more slices mean the change splits along a graph-proven
+ * seam into pieces that can be reviewed and merged on their own. An
+ * orientation fact, never a demand to split.
+ */
+independent_slices?: string[][]
 }
 /**
  * One review unit: a coherent by-module cluster of the changed set.
@@ -12683,6 +12698,18 @@ cycle_introduced: string[]
  * reachable through an `exports` path is present (exactly one).
  */
 public_api_added: string[]
+/**
+ * Third-party dependencies a changed `package.json` declares that the base
+ * manifest did not, as `<manifest>::<name>` keys. Every dependency section
+ * participates.
+ */
+dependency_added?: string[]
+/**
+ * Declared dependencies whose range moved across a major version (or a
+ * `0.x` minor) vs base, as `<manifest>::<name>@<from>-><to>` keys. Minor
+ * and patch moves are not candidates; a non-numeric range is skipped.
+ */
+dependency_major_bumped?: string[]
 }
 /**
  * One weakening signal: a category, the file it was detected in, and a short
@@ -12963,6 +12990,11 @@ out_of_diff: string[]
  * Routed expert(s), when ownership signals are available.
  */
 expert: string[]
+/**
+ * Direct test adjacency of this unit. Absent when the graph was not
+ * retained or the unit is itself a test file.
+ */
+test_adjacency?: (TestAdjacency | null)
 }
 /**
  * One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a
@@ -13018,6 +13050,16 @@ echo_field: string
  * The anchoring rule name.
  */
 anchoring_rule: string
+/**
+ * The closed `action` vocabulary ([`JUDGMENT_ACTIONS`]): a judgment with
+ * any other value is rejected on reentry.
+ */
+action_vocabulary: string[]
+/**
+ * The recommended `concern` vocabulary ([`JUDGMENT_CONCERNS`]), documented
+ * for grouping; free text is still accepted.
+ */
+concern_vocabulary: string[]
 }
 /**
  * The `fallow review --walkthrough-file` validation envelope: the result of
@@ -13095,6 +13137,13 @@ agent_framing: string
  * The agent's optional concern category.
  */
 concern?: (string | null)
+/**
+ * The author-action label the judgment carries (`block`, `address`,
+ * `consider`, or `fyi`), validated against [`JUDGMENT_ACTIONS`]. It tells
+ * the receiving author what is required and what is optional; it is the
+ * reviewer's instruction, fenced with the framing, never a gate.
+ */
+action?: (string | null)
 /**
  * Hard fence: always `false`. The framing is agent prose, never a
  * deterministic fallow result, so it never gates or auto-posts.

@@ -17675,7 +17675,7 @@
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
-      "const": 7,
+      "const": 8,
       "description": "Independently-versioned wire-version newtype for the brief envelope.\nSerializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`."
     },
     "RiskClass": {
@@ -17867,6 +17867,20 @@
             "type": "string"
           },
           "description": "Exports-aware public-API surface delta: the public-export keys\n(`<rel_path>::<name>`) added vs base, resolved through `package.json`\n`exports` + re-export reachability. A symbol re-exported only through an\ninternal barrel NOT in `exports` is absent here (zero delta); one\nreachable through an `exports` path is present (exactly one)."
+        },
+        "dependency_added": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Third-party dependencies a changed `package.json` declares that the base\nmanifest did not, as `<manifest>::<name>` keys. Every dependency section\nparticipates."
+        },
+        "dependency_major_bumped": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Declared dependencies whose range moved across a major version (or a\n`0.x` minor) vs base, as `<manifest>::<name>@<from>-><to>` keys. Minor\nand patch moves are not candidates; a non-numeric range is skipped."
         }
       },
       "required": [
@@ -18102,7 +18116,7 @@
         {
           "type": "string",
           "const": "dependency",
-          "description": "A new third-party dependency (new maintenance + security surface).\n\nThe arm is part of the SOLID-3 surface, but its candidate source is not\nyet threaded onto the brief path, so the extractor never constructs it\nfrom a live signal today. Reserved, not dead."
+          "description": "A new third-party dependency, or a declared one moved across a major\nversion (new maintenance + security surface, or a behavior change nobody\nin the diff wrote)."
         }
       ],
       "description": "The exactly-three shippable decision categories (the SOLID-3). No cut category\n(abstraction / deletion / convention / irreversibility) is representable: this\nenum is the structural guarantee that confirmed-noise categories never ship."
@@ -18323,6 +18337,13 @@
           ],
           "description": "The agent's optional concern category."
         },
+        "action": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The author-action label the judgment carries (`block`, `address`,\n`consider`, or `fyi`), validated against [`JUDGMENT_ACTIONS`]. It tells\nthe receiving author what is required and what is optional; it is the\nreviewer's instruction, fenced with the framing, never a gate."
+        },
         "deterministic": {
           "type": "boolean",
           "description": "Hard fence: always `false`. The framing is agent prose, never a\ndeterministic fallow result, so it never gates or auto-posts."
@@ -18351,12 +18372,28 @@
         "anchoring_rule": {
           "type": "string",
           "description": "The anchoring rule name."
+        },
+        "action_vocabulary": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The closed `action` vocabulary ([`JUDGMENT_ACTIONS`]): a judgment with\nany other value is rejected on reentry."
+        },
+        "concern_vocabulary": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The recommended `concern` vocabulary ([`JUDGMENT_CONCERNS`]), documented\nfor grouping; free text is still accepted."
         }
       },
       "required": [
         "judgment_shape",
         "echo_field",
-        "anchoring_rule"
+        "anchoring_rule",
+        "action_vocabulary",
+        "concern_vocabulary"
       ],
       "description": "The shape the agent must return, embedded in the guide so a thin skill needs\nno frozen copy. Documents the anchoring + staleness contract in the wire."
     },
@@ -18388,6 +18425,17 @@
             "type": "string"
           },
           "description": "Routed expert(s), when ownership signals are available."
+        },
+        "test_adjacency": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TestAdjacency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Direct test adjacency of this unit. Absent when the graph was not\nretained or the unit is itself a test file."
         }
       },
       "required": [
@@ -18584,6 +18632,16 @@
             "type": "string"
           },
           "description": "The dependency-sensible review order: module-directory strings,\ndefinitions before consumers, mechanical/leaf units last. A permutation of\nthe `units` module directories."
+        },
+        "independent_slices": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "Connected components of the inter-unit dependency graph: groups of\nmodule directories that share no import edge with any unit outside the\ngroup. Two or more slices mean the change splits along a graph-proven\nseam into pieces that can be reviewed and merged on their own. An\norientation fact, never a demand to split."
         }
       },
       "required": [
@@ -24416,6 +24474,26 @@
         "paths"
       ],
       "description": "Effective endpoint scope used for corpus admission and pair retention."
+    },
+    "TestAdjacency": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "none",
+          "description": "No test file imports this unit directly."
+        },
+        {
+          "type": "string",
+          "const": "untouched",
+          "description": "A test file imports this unit, and none of those tests is in the diff."
+        },
+        {
+          "type": "string",
+          "const": "changed",
+          "description": "A test file imports this unit and at least one of those tests is in the\ndiff."
+        }
+      ],
+      "description": "Whether a changed source unit has a test file importing it, and whether that\ntest moved with the change. A direct-importer fact from the graph, not a\ncoverage claim: `untouched` says a test exists and was not edited, which is\nthe verification question the reviewer asks the author, never an answer."
     }
   }
 }
