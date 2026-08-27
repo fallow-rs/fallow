@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787836719666,
+  "lastUpdate": 1787860511247,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "73bb630b9510462e3139b3a65ba0179999380752",
-          "message": "fix(health): explain override rows a reader could not act on (#2230)\n\nOverride metrics gain an optional line_count on complexity rows so a unit-size breach claim sits next to the number it was scored on; the human override section caps at the ten most actionable rows with an overflow line while JSON, compact and markdown stay complete; and a complexity override scoped to a suppressed function reads stale instead of no_match, mirroring the CRAP semantics from #2207. Additive only; health schema stays at version 10.\n\nRefs #2163",
-          "timestamp": "2026-08-12T16:40:46+02:00",
-          "tree_id": "af0295c2558347e66c11af566af0bcfa15ecd07c",
-          "url": "https://github.com/fallow-rs/fallow/commit/73bb630b9510462e3139b3a65ba0179999380752"
-        },
-        "date": 1786546142453,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 10581246,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 55214,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 970653,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7604,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8400,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "Patrick.Leong.Shaw@gmail.com",
+            "name": "Patrick Shaw",
+            "username": "PatrickShaw"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8c3c5b7d9a26ff5e0a6c7393edcde3aaeab1397f",
+          "message": "perf(graph): cut tsconfig cache lock contention on large monorepos (#2437)\n\nImport resolution on large project-reference monorepos is faster: the per-run tsconfig and canonicalize caches no longer serialize every lookup behind a single lock or deep-copy the parsed document on every hit. Cached entries are handed back as Arc values, so a hit costs a refcount bump instead of cloning the whole parsed tsconfig on each hop of a chain that is walked several times per import specifier.\n\nThanks to @PatrickShaw for the contribution.",
+          "timestamp": "2026-08-27T21:49:35+02:00",
+          "tree_id": "c0afb4d8d82e1cf3503e5d52ea9af25403799106",
+          "url": "https://github.com/fallow-rs/fallow/commit/8c3c5b7d9a26ff5e0a6c7393edcde3aaeab1397f"
+        },
+        "date": 1787860505779,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9705227,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49271,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1168106,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8347,
             "unit": "allocations"
           }
         ]
