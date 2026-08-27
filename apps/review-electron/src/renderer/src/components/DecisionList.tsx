@@ -153,13 +153,24 @@ const DecisionRow = ({
  * review-time inference (reconstructed, confirm-with-author). It never gates the
  * reviewer's options, never carries a door/reversibility label, never ranks.
  */
+/** Visual weight per author action: the vocabulary exists for triage salience,
+ * so `block` must not render like `fyi`. */
+const ACTION_TONE: Record<string, string> = {
+  block: "font-semibold text-destructive",
+  address: "font-semibold text-foreground",
+  consider: "text-foreground",
+  fyi: "text-muted-foreground",
+};
+
 const FramingBlock = ({ framing: f }: { framing: InlineFraming }) => {
   const { label, tone } = ORIGIN_PRESENTATION[f.origin];
   return (
     <div className="space-y-0.5 rounded-md border border-border/60 bg-muted/10 p-1.5">
       <p className={tone}>{label}</p>
       <p className="text-foreground">{f.framing}</p>
-      {f.action && <p className="text-muted-foreground">action: {f.action}</p>}
+      {f.action && (
+        <p className={ACTION_TONE[f.action] ?? "text-muted-foreground"}>action: {f.action}</p>
+      )}
       {f.concern && <p className="text-muted-foreground">concern: {f.concern}</p>}
     </div>
   );

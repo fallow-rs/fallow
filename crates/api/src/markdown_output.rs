@@ -2156,7 +2156,8 @@ pub fn build_walkthrough_markdown(
     out.push_str("## Fallow Review: Walkthrough\n\n");
     push_walkthrough_focus(&mut out, guide, viewed);
 
-    if guide.direction.order.is_empty() {
+    let unstaged = fallow_output::decisions_outside_units(guide);
+    if guide.direction.order.is_empty() && unstaged.is_empty() {
         out.push_str("_No reviewable units in this change (orientation only)._\n");
         return out;
     }
@@ -2176,8 +2177,44 @@ pub fn build_walkthrough_markdown(
         guide,
         root,
     );
+    push_walkthrough_unstaged_decisions(&mut out, &unstaged, root);
     push_walkthrough_cleared(&mut out, guide, root, viewed);
     out
+}
+
+/// Decisions whose anchor is not a staged unit (a manifest), rendered as their
+/// own section so a dependency-only change never reads as "nothing to review".
+fn push_walkthrough_unstaged_decisions(
+    out: &mut String,
+    decisions: &[&fallow_output::Decision],
+    root: &Path,
+) {
+    if decisions.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "### Decisions outside the staged files ({})\n",
+        decisions.len()
+    );
+    for decision in decisions {
+        let token = match decision.category {
+            fallow_output::DecisionCategory::CouplingBoundary => "COUPLING",
+            fallow_output::DecisionCategory::PublicApiContract => "PUBLIC-API",
+            fallow_output::DecisionCategory::Dependency => "DEPENDENCY",
+        };
+        let _ = writeln!(
+            out,
+            "- {} `{token}`  \n  {}",
+            markdown_code_span(&markdown_relative_path_str(&decision.anchor_file, root)),
+            fallow_output::clean_decision_fact(
+                &decision.question,
+                &decision.anchor_file,
+                fallow_output::MAX_CONTRACT_MEMBERS
+            )
+        );
+    }
+    out.push('\n');
 }
 
 /// Push the `**Focus:**` line built from the guide's triage, with the reconciled
@@ -2303,6 +2340,9 @@ fn walkthrough_markdown_badges(
     }
     if walkthrough_weakened(&unit.file, guide) {
         badges.push("`WEAKENED`".to_string());
+    }
+    if unit.test_adjacency == Some(fallow_output::TestAdjacency::None) {
+        badges.push("`NO-DIRECT-TEST`".to_string());
     }
     badges
 }
@@ -2765,7 +2805,32 @@ mod walkthrough_markdown_tests {
         let mut guide = guide_with_question("src/page.ts", "q");
         guide.direction.order.clear();
         guide.direction.units.clear();
+        guide.digest.decisions.decisions.clear();
         let md = build_walkthrough_markdown(&guide, Path::new("/project"), &[]);
         assert!(md.contains("orientation only"), "got: {md}");
+    }
+
+    // A decision whose anchor is not a staged unit (a manifest) still renders,
+    // so a dependency-only change never reads as "nothing to review".
+    #[test]
+    fn decision_outside_staged_units_renders_its_own_section() {
+        let mut guide = guide_with_question(
+            "package.json",
+            "`package.json` moves 1 dependency across a major version (`react` ^18 -> ^19), imported by 8 in-repo modules. Which changelog-listed behavior changes reach those importers?",
+        );
+        guide.direction.order.clear();
+        guide.direction.units.clear();
+        let md = build_walkthrough_markdown(&guide, Path::new("/project"), &[]);
+        assert!(
+            md.contains("### Decisions outside the staged files (1)"),
+            "got: {md}"
+        );
+        assert!(
+            md.contains("`package.json`") && md.contains("`COUPLING`")
+                || md.contains("`PUBLIC-API`")
+                || md.contains("`DEPENDENCY`"),
+            "got: {md}"
+        );
+        assert!(!md.contains("orientation only"), "got: {md}");
     }
 }

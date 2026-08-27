@@ -158,7 +158,9 @@ pub fn is_ci_file(rel_path: &str) -> bool {
 /// Whether a path looks like a test file (where test removal/skip is meaningful).
 #[must_use]
 pub fn is_test_file(rel_path: &str) -> bool {
-    let lower = rel_path.to_ascii_lowercase();
+    // Anchored with a leading slash so a root-level `tests/` or `test/`
+    // (the Vitest and Node defaults) matches like a nested one.
+    let lower = format!("/{}", rel_path.to_ascii_lowercase());
     lower.contains(".test.")
         || lower.contains(".spec.")
         || lower.contains("__tests__/")
@@ -312,6 +314,18 @@ mod tests {
     fn file_classifiers() {
         assert!(is_ci_file(".github/workflows/ci.yml"));
         assert!(is_ci_file(".gitlab-ci.yml"));
+    }
+
+    #[test]
+    fn test_file_paths_match_root_level_test_dirs() {
+        assert!(is_test_file("tests/bravo.ts"));
+        assert!(is_test_file("test/unit/charlie.ts"));
+        assert!(is_test_file("src/__tests__/alpha.ts"));
+        assert!(is_test_file("e2e/echo.spec.ts"));
+        assert!(is_test_file("cypress/e2e/foxtrot.cy.ts"));
+        assert!(!is_test_file("src/latest/x.ts"));
+        assert!(!is_test_file("src/contest/y.ts"));
+        assert!(!is_test_file("src/testing/hotel.ts"));
         assert!(!is_ci_file("src/app.ts"));
         assert!(is_test_file("src/app.test.ts"));
         assert!(is_test_file("__tests__/app.ts"));

@@ -487,8 +487,14 @@ fn validate_fresh_judgment(
     };
 
     // The author-action label is a closed vocabulary: an unknown label refuses
-    // the judgment so a typo never reaches the author as an unlabeled note.
-    if let Some(action) = judgment.action.as_deref()
+    // the judgment so a typo never reaches the author as an unlabeled note. An
+    // empty string is an absent label, like `null`.
+    let action = judgment
+        .action
+        .as_deref()
+        .map(str::trim)
+        .filter(|action| !action.is_empty());
+    if let Some(action) = action
         && !fallow_output::is_judgment_action(action)
     {
         return Err(RejectedJudgment {
@@ -505,7 +511,7 @@ fn validate_fresh_judgment(
         anchor_kind: anchor_kind.to_string(),
         agent_framing: judgment.framing.clone(),
         concern: judgment.concern.clone(),
-        action: judgment.action.clone(),
+        action: action.map(str::to_string),
         deterministic: false,
     })
 }

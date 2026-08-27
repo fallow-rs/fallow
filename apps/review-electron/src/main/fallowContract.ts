@@ -71,7 +71,8 @@ const hasHeader = (value: unknown, kind: string): value is JsonRecord =>
   isRecord(value) &&
   value["kind"] === kind &&
   value["command"] === kind &&
-  value["schema_version"] === REVIEW_BRIEF_SCHEMA_VERSION;
+  isNumber(value["schema_version"]) &&
+  value["schema_version"] >= REVIEW_BRIEF_SCHEMA_VERSION;
 
 const isScore = (value: unknown): value is JsonRecord =>
   isRecord(value) &&

@@ -22,8 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Direction units report test adjacency.** Each `direction.units[]` entry
   in the walkthrough guide carries `test_adjacency` (`none`, `untouched`, or
   `changed`): whether a test file imports the changed unit directly, and
-  whether that test moved with the change. The human tour badges `UNTESTED`
-  units. A graph fact, not a coverage claim; absent when the graph was not
+  whether that test moved with the change. The human and markdown tours
+  badge `NO-DIRECT-TEST` units; a project with no test files gets no claims. A graph fact, not a coverage claim; absent when the graph was not
   retained or the unit is itself a test file.
 
 - **The review partition reports independent slices.** `partition` now

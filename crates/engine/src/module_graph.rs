@@ -450,6 +450,15 @@ pub fn test_adjacency_for_changed_paths(
     is_test_path: &dyn Fn(&str) -> bool,
 ) -> Option<FxHashMap<String, TestAdjacency>> {
     let graph = graph.as_graph();
+    // A project with no test files at all gets no adjacency claims: "no direct
+    // test" on every unit would say nothing about the change.
+    if !graph
+        .modules
+        .iter()
+        .any(|module| is_test_path(&relative_key_path(&module.path, root)))
+    {
+        return None;
+    }
     let changed_norm = normalized_changed_paths(changed_files);
     let mut map: FxHashMap<String, TestAdjacency> = FxHashMap::default();
     for module in &graph.modules {
@@ -495,17 +504,19 @@ pub struct PackageImporters {
 }
 
 /// Compute per-package in-repo importer counts for every third-party package
-/// the graph saw a value import of, split by whether the importer is in the
-/// changed set. The dependency decision arm reads these so a new or bumped
-/// `package.json` entry carries the modules it actually reaches. `None` when
-/// the graph recorded no package usage.
+/// the graph saw an import of, value or type-only, split by whether the
+/// importer is in the changed set. Type-only importers count because a major
+/// bump of a types package is a compile-wide change even when no value
+/// crosses the boundary. The dependency decision arm reads these so a new or
+/// bumped `package.json` entry carries the modules it actually reaches. `None`
+/// when the graph recorded no package usage.
 #[must_use]
 pub fn package_importers_for_changed_paths(
     graph: &RetainedModuleGraph,
     changed_files: &FxHashSet<PathBuf>,
 ) -> Option<FxHashMap<String, PackageImporters>> {
     let graph = graph.as_graph();
-    if graph.package_usage.is_empty() {
+    if graph.package_usage.is_empty() && graph.type_only_package_usage.is_empty() {
         return None;
     }
     let changed_norm = normalized_changed_paths(changed_files);
@@ -514,11 +525,21 @@ pub fn package_importers_for_changed_paths(
         .iter()
         .map(|module| (module.file_id, normalize_path(&module.path)))
         .collect();
-    let map = graph
+    let mut usage: FxHashMap<&str, Vec<FileId>> = FxHashMap::default();
+    for (package, files) in graph
         .package_usage
         .iter()
+        .chain(graph.type_only_package_usage.iter())
+    {
+        usage
+            .entry(package.as_str())
+            .or_default()
+            .extend(files.iter().copied());
+    }
+    let map = usage
+        .into_iter()
         .map(|(package, files)| {
-            let mut importers: Vec<FileId> = files.clone();
+            let mut importers: Vec<FileId> = files;
             importers.sort_unstable_by_key(|id| id.0);
             importers.dedup();
             let out_of_diff: Vec<FileId> = importers
@@ -527,7 +548,7 @@ pub fn package_importers_for_changed_paths(
                 .filter(|id| id_to_norm.get(id).is_none_or(|p| !changed_norm.contains(p)))
                 .collect();
             (
-                package.clone(),
+                package.to_string(),
                 PackageImporters {
                     importers,
                     out_of_diff,

@@ -5208,6 +5208,43 @@ fn typed_decision_surface_route_surfaces_dependency_decisions() {
     }
 }
 
+/// A dependency-only change has no graph module to stage, so the human tour
+/// must still show the decision instead of "0 files".
+#[test]
+fn human_tour_shows_dependency_decisions_outside_staged_files() {
+    let tmp = create_dependency_decision_fixture();
+    fs::write(
+        tmp.path().join("src/a.ts"),
+        "import dayjs from 'dayjs';\nimport leftPad from 'left-pad';\nexport const a = () => leftPad(String(dayjs()), 2);\n",
+    )
+    .unwrap();
+    git(tmp.path(), &["checkout", "-q", "HEAD~1", "--", "src/a.ts"]);
+    commit_all(tmp.path(), "manifest-only head");
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "HEAD~2",
+        "--walkthrough",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let text = format!("{}{}", output.stdout, output.stderr);
+    assert!(
+        text.contains("Decisions outside the staged files"),
+        "the tour names the unstaged decision block: {text}"
+    );
+    assert!(
+        text.contains("DEPENDENCY") && text.contains("package.json"),
+        "the dependency decision is visible in the tour: {text}"
+    );
+    assert!(
+        !text.contains("No reviewable units in this change"),
+        "a change with a decision is not orientation only: {text}"
+    );
+}
+
 #[test]
 fn e5_clean_agent_json_is_accepted_zero_unanchored() {
     let tmp = create_boundary_walkthrough_fixture();

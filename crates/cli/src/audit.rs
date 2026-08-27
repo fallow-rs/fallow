@@ -1630,12 +1630,15 @@ fn compute_audit_brief_data(input: AuditBriefDataInput<'_>) -> AuditBriefData {
         .map(|check| check.config.root.clone())
         .unwrap_or_default();
     let head_source = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
-    let rename_old_path = |rel: &str| -> Option<String> {
-        crate::report::ci::diff_filter::shared_diff_index()
-            .and_then(|index| index.old_path_for_root_relative(rel))
-            .map(std::borrow::Cow::into_owned)
-    };
-    compute_audit_brief_data_with_lookups(input, None, &head_source, &rename_old_path)
+    compute_audit_brief_data_with_lookups(input, None, &head_source, &shared_rename_old_path)
+}
+
+/// Resolve a head root-relative path to its pre-rename path through the run's
+/// shared diff index; `None` when the file was not renamed.
+fn shared_rename_old_path(rel: &str) -> Option<String> {
+    crate::report::ci::diff_filter::shared_diff_index()
+        .and_then(|index| index.old_path_for_root_relative(rel))
+        .map(std::borrow::Cow::into_owned)
 }
 
 struct AuditBriefExternalData {
@@ -1660,6 +1663,7 @@ fn prepare_audit_brief_external_data(
         base_ref,
         changed_files,
         check.and_then(|check| check.package_importers.as_ref()),
+        &shared_rename_old_path,
     );
     AuditBriefExternalData {
         weakening_signals,
@@ -1883,6 +1887,7 @@ pub fn benchmark_audit_review_brief_many_changed_files_json(
             .check
             .as_ref()
             .and_then(|check| check.package_importers.as_ref()),
+        &shared_rename_old_path,
     );
     corpus.state = Some(AuditReviewBenchmarkState {
         head: HeadAnalyses {
@@ -1937,6 +1942,7 @@ fn compute_audit_brief_data_with_lookups(
                 input
                     .check
                     .and_then(|check| check.package_importers.as_ref()),
+                rename_old_path,
             ),
         ),
         Some(external) => (
@@ -2348,6 +2354,7 @@ fn compute_dependency_anchors(
     base_ref: &str,
     changed_files: &FxHashSet<PathBuf>,
     package_importers: Option<&FxHashMap<String, fallow_engine::module_graph::PackageImporters>>,
+    rename_old_path: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<crate::audit_decision_surface::DependencyAnchor> {
     use fallow_api::dependency_deltas::{
         ManifestPair, dependency_anchors_from_manifests, is_manifest_path,
@@ -2356,6 +2363,9 @@ fn compute_dependency_anchors(
     let Some(git_root) = git_toplevel(root) else {
         return Vec::new();
     };
+    let root_prefix = root
+        .strip_prefix(&git_root)
+        .unwrap_or_else(|_| Path::new(""));
     let mut manifests: Vec<(String, PathBuf, &PathBuf)> = Vec::new();
     for abs in changed_files {
         let (Ok(root_relative), Ok(git_relative)) =
@@ -2381,11 +2391,23 @@ fn compute_dependency_anchors(
         let Ok(head) = std::fs::read_to_string(abs) else {
             continue;
         };
-        let base = match reader.read(base_ref, &git_relative) {
+        let mut base = match reader.read(base_ref, &git_relative) {
             BaseRead::Content(base) => Some(base),
             BaseRead::Missing => None,
             BaseRead::Error => break,
         };
+        // A manifest that moved with its package (`git mv packages/a
+        // packages/b`) is not new: read it at its pre-rename path so its
+        // dependency list is diffed, not reported wholesale as added.
+        if base.is_none()
+            && let Some(old) = rename_old_path(&manifest)
+        {
+            base = match reader.read(base_ref, &root_prefix.join(old)) {
+                BaseRead::Content(base) => Some(base),
+                BaseRead::Missing => None,
+                BaseRead::Error => break,
+            };
+        }
         pairs.push(ManifestPair {
             manifest,
             base,

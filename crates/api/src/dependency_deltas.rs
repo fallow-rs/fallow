@@ -234,8 +234,15 @@ fn to_anchor(
 }
 
 /// The `(major, minor)` pair a range starts with, after stripping a leading
-/// range operator. `None` when the range does not start with digits.
+/// range operator. An `npm:<name>@<range>` alias is read at its range, since
+/// that is how a package ships two majors of one peer side by side. `None`
+/// when the range does not start with digits.
 fn leading_version(range: &str) -> Option<(u64, u64)> {
+    let range = range
+        .trim()
+        .strip_prefix("npm:")
+        .and_then(|alias| alias.rsplit_once('@').map(|(_, range)| range))
+        .unwrap_or(range);
     let trimmed = range
         .trim()
         .trim_start_matches(['^', '~', '=', 'v', '>', '<', ' ']);
@@ -342,7 +349,12 @@ mod tests {
         assert!(!is_major_bump("catalog:", "catalog:react19"));
         assert!(!is_major_bump("^2.0.0", "file:../local"));
         assert!(!is_major_bump("latest", "^3.0.0"));
-        assert!(!is_major_bump("npm:foo@1.0.0", "npm:foo@2.0.0"));
+        assert!(is_major_bump("npm:foo@1.0.0", "npm:foo@2.0.0"));
+        assert!(is_major_bump(
+            "npm:@scope/pkg@^1.4.0",
+            "npm:@scope/pkg@^2.0.0"
+        ));
+        assert!(!is_major_bump("npm:foo@^1.0.0", "npm:foo@^1.9.0"));
         assert!(!is_major_bump("1.0.0-beta.2", "1.0.0"));
         assert!(is_major_bump("~1.4.0", "2.0.0"));
         assert!(is_major_bump(">=1.0.0 <2.0.0", "^3.0.0"));

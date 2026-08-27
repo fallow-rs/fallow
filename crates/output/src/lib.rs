@@ -362,5 +362,5 @@ pub use type_aware_envelopes::{
 };
 pub use walkthrough_render::{
     MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_names, clean_decision_fact,
-    visible_stage_units,
+    decisions_outside_units, visible_stage_units,
 };

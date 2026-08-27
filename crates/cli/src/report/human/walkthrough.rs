@@ -21,8 +21,10 @@
 //! pre-computes none): COUPLING / PUBLIC-API / DEPENDENCY from
 //! `digest.decisions`, OUT-OF-DIFF from the contract-break lens, OWNER / BUS-FACTOR-1
 //! from the unit's routed expert, WEAKENED from `digest.weakening`, INTRODUCED from
-//! `digest.deltas`, UNTESTED from the unit's `test_adjacency`, and VIEWED from the
-//! local viewed-state. They are render-only, never a wire field.
+//! `digest.deltas`, NO-DIRECT-TEST from the unit's `test_adjacency`, and VIEWED
+//! from the local viewed-state. They are render-only, never a wire field.
+//! Decisions whose anchor is not a staged unit (a manifest) get their own block
+//! after the stages so the top-ranked decision is never hidden behind "0 files".
 
 use colored::Colorize;
 use fallow_output::{
@@ -58,7 +60,8 @@ pub(in crate::report) fn build_walkthrough_human_lines(
     let guide = input.guide;
     let mut lines = Vec::new();
 
-    if guide.direction.order.is_empty() {
+    let unstaged = fallow_output::decisions_outside_units(guide);
+    if guide.direction.order.is_empty() && unstaged.is_empty() {
         lines.push(
             "No reviewable units in this change (orientation only)."
                 .dimmed()
@@ -77,9 +80,47 @@ pub(in crate::report) fn build_walkthrough_human_lines(
         true,
     );
     push_stage(&mut lines, "Stage 2: Self-contained", &stage2, input, false);
+    push_unstaged_decisions(&mut lines, &unstaged);
     push_cleared_panel(&mut lines, input);
 
     lines
+}
+
+/// Render the decisions whose anchor is not a staged source unit (a
+/// `package.json` for a dependency decision), so the top-ranked decision never
+/// disappears behind "0 files" just because its anchor is not a module.
+fn push_unstaged_decisions(lines: &mut Vec<String>, decisions: &[&fallow_output::Decision]) {
+    if decisions.is_empty() {
+        return;
+    }
+    let header = format!("Decisions outside the staged files ({})", decisions.len());
+    lines.push(String::new());
+    lines.push(format!(
+        "{} {}",
+        "\u{25cf}".yellow(),
+        header.yellow().bold()
+    ));
+    for decision in decisions {
+        let token = match decision.category {
+            DecisionCategory::CouplingBoundary => "COUPLING",
+            DecisionCategory::PublicApiContract => "PUBLIC-API",
+            DecisionCategory::Dependency => "DEPENDENCY",
+        };
+        lines.push(format!(
+            "  {} {}",
+            format_path(&decision.anchor_file),
+            token.cyan()
+        ));
+        lines.push(format!(
+            "    {}",
+            clean_decision_fact(
+                &decision.question,
+                &decision.anchor_file,
+                MAX_CONTRACT_MEMBERS
+            )
+            .dimmed()
+        ));
+    }
 }
 
 /// The staged source files the local state has marked viewed (current hash only),
@@ -242,7 +283,7 @@ fn synthesize_badges(unit: &DirectionUnit, input: &WalkthroughHumanInput<'_>) ->
         badges.push("WEAKENED".yellow().to_string());
     }
     if unit.test_adjacency == Some(fallow_output::TestAdjacency::None) {
-        badges.push("UNTESTED".yellow().to_string());
+        badges.push("NO-DIRECT-TEST".yellow().to_string());
     }
     if input
         .viewed

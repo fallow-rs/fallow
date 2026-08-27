@@ -59,8 +59,8 @@ pub struct PartitionOrder {
     /// Connected components of the inter-unit dependency graph: groups of units
     /// that share no import edge with any unit outside their group. Each slice
     /// is `module_dir`-sorted; slices are sorted by their first entry. Two or
-    /// more slices mean the change splits into independently reviewable (and
-    /// mergeable) pieces along a graph-proven seam.
+    /// more slices mean the change has no import edge across that seam; whether
+    /// the pieces can land separately is still the reviewer's call.
     independent_slices: Vec<Vec<String>>,
 }
 

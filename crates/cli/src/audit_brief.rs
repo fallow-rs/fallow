@@ -716,16 +716,39 @@ fn print_deltas_human(deltas: &ReviewDeltas) {
             } else {
                 "ies"
             },
-            deltas.dependency_added.join(", ")
+            dependency_key_names(&deltas.dependency_added)
         );
     }
     if !deltas.dependency_major_bumped.is_empty() {
         eprintln!(
             "  major version bump{}: {}",
             crate::report::plural(deltas.dependency_major_bumped.len()),
-            deltas.dependency_major_bumped.join(", ")
+            dependency_key_names(&deltas.dependency_major_bumped)
         );
     }
+}
+
+/// Render dependency delta keys (`<manifest>::<name>[@<from>-><to>]`) as the
+/// names a human reads: `react ^18.0.0 to ^19.0.0 (package.json)`.
+fn dependency_key_names(keys: &[String]) -> String {
+    keys.iter()
+        .map(|key| {
+            let (manifest, rest) = key.split_once("::").unwrap_or(("", key));
+            let (name, range) = rest
+                .split_once('@')
+                .map_or((rest, None), |(name, range)| (name, range.split_once("->")));
+            let range_text = range
+                .map(|(from, to)| format!(" {from} to {to}"))
+                .unwrap_or_default();
+            let manifest_text = if manifest.is_empty() || manifest == "package.json" {
+                String::new()
+            } else {
+                format!(" ({manifest})")
+            };
+            format!("{name}{range_text}{manifest_text}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Print the weakening signals (6.F headline). Advisory, reviewer-private.

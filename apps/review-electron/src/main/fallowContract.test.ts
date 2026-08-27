@@ -70,7 +70,6 @@ describe("parseReviewContract", () => {
   it.each([
     ["missing", undefined],
     ["older", REVIEW_BRIEF_SCHEMA_VERSION - 1],
-    ["newer", REVIEW_BRIEF_SCHEMA_VERSION + 1],
   ])("rejects a %s schema version", (_label, schemaVersion) => {
     const value = minimumReview();
     if (schemaVersion === undefined) delete value["schema_version"];
@@ -79,6 +78,14 @@ describe("parseReviewContract", () => {
     expect(() => parseReviewContract(JSON.stringify(value))).toThrow(
       compatibilityError("audit-brief"),
     );
+  });
+
+  // The brief schema only ever adds fields, so the pin is a floor, not a
+  // lockstep: a newer fallow build must not strand the app.
+  it("accepts a newer schema version", () => {
+    const value = minimumReview();
+    value["schema_version"] = REVIEW_BRIEF_SCHEMA_VERSION + 1;
+    expect(() => parseReviewContract(JSON.stringify(value))).not.toThrow();
   });
 
   it.each([

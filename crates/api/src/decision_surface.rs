@@ -328,7 +328,16 @@ struct DecisionSpec {
     internal_consumer_count: u64,
     /// The named-sacrifice clause, stated as a fact.
     tradeoff: String,
+    /// Per-decision override of the category's reversibility weight. A
+    /// dependency ADDED is a permanent new surface (the category weight); a
+    /// MAJOR BUMP reverts with two files and a lockfile, so it ranks with a
+    /// public-API change rather than above it.
+    reversibility_weight: Option<u64>,
 }
+
+/// The reversibility weight a major bump carries: the public-API weight, not
+/// the added-dependency weight.
+const MAJOR_BUMP_REVERSIBILITY_WEIGHT: u64 = 3;
 
 /// Build one decision, resolving its routed expert and suppression state.
 fn build_decision(spec: DecisionSpec, inputs: &DecisionInputs<'_>) -> Decision {
@@ -340,6 +349,7 @@ fn build_decision(spec: DecisionSpec, inputs: &DecisionInputs<'_>) -> Decision {
         anchor_line,
         blast,
         internal_consumer_count,
+        reversibility_weight,
         tradeoff,
     } = spec;
     let signal_id = derive_signal_id(category, &candidate_key);
@@ -349,7 +359,8 @@ fn build_decision(spec: DecisionSpec, inputs: &DecisionInputs<'_>) -> Decision {
     let previous_signal_id = remap_key_paths(&candidate_key, inputs.rename_old_path)
         .map(|old_key| derive_signal_id(category, &old_key));
     let (expert, bus_factor_one) = route_for(inputs.routing, &anchor_file);
-    let consequence = blast.saturating_mul(category.reversibility_weight());
+    let consequence = blast
+        .saturating_mul(reversibility_weight.unwrap_or_else(|| category.reversibility_weight()));
     Decision {
         signal_id,
         category,
@@ -521,6 +532,10 @@ fn append_dependency_decisions(decisions: &mut Vec<Decision>, inputs: &DecisionI
                 anchor_line: anchor.line,
                 blast: anchor.importers,
                 internal_consumer_count: anchor.out_of_diff_importers,
+                reversibility_weight: match anchor.kind {
+                    DependencyChangeKind::Added => None,
+                    DependencyChangeKind::MajorBump => Some(MAJOR_BUMP_REVERSIBILITY_WEIGHT),
+                },
             },
             inputs,
         ));
@@ -555,6 +570,7 @@ fn append_boundary_decisions(decisions: &mut Vec<Decision>, inputs: &DecisionInp
                 anchor_line,
                 blast: inputs.affected_not_shown,
                 internal_consumer_count,
+                reversibility_weight: None,
             },
             inputs,
         ));
@@ -587,6 +603,7 @@ fn append_public_api_decision(decisions: &mut Vec<Decision>, inputs: &DecisionIn
                 anchor_line: inputs.public_api_anchor_line,
                 blast: inputs.affected_not_shown,
                 internal_consumer_count,
+                reversibility_weight: None,
             },
             inputs,
         ));
@@ -612,6 +629,7 @@ fn append_coordination_decisions(decisions: &mut Vec<Decision>, inputs: &Decisio
                 // The coordination arm already carries the honest per-decision
                 // count; no precomputed-map lookup needed.
                 internal_consumer_count: gap.consumer_count,
+                reversibility_weight: None,
             },
             inputs,
         ));
@@ -644,9 +662,18 @@ pub fn extract_decision_surface(inputs: &DecisionInputs<'_>) -> DecisionSurface 
     });
 
     // Rank by consequence desc; stable, deterministic tiebreak on signal_id.
+    // Rank by consequence, then by the category's reversibility weight, then by
+    // anchor path, so a tie is broken by a stated policy a reviewer can predict
+    // across runs rather than by hash order. The id is the final, total order.
     classified.sort_by(|a, b| {
         b.consequence
             .cmp(&a.consequence)
+            .then_with(|| {
+                b.category
+                    .reversibility_weight()
+                    .cmp(&a.category.reversibility_weight())
+            })
+            .then_with(|| a.anchor_file.cmp(&b.anchor_file))
             .then_with(|| a.signal_id.cmp(&b.signal_id))
     });
 
@@ -794,8 +821,8 @@ mod tests {
         assert_eq!(bump.internal_consumer_count, 9);
         assert_eq!(
             bump.consequence,
-            12 * 5,
-            "dependency carries the top reversibility weight"
+            12 * 3,
+            "a major bump ranks with a public-API change, not above it"
         );
         assert!(bump.question.contains("`react` ^18.2.0 -> ^19.0.0"));
         assert!(bump.question.ends_with('?'));
