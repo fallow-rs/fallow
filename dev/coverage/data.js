@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787833772386,
+  "lastUpdate": 1787836898418,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "74f5a847a45709ef4d09a5d8f7918d6fcb70cb9d",
-          "message": "perf(core): cache default entry matchers",
-          "timestamp": "2026-08-13T16:57:26+02:00",
-          "tree_id": "5f23453ab749809c83ad7f68b0ce87b612840b0f",
-          "url": "https://github.com/fallow-rs/fallow/commit/74f5a847a45709ef4d09a5d8f7918d6fcb70cb9d"
-        },
-        "date": 1786633497971,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/bcf333d8f9fe0753be4df17bf1a8a20be4fbdb53"
         },
         "date": 1787833768885,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "9406571ba1749fc34c0a516720c9fb167ed7a233",
+          "message": "chore(napi): sync transitive similar-code platform pins to v3.19.0",
+          "timestamp": "2026-08-27T15:13:00+02:00",
+          "tree_id": "d82aef00df0a8cd605ed955cc2e2e2023522d411",
+          "url": "https://github.com/fallow-rs/fallow/commit/9406571ba1749fc34c0a516720c9fb167ed7a233"
+        },
+        "date": 1787836894799,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
