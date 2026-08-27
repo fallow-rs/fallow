@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787865730203,
+  "lastUpdate": 1787870393727,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "008e2b2056841859745afae6b92047f847e5553e",
-          "message": "test(audit): surface verdict context in the reshaped-clone demotion assert",
-          "timestamp": "2026-08-13T18:13:44+02:00",
-          "tree_id": "68eb1f43b3c9b57f7f28fb4514448f3c7ba877c2",
-          "url": "https://github.com/fallow-rs/fallow/commit/008e2b2056841859745afae6b92047f847e5553e"
-        },
-        "date": 1786637952628,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/8d53657a9e18fa00f8b8a83337428bf912de8c23"
         },
         "date": 1787865726697,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "446e3f0a55c68c95ef765cfe5c872e1e8a16e509",
+          "message": "docs(changelog): move the review schema 8 entries to Unreleased\n\nThey were added under the 3.19.0 heading after that tag was cut, so the\nchangelog credited a released version with features it does not contain.\nThey ship in the next release.",
+          "timestamp": "2026-08-28T00:30:13+02:00",
+          "tree_id": "7c44bddd67f375455f7909d3febfd9d3e55d88d6",
+          "url": "https://github.com/fallow-rs/fallow/commit/446e3f0a55c68c95ef765cfe5c872e1e8a16e509"
+        },
+        "date": 1787870389625,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
