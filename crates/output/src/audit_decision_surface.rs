@@ -222,7 +222,10 @@ pub fn suppress_comment(category: DecisionCategory) -> String {
     )
 }
 
-/// Attach structured actions to one decision.
+/// Attach structured actions to one decision. A `dependency` decision anchors
+/// on a `package.json`, which cannot carry a comment, so it gets no `suppress`
+/// action: handing an agent a `//` line to paste into JSON would corrupt the
+/// manifest.
 #[must_use]
 pub fn decision_actions(decision: &Decision) -> Vec<DecisionAction> {
     let mut actions = Vec::new();
@@ -234,12 +237,14 @@ pub fn decision_actions(decision: &Decision) -> Vec<DecisionAction> {
             auto_fixable: false,
         });
     }
-    actions.push(DecisionAction {
-        action_type: DecisionActionType::Suppress,
-        description: "Suppress this decision if it is settled".to_string(),
-        command: Some(suppress_comment(decision.category)),
-        auto_fixable: false,
-    });
+    if decision.category != DecisionCategory::Dependency {
+        actions.push(DecisionAction {
+            action_type: DecisionActionType::Suppress,
+            description: "Suppress this decision if it is settled".to_string(),
+            command: Some(suppress_comment(decision.category)),
+            auto_fixable: false,
+        });
+    }
     actions
 }
 

@@ -417,6 +417,7 @@ pub fn validate_walkthrough(
                 signal_id: judgment.signal_id.clone(),
                 change_anchor: judgment.change_anchor.clone(),
                 reason: "stale-snapshot".to_string(),
+                invalid_value: None,
             });
         }
     } else {
@@ -454,9 +455,39 @@ fn validate_fresh_judgment(
     surface: &DecisionSurface,
     change_anchor_ids: &FxHashSet<String>,
 ) -> Result<AcceptedJudgment, RejectedJudgment> {
-    // The author-action label is a closed vocabulary: an unknown label is
-    // refused outright, before anchoring, so a typo never reaches the author as
-    // an unlabeled note.
+    // A signal_id (graph finding) is the strong anchor; a change_anchor
+    // (changed region) is the weaker fallback. Prefer the signal. The anchor
+    // is checked first so a hallucinated anchor is reported as such even when
+    // the label is also wrong: the anti-hallucination result must never hide
+    // behind a typo.
+    let anchor = if !judgment.signal_id.is_empty() && surface.accept_signal_id(&judgment.signal_id)
+    {
+        Some((judgment.signal_id.clone(), String::new(), "signal"))
+    } else if !judgment.change_anchor.is_empty()
+        && change_anchor_ids.contains(&judgment.change_anchor)
+    {
+        Some((String::new(), judgment.change_anchor.clone(), "change"))
+    } else {
+        None
+    };
+    let Some((signal_id, change_anchor, anchor_kind)) = anchor else {
+        // Cited a change_anchor (but no valid signal_id) and it did not resolve:
+        // the region-level miss. Otherwise this is the signal-id miss.
+        let reason = if judgment.signal_id.is_empty() && !judgment.change_anchor.is_empty() {
+            UNKNOWN_CHANGE_ANCHOR_REASON
+        } else {
+            UNANCHORED_REASON
+        };
+        return Err(RejectedJudgment {
+            signal_id: judgment.signal_id.clone(),
+            change_anchor: judgment.change_anchor.clone(),
+            reason: reason.to_string(),
+            invalid_value: None,
+        });
+    };
+
+    // The author-action label is a closed vocabulary: an unknown label refuses
+    // the judgment so a typo never reaches the author as an unlabeled note.
     if let Some(action) = judgment.action.as_deref()
         && !fallow_output::is_judgment_action(action)
     {
@@ -464,45 +495,18 @@ fn validate_fresh_judgment(
             signal_id: judgment.signal_id.clone(),
             change_anchor: judgment.change_anchor.clone(),
             reason: INVALID_ACTION_REASON.to_string(),
+            invalid_value: Some(action.to_string()),
         });
     }
 
-    // A signal_id (graph finding) is the strong anchor; a change_anchor
-    // (changed region) is the weaker fallback. Prefer the signal.
-    if !judgment.signal_id.is_empty() && surface.accept_signal_id(&judgment.signal_id) {
-        return Ok(AcceptedJudgment {
-            signal_id: judgment.signal_id.clone(),
-            change_anchor: String::new(),
-            anchor_kind: "signal".to_string(),
-            agent_framing: judgment.framing.clone(),
-            concern: judgment.concern.clone(),
-            action: judgment.action.clone(),
-            deterministic: false,
-        });
-    }
-    if !judgment.change_anchor.is_empty() && change_anchor_ids.contains(&judgment.change_anchor) {
-        return Ok(AcceptedJudgment {
-            signal_id: String::new(),
-            change_anchor: judgment.change_anchor.clone(),
-            anchor_kind: "change".to_string(),
-            agent_framing: judgment.framing.clone(),
-            concern: judgment.concern.clone(),
-            action: judgment.action.clone(),
-            deterministic: false,
-        });
-    }
-
-    // Cited a change_anchor (but no valid signal_id) and it did not resolve:
-    // the region-level miss. Otherwise this is the signal-id miss.
-    let reason = if judgment.signal_id.is_empty() && !judgment.change_anchor.is_empty() {
-        UNKNOWN_CHANGE_ANCHOR_REASON
-    } else {
-        UNANCHORED_REASON
-    };
-    Err(RejectedJudgment {
-        signal_id: judgment.signal_id.clone(),
-        change_anchor: judgment.change_anchor.clone(),
-        reason: reason.to_string(),
+    Ok(AcceptedJudgment {
+        signal_id,
+        change_anchor,
+        anchor_kind: anchor_kind.to_string(),
+        agent_framing: judgment.framing.clone(),
+        concern: judgment.concern.clone(),
+        action: judgment.action.clone(),
+        deterministic: false,
     })
 }
 
@@ -1106,6 +1110,13 @@ mod tests {
                     concern: None,
                     action: Some("must-fix".to_string()),
                 },
+                AgentJudgment {
+                    signal_id: "sig:0000000000000000".to_string(),
+                    change_anchor: String::new(),
+                    framing: "hallucinated anchor and a typo".to_string(),
+                    concern: None,
+                    action: Some("must-fix".to_string()),
+                },
             ],
         };
         let validation = validate_walkthrough(&agent, &surface, &FxHashSet::default(), hash);
@@ -1114,8 +1125,18 @@ mod tests {
         assert_eq!(validation.accepted[0].concern.as_deref(), Some("coupling"));
         assert!(!validation.accepted[0].deterministic);
         assert_eq!(validation.accepted[1].action, None);
-        assert_eq!(validation.rejected_count, 1);
+        assert_eq!(validation.rejected_count, 2);
         assert_eq!(validation.rejected[0].reason, INVALID_ACTION_REASON);
+        assert_eq!(
+            validation.rejected[0].invalid_value.as_deref(),
+            Some("must-fix"),
+            "the offending label is echoed"
+        );
+        assert_eq!(
+            validation.rejected[1].reason, UNANCHORED_REASON,
+            "a hallucinated anchor outranks a bad label"
+        );
+        assert_eq!(validation.rejected[1].invalid_value, None);
         let json = serde_json::to_value(&validation.accepted[1]).unwrap();
         assert!(
             json.get("action").is_none(),

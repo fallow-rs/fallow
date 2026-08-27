@@ -153,11 +153,16 @@ pub struct PartitionFacts {
     pub order: Vec<String>,
     /// Connected components of the inter-unit dependency graph: groups of
     /// module directories that share no import edge with any unit outside the
-    /// group. Two or more slices mean the change splits along a graph-proven
-    /// seam into pieces that can be reviewed and merged on their own. An
+    /// group. Present only when there are two or more, which is when the
+    /// change splits along a graph-proven seam into pieces that can be
+    /// reviewed and merged on their own; a single slice is just `order`. An
     /// orientation fact, never a demand to split.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "fewer_than_two_slices")]
     pub independent_slices: Vec<Vec<String>>,
+}
+
+fn fewer_than_two_slices(slices: &[Vec<String>]) -> bool {
+    slices.len() < 2
 }
 
 /// One review unit: a coherent by-module cluster of the changed set.
@@ -194,13 +199,12 @@ pub struct ReviewDeltas {
     pub public_api_added: Vec<String>,
     /// Third-party dependencies a changed `package.json` declares that the base
     /// manifest did not, as `<manifest>::<name>` keys. Every dependency section
-    /// participates.
-    #[serde(default)]
+    /// participates. Always present, empty when no manifest changed.
     pub dependency_added: Vec<String>,
     /// Declared dependencies whose range moved across a major version (or a
     /// `0.x` minor) vs base, as `<manifest>::<name>@<from>-><to>` keys. Minor
     /// and patch moves are not candidates; a non-numeric range is skipped.
-    #[serde(default)]
+    /// Always present, empty when nothing crossed a major version.
     pub dependency_major_bumped: Vec<String>,
 }
 

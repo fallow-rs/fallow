@@ -114,6 +114,9 @@ pub enum DependencyChangeKind {
 pub struct DependencyEntry {
     /// The package name.
     pub name: String,
+    /// The manifest section the entry lives in at head (`dependencies`,
+    /// `devDependencies`, `optionalDependencies`, `peerDependencies`).
+    pub section: String,
     /// The base range; `None` for an added entry.
     pub from: Option<String>,
     /// The head range.
@@ -408,29 +411,41 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
 
 /// The candidate key for a dependency anchor: the manifest-scoped entry keys,
 /// name-sorted and `|`-joined, so one manifest yields one stable id per kind.
+/// Built from the same per-entry key the brief's `deltas` carry.
 fn dependency_candidate_key(anchor: &DependencyAnchor) -> String {
     let keys: Vec<String> = anchor
         .entries
         .iter()
-        .map(|entry| match (&anchor.kind, &entry.from) {
-            (DependencyChangeKind::MajorBump, Some(from)) => {
-                format!("{}::{}@{from}->{}", anchor.manifest, entry.name, entry.to)
-            }
-            _ => format!("{}::{}", anchor.manifest, entry.name),
+        .map(|entry| {
+            crate::dependency_deltas::dependency_delta_key(&anchor.manifest, anchor.kind, entry)
         })
         .collect();
     keys.join("|")
+}
+
+/// A short section tag for anything outside `dependencies`, so a dev tool
+/// never reads as a runtime dependency in the question.
+fn section_tag(section: &str) -> &'static str {
+    match section {
+        "devDependencies" => " (dev)",
+        "optionalDependencies" => " (optional)",
+        "peerDependencies" => " (peer)",
+        _ => "",
+    }
 }
 
 fn dependency_names(anchor: &DependencyAnchor) -> String {
     anchor
         .entries
         .iter()
-        .map(|entry| match (&anchor.kind, &entry.from) {
-            (DependencyChangeKind::MajorBump, Some(from)) => {
-                format!("`{}` {from} -> {}", entry.name, entry.to)
+        .map(|entry| {
+            let tag = section_tag(&entry.section);
+            match (&anchor.kind, &entry.from) {
+                (DependencyChangeKind::MajorBump, Some(from)) => {
+                    format!("`{}`{tag} {from} -> {}", entry.name, entry.to)
+                }
+                _ => format!("`{}`{tag}", entry.name),
             }
-            _ => format!("`{}`", entry.name),
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -720,11 +735,13 @@ mod tests {
                 entries: vec![
                     DependencyEntry {
                         name: "react".to_string(),
+                        section: "dependencies".to_string(),
                         from: Some("^18.2.0".to_string()),
                         to: "^19.0.0".to_string(),
                     },
                     DependencyEntry {
                         name: "zod".to_string(),
+                        section: "dependencies".to_string(),
                         from: Some("^3.0.0".to_string()),
                         to: "^4.0.0".to_string(),
                     },
@@ -738,6 +755,7 @@ mod tests {
                 kind: DependencyChangeKind::Added,
                 entries: vec![DependencyEntry {
                     name: "dayjs".to_string(),
+                    section: "dependencies".to_string(),
                     from: None,
                     to: "^1.11.0".to_string(),
                 }],

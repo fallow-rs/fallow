@@ -25,7 +25,6 @@ mod audit;
 mod audit_brief;
 mod audit_cache_prune;
 mod audit_decision_surface;
-mod audit_dependency_deltas;
 mod audit_focus;
 mod audit_walkthrough;
 mod base_worktree;
@@ -1507,10 +1506,12 @@ enum Command {
         /// Ingest an agent's judgment JSON and POST-VALIDATE it against the
         /// LIVE graph. Rejects any judgment whose `signal_id` fallow did not emit
         /// (anti-hallucination); refuses the whole payload as stale when the
-        /// echoed graph-snapshot hash no longer matches (the tree moved). The
-        /// verifier is the graph, not a second model. Implies the brief; always
-        /// exits 0. The agent's free-text framing is fenced as non-deterministic
-        /// and never gates or auto-posts.
+        /// echoed graph-snapshot hash no longer matches (the tree moved); rejects
+        /// an `action` outside `block`, `address`, `consider`, `fyi`
+        /// (`invalid-action`). The verifier is the graph, not a second model.
+        /// Implies the brief; always exits 0. The agent's free-text framing and
+        /// action label are fenced as non-deterministic and never gate or
+        /// auto-post.
         #[arg(long, value_name = "PATH")]
         walkthrough_file: Option<PathBuf>,
 
@@ -1559,7 +1560,9 @@ enum Command {
     /// signal_id-anchored set of the SOLID-3 decisions (coupling/boundary,
     /// exports-aware public-API/contract, dependency). Runs the same changed-code
     /// analysis as `fallow review` but emits ONLY the decisions, separable and
-    /// cheap. Every decision is suppressible with `// fallow-ignore`. Always
+    /// cheap. Coupling and public-API decisions are suppressible with
+    /// `// fallow-ignore`; a dependency decision anchors on `package.json` and
+    /// has no suppress action. Always
     /// exits 0 (advisory, never a gate). Use `--base` / `--changed-since` to pick
     /// the comparison point, exactly like `fallow audit`.
     DecisionSurface {

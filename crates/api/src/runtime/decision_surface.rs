@@ -48,9 +48,20 @@ pub fn run_decision_surface(
     }
 
     let head = run_decision_analysis(&resolved, Some(&changed_files))?;
-    let base = compute_base_decision_snapshot(options, &resolved.root, &resolved_base.git_ref)?;
-    let deltas = build_decision_deltas(&head, &base);
-    let surface = build_surface(options, &head, &deltas);
+    let manifests = changed_manifests(&resolved.root, &changed_files);
+    let base = compute_base_decision_snapshot(
+        options,
+        &resolved.root,
+        &resolved_base.git_ref,
+        &manifests,
+    )?;
+    let manifest_pairs = manifest_pairs(&resolved.root, &manifests, &base);
+    let dependency_anchors = crate::dependency_deltas::dependency_anchors_from_manifests(
+        &manifest_pairs,
+        head.package_importers.as_ref(),
+    );
+    let deltas = build_decision_deltas(&head, &base, &dependency_anchors);
+    let surface = build_surface(options, &head, &deltas, &dependency_anchors);
 
     Ok(DecisionSurfaceProgrammaticOutput {
         surface,
@@ -75,6 +86,7 @@ struct DecisionAnalysis {
     impact_closure: Option<fallow_engine::module_graph::ImpactClosurePaths>,
     export_lines: Option<FxHashMap<String, Vec<(String, u32)>>>,
     internal_consumers: Option<FxHashMap<String, u64>>,
+    package_importers: Option<FxHashMap<String, fallow_engine::module_graph::PackageImporters>>,
     routing: fallow_output::RoutingFacts,
 }
 
@@ -83,6 +95,41 @@ struct DecisionGraphSignals {
     impact_closure: Option<fallow_engine::module_graph::ImpactClosurePaths>,
     export_lines: Option<FxHashMap<String, Vec<(String, u32)>>>,
     internal_consumers: Option<FxHashMap<String, u64>>,
+    package_importers: Option<FxHashMap<String, fallow_engine::module_graph::PackageImporters>>,
+}
+
+/// Root-relative, forward-slashed paths of the changed `package.json`
+/// manifests, sorted.
+fn changed_manifests(root: &Path, changed_files: &FxHashSet<PathBuf>) -> Vec<String> {
+    let mut manifests: Vec<String> = changed_files
+        .iter()
+        .filter_map(|abs| abs.strip_prefix(root).ok())
+        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        .filter(|rel| crate::dependency_deltas::is_manifest_path(rel))
+        .collect();
+    manifests.sort();
+    manifests
+}
+
+/// Pair each changed manifest's head text with the base text captured from the
+/// base worktree. A manifest unreadable at head is skipped; one absent at base
+/// reads as new.
+fn manifest_pairs(
+    root: &Path,
+    manifests: &[String],
+    base: &DecisionSnapshot,
+) -> Vec<crate::dependency_deltas::ManifestPair> {
+    manifests
+        .iter()
+        .filter_map(|manifest| {
+            let head = std::fs::read_to_string(root.join(manifest)).ok()?;
+            Some(crate::dependency_deltas::ManifestPair {
+                manifest: manifest.clone(),
+                base: base.manifests.get(manifest).cloned(),
+                head,
+            })
+        })
+        .collect()
 }
 
 fn run_decision_analysis(
@@ -128,6 +175,7 @@ fn run_decision_analysis(
         impact_closure: graph_signals.impact_closure,
         export_lines: graph_signals.export_lines,
         internal_consumers: graph_signals.internal_consumers,
+        package_importers: graph_signals.package_importers,
         routing,
     })
 }
@@ -161,12 +209,18 @@ fn decision_graph_signals(
             fallow_engine::module_graph::internal_consumers_for_changed_paths(graph, root, files)
         })
     });
+    let package_importers = graph.and_then(|graph| {
+        changed_files.and_then(|files| {
+            fallow_engine::module_graph::package_importers_for_changed_paths(graph, files)
+        })
+    });
 
     DecisionGraphSignals {
         public_api,
         impact_closure,
         export_lines,
         internal_consumers,
+        package_importers,
     }
 }
 
@@ -187,6 +241,7 @@ fn compute_base_decision_snapshot(
     options: &DecisionSurfaceOptions,
     current_root: &Path,
     base_ref: &str,
+    manifests: &[String],
 ) -> ProgrammaticResult<DecisionSnapshot> {
     let worktree = TemporaryBaseWorktree::create(current_root, base_ref).map_err(|err| {
         ProgrammaticError::new(err.to_string(), 2)
@@ -194,6 +249,16 @@ fn compute_base_decision_snapshot(
             .with_context("decisionSurface.base")
     })?;
     let base_root = repo_refs::base_analysis_root(current_root, worktree.path());
+    // The base manifests are read while the worktree still exists; a manifest
+    // absent at base stays absent (it is new in this change).
+    let base_manifests: FxHashMap<String, String> = manifests
+        .iter()
+        .filter_map(|manifest| {
+            std::fs::read_to_string(base_root.join(manifest))
+                .ok()
+                .map(|text| (manifest.clone(), text))
+        })
+        .collect();
     let base_analysis = AnalysisOptions {
         root: Some(base_root),
         config_path: options.analysis.config_path.clone(),
@@ -203,7 +268,9 @@ fn compute_base_decision_snapshot(
     };
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&base_analysis)?;
     let base = run_decision_analysis(&resolved, None)?;
-    Ok(snapshot_from_decision_analysis(&base))
+    let mut snapshot = snapshot_from_decision_analysis(&base);
+    snapshot.manifests = base_manifests;
+    Ok(snapshot)
 }
 
 #[derive(Default)]
@@ -211,6 +278,8 @@ struct DecisionSnapshot {
     boundary_edges: FxHashSet<String>,
     cycles: FxHashSet<String>,
     public_api: FxHashSet<String>,
+    /// Base text of each changed manifest, keyed by root-relative path.
+    manifests: FxHashMap<String, String>,
 }
 
 fn snapshot_from_decision_analysis(analysis: &DecisionAnalysis) -> DecisionSnapshot {
@@ -223,12 +292,17 @@ fn snapshot_from_decision_analysis(analysis: &DecisionAnalysis) -> DecisionSnaps
             &analysis.root,
         ),
         public_api: analysis.public_api.clone(),
+        manifests: FxHashMap::default(),
     }
 }
 
-fn build_decision_deltas(head: &DecisionAnalysis, base: &DecisionSnapshot) -> ReviewDeltas {
+fn build_decision_deltas(
+    head: &DecisionAnalysis,
+    base: &DecisionSnapshot,
+    dependency_anchors: &[crate::decision_surface::DependencyAnchor],
+) -> ReviewDeltas {
     let head_snapshot = snapshot_from_decision_analysis(head);
-    fallow_output::ReviewDeltas {
+    let mut deltas = fallow_output::ReviewDeltas {
         boundary_introduced: crate::review_deltas::introduced_keys(
             &head_snapshot.boundary_edges,
             &base.boundary_edges,
@@ -243,13 +317,16 @@ fn build_decision_deltas(head: &DecisionAnalysis, base: &DecisionSnapshot) -> Re
         ),
         dependency_added: Vec::new(),
         dependency_major_bumped: Vec::new(),
-    }
+    };
+    crate::dependency_deltas::fill_dependency_delta_keys(&mut deltas, dependency_anchors);
+    deltas
 }
 
 fn build_surface(
     options: &DecisionSurfaceOptions,
     head: &DecisionAnalysis,
     deltas: &ReviewDeltas,
+    dependency_anchors: &[crate::decision_surface::DependencyAnchor],
 ) -> fallow_output::DecisionSurface {
     let boundary_anchors = boundary_anchors(head, deltas);
     let mut coordination = coordination_anchors(head.impact_closure.as_ref());
@@ -281,7 +358,7 @@ fn build_surface(
         deltas,
         boundary_anchors: &boundary_anchors,
         coordination: &coordination,
-        dependency_anchors: &[],
+        dependency_anchors,
         public_api_anchor_line,
         affected_not_shown,
         routing: &head.routing,

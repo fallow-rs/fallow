@@ -135,8 +135,10 @@ pub struct ReviewDirection {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentSchema {
-    /// How the agent must structure each judgment: cite an emitted `signal_id`,
-    /// add free-text `framing` (non-deterministic, fenced), an optional `concern`.
+    /// How the agent must structure each judgment: cite an emitted `signal_id`
+    /// or `change_anchor`, add free-text `framing` (non-deterministic, fenced),
+    /// an optional `concern`, and an optional `action` from the closed
+    /// vocabulary.
     pub judgment_shape: &'static str,
     /// The agent MUST echo this `graph_snapshot_hash` back in its JSON; a
     /// mismatch on reentry REFUSES the payload as stale.
@@ -157,7 +159,7 @@ pub const fn agent_schema() -> AgentSchema {
     AgentSchema {
         judgment_shape: "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one fallow emitted, OR omit and use change_anchor>, \"change_anchor\": <one fallow emitted chg: id, for a changed region with no finding>, \"framing\": <free text>, \"concern\": <optional, prefer concern_vocabulary>, \"action\": <optional: block | address | consider | fyi> } ] }.",
         echo_field: "graph_snapshot_hash",
-        anchoring_rule: "Every judgment must cite an emitted signal_id OR an emitted change_anchor; an unanchored id is rejected (anti-hallucination). A change_anchor proves only that the region changed (anchor_kind=change), a weaker guarantee than a signal_id finding (anchor_kind=signal). An action outside action_vocabulary is rejected (invalid-action).",
+        anchoring_rule: "Every judgment must cite an emitted signal_id OR an emitted change_anchor; an unanchored id is rejected (anti-hallucination). A change_anchor proves only that the region changed (anchor_kind=change), a weaker guarantee than a signal_id finding (anchor_kind=signal). An action outside action_vocabulary is rejected (invalid-action, the offending value echoed as invalid_value); concern_vocabulary is advisory and any concern string is accepted.",
         action_vocabulary: &JUDGMENT_ACTIONS,
         concern_vocabulary: &JUDGMENT_CONCERNS,
     }
@@ -277,8 +279,13 @@ pub struct RejectedJudgment {
     pub change_anchor: String,
     /// The rejection reason: `unanchored-signal-id` (cited a signal fallow did
     /// not emit), `unknown-change-anchor` (cited a region fallow did not emit),
-    /// or `stale-snapshot` (the tree moved).
+    /// `stale-snapshot` (the tree moved), or `invalid-action` (an `action`
+    /// outside [`JUDGMENT_ACTIONS`]; the anchor itself resolved).
     pub reason: String,
+    /// The offending value for an `invalid-action` rejection, echoed so the
+    /// agent can correct it in one round trip. Absent for the other reasons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invalid_value: Option<String>,
 }
 
 /// The `fallow review --walkthrough-file` validation envelope: the result of

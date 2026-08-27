@@ -35,6 +35,7 @@ pub mod coverage;
 pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
 pub mod decision_surface;
+pub mod dependency_deltas;
 pub mod dupes_output;
 mod duplication_filters;
 pub mod editor;

@@ -5159,6 +5159,55 @@ fn dependency_bump_and_addition_surface_as_batched_decisions() {
     );
 }
 
+/// The typed runtime (the route the `decision_surface` MCP tool takes, with no
+/// CLI fallback) must surface the same dependency decisions as the CLI brief.
+#[test]
+fn typed_decision_surface_route_surfaces_dependency_decisions() {
+    let tmp = create_dependency_decision_fixture();
+    let output = fallow_api::run_decision_surface(&fallow_api::DecisionSurfaceOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(tmp.path().to_path_buf()),
+            ..Default::default()
+        },
+        base: Some("main~1".to_string()),
+        max_decisions: None,
+    })
+    .expect("typed decision surface runs");
+    let dependency: Vec<&fallow_output::Decision> = output
+        .surface
+        .decisions
+        .iter()
+        .filter(|d| d.category == fallow_output::DecisionCategory::Dependency)
+        .collect();
+    let keys: Vec<&str> = dependency.iter().map(|d| d.signal_key.as_str()).collect();
+    assert!(
+        keys.contains(&"package.json::left-pad@^1.3.0->^2.0.0"),
+        "the typed route surfaces the major bump: {keys:?}"
+    );
+    assert!(
+        keys.contains(&"package.json::dayjs"),
+        "the typed route surfaces the added entry: {keys:?}"
+    );
+    assert!(
+        dependency.iter().all(|d| d.blast == 1),
+        "importer counts come from the head graph on the typed route"
+    );
+    let envelope = fallow_output::build_decision_surface_output(&output.surface);
+    for decision in envelope
+        .decisions
+        .iter()
+        .filter(|d| d.decision.category == fallow_output::DecisionCategory::Dependency)
+    {
+        assert!(
+            decision
+                .actions
+                .iter()
+                .all(|a| a.action_type != fallow_output::DecisionActionType::Suppress),
+            "a manifest anchor never gets a comment-based suppress action"
+        );
+    }
+}
+
 #[test]
 fn e5_clean_agent_json_is_accepted_zero_unanchored() {
     let tmp = create_boundary_walkthrough_fixture();

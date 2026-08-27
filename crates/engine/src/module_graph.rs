@@ -483,12 +483,15 @@ pub fn test_adjacency_for_changed_paths(
 }
 
 /// In-repo importer counts for one third-party package.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PackageImporters {
-    /// Modules that import the package (value imports only).
-    pub importers: u64,
-    /// The subset of `importers` outside the changed set.
-    pub out_of_diff: u64,
+    /// Modules that import the package (value imports only), id-sorted. Kept
+    /// as ids rather than a count so a decision that batches several packages
+    /// can take the union instead of double-counting a module that imports
+    /// more than one of them.
+    pub importers: Vec<FileId>,
+    /// The subset of `importers` outside the changed set, id-sorted.
+    pub out_of_diff: Vec<FileId>,
 }
 
 /// Compute per-package in-repo importer counts for every third-party package
@@ -515,11 +518,14 @@ pub fn package_importers_for_changed_paths(
         .package_usage
         .iter()
         .map(|(package, files)| {
-            let importers = files.len() as u64;
-            let out_of_diff = files
+            let mut importers: Vec<FileId> = files.clone();
+            importers.sort_unstable_by_key(|id| id.0);
+            importers.dedup();
+            let out_of_diff: Vec<FileId> = importers
                 .iter()
+                .copied()
                 .filter(|id| id_to_norm.get(id).is_none_or(|p| !changed_norm.contains(p)))
-                .count() as u64;
+                .collect();
             (
                 package.clone(),
                 PackageImporters {
