@@ -30,7 +30,7 @@ oxc_allocator = "0.126"
 oxc_ast = "0.126"
 oxc_ast_visit = "0.126"
 oxc_parser = "0.126"
-oxc_resolver = "11"
+oxc_resolver = { version = "11", features = ["yarn_pnp"] }
 oxc_semantic = "0.126"
 oxc_span = "0.126"
 oxc_str = "0.126"

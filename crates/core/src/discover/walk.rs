@@ -504,11 +504,23 @@ fn is_allowed_scoped_hidden_dir(
         .any(|scope| scope.allows(path, name))
 }
 
+/// Files Yarn Plug'n'Play writes at the workspace root. They carry source
+/// extensions (`.pnp.cjs` is the multi-megabyte generated loader with the
+/// install state inlined, `.pnp.loader.mjs` its ESM shim) but are install
+/// artifacts, not project source, so the walker drops them by name.
+const YARN_PNP_GENERATED_FILES: &[&str] = &[".pnp.cjs", ".pnp.loader.mjs"];
+
+fn is_yarn_pnp_generated_file(name: &OsStr) -> bool {
+    YARN_PNP_GENERATED_FILES
+        .iter()
+        .any(|&f| OsStr::new(f) == name)
+}
+
 /// Check if a hidden directory entry should be allowed through the filter.
 ///
 /// Returns `true` if the entry is not hidden or is on the allowlist.
-/// Hidden files (not directories) are always allowed through since the type
-/// filter handles them.
+/// Hidden files (not directories) are allowed through since the type filter
+/// handles them, except for the generated Yarn PnP files.
 fn is_allowed_hidden(entry: &ignore::DirEntry) -> bool {
     is_allowed_hidden_with_scopes(entry, &[])
 }
@@ -525,7 +537,7 @@ fn is_allowed_hidden_with_scopes(
     }
 
     if entry.file_type().is_some_and(|ft| !ft.is_dir()) {
-        return true;
+        return !is_yarn_pnp_generated_file(name);
     }
 
     is_allowed_hidden_dir(name)
@@ -1307,6 +1319,22 @@ mod tests {
             assert!(!names.contains(&"src/outside-link.ts".to_string()));
             assert!(!names.contains(&"src/broken-link.ts".to_string()));
             assert!(!names.contains(&"src/directory-link.ts".to_string()));
+        }
+
+        /// Yarn PnP writes `.pnp.cjs` and `.pnp.loader.mjs` at the workspace
+        /// root. They match the source extension filter but are generated
+        /// install state, not code to analyze.
+        #[test]
+        fn skips_yarn_pnp_generated_files() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::write(dir.path().join(".pnp.cjs"), "module.exports = {};").unwrap();
+            std::fs::write(dir.path().join(".pnp.loader.mjs"), "export {};").unwrap();
+            std::fs::write(dir.path().join("index.ts"), "export const a = 1;").unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let names = file_names(&discover_files(&config), dir.path());
+
+            assert_eq!(names, vec!["index.ts".to_string()]);
         }
 
         #[test]

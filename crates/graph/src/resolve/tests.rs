@@ -30,6 +30,13 @@ fn dummy_span() -> Span {
     Span::new(0, 0)
 }
 
+/// Project root for tests that only exercise resolver *option* building and
+/// never touch the filesystem. It deliberately does not exist on disk, so Yarn
+/// PnP detection stays off.
+fn options_only_root() -> &'static Path {
+    Path::new("/project")
+}
+
 /// Build a minimal `ResolveContext` backed by a real resolver but with
 /// empty lookup tables. Every specifier resolves to `NpmPackage` or
 /// `Unresolvable`, which is fine , the tests focus on how helper functions
@@ -39,15 +46,15 @@ fn dummy_span() -> Span {
 /// (via `rustix`) which Miri does not support.
 #[cfg(not(miri))]
 fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
-    let resolver = specifier::create_resolver(&[], &[]);
-    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let root = PathBuf::from("/project");
+    let resolver = specifier::create_resolver(&root, &[], &[]);
+    let style_resolver = specifier::create_resolver(&root, &[], &["style".to_string()]);
     let extensions = react_native::build_extensions(&[]);
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
     let workspace_roots = FxHashMap::default();
     let package_manifests = Vec::new();
     let condition_names = react_native::build_condition_names(&[], &[]);
-    let root = PathBuf::from("/project");
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
     let tsconfig_cache = TsconfigCache::default();
     let canonicalize_cache = CanonicalizeCache::default();
@@ -211,8 +218,8 @@ fn vitest_mock_operations_resolve_canonical_targets_and_abstain_on_missing() {
     )
     .expect("write tsconfig");
 
-    let resolver = specifier::create_resolver(&[], &[]);
-    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let resolver = specifier::create_resolver(&root, &[], &[]);
+    let style_resolver = specifier::create_resolver(&root, &[], &["style".to_string()]);
     let extensions = react_native::build_extensions(&[]);
     let path_to_id = FxHashMap::from_iter([
         (test_file.as_path(), FileId(0)),
@@ -310,8 +317,8 @@ fn cross_tsconfig_bare_alias_upgrades_replacement_target() {
     std::fs::write(&test_file, "").expect("write test source");
     std::fs::write(&dependency_file, "export const value = 1;").expect("write dependency");
 
-    let resolver = specifier::create_resolver(&[], &[]);
-    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let resolver = specifier::create_resolver(&root, &[], &[]);
+    let style_resolver = specifier::create_resolver(&root, &[], &["style".to_string()]);
     let extensions = react_native::build_extensions(&[]);
     let path_to_id = FxHashMap::from_iter([
         (aliased_source.as_path(), FileId(0)),
@@ -1716,8 +1723,8 @@ fn pnpm_package_source_alias_preserves_declared_import_name() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(&source_pkg, root.join("node_modules/unstorage")).unwrap();
 
-    let resolver = specifier::create_resolver(&[], &[]);
-    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let resolver = specifier::create_resolver(root, &[], &[]);
+    let style_resolver = specifier::create_resolver(root, &[], &["style".to_string()]);
     let extensions = react_native::build_extensions(&[]);
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
@@ -1778,8 +1785,8 @@ fn pnpm_jsr_package_source_alias_preserves_declared_import_name() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(&source_pkg, root.join("node_modules/@std/csv")).unwrap();
 
-    let resolver = specifier::create_resolver(&[], &[]);
-    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let resolver = specifier::create_resolver(root, &[], &[]);
+    let style_resolver = specifier::create_resolver(root, &[], &["style".to_string()]);
     let extensions = react_native::build_extensions(&[]);
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
@@ -1977,15 +1984,15 @@ fn specifier_pascal_scope_alias_returns_unresolvable() {
 #[test]
 #[cfg_attr(miri, ignore)] // oxc_resolver uses statx syscall unsupported by Miri
 fn specifier_plugin_alias_match_returns_unresolvable() {
-    let resolver = specifier::create_resolver(&[], &[]);
-    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let root = PathBuf::from("/project");
+    let resolver = specifier::create_resolver(&root, &[], &[]);
+    let style_resolver = specifier::create_resolver(&root, &[], &["style".to_string()]);
     let extensions = react_native::build_extensions(&[]);
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
     let workspace_roots = FxHashMap::default();
     let package_manifests = Vec::new();
     let condition_names = react_native::build_condition_names(&[], &[]);
-    let root = PathBuf::from("/project");
     let aliases = vec![("$lib/".to_string(), "src/lib/".to_string())];
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
     let tsconfig_cache = TsconfigCache::default();
@@ -2113,24 +2120,161 @@ fn specifier_at_at_slash_returns_unresolvable() {
     });
 }
 
+/// Write a minimal inlined Yarn PnP manifest at `root` that maps the bare
+/// package `foo@npm:1.0.0` to an unplugged (unzipped) install directory, plus
+/// `src/app.ts` as an issuer, and return the package directory. Mirrors the
+/// shape Yarn 4 writes: a `null` top-level entry, one workspace at `./`, and
+/// per-package `packageLocation` values relative to the manifest.
+fn write_yarn_pnp_fixture(root: &Path) -> PathBuf {
+    let package_dir = root.join(".yarn/unplugged/foo-npm-1.0.0-0123456789/node_modules/foo");
+    std::fs::create_dir_all(&package_dir).unwrap();
+    std::fs::write(
+        package_dir.join("package.json"),
+        r#"{"name":"foo","version":"1.0.0","main":"index.js"}"#,
+    )
+    .unwrap();
+    std::fs::write(package_dir.join("index.js"), "module.exports = 'foo';\n").unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/app.ts"), "import foo from 'foo';\n").unwrap();
+
+    let manifest = concat!(
+        "#!/usr/bin/env node\n",
+        "/* eslint-disable */\n",
+        "\"use strict\";\n",
+        "\n",
+        "const RAW_RUNTIME_STATE =\n",
+        "'{\"dependencyTreeRoots\":[{\"name\":\"app\",\"reference\":\"workspace:.\"}],",
+        "\"enableTopLevelFallback\":true,",
+        "\"ignorePatternData\":null,",
+        "\"fallbackExclusionList\":[[\"app\",[\"workspace:.\"]]],",
+        "\"fallbackPool\":[],",
+        "\"packageRegistryData\":[",
+        "[null,[[null,{\"packageLocation\":\"./\",\"packageDependencies\":[],",
+        "\"linkType\":\"SOFT\"}]]],",
+        "[\"app\",[[\"workspace:.\",{\"packageLocation\":\"./\",",
+        "\"packageDependencies\":[[\"app\",\"workspace:.\"],[\"foo\",\"npm:1.0.0\"]],",
+        "\"linkType\":\"SOFT\"}]]],",
+        "[\"foo\",[[\"npm:1.0.0\",{\"packageLocation\":",
+        "\"./.yarn/unplugged/foo-npm-1.0.0-0123456789/node_modules/foo/\",",
+        "\"packageDependencies\":[[\"foo\",\"npm:1.0.0\"]],\"linkType\":\"HARD\"}]]]",
+        "]}';\n",
+        "\n",
+        "function $$SETUP_STATE(hydrateRuntimeState, basePath) {\n",
+        "  return hydrateRuntimeState(JSON.parse(RAW_RUNTIME_STATE), ",
+        "{basePath: basePath || __dirname});\n",
+        "}\n",
+    );
+    std::fs::write(root.join(".pnp.cjs"), manifest).unwrap();
+    package_dir
+}
+
+/// Yarn PnP projects have no `node_modules`; bare specifiers go through the
+/// inlined `.pnp.cjs` manifest instead. oxc locates that manifest from the
+/// resolver's `cwd` (falling back to the process working directory) and fallow
+/// never chdirs, so the resolver must anchor it to the project itself. The
+/// test therefore runs with the process cwd elsewhere and must not chdir.
+#[test]
+#[cfg_attr(miri, ignore)] // oxc_resolver uses statx syscall unsupported by Miri
+fn yarn_pnp_bare_specifier_resolves_through_the_manifest_without_chdir() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let package_dir = write_yarn_pnp_fixture(&root);
+    assert_ne!(
+        std::env::current_dir().ok().as_deref(),
+        Some(root.as_path()),
+        "the test must exercise cwd-independent manifest discovery"
+    );
+
+    let resolver = specifier::create_resolver(&root, &[], &[]);
+    let resolved = resolver
+        .resolve_file(root.join("src/app.ts"), "foo")
+        .expect("foo resolves through .pnp.cjs");
+
+    assert_eq!(resolved.full_path(), package_dir.join("index.js"));
+}
+
+/// Yarn writes the manifest only at the workspace root. Analyzing one package
+/// of a PnP monorepo must still find it and resolve through it.
+#[test]
+#[cfg_attr(miri, ignore)] // oxc_resolver uses statx syscall unsupported by Miri
+fn yarn_pnp_sub_package_root_resolves_through_the_workspace_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let package_dir = write_yarn_pnp_fixture(&root);
+    let app_root = root.join("packages/app");
+    std::fs::create_dir_all(app_root.join("src")).unwrap();
+    std::fs::write(app_root.join("src/index.ts"), "import foo from 'foo';\n").unwrap();
+
+    let resolver = specifier::create_resolver(&app_root, &[], &[]);
+    let resolved = resolver
+        .resolve_file(app_root.join("src/index.ts"), "foo")
+        .expect("foo resolves through the ancestor .pnp.cjs");
+
+    assert_eq!(resolved.full_path(), package_dir.join("index.js"));
+}
+
+/// The style resolver is derived from the main one and shares its cache; it
+/// must resolve through the same manifest.
+#[test]
+#[cfg_attr(miri, ignore)] // oxc_resolver uses statx syscall unsupported by Miri
+fn yarn_pnp_style_resolver_derived_via_clone_with_options_resolves_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let package_dir = write_yarn_pnp_fixture(&root);
+
+    let resolver = specifier::create_resolver(&root, &[], &[]);
+    let style_resolver = resolver.clone_with_options(specifier::build_resolve_options(
+        &root,
+        &[],
+        &["style".to_string()],
+    ));
+    let resolved = style_resolver
+        .resolve_file(root.join("src/app.ts"), "foo")
+        .expect("foo resolves through .pnp.cjs");
+
+    assert_eq!(resolved.full_path(), package_dir.join("index.js"));
+}
+
+/// Without a manifest the resolver stays on the `node_modules` path: a missing
+/// bare specifier is a plain miss, not a PnP manifest error.
+#[test]
+#[cfg_attr(miri, ignore)] // oxc_resolver uses statx syscall unsupported by Miri
+fn non_pnp_root_reports_missing_bare_specifier_as_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    std::fs::write(root.join("package.json"), r#"{"name":"app"}"#).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/app.ts"), "import foo from 'foo';\n").unwrap();
+
+    let resolver = specifier::create_resolver(&root, &[], &[]);
+    let err = resolver
+        .resolve_file(root.join("src/app.ts"), "foo")
+        .expect_err("no node_modules and no manifest");
+
+    assert!(
+        matches!(err, oxc_resolver::ResolveError::NotFound(_)),
+        "expected NotFound, got {err:?}"
+    );
+}
+
 #[test]
 #[cfg_attr(miri, ignore)]
 fn create_resolver_without_plugins() {
-    let _resolver = specifier::create_resolver(&[], &[]);
+    let _resolver = specifier::create_resolver(options_only_root(), &[], &[]);
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
 fn create_resolver_with_react_native_plugin() {
     let plugins = vec!["react-native".to_string()];
-    let _resolver = specifier::create_resolver(&plugins, &[]);
+    let _resolver = specifier::create_resolver(options_only_root(), &plugins, &[]);
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
 fn create_resolver_with_expo_plugin() {
     let plugins = vec!["expo".to_string()];
-    let _resolver = specifier::create_resolver(&plugins, &[]);
+    let _resolver = specifier::create_resolver(options_only_root(), &plugins, &[]);
 }
 
 #[test]
@@ -2141,14 +2285,14 @@ fn create_resolver_with_multiple_plugins() {
         "typescript".to_string(),
         "jest".to_string(),
     ];
-    let _resolver = specifier::create_resolver(&plugins, &[]);
+    let _resolver = specifier::create_resolver(options_only_root(), &plugins, &[]);
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
 fn create_resolver_with_custom_conditions() {
     let conditions = vec!["worker".to_string(), "edge-light".to_string()];
-    let _resolver = specifier::create_resolver(&[], &conditions);
+    let _resolver = specifier::create_resolver(options_only_root(), &[], &conditions);
 }
 
 #[test]
@@ -2165,7 +2309,7 @@ fn resolve_prefers_js_over_dts_when_both_exist() {
     .unwrap();
     std::fs::write(root.join("app.ts"), "import { helper } from './utils';").unwrap();
 
-    let resolver = specifier::create_resolver(&[], &[]);
+    let resolver = specifier::create_resolver(root, &[], &[]);
     let from_file = root.join("app.ts");
     let result = resolver.resolve_file(&from_file, "./utils");
 
@@ -2196,7 +2340,7 @@ fn resolve_prefers_ts_over_dts_when_both_exist() {
     .unwrap();
     std::fs::write(root.join("app.ts"), "import { helper } from './utils';").unwrap();
 
-    let resolver = specifier::create_resolver(&[], &[]);
+    let resolver = specifier::create_resolver(root, &[], &[]);
     let from_file = root.join("app.ts");
     let result = resolver.resolve_file(&from_file, "./utils");
 
@@ -2222,7 +2366,7 @@ fn resolve_falls_back_to_dts_when_no_runtime_file() {
     std::fs::write(root.join("types.d.ts"), "export declare const x: number;").unwrap();
     std::fs::write(root.join("app.ts"), "import { x } from './types';").unwrap();
 
-    let resolver = specifier::create_resolver(&[], &[]);
+    let resolver = specifier::create_resolver(root, &[], &[]);
     let from_file = root.join("app.ts");
     let result = resolver.resolve_file(&from_file, "./types");
 
@@ -2252,7 +2396,7 @@ fn resolve_js_specifier_falls_back_to_dts_when_no_runtime_file() {
     .unwrap();
     std::fs::write(root.join("app.ts"), "import { x } from './contract.js';").unwrap();
 
-    let resolver = specifier::create_resolver(&[], &[]);
+    let resolver = specifier::create_resolver(root, &[], &[]);
     let from_file = root.join("app.ts");
     let result = resolver.resolve_file(&from_file, "./contract.js");
 
@@ -2286,7 +2430,7 @@ fn resolve_js_specifier_prefers_runtime_ts_over_dts() {
     .unwrap();
     std::fs::write(root.join("app.ts"), "import { x } from './contract.js';").unwrap();
 
-    let resolver = specifier::create_resolver(&[], &[]);
+    let resolver = specifier::create_resolver(root, &[], &[]);
     let from_file = root.join("app.ts");
     let result = resolver.resolve_file(&from_file, "./contract.js");
 
@@ -2338,7 +2482,7 @@ fn resolve_honors_development_condition_by_default() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(root.join("pkg"), root.join("node_modules/pkg")).unwrap();
 
-    let resolver = specifier::create_resolver(&[], &[]);
+    let resolver = specifier::create_resolver(root, &[], &[]);
     let from_file = root.join("app.ts");
     let resolved = resolver
         .resolve_file(&from_file, "pkg")
@@ -2387,7 +2531,7 @@ fn resolve_honors_user_supplied_conditions_before_baseline() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(root.join("pkg"), root.join("node_modules/pkg")).unwrap();
 
-    let resolver = specifier::create_resolver(&[], &["worker".to_string()]);
+    let resolver = specifier::create_resolver(root, &[], &["worker".to_string()]);
     let from_file = root.join("app.ts");
     let resolved = resolver
         .resolve_file(&from_file, "pkg")
@@ -2407,15 +2551,15 @@ fn resolve_honors_user_supplied_conditions_before_baseline() {
 #[test]
 #[cfg_attr(miri, ignore)] // oxc_resolver uses statx syscall unsupported by Miri
 fn bare_at_alias_does_not_swallow_scoped_npm_packages() {
-    let resolver = specifier::create_resolver(&[], &[]);
-    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let root = PathBuf::from("/project");
+    let resolver = specifier::create_resolver(&root, &[], &[]);
+    let style_resolver = specifier::create_resolver(&root, &[], &["style".to_string()]);
     let extensions = react_native::build_extensions(&[]);
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
     let workspace_roots = FxHashMap::default();
     let package_manifests = Vec::new();
     let condition_names = react_native::build_condition_names(&[], &[]);
-    let root = PathBuf::from("/project");
     // Register a bare "@" alias pointing to "./src", the problematic case.
     let aliases = vec![("@".to_string(), "src".to_string())];
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
@@ -2540,8 +2684,8 @@ fn deno_import_maps_follow_nearest_package_scope_and_declaring_base() {
     let canonical_ws_roots = vec![dunce::canonicalize(&member).unwrap()];
     let package_manifests = super::build_package_manifests(&input, &canonical_ws_roots);
 
-    let resolver = specifier::create_resolver(&[], &[]);
-    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let resolver = specifier::create_resolver(root, &[], &[]);
+    let style_resolver = specifier::create_resolver(root, &[], &["style".to_string()]);
     let extensions = react_native::build_extensions(&[]);
     let mut raw_path_to_id = FxHashMap::default();
     raw_path_to_id.insert(root_exact.as_path(), FileId(1));

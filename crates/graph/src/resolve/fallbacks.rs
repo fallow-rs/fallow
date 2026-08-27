@@ -534,7 +534,7 @@ pub(super) fn try_relative_package_root_source_fallback(
     })
 }
 
-fn normalize_path_lexically(path: &Path) -> PathBuf {
+pub(super) fn normalize_path_lexically(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {

@@ -165,6 +165,18 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **A referenced `tsconfig.json` without `include` or `files` no longer claims
+  every file** ([#2436](https://github.com/fallow-rs/fallow/pull/2436)). When
+  fallow follows project `references`, such a config now applies only to files
+  under its own directory, matching tsc's `**/*` default scope. Its `paths`
+  aliases previously leaked repository-wide, so an import that only resolved
+  through that leak now produces an `unresolved-import` finding, which is
+  error severity by default and fails `--fail-on-issues`; a file reachable
+  only through such an import may now be reported as unused. Give the
+  subdirectory config an explicit `include`, or move the shared aliases to a
+  config whose directory contains the importing files. Root and workspace
+  configs are unaffected because the root is an ancestor of every file.
+
 - **A strict run fails on findings the override path used to let through**
   ([#2445](https://github.com/fallow-rs/fallow/issues/2445)). When a config
   contains any per-path `overrides` entry, the exit code is decided by

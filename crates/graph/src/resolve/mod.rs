@@ -55,7 +55,7 @@ use dynamic_imports::{GlobMatcherCache, resolve_dynamic_imports, resolve_dynamic
 use re_exports::resolve_re_exports;
 use react_native::{build_condition_names, build_extensions, synthesize_platform_family_edges};
 use require_imports::resolve_require_imports;
-use specifier::create_resolver;
+use specifier::{build_resolve_options, create_resolver};
 use static_imports::resolve_static_imports;
 use types::{DenoImportMapEntry, PackageManifestInfo, ResolveContext};
 use upgrades::{ResolvedVitestMockOperation, apply_specifier_upgrades};
@@ -128,11 +128,17 @@ impl ResolverSession {
 
         let extensions = build_extensions(input.active_plugins);
         let condition_names = build_condition_names(input.active_plugins, input.extra_conditions);
-        let resolver = create_resolver(input.active_plugins, input.extra_conditions);
+        let resolver = create_resolver(input.root, input.active_plugins, input.extra_conditions);
         let mut style_conditions = input.extra_conditions.to_vec();
         style_conditions.push("sass".to_string());
         style_conditions.push("style".to_string());
-        let style_resolver = create_resolver(input.active_plugins, &style_conditions);
+        // Derived from the main resolver so both share one filesystem cache and,
+        // on Yarn PnP projects, one parsed manifest.
+        let style_resolver = resolver.clone_with_options(build_resolve_options(
+            input.root,
+            input.active_plugins,
+            &style_conditions,
+        ));
 
         Self {
             resolver,

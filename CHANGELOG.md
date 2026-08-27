@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Yarn Plug'n'Play projects now resolve bare specifiers through the PnP
+  manifest** (Closes [#2444](https://github.com/fallow-rs/fallow/issues/2444),
+  [#2435](https://github.com/fallow-rs/fallow/pull/2435)). A PnP install has no
+  populated `node_modules`, so every bare import used to miss and fall through
+  to the much slower tsconfig fallback. fallow now detects `.pnp.cjs` at the
+  analyzed root or one of its ancestors, enables oxc's PnP resolution, and
+  anchors manifest discovery to that directory, so runs started outside the
+  project and editor sessions resolve the same way. Manifests that are not
+  inlined (`pnpEnableInlining: false`) are not supported and stay on the
+  fallback path. The generated `.pnp.cjs` and `.pnp.loader.mjs` files are no
+  longer discovered as project source, so they drop out of file counts and
+  never produce findings of their own. Thanks to
+  [@PatrickShaw](https://github.com/PatrickShaw) for the contribution.
+
 ### Changed
 
 - **Import resolution on large project-reference monorepos is faster.** The
@@ -31,6 +47,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outcome, set the rule to `off` rather than `warn`, or drop
   `--fail-on-issues` and `--ci` for that job. Thanks to
   [@DeLuke84](https://github.com/DeLuke84) for the report.
+
+### Fixed
+
+- **A tsconfig without `include` or `files` now applies only to files under
+  its own directory when fallow follows `references`**
+  ([#2436](https://github.com/fallow-rs/fallow/pull/2436)). This matches tsc's
+  `**/*` default project scope. Previously such a referenced config matched
+  every file in the repository, so its `paths` leaked to files outside that
+  directory and every referenced project was walked for every import. Aliases
+  from a referenced package no longer resolve from a sibling package, and
+  monorepos with many `references` and no `include` resolve imports noticeably
+  faster. Imports that only resolved through that leak are now reported as
+  `unresolved-import` findings, which are error severity by default and will
+  fail `--fail-on-issues`, and a file that was only reachable through such an
+  import may now be reported as unused. If a subdirectory `tsconfig.json`
+  intentionally holds shared `paths`, give it an explicit `include`, or move
+  those aliases to a config whose directory contains the importing files.
+  Thanks to [@PatrickShaw](https://github.com/PatrickShaw) for the
+  contribution.
+
 
 ## [3.19.0] - 2026-08-26
 
