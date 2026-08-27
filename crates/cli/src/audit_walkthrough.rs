@@ -581,6 +581,8 @@ mod tests {
             boundary_introduced: vec!["ui->-db".to_string()],
             cycle_introduced: Vec::new(),
             public_api_added: Vec::new(),
+            dependency_added: Vec::new(),
+            dependency_major_bumped: Vec::new(),
         };
         let anchors = vec![BoundaryAnchor {
             zone_pair_key: "ui->-db".to_string(),
@@ -594,6 +596,7 @@ mod tests {
             deltas: &deltas,
             boundary_anchors: &anchors,
             coordination: &[],
+            dependency_anchors: &[],
             public_api_anchor_line: 0,
             affected_not_shown: 3,
             routing: &routing,

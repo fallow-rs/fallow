@@ -443,6 +443,11 @@ pub struct CheckResult {
     /// Computed from the retained graph's reverse-deps on the brief path BEFORE
     /// the graph is dropped; `None` otherwise. Internal (not serialized).
     pub test_adjacency: Option<rustc_hash::FxHashMap<String, fallow_output::TestAdjacency>>,
+    /// Per-package in-repo importer counts for the dependency decision arm.
+    /// Computed from the retained graph's package usage on the brief path BEFORE
+    /// the graph is dropped; `None` otherwise. Internal (not serialized).
+    pub package_importers:
+        Option<rustc_hash::FxHashMap<String, fallow_engine::module_graph::PackageImporters>>,
     pub workspaces: Vec<WorkspaceInfo>,
     retained_files: Option<Vec<DiscoveredFile>>,
 }
@@ -978,6 +983,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         export_lines: None,
         internal_consumers: None,
         test_adjacency: None,
+        package_importers: None,
         workspaces,
         retained_files: retained_files_for_cross_reference,
     }

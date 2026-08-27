@@ -61,6 +61,8 @@ pub fn build_review_deltas(
         boundary_introduced: introduced_keys(head_boundary, base_boundary),
         cycle_introduced: introduced_keys(head_cycles, base_cycles),
         public_api_added: introduced_keys(head_public_api, base_public_api),
+        dependency_added: Vec::new(),
+        dependency_major_bumped: Vec::new(),
     }
 }
 
@@ -704,6 +706,24 @@ fn print_deltas_human(deltas: &ReviewDeltas) {
             "  public API surface widened by {} export{} (exports-aware)",
             deltas.public_api_added.len(),
             crate::report::plural(deltas.public_api_added.len()),
+        );
+    }
+    if !deltas.dependency_added.is_empty() {
+        eprintln!(
+            "  new third-party dependenc{}: {}",
+            if deltas.dependency_added.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            },
+            deltas.dependency_added.join(", ")
+        );
+    }
+    if !deltas.dependency_major_bumped.is_empty() {
+        eprintln!(
+            "  major version bump{}: {}",
+            crate::report::plural(deltas.dependency_major_bumped.len()),
+            deltas.dependency_major_bumped.join(", ")
         );
     }
 }

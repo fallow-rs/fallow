@@ -482,6 +482,56 @@ pub fn test_adjacency_for_changed_paths(
     Some(map)
 }
 
+/// In-repo importer counts for one third-party package.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PackageImporters {
+    /// Modules that import the package (value imports only).
+    pub importers: u64,
+    /// The subset of `importers` outside the changed set.
+    pub out_of_diff: u64,
+}
+
+/// Compute per-package in-repo importer counts for every third-party package
+/// the graph saw a value import of, split by whether the importer is in the
+/// changed set. The dependency decision arm reads these so a new or bumped
+/// `package.json` entry carries the modules it actually reaches. `None` when
+/// the graph recorded no package usage.
+#[must_use]
+pub fn package_importers_for_changed_paths(
+    graph: &RetainedModuleGraph,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<FxHashMap<String, PackageImporters>> {
+    let graph = graph.as_graph();
+    if graph.package_usage.is_empty() {
+        return None;
+    }
+    let changed_norm = normalized_changed_paths(changed_files);
+    let id_to_norm: FxHashMap<FileId, String> = graph
+        .modules
+        .iter()
+        .map(|module| (module.file_id, normalize_path(&module.path)))
+        .collect();
+    let map = graph
+        .package_usage
+        .iter()
+        .map(|(package, files)| {
+            let importers = files.len() as u64;
+            let out_of_diff = files
+                .iter()
+                .filter(|id| id_to_norm.get(id).is_none_or(|p| !changed_norm.contains(p)))
+                .count() as u64;
+            (
+                package.clone(),
+                PackageImporters {
+                    importers,
+                    out_of_diff,
+                },
+            )
+        })
+        .collect();
+    Some(map)
+}
+
 fn changed_file_ids(graph: &ModuleGraph, changed_files: &FxHashSet<PathBuf>) -> Vec<FileId> {
     let path_to_id: FxHashMap<String, FileId> = graph
         .modules

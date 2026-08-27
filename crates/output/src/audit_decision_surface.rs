@@ -16,11 +16,9 @@ pub enum DecisionCategory {
     CouplingBoundary,
     /// A new exported contract, or a changed contract consumed outside the diff.
     PublicApiContract,
-    /// A new third-party dependency (new maintenance + security surface).
-    ///
-    /// The arm is part of the SOLID-3 surface, but its candidate source is not
-    /// yet threaded onto the brief path, so the extractor never constructs it
-    /// from a live signal today. Reserved, not dead.
+    /// A new third-party dependency, or a declared one moved across a major
+    /// version (new maintenance + security surface, or a behavior change nobody
+    /// in the diff wrote).
     Dependency,
 }
 

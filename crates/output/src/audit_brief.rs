@@ -192,6 +192,16 @@ pub struct ReviewDeltas {
     /// internal barrel NOT in `exports` is absent here (zero delta); one
     /// reachable through an `exports` path is present (exactly one).
     pub public_api_added: Vec<String>,
+    /// Third-party dependencies a changed `package.json` declares that the base
+    /// manifest did not, as `<manifest>::<name>` keys. Every dependency section
+    /// participates.
+    #[serde(default)]
+    pub dependency_added: Vec<String>,
+    /// Declared dependencies whose range moved across a major version (or a
+    /// `0.x` minor) vs base, as `<manifest>::<name>@<from>-><to>` keys. Minor
+    /// and patch moves are not candidates; a non-numeric range is skipped.
+    #[serde(default)]
+    pub dependency_major_bumped: Vec<String>,
 }
 
 /// The full `fallow audit --brief --format json` envelope. Carries the

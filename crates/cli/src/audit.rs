@@ -1166,6 +1166,7 @@ fn run_audit_head_analyses(
         check.internal_consumers =
             compute_brief_internal_consumers(opts.root, check, changed_files);
         check.test_adjacency = compute_brief_test_adjacency(opts.root, check, changed_files);
+        check.package_importers = compute_brief_package_importers(check, changed_files);
     }
     let shared_parse = if share_dead_code_parse_with_health {
         check.as_mut().and_then(|r| r.shared_parse.take())
@@ -1283,6 +1284,22 @@ fn compute_brief_test_adjacency(
         changed_files,
         &weakening::is_test_file,
     )
+}
+
+/// Precompute per-package in-repo importer counts for the dependency decision
+/// arm from the retained graph, BEFORE health drops it. `None` when the graph
+/// is not retained or saw no package usage.
+fn compute_brief_package_importers(
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<FxHashMap<String, fallow_engine::module_graph::PackageImporters>> {
+    let graph = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())?;
+
+    fallow_engine::module_graph::package_importers_for_changed_paths(graph, changed_files)
 }
 
 /// Compute the per-file focus graph facts (fan-in/out + the dynamic-dispatch /
@@ -1882,7 +1899,18 @@ fn compute_audit_brief_data_with_lookups(
         return AuditBriefData::default();
     }
 
-    let review_deltas = compute_review_deltas(input.check, input.base_snapshot);
+    let mut review_deltas = compute_review_deltas(input.check, input.base_snapshot);
+    let dependency_anchors = compute_dependency_anchors(
+        input.opts.root,
+        input.base_ref,
+        input.changed_files,
+        input
+            .check
+            .and_then(|check| check.package_importers.as_ref()),
+    );
+    if let Some(deltas) = review_deltas.as_mut() {
+        fill_dependency_delta_keys(deltas, &dependency_anchors);
+    }
     let (weakening_signals, routing, preloaded_diff_evidence) = match preloaded {
         None => (
             compute_weakening_signals(input.opts.root, input.base_ref, input.changed_files),
@@ -1904,8 +1932,11 @@ fn compute_audit_brief_data_with_lookups(
         input.check,
         review_deltas.as_ref(),
         routing.as_ref(),
-        head_source,
-        rename_old_path,
+        &DecisionSurfaceLookups {
+            dependency_anchors: &dependency_anchors,
+            head_source,
+            rename_old_path,
+        },
     ));
 
     let diff_evidence = preloaded_diff_evidence.unwrap_or_else(|| {
@@ -2051,13 +2082,21 @@ fn walkthrough_file_relative_to_root(
 /// coordination gaps, and the impact-closure blast magnitude, then run the
 /// extractor. The cap is taken from the audit options (clamped to [3, 5] by the
 /// extractor). Returns an empty surface when no check result is available.
+/// The per-run lookups the decision extractor needs beyond the brief data:
+/// head sources for suppression checks, the rename map for review memory, and
+/// the dependency candidates read from the changed manifests.
+struct DecisionSurfaceLookups<'a> {
+    dependency_anchors: &'a [crate::audit_decision_surface::DependencyAnchor],
+    head_source: &'a dyn Fn(&str) -> Option<String>,
+    rename_old_path: &'a dyn Fn(&str) -> Option<String>,
+}
+
 fn compute_decision_surface_with_lookups(
     opts: &AuditOptions<'_>,
     check: Option<&CheckResult>,
     review_deltas: Option<&crate::audit_brief::ReviewDeltas>,
     routing: Option<&routing::RoutingFacts>,
-    head_source: &dyn Fn(&str) -> Option<String>,
-    rename_old_path: &dyn Fn(&str) -> Option<String>,
+    lookups: &DecisionSurfaceLookups<'_>,
 ) -> crate::audit_decision_surface::DecisionSurface {
     use crate::audit_decision_surface::{
         CoordinationAnchor, DecisionInputs, extract_decision_surface,
@@ -2114,11 +2153,12 @@ fn compute_decision_surface_with_lookups(
         deltas,
         boundary_anchors: &boundary_anchors,
         coordination: &coordination,
+        dependency_anchors: lookups.dependency_anchors,
         public_api_anchor_line,
         affected_not_shown,
         routing,
-        head_source,
-        rename_old_path,
+        head_source: lookups.head_source,
+        rename_old_path: lookups.rename_old_path,
         internal_consumers: &internal_consumers,
         cap: opts.max_decisions,
     })
@@ -2270,6 +2310,134 @@ fn compute_weakening_signals(
         signals.extend(weakening_signals_for_file(&rel_str, &base, &head));
     }
     signals
+}
+
+/// Diff every changed `package.json` against its base version and project the
+/// added entries and major bumps onto the dependency decision shape, one anchor
+/// per manifest per kind. Importer counts come from the graph's package usage
+/// precomputed on the brief path; a package the graph never saw counts zero.
+/// Best-effort like the weakening scan: an unreadable manifest yields nothing,
+/// and a base-reader error stops the scan.
+fn compute_dependency_anchors(
+    root: &Path,
+    base_ref: &str,
+    changed_files: &FxHashSet<PathBuf>,
+    package_importers: Option<&FxHashMap<String, fallow_engine::module_graph::PackageImporters>>,
+) -> Vec<crate::audit_decision_surface::DependencyAnchor> {
+    use crate::audit_decision_surface::{DependencyAnchor, DependencyChangeKind, DependencyEntry};
+    use crate::audit_dependency_deltas::{
+        DependencyChange, is_manifest_path, manifest_dependency_deltas,
+    };
+
+    let mut manifests: Vec<(String, &PathBuf)> = Vec::new();
+    let Some(git_root) = git_toplevel(root) else {
+        return Vec::new();
+    };
+    for abs in changed_files {
+        let Ok(relative) = abs.strip_prefix(&git_root) else {
+            continue;
+        };
+        let rel_str = relative.to_string_lossy().replace('\\', "/");
+        if is_manifest_path(&rel_str) {
+            manifests.push((rel_str, abs));
+        }
+    }
+    if manifests.is_empty() {
+        return Vec::new();
+    }
+    manifests.sort();
+    let Some(mut reader) = BaseFileReader::spawn(root) else {
+        return Vec::new();
+    };
+
+    let count_importers = |entries: &[DependencyChange]| -> (u64, u64) {
+        entries.iter().fold((0, 0), |(total, outside), entry| {
+            let counts = package_importers
+                .and_then(|map| map.get(&entry.name))
+                .copied()
+                .unwrap_or_default();
+            (total + counts.importers, outside + counts.out_of_diff)
+        })
+    };
+    let to_anchor = |manifest: &str, kind: DependencyChangeKind, entries: &[DependencyChange]| {
+        let (importers, out_of_diff_importers) = count_importers(entries);
+        DependencyAnchor {
+            manifest: manifest.to_string(),
+            kind,
+            entries: entries
+                .iter()
+                .map(|entry| DependencyEntry {
+                    name: entry.name.clone(),
+                    from: entry.from.clone(),
+                    to: entry.to.clone(),
+                })
+                .collect(),
+            importers,
+            out_of_diff_importers,
+            line: entries
+                .iter()
+                .map(|entry| entry.line)
+                .find(|line| *line > 0)
+                .unwrap_or(0),
+        }
+    };
+
+    let mut anchors = Vec::new();
+    for (rel_str, abs) in manifests {
+        let Ok(head) = std::fs::read_to_string(abs) else {
+            continue;
+        };
+        let relative = Path::new(&rel_str);
+        let base = match reader.read(base_ref, relative) {
+            BaseRead::Content(base) => base,
+            BaseRead::Missing => String::new(),
+            BaseRead::Error => break,
+        };
+        let deltas = manifest_dependency_deltas(&base, &head);
+        if !deltas.added.is_empty() {
+            anchors.push(to_anchor(
+                &rel_str,
+                DependencyChangeKind::Added,
+                &deltas.added,
+            ));
+        }
+        if !deltas.major_bumped.is_empty() {
+            anchors.push(to_anchor(
+                &rel_str,
+                DependencyChangeKind::MajorBump,
+                &deltas.major_bumped,
+            ));
+        }
+    }
+    anchors
+}
+
+/// Mirror the dependency anchors onto the brief's `deltas` as stable keys so
+/// the JSON envelope names what changed even when the cap collapses the
+/// decision.
+fn fill_dependency_delta_keys(
+    deltas: &mut crate::audit_brief::ReviewDeltas,
+    anchors: &[crate::audit_decision_surface::DependencyAnchor],
+) {
+    use crate::audit_decision_surface::DependencyChangeKind;
+
+    for anchor in anchors {
+        for entry in &anchor.entries {
+            match (anchor.kind, &entry.from) {
+                (DependencyChangeKind::MajorBump, Some(from)) => {
+                    deltas.dependency_major_bumped.push(format!(
+                        "{}::{}@{from}->{}",
+                        anchor.manifest, entry.name, entry.to
+                    ));
+                }
+                _ => deltas
+                    .dependency_added
+                    .push(format!("{}::{}", anchor.manifest, entry.name)),
+            }
+        }
+    }
+    deltas.dependency_added.sort();
+    deltas.dependency_major_bumped.sort();
 }
 
 fn weakening_signals_for_file(

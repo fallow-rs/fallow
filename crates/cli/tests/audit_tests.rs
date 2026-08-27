@@ -5065,6 +5065,100 @@ fn partition_reports_independent_slices_along_graph_seams() {
     );
 }
 
+/// The head manifest bumps `left-pad` across a major version and adds `dayjs`;
+/// `src/a.ts` imports both. Each package ships a stub under `node_modules` so
+/// the resolver records package usage.
+fn create_dependency_decision_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    for pkg in ["left-pad", "dayjs"] {
+        fs::create_dir_all(dir.join("node_modules").join(pkg)).unwrap();
+        fs::write(
+            dir.join("node_modules").join(pkg).join("package.json"),
+            format!(r#"{{"name": "{pkg}", "version": "1.0.0", "main": "index.js"}}"#),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("node_modules").join(pkg).join("index.js"),
+            "module.exports = () => 1;\n",
+        )
+        .unwrap();
+    }
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"dep-test\",\n  \"main\": \"src/a.ts\",\n  \"dependencies\": {\n    \"left-pad\": \"^1.3.0\"\n  }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/a.ts"),
+        "import leftPad from 'left-pad';\nexport const a = () => leftPad('x', 2);\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"dep-test\",\n  \"main\": \"src/a.ts\",\n  \"dependencies\": {\n    \"dayjs\": \"^1.11.0\",\n    \"left-pad\": \"^2.0.0\"\n  }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/a.ts"),
+        "import dayjs from 'dayjs';\nimport leftPad from 'left-pad';\nexport const a = () => leftPad(String(dayjs()), 2);\n",
+    )
+    .unwrap();
+    commit_all(dir, "bump left-pad, add dayjs");
+    tmp
+}
+
+#[test]
+fn dependency_bump_and_addition_surface_as_batched_decisions() {
+    let tmp = create_dependency_decision_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let pretty = || serde_json::to_string_pretty(&guide).unwrap_or_default();
+    assert_eq!(
+        guide["digest"]["deltas"]["dependency_added"],
+        serde_json::json!(["package.json::dayjs"]),
+        "guide: {}",
+        pretty()
+    );
+    assert_eq!(
+        guide["digest"]["deltas"]["dependency_major_bumped"],
+        serde_json::json!(["package.json::left-pad@^1.3.0->^2.0.0"]),
+        "guide: {}",
+        pretty()
+    );
+    let decisions = guide["digest"]["decisions"]["decisions"]
+        .as_array()
+        .expect("decisions");
+    let dependency: Vec<&serde_json::Value> = decisions
+        .iter()
+        .filter(|d| d["category"] == "dependency")
+        .collect();
+    assert_eq!(dependency.len(), 2, "one per kind. guide: {}", pretty());
+    for decision in &dependency {
+        assert_eq!(decision["anchor_file"], "package.json");
+        assert!(decision["anchor_line"].as_u64().unwrap_or(0) > 0);
+        assert_eq!(decision["blast"], 1, "src/a.ts imports each package");
+        assert_eq!(decision["internal_consumer_count"], 0);
+        assert!(
+            decision["question"]
+                .as_str()
+                .unwrap_or_default()
+                .ends_with('?'),
+            "the decision stays a question"
+        );
+    }
+    assert!(
+        dependency
+            .iter()
+            .any(|d| d["signal_key"] == "package.json::left-pad@^1.3.0->^2.0.0"),
+        "the bump is a decision. guide: {}",
+        pretty()
+    );
+}
+
 #[test]
 fn e5_clean_agent_json_is_accepted_zero_unanchored() {
     let tmp = create_boundary_walkthrough_fixture();

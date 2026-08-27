@@ -25,6 +25,7 @@ mod audit;
 mod audit_brief;
 mod audit_cache_prune;
 mod audit_decision_surface;
+mod audit_dependency_deltas;
 mod audit_focus;
 mod audit_walkthrough;
 mod base_worktree;

@@ -241,6 +241,8 @@ fn build_decision_deltas(head: &DecisionAnalysis, base: &DecisionSnapshot) -> Re
             &head_snapshot.public_api,
             &base.public_api,
         ),
+        dependency_added: Vec::new(),
+        dependency_major_bumped: Vec::new(),
     }
 }
 
@@ -279,6 +281,7 @@ fn build_surface(
         deltas,
         boundary_anchors: &boundary_anchors,
         coordination: &coordination,
+        dependency_anchors: &[],
         public_api_anchor_line,
         affected_not_shown,
         routing: &head.routing,

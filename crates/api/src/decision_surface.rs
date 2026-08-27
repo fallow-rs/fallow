@@ -19,10 +19,10 @@
 //! 2. **public-API/contract** (`public_api_added` + coordination gaps): a
 //!    new exports-aware public surface, or a changed contract consumed by modules
 //!    outside the diff.
-//! 3. **dependency**: a new `package.json` dependency entry (the arm is present;
-//!    its candidate source is a dependency delta not yet threaded on the brief
-//!    path, so it produces decisions only once that delta lands, never a
-//!    fabricated signal).
+//! 3. **dependency**: a changed `package.json` that adds third-party entries or
+//!    moves one across a major version (`dependency_added` /
+//!    `dependency_major_bumped`), batch-consolidated per manifest per kind and
+//!    weighted by the graph's in-repo importers of the affected packages.
 //!
 //! The four CUT categories (abstraction-with-1-implementor, deletion-still-
 //! reachable, convention-divergence, irreversibility/migration) are CONFIRMED
@@ -100,6 +100,46 @@ pub struct CoordinationAnchor {
     pub line: u32,
 }
 
+/// Which manifest change a dependency decision frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyChangeKind {
+    /// Entries the base manifest did not declare.
+    Added,
+    /// Entries whose range crossed a major version.
+    MajorBump,
+}
+
+/// One declared dependency entry inside a dependency decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependencyEntry {
+    /// The package name.
+    pub name: String,
+    /// The base range; `None` for an added entry.
+    pub from: Option<String>,
+    /// The head range.
+    pub to: String,
+}
+
+/// A changed manifest's dependency candidates of one kind, batch-consolidated
+/// per manifest (rule R1): a reviewer reads "3 new dependencies", never one
+/// decision per package. The importer counts come from the graph's package
+/// usage, so the decision carries the modules the change actually reaches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependencyAnchor {
+    /// Root-relative path of the `package.json` (the decision anchor).
+    pub manifest: String,
+    /// Added entries or major bumps.
+    pub kind: DependencyChangeKind,
+    /// The entries, name-sorted.
+    pub entries: Vec<DependencyEntry>,
+    /// In-repo modules importing any of the entries (the blast).
+    pub importers: u64,
+    /// The subset of `importers` outside the diff (the display number).
+    pub out_of_diff_importers: u64,
+    /// 1-based line of the first entry in the head manifest, `0` when unresolved.
+    pub line: u32,
+}
+
 /// All inputs the extractor needs, gathered from the assembled brief data.
 pub struct DecisionInputs<'a> {
     /// Diff-aware deltas (boundary + public-API). The candidate source.
@@ -108,6 +148,8 @@ pub struct DecisionInputs<'a> {
     pub boundary_anchors: &'a [BoundaryAnchor],
     /// Coordination gaps projected to the contract decision shape.
     pub coordination: &'a [CoordinationAnchor],
+    /// Dependency candidates per changed manifest, one per kind.
+    pub dependency_anchors: &'a [DependencyAnchor],
     /// 1-based line of the first widened public-API export's declaration, so the
     /// public-API-surface decision anchors to a real line. `0` when unresolved.
     pub public_api_anchor_line: u32,
@@ -360,7 +402,104 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
     append_boundary_decisions(&mut decisions, inputs);
     append_public_api_decision(&mut decisions, inputs);
     append_coordination_decisions(&mut decisions, inputs);
+    append_dependency_decisions(&mut decisions, inputs);
     decisions
+}
+
+/// The candidate key for a dependency anchor: the manifest-scoped entry keys,
+/// name-sorted and `|`-joined, so one manifest yields one stable id per kind.
+fn dependency_candidate_key(anchor: &DependencyAnchor) -> String {
+    let keys: Vec<String> = anchor
+        .entries
+        .iter()
+        .map(|entry| match (&anchor.kind, &entry.from) {
+            (DependencyChangeKind::MajorBump, Some(from)) => {
+                format!("{}::{}@{from}->{}", anchor.manifest, entry.name, entry.to)
+            }
+            _ => format!("{}::{}", anchor.manifest, entry.name),
+        })
+        .collect();
+    keys.join("|")
+}
+
+fn dependency_names(anchor: &DependencyAnchor) -> String {
+    anchor
+        .entries
+        .iter()
+        .map(|entry| match (&anchor.kind, &entry.from) {
+            (DependencyChangeKind::MajorBump, Some(from)) => {
+                format!("`{}` {from} -> {}", entry.name, entry.to)
+            }
+            _ => format!("`{}`", entry.name),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn dependency_question(anchor: &DependencyAnchor) -> String {
+    let count = anchor.entries.len();
+    let names = dependency_names(anchor);
+    match anchor.kind {
+        DependencyChangeKind::Added => format!(
+            "`{}` adds {count} third-party dependenc{} ({names}), imported by {} in-repo {}. What does each replace, and who owns the new surface?",
+            anchor.manifest,
+            if count == 1 { "y" } else { "ies" },
+            anchor.importers,
+            modules_word(anchor.importers),
+        ),
+        DependencyChangeKind::MajorBump => format!(
+            "`{}` moves {count} dependenc{} across a major version ({names}), imported by {} in-repo {}. Which changelog-listed behavior changes reach those importers?",
+            anchor.manifest,
+            if count == 1 { "y" } else { "ies" },
+            anchor.importers,
+            modules_word(anchor.importers),
+        ),
+    }
+}
+
+fn dependency_tradeoff(anchor: &DependencyAnchor) -> String {
+    let count = anchor.entries.len();
+    match anchor.kind {
+        DependencyChangeKind::Added => format!(
+            "Takes on {count} new maintenance and supply-chain surface{}; {} in-repo {} outside this diff already {} the added packages.",
+            if count == 1 { "" } else { "s" },
+            anchor.out_of_diff_importers,
+            modules_word(anchor.out_of_diff_importers),
+            agrees("import", anchor.out_of_diff_importers),
+        ),
+        DependencyChangeKind::MajorBump => format!(
+            "A major bump is a behavior change nobody in this diff wrote; {} in-repo {} outside this diff {} the bumped packages and {} not in the review.",
+            anchor.out_of_diff_importers,
+            modules_word(anchor.out_of_diff_importers),
+            agrees("import", anchor.out_of_diff_importers),
+            if anchor.out_of_diff_importers == 1 {
+                "is"
+            } else {
+                "are"
+            },
+        ),
+    }
+}
+
+fn append_dependency_decisions(decisions: &mut Vec<Decision>, inputs: &DecisionInputs<'_>) {
+    for anchor in inputs.dependency_anchors {
+        if anchor.entries.is_empty() {
+            continue;
+        }
+        decisions.push(build_decision(
+            DecisionSpec {
+                category: DecisionCategory::Dependency,
+                candidate_key: dependency_candidate_key(anchor),
+                question: dependency_question(anchor),
+                tradeoff: dependency_tradeoff(anchor),
+                anchor_file: anchor.manifest.clone(),
+                anchor_line: anchor.line,
+                blast: anchor.importers,
+                internal_consumer_count: anchor.out_of_diff_importers,
+            },
+            inputs,
+        ));
+    }
 }
 
 fn append_boundary_decisions(decisions: &mut Vec<Decision>, inputs: &DecisionInputs<'_>) {
@@ -518,6 +657,8 @@ mod tests {
             boundary_introduced: boundary.iter().map(|s| (*s).to_string()).collect(),
             cycle_introduced: Vec::new(),
             public_api_added: public_api.iter().map(|s| (*s).to_string()).collect(),
+            dependency_added: Vec::new(),
+            dependency_major_bumped: Vec::new(),
         }
     }
 
@@ -541,6 +682,7 @@ mod tests {
             deltas,
             boundary_anchors,
             coordination,
+            dependency_anchors: &[],
             public_api_anchor_line: 0,
             affected_not_shown: 3,
             routing,
@@ -557,6 +699,92 @@ mod tests {
 
     // (d) None of the four cut categories can ever appear: the enum has exactly
     // three discriminants, so this is a compile-time + runtime guarantee.
+    #[test]
+    fn dependency_anchor_becomes_one_batched_dependency_decision() {
+        let deltas = deltas(&[], &[]);
+        let routing = empty_routing();
+        let anchors = vec![
+            DependencyAnchor {
+                manifest: "package.json".to_string(),
+                kind: DependencyChangeKind::MajorBump,
+                entries: vec![
+                    DependencyEntry {
+                        name: "react".to_string(),
+                        from: Some("^18.2.0".to_string()),
+                        to: "^19.0.0".to_string(),
+                    },
+                    DependencyEntry {
+                        name: "zod".to_string(),
+                        from: Some("^3.0.0".to_string()),
+                        to: "^4.0.0".to_string(),
+                    },
+                ],
+                importers: 12,
+                out_of_diff_importers: 9,
+                line: 14,
+            },
+            DependencyAnchor {
+                manifest: "package.json".to_string(),
+                kind: DependencyChangeKind::Added,
+                entries: vec![DependencyEntry {
+                    name: "dayjs".to_string(),
+                    from: None,
+                    to: "^1.11.0".to_string(),
+                }],
+                importers: 1,
+                out_of_diff_importers: 0,
+                line: 9,
+            },
+        ];
+        let surface = extract_decision_surface(&DecisionInputs {
+            deltas: &deltas,
+            boundary_anchors: &[],
+            coordination: &[],
+            dependency_anchors: &anchors,
+            public_api_anchor_line: 0,
+            affected_not_shown: 0,
+            routing: &routing,
+            head_source: &no_source,
+            rename_old_path: &no_source,
+            internal_consumers: &no_consumers,
+            cap: 4,
+        });
+        assert_eq!(
+            surface.decisions.len(),
+            2,
+            "one decision per manifest per kind"
+        );
+        let bump = &surface.decisions[0];
+        assert_eq!(bump.category, DecisionCategory::Dependency);
+        assert_eq!(
+            bump.signal_key,
+            "package.json::react@^18.2.0->^19.0.0|package.json::zod@^3.0.0->^4.0.0"
+        );
+        assert_eq!(bump.anchor_file, "package.json");
+        assert_eq!(bump.anchor_line, 14);
+        assert_eq!(bump.blast, 12);
+        assert_eq!(bump.internal_consumer_count, 9);
+        assert_eq!(
+            bump.consequence,
+            12 * 5,
+            "dependency carries the top reversibility weight"
+        );
+        assert!(bump.question.contains("`react` ^18.2.0 -> ^19.0.0"));
+        assert!(bump.question.ends_with('?'));
+        assert!(
+            bump.tradeoff
+                .contains("9 in-repo modules outside this diff import")
+        );
+        let added = &surface.decisions[1];
+        assert_eq!(added.signal_key, "package.json::dayjs");
+        assert!(
+            added
+                .question
+                .contains("adds 1 third-party dependency (`dayjs`)")
+        );
+        assert!(surface.accept_signal_id(&added.signal_id));
+    }
+
     #[test]
     fn only_three_categories_exist_no_cut_category_representable() {
         let all = [
@@ -796,6 +1024,7 @@ mod tests {
             deltas: &d,
             boundary_anchors: &[],
             coordination: &[],
+            dependency_anchors: &[],
             public_api_anchor_line: 0,
             // The project-wide proxy must NOT become the display number.
             affected_not_shown: 99,
@@ -871,6 +1100,7 @@ mod tests {
             deltas: &d,
             boundary_anchors: &[],
             coordination: &coordination,
+            dependency_anchors: &[],
             public_api_anchor_line: 0,
             affected_not_shown: 2,
             routing: &routing,

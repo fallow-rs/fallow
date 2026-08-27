@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow review` judgments carry an author-action label, and the guide
+  publishes the vocabularies.** A judgment returned through
+  `--walkthrough-file` may set `action` to `block`, `address`, `consider`, or
+  `fyi`; fallow validates it on reentry (`invalid-action` rejects anything
+  else) and passes it through fenced on the accepted judgment, so the author
+  receiving a note knows what is required and what is optional. The
+  walkthrough guide's `agent_schema` now lists `action_vocabulary` and a
+  recommended `concern_vocabulary` (the trade-off lenses). Review-brief
+  schema 7 -> 8.
+
+- **Direction units report test adjacency.** Each `direction.units[]` entry
+  in the walkthrough guide carries `test_adjacency` (`none`, `untouched`, or
+  `changed`): whether a test file imports the changed unit directly, and
+  whether that test moved with the change. The human tour badges `UNTESTED`
+  units. A graph fact, not a coverage claim; absent when the graph was not
+  retained or the unit is itself a test file.
+
+- **The review partition reports independent slices.** `partition` now
+  carries `independent_slices`: the connected components of the inter-unit
+  dependency graph. Two or more slices mean the change splits along a
+  graph-proven seam into pieces that can be reviewed and merged on their own;
+  the human brief names them. An orientation fact, never a demand to split.
+
+- **The decision surface's dependency arm now fires.** A changed
+  `package.json` that adds third-party entries, or moves a declared entry
+  across a major version (or a `0.x` minor), yields one batched `dependency`
+  decision per manifest per kind, weighted by the graph's in-repo importers
+  of the affected packages. The brief's `deltas` carry the same keys as
+  `dependency_added` (`<manifest>::<name>`) and `dependency_major_bumped`
+  (`<manifest>::<name>@<from>-><to>`). Minor and patch bumps and non-numeric
+  ranges (workspace, file, git, tags) are never candidates.
+
 - **`fallow similar-code` adds opt-in semantic function discovery through a
   pinned, verified local model.** It complements deterministic clone detection
   with explicitly unverified candidates for functions that may share intent
