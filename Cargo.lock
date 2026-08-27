@@ -1234,6 +1234,7 @@ dependencies = [
 name = "fallow-graph"
 version = "3.19.0"
 dependencies = [
+ "dashmap",
  "dunce",
  "fallow-config",
  "fallow-types",

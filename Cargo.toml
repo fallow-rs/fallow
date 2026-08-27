@@ -60,6 +60,7 @@ flate2 = "1"
 
 # Parallelism
 rayon = "1"
+dashmap = "6"
 
 # File system
 dunce = "1"

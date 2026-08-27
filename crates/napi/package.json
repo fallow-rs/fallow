@@ -75,7 +75,7 @@
     "@fallow-cli/fallow-node-linux-x64-musl": "3.19.0",
     "@fallow-cli/fallow-node-win32-arm64-msvc": "3.19.0",
     "@fallow-cli/fallow-node-win32-x64-msvc": "3.19.0",
-    "fallow-similar-code": "3.18.0",
-    "fallow-type-aware": "3.18.0"
+    "fallow-similar-code": "3.19.0",
+    "fallow-type-aware": "3.19.0"
   }
 }

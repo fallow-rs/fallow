@@ -36,6 +36,9 @@ fixedbitset = { workspace = true }
 # Hashing
 rustc-hash = { workspace = true }
 
+# Concurrent caches shared across rayon workers
+dashmap = { workspace = true }
+
 # Persisted graph cache (serde derives on the graph types + postcard store)
 serde = { workspace = true }
 postcard = { workspace = true }

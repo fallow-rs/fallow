@@ -3,8 +3,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use dashmap::DashMap;
 use oxc_resolver::Resolver;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use serde_json::Value;
 
 use fallow_types::discover::FileId;
@@ -412,7 +413,7 @@ pub(super) struct ResolveContext<'a> {
 /// Session-local cache of `dunce::canonicalize` results keyed by input path.
 #[derive(Default)]
 pub(super) struct CanonicalizeCache {
-    map: Mutex<FxHashMap<PathBuf, Option<PathBuf>>>,
+    map: DashMap<PathBuf, Option<PathBuf>, FxBuildHasher>,
 }
 
 impl CanonicalizeCache {
@@ -420,15 +421,11 @@ impl CanonicalizeCache {
     /// first miss. `None` (a path that fails to canonicalize) is cached too so a
     /// repeated probe of the same missing path does not re-issue the syscall.
     pub fn get(&self, path: &Path) -> Option<PathBuf> {
-        if let Ok(cache) = self.map.lock()
-            && let Some(value) = cache.get(path)
-        {
+        if let Some(value) = self.map.get(path) {
             return value.clone();
         }
         let value = dunce::canonicalize(path).ok();
-        if let Ok(mut cache) = self.map.lock() {
-            cache.insert(path.to_path_buf(), value.clone());
-        }
+        self.map.insert(path.to_path_buf(), value.clone());
         value
     }
 }
@@ -436,39 +433,39 @@ impl CanonicalizeCache {
 /// Session-local cache for tsconfig helper lookups used during import resolution.
 #[derive(Default)]
 pub(super) struct TsconfigCache {
-    json: Mutex<FxHashMap<PathBuf, Option<Value>>>,
-    chains: Mutex<FxHashMap<PathBuf, Vec<PathBuf>>>,
+    json: DashMap<PathBuf, Option<Arc<Value>>, FxBuildHasher>,
+    chains: DashMap<PathBuf, Arc<[PathBuf]>, FxBuildHasher>,
 }
 
 impl TsconfigCache {
     /// Return a cached parsed tsconfig JSON value, loading it on first miss.
-    pub fn json(&self, path: &Path, load: impl FnOnce(&Path) -> Option<Value>) -> Option<Value> {
-        if let Ok(cache) = self.json.lock()
-            && let Some(value) = cache.get(path)
-        {
+    ///
+    /// Handing back an [`Arc`] rather than a clone matters: a tsconfig chain is
+    /// walked several times per import specifier, and deep-copying every parsed
+    /// document on each hop dominated resolution on large project-reference
+    /// graphs.
+    pub fn json(
+        &self,
+        path: &Path,
+        load: impl FnOnce(&Path) -> Option<Value>,
+    ) -> Option<Arc<Value>> {
+        if let Some(value) = self.json.get(path) {
             return value.clone();
         }
 
-        let value = load(path);
-        if let Ok(mut cache) = self.json.lock() {
-            cache.insert(path.to_path_buf(), value.clone());
-        }
+        let value = load(path).map(Arc::new);
+        self.json.insert(path.to_path_buf(), value.clone());
         value
     }
 
     /// Return the cached tsconfig chain for a source file, if one exists.
-    pub fn chain(&self, from_file: &Path) -> Option<Vec<PathBuf>> {
-        self.chains
-            .lock()
-            .ok()
-            .and_then(|cache| cache.get(from_file).cloned())
+    pub fn chain(&self, from_file: &Path) -> Option<Arc<[PathBuf]>> {
+        self.chains.get(from_file).map(|entry| Arc::clone(&entry))
     }
 
     /// Store the computed tsconfig chain for a source file.
-    pub fn store_chain(&self, from_file: &Path, chain: Vec<PathBuf>) {
-        if let Ok(mut cache) = self.chains.lock() {
-            cache.insert(from_file.to_path_buf(), chain);
-        }
+    pub fn store_chain(&self, from_file: &Path, chain: Arc<[PathBuf]>) {
+        self.chains.insert(from_file.to_path_buf(), chain);
     }
 }
 
@@ -579,6 +576,89 @@ mod tests {
         assert!(fallback.get(Path::new("/nonexistent/file.ts")).is_none());
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn tsconfig_cache_loads_once_and_shares_the_parsed_document() {
+        let cache = TsconfigCache::default();
+        let path = Path::new("/project/tsconfig.json");
+        let loads = std::sync::atomic::AtomicUsize::new(0);
+        let load = |_: &Path| {
+            loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Some(serde_json::json!({ "compilerOptions": {} }))
+        };
+
+        let first = cache.json(path, load).unwrap();
+        let second = cache.json(path, load).unwrap();
+
+        assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "repeat reads must share one allocation rather than deep-copy"
+        );
+    }
+
+    /// An unreadable tsconfig is cached as a miss so the read is not retried.
+    #[test]
+    fn tsconfig_cache_caches_a_failed_load() {
+        let cache = TsconfigCache::default();
+        let path = Path::new("/project/missing.json");
+        let loads = std::sync::atomic::AtomicUsize::new(0);
+        let load = |_: &Path| {
+            loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            None
+        };
+
+        assert!(cache.json(path, load).is_none());
+        assert!(cache.json(path, load).is_none());
+        assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn tsconfig_cache_round_trips_a_chain() {
+        let cache = TsconfigCache::default();
+        let from_file = Path::new("/project/src/index.ts");
+        assert!(cache.chain(from_file).is_none());
+
+        let chain: Arc<[PathBuf]> = vec![PathBuf::from("/project/tsconfig.json")].into();
+        cache.store_chain(from_file, Arc::clone(&chain));
+
+        assert!(Arc::ptr_eq(&cache.chain(from_file).unwrap(), &chain));
+    }
+
+    /// Both caches are read concurrently by rayon workers during resolution.
+    #[test]
+    fn tsconfig_cache_is_consistent_under_concurrent_access() {
+        const THREADS: usize = 8;
+        const PATHS: usize = 32;
+
+        let cache = TsconfigCache::default();
+        std::thread::scope(|scope| {
+            for _ in 0..THREADS {
+                scope.spawn(|| {
+                    for index in 0..PATHS {
+                        let path = PathBuf::from(format!("/project/{index}/tsconfig.json"));
+                        let json = cache
+                            .json(&path, |_| Some(serde_json::json!({ "index": index })))
+                            .unwrap();
+                        assert_eq!(json["index"], index);
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn canonicalize_cache_returns_the_same_result_on_repeat_lookups() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let file = temp.path().join("file.ts");
+        std::fs::write(&file, "").unwrap();
+
+        let cache = CanonicalizeCache::default();
+        let expected = dunce::canonicalize(&file).ok();
+        assert_eq!(cache.get(&file), expected);
+        assert_eq!(cache.get(&file), expected);
+        assert!(cache.get(&temp.path().join("missing.ts")).is_none());
     }
 
     #[test]

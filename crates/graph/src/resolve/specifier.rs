@@ -3,6 +3,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use globset::{Glob, GlobSetBuilder};
 use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
@@ -253,12 +254,13 @@ fn nearest_tsconfig_path(root: &Path, from_file: &Path) -> Option<PathBuf> {
     }
 }
 
-fn local_tsconfig_chain(ctx: &ResolveContext<'_>, from_file: &Path) -> Vec<PathBuf> {
+fn local_tsconfig_chain(ctx: &ResolveContext<'_>, from_file: &Path) -> Arc<[PathBuf]> {
     if let Some(chain) = ctx.tsconfig_cache.chain(from_file) {
         return chain;
     }
-    let chain = local_tsconfig_chain_uncached(ctx, from_file);
-    ctx.tsconfig_cache.store_chain(from_file, chain.clone());
+    let chain: Arc<[PathBuf]> = local_tsconfig_chain_uncached(ctx, from_file).into();
+    ctx.tsconfig_cache
+        .store_chain(from_file, Arc::clone(&chain));
     chain
 }
 
@@ -601,7 +603,7 @@ fn read_tsconfig_json(path: &Path) -> Option<Value> {
     read_json_file(path)
 }
 
-fn read_tsconfig_json_cached(ctx: &ResolveContext<'_>, path: &Path) -> Option<Value> {
+fn read_tsconfig_json_cached(ctx: &ResolveContext<'_>, path: &Path) -> Option<Arc<Value>> {
     ctx.tsconfig_cache.json(path, read_tsconfig_json)
 }
 
@@ -654,8 +656,8 @@ fn matches_nearest_tsconfig_path_alias(
     from_file: &Path,
     specifier: &str,
 ) -> bool {
-    for tsconfig_path in local_tsconfig_chain(ctx, from_file) {
-        let Some(paths) = read_tsconfig_json_cached(ctx, &tsconfig_path).and_then(|json| {
+    for tsconfig_path in local_tsconfig_chain(ctx, from_file).iter() {
+        let Some(paths) = read_tsconfig_json_cached(ctx, tsconfig_path).and_then(|json| {
             json.get("compilerOptions")
                 .and_then(|compiler_options| compiler_options.get("paths"))
                 .and_then(Value::as_object)
@@ -681,7 +683,7 @@ fn try_nearest_tsconfig_path_alias(
             .extension()
             .is_some_and(|extension| extension == "scss" || extension == "sass");
     let chain = local_tsconfig_chain(ctx, from_file);
-    for tsconfig_path in &chain {
+    for tsconfig_path in chain.iter() {
         let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
             continue;
         };
@@ -698,7 +700,7 @@ fn try_nearest_tsconfig_path_alias(
             return None;
         }
     }
-    for tsconfig_path in &chain {
+    for tsconfig_path in chain.iter() {
         let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
             continue;
         };
@@ -1825,8 +1827,8 @@ fn try_tsconfig_root_dirs(
     if !specifier.starts_with('.') {
         return None;
     }
-    for tsconfig_path in local_tsconfig_chain(ctx, from_file) {
-        let Some(json) = read_tsconfig_json_cached(ctx, &tsconfig_path) else {
+    for tsconfig_path in local_tsconfig_chain(ctx, from_file).iter() {
+        let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
             continue;
         };
         let Some(compiler_options) = json.get("compilerOptions") else {
