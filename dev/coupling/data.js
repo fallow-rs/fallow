@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787824949171,
+  "lastUpdate": 1787833110286,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c97f4b9dbb324e655c5e66e0f10b205a36381fc6",
-          "message": "Merge pull request #2212 from fallow-rs/feat/css-reference-index-perf\n\nrefactor: index CSS reference lookups",
-          "timestamp": "2026-08-12T14:40:50+02:00",
-          "tree_id": "83d7481b74a847bc52a2abeabc69ad9604c3bcc6",
-          "url": "https://github.com/fallow-rs/fallow/commit/c97f4b9dbb324e655c5e66e0f10b205a36381fc6"
-        },
-        "date": 1786538755575,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 46,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.33,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 451,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1202,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/bf98a4270ab5ce6fb9aca1e5c92a51da6dde2023"
         },
         "date": 1787824946114,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bcf333d8f9fe0753be4df17bf1a8a20be4fbdb53",
+          "message": "feat(review): author actions, test adjacency, slices, and dependency decisions (#2446)\n\nReview-brief schema 7 -> 8, all additive.\n\n- Judgments carry an author-action label (block, address, consider, fyi) validated on reentry (invalid-action with invalid_value, checked after the anchor) and echoed fenced; the guide publishes action_vocabulary and concern_vocabulary.\n- Direction units carry test_adjacency (none, untouched, changed); both tours badge NO-DIRECT-TEST; root-level test/ and tests/ count as test paths; a project with no tests gets no claims.\n- The partition reports independent_slices (connected components of the inter-unit graph) when there are two or more.\n- The dependency decision arm fires on both the CLI and the typed/MCP route: added entries and major bumps per changed package.json, batched per manifest per kind, weighted by in-repo importers (union, value and type-only), section-tagged, rename-aware, npm: aliases read at their range; a major bump ranks with a public-API change; no comment-based suppress action on a manifest anchor.\n- The human and markdown tours show decisions whose anchor is not a staged unit, so a dependency-only change never renders as \"0 files\".\n- Review app: action on judgments and feed items, invalid_value, schema pin as a floor.\n\nVerified with unit and e2e tests on the real binary, real-project runs (fallow's vscode extension bump commit, a monorepo worktree with major bumps), verify:fast, and the contract drift gate. Companion PRs fallow-skills #42/#43 and fallow-docs #21 land with the release that ships schema 8.",
+          "timestamp": "2026-08-27T14:11:13+02:00",
+          "tree_id": "f0fafc776f5a2ca0062607ff01b7d6baaa008884",
+          "url": "https://github.com/fallow-rs/fallow/commit/bcf333d8f9fe0753be4df17bf1a8a20be4fbdb53"
+        },
+        "date": 1787833106370,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
