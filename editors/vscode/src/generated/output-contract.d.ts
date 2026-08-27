@@ -12528,8 +12528,9 @@ order: string[]
 /**
  * Connected components of the inter-unit dependency graph: groups of
  * module directories that share no import edge with any unit outside the
- * group. Two or more slices mean the change splits along a graph-proven
- * seam into pieces that can be reviewed and merged on their own. An
+ * group. Present only when there are two or more, which is when the
+ * change splits along a graph-proven seam into pieces that can be
+ * reviewed and merged on their own; a single slice is just `order`. An
  * orientation fact, never a demand to split.
  */
 independent_slices?: string[][]
@@ -12701,15 +12702,16 @@ public_api_added: string[]
 /**
  * Third-party dependencies a changed `package.json` declares that the base
  * manifest did not, as `<manifest>::<name>` keys. Every dependency section
- * participates.
+ * participates. Always present, empty when no manifest changed.
  */
-dependency_added?: string[]
+dependency_added: string[]
 /**
  * Declared dependencies whose range moved across a major version (or a
  * `0.x` minor) vs base, as `<manifest>::<name>@<from>-><to>` keys. Minor
  * and patch moves are not candidates; a non-numeric range is skipped.
+ * Always present, empty when nothing crossed a major version.
  */
-dependency_major_bumped?: string[]
+dependency_major_bumped: string[]
 }
 /**
  * One weakening signal: a category, the file it was detected in, and a short
@@ -13037,8 +13039,10 @@ previous_change_anchor?: (string | null)
  */
 export interface AgentSchema {
 /**
- * How the agent must structure each judgment: cite an emitted `signal_id`,
- * add free-text `framing` (non-deterministic, fenced), an optional `concern`.
+ * How the agent must structure each judgment: cite an emitted `signal_id`
+ * or `change_anchor`, add free-text `framing` (non-deterministic, fenced),
+ * an optional `concern`, and an optional `action` from the closed
+ * vocabulary.
  */
 judgment_shape: string
 /**
@@ -13167,9 +13171,15 @@ change_anchor: string
 /**
  * The rejection reason: `unanchored-signal-id` (cited a signal fallow did
  * not emit), `unknown-change-anchor` (cited a region fallow did not emit),
- * or `stale-snapshot` (the tree moved).
+ * `stale-snapshot` (the tree moved), or `invalid-action` (an `action`
+ * outside [`JUDGMENT_ACTIONS`]; the anchor itself resolved).
  */
 reason: string
+/**
+ * The offending value for an `invalid-action` rejection, echoed so the
+ * agent can correct it in one round trip. Absent for the other reasons.
+ */
+invalid_value?: (string | null)
 }
 /**
  * The `fallow suppressions --format json` envelope. `FallowOutput`

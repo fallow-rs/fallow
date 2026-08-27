@@ -1787,7 +1787,7 @@
           "name": "--walkthrough-file",
           "type": "string",
           "required": false,
-          "description": "Ingest an agent's judgment JSON and POST-VALIDATE it against the LIVE graph. Rejects any judgment whose `signal_id` fallow did not emit (anti-hallucination); refuses the whole payload as stale when the echoed graph-snapshot hash no longer matches (the tree moved). The verifier is the graph, not a second model. Implies the brief; always exits 0. The agent's free-text framing is fenced as non-deterministic and never gates or auto-posts"
+          "description": "Ingest an agent's judgment JSON and POST-VALIDATE it against the LIVE graph. Rejects any judgment whose `signal_id` fallow did not emit (anti-hallucination); refuses the whole payload as stale when the echoed graph-snapshot hash no longer matches (the tree moved); rejects an `action` outside `block`, `address`, `consider`, `fyi` (`invalid-action`). The verifier is the graph, not a second model. Implies the brief; always exits 0. The agent's free-text framing and action label are fenced as non-deterministic and never gate or auto-post"
         },
         {
           "name": "--walkthrough",

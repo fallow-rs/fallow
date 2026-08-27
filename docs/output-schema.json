@@ -17873,20 +17873,22 @@
           "items": {
             "type": "string"
           },
-          "description": "Third-party dependencies a changed `package.json` declares that the base\nmanifest did not, as `<manifest>::<name>` keys. Every dependency section\nparticipates."
+          "description": "Third-party dependencies a changed `package.json` declares that the base\nmanifest did not, as `<manifest>::<name>` keys. Every dependency section\nparticipates. Always present, empty when no manifest changed."
         },
         "dependency_major_bumped": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Declared dependencies whose range moved across a major version (or a\n`0.x` minor) vs base, as `<manifest>::<name>@<from>-><to>` keys. Minor\nand patch moves are not candidates; a non-numeric range is skipped."
+          "description": "Declared dependencies whose range moved across a major version (or a\n`0.x` minor) vs base, as `<manifest>::<name>@<from>-><to>` keys. Minor\nand patch moves are not candidates; a non-numeric range is skipped.\nAlways present, empty when nothing crossed a major version."
         }
       },
       "required": [
         "boundary_introduced",
         "cycle_introduced",
-        "public_api_added"
+        "public_api_added",
+        "dependency_added",
+        "dependency_major_bumped"
       ],
       "description": "Diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against\nthe audit base snapshot. Each entry is a brief summary/verdict line.\n\n`public_api` is batch-consolidated to ONE decision per change (rule R1):\nthe `added` list carries the introduced public-export keys as evidence, but a\nreviewer reads \"the public surface widened by N\", never one decision per\nsymbol."
     },
@@ -18363,7 +18365,7 @@
       "properties": {
         "judgment_shape": {
           "type": "string",
-          "description": "How the agent must structure each judgment: cite an emitted `signal_id`,\nadd free-text `framing` (non-deterministic, fenced), an optional `concern`."
+          "description": "How the agent must structure each judgment: cite an emitted `signal_id`\nor `change_anchor`, add free-text `framing` (non-deterministic, fenced),\nan optional `concern`, and an optional `action` from the closed\nvocabulary."
         },
         "echo_field": {
           "type": "string",
@@ -18460,7 +18462,14 @@
         },
         "reason": {
           "type": "string",
-          "description": "The rejection reason: `unanchored-signal-id` (cited a signal fallow did\nnot emit), `unknown-change-anchor` (cited a region fallow did not emit),\nor `stale-snapshot` (the tree moved)."
+          "description": "The rejection reason: `unanchored-signal-id` (cited a signal fallow did\nnot emit), `unknown-change-anchor` (cited a region fallow did not emit),\n`stale-snapshot` (the tree moved), or `invalid-action` (an `action`\noutside [`JUDGMENT_ACTIONS`]; the anchor itself resolved)."
+        },
+        "invalid_value": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The offending value for an `invalid-action` rejection, echoed so the\nagent can correct it in one round trip. Absent for the other reasons."
         }
       },
       "required": [
@@ -18641,7 +18650,7 @@
               "type": "string"
             }
           },
-          "description": "Connected components of the inter-unit dependency graph: groups of\nmodule directories that share no import edge with any unit outside the\ngroup. Two or more slices mean the change splits along a graph-proven\nseam into pieces that can be reviewed and merged on their own. An\norientation fact, never a demand to split."
+          "description": "Connected components of the inter-unit dependency graph: groups of\nmodule directories that share no import edge with any unit outside the\ngroup. Present only when there are two or more, which is when the\nchange splits along a graph-proven seam into pieces that can be\nreviewed and merged on their own; a single slice is just `order`. An\norientation fact, never a demand to split."
         }
       },
       "required": [
