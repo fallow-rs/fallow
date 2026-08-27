@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787764772236,
+  "lastUpdate": 1787824951445,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "93e765835bf3aa5b3048468753ad0fd228bbef15",
-          "message": "perf: skip side-effect export indexes",
-          "timestamp": "2026-08-13T15:41:30+02:00",
-          "tree_id": "65970b121ab3e0902b67919ecf298a124e4db4eb",
-          "url": "https://github.com/fallow-rs/fallow/commit/93e765835bf3aa5b3048468753ad0fd228bbef15"
-        },
-        "date": 1786629089339,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/94d5f7ad28fd921c6709bf4939c2d5fe0b76a273"
         },
         "date": 1787764767756,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "bf98a4270ab5ce6fb9aca1e5c92a51da6dde2023",
+          "message": "chore(docker): pin Dockerfile to v3.19.0",
+          "timestamp": "2026-08-27T11:55:55+02:00",
+          "tree_id": "55c52365376ec9d37614cbefdb1f12aac052f1eb",
+          "url": "https://github.com/fallow-rs/fallow/commit/bf98a4270ab5ce6fb9aca1e5c92a51da6dde2023"
+        },
+        "date": 1787824945046,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
