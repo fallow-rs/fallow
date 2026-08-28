@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787876856425,
+  "lastUpdate": 1787888256369,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "19606bfef48834a4d0844172f466c2438cb4256e",
-          "message": "Merge pull request #2234 from fallow-rs/feat/css-color-direct-parse-product\n\nperf(extract): parse CSS colors directly",
-          "timestamp": "2026-08-12T20:42:28+02:00",
-          "tree_id": "fa7b6fb416303e594914bf58d897cd758a294c2e",
-          "url": "https://github.com/fallow-rs/fallow/commit/19606bfef48834a4d0844172f466c2438cb4256e"
-        },
-        "date": 1786560454012,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 10640680,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 55306,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 970653,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7604,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8358,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "802bfd2c4e2e397409e16b5e87d7914464bdae11",
+          "message": "chore(napi): sync package.json / package-lock / index.js to v3.20.0",
+          "timestamp": "2026-08-28T05:31:51+02:00",
+          "tree_id": "50069b7aeaf722d1d81d0b3d1b636e322394165c",
+          "url": "https://github.com/fallow-rs/fallow/commit/802bfd2c4e2e397409e16b5e87d7914464bdae11"
+        },
+        "date": 1787888251497,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9756981,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49415,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1185970,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8404,
             "unit": "allocations"
           }
         ]
