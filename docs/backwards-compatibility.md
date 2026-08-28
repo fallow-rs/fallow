@@ -27,7 +27,7 @@ These interfaces are covered by semver , breaking changes only happen in major v
 - **Top-level structure**: `schema_version`, `version`, `elapsed_ms`, `total_issues`, and all issue arrays
 - **Issue type arrays**: `unused_files`, `unused_exports`, `unused_types`, `private_type_leaks`, `unused_dependencies`, `unused_dev_dependencies`, `unused_enum_members`, `unused_class_members`, `unresolved_imports`, `unlisted_dependencies`, `duplicate_exports`, `type_only_dependencies`, `circular_dependencies`, `re_export_cycles`, `boundary_violations`, `boundary_coverage_violations`, `boundary_call_violations`, `policy_violations`
 - **Issue object fields**: all fields documented in `docs/output-schema.json`
-- **Schema version**: each output envelope versions independently from the tool and from sibling envelopes. The affected envelope is bumped when an EXISTING wire field is renamed, removed, or its type changes, when a value is added to an existing enum-valued required field, OR when a `required` field is added to a previously-documented finding. An envelope that embeds the changed contract bumps too; unrelated envelopes do not. Additive optional fields (new fields with `#[serde(skip_serializing_if = ...)]` that are absent on the wire by default, or new finding types added to brand-new issue-type arrays) do NOT bump `schema_version`: existing consumers see a byte-identical wire shape on the unchanged path. Exact envelope versions are encoded as numeric `const` values in `docs/output-schema.json`; a shared CLI/programmatic shape with separate version lineages encodes the closed numeric set. The generated TypeScript contract derives its literal types from those schema definitions.
+- **Schema version**: each output envelope versions independently from the tool and from sibling envelopes. The affected envelope is bumped when an EXISTING wire field is renamed, removed, or its type changes, when a value is added to an existing enum-valued required field, OR when a `required` field is added to a previously-documented finding. An envelope that embeds the changed contract bumps too; unrelated envelopes do not. Additive optional fields (new fields with `#[serde(skip_serializing_if = ...)]` that are absent on the wire by default, or new finding types added to brand-new issue-type arrays) do NOT bump `schema_version`: existing consumers see a byte-identical wire shape on the unchanged path. Exact envelope versions are encoded as numeric `const` values in `docs/output-schema.json`; a shared CLI/programmatic shape with separate version lineages encodes the closed numeric set. The generated TypeScript contract derives its literal types from those schema definitions. One field is an explicit exception to the enum-value rule above: `workspace_diagnostics[].kind` is an OPEN set. A new diagnostic kind may be added without bumping any envelope, because a diagnostic is advisory, is omitted when the run records none, and never changes an exit code, so a consumer that does not recognise a kind can ignore the entry and lose nothing. `docs/output-schema.json` still enumerates every kind fallow can currently emit, so a consumer validating against a PINNED older copy of the schema will reject an entry carrying a newer kind: validate against the schema shipped with the version you run, and treat an unknown `kind` as "some diagnostic" rather than an error. This is the same tolerate-unknown-values contract `duplication.clone_groups[].demotion_reason` documents. Kinds added under this exception, without a bump, are `bun-lockb-override-resolution-skipped` ([#2358](https://github.com/fallow-rs/fallow/issues/2358)), `malformed-pnpm-workspace-yaml` ([#2148](https://github.com/fallow-rs/fallow/issues/2148)), and `skipped-source-dotdir` ([#461](https://github.com/fallow-rs/fallow/issues/461)).
 - **Audit duplication demotion fields**: under `gate: new-only`, an introduced clone group none of whose instances overlap an added line from the run's diff is demoted to inherited (issue #2164). The demotion is observable (issue #2220): the demoted entry in `duplication.clone_groups[]` carries an additive optional `demotion_reason` string (kebab-case, currently `no-added-lines`; further values may be added, so treat unknown values as "some demotion reason"), and audit-family attribution blocks (`fallow audit --format json`, `fallow review --format json`, the MCP `audit` tool) always include an integer `attribution.duplication_demoted` derived from those entries. Demoted groups stay counted in `duplication_inherited`, so `duplication_demoted <= duplication_inherited`. Both fields follow the styling-attribution precedent: additive audit-family JSON, no `schema_version` bump. `fallow dupes --format json` never emits `demotion_reason`.
 - **Audit styling fields**: `fallow audit` includes styling analytics by default. The nested `complexity` block (the health sub-analysis payload) may contain `css_analytics`, `styling_health`, and `styling_findings` for CSS, Sass/Less, CSS Modules, Tailwind/shadcn/CVA, StyleX/PandaCSS, vanilla-extract, styled-components, and Emotion projects. Under `gate: new-only`, styling findings carry the same optional `introduced` marker as other findings and the attribution block includes `styling_introduced` / `styling_inherited` totals. These fields are additive JSON output, and styling findings are verdict-neutral unless the corresponding rule is configured to `error`; they do not require a `schema_version` bump under the additive-field policy. Snapshot-diffing consumers can set `audit.css: false` or pass `--no-css` to suppress styling entirely.
 - **Audit and combined workspace diagnostics**: three envelopes report more in `workspace_diagnostics[]`, and a shared dedupe fix widens the list and programmatic envelopes on one project shape (issue #2366). `fallow audit --format json` and the `audit-brief` envelope shared by `fallow review --format json` and `fallow audit --brief --format json` carried the config-load workspace-discovery kinds and the source-discovery kinds under `dead_code.workspace_diagnostics[]`, and now additionally carry the two analysis-stage kinds (`malformed-pnpm-workspace-yaml`, `bun-lockb-override-resolution-skipped`) and `undeclared-workspace`, which the analyze pipeline appends after the config-load stash; a consumer pinning the exact set of kinds those two envelopes can emit should widen it by three, not two. The bare combined `fallow --format json` gained a NEW top-level `workspace_diagnostics[]`, an optional field absent when the run records no diagnostics, which is additive under the rule above; only there was the array previously always absent. The two audit-family paths are the same `CheckOutput` array the standalone `dead-code` envelope already documents. All three use root-relative paths, are deduplicated on the whole `kind` (payload included) plus `path` so two overlapping workspace globs still report the same directory once per pattern, and are omitted when empty; none bumps `schema_version`. The combined envelope's `check`, `dupes`, and `health` sections never carry the array. That payload-aware dedupe is shared, so two further surfaces report one entry more on a project where two workspace globs match the same package-less directory: bare `fallow list --format json`, and every envelope built from an engine session's diagnostics snapshot (the MCP `project_info`, `find_dupes`, and `check_health` tools plus the programmatic dead-code and combined routes). Those previously collapsed the two `glob-matched-no-package-json` entries into one and now agree with `fallow list --workspaces --format json`, which always reported both. Three consequences of the payload deciding identity: the recorded `pattern` drops a no-op `./` prefix (`"./apps/**"` is reported as `apps/**`, in the JSON field and in the warning text; a glob spelled exactly `"./"`, the project root itself, keeps its spelling); the recorded `path` drops the matching no-op `.` component, so one directory has one spelling on every envelope instead of `./pkgs/aaa` on the analysis envelopes next to `pkgs/aaa` on the workspace listing; and workspace discovery deduplicates before it returns, not only the process registry. Because `package.json` `workspaces`, `pnpm-workspace.yaml` `packages`, `deno.json` `workspace`, and the root `tsconfig.json` references are additive sources, a repository declaring one glob in two of them (the conventional pnpm layout) reported every package-less directory under it once per spelling and now reports it once, on `fallow dead-code`, `check`, `dupes`, `health`, `list --workspaces`, and `workspaces --format json`, through the MCP `project_info` tool, and under `dead_code` in `fallow audit` and `fallow review --format json`; the aggregated stderr warning, built from the same list, likewise names the true directory count with each example once, as do the `N workspace discovery diagnostics` summary line every human-format command prints and the per-entry block `fallow workspaces` and `fallow list --workspaces` print. SARIF, markdown, compact, badge, CodeClimate, and the cache format carry no workspace diagnostic and are unchanged. The two shapes are independent: the `./` normalisation alone changes the recorded `pattern`, `path`, and `message` on a repository that declares each glob once through one source, so a consumer pinning snapshots should expect movement whenever a manifest spells a workspace glob with a leading `./`, whether or not that glob is declared twice. The same fold covers a second shape on the same surfaces: a malformed workspace member reached through both an npm glob and a root `tsconfig.json` `references[]` entry reported one `malformed-package-json` diagnostic per source and now reports one in total. Two overlapping globs declared in one manifest still report the same directory once per `pattern`. No kind is new on any of these envelopes and no field changes type, so no `schema_version` moves; a consumer counting entries per directory should expect one per distinct matching pattern.
@@ -201,6 +201,62 @@ These are documented for the rare CI script that depended on the old behavior. N
   since the decision surface shipped, now produces decisions from changed
   `package.json` manifests. Consumers that pinned `schema_version` to 7 must
   accept 8.
+
+- **Hidden directories that hold source files now report a diagnostic**
+  ([#461](https://github.com/fallow-rs/fallow/issues/461)). Source discovery has
+  always skipped dot-prefixed directories outside a small convention allowlist;
+  the skip was silent. It now records a `skipped-source-dotdir` workspace
+  diagnostic and one aggregated stderr note when a skipped directory holds
+  source files the project has not excluded. Traversal is unchanged: no
+  directory is newly analyzed and no directory is newly skipped. "Not excluded"
+  matches what the run would analyze, so a directory whose contents are
+  gitignored, matched by `ignorePatterns`, or (on a `--production` run) excluded
+  as test or story files stays silent, and so do generated tool output
+  directories and non-git VCS metadata. The new kind moves no `schema_version`
+  under the open-set exception for `workspace_diagnostics[].kind` documented
+  above; a consumer validating against a pinned older schema copy should move
+  to the schema shipped with the version it runs.
+
+- **`.pnpm` is no longer auto-scoped into discovery from a `package.json`
+  script** ([#461](https://github.com/fallow-rs/fallow/issues/461)). `.pnpm` was
+  missing from the script-scope denylist while `.pnpm-store` was present, so a
+  script argument such as `node .pnpm/tool/bin.mjs` pulled that directory into
+  source discovery. It now behaves like every other package-manager state
+  directory: the files leave the discovered set, and no `skipped-source-dotdir`
+  advisory replaces them, because a denylisted directory never earns one. A
+  repository that tracks source under a root-level `.pnpm` and relied on the
+  script reference to reach it loses those findings; move the files or add the
+  directory to a traversed location. The `node_modules/.pnpm` shape is not
+  observable either way, since the built-in `node_modules` exclusion already
+  dominates there.
+
+- **A `package.json` script reference now scopes the directory it names, not
+  the name anywhere in the tree**
+  ([#461](https://github.com/fallow-rs/fallow/issues/461)). A script argument
+  such as `node .tools/.private/build.mjs` made `.tools` and `.private`
+  traversable wherever either name appeared, so an unrelated
+  `packages/web/.private` was pulled into discovery by a script that never
+  referenced it. The inferred scope is now the exact root-relative path the
+  script named, so the example admits `.tools` and `.tools/.private` only.
+  Directories that were reached only through the name match leave the
+  discovered set and their findings disappear. They earn a
+  `skipped-source-dotdir` advisory when they hold source, so the loss is
+  visible rather than silent. Plugin-contributed conventions are unaffected: a
+  framework's `.client` and `.server` still match at any depth under the
+  package that activates the plugin, because the plugin declares a convention
+  rather than a location.
+
+- **More generated-output and VCS directories are excluded from script
+  scoping** ([#461](https://github.com/fallow-rs/fallow/issues/461)). The
+  script-scope denylist covered the build caches of one framework generation.
+  It now also covers `.angular`, `.astro`, `.contentlayer`, `.expo`,
+  `.react-router`, `.rollup.cache`, `.sst`, `.swc`, `.tanstack`, `.velite`,
+  `.vinxi`, `.wrangler`, `.wxt`, `.yalc`, and the `.hg`, `.jj`, and `.svn`
+  metadata trees. A script argument pointing into one of these no longer pulls
+  it into source discovery, so machine-written output and VCS object stores
+  stay out of the analyzed set. A repository that kept first-party source under
+  one of these names and relied on a script reference to reach it loses those
+  findings; move the files to a traversed location.
 
 - **Trace evidence is reachability-aware and lane-complete**
   ([#2390](https://github.com/fallow-rs/fallow/issues/2390)). This supersedes

@@ -84,6 +84,43 @@ pub enum WorkspaceDiagnosticKind {
         /// On-disk size of the skipped file in bytes.
         size_bytes: u64,
     },
+    /// A dot-prefixed directory was not traversed by source discovery even
+    /// though it contains at least one source file the project has not
+    /// excluded. Hidden directories are skipped by default apart from a small
+    /// convention allowlist (`.storybook`, `.vitepress`, `.well-known`,
+    /// `.changeset`, `.github`) and the directories an active framework plugin
+    /// or a `package.json` script reference contributes, so files inside are
+    /// never parsed and their imports and exports are invisible to every
+    /// analysis. No config field adds a directory to traversal: run fallow
+    /// with `--root` against the directory to analyze it on its own, or add it
+    /// to `ignorePatterns` to silence this (issue #461).
+    ///
+    /// "Not excluded" is measured the way the run measures it: a directory
+    /// whose contents are gitignored, or excluded by `ignorePatterns`, or (on
+    /// a `--production` run) excluded as test or story files, never earns this
+    /// diagnostic, because the advertised remedies would find nothing there
+    /// either. Generated tool output and non-git VCS metadata are excluded by
+    /// name.
+    ///
+    /// The advisory is best-effort and bounded: one run inspects a fixed
+    /// number of skipped directories with a fixed I/O budget, in sorted path
+    /// order, so a pathological tree yields a deterministic prefix rather than
+    /// an unbounded array or an unbounded scan. The stderr note says "at
+    /// least" when a ceiling bound the run.
+    ///
+    /// Surfaced by source discovery, not workspace discovery, but shares this
+    /// channel so the skip is visible in `workspace_diagnostics[]` on
+    /// `fallow dead-code / dupes / health` JSON.
+    ///
+    /// Unlike the two skipped-file kinds beside it, this one is CAPPED. To
+    /// bound the directory reads the check costs, a run classifies at most 64
+    /// candidate directories and spends at most 1024 directory entries across
+    /// all of them, so on a project that exceeds either ceiling the array is a
+    /// prefix of the skipped directories rather than all of them, and the
+    /// stderr note says "at least N". No measured repository comes close to
+    /// either ceiling. A consumer needing an exact total should run fallow
+    /// with `--root` against the tree rather than infer one from this array.
+    SkippedSourceDotdir,
     /// A source discovered with a stable [`FileId`](crate::discover::FileId)
     /// could not be read before parsing. Analysis continues with the remaining
     /// sparse module IDs and reports the underlying filesystem or UTF-8 error.
@@ -128,6 +165,7 @@ impl WorkspaceDiagnosticKind {
             Self::MalformedPnpmWorkspaceYaml { .. } => "malformed-pnpm-workspace-yaml",
             Self::SkippedLargeFile { .. } => "skipped-large-file",
             Self::SkippedMinifiedFile { .. } => "skipped-minified-file",
+            Self::SkippedSourceDotdir => "skipped-source-dotdir",
             Self::SourceReadFailure { .. } => "source-read-failure",
             Self::BunLockbOverrideResolutionSkipped => "bun-lockb-override-resolution-skipped",
             Self::BunLockOverrideResolutionSkipped => "bun-lock-override-resolution-skipped",
@@ -149,6 +187,7 @@ impl WorkspaceDiagnosticKind {
             self,
             Self::SkippedLargeFile { .. }
                 | Self::SkippedMinifiedFile { .. }
+                | Self::SkippedSourceDotdir
                 | Self::SourceReadFailure { .. }
         )
     }
@@ -169,7 +208,9 @@ impl WorkspaceDiagnosticKind {
     pub const fn is_source_walk_recorded(&self) -> bool {
         matches!(
             self,
-            Self::SkippedLargeFile { .. } | Self::SkippedMinifiedFile { .. }
+            Self::SkippedLargeFile { .. }
+                | Self::SkippedMinifiedFile { .. }
+                | Self::SkippedSourceDotdir
         )
     }
 
@@ -201,6 +242,7 @@ impl WorkspaceDiagnosticKind {
             | Self::TsconfigReferenceDirMissing
             | Self::SkippedLargeFile { .. }
             | Self::SkippedMinifiedFile { .. }
+            | Self::SkippedSourceDotdir
             | Self::SourceReadFailure { .. } => false,
         }
     }
@@ -483,6 +525,14 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              should be analyzed.",
             size = format_size_mb(*size_bytes)
         ),
+        WorkspaceDiagnosticKind::SkippedSourceDotdir => format!(
+            "Skipped hidden directory '{display}': it contains source files but hidden \
+             directories are not traversed. Its imports and exports are not analyzed. \
+             There is no config field that adds a directory to traversal. If it holds \
+             first-party source, analyze it on its own with fallow --root {display}; if it \
+             is tool or agent scratch state, add '{display}/**' to ignorePatterns to \
+             silence this."
+        ),
         WorkspaceDiagnosticKind::SourceReadFailure { error } => format!(
             "Could not read source '{display}' ({error}). Restore the file or its read permissions, \
              ensure it contains valid UTF-8 text, or add '{display}' to ignorePatterns."
@@ -567,6 +617,56 @@ mod tests {
             "message names the opt-out: {}",
             diag.message
         );
+    }
+
+    #[test]
+    fn skipped_source_dotdir_diagnostic_id_and_message() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join(".claude"),
+            WorkspaceDiagnosticKind::SkippedSourceDotdir,
+        );
+        assert_eq!(diag.kind.id(), "skipped-source-dotdir");
+        assert!(
+            diag.message.contains(".claude"),
+            "message names the project-relative path: {}",
+            diag.message
+        );
+        assert!(
+            diag.message
+                .contains("Its imports and exports are not analyzed."),
+            "message states the consequence: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("--root"),
+            "message names the real remedy: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("ignorePatterns"),
+            "message names the silencing route: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("no config field"),
+            "the message must say plainly that no config field traverses it: {}",
+            diag.message
+        );
+        assert_eq!(
+            serde_json::to_value(&diag).expect("serializes")["kind"],
+            "skipped-source-dotdir",
+            "id() must byte-match the serde kebab-case tag"
+        );
+    }
+
+    #[cfg(feature = "schema")]
+    #[test]
+    fn workspace_diagnostic_schema_includes_skipped_source_dotdir() {
+        let schema = schemars::schema_for!(WorkspaceDiagnostic);
+        let json = serde_json::to_string(&schema).expect("schema serializes");
+        assert!(json.contains("skipped-source-dotdir"));
     }
 
     #[test]
@@ -713,6 +813,7 @@ mod tests {
             WorkspaceDiagnosticKind::TsconfigReferenceDirMissing,
             WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes: 1 },
             WorkspaceDiagnosticKind::SkippedMinifiedFile { size_bytes: 1 },
+            WorkspaceDiagnosticKind::SkippedSourceDotdir,
             WorkspaceDiagnosticKind::SourceReadFailure {
                 error: "permission denied".to_owned(),
             },
@@ -929,6 +1030,7 @@ mod tests {
         for kind in [
             WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes: 1 },
             WorkspaceDiagnosticKind::SkippedMinifiedFile { size_bytes: 1 },
+            WorkspaceDiagnosticKind::SkippedSourceDotdir,
         ] {
             assert!(
                 kind.is_source_walk_recorded() && kind.is_source_discovery(),

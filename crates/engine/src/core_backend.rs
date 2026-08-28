@@ -137,9 +137,17 @@ pub fn discover_files_config_candidates_and_diagnostics(
     let scopes = additional_hidden_dir_scopes
         .iter()
         .map(|scope| {
-            fallow_core::discover::HiddenDirScope::new(
+            fallow_core::discover::HiddenDirScope::with_match_mode(
                 scope.root().to_path_buf(),
                 scope.dirs().to_vec(),
+                match scope.match_mode() {
+                    crate::discover::HiddenDirMatch::AnyDepth => {
+                        fallow_core::discover::HiddenDirMatch::AnyDepth
+                    }
+                    crate::discover::HiddenDirMatch::ExactPath => {
+                        fallow_core::discover::HiddenDirMatch::ExactPath
+                    }
+                },
             )
         })
         .collect::<Vec<_>>();

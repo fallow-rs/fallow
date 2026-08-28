@@ -351,7 +351,9 @@ static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDia
 ///
 /// Called at config-load time after [`super::discover_workspaces_with_diagnostics`]
 /// completes; the analyze pipeline then APPENDS undeclared-workspace and
-/// source-discovery (`skipped-large-file`) diagnostics via
+/// source-discovery (`skipped-large-file`, `skipped-source-dotdir`, and the
+/// other kinds [`WorkspaceDiagnosticKind::is_source_discovery`] covers)
+/// diagnostics via
 /// [`append_workspace_diagnostics`]. The workspace-discovery set is authoritative
 /// and replaced wholesale (so a fixed `package.json` clears its stale diagnostic
 /// across watch-mode reruns), but source-discovery diagnostics are appended
@@ -690,6 +692,38 @@ mod tests {
         assert!(
             diag.message.contains("--max-file-size 0"),
             "message names the opt-out: {}",
+            diag.message
+        );
+    }
+
+    #[test]
+    fn skipped_source_dotdir_diagnostic_id_and_message() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join(".claude"),
+            WorkspaceDiagnosticKind::SkippedSourceDotdir,
+        );
+        assert_eq!(diag.kind.id(), "skipped-source-dotdir");
+        assert!(
+            diag.message.contains(".claude"),
+            "message names the project-relative path: {}",
+            diag.message
+        );
+        assert!(
+            diag.message
+                .contains("Its imports and exports are not analyzed."),
+            "message states the consequence: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("--root"),
+            "message names the real remedy: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("no config field"),
+            "the message must say plainly that no config field traverses it: {}",
             diag.message
         );
     }

@@ -1696,6 +1696,93 @@ fn split_production_two_large_files_project(production_config: &str) -> tempfile
     dir
 }
 
+/// Write a project whose only source outside `src/` sits in a dot-prefixed
+/// directory discovery does not traverse, so a walk records exactly one
+/// `skipped-source-dotdir` (issue #461).
+fn skipped_source_dotdir_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-461-skipped-source-dotdir","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::create_dir_all(dir.path().join(".claude/hooks")).expect("create .claude/hooks");
+    std::fs::write(
+        dir.path().join(".claude/hooks/probe.mjs"),
+        "export const hook = () => 1;\n",
+    )
+    .expect("write hook");
+    dir
+}
+
+/// Issue #461: the diagnostic has to survive combined mode's per-analysis
+/// config reload to reach the JSON envelope, which is exactly what
+/// `WorkspaceDiagnosticKind::is_source_discovery` decides. A kind left out of
+/// that classifier passes every unit test in the workspace and is still wiped
+/// from the combined root before serialization (the issue #1086 failure).
+#[test]
+fn combined_json_root_carries_the_skipped_source_dotdir_diagnostic() {
+    let dir = skipped_source_dotdir_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let json = parse_json(&run_fallow_raw(&[
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+
+    let reported = combined_root_diagnostics_of_kind(&json, "skipped-source-dotdir");
+    assert_eq!(
+        reported.len(),
+        1,
+        "the combined root reports the skip once: {}",
+        json["workspace_diagnostics"]
+    );
+    assert_eq!(reported[0]["path"], ".claude");
+    assert!(
+        reported[0]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("--root")),
+        "the message names the only remedy that analyzes the directory: {}",
+        reported[0]["message"]
+    );
+}
+
+/// Issue #461 plus issue #2366: the diagnostic must also be classified as
+/// walk-recorded, so a concurrent walk's dotdir set is never folded into
+/// another analysis's list. A kind missing from
+/// `WorkspaceDiagnosticKind::is_source_walk_recorded` makes the combined
+/// root's array order depend on which walk wrote last.
+#[test]
+fn combined_json_root_workspace_diagnostics_stay_byte_identical_with_a_skipped_dotdir() {
+    let dir = skipped_source_dotdir_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let mut observed: Vec<serde_json::Value> = Vec::new();
+    for _ in 0..6 {
+        let json = parse_json(&run_fallow_raw(&[
+            "--root",
+            root,
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]));
+        observed.push(json["workspace_diagnostics"].clone());
+    }
+    for (index, run) in observed.iter().enumerate() {
+        assert_eq!(
+            run, &observed[0],
+            "run {index} disagrees with the first run about the combined root's \
+             workspace_diagnostics[]"
+        );
+    }
+}
+
 /// Issue #2366: the combined root's union must be the same ARRAY on every run
 /// of the same command, not just the same set.
 ///

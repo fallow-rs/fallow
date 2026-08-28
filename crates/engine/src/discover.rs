@@ -22,24 +22,42 @@ use crate::{EngineError, EngineResult, plugins::PluginRegistry};
 const UNDECLARED_WORKSPACE_WARNING_PREVIEW: usize = 5;
 
 const SCRIPT_SCOPE_DENYLIST: &[&str] = &[
+    ".angular",
+    ".astro",
+    ".cache",
+    ".contentlayer",
+    ".docusaurus",
+    ".expo",
+    ".fallow",
     ".git",
+    ".hg",
+    ".husky",
+    ".idea",
+    ".jj",
+    ".netlify",
     ".next",
     ".nuxt",
-    ".output",
-    ".svelte-kit",
-    ".turbo",
     ".nx",
-    ".cache",
+    ".output",
     ".parcel-cache",
-    ".vercel",
-    ".netlify",
-    ".yarn",
+    ".pnpm",
     ".pnpm-store",
-    ".docusaurus",
+    ".react-router",
+    ".rollup.cache",
+    ".sst",
+    ".svelte-kit",
+    ".svn",
+    ".swc",
+    ".tanstack",
+    ".turbo",
+    ".velite",
+    ".vercel",
+    ".vinxi",
     ".vscode",
-    ".idea",
-    ".fallow",
-    ".husky",
+    ".wrangler",
+    ".wxt",
+    ".yalc",
+    ".yarn",
 ];
 
 const ENV_WRAPPERS: &[&str] = &["cross-env", "dotenv", "env"];
@@ -82,17 +100,43 @@ pub fn discover_workspace_packages_with_diagnostics(
         .map_err(|err| EngineError::new(err.to_string()))
 }
 
+/// How a [`HiddenDirScope`] matches a hidden directory during the walk.
+///
+/// Mirrors `fallow_core::discover::HiddenDirMatch`; the two are kept in step
+/// by the conversion in `core_backend`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HiddenDirMatch {
+    /// Match by directory NAME at any depth beneath the scope root.
+    AnyDepth,
+    /// Match the exact root-relative directory PATH (issue #461).
+    ExactPath,
+}
+
 /// Package-scoped hidden directories that source discovery should traverse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HiddenDirScope {
     root: PathBuf,
     dirs: Vec<String>,
+    match_mode: HiddenDirMatch,
 }
 
 impl HiddenDirScope {
     #[must_use]
     const fn new(root: PathBuf, dirs: Vec<String>) -> Self {
-        Self { root, dirs }
+        Self {
+            root,
+            dirs,
+            match_mode: HiddenDirMatch::AnyDepth,
+        }
+    }
+
+    #[must_use]
+    const fn new_exact_paths(root: PathBuf, dirs: Vec<String>) -> Self {
+        Self {
+            root,
+            dirs,
+            match_mode: HiddenDirMatch::ExactPath,
+        }
     }
 
     #[must_use]
@@ -103,6 +147,11 @@ impl HiddenDirScope {
     #[must_use]
     pub(crate) fn dirs(&self) -> &[String] {
         &self.dirs
+    }
+
+    #[must_use]
+    pub(crate) const fn match_mode(&self) -> HiddenDirMatch {
+        self.match_mode
     }
 }
 
@@ -429,8 +478,8 @@ fn build_script_scope(pkg: &PackageJson, root: &Path) -> Option<HiddenDirScope> 
     for (script_name, script_value) in scripts {
         for cmd in parse_script_value(script_value) {
             for path in cmd.config_args.iter().chain(cmd.file_args.iter()) {
-                for hidden in extract_hidden_segments(path) {
-                    if SCRIPT_SCOPE_DENYLIST.contains(&hidden.as_str()) {
+                for hidden in extract_hidden_dir_paths(path) {
+                    if hidden_dir_path_is_denied(&hidden) {
                         continue;
                     }
                     if seen.insert(hidden.clone()) {
@@ -450,8 +499,20 @@ fn build_script_scope(pkg: &PackageJson, root: &Path) -> Option<HiddenDirScope> 
     if dirs.is_empty() {
         None
     } else {
-        Some(HiddenDirScope::new(root.to_path_buf(), dirs))
+        Some(HiddenDirScope::new_exact_paths(root.to_path_buf(), dirs))
     }
+}
+
+/// Whether the last component of a root-relative hidden directory path is on
+/// [`SCRIPT_SCOPE_DENYLIST`].
+///
+/// The denylist names directories, so it is matched against the directory's
+/// own name rather than the path that reaches it.
+fn hidden_dir_path_is_denied(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| SCRIPT_SCOPE_DENYLIST.contains(&name))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -761,7 +822,18 @@ fn could_be_file_path(token: &str) -> bool {
     true
 }
 
-fn extract_hidden_segments(path: &str) -> Vec<String> {
+/// Extract the root-relative path of every hidden (dot-prefixed) directory
+/// component on a relative path.
+///
+/// Each hidden directory on the path gets its own entry, because the walker
+/// filters one component at a time and every hidden level has to be admitted
+/// for the next one to be reached: `.foo/.bar/x.js` yields `[".foo",
+/// ".foo/.bar"]`. A hidden directory under a visible parent keeps that parent
+/// in its entry, so `tools/.bar/x.js` admits nothing named `.bar` anywhere
+/// else in the tree (issue #461).
+///
+/// Mirrors `fallow_core::discover::extract_hidden_dir_paths`.
+fn extract_hidden_dir_paths(path: &str) -> Vec<String> {
     let path = Path::new(path);
     if path.is_absolute() {
         return Vec::new();
@@ -778,18 +850,20 @@ fn extract_hidden_segments(path: &str) -> Vec<String> {
         return Vec::new();
     }
 
+    let mut prefix = PathBuf::new();
     for (index, component) in components.iter().enumerate() {
         let std::path::Component::Normal(value) = component else {
             continue;
         };
+        if index == components.len().saturating_sub(1) {
+            continue;
+        }
+        prefix.push(value);
         let value = value.to_string_lossy();
         if !value.starts_with('.') || value == "." || value == ".." {
             continue;
         }
-        if index == components.len().saturating_sub(1) {
-            continue;
-        }
-        hidden.push(value.to_string());
+        hidden.push(prefix.to_string_lossy().into_owned());
     }
 
     hidden
@@ -853,7 +927,7 @@ mod tests {
 
     use super::{
         ALLOWED_HIDDEN_DIRS, HiddenDirScope, collect_hidden_dir_scopes,
-        collect_plugin_hidden_dir_scopes, extract_hidden_segments, is_allowed_hidden_dir,
+        collect_plugin_hidden_dir_scopes, extract_hidden_dir_paths, is_allowed_hidden_dir,
     };
 
     #[test]
@@ -912,7 +986,8 @@ mod tests {
             "scripts": {
                 "lint": "eslint -c .config/eslint.config.js",
                 "build": "tsx ./.scripts/build.ts",
-                "cache": "tsx .nx/cache/build.ts"
+                "cache": "tsx .nx/cache/build.ts",
+                "pnpm": "node node_modules/.pnpm/tool/bin.js"
             }
         }))
         .expect("valid package fixture");
@@ -927,12 +1002,15 @@ mod tests {
     }
 
     #[test]
-    fn hidden_segment_extraction_rejects_escape_paths() {
+    fn hidden_dir_path_extraction_rejects_escape_paths() {
         assert_eq!(
-            extract_hidden_segments(".foo/.bar/x.js"),
-            vec![".foo".to_string(), ".bar".to_string()]
+            extract_hidden_dir_paths(".foo/.bar/x.js"),
+            vec![
+                ".foo".to_string(),
+                format!(".foo{}.bar", std::path::MAIN_SEPARATOR)
+            ]
         );
-        assert!(extract_hidden_segments("../../.config/eslint.config.js").is_empty());
-        assert!(extract_hidden_segments(".env").is_empty());
+        assert!(extract_hidden_dir_paths("../../.config/eslint.config.js").is_empty());
+        assert!(extract_hidden_dir_paths(".env").is_empty());
     }
 }

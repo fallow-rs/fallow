@@ -1518,6 +1518,10 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         // config-candidate basenames stay derived from the plugin registry.
         "fallow_core::discover::DiscoveredSources",
         "fallow_core::discover::HiddenDirScope",
+        // The scope's match mode crosses the boundary with it: a script-derived
+        // scope that arrived as `AnyDepth` would silently restore the
+        // match-by-name-anywhere behavior issue #461 removed.
+        "fallow_core::discover::HiddenDirMatch",
         "fallow_core::discover::discover_files_and_config_candidates",
         "fallow_core::discover::discover_files_config_candidates_and_diagnostics",
         // Entry-point discovery has one implementation, in fallow-core.
@@ -2095,6 +2099,70 @@ fn source_discovery_diagnostics_reach_sessions_by_value_not_through_the_registry
          fold leg; importing a concurrent walk's skips changes the order of the combined \
          root's union between runs of the same command"
     );
+}
+
+/// The script-scope denylist exists in two independently live copies with no
+/// shared const: `crates/core/src/discover/mod.rs` for the core discovery
+/// route and `crates/engine/src/discover.rs` for the engine session route.
+/// A dir added to one and not the other leaves the other boundary
+/// auto-scoping it, and no other test in the workspace notices.
+#[test]
+fn script_scope_denylist_copies_stay_in_sync() {
+    fn denylist(path: &str) -> String {
+        let source = read_source_without_line_comments(path).expect("read crate source");
+        let start = source
+            .find("const SCRIPT_SCOPE_DENYLIST: &[&str] = &[")
+            .unwrap_or_else(|| panic!("{path} declares SCRIPT_SCOPE_DENYLIST"));
+        let rest = &source[start..];
+        let end = rest.find("];").expect("denylist is terminated") + 2;
+        rest[..end].to_owned()
+    }
+    assert_eq!(
+        denylist("crates/core/src/discover/mod.rs"),
+        denylist("crates/engine/src/discover.rs"),
+        "the two SCRIPT_SCOPE_DENYLIST copies must stay byte-identical"
+    );
+}
+
+/// Issue #461: the two `extract_hidden_dir_paths` copies decide which
+/// directories a `package.json` script may scope into discovery. They are
+/// written differently (core accumulates the prefix inside the loop, the engine
+/// skips the terminal component by index), so a byte comparison would fail on
+/// formatting rather than on behavior. Pin the guards instead: a copy that
+/// drops one silently widens discovery on the boundary it serves, and the
+/// `RootDir` guard in particular only matters on Windows, where no local run
+/// would catch its absence.
+#[test]
+fn hidden_dir_path_extraction_copies_keep_the_same_guards() {
+    fn body(path: &str) -> String {
+        let source = read_source_without_line_comments(path).expect("read crate source");
+        let start = source
+            .find("fn extract_hidden_dir_paths(path: &str) -> Vec<String> {")
+            .unwrap_or_else(|| panic!("{path} declares extract_hidden_dir_paths"));
+        let rest = &source[start..];
+        let end = rest.find("\n}\n").expect("function is terminated") + 3;
+        rest[..end].to_owned()
+    }
+
+    for path in [
+        "crates/core/src/discover/mod.rs",
+        "crates/engine/src/discover.rs",
+    ] {
+        let body = body(path);
+        assert!(
+            body.contains("is_absolute()"),
+            "{path}: extract_hidden_dir_paths must reject absolute paths"
+        );
+        assert!(
+            body.contains("ParentDir"),
+            "{path}: extract_hidden_dir_paths must reject `..` traversal"
+        );
+        assert!(
+            body.contains("RootDir"),
+            "{path}: extract_hidden_dir_paths must reject a rooted path with no \
+             prefix, which reports is_absolute() == false on Windows"
+        );
+    }
 }
 
 /// Issues #2366, #2392, and #2396: only the session may fold its own discovery

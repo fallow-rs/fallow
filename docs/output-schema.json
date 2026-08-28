@@ -885,7 +885,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `source-read-failure`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `source-read-failure`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field."
         },
         "next_steps": {
           "type": "array",
@@ -11411,6 +11411,19 @@
             "size_bytes"
           ],
           "description": "A large JavaScript bundle was skipped at discovery because it appears to\nbe minified generated output. The file is never parsed or analyzed,\nguarding against sub-limit bundles that can still create very large ASTs\nand extraction payloads (issue #1086). Use `--max-file-size 0` when the\nbundled file really should be analyzed."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "skipped-source-dotdir"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "A dot-prefixed directory was not traversed by source discovery even\nthough it contains at least one source file the project has not\nexcluded. Hidden directories are skipped by default apart from a small\nconvention allowlist (`.storybook`, `.vitepress`, `.well-known`,\n`.changeset`, `.github`) and the directories an active framework plugin\nor a `package.json` script reference contributes, so files inside are\nnever parsed and their imports and exports are invisible to every\nanalysis. No config field adds a directory to traversal: run fallow\nwith `--root` against the directory to analyze it on its own, or add it\nto `ignorePatterns` to silence this (issue #461).\n\n\"Not excluded\" is measured the way the run measures it: a directory\nwhose contents are gitignored, or excluded by `ignorePatterns`, or (on\na `--production` run) excluded as test or story files, never earns this\ndiagnostic, because the advertised remedies would find nothing there\neither. Generated tool output and non-git VCS metadata are excluded by\nname.\n\nThe advisory is best-effort and bounded: one run inspects a fixed\nnumber of skipped directories with a fixed I/O budget, in sorted path\norder, so a pathological tree yields a deterministic prefix rather than\nan unbounded array or an unbounded scan. The stderr note says \"at\nleast\" when a ceiling bound the run.\n\nSurfaced by source discovery, not workspace discovery, but shares this\nchannel so the skip is visible in `workspace_diagnostics[]` on\n`fallow dead-code / dupes / health` JSON.\n\nUnlike the two skipped-file kinds beside it, this one is CAPPED. To\nbound the directory reads the check costs, a run classifies at most 64\ncandidate directories and spends at most 1024 directory entries across\nall of them, so on a project that exceeds either ceiling the array is a\nprefix of the skipped directories rather than all of them, and the\nstderr note says \"at least N\". No measured repository comes close to\neither ceiling. A consumer needing an exact total should run fallow\nwith `--root` against the tree rather than infer one from this array."
         },
         {
           "type": "object",

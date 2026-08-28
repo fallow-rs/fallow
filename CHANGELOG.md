@@ -18,6 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and how many an analyzed file matched, and the human report says so when the
   two differ. A run whose coverage joins completely is unchanged.
 
+- **A skipped hidden directory that holds source files is now reported**
+  ([#461](https://github.com/fallow-rs/fallow/issues/461)). Discovery does not
+  traverse dot-prefixed directories outside a small convention allowlist, and
+  that skip used to be silent, so first-party code under a directory such as
+  `.claude/hooks/` was invisible with no explanation. A new
+  `skipped-source-dotdir` workspace diagnostic and one aggregated stderr note
+  now name the directory, state that its imports and exports are not analyzed,
+  and give the two real remedies: analyze it on its own with `fallow --root
+  <dir>`, or add it to `ignorePatterns` to silence the advisory. Traversal is
+  unchanged. The advisory only fires for code the run would otherwise have
+  analyzed, so a directory whose contents are gitignored (including through a
+  global gitignore, which commonly covers `.claude/`), matched by
+  `ignorePatterns`, or excluded by `--production` stays silent, as do generated
+  tool output directories and non-git VCS metadata.
+
 ### Fixed
 
 - **Coverage maps written by `v8-to-istanbul` are no longer rejected**
@@ -102,6 +117,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose name begins with `#` remains eligible for exact coverage matching. The
   rule sits at the one lookup entry point every consumer goes through, so the
   test-covered check honours it as well.
+
+- **A `package.json` script reference now scopes the directory it names, not
+  every directory of that name in the tree**
+  ([#461](https://github.com/fallow-rs/fallow/issues/461)). A script argument
+  such as `node .tools/.private/build.mjs` made `.tools` and `.private`
+  traversable wherever either name appeared, so an unrelated
+  `packages/web/.private` was pulled into discovery by a script that never
+  referenced it. The inferred scope is now the exact root-relative path the
+  script named. Plugin-contributed conventions are unaffected: a framework's
+  `.client` and `.server` still match at any depth under the package that
+  activates the plugin, because the plugin declares a convention rather than a
+  location.
+
+- **More generated-output and VCS directories stay out of script scoping**
+  ([#461](https://github.com/fallow-rs/fallow/issues/461)). The script-scope
+  denylist covered the build caches of one framework generation. It now also
+  covers `.angular`, `.astro`, `.contentlayer`, `.expo`, `.react-router`,
+  `.rollup.cache`, `.sst`, `.swc`, `.tanstack`, `.velite`, `.vinxi`,
+  `.wrangler`, `.wxt`, `.yalc`, and the `.hg`, `.jj`, and `.svn` metadata
+  trees, so a script argument pointing into machine-written output or a VCS
+  object store no longer pulls it into source discovery.
+
+- **`.pnpm` can no longer be auto-scoped into discovery from a `package.json`
+  script.** `.pnpm` was missing from the script-scope denylist while
+  `.pnpm-store` was present, so a script argument such as
+  `node .pnpm/tool/bin.mjs` pulled pnpm's store layout into source discovery on
+  a repository that tracks it. Both the core and engine copies of the denylist
+  now carry it, with a boundary test that keeps them in sync. The
+  `node_modules/.pnpm` shape was already covered by the built-in `node_modules`
+  exclusion.
 
 ### Performance
 

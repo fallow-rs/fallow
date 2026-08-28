@@ -1,13 +1,13 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use fallow_config::{ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use ignore::WalkBuilder;
 use rustc_hash::FxHashSet;
 
-use super::ALLOWED_HIDDEN_DIRS;
+use super::{ALLOWED_HIDDEN_DIRS, SCRIPT_SCOPE_DENYLIST};
 
 /// Process-wide dedupe of the size-skip / largest-files stderr notes, keyed by a
 /// content-derived string, so combined-mode (`fallow` runs check + dupes +
@@ -26,10 +26,63 @@ fn should_emit_note_once(key: String) -> bool {
 /// by the parallel walker before [`DiscoveredFile`] ids are assigned.
 type SizedFile = (PathBuf, u64);
 
+/// Dot-prefixed directories the walk dropped, collected inside the parallel
+/// walker's `filter_entry` predicate.
+///
+/// `Arc<Mutex<..>>` and not a borrow: `WalkBuilder::filter_entry` requires
+/// `Fn(&DirEntry) -> bool + Send + Sync + 'static`, so the closure can neither
+/// borrow a local nor mutate captured state directly, and the predicate runs
+/// on every walker thread.
+type SkippedDotdirSink = Arc<Mutex<Vec<PathBuf>>>;
+
 /// Number of example file paths named in the aggregated skipped-large-file and
 /// largest-files stderr notes before the tail collapses to "and N more". Keeps
 /// the notes to one bounded line on a monorepo that skips many files.
 const NOTE_EXAMPLE_CAP: usize = 5;
+
+/// Directory levels below a skipped dotdir the bounded scan descends. The
+/// dotdir itself is level 0. Two levels reach the conventional
+/// `<dotdir>/<group>/<file>` layout (`.claude/hooks/probe.mjs`) with one level
+/// of headroom, and stop well above a vendored toolchain tree.
+const DOTDIR_SCAN_MAX_DEPTH: usize = 2;
+
+/// Directory entries the bounded scan reads across all levels of ONE skipped
+/// dotdir. The ceiling this buys is a SYSCALL count, not a wall-clock figure:
+/// a directory-heavy dotdir spends budget on subdirectories that each cost an
+/// opendir of their own, so 256 entries can still mean 257 directory reads and
+/// several milliseconds. State the bound in syscalls, never in milliseconds.
+const DOTDIR_SCAN_MAX_ENTRIES: usize = 256;
+
+/// Directory entries the bounded scan reads across ALL skipped dotdirs in one
+/// walk. [`DOTDIR_SCAN_MAX_ENTRIES`] bounds a single directory and nothing
+/// bounded the sum, so the added cost was linear in the candidate count: a
+/// synthetic tree of 1000 directory-heavy dotdirs turned a 191 ms run into
+/// 6.6 s. Candidates are scanned in sorted order and share this budget, so
+/// exhausting it drops the advisory for the remaining candidates
+/// deterministically instead of paying an unbounded cost. With this ceiling
+/// and [`DOTDIR_SCAN_MAX_CANDIDATES`] the same synthetic trees measure about
+/// 30 ms of added work whether they hold 300 or 1000 candidates, and a real
+/// repository stays inside run-to-run noise.
+const DOTDIR_SCAN_TOTAL_ENTRIES: usize = 1024;
+
+/// Skipped dotdirs the bounded scan OPENS in one walk. The entry budget does
+/// not bound the per-candidate setup cost, since each scan builds its own
+/// gitignore matcher chain (about 0.2 ms) before it reads a single entry, so
+/// the candidate count needs a ceiling of its own. Counted after the name
+/// checks, so a monorepo full of `.turbo` and `.next` directories cannot spend
+/// the ceiling on directories that were never going to be scanned.
+const DOTDIR_SCAN_MAX_CANDIDATES: usize = 64;
+
+/// File extensions that put a file in the module graph the advisory talks
+/// about. Narrower than [`SOURCE_EXTENSIONS`] on purpose: the message states
+/// that the directory's imports and exports are not analyzed, and that is only
+/// true of code. A dotdir holding nothing but a generated Lighthouse
+/// `report.html`, a Sanity runtime page, a `schema.graphql`, or a stylesheet
+/// has no imports or exports to lose, so it does not earn the advisory.
+const DOTDIR_MODULE_EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "mts", "cts", "gts", "js", "jsx", "mjs", "cjs", "gjs", "vue", "svelte", "astro",
+    "mdx",
+];
 
 /// Discovered-file-count threshold above which the pre-parse largest-files note
 /// fires, so an out-of-memory hang at the parse stage has a visible suspect
@@ -128,12 +181,7 @@ fn summarize_examples(root: &Path, examples: &[SizedFile]) -> String {
         .iter()
         .take(NOTE_EXAMPLE_CAP)
         .map(|(path, size)| {
-            let display = path
-                .strip_prefix(root)
-                .unwrap_or(path)
-                .display()
-                .to_string()
-                .replace('\\', "/");
+            let display = display_relative_path(root, path);
             format!("{display} ({})", format_size_mb(*size))
         })
         .collect();
@@ -258,6 +306,315 @@ fn report_skipped_minified_files(
     diagnostics
 }
 
+/// Join up to [`NOTE_EXAMPLE_CAP`] root-relative paths (already ordered) into
+/// one comma-separated string, collapsing the tail to "and N more". The
+/// size-bearing sibling is [`summarize_examples`].
+fn summarize_paths(root: &Path, examples: &[&PathBuf]) -> String {
+    let shown: Vec<String> = examples
+        .iter()
+        .take(NOTE_EXAMPLE_CAP)
+        .map(|path| display_relative_path(root, path))
+        .collect();
+    let remaining = examples.len().saturating_sub(NOTE_EXAMPLE_CAP);
+    if remaining > 0 {
+        format!("{}, and {remaining} more", shown.join(", "))
+    } else {
+        shown.join(", ")
+    }
+}
+
+/// Like [`summarize_paths`], but for a list already known to be incomplete: the
+/// tail reads "and more" rather than naming a count the run cannot vouch for.
+fn summarize_paths_open_ended(root: &Path, examples: &[&PathBuf]) -> String {
+    let shown: Vec<String> = examples
+        .iter()
+        .take(NOTE_EXAMPLE_CAP)
+        .map(|path| display_relative_path(root, path))
+        .collect();
+    if examples.len() > NOTE_EXAMPLE_CAP {
+        format!("{}, and more", shown.join(", "))
+    } else {
+        shown.join(", ")
+    }
+}
+
+/// Render `path` relative to `root` with forward slashes. Cross-platform
+/// output stability depends on the slash normalisation.
+fn display_relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+        .replace('\\', "/")
+}
+
+/// Whether a candidate file inside a skipped dotdir is one this run had
+/// already excluded from analysis, matching what [`FileVisitor`] applies to
+/// every discovered file: the compiled `ignorePatterns` set (user entries plus
+/// the built-in defaults) against the ROOT-RELATIVE path, plus the production
+/// excludes when the run is a `--production` run.
+///
+/// The root-relative path is what matters. Matching the directory path instead
+/// would miss the pattern a user actually writes, because `.claude/**` does not
+/// match `.claude`.
+///
+/// Production excludes ARE applied, even though the skip the diagnostic reports
+/// is a traversal decision that `--production` does not change. A `--production`
+/// run that named a dotdir holding only `thing.test.ts` would print a remedy
+/// (`fallow --root .qa --production`) that returns nothing, so the advisory has
+/// to agree with the file set the run would actually analyze. Combined mode's
+/// two walks can therefore disagree, which the documented union semantics of
+/// the combined root already cover.
+fn is_excluded_from_analysis(
+    config: &ResolvedConfig,
+    production_excludes: Option<&globset::GlobSet>,
+    path: &Path,
+) -> bool {
+    let relative = path.strip_prefix(&config.root).unwrap_or(path);
+    config.ignore_patterns.is_match(relative)
+        || production_excludes.is_some_and(|excludes| excludes.is_match(relative))
+}
+
+/// True when `path` carries an extension that puts it in the module graph the
+/// advisory describes. See [`DOTDIR_MODULE_EXTENSIONS`] for why this is
+/// narrower than [`has_source_extension`].
+fn has_module_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|ext| DOTDIR_MODULE_EXTENSIONS.contains(&ext))
+}
+
+/// Depth- and entry-capped search for one reportable source file, stopping at
+/// the first hit. Never a recursive walk of an unbounded tree: the ceiling is
+/// `1 + DOTDIR_SCAN_MAX_ENTRIES` directory reads for one dotdir, and
+/// [`DOTDIR_SCAN_TOTAL_ENTRIES`] across the whole walk.
+///
+/// Runs on `ignore::WalkBuilder` with the same git settings as the source walk
+/// rather than a bare `read_dir`, because "the project has not excluded it" has
+/// to mean what git means. Only the DIRECTORY form of a gitignore rule
+/// (`.build-tools/`) prunes a dotdir before the walk's own filter sees it: the
+/// `dir/**`, `dir/*`, `**/dir/**` and file-level (`*.ts`) forms all leave the
+/// directory reaching this scan with every file inside it ignored, and a cache
+/// directory that ignores itself through its own nested `.gitignore` does the
+/// same. Reporting those would advertise two remedies that both do nothing,
+/// since a re-rooted `fallow --root <dir>` still reads the parent repository's
+/// gitignore and would find no files either.
+///
+/// Accepted tradeoff: for a dotdir with more than [`DOTDIR_SCAN_MAX_ENTRIES`]
+/// entries whose only source file sits past the budget, the verdict is
+/// readdir-order dependent, so the advisory can flap between runs. The
+/// alternative is unbounded I/O, and the consequence of a flap is a missing
+/// advisory line, never a changed analysis. No test may depend on that
+/// boundary.
+fn scan_for_reportable_source(
+    config: &ResolvedConfig,
+    production_excludes: Option<&globset::GlobSet>,
+    dir: &Path,
+    budget: &mut usize,
+) -> bool {
+    let mut builder = WalkBuilder::new(dir);
+    builder
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .follow_links(false)
+        .max_depth(Some(DOTDIR_SCAN_MAX_DEPTH + 1))
+        .threads(1);
+    builder.filter_entry(|entry| {
+        if entry.depth() == 0 || !entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            return true;
+        }
+        entry
+            .file_name()
+            .to_str()
+            .is_none_or(|name| !SCRIPT_SCOPE_DENYLIST.contains(&name) && name != "node_modules")
+    });
+
+    let mut per_dotdir = DOTDIR_SCAN_MAX_ENTRIES;
+    for entry in builder.build() {
+        if per_dotdir == 0 || *budget == 0 {
+            return false;
+        }
+        per_dotdir -= 1;
+        *budget -= 1;
+        let Ok(entry) = entry else {
+            continue;
+        };
+        // Regular files only. A symlink is never followed out of the scan, and
+        // a fifo or a socket named `pipe.ts` is not source either.
+        #[expect(
+            clippy::filetype_is_file,
+            reason = "regular files only is the point: !is_dir() would readmit fifos and sockets"
+        )]
+        let is_regular_file = entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file());
+        if !is_regular_file {
+            continue;
+        }
+        if has_module_extension(entry.path())
+            && !is_excluded_from_analysis(config, production_excludes, entry.path())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Path components whose subtrees never earn the skipped-source-dotdir
+/// advisory. A hidden directory under one of these is test scaffolding rather
+/// than first-party source the project meant to analyze.
+const DOTDIR_NOISE_PATH_COMPONENTS: &[&str] = &[
+    "__fixtures__",
+    "__mocks__",
+    "__tests__",
+    "e2e",
+    "fixture",
+    "fixtures",
+    "playground",
+    "playgrounds",
+    "spec",
+    "test",
+    "tests",
+];
+
+/// Whether a dropped dotdir is worth opening at all. Decided from the PATH
+/// alone, so it costs no I/O and runs before the scan budget is touched:
+/// `.git` in a large repository, a `.jj` object store, and `node_modules/.pnpm`
+/// are never opened. `ALLOWED_HIDDEN_DIRS` and every plugin- or
+/// script-contributed scope are already excluded by construction, since a
+/// directory they admit is never dropped and so never reaches this list.
+fn dotdir_is_scan_candidate(config: &ResolvedConfig, dir: &Path) -> bool {
+    let Some(name) = dir.file_name().and_then(OsStr::to_str) else {
+        return false;
+    };
+    if SCRIPT_SCOPE_DENYLIST.contains(&name) {
+        return false;
+    }
+    let relative = dir.strip_prefix(&config.root).unwrap_or(dir);
+    // Pure cost saving, not a further condition: the built-in `**/node_modules/**`
+    // ignore default makes every file under a `node_modules` component ignored,
+    // so the scan could only ever return false.
+    if relative
+        .components()
+        .any(|component| component.as_os_str() == OsStr::new("node_modules"))
+    {
+        return false;
+    }
+    // Precision, and the one place this check is deliberately less complete
+    // than it could be. A hidden directory under a test, fixture, or playground
+    // tree is usually there BECAUSE it is hidden: some of these exist purely to
+    // exercise hidden-directory handling, so an advisory about them is wrong
+    // about the project every time it fires. Measured on a ten-repository
+    // corpus, this component filter removes every false positive one framework
+    // contributed and half of another's while keeping the true positives, which
+    // sit at a repository root rather than under a test tree.
+    !relative.components().any(|component| {
+        DOTDIR_NOISE_PATH_COMPONENTS.contains(&component.as_os_str().to_string_lossy().as_ref())
+    })
+}
+
+/// Build the typed diagnostics for the dot-prefixed directories this walk
+/// dropped that hold source files the project has not excluded, and emit one
+/// aggregated `tracing::warn!` so the otherwise silent skip is visible on
+/// stderr too (issue #461). The caller writes the returned list to the
+/// registry.
+fn report_skipped_source_dotdirs(
+    config: &ResolvedConfig,
+    production_excludes: Option<&globset::GlobSet>,
+    candidates: &[PathBuf],
+) -> Vec<WorkspaceDiagnostic> {
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+    // The caller sorted and deduped, so both caps truncate deterministically:
+    // the same tree reports the same prefix on every run.
+    let mut budget = DOTDIR_SCAN_TOTAL_ENTRIES;
+    let scannable: Vec<&PathBuf> = candidates
+        .iter()
+        .filter(|dir| dotdir_is_scan_candidate(config, dir))
+        .collect();
+    let reportable: Vec<&PathBuf> = scannable
+        .iter()
+        .copied()
+        .take(DOTDIR_SCAN_MAX_CANDIDATES)
+        .filter(|dir| scan_for_reportable_source(config, production_excludes, dir, &mut budget))
+        .collect();
+    // Either ceiling can stop the scan with candidates left unexamined, so the
+    // count is a floor rather than a total whenever one of them binds.
+    let truncated = scannable.len() > DOTDIR_SCAN_MAX_CANDIDATES || budget == 0;
+    if reportable.is_empty() {
+        return Vec::new();
+    }
+
+    let diagnostics: Vec<WorkspaceDiagnostic> = reportable
+        .iter()
+        .map(|dir| {
+            WorkspaceDiagnostic::new(
+                &config.root,
+                (*dir).clone(),
+                WorkspaceDiagnosticKind::SkippedSourceDotdir,
+            )
+        })
+        .collect();
+
+    let count = reportable.len();
+    if !config.quiet
+        && should_emit_note_once(format!(
+            "dotdir::{}::{count}::{}",
+            config.root.display(),
+            reportable
+                .first()
+                .map_or_else(String::new, |dir| display_relative_path(&config.root, dir))
+        ))
+    {
+        tracing::warn!(
+            "{}",
+            build_skipped_dotdirs_note(&config.root, &reportable, truncated)
+        );
+    }
+    diagnostics
+}
+
+/// Build the skipped-source-dotdir note. Pure so the singular and plural forms,
+/// the truncated prefix, and the single-directory remedy substitution are
+/// unit-testable without a tracing subscriber, mirroring
+/// [`build_largest_files_note`].
+///
+/// With exactly one directory the remedy names it instead of printing a `<dir>`
+/// placeholder: the path is already known and was printed a few words earlier,
+/// so a placeholder would make the one case a user can act on directly the one
+/// case they have to retype.
+fn build_skipped_dotdirs_note(root: &Path, reportable: &[&PathBuf], truncated: bool) -> String {
+    let count = reportable.len();
+    // An exact remainder inside an explicitly inexact total reads as a
+    // contradiction ("at least 64 ... and 59 more"), so a truncated run drops
+    // the tail count.
+    let examples = if truncated {
+        summarize_paths_open_ended(root, reportable)
+    } else {
+        summarize_paths(root, reportable)
+    };
+    let noun = if count == 1 {
+        "directory"
+    } else {
+        "directories"
+    };
+    let verb = if count == 1 { "contains" } else { "contain" };
+    let at_least = if truncated { "at least " } else { "" };
+    let (target, pronoun) = match reportable {
+        [only] => (display_relative_path(root, only), "it"),
+        _ => ("<dir>".to_owned(), "one"),
+    };
+    format!(
+        "fallow: skipped {at_least}{count} hidden {noun} that {verb} source files ({examples}). \
+         Hidden directories are not traversed and no config field adds one: analyze {pronoun} \
+         with fallow --root {target} if it holds first-party source, or add '{target}/**' to \
+         ignorePatterns to silence this."
+    )
+}
+
 /// Build the pre-parse largest-files note, or `None` when the discovered set is
 /// neither unusually large nor contains an unusually large file. Pure so the
 /// pluralization, floor filtering, and count-only fallback are unit-testable
@@ -308,19 +665,70 @@ fn note_largest_files(config: &ResolvedConfig, files: &[DiscoveredFile]) {
     }
 }
 
+/// How a [`HiddenDirScope`] matches a hidden directory during the walk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HiddenDirMatch {
+    /// Match by directory NAME at any depth beneath the scope root.
+    ///
+    /// Framework plugins declare bundle-boundary conventions like `.client`
+    /// and `.server` that a project may place under any route directory, so
+    /// the name is the whole rule and the depth is not knowable in advance.
+    AnyDepth,
+    /// Match the exact root-relative directory PATH.
+    ///
+    /// A `package.json` script naming `.a/.b/build.mjs` states where the file
+    /// it needs actually lives, so the scope admits `<root>/.a` and
+    /// `<root>/.a/.b` and nothing else. An unrelated `packages/x/.b` stays
+    /// untraversed (issue #461).
+    ExactPath,
+}
+
 /// Package-scoped hidden directories that source discovery should traverse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HiddenDirScope {
     root: PathBuf,
     dirs: Vec<String>,
+    match_mode: HiddenDirMatch,
 }
 
 impl HiddenDirScope {
     /// Build a scope rooted at a package directory that admits the given
-    /// hidden directory names during the walk.
+    /// hidden directory names at any depth beneath it.
+    ///
+    /// This is the plugin-contributed shape. For a scope inferred from a
+    /// concrete path, use [`HiddenDirScope::new_exact_paths`], which does not
+    /// admit the same name elsewhere in the tree.
     #[must_use]
     pub fn new(root: PathBuf, dirs: Vec<String>) -> Self {
-        Self { root, dirs }
+        Self {
+            root,
+            dirs,
+            match_mode: HiddenDirMatch::AnyDepth,
+        }
+    }
+
+    /// Build a scope rooted at a package directory that admits exactly the
+    /// given root-relative directory paths.
+    #[must_use]
+    pub fn new_exact_paths(root: PathBuf, dirs: Vec<String>) -> Self {
+        Self {
+            root,
+            dirs,
+            match_mode: HiddenDirMatch::ExactPath,
+        }
+    }
+
+    /// Rebuild a scope with an explicit match mode.
+    ///
+    /// Used when a scope crosses a crate boundary and must arrive with the
+    /// same semantics it left with.
+    #[must_use]
+    pub fn with_match_mode(root: PathBuf, dirs: Vec<String>, match_mode: HiddenDirMatch) -> Self {
+        Self {
+            root,
+            dirs,
+            match_mode,
+        }
     }
 
     #[must_use]
@@ -333,8 +741,25 @@ impl HiddenDirScope {
         &self.dirs
     }
 
+    #[must_use]
+    pub fn match_mode(&self) -> HiddenDirMatch {
+        self.match_mode
+    }
+
     fn allows(&self, path: &Path, name: &OsStr) -> bool {
-        path.starts_with(&self.root) && self.dirs.iter().any(|dir| OsStr::new(dir) == name)
+        match self.match_mode {
+            HiddenDirMatch::AnyDepth => {
+                path.starts_with(&self.root) && self.dirs.iter().any(|dir| OsStr::new(dir) == name)
+            }
+            HiddenDirMatch::ExactPath => {
+                // `Path` compares component-wise, so a `/`-separated entry
+                // from a script string matches on every platform.
+                let Ok(relative) = path.strip_prefix(&self.root) else {
+                    return false;
+                };
+                self.dirs.iter().any(|dir| Path::new(dir) == relative)
+            }
+        }
     }
 }
 
@@ -521,10 +946,6 @@ fn is_yarn_pnp_generated_file(name: &OsStr) -> bool {
 /// Returns `true` if the entry is not hidden or is on the allowlist.
 /// Hidden files (not directories) are allowed through since the type filter
 /// handles them, except for the generated Yarn PnP files.
-fn is_allowed_hidden(entry: &ignore::DirEntry) -> bool {
-    is_allowed_hidden_with_scopes(entry, &[])
-}
-
 fn is_allowed_hidden_with_scopes(
     entry: &ignore::DirEntry,
     additional_hidden_dir_scopes: &[HiddenDirScope],
@@ -633,6 +1054,7 @@ fn build_source_walk_builder(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
     capture_config: bool,
+    skipped_dotdirs: &SkippedDotdirSink,
 ) -> WalkBuilder {
     let mut walk_builder = WalkBuilder::new(&config.root);
     walk_builder
@@ -642,12 +1064,23 @@ fn build_source_walk_builder(
         .git_exclude(true)
         .types(build_walk_types(capture_config))
         .threads(config.threads);
-    if additional_hidden_dir_scopes.is_empty() {
-        walk_builder.filter_entry(is_allowed_hidden);
-    } else {
-        let scopes = additional_hidden_dir_scopes.to_vec();
-        walk_builder.filter_entry(move |entry| is_allowed_hidden_with_scopes(entry, &scopes));
-    }
+    // One filter, not two: `filter_entry` replaces rather than chains, and the
+    // dropped-dotdir record has to happen on the same false path that decides
+    // the skip so the allowlist and every plugin- or script-contributed scope
+    // are excluded by construction (issue #461).
+    let scopes = additional_hidden_dir_scopes.to_vec();
+    let sink = Arc::clone(skipped_dotdirs);
+    walk_builder.filter_entry(move |entry| {
+        if is_allowed_hidden_with_scopes(entry, &scopes) {
+            return true;
+        }
+        if entry.file_type().is_some_and(|ft| ft.is_dir())
+            && let Ok(mut collected) = sink.lock()
+        {
+            collected.push(entry.path().to_path_buf());
+        }
+        false
+    });
     walk_builder
 }
 
@@ -717,7 +1150,8 @@ pub struct DiscoveredSources {
     pub files: Vec<DiscoveredFile>,
     /// Non-source config-candidate paths captured in the same traversal.
     pub config_candidates: Vec<PathBuf>,
-    /// Skipped-large-file and skipped-minified-file diagnostics from this walk.
+    /// Skipped-large-file, skipped-minified-file, and skipped-source-dotdir
+    /// diagnostics from this walk.
     pub diagnostics: Vec<WorkspaceDiagnostic>,
 }
 
@@ -740,8 +1174,13 @@ pub fn discover_files_config_candidates_and_diagnostics(
     let _span = tracing::info_span!("discover_files").entered();
 
     let capture_config = !config.production;
-    let walk_builder =
-        build_source_walk_builder(config, additional_hidden_dir_scopes, capture_config);
+    let skipped_dotdirs: SkippedDotdirSink = Arc::new(Mutex::new(Vec::new()));
+    let walk_builder = build_source_walk_builder(
+        config,
+        additional_hidden_dir_scopes,
+        capture_config,
+        &skipped_dotdirs,
+    );
     let production_excludes = build_production_excludes(config);
     let canonical_root = config.root.canonicalize().ok();
 
@@ -774,6 +1213,15 @@ pub fn discover_files_config_candidates_and_diagnostics(
         .expect("walk config collector lock poisoned");
     config_candidates.sort_unstable();
 
+    // The parallel walk records dotdirs in nondeterministic thread order, and
+    // the diagnostic array order is part of the JSON contract, so sort and
+    // dedupe before the predicate runs (issue #2366).
+    let mut dotdir_candidates = skipped_dotdirs
+        .lock()
+        .map_or_else(|_| Vec::new(), |mut guard| std::mem::take(&mut *guard));
+    dotdir_candidates.sort_unstable();
+    dotdir_candidates.dedup();
+
     let (kept, skipped) = partition_by_size(raw, config.max_file_size_bytes);
     let (kept, skipped_minified) =
         partition_minified_generated_js(kept, config.max_file_size_bytes);
@@ -786,6 +1234,11 @@ pub fn discover_files_config_candidates_and_diagnostics(
         report_skipped_large_files(config, &skipped)
             .into_iter()
             .chain(report_skipped_minified_files(config, &skipped_minified))
+            .chain(report_skipped_source_dotdirs(
+                config,
+                production_excludes.as_ref(),
+                &dotdir_candidates,
+            ))
             .collect(),
     );
 
@@ -811,8 +1264,101 @@ pub fn discover_files_config_candidates_and_diagnostics(
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
+    use std::path::MAIN_SEPARATOR;
 
     use super::*;
+
+    #[test]
+    fn skipped_dotdirs_note_names_the_directory_when_there_is_one() {
+        let root = Path::new("/repo");
+        let only = PathBuf::from("/repo/.tooling");
+        let note = build_skipped_dotdirs_note(root, &[&only], false);
+        assert!(note.contains("skipped 1 hidden directory that contains source files"));
+        assert!(note.contains("analyze it with fallow --root .tooling"));
+        assert!(note.contains("add '.tooling/**' to"));
+        assert!(
+            !note.contains("<dir>"),
+            "the single-directory remedy must be copy-pasteable: {note}"
+        );
+    }
+
+    #[test]
+    fn skipped_dotdirs_note_pluralizes_and_keeps_the_placeholder() {
+        let root = Path::new("/repo");
+        let a = PathBuf::from("/repo/.a");
+        let b = PathBuf::from("/repo/.b");
+        let note = build_skipped_dotdirs_note(root, &[&a, &b], false);
+        assert!(note.contains("skipped 2 hidden directories that contain source files"));
+        assert!(note.contains("analyze one with fallow --root <dir>"));
+    }
+
+    #[test]
+    fn skipped_dotdirs_note_drops_the_tail_count_when_truncated() {
+        let root = Path::new("/repo");
+        let owned: Vec<PathBuf> = (0..8)
+            .map(|i| PathBuf::from(format!("/repo/.d{i}")))
+            .collect();
+        let reportable: Vec<&PathBuf> = owned.iter().collect();
+
+        let bounded = build_skipped_dotdirs_note(root, &reportable, true);
+        assert!(bounded.contains("skipped at least 8 hidden directories"));
+        assert!(
+            bounded.contains("and more") && !bounded.contains("and 3 more"),
+            "an inexact total must not carry an exact remainder: {bounded}"
+        );
+
+        let complete = build_skipped_dotdirs_note(root, &reportable, false);
+        assert!(!complete.contains("at least"));
+        assert!(complete.contains("and 3 more"));
+    }
+
+    #[test]
+    fn dotdir_noise_path_components_stay_sorted_and_lowercase() {
+        let mut sorted = DOTDIR_NOISE_PATH_COMPONENTS.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(sorted, DOTDIR_NOISE_PATH_COMPONENTS);
+        for component in DOTDIR_NOISE_PATH_COMPONENTS {
+            assert!(!component.starts_with('.'), "'{component}' is not hidden");
+            assert_eq!(
+                *component,
+                component.to_lowercase(),
+                "'{component}' is matched verbatim against a path component"
+            );
+        }
+    }
+
+    #[test]
+    fn script_scope_denylist_stays_disjoint_and_sorted() {
+        let mut sorted = SCRIPT_SCOPE_DENYLIST.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(
+            sorted, SCRIPT_SCOPE_DENYLIST,
+            "keep the list sorted so additions stay reviewable"
+        );
+        for dir in SCRIPT_SCOPE_DENYLIST {
+            assert!(dir.starts_with('.'), "'{dir}' is not a hidden directory");
+            assert!(
+                !ALLOWED_HIDDEN_DIRS.contains(dir),
+                "'{dir}' is traversed, so it can never be a skipped candidate"
+            );
+        }
+    }
+
+    #[test]
+    fn dotdir_module_extensions_are_a_subset_of_source_extensions() {
+        for ext in DOTDIR_MODULE_EXTENSIONS {
+            assert!(
+                SOURCE_EXTENSIONS.contains(ext),
+                "'{ext}' is not discovered as source, so it cannot be a trigger"
+            );
+        }
+        for ext in ["css", "scss", "sass", "less", "html", "graphql", "gql"] {
+            assert!(
+                !DOTDIR_MODULE_EXTENSIONS.contains(&ext),
+                "'{ext}' carries no imports or exports for the message to be about"
+            );
+        }
+    }
 
     /// Reproduce the FileId-assignment rule used by `walk_source_files`: sort by
     /// absolute path, then assign `FileId(idx)` in that order.
@@ -1563,6 +2109,84 @@ mod tests {
         }
 
         #[test]
+        fn exact_path_scope_does_not_admit_the_same_name_elsewhere() {
+            // A script naming `.a/.b/deep.mjs` says where the file it needs
+            // lives. Before issue #461 the scope stored the bare names, so an
+            // unrelated `elsewhere/.b` and `unrelated/.a` were pulled in too.
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::create_dir_all(dir.path().join(".a/.b")).unwrap();
+            std::fs::create_dir_all(dir.path().join("elsewhere/.b")).unwrap();
+            std::fs::create_dir_all(dir.path().join("unrelated/.a")).unwrap();
+            std::fs::write(dir.path().join(".a/.b/deep.mjs"), "export const a = 1;").unwrap();
+            std::fs::write(dir.path().join("elsewhere/.b/y.mjs"), "export const b = 1;").unwrap();
+            std::fs::write(dir.path().join("unrelated/.a/u.mjs"), "export const c = 1;").unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let scopes = [HiddenDirScope::new_exact_paths(
+                dir.path().to_path_buf(),
+                vec![".a".to_string(), format!(".a{MAIN_SEPARATOR}.b")],
+            )];
+            let files = discover_files_with_additional_hidden_dirs(&config, &scopes);
+            let names = file_names(&files, dir.path());
+
+            assert!(names.contains(&".a/.b/deep.mjs".to_string()));
+            assert!(!names.contains(&"elsewhere/.b/y.mjs".to_string()));
+            assert!(!names.contains(&"unrelated/.a/u.mjs".to_string()));
+        }
+
+        #[test]
+        fn exact_path_scope_admits_a_hidden_dir_under_a_visible_parent() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::create_dir_all(dir.path().join("tools/.config")).unwrap();
+            std::fs::create_dir_all(dir.path().join("other/.config")).unwrap();
+            std::fs::write(
+                dir.path().join("tools/.config/eslint.config.js"),
+                "export default [];",
+            )
+            .unwrap();
+            std::fs::write(
+                dir.path().join("other/.config/eslint.config.js"),
+                "export default [];",
+            )
+            .unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let scopes = [HiddenDirScope::new_exact_paths(
+                dir.path().to_path_buf(),
+                vec![format!("tools{MAIN_SEPARATOR}.config")],
+            )];
+            let files = discover_files_with_additional_hidden_dirs(&config, &scopes);
+            let names = file_names(&files, dir.path());
+
+            assert!(names.contains(&"tools/.config/eslint.config.js".to_string()));
+            assert!(!names.contains(&"other/.config/eslint.config.js".to_string()));
+        }
+
+        #[test]
+        fn any_depth_scope_keeps_matching_by_name_for_plugins() {
+            // Framework plugins declare `.client` / `.server` conventions that
+            // may sit under any route directory, so the plugin shape must keep
+            // matching at any depth.
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::create_dir_all(dir.path().join("app/routes/deep/.server")).unwrap();
+            std::fs::write(
+                dir.path().join("app/routes/deep/.server/db.ts"),
+                "export const db = {};",
+            )
+            .unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let scopes = [HiddenDirScope::new(
+                dir.path().to_path_buf(),
+                vec![".server".to_string()],
+            )];
+            let files = discover_files_with_additional_hidden_dirs(&config, &scopes);
+            let names = file_names(&files, dir.path());
+
+            assert!(names.contains(&"app/routes/deep/.server/db.ts".to_string()));
+        }
+
+        #[test]
         fn excludes_root_build_directory() {
             let dir = tempfile::tempdir().expect("create temp dir");
 
@@ -1965,6 +2589,358 @@ mod tests {
                         if size_bytes == 5_000
                 ),
                 "the recorded diagnostic carries the on-disk byte size"
+            );
+        }
+
+        /// The skipped-source-dotdir entries the last walk on `root` recorded.
+        fn dotdir_diagnostics(root: &Path) -> Vec<fallow_config::WorkspaceDiagnostic> {
+            fallow_config::workspace_diagnostics_for(root)
+                .into_iter()
+                .filter(|d| {
+                    matches!(
+                        d.kind,
+                        fallow_config::WorkspaceDiagnosticKind::SkippedSourceDotdir
+                    )
+                })
+                .collect()
+        }
+
+        fn write_at(root: &Path, relative: &str, contents: &str) {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().expect("has a parent")).unwrap();
+            std::fs::write(path, contents).unwrap();
+        }
+
+        #[test]
+        fn skipped_source_dotdir_recorded_in_workspace_diagnostics() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(
+                dir.path(),
+                ".claude/hooks/probe.mjs",
+                "export const a = 1;\n",
+            );
+            write_at(dir.path(), "src/app.ts", "export const b = 2;\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            let reported = dotdir_diagnostics(dir.path());
+            assert_eq!(reported.len(), 1, "one skipped dotdir holds source files");
+            assert!(reported[0].path.ends_with(".claude"));
+            assert_eq!(reported[0].kind.id(), "skipped-source-dotdir");
+            assert!(
+                reported[0].message.contains("--root"),
+                "message names the real remedy: {}",
+                reported[0].message
+            );
+            assert!(
+                names.contains(&"src/app.ts".to_string()),
+                "traversal is unchanged for ordinary directories"
+            );
+            assert!(
+                !names.contains(&".claude/hooks/probe.mjs".to_string()),
+                "the diagnostic reports the skip, it does not change traversal"
+            );
+        }
+
+        #[test]
+        fn allowlisted_dotdir_is_not_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(dir.path(), ".storybook/main.ts", "export const a = 1;\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert!(dotdir_diagnostics(dir.path()).is_empty());
+            assert!(
+                names.contains(&".storybook/main.ts".to_string()),
+                "an allowlisted dotdir is still traversed"
+            );
+        }
+
+        #[test]
+        fn denylisted_dotdir_is_not_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(dir.path(), ".idea/workspace.ts", "export const a = 1;\n");
+            write_at(dir.path(), ".husky/hook.js", "export const b = 2;\n");
+            write_at(dir.path(), ".next/page.js", "export const c = 3;\n");
+            write_at(dir.path(), ".pnpm/x.js", "export const d = 4;\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            assert!(
+                dotdir_diagnostics(dir.path()).is_empty(),
+                "build caches, VCS and package-manager state never advise"
+            );
+        }
+
+        #[test]
+        fn scoped_dotdir_is_traversed_and_not_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(
+                dir.path(),
+                ".claude/hooks/probe.mjs",
+                "export const a = 1;\n",
+            );
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let scopes = [HiddenDirScope::new(
+                dir.path().to_path_buf(),
+                vec![".claude".to_owned()],
+            )];
+            let files = discover_files_with_additional_hidden_dirs(&config, &scopes);
+            let names = file_names(&files, dir.path());
+
+            assert!(
+                dotdir_diagnostics(dir.path()).is_empty(),
+                "a plugin- or script-contributed scope is admitted, so nothing was skipped"
+            );
+            assert!(names.contains(&".claude/hooks/probe.mjs".to_string()));
+        }
+
+        #[test]
+        fn ignore_patterns_silence_the_skipped_source_dotdir() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(
+                dir.path(),
+                ".claude/hooks/probe.mjs",
+                "export const a = 1;\n",
+            );
+
+            let config =
+                make_config_with_ignores(dir.path().to_path_buf(), vec![".claude/**".to_owned()]);
+            let _ = discover_files(&config);
+
+            assert!(
+                dotdir_diagnostics(dir.path()).is_empty(),
+                "the documented silencing route works"
+            );
+        }
+
+        #[test]
+        fn dotdir_without_source_files_is_not_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(dir.path(), ".claude/settings.json", "{}\n");
+            write_at(dir.path(), ".claude/README.md", "# notes\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            assert!(dotdir_diagnostics(dir.path()).is_empty());
+        }
+
+        #[test]
+        fn dotdir_source_at_scan_depth_limit_is_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(dir.path(), ".claude/a/b/deep.ts", "export const a = 1;\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            assert_eq!(dotdir_diagnostics(dir.path()).len(), 1);
+        }
+
+        #[test]
+        fn dotdir_source_below_scan_depth_limit_is_not_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(
+                dir.path(),
+                ".claude/a/b/c/deeper.ts",
+                "export const a = 1;\n",
+            );
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            assert!(
+                dotdir_diagnostics(dir.path()).is_empty(),
+                "the depth cap is real, so widening it stays a deliberate act"
+            );
+        }
+
+        /// Mark `root` as a git worktree so the `ignore` crate applies the
+        /// gitignore files below it. `require_git` is on by default, and it
+        /// tests for the presence of `.git`, not for a valid object store.
+        fn mark_as_git_repo(root: &Path) {
+            std::fs::create_dir_all(root.join(".git")).expect("create .git marker");
+        }
+
+        #[test]
+        fn gitignored_dotdir_contents_are_not_reported() {
+            // The directory FORM (`.tooling/`) prunes the dotdir upstream of the
+            // predicate, so these are the forms that reach it with every file
+            // inside already ignored.
+            for pattern in [".tooling/**", ".tooling/*", "**/.tooling/**", "*.ts"] {
+                let dir = tempfile::tempdir().expect("create temp dir");
+                mark_as_git_repo(dir.path());
+                write_at(dir.path(), ".gitignore", &format!("{pattern}\n"));
+                write_at(dir.path(), ".tooling/mod.ts", "export const a = 1;\n");
+
+                let config = make_config(dir.path().to_path_buf(), false);
+                let _ = discover_files(&config);
+
+                assert!(
+                    dotdir_diagnostics(dir.path()).is_empty(),
+                    "gitignore pattern '{pattern}' excludes the contents, so neither \
+                     advertised remedy would find anything there"
+                );
+            }
+        }
+
+        #[test]
+        fn self_ignoring_dotdir_is_not_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            mark_as_git_repo(dir.path());
+            write_at(dir.path(), ".toolcache/.gitignore", "*\n");
+            write_at(dir.path(), ".toolcache/mod.ts", "export const a = 1;\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            assert!(
+                dotdir_diagnostics(dir.path()).is_empty(),
+                "a cache directory that ignores itself has excluded its own contents"
+            );
+        }
+
+        #[test]
+        fn ungitignored_dotdir_in_a_git_repo_is_still_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            mark_as_git_repo(dir.path());
+            write_at(dir.path(), ".gitignore", "dist/\n");
+            write_at(dir.path(), ".tooling/mod.ts", "export const a = 1;\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            assert_eq!(
+                dotdir_diagnostics(dir.path()).len(),
+                1,
+                "the gitignore check must not swallow the case the diagnostic exists for"
+            );
+        }
+
+        #[test]
+        fn production_run_does_not_report_a_test_only_dotdir() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(dir.path(), ".qa/thing.test.ts", "export const a = 1;\n");
+            write_at(dir.path(), ".qa/thing.stories.tsx", "export const b = 2;\n");
+
+            let config = make_config(dir.path().to_path_buf(), true);
+            let _ = discover_files(&config);
+
+            assert!(
+                dotdir_diagnostics(dir.path()).is_empty(),
+                "a --production run would analyze none of those files, so the \
+                 --root remedy would return nothing"
+            );
+        }
+
+        #[test]
+        fn production_run_still_reports_a_dotdir_with_production_source() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(dir.path(), ".qa/thing.test.ts", "export const a = 1;\n");
+            write_at(dir.path(), ".qa/helper.ts", "export const b = 2;\n");
+
+            let config = make_config(dir.path().to_path_buf(), true);
+            let _ = discover_files(&config);
+
+            assert_eq!(dotdir_diagnostics(dir.path()).len(), 1);
+        }
+
+        #[test]
+        fn dotdir_with_only_generated_markup_is_not_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(dir.path(), ".lighthouseci/lhr-1.html", "<html></html>\n");
+            write_at(dir.path(), ".styles/theme.css", ":root { color: red; }\n");
+            write_at(dir.path(), ".gql/schema.graphql", "type Query { a: Int }\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            assert!(
+                dotdir_diagnostics(dir.path()).is_empty(),
+                "the message claims imports and exports are lost, and these have none"
+            );
+        }
+
+        #[test]
+        fn generated_tool_and_foreign_vcs_dotdirs_are_not_reported() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(dir.path(), ".astro/types.d.ts", "export {};\n");
+            write_at(dir.path(), ".wxt/types/imports.d.ts", "export {};\n");
+            write_at(dir.path(), ".yalc/pkg/index.js", "export const a = 1;\n");
+            write_at(dir.path(), ".jj/repo/config.js", "export const b = 2;\n");
+            write_at(dir.path(), ".svn/pristine/y.js", "export const c = 3;\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            assert!(
+                dotdir_diagnostics(dir.path()).is_empty(),
+                "generated output and foreign VCS metadata are not first-party source"
+            );
+        }
+
+        #[test]
+        fn denylisted_dotdirs_do_not_consume_the_candidate_ceiling() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            // Sorted before the real candidate, and more of them than the
+            // ceiling, so a cap applied before the name checks would hide it.
+            for index in 0..(DOTDIR_SCAN_MAX_CANDIDATES + 8) {
+                write_at(
+                    dir.path(),
+                    &format!("packages/pkg{index:03}/.turbo/blob.js"),
+                    "export const a = 1;\n",
+                );
+            }
+            write_at(dir.path(), "zz/.tooling/mod.ts", "export const b = 2;\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            let reported = dotdir_diagnostics(dir.path());
+            assert_eq!(reported.len(), 1, "{reported:?}");
+            assert!(reported[0].path.ends_with(".tooling"));
+        }
+
+        #[test]
+        fn one_pathological_dotdir_cannot_starve_the_rest() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            // Wide and shallow, no source: exhausts this candidate's own budget.
+            for index in 0..(DOTDIR_SCAN_MAX_ENTRIES * 2) {
+                write_at(dir.path(), &format!(".aaa-noise/f{index}.bin"), "x");
+            }
+            write_at(dir.path(), ".zzz-real/mod.ts", "export const a = 1;\n");
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+
+            let reported = dotdir_diagnostics(dir.path());
+            assert_eq!(reported.len(), 1, "{reported:?}");
+            assert!(reported[0].path.ends_with(".zzz-real"));
+        }
+
+        #[test]
+        fn repeat_walks_do_not_stack_skipped_source_dotdirs() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            write_at(
+                dir.path(),
+                ".claude/hooks/probe.mjs",
+                "export const a = 1;\n",
+            );
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let _ = discover_files(&config);
+            let _ = discover_files(&config);
+
+            assert_eq!(
+                dotdir_diagnostics(dir.path()).len(),
+                1,
+                "each walk replaces its own root's source-discovery set"
             );
         }
 

@@ -357,6 +357,8 @@ mod issue_358_custom_eslint_config;
 mod issue_359_empty_catalog_group;
 #[path = "integration_test/issue_396_397_399_typeof_import_and_new_url.rs"]
 mod issue_396_397_399_typeof_import_and_new_url;
+#[path = "integration_test/issue_461_hidden_dotdir_diagnostic.rs"]
+mod issue_461_hidden_dotdir_diagnostic;
 #[path = "integration_test/issue_462_tooling_catalogue.rs"]
 mod issue_462_tooling_catalogue;
 #[path = "integration_test/issue_463_glob_validation.rs"]
