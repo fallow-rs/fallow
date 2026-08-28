@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787882014258,
+  "lastUpdate": 1787888389372,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "aec0bd07a5e2532ad242a3587459b7aaade345df",
-          "message": "test(audit-cache): ignore lazy directory mtimes in the prune snapshot",
-          "timestamp": "2026-08-13T20:17:19+02:00",
-          "tree_id": "93e3fee7ae6c8e79248acf298c739fe8ecdbc395",
-          "url": "https://github.com/fallow-rs/fallow/commit/aec0bd07a5e2532ad242a3587459b7aaade345df"
-        },
-        "date": 1786645383770,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/85d490ce31ada36388dd59f7860716b261b48694"
         },
         "date": 1787882010663,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "ef4231886a47d810896a6d0d1ed5a0f0c0eaa2b5",
+          "message": "chore(mcp): sync the MCP Registry card to v3.20.0",
+          "timestamp": "2026-08-28T05:33:56+02:00",
+          "tree_id": "9db570fe102d804dd937cee08acaaebd4cbf64c8",
+          "url": "https://github.com/fallow-rs/fallow/commit/ef4231886a47d810896a6d0d1ed5a0f0c0eaa2b5"
+        },
+        "date": 1787888385898,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
