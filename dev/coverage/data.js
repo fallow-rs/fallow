@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787877054468,
+  "lastUpdate": 1787882014258,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "fb44ef467c8a032dc12453fb3b2842c115ec10da",
-          "message": "fix(audit): keep base attribution when the focus remap fails\n\nThe base-snapshot focus set is built from `git rev-parse --show-toplevel`,\nwhose spelling can differ from the caller's canonicalized root (Windows 8.3\ncomponents and drive-letter case, verbatim prefixes), so a literal\nstrip_prefix mapped no path at all. The base dead-code results were then\nfiltered against an empty focus set and every base finding disappeared, which\nmade each inherited finding look introduced and failed `--gate new-only` on\npre-existing findings.\n\nThe remap now compares simplified and canonicalized forms before giving up on\na path, and a base run whose focus set cannot be expressed leaves its results\nunfiltered instead of filtering them against an empty set.",
-          "timestamp": "2026-08-13T20:01:56+02:00",
-          "tree_id": "a32c69c82618dc6eee83c07431f87f5eed349ee2",
-          "url": "https://github.com/fallow-rs/fallow/commit/fb44ef467c8a032dc12453fb3b2842c115ec10da"
-        },
-        "date": 1786644434729,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/5a2a685eb56790043daaf15245ecad2ab5901387"
         },
         "date": 1787877051136,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "85d490ce31ada36388dd59f7860716b261b48694",
+          "message": "ci(release): initialize the pnpm store before caching on Windows\n\nThe Windows VS Code host job leaves the pnpm store directory absent, so\nactions/setup-node's cache-save post-step fails path validation and marks\nan otherwise green job as failed, which skips every publish job behind it.\nrelease-validation.yml already carries this step; release.yml did not.",
+          "timestamp": "2026-08-28T03:44:42+02:00",
+          "tree_id": "184f90c3e4b47c813cffba2016d7f00e652a9ddd",
+          "url": "https://github.com/fallow-rs/fallow/commit/85d490ce31ada36388dd59f7860716b261b48694"
+        },
+        "date": 1787882010663,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
