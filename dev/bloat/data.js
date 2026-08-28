@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787877714487,
+  "lastUpdate": 1787888715591,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "e0d27b060044b5c8758ccbfc725779758652846e",
-          "message": "Merge pull request #2229 from fallow-rs/feat/css-lazy-token-candidates\n\nperf(engine): build styling token candidates lazily",
-          "timestamp": "2026-08-12T16:23:00+02:00",
-          "tree_id": "0a48cc90a4daa9b01c97a2fc2b661ae385ad293b",
-          "url": "https://github.com/fallow-rs/fallow/commit/e0d27b060044b5c8758ccbfc725779758652846e"
-        },
-        "date": 1786545321200,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 492782912,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 19846352,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25188136,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 37626136,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/5a2a685eb56790043daaf15245ecad2ab5901387"
         },
         "date": 1787877711016,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 544263024,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21310792,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 27776680,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 41671048,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "802bfd2c4e2e397409e16b5e87d7914464bdae11",
+          "message": "chore(napi): sync package.json / package-lock / index.js to v3.20.0",
+          "timestamp": "2026-08-28T05:31:51+02:00",
+          "tree_id": "50069b7aeaf722d1d81d0b3d1b636e322394165c",
+          "url": "https://github.com/fallow-rs/fallow/commit/802bfd2c4e2e397409e16b5e87d7914464bdae11"
+        },
+        "date": 1787888711508,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
