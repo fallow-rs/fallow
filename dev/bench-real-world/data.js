@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787945065504,
+  "lastUpdate": 1788008852806,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "id": "781f9c0fd1221ef7faa99c546bc320c02cb63644",
-          "message": "fix(cli): support GitLab CODEOWNERS section headers and exclusions\n\nCloses #127. The CODEOWNERS parser previously treated `[Section name]`\nheaders as glob character classes, causing hard errors for `--group-by\nowner` and silent null ownership for `--ownership` on any GitLab\nproject using sections.\n\n- Recognize section headers (`[Name]`, `^[Name]`, `[Name][N]`) and skip\n  them as rules; propagate section default owners to bare pattern lines.\n- Accept GitLab 17.10+ exclusion patterns (`!path`) and clear ownership\n  for files whose last matching rule is a negation.\n- Emit a stderr warning when `--ownership` encounters an unparsable\n  CODEOWNERS instead of silently returning null ownership data.",
-          "timestamp": "2026-04-17T08:46:47Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/781f9c0fd1221ef7faa99c546bc320c02cb63644"
-        },
-        "date": 1776415970874,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 116,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 115,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 201,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 205,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 121,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 119,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 351,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 334,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 752,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 687,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 703,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 740,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 560,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 524,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7590,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7211,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9489,6 +9387,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1433,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Daniel Morales",
+            "username": "PrinceD96",
+            "email": "53633741+PrinceD96@users.noreply.github.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "df15924cb3ace9155aa431625f7e151d445617a6",
+          "message": "fix(health): attribute Istanbul coverage to the function that owns the position (#2449)\n\nIstanbul coverage now reaches the functions whose extracted position falls\nbetween the producer's declaration and its body: a class member carrying a\ndecorator and a wrapped parameter list, and the innermost arrow of a curried\nchain formatted one per line. The header span identifies those, and it is read\nonly when exactly one anonymous record covers the position and no other\nfunction is declared inside it.\n\nAttribution is tightened at the same time. A member whose parameter list holds\na function no longer reports that function's coverage, a private class member\ntakes the static estimate rather than the coverage of whatever encloses it, and\na named function expression is resolved against the real source rather than a\nguess at the keyword's width. Coverage maps with project-relative keys join\nfrom any working directory, and the fallbacks are bounded by line indexes so a\nmap that does not join no longer costs a full scan per function.\n\nCloses #2448\n\nThanks to @PrinceD96 for the report and the implementation.",
+          "timestamp": "2026-08-29T06:01:05Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/df15924cb3ace9155aa431625f7e151d445617a6"
+        },
+        "date": 1788008848453,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 207,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 309,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 615,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 408,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1742,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1331,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1225,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1020,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1433,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1329,
             "unit": "ms"
           }
         ]
