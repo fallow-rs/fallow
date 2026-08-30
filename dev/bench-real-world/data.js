@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788008852806,
+  "lastUpdate": 1788093657461,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "8c3c68497551b1d29543c804460321996a0a5e75",
-          "message": "fix(workspace): surface malformed package.json and unreachable glob matches\n\nSeven silent-drop sites in crates/config/src/workspace/{mod.rs,parsers.rs}\nbecome typed WorkspaceDiagnostic values carrying a kind discriminator\n(undeclared-workspace, malformed-package-json, glob-matched-no-package-json,\nmalformed-tsconfig, tsconfig-reference-dir-missing). Severity is per site: a\nmalformed root package.json exits 2 at config load (mirrors #468); declared\nworkspace package.json malformed warns and continues so analysis still runs\non the rest; glob-matched-no-package-json warns only when the path is not in\nthe conventional skip list and not in user ignorePatterns; shallow-scan\ncandidates stay silent because the user did not declare them; missing\ntsconfig.json stays silent. Diagnostics emit via deduplicated tracing::warn!\n(process-wide OnceLock keyed on canonical-root + kind + path) and land in a\nshared registry so the JSON envelope on check / dupes / health carries a new\noptional workspace_diagnostics[] field.\n\nA new fallow list --workspaces flag and a dedicated fallow workspaces\nsubcommand expose the discovery topology for introspection. The legacy\ndiscover_workspaces back-compat wrapper now routes through a silent\ncollector that does NOT emit, so sibling analyze + file-discovery callers\nno longer re-warn on paths the user already excluded via ignorePatterns.\nThe analyze pipeline's undeclared-workspace pass also folds into the same\nregistry and suppresses entries that already carry a MalformedPackageJson\ndiagnostic, so a typo'd workspace is no longer double-reported. Path\nnormalisation handles macOS /private/tmp canonicalisation symmetrically;\nPackageJson::load strips a leading UTF-8 BOM so Windows-authored or\nvite-fixture-style configs do not surface as false positives.\n\nFixes #473.",
-          "timestamp": "2026-05-21T10:23:46Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/8c3c68497551b1d29543c804460321996a0a5e75"
-        },
-        "date": 1779360111199,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 153,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 148,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 252,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 230,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 149,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 130,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 477,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 384,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1062,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 872,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 880,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 847,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 746,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 672,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 8282,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7057,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9479,6 +9377,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1329,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "900d29a76e7cb1488930b2fa71f7053ead69b187",
+          "message": "docs(quality-gates): list the install the NAPI gate step needs (#2462)\n\n`verify:full` ends with a local NAPI build whose `napi` binary comes from\n`crates/napi`'s own devDependencies. The documented setup covered the root, the\ntype-aware sidecar, and the VS Code extension, so a checkout that followed it\npassed every earlier gate and stopped at the last step with\n`napi: command not found`.",
+          "timestamp": "2026-08-30T09:54:02Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/900d29a76e7cb1488930b2fa71f7053ead69b187"
+        },
+        "date": 1788093653252,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 307,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 617,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 409,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1640,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1330,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1225,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1023,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1438,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1430,
             "unit": "ms"
           }
         ]
