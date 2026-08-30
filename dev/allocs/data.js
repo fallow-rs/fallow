@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788125880151,
+  "lastUpdate": 1788130057640,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6866dc917cb85276c2ef8c2d16d0deff25d2a09b",
-          "message": "fix(analyze): align jest/vitest __mocks__ manual-mock semantics (#2250)\n\n* fix(analyze): align jest/vitest __mocks__ manual-mock semantics\n\nFactory-less vi.mock and jest.mock calls with a bare package specifier now\nsynthesize a speculative root-level __mocks__/<specifier> candidate. The\nresolver probes ancestor __mocks__ directories of the test file and credits\nthe manual mock file when it exists, so root-level node-module manual mocks\nno longer surface as unused files in vitest projects (issue #2225). A root\nmock without a matching mock call keeps surfacing under vitest, which\napplies manual mocks only through vi.mock; jest keeps its __mocks__ entry\npatterns, matching its automatic node-module mocking.\n\nThe vitest plugin no longer declares the /__mocks__ virtual package suffix:\nliteral X/__mocks__ imports carry no runner semantics, so they are reported\nas unlisted dependencies under both runners (issue #2226). Extract and\ngraph cache versions are bumped because extraction output and resolution\nbehavior changed.\n\n* docs(agents): align plugins rule with removed vitest /__mocks__ suffix\n\nNo built-in plugin declares a virtual package suffix since issue #2226;\nthe old example claimed @aws-sdk/__mocks__ stays suppressed, which is\nexactly the literal-import case that now reports as unlisted.",
-          "timestamp": "2026-08-13T11:58:20+02:00",
-          "tree_id": "2a54471f69408aab37ebdc1af6cd88709ce26aaf",
-          "url": "https://github.com/fallow-rs/fallow/commit/6866dc917cb85276c2ef8c2d16d0deff25d2a09b"
-        },
-        "date": 1786615350573,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 10325315,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 53013,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1026000,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7541,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8430,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "3446f413b252cf0950ac63782e0b0ff25a1162df",
+          "message": "chore: release v3.21.0",
+          "timestamp": "2026-08-31T00:42:39+02:00",
+          "tree_id": "e583367048294079d0a67e90746aefe8047d0ec9",
+          "url": "https://github.com/fallow-rs/fallow/commit/3446f413b252cf0950ac63782e0b0ff25a1162df"
+        },
+        "date": 1788130054449,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9783341,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49451,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1195753,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8399,
             "unit": "allocations"
           }
         ]
