@@ -26,6 +26,15 @@ fn copy_dir_recursive(src: &Path, dst: &Path) {
     std::fs::create_dir_all(dst).expect("create destination directory");
     for entry in std::fs::read_dir(src).expect("read source directory") {
         let entry = entry.expect("read source entry");
+        // A fixture's cache directory is not part of the fixture. Another test
+        // in this binary runs the real binary against the shared fixture as its
+        // root, which writes and renames cache files there, so copying that
+        // directory races the writer: the entry is read, the writer renames its
+        // temp file over the old one, and the copy fails with a not-found for a
+        // file the caller never asked for. The copy also wants a cold cache.
+        if entry.file_name() == ".fallow" {
+            continue;
+        }
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
         let file_type = entry.file_type().expect("read source entry type");

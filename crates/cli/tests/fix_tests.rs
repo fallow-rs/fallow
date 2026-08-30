@@ -748,6 +748,11 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
+        // A fixture's cache directory is not part of the fixture, and another
+        // test in this binary may be writing it while this copy walks it.
+        if entry.file_name() == ".fallow" {
+            continue;
+        }
         let ty = entry.file_type()?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
