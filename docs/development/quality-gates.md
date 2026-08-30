@@ -43,8 +43,14 @@ Install into the checkout you are working in:
 ```bash
 npm ci
 npm ci --prefix tools/type-aware-sidecar
+npm ci --prefix crates/napi
 pnpm --dir editors/vscode install
 ```
+
+`verify:full` runs `npm --prefix crates/napi run build:debug`, whose `napi`
+binary comes from that package's own devDependencies. Without the install the
+step ends in `napi: command not found` and exit 127, after every earlier gate
+has already passed.
 
 `scripts/assert-local-resolution.mjs` enforces the invariant for the
 entrypoints that load third-party modules. The JavaScript lint, format, and
