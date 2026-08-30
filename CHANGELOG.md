@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A telemetry spool lock that cannot be opened is no longer reported as
+  contention.** `SpoolLock::try_acquire` mapped a lock file it could not open
+  (a read-only or missing directory, a permissions denial, a descriptor limit)
+  onto the same "no lock" outcome as another `fallow` process legitimately
+  holding it, and discarded the error. The two mean opposite things: contention
+  is normal and self-correcting, while an unopenable lock file skips every
+  spool drain and trim on every run, silently and permanently. The unopenable
+  case now carries the underlying error into the existing debug diagnostic, so
+  the condition is observable instead of invisible. No behavior change on the
+  contended path, and no telemetry is sent that was not sent before.
+
 - **Istanbul coverage now matches functions whose extracted position falls
   between the producer's declaration and its body**
   (Closes [#2448](https://github.com/fallow-rs/fallow/issues/2448),

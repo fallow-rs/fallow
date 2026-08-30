@@ -2104,19 +2104,52 @@ struct SpoolLock {
     _file: std::fs::File,
 }
 
+/// Why [`SpoolLock::acquire`] did not hand back the lock.
+///
+/// The two cases mean opposite things and only one is normal. `Contended` is
+/// the designed outcome when another `fallow` process is already rewriting the
+/// spool: the caller skips and the next run picks the work up. `Unavailable`
+/// means this machine cannot take the lock at all, so every drain and trim is
+/// skipped on every run and the spool grows until the size cap trims it
+/// blindly. Collapsing both into "no lock" hid that second case entirely.
+#[derive(Debug)]
+enum SpoolLockUnavailable {
+    /// Another process holds the lock. Expected, and self-correcting.
+    Contended,
+    /// The lock file could not be opened or locked on this machine: a
+    /// read-only or missing directory, permissions, or a descriptor limit.
+    /// Never self-correcting, so it is worth a diagnostic.
+    Unusable(std::io::Error),
+}
+
 impl SpoolLock {
-    fn try_acquire(lock_path: &Path) -> Option<Self> {
+    /// Take the lock, reporting WHY when it is not taken.
+    ///
+    /// Separate from [`Self::try_acquire`] so tests can tell a contended lock
+    /// apart from a lock file that could not be opened. A test asserting only
+    /// `is_none()` reports "another process holds it" for an environment that
+    /// could not open the file at all, which sends the reader after a
+    /// concurrency bug that is not there.
+    fn acquire(lock_path: &Path) -> Result<Self, SpoolLockUnavailable> {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
             .open(lock_path)
-            .ok()?;
+            .map_err(SpoolLockUnavailable::Unusable)?;
         match file.try_lock() {
-            Ok(()) => Some(Self { _file: file }),
+            Ok(()) => Ok(Self { _file: file }),
             // Another process holds the lock; skip and let the next run retry.
-            Err(std::fs::TryLockError::WouldBlock) => None,
-            Err(std::fs::TryLockError::Error(err)) => {
+            Err(std::fs::TryLockError::WouldBlock) => Err(SpoolLockUnavailable::Contended),
+            Err(std::fs::TryLockError::Error(err)) => Err(SpoolLockUnavailable::Unusable(err)),
+        }
+    }
+
+    fn try_acquire(lock_path: &Path) -> Option<Self> {
+        match Self::acquire(lock_path) {
+            Ok(lock) => Some(lock),
+            Err(SpoolLockUnavailable::Contended) => None,
+            Err(SpoolLockUnavailable::Unusable(err)) => {
                 tracing::debug!(error = %err, "could not acquire telemetry spool lock");
                 None
             }
@@ -3306,15 +3339,52 @@ mod tests {
     fn spool_lock_excludes_concurrent_acquire() {
         let dir = tempfile::tempdir().expect("tempdir");
         let lock_path = dir.path().join(SPOOL_LOCK_NAME);
-        let first = SpoolLock::try_acquire(&lock_path).expect("first acquire");
+        // Assert on WHY each acquire failed, not just that it failed. An
+        // environment that cannot open the lock file at all would otherwise
+        // report "the lock was still held after its holder dropped", pointing
+        // at a lock-release bug that is not there.
+        let first = match SpoolLock::acquire(&lock_path) {
+            Ok(lock) => lock,
+            Err(err) => panic!("first acquire should take a free lock, got {err:?}"),
+        };
+        match SpoolLock::acquire(&lock_path) {
+            Err(SpoolLockUnavailable::Contended) => {}
+            Ok(_) => panic!("second acquire should contend while the first is held"),
+            Err(SpoolLockUnavailable::Unusable(err)) => {
+                panic!("second acquire should contend, not fail to open the lock file: {err}")
+            }
+        }
+        drop(first);
+        match SpoolLock::acquire(&lock_path) {
+            Ok(_) => {}
+            Err(SpoolLockUnavailable::Contended) => {
+                panic!("lock should be free after the holder drops")
+            }
+            Err(SpoolLockUnavailable::Unusable(err)) => panic!(
+                "lock file became unusable between acquires, which is an environment failure                  rather than a locking failure: {err}"
+            ),
+        }
+    }
+
+    #[test]
+    fn spool_lock_reports_an_unusable_lock_file_separately_from_contention() {
+        // A directory that does not exist stands in for every environment
+        // failure that reaches the same code path: a read-only parent, a
+        // permissions denial, or a descriptor limit. None of them mean another
+        // process holds the lock, and the production caller logs this case
+        // instead of silently skipping every drain.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock_path = dir.path().join("missing-parent").join(SPOOL_LOCK_NAME);
+        match SpoolLock::acquire(&lock_path) {
+            Err(SpoolLockUnavailable::Unusable(_)) => {}
+            Ok(_) => panic!("a lock file under a missing directory should not be acquirable"),
+            Err(SpoolLockUnavailable::Contended) => {
+                panic!("an unopenable lock file must not be reported as contention")
+            }
+        }
         assert!(
             SpoolLock::try_acquire(&lock_path).is_none(),
-            "second acquire should contend while the first is held",
-        );
-        drop(first);
-        assert!(
-            SpoolLock::try_acquire(&lock_path).is_some(),
-            "lock should be free after the holder drops",
+            "the Option-returning caller still declines the lock"
         );
     }
 
