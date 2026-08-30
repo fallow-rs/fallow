@@ -50,6 +50,8 @@ struct HealthSummaryAssembly<'a> {
     has_istanbul_coverage: bool,
     istanbul_matched: usize,
     istanbul_total: usize,
+    istanbul_files_matched: usize,
+    istanbul_files_total: usize,
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
@@ -75,6 +77,8 @@ fn build_summary_from_assembly(
 ) -> HealthSummary {
     let (ist_matched, ist_total) =
         istanbul_counts_from_score_output(assembly.score_output.as_ref());
+    let (ist_files_matched, ist_files_total) =
+        istanbul_file_counts_from_score_output(assembly.score_output.as_ref());
     build_health_summary(
         opts,
         &HealthSummaryAssembly {
@@ -92,6 +96,8 @@ fn build_summary_from_assembly(
             has_istanbul_coverage: assembly.has_istanbul_coverage,
             istanbul_matched: ist_matched,
             istanbul_total: ist_total,
+            istanbul_files_matched: ist_files_matched,
+            istanbul_files_total: ist_files_total,
             sev_critical: assembly.sev_critical,
             sev_high: assembly.sev_high,
             sev_moderate: assembly.sev_moderate,
@@ -323,6 +329,14 @@ fn istanbul_counts_from_score_output(
     score_output.map_or((0, 0), |o| (o.istanbul_matched, o.istanbul_total))
 }
 
+fn istanbul_file_counts_from_score_output(
+    score_output: Option<&super::scoring::FileScoreOutput>,
+) -> (usize, usize) {
+    score_output.map_or((0, 0), |o| {
+        (o.istanbul_files_joined, o.istanbul_files_total)
+    })
+}
+
 /// Build the per-file top-render-fan-in lookup for the human drill-down: maps a
 /// component file's absolute path to its highest-render-SITE component
 /// `(component name, render sites)`. A file with several components keeps only
@@ -372,6 +386,12 @@ fn build_health_summary(
         input.istanbul_matched,
         input.istanbul_total,
     );
+    let (istanbul_files_matched, istanbul_files_total) = summary_istanbul_counts(
+        opts,
+        input.has_istanbul_coverage,
+        input.istanbul_files_matched,
+        input.istanbul_files_total,
+    );
     HealthSummary {
         files_analyzed: input.files_analyzed,
         functions_analyzed: input.total_functions,
@@ -393,6 +413,8 @@ fn build_health_summary(
         coverage_source_consistency: summary_coverage_source_consistency(opts, input.findings),
         istanbul_matched,
         istanbul_total,
+        istanbul_files_matched,
+        istanbul_files_total,
         severity_critical_count: input.sev_critical,
         severity_high_count: input.sev_high,
         severity_moderate_count: input.sev_moderate,

@@ -925,6 +925,14 @@ pub struct HealthSummary {
     /// Functions in the Istanbul coverage file, in Istanbul mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub istanbul_total: Option<usize>,
+    /// Analyzed files the Istanbul coverage file carried an entry for.
+    /// Read against `istanbul_files_total`, this separates a coverage file
+    /// that did not join from code the coverage file says nothing ran in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub istanbul_files_matched: Option<usize>,
+    /// Files described by the Istanbul coverage file, joined or not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub istanbul_files_total: Option<usize>,
     /// Findings with critical severity.
     pub severity_critical_count: usize,
     /// Findings with high severity.
@@ -952,6 +960,8 @@ impl Default for HealthSummary {
             coverage_source_consistency: None,
             istanbul_matched: None,
             istanbul_total: None,
+            istanbul_files_matched: None,
+            istanbul_files_total: None,
             severity_critical_count: 0,
             severity_high_count: 0,
             severity_moderate_count: 0,

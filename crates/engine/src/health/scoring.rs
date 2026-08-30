@@ -45,6 +45,12 @@ pub struct FileScoreOutput {
     /// Istanbul match stats: functions matched / total (only meaningful with Istanbul model).
     pub(crate) istanbul_matched: usize,
     pub(crate) istanbul_total: usize,
+    /// Analyzed files the coverage map carried an entry for. Read against the
+    /// map's own file count, this separates a map that did not join from code
+    /// the map says nothing ran in.
+    pub(crate) istanbul_files_joined: usize,
+    /// Files the coverage map describes, joined or not. Zero without a map.
+    pub(crate) istanbul_files_total: usize,
     /// Per-file, per-function CRAP data used to emit `--max-crap` findings.
     /// Absolute paths match `FileHealthScore.path`. Absent entries indicate the
     /// file had zero functions.
@@ -74,6 +80,8 @@ struct FileScoreOutputParts<'a> {
     direct_callers: rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
     istanbul_matched: usize,
     istanbul_total: usize,
+    istanbul_files_joined: usize,
+    istanbul_files_total: usize,
     per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>>,
     template_inherit: rustc_hash::FxHashMap<crate::discover::FileId, TemplateInheritContext>,
 }
@@ -1486,6 +1494,11 @@ impl IstanbulCoverage {
     pub fn get(&self, path: &std::path::Path) -> Option<&IstanbulFileCoverage> {
         self.files.get(path)
     }
+
+    /// How many files the coverage map describes, joined or not.
+    pub fn file_count(&self) -> usize {
+        self.files.len()
+    }
 }
 
 /// Precedence decision for per-function CRAP coverage inputs.
@@ -2286,6 +2299,8 @@ pub(super) fn compute_file_scores(
         direct_callers,
         istanbul_matched: acc.istanbul_matched,
         istanbul_total: acc.istanbul_total,
+        istanbul_files_joined: acc.istanbul_files_joined,
+        istanbul_files_total: acc.istanbul_files_total,
         per_function_crap: acc.per_function_crap,
         template_inherit,
     }))
@@ -2315,6 +2330,8 @@ struct FileScoreAccumulator {
     unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
     per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>>,
     istanbul_matched: usize,
+    istanbul_files_joined: usize,
+    istanbul_files_total: usize,
     istanbul_total: usize,
 }
 
@@ -2329,6 +2346,8 @@ impl FileScoreAccumulator {
             per_function_crap: rustc_hash::FxHashMap::default(),
             istanbul_matched: 0,
             istanbul_total: 0,
+            istanbul_files_joined: 0,
+            istanbul_files_total: 0,
         }
     }
 }
@@ -2341,6 +2360,9 @@ fn accumulate_file_scores(
 ) -> FileScoreAccumulator {
     let mut acc = FileScoreAccumulator {
         unused_export_names,
+        istanbul_files_total: ctx
+            .istanbul_coverage
+            .map_or(0, IstanbulCoverage::file_count),
         ..FileScoreAccumulator::with_capacity(ctx.graph.modules.len())
     };
     for node in &ctx.graph.modules {
@@ -2407,6 +2429,7 @@ fn compute_one_file_score(
     let crap = compute_file_score_crap(node, ctx, &path_owned, &ceilings);
     acc.istanbul_matched += crap.istanbul_matched;
     acc.istanbul_total += crap.istanbul_total;
+    acc.istanbul_files_joined += usize::from(crap.coverage_file_joined);
     record_per_function_crap(&mut acc.per_function_crap, &path_owned, crap.per_function);
 
     // `crap_effective_threshold` is the file's lowest effective ceiling, on the
@@ -2499,6 +2522,8 @@ fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
         analysis_snapshot,
         istanbul_matched: parts.istanbul_matched,
         istanbul_total: parts.istanbul_total,
+        istanbul_files_joined: parts.istanbul_files_joined,
+        istanbul_files_total: parts.istanbul_files_total,
         per_function_crap: parts.per_function_crap,
         template_inherit_provenance,
     }
@@ -2569,6 +2594,9 @@ struct FileScoreCrap {
     per_function: Vec<PerFunctionCrap>,
     istanbul_matched: usize,
     istanbul_total: usize,
+    /// The coverage map carried an entry for this file. Distinguishes a map
+    /// that did not join from code the map genuinely says nothing ran in.
+    coverage_file_joined: bool,
 }
 
 impl FileScoreCrap {
@@ -2579,6 +2607,7 @@ impl FileScoreCrap {
             per_function: Vec::new(),
             istanbul_matched: 0,
             istanbul_total: 0,
+            coverage_file_joined: false,
         }
     }
 
@@ -2589,16 +2618,18 @@ impl FileScoreCrap {
             per_function: result.per_function,
             istanbul_matched: 0,
             istanbul_total: 0,
+            coverage_file_joined: false,
         }
     }
 
-    fn istanbul(result: IstanbulCrapResult) -> Self {
+    fn istanbul(result: IstanbulCrapResult, coverage_file_joined: bool) -> Self {
         Self {
             max: result.max_crap,
             signals: result.signals,
             per_function: result.per_function,
             istanbul_matched: result.matched,
             istanbul_total: result.total,
+            coverage_file_joined,
         }
     }
 }
@@ -2660,12 +2691,15 @@ fn compute_istanbul_file_crap(
     is_test_reachable: bool,
     ceilings: &CrapCeilingLookup<'_>,
 ) -> FileScoreCrap {
-    FileScoreCrap::istanbul(compute_crap_scores_istanbul(
-        &module.complexity,
-        file_coverage,
-        is_test_reachable,
-        ceilings,
-    ))
+    FileScoreCrap::istanbul(
+        compute_crap_scores_istanbul(
+            &module.complexity,
+            file_coverage,
+            is_test_reachable,
+            ceilings,
+        ),
+        file_coverage.is_some(),
+    )
 }
 
 fn compute_static_file_crap(

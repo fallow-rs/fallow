@@ -1750,6 +1750,9 @@ fn render_findings(lines: &mut Vec<String>, report: &fallow_output::HealthReport
     if let Some(note) = crap_coverage_note(report) {
         lines.push(format!("  {}", note.dimmed()));
     }
+    if let Some(warning) = coverage_join_warning(report) {
+        lines.push(format!("  {}", warning.yellow()));
+    }
 
     let mut last_file = String::new();
     for finding in &report.findings {
@@ -2236,6 +2239,28 @@ fn threshold_override_outstanding_suffix(
     // covers `maxUnitSize`, which keeps a unit in the large-function list
     // without ever emitting a finding of its own.
     format!(" (still breaches: {})", names.join(", "))
+}
+
+/// Warn when the coverage file describes files that no analyzed file matched.
+///
+/// Without this, a coverage file written for a different root, a container
+/// path prefix, or an older checkout reads exactly like code that has no
+/// tests: every function falls back to its estimate and nothing says why.
+fn coverage_join_warning(report: &fallow_output::HealthReport) -> Option<String> {
+    let matched = report.summary.istanbul_files_matched?;
+    let total = report.summary.istanbul_files_total?;
+    if total == 0 || matched >= total {
+        return None;
+    }
+    let file_word = if total == 1 { "file" } else { "files" };
+    if matched == 0 {
+        return Some(format!(
+            "note: the coverage file describes {total} {file_word} that no analyzed file matched; check that it was generated for this project, or set --coverage-root."
+        ));
+    }
+    Some(format!(
+        "note: {matched} of {total} {file_word} in the coverage file matched an analyzed file; the rest scored from their estimate."
+    ))
 }
 
 fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
@@ -2895,6 +2920,58 @@ mod tests {
     use super::super::{plain, strip_ansi};
     use super::*;
     use std::path::PathBuf;
+
+    fn report_with_join_counts(
+        matched: Option<usize>,
+        total: Option<usize>,
+    ) -> fallow_output::HealthReport {
+        fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary {
+                istanbul_files_matched: matched,
+                istanbul_files_total: total,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// A coverage file written for another root joins nothing, which without
+    /// this line is indistinguishable from code that has no tests.
+    #[test]
+    fn a_coverage_file_that_joins_nothing_says_so() {
+        let warning = coverage_join_warning(&report_with_join_counts(Some(0), Some(12)))
+            .expect("a map that joined no file warns");
+        assert!(
+            warning.contains("12 files that no analyzed file matched"),
+            "{warning}"
+        );
+        assert!(warning.contains("--coverage-root"), "{warning}");
+    }
+
+    #[test]
+    fn a_partial_join_reports_the_ratio() {
+        let warning = coverage_join_warning(&report_with_join_counts(Some(3), Some(12)))
+            .expect("a partial join warns");
+        assert!(warning.contains("3 of 12 files"), "{warning}");
+    }
+
+    /// Nothing is added to a healthy run, and nothing to a run without a
+    /// coverage file at all.
+    #[test]
+    fn a_complete_join_and_a_run_without_coverage_stay_quiet() {
+        assert_eq!(
+            coverage_join_warning(&report_with_join_counts(Some(12), Some(12))),
+            None
+        );
+        assert_eq!(
+            coverage_join_warning(&report_with_join_counts(None, None)),
+            None
+        );
+        assert_eq!(
+            coverage_join_warning(&report_with_join_counts(Some(0), Some(0))),
+            None
+        );
+    }
 
     #[test]
     fn health_empty_findings_produces_no_header() {

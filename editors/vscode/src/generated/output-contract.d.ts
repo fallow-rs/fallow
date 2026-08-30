@@ -5743,6 +5743,16 @@ istanbul_matched?: (number | null)
  */
 istanbul_total?: (number | null)
 /**
+ * Analyzed files the Istanbul coverage file carried an entry for.
+ * Read against `istanbul_files_total`, this separates a coverage file
+ * that did not join from code the coverage file says nothing ran in.
+ */
+istanbul_files_matched?: (number | null)
+/**
+ * Files described by the Istanbul coverage file, joined or not.
+ */
+istanbul_files_total?: (number | null)
+/**
  * Findings with critical severity.
  */
 severity_critical_count: number

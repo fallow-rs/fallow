@@ -2966,6 +2966,20 @@
           ],
           "description": "Functions in the Istanbul coverage file, in Istanbul mode."
         },
+        "istanbul_files_matched": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Analyzed files the Istanbul coverage file carried an entry for.\nRead against `istanbul_files_total`, this separates a coverage file\nthat did not join from code the coverage file says nothing ran in."
+        },
+        "istanbul_files_total": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Files described by the Istanbul coverage file, joined or not."
+        },
         "severity_critical_count": {
           "type": "integer",
           "description": "Findings with critical severity."
