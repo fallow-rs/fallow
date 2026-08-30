@@ -108,8 +108,8 @@ impl CoverageFixture {
                             "end": { "line": 3, "column": 16 }
                         },
                         "loc": {
-                            "start": { "line": 3, "column": 35 },
-                            "end": { "line": 11, "column": 10 }
+                            "start": { "line": 3, "column": 36 },
+                            "end": { "line": 11, "column": 1 }
                         }
                     }
                 },

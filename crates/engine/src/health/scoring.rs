@@ -970,6 +970,15 @@ struct IstanbulFunctionCoverage {
 }
 
 impl IstanbulFunctionCoverage {
+    /// Whether this record answers to `name`, either as recorded or as the
+    /// property behind an accessor keyword the producer kept.
+    fn answers_to(&self, name: &str) -> bool {
+        if self.name == name {
+            return true;
+        }
+        accessor_property_name(&self.name) == Some(name)
+    }
+
     fn nearest_alias(
         &self,
         target: IstanbulPosition,
@@ -1194,6 +1203,17 @@ impl IstanbulFileCoverage {
                     ),
                     function_index,
                 );
+                // An accessor answers to its property name as well, without
+                // giving up the spelling the producer recorded.
+                if let Some(property) = accessor_property_name(&function.name) {
+                    alias_index
+                        .entry((
+                            property.to_string(),
+                            alias.position.line,
+                            alias.position.col,
+                        ))
+                        .or_insert(function_index);
+                }
             }
         }
 
@@ -1289,7 +1309,7 @@ impl IstanbulFileCoverage {
         if let Some(function) = window
             .iter()
             .copied()
-            .filter(|function_index| self.functions[*function_index].name == name)
+            .filter(|function_index| self.functions[*function_index].answers_to(name))
             .filter_map(|function_index| {
                 let function = &self.functions[function_index];
                 function
@@ -1471,7 +1491,7 @@ impl IstanbulFileCoverage {
     fn unambiguous_named_pct(&self, name: &str) -> Option<f64> {
         let mut found: Option<f64> = None;
         for function in &self.functions {
-            if function.name != name {
+            if !function.answers_to(name) {
                 continue;
             }
             match found {
@@ -1617,7 +1637,7 @@ pub(super) fn load_istanbul_coverage_for_sources(
         .map_err(|e| format!("failed to read coverage file {}: {e}", file_path.display()))?;
 
     let raw: std::collections::BTreeMap<String, oxc_coverage_instrument::FileCoverage> =
-        oxc_coverage_instrument::parse_coverage_map(&json).map_err(|e| {
+        parse_coverage_map_tolerantly(&json).map_err(|e| {
             format!(
                 "failed to parse coverage data from {}: {e}",
                 file_path.display()
@@ -1675,6 +1695,70 @@ fn read_discovered_source(
     } else {
         None
     }
+}
+
+/// Parse a coverage map, retrying once with unplaceable coordinates clamped.
+///
+/// A producer can emit a negative coordinate for a position it could not
+/// place: `v8-to-istanbul`, which is what c8 and nyc write, records
+/// `column: -1` on the implicit else of a bare `if`. Positions are unsigned,
+/// so one such coordinate rejects the entire map, and it always lands in
+/// `branchMap`, which nothing here reads. The retry costs a second parse and
+/// only runs after the strict one has already failed.
+fn parse_coverage_map_tolerantly(
+    json: &str,
+) -> Result<std::collections::BTreeMap<String, oxc_coverage_instrument::FileCoverage>, String> {
+    match oxc_coverage_instrument::parse_coverage_map(json) {
+        Ok(raw) => Ok(raw),
+        Err(strict_error) => {
+            let mut value: serde_json::Value =
+                serde_json::from_str(json).map_err(|_| strict_error.to_string())?;
+            if !clamp_negative_positions(&mut value) {
+                return Err(strict_error.to_string());
+            }
+            serde_json::from_value(value).map_err(|_| strict_error.to_string())
+        }
+    }
+}
+
+/// Clamp every negative `line` or `column` in the tree to zero, reporting
+/// whether anything changed. Zero is what the shared position type already
+/// uses for a coordinate a producer left null or absent.
+fn clamp_negative_positions(value: &mut serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(entries) => {
+            let mut clamped = false;
+            for (key, child) in entries.iter_mut() {
+                if matches!(key.as_str(), "line" | "column")
+                    && child.as_i64().is_some_and(|number| number < 0)
+                {
+                    *child = serde_json::Value::from(0);
+                    clamped = true;
+                    continue;
+                }
+                clamped |= clamp_negative_positions(child);
+            }
+            clamped
+        }
+        serde_json::Value::Array(items) => items.iter_mut().fold(false, |clamped, item| {
+            clamped | clamp_negative_positions(item)
+        }),
+        _ => false,
+    }
+}
+
+/// The property name behind an accessor record, when a producer prefixed it.
+///
+/// istanbul-lib-instrument leaves a class accessor anonymous, but raw V8
+/// coverage and `oxc-coverage-instrument` record `get area` and `set area`,
+/// while fallow extracts the unit as `area`. The prefix is the whole
+/// difference, so a record keeps its own spelling and answers to the bare
+/// property name as well.
+fn accessor_property_name(name: &str) -> Option<&str> {
+    let property = name
+        .strip_prefix("get ")
+        .or_else(|| name.strip_prefix("set "))?;
+    (!property.is_empty() && !property.contains(' ')).then_some(property)
 }
 
 /// Rebase one Istanbul file path from `coverage_root` onto `project_root`.
@@ -5790,6 +5874,101 @@ mod tests {
         );
 
         std::fs::write(coverage_path, serde_json::to_string(&root).unwrap()).unwrap();
+    }
+
+    /// `v8-to-istanbul`, which is what c8 and nyc write, records `column: -1`
+    /// for the implicit else of a bare `if`. Positions are unsigned, so the
+    /// strict parse rejected the whole map over a coordinate in a section
+    /// nothing here reads. Geometry from a map generated by running real V8
+    /// coverage through v8-to-istanbul 9.2.0.
+    #[test]
+    fn a_negative_branch_coordinate_does_not_cost_the_whole_map() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/pick.ts");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        let source = source_path.to_string_lossy().into_owned();
+        std::fs::write(
+            &coverage_path,
+            serde_json::to_string(&serde_json::json!({
+                source.clone(): {
+                    "path": source,
+                    "statementMap": {},
+                    "fnMap": {
+                        "0": {
+                            "name": "pick",
+                            "line": 1,
+                            "decl": { "start": { "line": 1, "column": 16 }, "end": { "line": 1, "column": 20 } },
+                            "loc": { "start": { "line": 1, "column": 41 }, "end": { "line": 6, "column": 1 } }
+                        }
+                    },
+                    "branchMap": {
+                        "0": {
+                            "type": "branch",
+                            "line": 5,
+                            "loc": {
+                                "start": { "line": 5, "column": -1 },
+                                "end": { "line": 6, "column": 0 }
+                            },
+                            "locations": [
+                                {
+                                    "start": { "line": 5, "column": -1 },
+                                    "end": { "line": 6, "column": 0 }
+                                }
+                            ]
+                        }
+                    },
+                    "s": {},
+                    "f": { "0": 2 },
+                    "b": { "0": [1, 0] }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        assert_eq!(file_coverage.lookup("pick", 1, 16), Some(100.0));
+    }
+
+    /// Raw V8 coverage and `oxc-coverage-instrument` record an accessor as
+    /// `get area`, istanbul-lib-instrument leaves it anonymous, and fallow
+    /// extracts the unit as `area`. Both spellings must reach the record.
+    #[test]
+    fn an_accessor_answers_to_its_property_name() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/box.ts");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "get area",
+                    "line": 4,
+                    "decl": { "start": { "line": 4, "column": 6 }, "end": { "line": 4, "column": 10 } },
+                    "loc": { "start": { "line": 4, "column": 13 }, "end": { "line": 6, "column": 3 } }
+                }
+            }),
+            &serde_json::json!({ "0": 0 }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        // Fallow extracts the accessor under the property name alone.
+        assert_eq!(file_coverage.lookup("area", 4, 6), Some(0.0));
+        // The producer's own spelling still resolves.
+        assert_eq!(file_coverage.lookup("get area", 4, 6), Some(0.0));
     }
 
     #[test]
