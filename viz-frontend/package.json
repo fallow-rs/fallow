@@ -22,6 +22,6 @@
     "@types/d3-zoom": "^3.0.8",
     "rolldown": "1.2.4",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
