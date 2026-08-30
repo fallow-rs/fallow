@@ -27,7 +27,7 @@ expression: rendered
 |:-----|:---------|:-------|:---------|:-----------|:----------|:---------|:-----|
 | `src/gnarly.ts:88` | `bigSwitch` | new | high | 24 | 18 | partial | 42.5 |
 
-*Coverage model: istanbul. Matched 12/40 functions. Low match rate; check `--coverage-root` is correct for this checkout.*
+*Coverage model: istanbul. Matched 12/40 functions.*
 
 ### Duplication
 

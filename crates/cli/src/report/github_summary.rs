@@ -2029,6 +2029,29 @@ fn audit_complexity_section(env: &Value) -> String {
     )
 }
 
+/// Point at the coverage root only when the coverage file failed to join.
+///
+/// A low function match rate is ordinary: a coverage file covers the files its
+/// test run touched, so a project whose suite exercises a fraction of its
+/// modules matches a fraction of its functions with nothing wrong. The signal
+/// that a path is misconfigured is files in the coverage file that no analyzed
+/// file matched.
+fn audit_coverage_join_suffix(summary: &Value) -> String {
+    let matched = summary
+        .get("istanbul_files_matched")
+        .and_then(Value::as_u64);
+    let total = summary.get("istanbul_files_total").and_then(Value::as_u64);
+    match (matched, total) {
+        (Some(matched), Some(total)) if total > 0 && matched == 0 => format!(
+            ", from a coverage file describing {total} files that none of the analyzed files matched; check `--coverage-root` is correct for this checkout."
+        ),
+        (Some(matched), Some(total)) if total > 0 && matched < total => format!(
+            ", from {matched} of {total} files in the coverage file; the rest matched no analyzed file."
+        ),
+        _ => ".".to_owned(),
+    }
+}
+
 fn audit_coverage_model_note(complexity: &Value) -> String {
     let summary = complexity.get("summary").cloned().unwrap_or(Value::Null);
     let model = summary.get("coverage_model").and_then(Value::as_str);
@@ -2038,13 +2061,9 @@ fn audit_coverage_model_note(complexity: &Value) -> String {
             let total = summary.get("istanbul_total").and_then(Value::as_u64);
             match (matched, total) {
                 (Some(matched), Some(total)) if total > 0 => {
-                    let suffix = if matched * 100 / total < 50 {
-                        ". Low match rate; check `--coverage-root` is correct for this checkout."
-                    } else {
-                        "."
-                    };
                     format!(
-                        "\n\n*Coverage model: istanbul. Matched {matched}/{total} functions{suffix}*"
+                        "\n\n*Coverage model: istanbul. Matched {matched}/{total} functions{}*",
+                        audit_coverage_join_suffix(&summary)
                     )
                 }
                 _ => "\n\n*Coverage model: istanbul (exact, from `--coverage`).*".to_owned(),

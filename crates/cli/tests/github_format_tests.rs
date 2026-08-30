@@ -207,7 +207,7 @@ fn audit_envelope() -> Value {
             "findings": [
                 { "path": "src/gnarly.ts", "line": 88, "name": "bigSwitch", "severity": "high", "cyclomatic": 24, "cognitive": 18, "crap": 42.5, "coverage_tier": "partial", "introduced": true }
             ],
-            "summary": { "coverage_model": "istanbul", "istanbul_matched": 12, "istanbul_total": 40 }
+            "summary": { "coverage_model": "istanbul", "istanbul_matched": 12, "istanbul_total": 40, "istanbul_files_matched": 5, "istanbul_files_total": 5 }
         },
         "duplication": {
             "clone_groups": [
@@ -793,6 +793,39 @@ fn github_summary_health_snapshot() {
         &LinkContext::default(),
     );
     insta::assert_snapshot!("github_summary_health", rendered);
+}
+
+/// A coverage file covers the files its test run touched, so matching a
+/// fraction of a project's functions is ordinary. The signal that a path is
+/// wrong is files in the coverage file that no analyzed file matched, and the
+/// note points at `--coverage-root` for that case alone.
+#[test]
+fn audit_summary_names_the_coverage_root_only_when_the_join_failed() {
+    let with_join_failure = |matched: u64, total: u64| {
+        let mut envelope = audit_envelope();
+        envelope["complexity"]["summary"] = serde_json::json!({
+            "coverage_model": "istanbul",
+            "istanbul_matched": 12,
+            "istanbul_total": 40,
+            "istanbul_files_matched": matched,
+            "istanbul_files_total": total,
+        });
+        render_summary(EnvelopeKind::Audit, &envelope, &LinkContext::default())
+    };
+
+    let joined = with_join_failure(5, 5);
+    assert!(joined.contains("Matched 12/40 functions."), "{joined}");
+    assert!(!joined.contains("--coverage-root"), "{joined}");
+
+    let unjoined = with_join_failure(0, 5);
+    assert!(unjoined.contains("--coverage-root"), "{unjoined}");
+    assert!(
+        unjoined.contains("5 files that none of the analyzed files matched"),
+        "{unjoined}"
+    );
+
+    let partial = with_join_failure(2, 5);
+    assert!(partial.contains("from 2 of 5 files"), "{partial}");
 }
 
 #[test]

@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The CI summary points at `--coverage-root` only when the coverage file
+  failed to join.** The audit summary warned about a low match rate whenever
+  fewer than half the analyzed functions matched a record, which is ordinary:
+  a coverage file covers the files its test run touched, so a project whose
+  suite exercises part of its modules matched part of its functions and was
+  told its paths were probably wrong. The note now keys on files in the
+  coverage file that no analyzed file matched, and says how many.
+
 - **Coverage maps written by `v8-to-istanbul` are no longer rejected**
   (Closes [#2454](https://github.com/fallow-rs/fallow/issues/2454)). c8, nyc in
   v8 mode, and older vitest versions write a map in which the implicit else of
