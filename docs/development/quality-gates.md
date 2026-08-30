@@ -28,6 +28,34 @@ npm ci --prefix tools/type-aware-sidecar
 
 CI installs the sidecar explicitly, so these tests pass there either way.
 
+The coverage producer corpus pins four JavaScript coverage producers in a
+package of its own, so the root `npm ci` every contributor and every CI job
+runs stays untouched:
+
+```bash
+npm ci --prefix tests/coverage-producer-corpus/producers \
+  --no-audit --no-fund --ignore-scripts
+```
+
+That install is needed only to re-record the corpus
+(`npm run refresh:coverage-producers`) or to compare the committed maps against
+the pinned producers (`npm run check:coverage-producer-drift`). Do not add
+`--omit=optional`: `oxc-coverage-instrument` ships its platform bindings as
+optional dependencies, and its WASI fallback does not stand in for them.
+Importing the package then throws `Cannot find native binding`, so recording
+stops instead of recording something subtly different.
+
+The conformance gate itself (`npm run check:coverage-producers`, part of
+`verify:full` and of the CI `check` job) reads the committed maps and needs no
+producer install. It does need the binary: it runs `target/debug/fallow` and
+stops with `fallow binary not found at <path>` when that is missing, so build
+it first with `cargo build -p fallow-cli --bin fallow`, or run any `cargo test`
+target that already does. Both re-recording commands name the Node they run on
+when it differs from the Node the corpus was recorded on. That line is
+provenance, not a gate: the recorded maps are byte-identical on Node 22.21.1,
+22.23.2, 24.18.0 and 26.7.0, and a real V8 change surfaces as a map difference
+with a message that names the row.
+
 ## Local resolution invariant
 
 Every checkout runs the dependency versions it pins. Node resolves a bare

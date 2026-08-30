@@ -1,0 +1,13 @@
+{
+  "name": "fallow-coverage-producer-pins",
+  "private": true,
+  "type": "module",
+  "description": "Pinned JavaScript coverage producers recorded by the coverage producer conformance corpus. Never installed by the repository root.",
+  "dependencies": {
+    "acorn": "8.18.0",
+    "ast-v8-to-istanbul": "1.0.5",
+    "istanbul-lib-instrument": "6.0.3",
+    "oxc-coverage-instrument": "0.12.0",
+    "v8-to-istanbul": "9.3.0"
+  }
+}

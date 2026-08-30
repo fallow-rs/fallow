@@ -27,6 +27,7 @@ const FULL_ONLY_COMMANDS = [
   ["npm", ["--prefix", "npm/fallow", "test"]],
   ["npm", ["--prefix", "npm/fallow-similar-code", "test"]],
   ["cargo", ["test", "--workspace", "--lib", "--bins", "--tests", "--examples"]],
+  ["npm", ["run", "check:coverage-producers"]],
   ["npm", ["run", "check:semantic-clone-conformance"]],
   ["cargo", ["check", "--workspace", "--benches"]],
   ["cargo", ["doc", "--workspace", "--no-deps", "--document-private-items"]],

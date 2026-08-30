@@ -71,6 +71,11 @@ const FULL_ONLY_COMMANDS = [
     args: ["test", "--workspace", "--lib", "--bins", "--tests", "--examples"],
   },
   {
+    label: "Coverage producer conformance",
+    command: "npm",
+    args: ["run", "check:coverage-producers"],
+  },
+  {
     label: "Semantic clone conformance",
     command: "npm",
     args: ["run", "check:semantic-clone-conformance"],

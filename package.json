@@ -22,15 +22,18 @@
     "conformance:semantic-clones": "node scripts/semantic-clone-conformance.mjs",
     "conformance:semantic-clones:candle": "node scripts/semantic-clone-candle-conformance.mjs",
     "check:semantic-clone-conformance": "node scripts/semantic-clone-conformance.mjs --check",
+    "check:coverage-producers": "node scripts/coverage-producer-conformance.mjs",
+    "check:coverage-producer-drift": "node scripts/coverage-producer-refresh.mjs --check",
+    "refresh:coverage-producers": "node scripts/coverage-producer-refresh.mjs",
     "check:similar-code-sidecar-audit": "node scripts/check-similar-code-sidecar-audit.mjs",
     "test:semantic-clone-conformance": "node --test scripts/semantic-clone-conformance.test.mjs",
     "type-aware:corpus": "node scripts/type-aware-corpus.mjs",
     "test:type-aware-corpus": "node --test scripts/type-aware-corpus.test.mjs",
     "smoke:styling-corpus": "node scripts/styling-corpus-smoke.mjs",
     "smoke:styling-prs": "node scripts/styling-pr-smoke.mjs",
-    "lint:js": "node scripts/assert-local-resolution.mjs oxlint && oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
-    "fmt:js": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs",
-    "fmt:js:check": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar commitlint.config.mjs"
+    "lint:js": "node scripts/assert-local-resolution.mjs oxlint && oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs",
+    "fmt:js": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs",
+    "fmt:js:check": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

@@ -1,0 +1,1105 @@
+{
+  "$schema": "fallow-coverage-producer-conformance/v1",
+  "recorded": {
+    "node_pin": "v24.18.0",
+    "platform": "darwin-arm64",
+    "coverage_root": "/fallow/corpus",
+    "producers_lock_file": "producers/package-lock.json",
+    "producers_lock_sha256": "e673a88ff57403ae9f720c211556e3703f03d00cf3b13cd811bc95b8c703959c"
+  },
+  "invariants": [
+    {
+      "id": "effective_istanbul_fn_line",
+      "rust_fn": "crates/engine/src/health/scoring.rs::effective_istanbul_fn_line",
+      "mechanism": "A record's primary alias uses fnMap `line` when the producer set one and falls back to decl.start.line otherwise."
+    },
+    {
+      "id": "body_span_from_entry",
+      "rust_fn": "crates/engine/src/health/scoring.rs::IstanbulSpan::from_entry",
+      "mechanism": "The body-start alias exists only while loc.start sorts strictly before loc.end, so an inverted span drops the alias instead of matching at a nonsense position."
+    },
+    {
+      "id": "header_from_entry",
+      "rust_fn": "crates/engine/src/health/scoring.rs::IstanbulSpan::header_from_entry",
+      "mechanism": "The header span runs from decl.start to loc.start, which is what lets a position between the two resolve to the record that encloses it."
+    },
+    {
+      "id": "mark_headers_holding_other_fns",
+      "rust_fn": "crates/engine/src/health/scoring.rs::mark_headers_holding_other_fns",
+      "mechanism": "A header span that contains a second function's declaration says nothing about the positions inside it, so the header fallback must abstain there."
+    },
+    {
+      "id": "is_anonymous_istanbul_name",
+      "rust_fn": "crates/engine/src/health/scoring.rs::is_anonymous_istanbul_name",
+      "mechanism": "`(anonymous_N)` records carry no usable name, so they are matched by position rather than by name."
+    },
+    {
+      "id": "named_function_syntax_alias",
+      "rust_fn": "crates/engine/src/health/scoring.rs::named_function_syntax_alias",
+      "mechanism": "A named function record is anchored at its identifier by some producers and at the `function` keyword by others; the syntax alias reconciles both against the position Fallow extracts."
+    },
+    {
+      "id": "accessor_property_name",
+      "rust_fn": "crates/engine/src/health/scoring.rs::accessor_property_name",
+      "mechanism": "A record spelled `get area` / `set area` answers to the bare property name Fallow extracts."
+    },
+    {
+      "id": "clamp_negative_positions",
+      "rust_fn": "crates/engine/src/health/scoring.rs::parse_coverage_map_tolerantly",
+      "mechanism": "A producer that records a negative coordinate for a position it could not place must not reject the whole map, which would silently drop every unit in the file to its static estimate."
+    }
+  ],
+  "producers": [
+    {
+      "id": "istanbul-lib-instrument",
+      "package": "istanbul-lib-instrument",
+      "version": "6.0.3",
+      "profile": "default",
+      "driver": "producers/drivers/istanbul-lib-instrument.mjs",
+      "consumers": "jest, vitest --coverage.provider istanbul",
+      "derives_from_v8": false,
+      "self_conformance": false
+    },
+    {
+      "id": "v8-to-istanbul",
+      "package": "v8-to-istanbul",
+      "version": "9.3.0",
+      "profile": "default",
+      "driver": "producers/drivers/v8-to-istanbul.mjs",
+      "consumers": "c8, nyc in V8 mode, older vitest",
+      "derives_from_v8": true,
+      "self_conformance": false
+    },
+    {
+      "id": "ast-v8-to-istanbul",
+      "package": "ast-v8-to-istanbul",
+      "version": "1.0.5",
+      "profile": "default",
+      "driver": "producers/drivers/ast-v8-to-istanbul.mjs",
+      "consumers": "vitest default v8 provider",
+      "derives_from_v8": true,
+      "self_conformance": false
+    },
+    {
+      "id": "oxc-coverage-instrument",
+      "package": "oxc-coverage-instrument",
+      "version": "0.12.0",
+      "profile": "default",
+      "driver": "producers/drivers/oxc-coverage-instrument.mjs",
+      "consumers": "oxc-coverage-instrument vitest integration",
+      "derives_from_v8": false,
+      "self_conformance": true
+    },
+    {
+      "id": "oxc-coverage-instrument-istanbul",
+      "package": "oxc-coverage-instrument",
+      "version": "0.12.0",
+      "profile": "compat:istanbul",
+      "driver": "producers/drivers/oxc-coverage-instrument-istanbul.mjs",
+      "consumers": "oxc-coverage-instrument callers asking for Istanbul-shaped output",
+      "derives_from_v8": false,
+      "self_conformance": true
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "plain",
+      "file": "fixtures/plain/plain.js",
+      "virtual_path": "/fallow/corpus/plain.js",
+      "sha256": "0c7ecad8d6d5fed3f4c817a8a5189f87c81268c0c7c47de4deeb487944165295",
+      "divergence": "Baseline function declarations. istanbul-lib-instrument anchors decl at the identifier and loc at the body brace, while v8-to-istanbul gives decl and loc the same whole-function span and derives statements per line, so the same probe reports different coverage percentages across the matrix.",
+      "invariants": [
+        "effective_istanbul_fn_line",
+        "body_span_from_entry"
+      ]
+    },
+    {
+      "id": "named-fn-expr",
+      "file": "fixtures/named-fn-expr/named-fn-expr.js",
+      "virtual_path": "/fallow/corpus/named-fn-expr.js",
+      "sha256": "9daf54996f3fae51e9d76c40fd3b985e47d2d9c53e6d078fb92bb02c75f2e247",
+      "divergence": "Named function expressions. istanbul-lib-instrument anchors decl at the identifier (column 23) while v8-to-istanbul anchors at the `function` keyword (column 14), a nine-column split on one construct, and oxc's default profile names the record after the binding rather than the function.",
+      "invariants": [
+        "named_function_syntax_alias",
+        "is_anonymous_istanbul_name"
+      ]
+    },
+    {
+      "id": "curried-arrow",
+      "file": "fixtures/curried-arrow/curried-arrow.js",
+      "virtual_path": "/fallow/corpus/curried-arrow.js",
+      "sha256": "3489dc1f11ca99622ce3ebaf815299fb07a4952978e15b958dad73c96c5e51bb",
+      "divergence": "Curried arrows written one per line. An expression-bodied arrow records its body as the next arrow, so record N's loc.start lands exactly on record N+1's decl.start and the matcher has to decide which identity owns the position.",
+      "invariants": [
+        "mark_headers_holding_other_fns",
+        "body_span_from_entry"
+      ],
+      "fingerprint_collisions": [
+        {
+          "producers": [
+            "istanbul-lib-instrument",
+            "ast-v8-to-istanbul",
+            "oxc-coverage-instrument",
+            "oxc-coverage-instrument-istanbul"
+          ],
+          "rationale": "An expression-bodied arrow records its body as the enclosing expression, so an outer arrow's loc span contains exactly the inner arrow's statements and every level of a curried chain reports the same executed-over-total ratio. The collision is structural, not an authoring accident: no arrangement of the probe separates the ratios while keeping record N's loc.start on record N+1's decl.start. Identity for this fixture rests on the per-unit resolution status instead, which is what the v8-to-istanbul row measures when it resolves only the outermost arrow."
+        }
+      ]
+    },
+    {
+      "id": "accessors",
+      "file": "fixtures/accessors/accessors.js",
+      "virtual_path": "/fallow/corpus/accessors.js",
+      "sha256": "15b0ae4a1c3d089b927e83ce387c4acbe89d3c80ece7246ff1e49cd0e46b0a5d",
+      "divergence": "Class accessors. The same getter is spelled four ways across the matrix: `(anonymous_N)`, `get area`, `area` and `area_2`, and the two Istanbul-shaped rows disagree by four columns on decl.start.",
+      "invariants": [
+        "accessor_property_name",
+        "is_anonymous_istanbul_name"
+      ]
+    },
+    {
+      "id": "one-line",
+      "file": "fixtures/one-line/one-line.js",
+      "virtual_path": "/fallow/corpus/one-line.js",
+      "sha256": "835b370664c5a5283416ba105ee2df4bf6dc4dc9b95a23582186cb442f5b159b",
+      "divergence": "Single-line function bodies that end at end of line. ast-v8-to-istanbul reports loc.end.column as Infinity, which serializes to JSON null and deserializes to 0, so the body span of a one-line function inverts. No hand-written fixture would ever express this.",
+      "invariants": [
+        "body_span_from_entry",
+        "header_from_entry"
+      ]
+    },
+    {
+      "id": "bare-if",
+      "file": "fixtures/bare-if/bare-if.js",
+      "virtual_path": "/fallow/corpus/bare-if.js",
+      "sha256": "e8d9b4fadd38b6134f8f615580bcc7700631ee9497c3c6dab1cd0bf4954bedb9",
+      "divergence": "Bare `if` statements with returning consequents. v8-to-istanbul records `column: -1` for the implicit else it cannot place, and positions are unsigned, so a strict parse rejects the whole map and every unit in the file silently falls back to its static estimate.",
+      "invariants": [
+        "clamp_negative_positions",
+        "effective_istanbul_fn_line"
+      ]
+    },
+    {
+      "id": "decorated",
+      "file": "fixtures/decorated/decorated.ts",
+      "virtual_path": "/fallow/corpus/decorated.ts",
+      "sha256": "5ba9c2b28a71c764d377c563a3470f57f20002856661d0d8bf3376431e287278",
+      "divergence": "A decorated class member. istanbul-lib-instrument records decl.start at the decorator and loc.start at the body brace, so the position Fallow extracts sits strictly between them and only the header span can resolve it. oxc anchors decl at the method name instead, one line lower.",
+      "invariants": [
+        "header_from_entry",
+        "mark_headers_holding_other_fns"
+      ]
+    }
+  ],
+  "maps": [
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "plain",
+      "file": "maps/istanbul-lib-instrument/plain.json",
+      "sha256": "9a202b5c71f1113ba37113fe75a985564c8a514221bdb0cd71ee2b2367eb67a9"
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "named-fn-expr",
+      "file": "maps/istanbul-lib-instrument/named-fn-expr.json",
+      "sha256": "0081faa334899ad0a0c0d38b5fc804353f71cd79069cab817ee8d1dc49685923"
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "curried-arrow",
+      "file": "maps/istanbul-lib-instrument/curried-arrow.json",
+      "sha256": "5d16ad87d85d3c5920168c242d17d0db2d4da35564fd93b6c9734b330434c1a4"
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "accessors",
+      "file": "maps/istanbul-lib-instrument/accessors.json",
+      "sha256": "75c544b079646471b8ad9e4feea40fa91bd7e1b72242e312b7f56cac68a3f7cb"
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "one-line",
+      "file": "maps/istanbul-lib-instrument/one-line.json",
+      "sha256": "4d92c16cf28f54ffb2bd2aa3fe42ddd60e18bc46b877da641775720abacdde81"
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "bare-if",
+      "file": "maps/istanbul-lib-instrument/bare-if.json",
+      "sha256": "ca35c012b9a0ac49261d94c5c519a1a0ea5392153e4b4220b7ed5b87c0647d63"
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "decorated",
+      "file": "maps/istanbul-lib-instrument/decorated.json",
+      "sha256": "7efb39bb69f4abe273c3d52543f11cd2aeeadc6e8ac10a12ac8711476cda106d"
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "plain",
+      "file": "maps/v8-to-istanbul/plain.json",
+      "sha256": "e4d6dba86aa6a30d4f4329d9f18d85cada245afe5b81b6d43e8200cf9c902918"
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "named-fn-expr",
+      "file": "maps/v8-to-istanbul/named-fn-expr.json",
+      "sha256": "4b7112bb6668248bdf00b79448f87149d5c8e20c6830babea035689955bc47b9"
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "curried-arrow",
+      "file": "maps/v8-to-istanbul/curried-arrow.json",
+      "sha256": "fadfb96df4d40404b862deb0d5260e3b7bf900db1e7100eb9baf6ad59e3ef9ad"
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "accessors",
+      "file": "maps/v8-to-istanbul/accessors.json",
+      "sha256": "e128beb05b89cde84db4f589183a8a8ebb0049533f9bfafed9d30a1c0a8cf6ff"
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "one-line",
+      "file": "maps/v8-to-istanbul/one-line.json",
+      "sha256": "5789c671727652ab503f448ae9dd0dbfad73dc1fa10b9b0df299670f9c07488a"
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "bare-if",
+      "file": "maps/v8-to-istanbul/bare-if.json",
+      "sha256": "9a5a28f7bac6c2099fe65ba23fffddfe765716045f7105d1ff6c06de0dfe8cf9"
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "plain",
+      "file": "maps/ast-v8-to-istanbul/plain.json",
+      "sha256": "41dffe735fd15c1c2b2c717c63693ad50a5b922d13079c15453f9d00a7ef73fa"
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "named-fn-expr",
+      "file": "maps/ast-v8-to-istanbul/named-fn-expr.json",
+      "sha256": "7b14d39ac60a31f0452aaf898486275c4571b5bd5cc1a6c50b74f7353fb71395"
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "curried-arrow",
+      "file": "maps/ast-v8-to-istanbul/curried-arrow.json",
+      "sha256": "67958861565368023b313cf7358f55baa6eb75d04cb769baf6b4501698e92b0c"
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "accessors",
+      "file": "maps/ast-v8-to-istanbul/accessors.json",
+      "sha256": "dd39a83225146ae751db856f9c0d011a50242e40be45f1b7833d91a04e3f7c94"
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "one-line",
+      "file": "maps/ast-v8-to-istanbul/one-line.json",
+      "sha256": "ed09f082354dc29e9130abc5fd1a15418a3a9d58fbe5c77a979bec7c5dce26c3"
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "bare-if",
+      "file": "maps/ast-v8-to-istanbul/bare-if.json",
+      "sha256": "8d52dd97ddcba7bef88c7685d2007d4db41e161cc6b821fe9356c5140b2c27e4"
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "plain",
+      "file": "maps/oxc-coverage-instrument/plain.json",
+      "sha256": "732d3337acfd13faa8027103bca9bcc55fe94b9dcbb91440e1baae68b9799d1f"
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "named-fn-expr",
+      "file": "maps/oxc-coverage-instrument/named-fn-expr.json",
+      "sha256": "6079f1cca53f55d9c26357d8c0a74faf57fe2fc479879e6ad66526e9473ee4a1"
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "curried-arrow",
+      "file": "maps/oxc-coverage-instrument/curried-arrow.json",
+      "sha256": "e78ce7d6b7628ede3d0dd47500f38b296772ce1f51fee79a0b94e9e85fa9aa69"
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "accessors",
+      "file": "maps/oxc-coverage-instrument/accessors.json",
+      "sha256": "197893e94a1941994056f989834e64f5b5f179600dfea007ccd0eaaffee50657"
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "one-line",
+      "file": "maps/oxc-coverage-instrument/one-line.json",
+      "sha256": "1a0708f4359369d3d2af21e4d78f11077a29c98a52f212f9d9e4dee91074ef80"
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "bare-if",
+      "file": "maps/oxc-coverage-instrument/bare-if.json",
+      "sha256": "89e8a5bab19f7908f30aa97e6c2cf37680ac19729a19cc97c0132610f2917348"
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "decorated",
+      "file": "maps/oxc-coverage-instrument/decorated.json",
+      "sha256": "ae42877fc338d92aae2cba588511c05d4bdc8d5486fc65334f3888ee7635aa3b"
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "plain",
+      "file": "maps/oxc-coverage-instrument-istanbul/plain.json",
+      "sha256": "291d95bf83626d2b6d45fc2447193785094b5cce7a608a49956e6113cc85a871"
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "named-fn-expr",
+      "file": "maps/oxc-coverage-instrument-istanbul/named-fn-expr.json",
+      "sha256": "e201367f93d4b05af83b382f614fd0ec872a34b3e067c1cb538c9d3f7046303e"
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "curried-arrow",
+      "file": "maps/oxc-coverage-instrument-istanbul/curried-arrow.json",
+      "sha256": "6118d4f5d1f1eba7290194f4c7c56141ea22a55dbd7c9f81589e2d63191c7e90"
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "accessors",
+      "file": "maps/oxc-coverage-instrument-istanbul/accessors.json",
+      "sha256": "39db3b8b7809d490c64daacfa3138bfd9d00853a7a32f717c454328751337cb9"
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "one-line",
+      "file": "maps/oxc-coverage-instrument-istanbul/one-line.json",
+      "sha256": "fc23f925acf9e1d6ff6f1756a9351b7f1a8813477755442307eb22719edb8e6f"
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "bare-if",
+      "file": "maps/oxc-coverage-instrument-istanbul/bare-if.json",
+      "sha256": "9ac193d7f74314c9aebf1ad9326d3c93d7a38c33d8447c43a255701e0c2d806b"
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "decorated",
+      "file": "maps/oxc-coverage-instrument-istanbul/decorated.json",
+      "sha256": "9e9725f7a94031ab8849feacfe6e41012e0b19a08b94b70ab6d70e0135a1d827"
+    }
+  ],
+  "census": [
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "plain",
+      "units": [
+        {
+          "name": "alpha",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "beta",
+          "line": 8,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 80
+        }
+      ]
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "named-fn-expr",
+      "units": [
+        {
+          "name": "namedGamma",
+          "line": 1,
+          "col": 14,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "namedDelta",
+          "line": 8,
+          "col": 14,
+          "coverage_source": "istanbul",
+          "coverage_pct": 40
+        }
+      ]
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "curried-arrow",
+      "units": [
+        {
+          "name": "curried",
+          "line": 3,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "<arrow>",
+          "line": 4,
+          "col": 2,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "<arrow>",
+          "line": 5,
+          "col": 4,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        }
+      ]
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "accessors",
+      "units": [
+        {
+          "name": "constructor",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "area",
+          "line": 7,
+          "col": 10,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "area",
+          "line": 14,
+          "col": 10,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "one-line",
+      "units": [
+        {
+          "name": "compact",
+          "line": 1,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "idle",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "bare-if",
+      "units": [
+        {
+          "name": "guard",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 50
+        },
+        {
+          "name": "clamp",
+          "line": 9,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 40
+        }
+      ]
+    },
+    {
+      "producer": "istanbul-lib-instrument",
+      "fixture": "decorated",
+      "units": [
+        {
+          "name": "balance",
+          "line": 5,
+          "col": 9,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "plain",
+      "units": [
+        {
+          "name": "alpha",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "beta",
+          "line": 8,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 75
+        }
+      ]
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "named-fn-expr",
+      "units": [
+        {
+          "name": "namedGamma",
+          "line": 1,
+          "col": 14,
+          "coverage_source": "istanbul",
+          "coverage_pct": 75
+        },
+        {
+          "name": "namedDelta",
+          "line": 8,
+          "col": 14,
+          "coverage_source": "istanbul",
+          "coverage_pct": 50
+        }
+      ]
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "curried-arrow",
+      "units": [
+        {
+          "name": "curried",
+          "line": 3,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "<arrow>",
+          "line": 4,
+          "col": 2,
+          "coverage_source": "estimated",
+          "rationale": "v8-to-istanbul 9.3.0 derives its record set from V8 ScriptCoverage, which reports the whole curried chain as one function, so the map holds a single record for `curried` and none for the inner arrows. Fallow reports the static estimate rather than inventing an attribution."
+        },
+        {
+          "name": "<arrow>",
+          "line": 5,
+          "col": 4,
+          "coverage_source": "estimated",
+          "rationale": "v8-to-istanbul 9.3.0 derives its record set from V8 ScriptCoverage, which reports the whole curried chain as one function, so the map holds a single record for `curried` and none for the inner arrows. Fallow reports the static estimate rather than inventing an attribution."
+        }
+      ]
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "accessors",
+      "units": [
+        {
+          "name": "constructor",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "estimated",
+          "rationale": "v8-to-istanbul 9.3.0 names the constructor record after the class (`Rect`), not `constructor`. The name is real rather than `(anonymous_N)`, so the anonymous positional fallback does not apply and Fallow abstains instead of matching a differently named record by position."
+        },
+        {
+          "name": "area",
+          "line": 7,
+          "col": 10,
+          "coverage_source": "istanbul",
+          "coverage_pct": 80
+        },
+        {
+          "name": "area",
+          "line": 14,
+          "col": 10,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "one-line",
+      "units": [
+        {
+          "name": "compact",
+          "line": 1,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "idle",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "v8-to-istanbul",
+      "fixture": "bare-if",
+      "units": [
+        {
+          "name": "guard",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 71.42857142857143
+        },
+        {
+          "name": "clamp",
+          "line": 9,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 62.5
+        }
+      ]
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "plain",
+      "units": [
+        {
+          "name": "alpha",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "beta",
+          "line": 8,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 80
+        }
+      ]
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "named-fn-expr",
+      "units": [
+        {
+          "name": "namedGamma",
+          "line": 1,
+          "col": 14,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "namedDelta",
+          "line": 8,
+          "col": 14,
+          "coverage_source": "istanbul",
+          "coverage_pct": 40
+        }
+      ]
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "curried-arrow",
+      "units": [
+        {
+          "name": "curried",
+          "line": 3,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "<arrow>",
+          "line": 4,
+          "col": 2,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "<arrow>",
+          "line": 5,
+          "col": 4,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        }
+      ]
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "accessors",
+      "units": [
+        {
+          "name": "constructor",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "area",
+          "line": 7,
+          "col": 10,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "area",
+          "line": 14,
+          "col": 10,
+          "coverage_source": "estimated",
+          "rationale": "ast-v8-to-istanbul 1.0.5 disambiguates the setter from the getter by suffixing the record name to `area_2`. The name is real rather than `(anonymous_N)`, so Fallow abstains instead of attributing the setter's counters to the getter's identity."
+        }
+      ]
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "one-line",
+      "units": [
+        {
+          "name": "compact",
+          "line": 1,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "idle",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "ast-v8-to-istanbul",
+      "fixture": "bare-if",
+      "units": [
+        {
+          "name": "guard",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 50
+        },
+        {
+          "name": "clamp",
+          "line": 9,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 40
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "plain",
+      "units": [
+        {
+          "name": "alpha",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "beta",
+          "line": 8,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 80
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "named-fn-expr",
+      "units": [
+        {
+          "name": "namedGamma",
+          "line": 1,
+          "col": 14,
+          "coverage_source": "estimated",
+          "rationale": "oxc-coverage-instrument 0.12.0 in its default profile names a named function expression after the binding (`gamma`) rather than after the function (`namedGamma`), which is what Fallow extracts. The compat:istanbul profile of the same version records `namedGamma` and resolves."
+        },
+        {
+          "name": "namedDelta",
+          "line": 8,
+          "col": 14,
+          "coverage_source": "estimated",
+          "rationale": "oxc-coverage-instrument 0.12.0 in its default profile names a named function expression after the binding (`delta`) rather than after the function (`namedDelta`), which is what Fallow extracts. The compat:istanbul profile of the same version records `namedDelta` and resolves."
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "curried-arrow",
+      "units": [
+        {
+          "name": "curried",
+          "line": 3,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "<arrow>",
+          "line": 4,
+          "col": 2,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "<arrow>",
+          "line": 5,
+          "col": 4,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "accessors",
+      "units": [
+        {
+          "name": "constructor",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "area",
+          "line": 7,
+          "col": 10,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "area",
+          "line": 14,
+          "col": 10,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "one-line",
+      "units": [
+        {
+          "name": "compact",
+          "line": 1,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "idle",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "bare-if",
+      "units": [
+        {
+          "name": "guard",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 50
+        },
+        {
+          "name": "clamp",
+          "line": 9,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 40
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument",
+      "fixture": "decorated",
+      "units": [
+        {
+          "name": "balance",
+          "line": 5,
+          "col": 9,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "plain",
+      "units": [
+        {
+          "name": "alpha",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "beta",
+          "line": 8,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 80
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "named-fn-expr",
+      "units": [
+        {
+          "name": "namedGamma",
+          "line": 1,
+          "col": 14,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "namedDelta",
+          "line": 8,
+          "col": 14,
+          "coverage_source": "istanbul",
+          "coverage_pct": 40
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "curried-arrow",
+      "units": [
+        {
+          "name": "curried",
+          "line": 3,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "<arrow>",
+          "line": 4,
+          "col": 2,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "<arrow>",
+          "line": 5,
+          "col": 4,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "accessors",
+      "units": [
+        {
+          "name": "constructor",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "istanbul",
+          "coverage_pct": 100
+        },
+        {
+          "name": "area",
+          "line": 7,
+          "col": 10,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "area",
+          "line": 14,
+          "col": 10,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "one-line",
+      "units": [
+        {
+          "name": "compact",
+          "line": 1,
+          "col": 16,
+          "coverage_source": "istanbul",
+          "coverage_pct": 66.66666666666666
+        },
+        {
+          "name": "idle",
+          "line": 2,
+          "col": 13,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "bare-if",
+      "units": [
+        {
+          "name": "guard",
+          "line": 1,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 50
+        },
+        {
+          "name": "clamp",
+          "line": 9,
+          "col": 0,
+          "coverage_source": "istanbul",
+          "coverage_pct": 40
+        }
+      ]
+    },
+    {
+      "producer": "oxc-coverage-instrument-istanbul",
+      "fixture": "decorated",
+      "units": [
+        {
+          "name": "balance",
+          "line": 5,
+          "col": 9,
+          "coverage_source": "istanbul",
+          "coverage_pct": 0
+        }
+      ]
+    }
+  ]
+}

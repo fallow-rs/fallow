@@ -97,6 +97,22 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
+    directory: /tests/coverage-producer-corpus/producers
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    # The pinned coverage producers this repository records geometry from. A
+    # bump here is expected to move the committed maps. Recording reads whatever
+    # is installed under the producers prefix, not the lockfile, so install
+    # first:
+    #   npm ci --prefix tests/coverage-producer-corpus/producers --no-audit --no-fund --ignore-scripts
+    #   npm run check:coverage-producer-drift
+    #   npm run refresh:coverage-producers
+    # then land the map diff when the behavioral census is unchanged.
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
     directory: /viz-frontend
     schedule:
       interval: weekly

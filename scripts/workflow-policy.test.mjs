@@ -784,3 +784,34 @@ test("coverage publication is isolated to trusted events and write permissions",
   assert.match(publishJob, /name: Update coverage badge/);
   assert.doesNotMatch(publishJob, /\b(?:cargo|npm|pnpm)\b/);
 });
+
+test("coverage producer conformance rides the check job instead of a job of its own", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const checkJob = indentedBlock(workflow, "check", 2);
+  const rustPaths = listedPaths(indentedBlock(workflow, "rust", 12));
+
+  assert.match(
+    checkJob,
+    /name: Run coverage producer conformance\n(?:\s+#.*\n)*\s+run: npm run check:coverage-producers/,
+    "deleting the census step must fail this test rather than pass silently",
+  );
+  assert.ok(
+    checkJob.indexOf("name: Run tests") < checkJob.indexOf("name: Run coverage producer"),
+    "the census needs the binary cargo test --bins already produced",
+  );
+  assert.ok(
+    matchesListedPath(rustPaths, "tests/coverage-producer-corpus/manifest.json"),
+    "the corpus must already be inside the filter that gates the check job",
+  );
+  assert.ok(matchesListedPath(rustPaths, "crates/engine/src/health/scoring.rs"));
+});
+
+test("the pinned coverage producers are covered by dependabot", () => {
+  const config = readWorkflow(".github/dependabot.yml");
+
+  assert.match(
+    config,
+    /package-ecosystem: npm\n\s+directory: \/tests\/coverage-producer-corpus\/producers/,
+    "no npm directory is covered automatically, so the pin would never move",
+  );
+});

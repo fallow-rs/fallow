@@ -1,0 +1,12 @@
+{
+  // The config the behavioral census runs under.
+  //
+  // Deliberately empty. Fallow walks up from `--root` looking for a config and
+  // every probe directory sits inside this repository, so without this file the
+  // census would resolve the repository's own `.fallowrc.json` and a PR that
+  // only edited that file could move a census the harness then blames on
+  // `crates/engine/src/health/scoring.rs`. Both harness scripts pass
+  // `--config` at this file, and the recorded census is therefore what Fallow's
+  // own defaults do with a producer map, overridden only by the flags the
+  // harness passes on the command line.
+}

@@ -312,6 +312,15 @@ jobs:
         # dedicated benchmark workflows.
         run: cargo test --workspace --lib --bins --tests --examples
 
+      - name: Run coverage producer conformance
+        # Rides this job rather than a job of its own: the `rust` filter above
+        # already covers crates/** and tests/**, `cargo test --bins` has already
+        # produced target/debug/fallow, and setup-node is already present. The
+        # harness reads committed producer maps, so it installs nothing and
+        # touches no network. It writes only to a temporary directory, which
+        # the `git diff --exit-code` step at the end of this job depends on.
+        run: npm run check:coverage-producers
+
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests
 

@@ -1,0 +1,363 @@
+{
+  "/fallow/corpus/curried-arrow.js": {
+    "path": "/fallow/corpus/curried-arrow.js",
+    "all": false,
+    "statementMap": {
+      "0": {
+        "start": {
+          "line": 1,
+          "column": 0
+        },
+        "end": {
+          "line": 1,
+          "column": 15
+        }
+      },
+      "1": {
+        "start": {
+          "line": 2,
+          "column": 0
+        },
+        "end": {
+          "line": 2,
+          "column": 0
+        }
+      },
+      "2": {
+        "start": {
+          "line": 3,
+          "column": 0
+        },
+        "end": {
+          "line": 3,
+          "column": 34
+        }
+      },
+      "3": {
+        "start": {
+          "line": 4,
+          "column": 0
+        },
+        "end": {
+          "line": 4,
+          "column": 17
+        }
+      },
+      "4": {
+        "start": {
+          "line": 5,
+          "column": 0
+        },
+        "end": {
+          "line": 5,
+          "column": 44
+        }
+      },
+      "5": {
+        "start": {
+          "line": 6,
+          "column": 0
+        },
+        "end": {
+          "line": 6,
+          "column": 0
+        }
+      },
+      "6": {
+        "start": {
+          "line": 7,
+          "column": 0
+        },
+        "end": {
+          "line": 7,
+          "column": 24
+        }
+      },
+      "7": {
+        "start": {
+          "line": 8,
+          "column": 0
+        },
+        "end": {
+          "line": 8,
+          "column": 24
+        }
+      }
+    },
+    "s": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1
+    },
+    "branchMap": {
+      "0": {
+        "type": "branch",
+        "line": 1,
+        "loc": {
+          "start": {
+            "line": 1,
+            "column": 0
+          },
+          "end": {
+            "line": 8,
+            "column": 24
+          }
+        },
+        "locations": [
+          {
+            "start": {
+              "line": 1,
+              "column": 0
+            },
+            "end": {
+              "line": 8,
+              "column": 24
+            }
+          }
+        ]
+      },
+      "1": {
+        "type": "branch",
+        "line": 3,
+        "loc": {
+          "start": {
+            "line": 3,
+            "column": 16
+          },
+          "end": {
+            "line": 5,
+            "column": 43
+          }
+        },
+        "locations": [
+          {
+            "start": {
+              "line": 3,
+              "column": 16
+            },
+            "end": {
+              "line": 5,
+              "column": 43
+            }
+          }
+        ]
+      },
+      "2": {
+        "type": "branch",
+        "line": 3,
+        "loc": {
+          "start": {
+            "line": 3,
+            "column": 26
+          },
+          "end": {
+            "line": 3,
+            "column": 30
+          }
+        },
+        "locations": [
+          {
+            "start": {
+              "line": 3,
+              "column": 26
+            },
+            "end": {
+              "line": 3,
+              "column": 30
+            }
+          }
+        ]
+      },
+      "3": {
+        "type": "branch",
+        "line": 4,
+        "loc": {
+          "start": {
+            "line": 4,
+            "column": 2
+          },
+          "end": {
+            "line": 5,
+            "column": 43
+          }
+        },
+        "locations": [
+          {
+            "start": {
+              "line": 4,
+              "column": 2
+            },
+            "end": {
+              "line": 5,
+              "column": 43
+            }
+          }
+        ]
+      },
+      "4": {
+        "type": "branch",
+        "line": 4,
+        "loc": {
+          "start": {
+            "line": 4,
+            "column": 9
+          },
+          "end": {
+            "line": 4,
+            "column": 13
+          }
+        },
+        "locations": [
+          {
+            "start": {
+              "line": 4,
+              "column": 9
+            },
+            "end": {
+              "line": 4,
+              "column": 13
+            }
+          }
+        ]
+      },
+      "5": {
+        "type": "branch",
+        "line": 5,
+        "loc": {
+          "start": {
+            "line": 5,
+            "column": 4
+          },
+          "end": {
+            "line": 5,
+            "column": 43
+          }
+        },
+        "locations": [
+          {
+            "start": {
+              "line": 5,
+              "column": 4
+            },
+            "end": {
+              "line": 5,
+              "column": 43
+            }
+          }
+        ]
+      },
+      "6": {
+        "type": "branch",
+        "line": 5,
+        "loc": {
+          "start": {
+            "line": 5,
+            "column": 11
+          },
+          "end": {
+            "line": 5,
+            "column": 15
+          }
+        },
+        "locations": [
+          {
+            "start": {
+              "line": 5,
+              "column": 11
+            },
+            "end": {
+              "line": 5,
+              "column": 15
+            }
+          }
+        ]
+      },
+      "7": {
+        "type": "branch",
+        "line": 5,
+        "loc": {
+          "start": {
+            "line": 5,
+            "column": 35
+          },
+          "end": {
+            "line": 5,
+            "column": 42
+          }
+        },
+        "locations": [
+          {
+            "start": {
+              "line": 5,
+              "column": 35
+            },
+            "end": {
+              "line": 5,
+              "column": 42
+            }
+          }
+        ]
+      }
+    },
+    "b": {
+      "0": [
+        1
+      ],
+      "1": [
+        1
+      ],
+      "2": [
+        0
+      ],
+      "3": [
+        1
+      ],
+      "4": [
+        0
+      ],
+      "5": [
+        1
+      ],
+      "6": [
+        0
+      ],
+      "7": [
+        0
+      ]
+    },
+    "fnMap": {
+      "0": {
+        "name": "curried",
+        "decl": {
+          "start": {
+            "line": 3,
+            "column": 16
+          },
+          "end": {
+            "line": 5,
+            "column": 43
+          }
+        },
+        "loc": {
+          "start": {
+            "line": 3,
+            "column": 16
+          },
+          "end": {
+            "line": 5,
+            "column": 43
+          }
+        },
+        "line": 3
+      }
+    },
+    "f": {
+      "0": 1
+    }
+  }
+}

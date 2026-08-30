@@ -1,0 +1,4 @@
+# A CRLF checkout shifts every column a producer records, which would make the
+# committed maps disagree with the probes they were recorded from.
+fixtures/** text eol=lf
+maps/** text eol=lf

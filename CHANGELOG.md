@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A conformance corpus of real coverage-producer geometry**
+  (Closes [#2457](https://github.com/fallow-rs/fallow/issues/2457)). Fallow maps
+  every function it extracts onto a record in an Istanbul coverage map, and the
+  matcher rests on where each producer anchors that record. Every geometry
+  expectation lived in hand-written JSON inside Rust tests, so nothing would
+  notice a producer moving an anchor in a minor release, and a hand-written
+  fixture could assert geometry no producer emits. A new corpus under
+  `tests/coverage-producer-corpus/` commits machine-recorded maps from four
+  pinned producers across five profiles (`istanbul-lib-instrument`,
+  `v8-to-istanbul`, `ast-v8-to-istanbul`, and `oxc-coverage-instrument` in both
+  its default and `compat: "istanbul"` shapes) over seven probes chosen by
+  measured divergence. `npm run check:coverage-producers` runs the real binary
+  against those maps and asserts the per-unit coverage provenance, with probe
+  functions carrying distinct coverage percentages so a match proves which
+  record resolved wherever a producer can tell two records apart. Geometry
+  itself is a reviewed map diff rather than an assertion, so a producer move the
+  matcher absorbs does not manufacture a chore. Every run proves the gate can
+  still fail: each row that resolves a unit is perturbed once with a record
+  moved past the matcher's line-drift window and once with every recorded column
+  moved past the end of every line in the probe, and the census must fail both
+  times. The producers install under their own prefix and add nothing to the
+  root `npm ci`.
+
 - **The health summary reports how much of a coverage file joined**
   (Closes [#2455](https://github.com/fallow-rs/fallow/issues/2455)). A coverage
   file written for a different root, a container path prefix, or an older
