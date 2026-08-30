@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788126106040,
+  "lastUpdate": 1788130214009,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "7a8442440410c9e3211ac28028fd415e8ee4e303",
-          "message": "perf(types): bucket clone spread locations",
-          "timestamp": "2026-08-15T23:51:41+02:00",
-          "tree_id": "5f52d8af626c7e62b2ce1239d7963bbfc93e8c92",
-          "url": "https://github.com/fallow-rs/fallow/commit/7a8442440410c9e3211ac28028fd415e8ee4e303"
-        },
-        "date": 1786831116930,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d69e459ad2b8f98a1d3fec3a59b3d3013262be76"
         },
         "date": 1788126102003,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "3446f413b252cf0950ac63782e0b0ff25a1162df",
+          "message": "chore: release v3.21.0",
+          "timestamp": "2026-08-31T00:42:39+02:00",
+          "tree_id": "e583367048294079d0a67e90746aefe8047d0ec9",
+          "url": "https://github.com/fallow-rs/fallow/commit/3446f413b252cf0950ac63782e0b0ff25a1162df"
+        },
+        "date": 1788130210713,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
