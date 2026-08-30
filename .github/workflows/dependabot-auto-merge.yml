@@ -21,7 +21,28 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - if: steps.meta.outputs.update-type != 'version-update:semver-major'
-        run: gh pr merge "$PR_URL" --auto --squash
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          if output=$(gh pr merge "$PR_URL" --auto --squash 2>&1); then
+            exit 0
+          fi
+          # GitHub refuses to ENABLE auto-merge when there is nothing left to
+          # wait for. That happens whenever this job queues behind a burst of
+          # dependabot pull requests: by the time it runs, every required
+          # context has already reported and the pull request is mergeable, so
+          # the mutation is rejected for clean or unstable status. A pull
+          # request that closed while the job waited is the same story. Neither
+          # is a fault, and failing here paints a red check on a pull request
+          # whose own checks are green.
+          printf '%s\n' "$output"
+          case "$output" in
+            *"is in clean status"*|*"is in unstable status"*|*"Pull request is closed"*)
+              echo "auto-merge not enabled: this pull request is no longer waiting on checks."
+              ;;
+            *)
+              exit 1
+              ;;
+          esac
