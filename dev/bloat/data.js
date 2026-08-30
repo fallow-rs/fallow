@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788080162690,
+  "lastUpdate": 1788083682228,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "raihassanraza10@gmail.com",
-            "name": "Muhammad Hassan Raza",
-            "username": "M-Hassan-Raza"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "64e3ce36c4a8086bd7a34aeaf7fd7d019d1548ca",
-          "message": "feat(plugins): expand declarative manifest entries (#2165)\n\nImplements the declarative manifest extensions from #1774.\n\nThe public skills contract check is red by construction on a contributor PR: the regenerated CLI reference in this branch is correct, and the companion repository can only be updated by a maintainer afterwards. That sync follows immediately.",
-          "timestamp": "2026-08-12T18:12:18+02:00",
-          "tree_id": "e985537ff7c697dba46a75dc3f67605334f5cf1f",
-          "url": "https://github.com/fallow-rs/fallow/commit/64e3ce36c4a8086bd7a34aeaf7fd7d019d1548ca"
-        },
-        "date": 1786552310610,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 493797072,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 19889664,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25235640,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 37689992,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 41713192,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7a3fcb30d2c6650bd5db529276a835add84710b1",
+          "message": "fix(health): read the coverage maps other producers actually write (#2461)\n\nc8, nyc in v8 mode, and older vitest versions write a coverage map in which the\nimplicit else of a bare `if` carries `column: -1`. Positions are unsigned, so\none unplaceable coordinate in `branchMap`, a section the CRAP path never reads,\naborted the run with exit 2. Unplaceable coordinates are now clamped on a retry\nthat only runs after the strict parse has failed.\n\nRaw V8 coverage and `oxc-coverage-instrument` record an accessor as `get area`\nwhere istanbul-lib-instrument leaves the record anonymous, and fallow extracts\nthe unit as `area`. A covered accessor read as unmeasured under the first two\nproducers. A record now answers to its property name as well as to the\nspelling the producer chose.\n\nThe MCP coverage fixture asserted a body span the instrumenter does not emit\nfor its own source, and `coverage_tier` now documents what it describes when\nnothing measured the function.\n\nCloses #2454\nCloses #2456",
+          "timestamp": "2026-08-30T11:41:03+02:00",
+          "tree_id": "254c5dcd9162208570cdb11ccd12a5eec29ce063",
+          "url": "https://github.com/fallow-rs/fallow/commit/7a3fcb30d2c6650bd5db529276a835add84710b1"
+        },
+        "date": 1788083678736,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 547023784,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21310920,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 27932392,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 41827144,
             "unit": "bytes"
           }
         ]
