@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788083398915,
+  "lastUpdate": 1788083999686,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c2b6c9efff2e4de57a32bfad828bc5a3a3574070",
-          "message": "perf(output): insert root kind in place",
-          "timestamp": "2026-08-14T00:15:47+02:00",
-          "tree_id": "9aa3e9c8065828466f34323fb9593765664c96cf",
-          "url": "https://github.com/fallow-rs/fallow/commit/c2b6c9efff2e4de57a32bfad828bc5a3a3574070"
-        },
-        "date": 1786659723138,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/7a3fcb30d2c6650bd5db529276a835add84710b1"
         },
         "date": 1788083395692,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "900d29a76e7cb1488930b2fa71f7053ead69b187",
+          "message": "docs(quality-gates): list the install the NAPI gate step needs (#2462)\n\n`verify:full` ends with a local NAPI build whose `napi` binary comes from\n`crates/napi`'s own devDependencies. The documented setup covered the root, the\ntype-aware sidecar, and the VS Code extension, so a checkout that followed it\npassed every earlier gate and stopped at the last step with\n`napi: command not found`.",
+          "timestamp": "2026-08-30T11:54:02+02:00",
+          "tree_id": "116cd580785df3014b43bf7f2bff88f9355d5508",
+          "url": "https://github.com/fallow-rs/fallow/commit/900d29a76e7cb1488930b2fa71f7053ead69b187"
+        },
+        "date": 1788083995788,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
