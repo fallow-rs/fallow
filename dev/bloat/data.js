@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788113603698,
+  "lastUpdate": 1788126573793,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "4f756e1f90972efa4190ca4f00ba6a3df3642b9b",
-          "message": "Merge pull request #2232 from fallow-rs/feat/css-color-direct-parse\n\nperf(benchmarks): cover CSS color candidates",
-          "timestamp": "2026-08-12T19:54:16+02:00",
-          "tree_id": "d561b401029e193f6e2adf861531aab0604795c0",
-          "url": "https://github.com/fallow-rs/fallow/commit/4f756e1f90972efa4190ca4f00ba6a3df3642b9b"
-        },
-        "date": 1786558156195,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 494468656,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 19932736,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25278200,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 37732616,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/935f1ca88e7d0925c75bcb159df915d6e55db84c"
         },
         "date": 1788113599570,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 547264000,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21324712,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 27946168,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 41845560,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d69e459ad2b8f98a1d3fec3a59b3d3013262be76",
+          "message": "test(cli): stop copying a fixture's cache directory into the copy (#2483)\n\nTwo tests in the same binary share `tests/fixtures/coverage-gaps`. One runs the\nreal binary with that fixture as its root, so the binary writes and renames\ncache files under `.fallow/`. The other copies the fixture into a temp\ndirectory, walking every entry it finds, and fails with a not-found when the\nwriter renames a cache file mid-walk. It surfaced as an unrelated red check on\na dependabot pull request that only bumped a devDependency.\n\nA fixture's cache directory is not part of the fixture, and a copied project\nwants a cold cache anyway, so both copy helpers skip it.",
+          "timestamp": "2026-08-30T23:33:51+02:00",
+          "tree_id": "19c59e682f2491adf62e4f7a2cd1cbdbbe3886d7",
+          "url": "https://github.com/fallow-rs/fallow/commit/d69e459ad2b8f98a1d3fec3a59b3d3013262be76"
+        },
+        "date": 1788126570886,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
