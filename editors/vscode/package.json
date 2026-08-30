@@ -933,7 +933,7 @@
     "@vscode/vsce": "3.9.2",
     "json-schema-to-typescript": "15.0.4",
     "mocha": "11.8.0",
-    "rolldown": "1.2.4",
+    "rolldown": "1.2.5",
     "ovsx": "1.1.1",
     "typescript": "7.0.2",
     "vitest": "4.1.10",
