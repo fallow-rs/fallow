@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788113162489,
+  "lastUpdate": 1788121404726,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "95a7ae9faf9e987616fe2366b74e99626dfd58c6",
-          "message": "fix: surface star-export ambiguity instead of blaming the sources (#2268)\n\nWhen two star re-export sources supply the same name, the barrel exports nothing under that name. Unused-export and unused-type findings are now suppressed for the declarations that contribute to such a collision, instead of blaming both source files for a mistake in the barrel. Traces carry an optional star_export_ambiguity block naming the contributing files and namespaces, so an ambiguous name is no longer indistinguishable from a misspelled one. The unrendered-component and unprovided-inject headers now state the guarantee the code actually offers, including the abstain carve-out that remains. The value-derived type fallback lane is seeded lazily, which makes barrel-chain resolution roughly ten percent cheaper.\n\nCloses #2262\nCloses #2263\nCloses #2264",
-          "timestamp": "2026-08-14T08:35:39+02:00",
-          "tree_id": "daf704ab51453c6880b4fb3c5d8775efa97cafce",
-          "url": "https://github.com/fallow-rs/fallow/commit/95a7ae9faf9e987616fe2366b74e99626dfd58c6"
-        },
-        "date": 1786689690068,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/935f1ca88e7d0925c75bcb159df915d6e55db84c"
         },
         "date": 1788113158574,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6d00a7337007105a76c5d538acb98127b974dec1",
+          "message": "test(coverage): pin the geometry every coverage producer emits (#2466)\n\nThe coverage matcher rests on where each producer anchors a function record,\nand every geometry assertion in the repository was hand written inside a Rust\ntest module. Nothing noticed when a producer moved an anchor, and twice a\nhand-written fixture asserted geometry no producer emits while its test passed.\n\nThe corpus records real output from five pinned producer profiles over seven\nprobes chosen by measured divergence. The gate runs the real binary against\nthose maps and asserts per-unit coverage provenance rather than coordinates, so\na producer move the matcher absorbs is a reviewable map diff with an unchanged\ncensus, and only a census delta needs a human. Each run proves the gate can\nstill fail by perturbing a record past the line-drift window and by moving\nevery column past the end of its line.\n\nThe producers install under their own prefix and add nothing to the root\ninstall. The gate is offline and reads only committed maps.\n\nRefs #2457",
+          "timestamp": "2026-08-30T22:14:31+02:00",
+          "tree_id": "6db047bdc9bba947f0e768573f7c3d2001cc25d4",
+          "url": "https://github.com/fallow-rs/fallow/commit/6d00a7337007105a76c5d538acb98127b974dec1"
+        },
+        "date": 1788121401242,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
