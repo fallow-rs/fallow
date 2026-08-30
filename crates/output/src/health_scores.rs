@@ -437,7 +437,12 @@ pub struct ComplexityViolation {
     /// Test coverage percentage (0-100) backing the CRAP score.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_pct: Option<f64>,
-    /// Coverage tier bucket derived from `coverage_pct`.
+    /// Coverage tier bucket.
+    ///
+    /// Derived from `coverage_pct` when coverage was measured. When
+    /// `coverage_source` is estimated, `coverage_pct` is absent and the tier
+    /// describes the static estimate behind the CRAP score rather than an
+    /// observation, so read the two fields together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_tier: Option<CoverageTier>,
     /// Provenance of the coverage signal.

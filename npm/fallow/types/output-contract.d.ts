@@ -5442,7 +5442,12 @@ crap?: (number | null)
  */
 coverage_pct?: (number | null)
 /**
- * Coverage tier bucket derived from `coverage_pct`.
+ * Coverage tier bucket.
+ *
+ * Derived from `coverage_pct` when coverage was measured. When
+ * `coverage_source` is estimated, `coverage_pct` is absent and the tier
+ * describes the static estimate behind the CRAP score rather than an
+ * observation, so read the two fields together.
  */
 coverage_tier?: (CoverageTier | null)
 /**

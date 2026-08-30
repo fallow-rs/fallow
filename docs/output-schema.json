@@ -3107,7 +3107,7 @@
               "type": "null"
             }
           ],
-          "description": "Coverage tier bucket derived from `coverage_pct`."
+          "description": "Coverage tier bucket.\n\nDerived from `coverage_pct` when coverage was measured. When\n`coverage_source` is estimated, `coverage_pct` is absent and the tier\ndescribes the static estimate behind the CRAP score rather than an\nobservation, so read the two fields together."
         },
         "coverage_source": {
           "anyOf": [
@@ -10775,7 +10775,7 @@
               "type": "null"
             }
           ],
-          "description": "Coverage tier bucket derived from `coverage_pct`."
+          "description": "Coverage tier bucket.\n\nDerived from `coverage_pct` when coverage was measured. When\n`coverage_source` is estimated, `coverage_pct` is absent and the tier\ndescribes the static estimate behind the CRAP score rather than an\nobservation, so read the two fields together."
         },
         "coverage_source": {
           "anyOf": [
