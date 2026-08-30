@@ -473,9 +473,12 @@ fn crap_for_function(
             fallow_output::CoverageSource::Istanbul,
         );
     }
+    // The same static estimate the run without a coverage map would have
+    // used. A map that says nothing about this function is not evidence that
+    // it ran, so passing one must never lower its CRAP below the estimate.
     if is_test_reachable {
         return (
-            cc,
+            crap_formula(cc, INDIRECT_TEST_COVERAGE_ESTIMATE),
             None,
             fallow_output::CoverageTier::from_pct(INDIRECT_TEST_COVERAGE_ESTIMATE),
             fallow_output::CoverageSource::Estimated,
@@ -2915,6 +2918,63 @@ mod tests {
             std::path::Path::new("src/test.ts"),
         );
         compute_crap_scores_istanbul(complexity, file_coverage, is_test_reachable, &ceilings)
+    }
+
+    /// A coverage map that says nothing about a function is not evidence that
+    /// the function ran, so passing one must not score it lower than the run
+    /// without a map would have. Both paths use the same static estimate for a
+    /// function whose file tests reach.
+    #[test]
+    fn an_unmatched_function_scores_the_same_with_and_without_a_coverage_map() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/grade.ts");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
+
+        // A map that carries the file but records a function fallow never
+        // extracted, which is what a stale map or an unresolved producer
+        // anchor produces.
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "unrelated",
+                    "line": 40,
+                    "decl": { "start": { "line": 40, "column": 0 }, "end": { "line": 40, "column": 9 } },
+                    "loc": { "start": { "line": 40, "column": 20 }, "end": { "line": 44, "column": 1 } }
+                }
+            }),
+            &serde_json::json!({ "0": 1 }),
+        );
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        let function = make_fn_complexity(10);
+        let with_map =
+            istanbul_crap_default(std::slice::from_ref(&function), Some(file_coverage), true);
+        let estimated = compute_crap_scores_estimated(
+            std::slice::from_ref(&function),
+            &rustc_hash::FxHashSet::default(),
+            true,
+            fallow_output::CoverageSource::Estimated,
+            &CrapCeilingLookup::new(
+                CrapScoreThresholds {
+                    resolver: &test_crap_resolver(CRAP_THRESHOLD),
+                    enforce_crap: true,
+                },
+                std::path::Path::new("src/test.ts"),
+            ),
+        );
+
+        assert_eq!(with_map.matched, 0);
+        assert!(
+            (with_map.per_function[0].crap - estimated.per_function[0].crap).abs() < f64::EPSILON,
+            "a map that attributes nothing must not change the score"
+        );
+        assert_eq!(with_map.per_function[0].coverage_pct, None);
     }
 
     fn test_istanbul_file_coverage(
@@ -5519,11 +5579,15 @@ mod tests {
         assert_eq!(result.signals.above, 1);
     }
 
+    /// A file tests reach, with no coverage data for it at all, keeps the
+    /// static estimate rather than being scored as fully covered.
     #[test]
-    fn istanbul_crap_falls_back_to_binary_when_no_file_coverage() {
+    fn istanbul_crap_uses_the_static_estimate_when_no_file_coverage() {
         let funcs = vec![make_fn_complexity(5)];
         let result = istanbul_crap_default(&funcs, None, true);
-        assert!((result.max_crap - 5.0).abs() < f64::EPSILON);
+        // The reported score is rounded to one decimal, so compare against
+        // the estimate rather than the formula's last bit.
+        assert!((result.max_crap - 10.4).abs() < 1e-9);
         assert_eq!(result.signals.above, 0);
     }
 

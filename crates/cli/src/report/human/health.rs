@@ -2260,7 +2260,7 @@ fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
         ) {
             (Some(matched), Some(total)) if total > 0 && matched < total => {
                 return Some(format!(
-                    "CRAP scores use Istanbul coverage where matched ({matched}/{total} functions); unmatched functions are estimated from export references."
+                    "CRAP scores use Istanbul coverage where matched ({matched}/{total} functions); the rest fall back to the static estimate."
                 ));
             }
             (Some(matched), Some(total)) if total > 0 => {
@@ -3601,7 +3601,7 @@ mod tests {
         let text = plain(&build_health_human_lines(&report, &root));
         assert!(
             text.contains(
-                "CRAP scores use Istanbul coverage where matched (1/2 functions); unmatched functions are estimated"
+                "CRAP scores use Istanbul coverage where matched (1/2 functions); the rest fall back to the static estimate."
             ),
             "mixed Istanbul note missing from output: {text}"
         );
@@ -3654,7 +3654,7 @@ mod tests {
         let text = plain(&build_health_human_lines(&report, &root));
         assert!(
             text.contains(
-                "CRAP scores use Istanbul coverage where matched (1/2 functions); unmatched functions are estimated"
+                "CRAP scores use Istanbul coverage where matched (1/2 functions); the rest fall back to the static estimate."
             ),
             "Istanbul counts should drive the note even when coverage_model is omitted: {text}"
         );

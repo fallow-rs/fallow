@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A coverage map that attributes nothing to a function no longer lowers its
+  CRAP** (Closes [#2453](https://github.com/fallow-rs/fallow/issues/2453)). A
+  function whose file tests reach, but which no record in the map could be
+  attributed to, was scored as though it were fully covered, while the same
+  function without a coverage map kept the static estimate. Passing real
+  coverage data could therefore take a function under `--max-crap` that failed
+  the gate without it. Both paths now use the same estimate, so a map only ever
+  changes a score for a function it actually measured.
+
+
+### Fixed
+
 - **Istanbul coverage now matches functions whose extracted position falls
   between the producer's declaration and its body**
   (Closes [#2448](https://github.com/fallow-rs/fallow/issues/2448),
