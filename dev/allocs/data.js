@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788079474879,
+  "lastUpdate": 1788083195535,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f86dc17482f42b69dc50a1bc3875c1c3812342b9",
-          "message": "Merge pull request #2242 from fallow-rs/perf/output-escape-md-single-pass\n\nperf(output): escape Markdown in one pass",
-          "timestamp": "2026-08-13T00:58:20+02:00",
-          "tree_id": "7061186070974620e90cff4b70707464e3d88765",
-          "url": "https://github.com/fallow-rs/fallow/commit/f86dc17482f42b69dc50a1bc3875c1c3812342b9"
-        },
-        "date": 1786575794522,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 10032122,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 51543,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 970653,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7604,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8446,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7a3fcb30d2c6650bd5db529276a835add84710b1",
+          "message": "fix(health): read the coverage maps other producers actually write (#2461)\n\nc8, nyc in v8 mode, and older vitest versions write a coverage map in which the\nimplicit else of a bare `if` carries `column: -1`. Positions are unsigned, so\none unplaceable coordinate in `branchMap`, a section the CRAP path never reads,\naborted the run with exit 2. Unplaceable coordinates are now clamped on a retry\nthat only runs after the strict parse has failed.\n\nRaw V8 coverage and `oxc-coverage-instrument` record an accessor as `get area`\nwhere istanbul-lib-instrument leaves the record anonymous, and fallow extracts\nthe unit as `area`. A covered accessor read as unmeasured under the first two\nproducers. A record now answers to its property name as well as to the\nspelling the producer chose.\n\nThe MCP coverage fixture asserted a body span the instrumenter does not emit\nfor its own source, and `coverage_tier` now documents what it describes when\nnothing measured the function.\n\nCloses #2454\nCloses #2456",
+          "timestamp": "2026-08-30T11:41:03+02:00",
+          "tree_id": "254c5dcd9162208570cdb11ccd12a5eec29ce063",
+          "url": "https://github.com/fallow-rs/fallow/commit/7a3fcb30d2c6650bd5db529276a835add84710b1"
+        },
+        "date": 1788083192263,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9695051,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49313,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1159177,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8316,
             "unit": "allocations"
           }
         ]
