@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788093657461,
+  "lastUpdate": 1788188073678,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "d177bab8546290ca50321e3a8ab16d02ca74d456",
-          "message": "fix(core): serialise trace output PathBufs with serde_path forward-slash (#585)\n\nAttach #[serde(serialize_with = \"serde_path::serialize\")] to every single-PathBuf field and serialize_vec to every Vec<PathBuf> field in the trace output structs (ExportTrace, ExportReference, ReExportChain, FileTrace, TracedReExport, DependencyTrace, CloneTrace). After PR #584 fixed path_matches so the lookup succeeded on Windows, the output still serialised backslash-separated paths via serde's default, breaking JSON consumers (MCP agents, CI glob filters, downstream pipelines) that expect forward-slash. CloneInstance.file already used this convention; trace structs now match.\n\nTwo cross-platform regression tests build a backslash-shaped PathBuf literal and assert the JSON contains the forward-slash form for every newly-decorated field.\n\nFixes the remaining MCP e2e e2e_trace_export_returns_json and e2e_trace_file_returns_json failures.\n\nRefs #561",
-          "timestamp": "2026-05-22T08:43:06Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/d177bab8546290ca50321e3a8ab16d02ca74d456"
-        },
-        "date": 1779445612576,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 136,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 133,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 242,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 239,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 132,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 138,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 450,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 397,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 999,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 911,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 914,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 904,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 756,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 664,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 8107,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7042,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9469,6 +9367,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1430,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "829a7cd490df0492fad6fdbd9b2059813050820d",
+          "message": "fix(cli): resolve a project-local Fallow from the standalone commit gate (#2492)\n\nFollow-up to #2465, which fixed the generated Lefthook job: a real installed Git\nhook keeps its caller PATH and does not add node_modules/.bin, so command -v\nfallow misses a project-local install and the job exits 0 without auditing.\n\nThe standalone .claude/hooks/fallow-gate.sh never learned any of it. Its only\nproject-local arm was npx --no-install, which needs npx on the hook own PATH\nrather than the shell one, and cannot see a Plug and Play install at all,\nbecause Plug and Play has no node_modules/.bin for npx to look in. Both cases\nfell through to \"binary not found, skipping audit\", the same silent success\n#2464 was filed for.\n\nThe script now tries the same installs in the same order as the job it ships\nalongside: PATH, the node_modules/.bin launcher, Yarn Plug and Play, then npx\n--no-install as a last resort. A comment in each file points at the other, since\nthe two must stay in step.\n\nTwo execution tests run the real rendered script rather than asserting on a\nstring: a project-local launcher with no global install reachable, and a Plug\nand Play install with no node_modules directory at all. Both reduce PATH to the\nprobe directory plus the system ones and link jq into the probe directory, since\non a developer machine the jq directory also holds the global fallow and would\nsatisfy the very resolution step under test. An unreachable\nFALLOW_GATE_MIN_VERSION makes the chosen runner observable in the block message.\nBoth fail without the new arms.",
+          "timestamp": "2026-08-31T14:29:15Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/829a7cd490df0492fad6fdbd9b2059813050820d"
+        },
+        "date": 1788188069375,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 309,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 208,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 516,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 408,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1638,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1327,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1222,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1022,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1327,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1325,
             "unit": "ms"
           }
         ]
