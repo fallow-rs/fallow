@@ -57,7 +57,14 @@ impl FallowMcp {
 /// Resolve the fallow binary path.
 /// Priority: `FALLOW_BIN` env var > sibling binary next to fallow-mcp > PATH lookup.
 fn resolve_binary() -> String {
-    if let Ok(bin) = std::env::var("FALLOW_BIN") {
+    resolve_binary_from(std::env::var("FALLOW_BIN").ok())
+}
+
+/// [`resolve_binary`] over an injected override, so the resolution order is
+/// testable without mutating the process environment that concurrent tests in
+/// this binary read while spawning the real fallow executable.
+fn resolve_binary_from(override_bin: Option<String>) -> String {
+    if let Some(bin) = override_bin {
         return bin;
     }
 
