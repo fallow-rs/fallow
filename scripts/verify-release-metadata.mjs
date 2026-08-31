@@ -128,7 +128,11 @@ export const previousReleasedVersion = (sections, version) => {
   return previous.version;
 };
 
-/** The `[x.y.z]: <url>` reference definitions, a later repeat winning. */
+/**
+ * The `[x.y.z]: <url>` reference definitions. A later repeat wins, which is
+ * safe only because the caller compares the result for exact equality: a
+ * duplicate that overrides the right URL with a wrong one fails there.
+ */
 export const changelogLinks = (changelog) =>
   new Map(
     Array.from(
