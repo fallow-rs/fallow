@@ -91,8 +91,11 @@ pub enum CognitiveAttribution {
     /// Nesting depth was reset, which extraction does for free. No branching
     /// left.
     NestingReset,
-    /// Branch points genuinely fell.
-    BranchesRemoved,
+    /// The branch-point count fell. Deliberately a statement about the count
+    /// and not about the program: increments outside every function are
+    /// invisible here, which is the same reason there is no "branching
+    /// removed" verdict.
+    FewerBranchPoints,
     /// Both moved.
     Mixed,
 }
@@ -222,6 +225,11 @@ struct Partition {
     scope: BranchingScope,
     deltas: Vec<BranchingFileDelta>,
     moved_in_place: bool,
+    /// Per-file branch-point delta for files present on both revisions, paired
+    /// with whether that file carried the in-place transfer signature. The
+    /// residual over the files that did NOT carry it is what separates a
+    /// relocation from two unrelated moves that happen to cancel in the sum.
+    both_deltas: Vec<(i64, bool)>,
 }
 
 fn partition(
@@ -245,6 +253,7 @@ fn partition(
         },
         deltas: Vec::new(),
         moved_in_place: false,
+        both_deltas: Vec::new(),
     };
     let mut test_totals = Totals::default();
 
@@ -269,12 +278,12 @@ fn partition(
         let function_delta = i64::from(head_file.functions) - i64::from(base_file.functions);
         // Branching held while the file grew functions and its worst one got
         // smaller: the branches were repartitioned inside this file.
-        if branch_delta.unsigned_abs() <= u64::from(tolerance)
+        let carries_in_place_signature = branch_delta.unsigned_abs() <= u64::from(tolerance)
             && function_delta > 0
-            && head_file.peak_cyclomatic < base_file.peak_cyclomatic
-        {
-            out.moved_in_place = true;
-        }
+            && head_file.peak_cyclomatic < base_file.peak_cyclomatic;
+        out.moved_in_place |= carries_in_place_signature;
+        out.both_deltas
+            .push((branch_delta, carries_in_place_signature));
         if branch_delta != 0 || function_delta != 0 {
             out.deltas.push(BranchingFileDelta {
                 path: path.clone(),
@@ -303,6 +312,67 @@ fn scope_largest(head: &BranchingSnapshot) -> u32 {
         .unwrap_or(0)
 }
 
+/// Everything the verdict rests on, so the decision reads as one rule set.
+struct Evidence<'a> {
+    both_deltas: &'a [(i64, bool)],
+    moved_in_place: bool,
+    moved_out: bool,
+    set_delta: i64,
+    function_delta: i64,
+    base_only_branch_points: u32,
+    head_functions: u32,
+    base_functions: u32,
+}
+
+/// A transfer signature in one file says nothing about the changeset unless the
+/// rest of it stayed still.
+///
+/// The set total alone is not enough, because it is a sum: an unrelated fall in
+/// one file cancels an unrelated rise in another and the total looks untouched.
+/// The residual adds the unrelated moves in absolute terms instead, so they
+/// cannot cancel. Files present only on the base revision are checked
+/// separately, since they enter neither side of the comparison and could
+/// otherwise hide a large fall behind a small local split.
+fn decide(
+    evidence: &Evidence<'_>,
+    tolerance: u32,
+) -> (BranchingVerdict, Option<BranchingInconclusiveReason>) {
+    if evidence.head_functions == 0 && evidence.base_functions == 0 {
+        return (
+            BranchingVerdict::Inconclusive,
+            Some(BranchingInconclusiveReason::SetTooSmall),
+        );
+    }
+    let unrelated: u64 = evidence
+        .both_deltas
+        .iter()
+        .filter(|(delta, in_place)| {
+            if evidence.moved_in_place {
+                !in_place
+            } else {
+                *delta >= 0
+            }
+        })
+        .map(|(delta, _)| delta.unsigned_abs())
+        .sum();
+    let story_is_local = evidence.set_delta.unsigned_abs() <= u64::from(tolerance)
+        && unrelated <= u64::from(tolerance)
+        && evidence.base_only_branch_points <= tolerance
+        && evidence.function_delta > 0;
+    if story_is_local && (evidence.moved_in_place || evidence.moved_out) {
+        return (BranchingVerdict::BranchingMoved, None);
+    }
+    if evidence.set_delta.unsigned_abs() <= u64::from(tolerance)
+        && evidence.function_delta.unsigned_abs() <= u64::from(tolerance)
+    {
+        return (BranchingVerdict::BranchingUnchanged, None);
+    }
+    (
+        BranchingVerdict::Inconclusive,
+        Some(BranchingInconclusiveReason::NoTransferSignature),
+    )
+}
+
 impl BranchingReport {
     /// Compare two revisions over the accounting set.
     ///
@@ -325,6 +395,7 @@ impl BranchingReport {
             mut scope,
             mut deltas,
             moved_in_place,
+            both_deltas,
         } = partition(base, head, tolerance, is_test_path);
 
         scope.largest_file_share_of_branch_points = if surviving_head.branch_points == 0 {
@@ -365,29 +436,19 @@ impl BranchingReport {
         let nesting_weight_delta =
             i64::from(surviving_head.nesting) - i64::from(surviving_base.nesting);
 
-        // A transfer signature in one file says nothing about the changeset
-        // unless the set total also held. Without this gate a single refactored
-        // file paints a commit that added two hundred branch points as a move,
-        // and the human line then explains that splitting relocates branching
-        // on top of numbers showing it arrived.
-        let total_held = branch_points.delta.unsigned_abs() <= u64::from(tolerance);
-        let (verdict, reason) = if surviving_head.functions == 0 && surviving_base.functions == 0 {
-            (
-                BranchingVerdict::Inconclusive,
-                Some(BranchingInconclusiveReason::SetTooSmall),
-            )
-        } else if total_held && (moved_in_place || moved_out) {
-            (BranchingVerdict::BranchingMoved, None)
-        } else if branch_points.delta.unsigned_abs() <= u64::from(tolerance)
-            && functions.delta.unsigned_abs() <= u64::from(tolerance)
-        {
-            (BranchingVerdict::BranchingUnchanged, None)
-        } else {
-            (
-                BranchingVerdict::Inconclusive,
-                Some(BranchingInconclusiveReason::NoTransferSignature),
-            )
-        };
+        let (verdict, reason) = decide(
+            &Evidence {
+                both_deltas: &both_deltas,
+                moved_in_place,
+                moved_out,
+                set_delta: branch_points.delta,
+                function_delta: functions.delta,
+                base_only_branch_points: deleted.branch_points,
+                head_functions: surviving_head.functions,
+                base_functions: surviving_base.functions,
+            },
+            tolerance,
+        );
 
         deltas.sort_by(|a, b| {
             b.branch_points_delta
@@ -458,7 +519,7 @@ fn attribute_cognitive(
     let branches_removed = branch_delta < -i64::from(tolerance);
     let nesting_reset = nesting_weight_delta < 0;
     Some(match (branches_removed, nesting_reset) {
-        (true, false) => CognitiveAttribution::BranchesRemoved,
+        (true, false) => CognitiveAttribution::FewerBranchPoints,
         (false, true) => CognitiveAttribution::NestingReset,
         // Both moved, or neither did. The second case is cognitive falling with
         // branching and nesting both held, where naming either cause would
@@ -731,7 +792,7 @@ mod tests {
 
         assert_eq!(
             report.cognitive.attributed_to,
-            Some(CognitiveAttribution::BranchesRemoved)
+            Some(CognitiveAttribution::FewerBranchPoints)
         );
     }
 
@@ -813,6 +874,68 @@ mod tests {
         assert_eq!(report.branch_points.delta, -11);
         assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
         assert!(!report.is_reportable());
+    }
+
+    #[test]
+    fn two_unrelated_moves_that_cancel_are_not_a_relocation() {
+        // The set total is a sum, so an unrelated fall in one file cancels an
+        // unrelated rise in another. a.ts is a genuine local split, but b.ts
+        // lost eight branch points and d.ts gained eight, which is two changes
+        // and not one relocation.
+        let base = snapshot(&[
+            ("a.ts", file(6, 1, 7)),
+            ("b.ts", file(12, 3, 5)),
+            ("d.ts", file(0, 1, 1)),
+        ]);
+        let head = snapshot(&[
+            ("a.ts", file(6, 4, 3)),
+            ("b.ts", file(4, 3, 5)),
+            ("d.ts", file(8, 1, 9)),
+        ]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.branch_points.delta, 0, "the sum hides both moves");
+        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
+    }
+
+    #[test]
+    fn a_large_base_only_file_blocks_the_relocation_claim() {
+        // Base-only files enter neither side, so without this guard a small
+        // local split captions a changeset that dropped three hundred branch
+        // points with a file.
+        let base = snapshot(&[("a.ts", file(6, 1, 7)), ("gone.ts", file(300, 9, 40))]);
+        let head = snapshot(&[("a.ts", file(6, 4, 3))]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.branch_points_only_in_base, 300);
+        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
+    }
+
+    #[test]
+    fn a_relocation_needs_the_function_count_to_have_risen() {
+        // Peak fell and branching held, but nothing was partitioned.
+        let base = snapshot(&[("a.ts", file(6, 7, 7))]);
+        let head = snapshot(&[("a.ts", file(6, 7, 3))]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.functions.delta, 0);
+        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
+    }
+
+    #[test]
+    fn a_split_with_a_little_glue_branching_still_reads_as_a_move() {
+        // The common real shape: extraction adds a guard or two. The tolerance
+        // has to absorb that or the verdict never fires in practice.
+        let base = snapshot(&[("a.ts", file(30, 1, 31))]);
+        let head = snapshot(&[("a.ts", file(32, 6, 8))]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.branch_points.delta, 2);
+        assert_eq!(report.verdict, BranchingVerdict::BranchingMoved);
     }
 
     #[test]

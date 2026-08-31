@@ -1047,7 +1047,7 @@ export type BranchingInconclusiveReason = ("no-transfer-signature" | "set-too-sm
 /**
  * Where a cognitive-complexity improvement came from.
  */
-export type CognitiveAttribution = ("nesting-reset" | "branches-removed" | "mixed")
+export type CognitiveAttribution = ("nesting-reset" | "fewer-branch-points" | "mixed")
 /**
  * Independently-versioned wire-version newtype. Serializes as the integer
  * [`DECISION_SURFACE_SCHEMA_VERSION`].

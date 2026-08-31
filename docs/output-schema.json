@@ -24769,8 +24769,8 @@
         },
         {
           "type": "string",
-          "const": "branches-removed",
-          "description": "Branch points genuinely fell."
+          "const": "fewer-branch-points",
+          "description": "The branch-point count fell. Deliberately a statement about the count\nand not about the program: increments outside every function are\ninvisible here, which is the same reason there is no \"branching\nremoved\" verdict."
         },
         {
           "type": "string",

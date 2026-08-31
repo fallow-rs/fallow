@@ -622,10 +622,14 @@ fn branching_human_lines(report: Option<&fallow_output::BranchingReport>) -> Opt
             report.functions.previous,
             report.functions.current,
         ),
-        format!(
-            "         max cyclomatic {} to {}; a split moves branching, never removes it",
-            report.peak_unit_cyclomatic.previous, report.peak_unit_cyclomatic.current,
-        ),
+        if report.peak_unit_cyclomatic.delta == 0 {
+            "         a split moves branching, never removes it".to_string()
+        } else {
+            format!(
+                "         max cyclomatic {} to {}; a split moves branching, never removes it",
+                report.peak_unit_cyclomatic.previous, report.peak_unit_cyclomatic.current,
+            )
+        },
     ])
 }
 

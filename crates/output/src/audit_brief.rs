@@ -649,7 +649,13 @@ mod tests {
         let value = brief_wire_value(Some(report));
 
         assert_eq!(value["branching"]["verdict"], "branching-moved");
-        assert!(value["branching"]["reason"].is_null());
+        assert!(
+            !value["branching"]
+                .as_object()
+                .expect("branching is an object")
+                .contains_key("reason"),
+            "a decided verdict carries no reason, and absent is not null"
+        );
         assert_eq!(value["branching"]["branch_points"]["delta"], 0);
         assert_eq!(value["branching"]["functions"]["delta"], 4);
         assert_eq!(value["branching"]["peak_unit_cyclomatic"]["delta"], -9);
