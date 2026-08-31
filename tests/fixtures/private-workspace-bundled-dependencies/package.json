@@ -1,0 +1,5 @@
+{
+  "name": "private-workspace-bundled-dependencies",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

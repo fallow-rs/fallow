@@ -1,0 +1,9 @@
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "lodash-es": "4.17.21"
+  }
+}
