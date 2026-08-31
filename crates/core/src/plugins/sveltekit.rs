@@ -29,6 +29,16 @@ const ENTRY_PATTERNS: &[&str] = &[
     "src/service-worker.{ts,js}",
     "src/params/**/*.{ts,js}",
     "src/**/*.remote.{ts,js}",
+    // SvelteKit 3 conventions. Each is loaded by the framework rather than
+    // imported, and none of them exist in a version 2 project, so both major
+    // versions stay covered by the same pattern set.
+    "src/params.{ts,js}",
+    "src/env.{ts,js}",
+    "src/instrumentation.server.{ts,js}",
+    "src/service-worker/index.{ts,js}",
+    // A remote module is any file with a `remote` segment in its name, so the
+    // bare spelling counts alongside `data.remote.ts`.
+    "src/**/remote.{ts,js}",
 ];
 
 const CONFIG_PATTERNS: &[&str] = &["svelte.config.{js,cjs,mjs,ts}"];
@@ -87,12 +97,18 @@ const PAGE_SERVER_EXPORTS: &[&str] = &[
 const LAYOUT_EXPORTS: &[&str] = &["default"];
 const LAYOUT_LOAD_EXPORTS: &[&str] = &["load", "prerender", "csr", "ssr", "trailingSlash"];
 const SERVER_EXPORTS: &[&str] = &[
-    "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "fallback",
+    "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "QUERY", "fallback",
 ];
 const HOOKS_SERVER_EXPORTS: &[&str] = &["handle", "handleError", "handleFetch", "init"];
 const HOOKS_CLIENT_EXPORTS: &[&str] = &["handleError", "init"];
 const HOOKS_SHARED_EXPORTS: &[&str] = &["reroute", "transport", "handleError", "init"];
 const PARAM_MATCHER_EXPORTS: &[&str] = &["match"];
+/// SvelteKit 3 collapses `src/params/<name>.ts`, each exporting `match`, into a
+/// single `src/params.ts` carrying every matcher on one `defineParams` object.
+const PARAM_FILE_EXPORTS: &[&str] = &["params"];
+/// `src/env.ts` declares every environment variable on one `defineEnvVars`
+/// object, read by the framework rather than imported.
+const ENV_EXPORTS: &[&str] = &["variables"];
 const REMOTE_EXPORTS: &[&str] = &["*"];
 
 impl Plugin for SvelteKitPlugin {
@@ -162,7 +178,10 @@ impl Plugin for SvelteKitPlugin {
             ("src/hooks.client.{ts,js}", HOOKS_CLIENT_EXPORTS),
             ("src/hooks.{ts,js}", HOOKS_SHARED_EXPORTS),
             ("src/params/**/*.{ts,js}", PARAM_MATCHER_EXPORTS),
+            ("src/params.{ts,js}", PARAM_FILE_EXPORTS),
+            ("src/env.{ts,js}", ENV_EXPORTS),
             ("src/**/*.remote.{ts,js}", REMOTE_EXPORTS),
+            ("src/**/remote.{ts,js}", REMOTE_EXPORTS),
         ]
     }
 

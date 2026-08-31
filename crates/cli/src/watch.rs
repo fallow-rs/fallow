@@ -1108,6 +1108,7 @@ mod tests {
     ) -> fallow_config::ResolvedConfig {
         FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns,

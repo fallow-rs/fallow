@@ -7,6 +7,7 @@ fn external_plugin_config(root: &std::path::Path) -> fallow_config::ResolvedConf
     FallowConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
+        minimum_version: None,
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],
