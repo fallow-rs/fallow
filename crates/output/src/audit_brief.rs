@@ -256,6 +256,12 @@ pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     /// as a judgment question with its routed expert. This is the only thing the
     /// brief visibly leads with; the stages above are its drill-down derivation.
     pub decisions: Decisions,
+    /// Branching conservation across the changeset: total branching against
+    /// the number of functions now holding it. Absent when no base comparison
+    /// ran, which keeps the wire shape byte-identical for a consumer that
+    /// never had a base snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branching: Option<crate::BranchingReport>,
 }
 
 /// The standard audit brief payload shape used by the CLI, schema emitter,
@@ -376,6 +382,10 @@ pub struct ReviewBriefWireOutput<
     /// Complexity findings scoped to the audit changeset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity: Option<Complexity>,
+    /// Branching conservation across the changeset. Absent when no base
+    /// comparison ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branching: Option<crate::BranchingReport>,
 }
 
 /// CLI-built audit subreports that are embedded in the audit brief envelope.
@@ -452,6 +462,7 @@ where
         dead_code: subtract.dead_code,
         duplication: subtract.duplication,
         complexity: subtract.complexity,
+        branching: brief.branching,
     })
 }
 
@@ -534,6 +545,7 @@ mod tests {
     #[test]
     fn review_brief_json_output_assembles_typed_wire_contract() {
         let brief = ReviewBriefOutput {
+            branching: None,
             schema_version: ReviewBriefSchemaVersion::default(),
             version: "1.2.3".to_string(),
             command: "audit-brief".to_string(),

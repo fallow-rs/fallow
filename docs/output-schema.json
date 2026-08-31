@@ -17681,6 +17681,17 @@
         "decisions": {
           "description": "6.G, the APEX: the decision surface. The ranked, capped,\nsignal_id-anchored set of consequential structural decisions, each framed\nas a judgment question with its routed expert. This is the only thing the\nbrief visibly leads with; the stages above are its drill-down derivation.",
           "$ref": "#/definitions/DecisionSurface"
+        },
+        "branching": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BranchingReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Branching conservation across the changeset: total branching against\nthe number of functions now holding it. Absent when no base comparison\nran, which keeps the wire shape byte-identical for a consumer that\nnever had a base snapshot."
         }
       },
       "required": [
@@ -20331,6 +20342,17 @@
             }
           ],
           "description": "Complexity findings scoped to the audit changeset."
+        },
+        "branching": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BranchingReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Branching conservation across the changeset. Absent when no base\ncomparison ran."
         }
       },
       "required": [
@@ -24530,6 +24552,250 @@
         }
       ],
       "description": "Whether a changed source unit has a test file importing it, and whether that\ntest moved with the change. A direct-importer fact from the graph, not a\ncoverage claim: `untouched` says a test exists and was not edited, which is\nthe verification question the reviewer asks the author, never an answer."
+    },
+    "BranchingReport": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "description": "What the comparison established.",
+          "$ref": "#/definitions/BranchingVerdict"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BranchingInconclusiveReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why it abstained, when it did."
+        },
+        "tolerance": {
+          "type": "integer",
+          "description": "The band inside which a move counts as flat. Published because a verdict\nagainst an unpublished threshold is not reproducible by a consumer."
+        },
+        "scope": {
+          "description": "Size and composition of the compared set.",
+          "$ref": "#/definitions/BranchingScope"
+        },
+        "branch_points": {
+          "description": "The conserved quantity, over the surviving partition.",
+          "$ref": "#/definitions/BranchingMetric"
+        },
+        "functions": {
+          "description": "The number of functions holding it, over the surviving partition.",
+          "$ref": "#/definitions/BranchingMetric"
+        },
+        "peak_unit_cyclomatic": {
+          "description": "Highest single-function score. Reported, never a verdict input: a split\nlowers it by construction, which is the whole reason this section exists.",
+          "$ref": "#/definitions/BranchingMetric"
+        },
+        "branch_points_in_deleted_files": {
+          "type": "integer",
+          "description": "Base-side branch points of the deleted partition."
+        },
+        "cognitive": {
+          "description": "The cognitive figure and what drove it.",
+          "$ref": "#/definitions/BranchingCognitive"
+        },
+        "by_file": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BranchingFileDelta"
+          },
+          "description": "The files that moved the numbers most, largest absolute branch-point\nchange first."
+        },
+        "by_file_omitted": {
+          "type": "integer",
+          "description": "Files with a change that the list did not name."
+        }
+      },
+      "required": [
+        "verdict",
+        "tolerance",
+        "scope",
+        "branch_points",
+        "functions",
+        "peak_unit_cyclomatic",
+        "branch_points_in_deleted_files",
+        "cognitive",
+        "by_file",
+        "by_file_omitted"
+      ],
+      "description": "The brief's branching section."
+    },
+    "BranchingVerdict": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "branching-moved",
+          "description": "Branching was demonstrably relocated rather than removed."
+        },
+        {
+          "type": "string",
+          "const": "branching-unchanged",
+          "description": "Both the branching and the number of functions holding it are flat."
+        },
+        {
+          "type": "string",
+          "const": "inconclusive",
+          "description": "Neither could be established. `reason` says why."
+        }
+      ],
+      "description": "What the comparison could establish about the changeset.\n\nThere is deliberately no \"branching removed\" value. Increments outside every\nfunction are invisible to the underlying count, so a fall in branch points\nis not proof that branching was removed: it is equally consistent with a\nbranch having been hoisted to module scope."
+    },
+    "BranchingInconclusiveReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "no-transfer-signature",
+          "description": "The changeset moved branching and function count together in a way that\nmatches feature work as readily as a split."
+        },
+        {
+          "type": "string",
+          "const": "set-too-small",
+          "description": "Too little surviving code carrying units to compare."
+        }
+      ],
+      "description": "Why the comparison abstained."
+    },
+    "BranchingScope": {
+      "type": "object",
+      "properties": {
+        "files_both": {
+          "type": "integer",
+          "description": "Files carrying units on both revisions."
+        },
+        "files_added": {
+          "type": "integer",
+          "description": "Files carrying units on the head revision only."
+        },
+        "files_deleted": {
+          "type": "integer",
+          "description": "Files that carried units on the base revision only. Reported, and\nexcluded from every headline number: a deleted file contributes its\nwhole base-side total as a fall with no head counterpart."
+        },
+        "test_branch_points": {
+          "type": "integer",
+          "description": "Branch points on test-shaped paths within the head totals. Test code\nroutinely dominates both terms, so a reader needs to see its share\nbefore reading the headline."
+        },
+        "test_functions": {
+          "type": "integer",
+          "description": "Functions on test-shaped paths within the head totals."
+        },
+        "largest_file_share_of_branch_points": {
+          "type": "number",
+          "description": "Share of head branch points owned by the single largest file, so a\nreader can see when one vendored or generated file owns the number."
+        }
+      },
+      "required": [
+        "files_both",
+        "files_added",
+        "files_deleted",
+        "test_branch_points",
+        "test_functions",
+        "largest_file_share_of_branch_points"
+      ],
+      "description": "Size and composition of the compared set."
+    },
+    "BranchingMetric": {
+      "type": "object",
+      "properties": {
+        "previous": {
+          "type": "integer",
+          "description": "Value on the base revision."
+        },
+        "current": {
+          "type": "integer",
+          "description": "Value on the head revision."
+        },
+        "delta": {
+          "type": "integer",
+          "description": "`current - previous`. Signed, so a consumer never has to infer direction\nfrom a separate field."
+        }
+      },
+      "required": [
+        "previous",
+        "current",
+        "delta"
+      ],
+      "description": "One metric across the two revisions."
+    },
+    "BranchingCognitive": {
+      "type": "object",
+      "properties": {
+        "previous": {
+          "type": "integer",
+          "description": "Cognitive weight on the base revision."
+        },
+        "current": {
+          "type": "integer",
+          "description": "Cognitive weight on the head revision."
+        },
+        "delta": {
+          "type": "integer",
+          "description": "`current - previous`."
+        },
+        "nesting_weight_delta": {
+          "type": "integer",
+          "description": "Change in the summed nesting depth behind those increments."
+        },
+        "attributed_to": {
+          "description": "What the change is attributable to.",
+          "$ref": "#/definitions/CognitiveAttribution"
+        }
+      },
+      "required": [
+        "previous",
+        "current",
+        "delta",
+        "nesting_weight_delta",
+        "attributed_to"
+      ],
+      "description": "The cognitive figure and what drove it.\n\n`previous` and `current` exclude prop-count and hook-density increments.\nBoth are cognitive-only, and prop count records an excess over a floor, so\nit is superlinear in a split and would move this number with branching and\nnesting both flat. This therefore does not match the cognitive score the\ncomplexity findings report."
+    },
+    "CognitiveAttribution": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "nesting-reset",
+          "description": "Nesting depth was reset, which extraction does for free. No branching\nleft."
+        },
+        {
+          "type": "string",
+          "const": "branches-removed",
+          "description": "Branch points genuinely fell."
+        },
+        {
+          "type": "string",
+          "const": "mixed",
+          "description": "Both moved."
+        }
+      ],
+      "description": "Where a cognitive-complexity improvement came from."
+    },
+    "BranchingFileDelta": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Root-relative path."
+        },
+        "branch_points_delta": {
+          "type": "integer",
+          "description": "Change in branch points for this file."
+        },
+        "functions_delta": {
+          "type": "integer",
+          "description": "Change in accounted functions for this file."
+        }
+      },
+      "required": [
+        "path",
+        "branch_points_delta",
+        "functions_delta"
+      ],
+      "description": "One file's contribution to the change."
     }
   }
 }

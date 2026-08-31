@@ -438,6 +438,7 @@ pub fn build_brief_output_with_diff(
     let impact_closure = build_impact_closure_facts(result);
     let focus = build_focus_map(result, &deltas);
     ReviewBriefOutput {
+        branching: build_branching_report(result),
         schema_version: ReviewBriefSchemaVersion::default(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         command: "audit-brief".to_string(),
@@ -451,6 +452,37 @@ pub fn build_brief_output_with_diff(
         routing: result.routing.clone().unwrap_or_default(),
         decisions: result.decision_surface.clone().unwrap_or_default(),
     }
+}
+
+/// Compare branching across the accounting set, or `None` when there is no
+/// base to compare against.
+///
+/// Both sides are restricted to the changed files before comparing. The base
+/// pass analyzes the whole base worktree, so an unrestricted comparison would
+/// describe the repository rather than the changeset.
+fn build_branching_report(result: &AuditResult) -> Option<fallow_output::BranchingReport> {
+    let base = result.base_snapshot.as_ref()?;
+    let health = result.health.as_ref()?;
+    let root = health.config.root.as_path();
+    let accounting: rustc_hash::FxHashSet<String> = result
+        .changed_files
+        .iter()
+        .map(|path| crate::audit::keys::relative_key_path(path, root))
+        .collect();
+    let restrict = |source: &fallow_output::BranchingSnapshot| -> fallow_output::BranchingSnapshot {
+        source
+            .iter()
+            .filter(|(path, _)| accounting.contains(path.as_str()))
+            .map(|(path, totals)| (path.clone(), *totals))
+            .collect()
+    };
+    let head = crate::audit::branching_keys(&health.branching_by_file, root);
+    Some(fallow_output::BranchingReport::compare(
+        &restrict(&base.branching),
+        &restrict(&head),
+        fallow_output::DEFAULT_BRANCHING_TOLERANCE,
+        &crate::audit::weakening::is_test_file,
+    ))
 }
 
 /// Build the reused "subtract" section (dead-code / duplication / complexity)
@@ -559,6 +591,7 @@ fn print_brief_human(
                 brief.graph_facts.boundaries_touched.join(", ")
             );
         }
+        print_branching_human(brief.branching.as_ref());
         print_partition_human(&brief.partition);
         print_impact_closure_human(&brief.impact_closure);
         print_focus_human(&brief.focus, show_deprioritized);
@@ -571,6 +604,30 @@ fn print_brief_human(
     // when the underlying verdict is a fail. Headers stay off (the brief owns its
     // own header line above).
     crate::audit::print_audit_findings(result, quiet, explain, false);
+}
+
+/// Print branching conservation on the human brief. Caller has already gated on
+/// `!quiet`. Renders nothing unless the comparison found a move: a flat or
+/// abstaining result is not news, and every sibling section is silent when it
+/// has nothing to say.
+fn print_branching_human(report: Option<&fallow_output::BranchingReport>) {
+    let Some(report) = report.filter(|report| report.is_reportable()) else {
+        return;
+    };
+    eprintln!(
+        "  branching: {} branch point{} across {} function{} (base {} across {}); peak per function {} to {}",
+        report.branch_points.current,
+        crate::report::plural(report.branch_points.current as usize),
+        report.functions.current,
+        crate::report::plural(report.functions.current as usize),
+        report.branch_points.previous,
+        report.functions.previous,
+        report.peak_unit_cyclomatic.previous,
+        report.peak_unit_cyclomatic.current,
+    );
+    eprintln!(
+        "             splitting a function moves its branches into new functions instead of removing them"
+    );
 }
 
 /// Print the Stage 2 partition + order on the human brief: the by-module units

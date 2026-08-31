@@ -2660,6 +2660,7 @@ mod walkthrough_markdown_tests {
             tradeoff: String::new(),
         };
         let digest = StandardReviewBriefOutput {
+            branching: None,
             schema_version: ReviewBriefSchemaVersion::default(),
             version: "test".to_string(),
             command: "audit-brief".to_string(),

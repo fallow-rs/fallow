@@ -274,7 +274,7 @@ pub struct AuditKeySnapshot {
     /// Branching totals per root-relative path. Threshold-blind and
     /// suppression-blind, so the head-versus-base comparison cannot be moved
     /// by a threshold override or an ignore comment.
-    branching: FxHashMap<String, fallow_types::extract::FileBranching>,
+    pub branching: FxHashMap<String, fallow_types::extract::FileBranching>,
 }
 
 /// If fallow's process inherited any ambient git repo-state env vars (typical
@@ -435,7 +435,7 @@ fn snapshot_from_results(
 
 /// Re-key absolute branching paths into the audit's root-relative key space so
 /// base and head entries join, and so the rename remap can move them.
-fn branching_keys(
+pub fn branching_keys(
     by_file: &fallow_engine::health::BranchingByFile,
     root: &Path,
 ) -> FxHashMap<String, fallow_types::extract::FileBranching> {

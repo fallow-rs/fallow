@@ -1027,6 +1027,23 @@ export type ConfidenceFlag = ("dynamic-dispatch" | "re-export-indirection")
  */
 export type WeakeningKind = ("test-weakened" | "threshold-lowered" | "suppression-added" | "security-check-removed")
 /**
+ * What the comparison could establish about the changeset.
+ *
+ * There is deliberately no "branching removed" value. Increments outside every
+ * function are invisible to the underlying count, so a fall in branch points
+ * is not proof that branching was removed: it is equally consistent with a
+ * branch having been hoisted to module scope.
+ */
+export type BranchingVerdict = ("branching-moved" | "branching-unchanged" | "inconclusive")
+/**
+ * Why the comparison abstained.
+ */
+export type BranchingInconclusiveReason = ("no-transfer-signature" | "set-too-small")
+/**
+ * Where a cognitive-complexity improvement came from.
+ */
+export type CognitiveAttribution = ("nesting-reset" | "branches-removed" | "mixed")
+/**
  * Independently-versioned wire-version newtype. Serializes as the integer
  * [`DECISION_SURFACE_SCHEMA_VERSION`].
  */
@@ -12361,6 +12378,11 @@ duplication?: (DupesReportPayload | null)
  * Complexity findings scoped to the audit changeset.
  */
 complexity?: (HealthReport | null)
+/**
+ * Branching conservation across the changeset. Absent when no base
+ * comparison ran.
+ */
+branching?: (BranchingReport | null)
 }
 /**
  * The ranked, capped decision surface plus the set of signal_ids the
@@ -12777,6 +12799,136 @@ expert: string[]
 bus_factor_one?: boolean
 }
 /**
+ * The brief's branching section.
+ */
+export interface BranchingReport {
+verdict: BranchingVerdict
+/**
+ * Why it abstained, when it did.
+ */
+reason?: (BranchingInconclusiveReason | null)
+/**
+ * The band inside which a move counts as flat. Published because a verdict
+ * against an unpublished threshold is not reproducible by a consumer.
+ */
+tolerance: number
+scope: BranchingScope
+branch_points: BranchingMetric
+functions: BranchingMetric
+peak_unit_cyclomatic: BranchingMetric
+/**
+ * Base-side branch points of the deleted partition.
+ */
+branch_points_in_deleted_files: number
+cognitive: BranchingCognitive
+/**
+ * The files that moved the numbers most, largest absolute branch-point
+ * change first.
+ */
+by_file: BranchingFileDelta[]
+/**
+ * Files with a change that the list did not name.
+ */
+by_file_omitted: number
+}
+/**
+ * Size and composition of the compared set.
+ */
+export interface BranchingScope {
+/**
+ * Files carrying units on both revisions.
+ */
+files_both: number
+/**
+ * Files carrying units on the head revision only.
+ */
+files_added: number
+/**
+ * Files that carried units on the base revision only. Reported, and
+ * excluded from every headline number: a deleted file contributes its
+ * whole base-side total as a fall with no head counterpart.
+ */
+files_deleted: number
+/**
+ * Branch points on test-shaped paths within the head totals. Test code
+ * routinely dominates both terms, so a reader needs to see its share
+ * before reading the headline.
+ */
+test_branch_points: number
+/**
+ * Functions on test-shaped paths within the head totals.
+ */
+test_functions: number
+/**
+ * Share of head branch points owned by the single largest file, so a
+ * reader can see when one vendored or generated file owns the number.
+ */
+largest_file_share_of_branch_points: number
+}
+/**
+ * One metric across the two revisions.
+ */
+export interface BranchingMetric {
+/**
+ * Value on the base revision.
+ */
+previous: number
+/**
+ * Value on the head revision.
+ */
+current: number
+/**
+ * `current - previous`. Signed, so a consumer never has to infer direction
+ * from a separate field.
+ */
+delta: number
+}
+/**
+ * The cognitive figure and what drove it.
+ *
+ * `previous` and `current` exclude prop-count and hook-density increments.
+ * Both are cognitive-only, and prop count records an excess over a floor, so
+ * it is superlinear in a split and would move this number with branching and
+ * nesting both flat. This therefore does not match the cognitive score the
+ * complexity findings report.
+ */
+export interface BranchingCognitive {
+/**
+ * Cognitive weight on the base revision.
+ */
+previous: number
+/**
+ * Cognitive weight on the head revision.
+ */
+current: number
+/**
+ * `current - previous`.
+ */
+delta: number
+/**
+ * Change in the summed nesting depth behind those increments.
+ */
+nesting_weight_delta: number
+attributed_to: CognitiveAttribution
+}
+/**
+ * One file's contribution to the change.
+ */
+export interface BranchingFileDelta {
+/**
+ * Root-relative path.
+ */
+path: string
+/**
+ * Change in branch points for this file.
+ */
+branch_points_delta: number
+/**
+ * Change in accounted functions for this file.
+ */
+functions_delta: number
+}
+/**
  * The separable `decision-surface` envelope: the single call that puts taste-
  * decisions in front of a human, callable WITHOUT the full pipeline (the
  * `decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus
@@ -12962,6 +13114,13 @@ deltas: ReviewDeltas
 weakening: WeakeningSignal[]
 routing: RoutingFacts
 decisions: DecisionSurface
+/**
+ * Branching conservation across the changeset: total branching against
+ * the number of functions now holding it. Absent when no base comparison
+ * ran, which keeps the wire shape byte-identical for a consumer that
+ * never had a base snapshot.
+ */
+branching?: (BranchingReport | null)
 }
 /**
  * The review direction artifact: the order to review in, the coherent units,

@@ -31,6 +31,7 @@ const MAX_BY_FILE: usize = 5;
 /// is not proof that branching was removed: it is equally consistent with a
 /// branch having been hoisted to module scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum BranchingVerdict {
     /// Branching was demonstrably relocated rather than removed.
@@ -43,6 +44,7 @@ pub enum BranchingVerdict {
 
 /// Why the comparison abstained.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum BranchingInconclusiveReason {
     /// The changeset moved branching and function count together in a way that
@@ -54,6 +56,7 @@ pub enum BranchingInconclusiveReason {
 
 /// One metric across the two revisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BranchingMetric {
     /// Value on the base revision.
     pub previous: u32,
@@ -76,6 +79,7 @@ impl BranchingMetric {
 
 /// Where a cognitive-complexity improvement came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum CognitiveAttribution {
     /// Nesting depth was reset, which extraction does for free. No branching
@@ -95,6 +99,7 @@ pub enum CognitiveAttribution {
 /// nesting both flat. This therefore does not match the cognitive score the
 /// complexity findings report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BranchingCognitive {
     /// Cognitive weight on the base revision.
     pub previous: u32,
@@ -110,6 +115,7 @@ pub struct BranchingCognitive {
 
 /// Size and composition of the compared set.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BranchingScope {
     /// Files carrying units on both revisions.
     pub files_both: u32,
@@ -132,6 +138,7 @@ pub struct BranchingScope {
 
 /// One file's contribution to the change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BranchingFileDelta {
     /// Root-relative path.
     pub path: String,
@@ -143,6 +150,7 @@ pub struct BranchingFileDelta {
 
 /// The brief's branching section.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BranchingReport {
     /// What the comparison established.
     pub verdict: BranchingVerdict,

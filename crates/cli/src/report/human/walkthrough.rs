@@ -606,6 +606,7 @@ mod tests {
             .collect();
         let total_files = review_here.len() + deprioritized.len();
         let digest = StandardReviewBriefOutput {
+            branching: None,
             schema_version: ReviewBriefSchemaVersion::default(),
             version: "test".to_string(),
             command: "audit-brief".to_string(),
