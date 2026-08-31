@@ -1751,4 +1751,129 @@ mod tests {
         assert_eq!(count_kind(f, ComplexityContributionKind::PropCount), 0);
         assert_eq!(f.cognitive, 1, "just the single if");
     }
+
+    /// The set-level form of the per-unit identity asserted above. Everything
+    /// the branching aggregate reports rests on it, so it is checked together
+    /// with the absence of `u16` saturation: the identity alone would still
+    /// hold vacuously if a unit had saturated.
+    fn assert_conservation(source: &str) -> fallow_types::extract::FileBranching {
+        let units = analyze(source);
+        assert!(
+            units.iter().all(|unit| unit.cyclomatic < u16::MAX),
+            "a unit saturated u16, the identity is vacuous for `{source}`"
+        );
+        let direct: u32 = units.iter().map(|unit| u32::from(unit.cyclomatic)).sum();
+        let totals = fallow_types::extract::FileBranching::from_units(&units);
+        assert_eq!(
+            totals.implied_cyclomatic(),
+            direct,
+            "functions + branch_points must equal the summed cyclomatic for `{source}`"
+        );
+        totals
+    }
+
+    #[test]
+    fn branching_is_conserved_when_one_function_becomes_many() {
+        // The canonical shape an agent produces under a per-function ceiling.
+        let whole = assert_conservation(
+            "function price(a, b, c, d) {
+              if (a) { return 1; }
+              if (b) { return 2; }
+              if (c) { return 3; }
+              if (d) { return 4; }
+              return 0;
+            }",
+        );
+        let split = assert_conservation(
+            "function a1(a) { if (a) { return 1; } return 0; }
+             function a2(b) { if (b) { return 2; } return 0; }
+             function a3(c) { if (c) { return 3; } return 0; }
+             function a4(d) { if (d) { return 4; } return 0; }
+             function price(a, b, c, d) {
+               return a1(a) + a2(b) + a3(c) + a4(d);
+             }",
+        );
+
+        assert_eq!(whole.functions, 1);
+        assert_eq!(whole.branch_points, 4);
+        assert_eq!(whole.peak_cyclomatic, 5);
+        assert_eq!(split.functions, 5, "four helpers plus the caller");
+        assert_eq!(
+            split.branch_points, whole.branch_points,
+            "the four branches survive the split unchanged"
+        );
+        assert_eq!(
+            split.peak_cyclomatic, 2,
+            "the peak falls from 5 to 2 even though nothing was removed"
+        );
+    }
+
+    #[test]
+    fn conservation_holds_across_every_increment_family() {
+        for source in [
+            "function f(a) { return a ? 1 : 2; }",
+            "function f(a, b) { return a && b; }",
+            "function f(a) { for (const x of a) { if (x) { return x; } } return null; }",
+            "function f(a) { switch (a) { case 1: return 1; case 2: return 2; default: return 0; } }",
+            "function f() { try { g(); } catch (e) { return e; } return null; }",
+            "function f(a) { return a?.b?.c; }",
+            "const f = (a) => (b) => a && b;",
+            "function App({ a, b, c, d, e, f, g }) { return <div><span><b/></span></div>; }",
+        ] {
+            assert_conservation(source);
+        }
+    }
+
+    #[test]
+    fn cognitive_aggregate_excludes_prop_count_and_hook_density() {
+        // Both are cognitive-only and move without any branching changing, so
+        // the aggregate deliberately diverges from `FunctionComplexity::cognitive`.
+        let source = "function App({ a, b, c, d, e, f, g, h }) { return <div/>; }";
+        let units = analyze(source);
+        let totals = fallow_types::extract::FileBranching::from_units(&units);
+        let raw: u32 = units.iter().map(|unit| u32::from(unit.cognitive)).sum();
+        assert!(
+            units.iter().any(|unit| unit
+                .contributions
+                .iter()
+                .any(|c| c.kind == ComplexityContributionKind::PropCount)),
+            "fixture must actually produce a PropCount contribution"
+        );
+        assert!(
+            totals.cognitive < raw,
+            "prop-count excess must be excluded: {} vs {raw}",
+            totals.cognitive
+        );
+        assert_eq!(totals.branch_points, 0, "no branching in the fixture");
+    }
+
+    #[test]
+    fn synthetic_template_units_are_excluded_from_the_aggregate() {
+        let mut units = analyze("function f(a) { if (a) { return 1; } return 0; }");
+        let mut synthetic = units[0].clone();
+        synthetic.name = "<template>".to_string();
+        units.push(synthetic);
+        let totals = fallow_types::extract::FileBranching::from_units(&units);
+        assert_eq!(totals.functions, 1, "the synthetic unit is not counted");
+        assert_eq!(totals.branch_points, 1);
+    }
+
+    #[test]
+    fn hoisting_a_branch_to_module_scope_hides_it() {
+        // Documented blind spot, asserted so a future frame change is visible.
+        // `push_function` runs only for functions and arrows, and both
+        // `push_contribution` and `inc_cyclomatic` write to the innermost
+        // frame, so a top-level branch contributes nothing at all.
+        let inside = assert_conservation("const f = (a) => { if (a) { return 1; } return 0; };");
+        let hoisted = assert_conservation(
+            "let value = 0;
+             if (globalThis.flag) { value = 1; }
+             const f = () => value;",
+        );
+        assert_eq!(inside.branch_points, 1);
+        assert_eq!(
+            hoisted.branch_points, 0,
+            "module-scope branching is invisible, so a fall in branch_points is not proof of removal"
+        );
+    }
 }

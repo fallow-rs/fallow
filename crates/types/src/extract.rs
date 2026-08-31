@@ -1003,6 +1003,105 @@ pub fn is_synthetic_template_unit(name: &str) -> bool {
     name == "<template>" || name.starts_with("<snippet:")
 }
 
+/// Branching totals for one file: the quantity that survives extraction, and
+/// the number of units now holding it.
+///
+/// A per-function cyclomatic ceiling constrains a partition, not a quantity.
+/// `McCabe` gives a function `1 + one increment per decision point`, so across
+/// a set of units the summed cyclomatic score is `functions + branch_points`.
+/// Moving an `if` from one function into a new one removes an increment from
+/// the first and adds it to the second: `branch_points` is unchanged and
+/// `functions` rises. Reporting the two terms separately is what distinguishes
+/// branching that left from branching that only moved.
+///
+/// Known blind spot: increments outside every function are invisible here.
+/// `push_contribution` and `inc_cyclomatic` both write to the innermost frame
+/// and no frame is pushed at module scope, so a branch hoisted to the top level
+/// of a module lowers `branch_points` without removing any branching. Consumers
+/// must not read a fall in `branch_points` as proof that branching was removed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FileBranching {
+    /// Summed weight of `Cyclomatic` contributions. The conserved quantity.
+    pub branch_points: u32,
+    /// Number of accounted units. The tax a split adds.
+    pub functions: u32,
+    /// Highest single-unit cyclomatic score. Reported, never a verdict input:
+    /// a split lowers it by construction.
+    pub peak_cyclomatic: u16,
+    /// Summed weight of `Cognitive` contributions, excluding `PropCount` and
+    /// `HookDensity`. Both are cognitive-only with no cyclomatic counterpart,
+    /// and `PropCount` records the excess over a floor, so it is superlinear in
+    /// a split: one 14-prop component contributes `+10` while the same props
+    /// across two 7-prop components contribute `+3` and `+3`. Including them
+    /// would move this number with both `branch_points` and nesting flat.
+    /// This therefore does NOT equal the sum of `FunctionComplexity::cognitive`.
+    pub cognitive: u32,
+    /// Summed `nesting` over the same cognitive contributions. Extraction
+    /// rebases nesting to zero on every new frame, so a cognitive improvement
+    /// that shows up here and not in `branch_points` came from repartitioning,
+    /// not from removing branching.
+    pub cognitive_nesting_weight: u32,
+}
+
+impl FileBranching {
+    /// Aggregate one file's units.
+    ///
+    /// Synthetic template units are excluded: they are suppressed entirely when
+    /// trivial, which would silently move any denominator that counted them.
+    /// Suppression is deliberately not consulted, so a
+    /// `fallow-ignore-next-line complexity` comment cannot remove a unit's
+    /// branches from the total.
+    #[must_use]
+    pub fn from_units(units: &[FunctionComplexity]) -> Self {
+        let mut totals = Self::default();
+        for unit in units
+            .iter()
+            .filter(|unit| !is_synthetic_template_unit(&unit.name))
+        {
+            totals.functions += 1;
+            totals.peak_cyclomatic = totals.peak_cyclomatic.max(unit.cyclomatic);
+            for contribution in &unit.contributions {
+                match contribution.metric {
+                    ComplexityMetric::Cyclomatic => {
+                        totals.branch_points += u32::from(contribution.weight);
+                    }
+                    ComplexityMetric::Cognitive => {
+                        if matches!(
+                            contribution.kind,
+                            ComplexityContributionKind::PropCount
+                                | ComplexityContributionKind::HookDensity
+                        ) {
+                            continue;
+                        }
+                        totals.cognitive += u32::from(contribution.weight);
+                        totals.cognitive_nesting_weight += u32::from(contribution.nesting);
+                    }
+                }
+            }
+        }
+        totals
+    }
+
+    /// Add another file's totals into this one.
+    pub fn merge(&mut self, other: Self) {
+        self.branch_points += other.branch_points;
+        self.functions += other.functions;
+        self.peak_cyclomatic = self.peak_cyclomatic.max(other.peak_cyclomatic);
+        self.cognitive += other.cognitive;
+        self.cognitive_nesting_weight += other.cognitive_nesting_weight;
+    }
+
+    /// Summed cyclomatic score implied by the identity `functions + branch_points`.
+    ///
+    /// Equals the direct sum of `FunctionComplexity::cyclomatic` over the same
+    /// units unless a unit saturated `u16`, which is the one way the identity
+    /// can break.
+    #[must_use]
+    pub const fn implied_cyclomatic(&self) -> u32 {
+        self.functions + self.branch_points
+    }
+}
+
 /// Complexity metrics for a single function/method/arrow.
 #[derive(Debug, Clone, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 pub struct FunctionComplexity {
