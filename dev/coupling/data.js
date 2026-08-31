@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788190614711,
+  "lastUpdate": 1788194795918,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "008e2b2056841859745afae6b92047f847e5553e",
-          "message": "test(audit): surface verdict context in the reshaped-clone demotion assert",
-          "timestamp": "2026-08-13T18:13:44+02:00",
-          "tree_id": "68eb1f43b3c9b57f7f28fb4514448f3c7ba877c2",
-          "url": "https://github.com/fallow-rs/fallow/commit/008e2b2056841859745afae6b92047f847e5553e"
-        },
-        "date": 1786637722071,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 454,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1225,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/8c0f2244fe0cf5543cec5c9d65abcf3616e73ab5"
         },
         "date": 1788190609666,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e368c0d05060409b9bcea702972415a85193c914",
+          "message": "fix(process): wait out an executable that is busy at spawn (#2496)\n\nUnix refuses to exec a file while any process holds it open for writing, and the\nholder is not always the process that opened it. `fs::write` closes its\ndescriptor, but a fork from any other thread during that open window carries a\nreference to the same open file description into the new child, and the inode\nkeeps counting a writer until that child reaches its own exec. A multi-threaded\nprocess that writes an executable and then runs it therefore races every other\nthread that spawns. That is how `cargo test -p fallow-api --lib` failed once in\nCI with `failed to spawn /tmp/.../fallow-similar-code: Text file busy`. The same\nshape reaches real users from the other side: an MCP tool call that re-runs the\nFallow binary while a package manager is still writing it.\n\nA new `crates/process/src/spawn_retry.rs` holds one retry schedule (200\nmicroseconds, doubling, capped at 20 milliseconds, one second total) behind two\nhelpers: a blocking one for `std::process::Command` and a Tokio one that awaits\n`tokio::time::sleep` so the pause yields instead of holding a worker. Both drive\nthe same struct, so the two paths cannot drift.\n\nWired into every managed spawn: `ScopedChild::spawn` and\n`ScopedChild::spawn_process_tree` (companion sidecars, audit helpers),\n`spawn_fallow` in the MCP tool path, and `spawn_managed_child` behind the MCP\ncode_mode tool. The last two re-run the Fallow binary itself. Each call site\nkeeps its exact error text, ProcessTree construction and cleanup behavior.\n`crates/engine/src/repo_refs.rs` deliberately keeps a plain spawn: it runs git\nfrom PATH, a binary Fallow never writes, so it cannot meet the condition.\n\nMeasured with a stress binary linked against the real crate, eight workers each\nwriting a stub and running it, 40000 spawns per row, on Linux:\n\n    Command::spawn (blocking, before)              1382 (3.455%)\n    ScopedChild::spawn_process_tree (after)           0\n    tokio::process::Command::spawn (before)         930 (2.325%)\n    spawn_tokio_retrying_busy_executable (after)      0\n\nSame wall time in both modes, so the retry costs nothing on the success path.\nTwo controls place the fault on the just-written target rather than on spawning:\nthe same loop single threaded fails 0 of 16000, and a thread that spawns a\npre-existing file under the same fork load fails 0 of 2000. On macOS an open\nwrite handle does not block exec at all, which is why this only ever failed on\nLinux CI.\n\nThe suite-level flake is not reproduced: the fallow-api lib suite is green over\n220 contended Linux runs before the change and 220 after. What is established is\nthe mechanism and the per-spawn rate, not a suite-level delta.",
+          "timestamp": "2026-08-31T18:45:13+02:00",
+          "tree_id": "df2f37a9849c34438fac9e1c90a43fdbf2c4d6e2",
+          "url": "https://github.com/fallow-rs/fallow/commit/e368c0d05060409b9bcea702972415a85193c914"
+        },
+        "date": 1788194792370,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
