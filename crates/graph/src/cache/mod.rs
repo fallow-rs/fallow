@@ -215,7 +215,12 @@ pub use store::GraphCacheStore;
 /// to the manifest directory, instead of missing on the empty `node_modules`
 /// and falling back. The resolver output persisted in a warm 46 cache holds
 /// those misses and would replay them as unresolved imports.
-pub const GRAPH_CACHE_VERSION: u32 = 47;
+///
+/// Bumped to 48: a root-relative asset reference in an HTML document now also
+/// resolves against a `static/` directory served at the site root, not only
+/// `public/`. A warm 47 cache holds the resolver's earlier miss and would
+/// replay it as an unresolved import plus an unused asset file.
+pub const GRAPH_CACHE_VERSION: u32 = 48;
 
 /// Cached form of a resolved target.
 ///

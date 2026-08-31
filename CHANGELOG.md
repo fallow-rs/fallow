@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ### Added
 
 - **Release publication is gated on the curated release metadata**
@@ -24,6 +25,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   published release, where those fields first exist and remain repairable.
   Verified against every 3.x release without a false failure.
 
+||||||| parent of 5aa72f4bace (fix(graph): resolve root-relative HTML assets against a static directory)
+=======
+### Fixed
+
+- **A root-relative asset in an HTML document resolves against a `static/`
+  directory too.** `<link rel="stylesheet" href="/theme.css" />` in a SvelteKit
+  `src/app.html` reported an unresolved import, and the stylesheet it names
+  reported as an unused file, because the resolver only looked in `public/`.
+  Frameworks that serve `static/` at the site root, SvelteKit, Gatsby and
+  Docusaurus among them, now resolve the same way. A candidate is only accepted
+  when the file is really on disk, so no project gains a reference it does not
+  have. Measured on the official SvelteKit RealWorld application: one
+  unresolved import and one unused file before, neither after.
+
+>>>>>>> 5aa72f4bace (fix(graph): resolve root-relative HTML assets against a static directory)
 ## [3.21.0] - 2026-08-31
 
 ### Added

@@ -248,7 +248,7 @@ fn try_root_relative_specifier(
     {
         return Some(result);
     }
-    if let Some(result) = try_html_public_root_relative_asset(ctx, from_file, specifier) {
+    if let Some(result) = try_html_root_relative_asset(ctx, from_file, specifier) {
         return Some(result);
     }
     Some(ResolveResult::Unresolvable(specifier.to_string()))
@@ -594,7 +594,14 @@ fn try_storybook_static_dir_mapping(
         .and_then(|(_, path)| resolve_filesystem_path(ctx, &path))
 }
 
-fn try_html_public_root_relative_asset(
+/// Directories a framework serves at the site root, so `/theme.css` in an HTML
+/// document names a file inside one of them. `public` covers Vite, Next and
+/// Create React App; `static` covers SvelteKit, Gatsby and Docusaurus. A
+/// candidate only resolves when the file is really on disk, so trying both
+/// cannot invent a reference that a project does not have.
+const HTML_ROOT_SERVED_DIRECTORIES: &[&str] = &["public", "static"];
+
+fn try_html_root_relative_asset(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
@@ -608,7 +615,9 @@ fn try_html_public_root_relative_asset(
         return None;
     }
 
-    resolve_filesystem_path(ctx, &ctx.root.join("public").join(relative))
+    HTML_ROOT_SERVED_DIRECTORIES
+        .iter()
+        .find_map(|served| resolve_filesystem_path(ctx, &ctx.root.join(served).join(relative)))
 }
 
 fn resolve_tsconfig_extends_path(base_dir: &Path, extends: &str) -> PathBuf {
