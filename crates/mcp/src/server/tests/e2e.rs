@@ -127,6 +127,10 @@ fn e2e_code_execute_runs_project_info_on_basic_project() {
 /// A real fan-out over the real binary: one in-process element and two
 /// subprocess-backed ones, positionally aligned, with the repeat served from
 /// the snippet's memo instead of a third analysis.
+///
+/// The subprocess elements are deliberately git-independent. `audit` resolves
+/// a base branch, which a detached shallow CI checkout cannot detect, so it
+/// exits 2 there and would fail this element on CI while passing locally.
 #[test]
 fn e2e_code_execute_batches_real_analyses_and_reuses_the_memo() {
     let bin = fallow_binary();
@@ -138,13 +142,14 @@ fn e2e_code_execute_batches_real_analyses_and_reuses_the_memo() {
             const batch = fallow.all([
                 { tool: "project_info", params: { files: true } },
                 { tool: "analyze", params: { issue_types: ["unused-exports"] } },
-                { tool: "audit", params: {} },
+                { tool: "find_dupes", params: {} },
                 { tool: "project_info", params: { files: true } }
             ]);
             return {
                 ok: batch.map((element) => element.ok),
                 fileCount: batch[0].value.file_count,
                 deadCodeKind: batch[1].value.kind,
+                dupesKind: batch[2].value.kind,
                 repeated: batch[3].value.file_count
             };
             "#
@@ -165,6 +170,7 @@ fn e2e_code_execute_batches_real_analyses_and_reuses_the_memo() {
     );
     assert!(json["result"]["fileCount"].as_u64().unwrap_or(0) > 0);
     assert_eq!(json["result"]["deadCodeKind"], "dead-code");
+    assert_eq!(json["result"]["dupesKind"], "dupes");
     assert_eq!(json["result"]["repeated"], json["result"]["fileCount"]);
 
     let calls = json["calls"].as_array().expect("calls");
