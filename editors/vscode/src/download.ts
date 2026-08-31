@@ -197,9 +197,12 @@ export const httpsDownload = (url: string, dest: string, signal?: AbortSignal): 
         file.on("finish", () => {
           bodyWritten = true;
           file.close((err) => {
-            // A failed close also reaches the 'error' handler below, which
-            // unlinks the partial file; whichever settles first wins, so the
-            // download still rejects exactly once.
+            // Measured on Node 22: a failed `fs.close` emits 'error' on the
+            // stream first and only then runs this callback, with no error
+            // argument. So a close failure rejects through the 'error' handler
+            // below, which must stay for that reason, and this branch never
+            // fires there. It remains as a guard for a runtime that reports the
+            // failure here instead.
             if (err) {
               reject(err);
               return;

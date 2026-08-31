@@ -81,11 +81,12 @@ describe("httpsDownload stream-error handling", () => {
     fsState.pendingClose = null;
   });
 
-  /** Run the pending fs.close(fd) completion, optionally as a failure. */
-  const releaseDescriptor = (err?: Error): void => {
+  /** Run the pending fs.close(fd) completion. A real stream passes no error
+   *  argument here even when the close failed; it emits 'error' instead. */
+  const releaseDescriptor = (): void => {
     const done = fsState.pendingClose;
     fsState.pendingClose = null;
-    done?.(err ?? null);
+    done?.();
   };
 
   /** Let queued microtasks and the macrotask queue drain. */
@@ -132,14 +133,21 @@ describe("httpsDownload stream-error handling", () => {
 
   it("rejects once when releasing the descriptor fails", async () => {
     const pending = httpsDownload("https://example.test/bin", "/tmp/badfd");
+    const settled: string[] = [];
+    void pending.then(
+      () => settled.push("resolved"),
+      () => settled.push("rejected"),
+    );
+
     fsState.writeStream.emit("finish");
-    // A real stream reports this both on 'error' and through the close
-    // callback; the promise must settle as a rejection either way.
-    const err = new Error("EBADF");
-    fsState.writeStream.emit("error", err);
-    releaseDescriptor(err);
+    // Order a real fs.WriteStream produces for a failed close: 'error' carries
+    // the failure, then the close callback runs with nothing. The resolve in
+    // that callback must not undo the rejection.
+    fsState.writeStream.emit("error", new Error("EBADF"));
+    releaseDescriptor();
 
     await expect(pending).rejects.toThrow("EBADF");
+    expect(settled).toEqual(["rejected"]);
     expect(fsState.unlinked).toContain("/tmp/badfd");
   });
 
