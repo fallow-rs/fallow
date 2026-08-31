@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788186939736,
+  "lastUpdate": 1788190611750,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "74f5a847a45709ef4d09a5d8f7918d6fcb70cb9d",
-          "message": "perf(core): cache default entry matchers",
-          "timestamp": "2026-08-13T16:57:26+02:00",
-          "tree_id": "5f23453ab749809c83ad7f68b0ce87b612840b0f",
-          "url": "https://github.com/fallow-rs/fallow/commit/74f5a847a45709ef4d09a5d8f7918d6fcb70cb9d"
-        },
-        "date": 1786633364497,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9744539,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48504,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1030804,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7606,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8336,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8c0f2244fe0cf5543cec5c9d65abcf3616e73ab5",
+          "message": "fix(graph): resolve root-relative HTML assets against a static directory (#2489)\n\nFound while checking SvelteKit support against the official SvelteKit RealWorld\napplication, which reported two findings that are both wrong.\n\nsrc/app.html links /conduit-theme.css, and the file it names is\nstatic/conduit-theme.css, exactly where SvelteKit expects it. Fallow reported an\nunresolved-import for /conduit-theme.css from src/app.html and an unused-file for\nstatic/conduit-theme.css: one cause, two findings, because the HTML\nroot-relative fallback in the resolver looked only in public/.\n\npublic/ is the Vite, Next and Create React App convention. SvelteKit, Gatsby and\nDocusaurus serve static/ at the site root instead, so every root-absolute asset\nreference in those projects missed and produced the same pair.\n\nBoth directories are now tried, in order. A candidate is accepted only when the\nfile is really on disk, so a project with neither directory, or with the\ndirectory but not the file, resolves exactly as before and cannot gain a\nreference it does not have. The traversal guard on the relative path is\nunchanged.\n\nGRAPH_CACHE_VERSION goes to 48: resolver output is persisted with the graph and\nthe cache key does not cover this, so a warm 47 cache would replay the earlier\nmiss as both findings.",
+          "timestamp": "2026-08-31T17:31:12+02:00",
+          "tree_id": "38efb7e9e56ccfa8dcb8bba78cdf862a5f46c6f8",
+          "url": "https://github.com/fallow-rs/fallow/commit/8c0f2244fe0cf5543cec5c9d65abcf3616e73ab5"
+        },
+        "date": 1788190607057,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9767949,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49430,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1185541,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8382,
             "unit": "allocations"
           }
         ]
