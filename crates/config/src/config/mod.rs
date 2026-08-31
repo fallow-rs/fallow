@@ -256,6 +256,10 @@ pub struct FallowConfig {
     #[serde(rename = "$schema", default, skip_serializing)]
     pub schema: Option<String>,
 
+    /// The lowest fallow version this config is written for, as `MAJOR.MINOR.PATCH`. An older binary stops with a message naming both versions instead of failing on the first field it does not recognize, so a config committed to a shared repository says which upgrade it needs rather than reading like a typo. Optional and unset by default; set it in the same change that adds a field introduced in a newer version. It gates nothing on its own: an unknown key still fails on a binary at or above this version, because there the key really is a typo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_version: Option<String>,
+
     /// An ordered array of parent config sources to inherit before this file's own keys apply; each entry is a file-relative path, an `npm:<package>` specifier, or an `https://` URL (`http://` is rejected), deep-merged in order so objects merge field-by-field while arrays and scalars in this file replace the parent's, with cycle and depth guards. Set it to share a base config across a monorepo or team; it is consumed at load and stripped before serialization (serde skip_serializing).
     #[serde(default, skip_serializing)]
     pub extends: Vec<String>,

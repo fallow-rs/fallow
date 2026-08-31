@@ -2697,11 +2697,16 @@ fn populate_dev_dependency_in_production_findings(
     // discovered file is production), and production CI is exactly where a
     // `pnpm install --prod` breakage matters.
     if input.config.rules.dev_dependencies_in_production != Severity::Off {
-        results.dev_dependencies_in_production =
-            find_dev_dependencies_in_production(input.graph, pkg, input.config, input.workspaces)
-                .into_iter()
-                .map(DevDependencyInProductionFinding::with_actions)
-                .collect();
+        results.dev_dependencies_in_production = find_dev_dependencies_in_production(
+            input.graph,
+            pkg,
+            input.config,
+            input.workspaces,
+            input.plugin_result,
+        )
+        .into_iter()
+        .map(DevDependencyInProductionFinding::with_actions)
+        .collect();
     }
 }
 

@@ -26,6 +26,7 @@ fn make_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
+        minimum_version: None,
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],

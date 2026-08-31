@@ -109,7 +109,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dependencies",
         name: "Dev Dependencies Used in Production",
         short: "devDependency imported by production code with a runtime import",
-        full: "A package in `devDependencies` that is imported by production (non-test, non-config) source code via a runtime/value import. It should be promoted to `dependencies`: a production-only install (`pnpm install --prod`) omits devDependencies, so the import would break at runtime. This is the promote-side mirror of `test-only-dependency` and `type-only-dependency`. A dev dependency imported from production code only via `import type` is NOT flagged (types are erased at build time), and a package also listed in `dependencies`, `peerDependencies`, or `optionalDependencies` is left alone because another manifest section provides it at runtime.",
+        full: "A package in `devDependencies` that is imported by production (non-test, non-config) source code via a runtime/value import. Whether it should be promoted to `dependencies` depends on the deployment: a production-only install (`pnpm install --prod`) omits devDependencies, so an import resolved at runtime breaks, while a build that inlines the package into its output resolves nothing at runtime and promoting it can instead make the deployment require an install it did not need. This is the promote-side mirror of `test-only-dependency` and `type-only-dependency`. A dev dependency imported from production code only via `import type` is NOT flagged (types are erased at build time), and a package also listed in `dependencies`, `peerDependencies`, or `optionalDependencies` is left alone because another manifest section provides it at runtime.",
         docs_path: "explanations/dead-code#dev-dependencies-in-production",
     },
     RuleDef {
@@ -670,7 +670,7 @@ fn source_dead_code_rule_guide(id: &str) -> Option<RuleGuide> {
         },
         "fallow/dev-dependency-in-production" => RuleGuide {
             example: "yaml is in devDependencies, but src/config.ts imports { parse } from 'yaml' and runs it at runtime.",
-            how_to_fix: "Move the package to dependencies so a production-only install keeps it. Leave it in devDependencies if the only production imports are `import type` or another manifest section (dependencies / peer / optional) already provides it.",
+            how_to_fix: "Move the package to dependencies when the deployment installs them, so a production-only install keeps it. Leave it in devDependencies if the build inlines it into the output, if the only production imports are `import type`, or if another manifest section (dependencies / peer / optional) already provides it.",
         },
         _ => return None,
     })

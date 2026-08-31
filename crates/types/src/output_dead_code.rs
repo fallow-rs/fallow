@@ -2090,10 +2090,11 @@ impl DevDependencyInProductionFinding {
             IssueAction::Fix(FixAction {
                 kind: FixActionType::MoveToProd,
                 auto_fixable: false,
-                description: "Move to dependencies (production code imports this at runtime)"
-                    .to_string(),
+                description:
+                    "Move to dependencies if the deployment installs them (production code imports this)"
+                        .to_string(),
                 note: Some(
-                    "A production-only install (`pnpm install --prod`) omits devDependencies, so this import would break at runtime"
+                    "A production-only install (`pnpm install --prod`) omits devDependencies, so an import resolved at runtime breaks. A build that inlines the package into its output resolves nothing at runtime, and moving it there can instead make the deployment require an install it did not need"
                         .to_string(),
                 ),
                 available_in_catalogs: None,

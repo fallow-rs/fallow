@@ -26,6 +26,7 @@ fn fixture_path(name: &str) -> PathBuf {
 fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
         schema: None,
+        minimum_version: None,
         type_aware: fallow_config::TypeAwareConfig::default(),
         extends: vec![],
         entry: vec![],
