@@ -9,7 +9,8 @@ use fallow_types::discover::StableFileKey;
 
 pub use crate::results::{
     AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
-    DeadCodeAnalysisWithHashes, derive_security_severity, security_catalogue_title,
+    DeadCodeAnalysisWithHashes, derive_security_severity, enable_security_rules,
+    security_catalogue_title, security_finding_id, security_rule_id,
 };
 
 use crate::{

@@ -19,7 +19,11 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
-use fallow_engine::dead_code::{derive_security_severity, security_catalogue_title};
+use fallow_engine::dead_code::{
+    derive_security_severity, enable_security_rules, security_catalogue_title,
+    security_finding_id as canonical_security_finding_id,
+    security_rule_id as canonical_security_rule_id,
+};
 pub use fallow_output::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
     SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
@@ -459,7 +463,7 @@ fn build_security_command_output(
     )?;
 
     let configured_severities = security_rule_severities(&config);
-    force_security_rules(&mut config);
+    enable_security_rules(&mut config);
     let effective_severities = security_rule_severities(&config);
 
     let mut analysis = analyze_security_candidates(opts, &config)?;
@@ -920,17 +924,6 @@ fn prepare_security_findings(
     }
 }
 
-fn force_security_rules(config: &mut fallow_config::ResolvedConfig) {
-    // Respect explicit user severities; force the rules on when they are the
-    // default off so this dedicated command actually surfaces candidates.
-    if config.rules.security_client_server_leak == Severity::Off {
-        config.rules.security_client_server_leak = Severity::Warn;
-    }
-    if config.rules.security_sink == Severity::Off {
-        config.rules.security_sink = Severity::Warn;
-    }
-}
-
 fn security_output_config(
     config: &fallow_config::ResolvedConfig,
     configured_severity: Severity,
@@ -1131,7 +1124,7 @@ fn compute_base_security_snapshot(
     )?;
     base_config.cache_dir =
         remap_cache_dir_for_base_worktree(opts.root, &base_root, &config.cache_dir);
-    force_security_rules(&mut base_config);
+    enable_security_rules(&mut base_config);
     let mut base_analysis = analyze_security_candidates(
         &base_snapshot_security_options(opts, &base_root, &current_config_path),
         &base_config,
@@ -2749,18 +2742,7 @@ fn is_server_only_leak(finding: &SecurityFinding) -> bool {
 /// secret"; each `TaintedSink` category gets `security/<category>` so candidates
 /// group and label per CWE class.
 fn sarif_rule_id(finding: &SecurityFinding) -> String {
-    match finding.kind {
-        SecurityFindingKind::ClientServerLeak if is_server_only_leak(finding) => {
-            "security/server-only-import".to_owned()
-        }
-        SecurityFindingKind::ClientServerLeak => "security/client-server-leak".to_owned(),
-        SecurityFindingKind::TaintedSink => {
-            format!(
-                "security/{}",
-                finding.category.as_deref().unwrap_or("tainted-sink")
-            )
-        }
-    }
+    canonical_security_rule_id(finding)
 }
 
 fn security_help_text(title: &str) -> String {
@@ -3130,29 +3112,13 @@ pub fn build_security_sarif(
     })
 }
 
-/// Small FNV-1a hex digest for SARIF `partialFingerprints` dedup stability.
-fn fnv_hex(input: &str) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in input.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("{hash:016x}")
-}
-
 /// Stable per-finding correlation id: FNV-1a hex of `rule:path:line`. The single
 /// source of truth for BOTH the JSON `finding_id` field and the SARIF
 /// `partialFingerprints` value, so an agent can join the two and they never
 /// drift. Computed on the project-relative path, so it must run after the
 /// finding is relativized (issue #900).
 fn security_finding_id(finding: &SecurityFinding) -> String {
-    let fp = format!(
-        "{}:{}:{}",
-        sarif_rule_id(finding),
-        finding.path.to_string_lossy().replace('\\', "/"),
-        finding.line,
-    );
-    fnv_hex(&fp)
+    canonical_security_finding_id(finding, &finding.path)
 }
 
 fn sarif_location(path: &Path, line: u32, col: u32) -> serde_json::Value {
@@ -3924,17 +3890,6 @@ mod tests {
             .map(|h| h.path.to_string_lossy().replace('\\', "/"))
             .collect();
         assert_eq!(hop_paths, vec!["src/routes/api.ts", "src/lib/sink.ts"]);
-    }
-
-    #[test]
-    fn fnv_hex_is_deterministic_and_16_hex_digits() {
-        let a = fnv_hex("security/client-server-leak:src/app.tsx:12");
-        let b = fnv_hex("security/client-server-leak:src/app.tsx:12");
-        assert_eq!(a, b, "same input must hash identically");
-        assert_eq!(a.len(), 16);
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
-        // Distinct input yields a distinct digest (anchor line differs).
-        assert_ne!(a, fnv_hex("security/client-server-leak:src/app.tsx:13"));
     }
 
     #[test]
