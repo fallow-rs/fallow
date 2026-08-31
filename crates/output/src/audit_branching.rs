@@ -109,8 +109,10 @@ pub struct BranchingCognitive {
     pub delta: i64,
     /// Change in the summed nesting depth behind those increments.
     pub nesting_weight_delta: i64,
-    /// What the change is attributable to.
-    pub attributed_to: CognitiveAttribution,
+    /// What the improvement is attributable to, absent when cognitive did not
+    /// fall. There is nothing to attribute when the number rose or held.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attributed_to: Option<CognitiveAttribution>,
 }
 
 /// Size and composition of the compared set.
@@ -419,26 +421,34 @@ impl BranchingReport {
     }
 }
 
-/// Split a cognitive change between nesting and branching.
+/// Split a cognitive improvement between nesting and branching.
 ///
 /// Extraction rebases nesting to zero on every new frame, so it lowers cognitive
 /// without removing a single branch. Flattening an else ladder into guard
 /// clauses also leaves branch points flat, because an `else if` carries the same
 /// increment a plain `if` does, so `nesting-reset` covers both. The function
 /// count is what separates them, and it is reported beside this.
+///
+/// Returns `None` unless cognitive actually fell. Attributing a rise to
+/// "branches removed" reads as the opposite of what happened, which is what a
+/// real split through a nullish-coalescing chain produces: branching up,
+/// cognitive up, and nothing to attribute.
 fn attribute_cognitive(
     cognitive_delta: i64,
     branch_delta: i64,
     nesting_weight_delta: i64,
     tolerance: u32,
-) -> CognitiveAttribution {
-    let branches_moved = branch_delta.unsigned_abs() > u64::from(tolerance);
-    let nesting_moved = nesting_weight_delta != 0 && cognitive_delta != 0;
-    match (branches_moved, nesting_moved) {
+) -> Option<CognitiveAttribution> {
+    if cognitive_delta >= 0 {
+        return None;
+    }
+    let branches_removed = branch_delta < -i64::from(tolerance);
+    let nesting_reset = nesting_weight_delta < 0;
+    Some(match (branches_removed, nesting_reset) {
         (true, true) => CognitiveAttribution::Mixed,
         (true, false) => CognitiveAttribution::BranchesRemoved,
         _ => CognitiveAttribution::NestingReset,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -673,7 +683,7 @@ mod tests {
         assert_eq!(report.cognitive.delta, -28);
         assert_eq!(
             report.cognitive.attributed_to,
-            CognitiveAttribution::NestingReset,
+            Some(CognitiveAttribution::NestingReset),
             "the cognitive win came from repartitioning, not from removing branches"
         );
     }
@@ -705,7 +715,44 @@ mod tests {
 
         assert_eq!(
             report.cognitive.attributed_to,
-            CognitiveAttribution::BranchesRemoved
+            Some(CognitiveAttribution::BranchesRemoved)
+        );
+    }
+
+    #[test]
+    fn a_cognitive_rise_is_attributed_to_nothing() {
+        // Measured on a real split routed through a nullish-coalescing chain:
+        // branching up, cognitive up. Labelling that "branches removed" reads
+        // as the opposite of what happened.
+        let base = snapshot(&[(
+            "src/a.ts",
+            FileBranching {
+                branch_points: 7,
+                functions: 1,
+                peak_cyclomatic: 8,
+                cognitive: 10,
+                cognitive_nesting_weight: 3,
+            },
+        )]);
+        let head = snapshot(&[(
+            "src/a.ts",
+            FileBranching {
+                branch_points: 11,
+                functions: 5,
+                peak_cyclomatic: 5,
+                cognitive: 11,
+                cognitive_nesting_weight: 3,
+            },
+        )]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.cognitive.delta, 1);
+        assert_eq!(report.cognitive.attributed_to, None);
+        assert_eq!(
+            report.verdict,
+            BranchingVerdict::Inconclusive,
+            "branching rose beyond tolerance, so this is not a clean transfer"
         );
     }
 

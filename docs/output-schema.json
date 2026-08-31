@@ -24741,16 +24741,22 @@
           "description": "Change in the summed nesting depth behind those increments."
         },
         "attributed_to": {
-          "description": "What the change is attributable to.",
-          "$ref": "#/definitions/CognitiveAttribution"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CognitiveAttribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the improvement is attributable to, absent when cognitive did not\nfall. There is nothing to attribute when the number rose or held."
         }
       },
       "required": [
         "previous",
         "current",
         "delta",
-        "nesting_weight_delta",
-        "attributed_to"
+        "nesting_weight_delta"
       ],
       "description": "The cognitive figure and what drove it.\n\n`previous` and `current` exclude prop-count and hook-density increments.\nBoth are cognitive-only, and prop count records an excess over a floor, so\nit is superlinear in a split and would move this number with branching and\nnesting both flat. This therefore does not match the cognitive score the\ncomplexity findings report."
     },

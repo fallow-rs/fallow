@@ -12909,7 +12909,11 @@ delta: number
  * Change in the summed nesting depth behind those increments.
  */
 nesting_weight_delta: number
-attributed_to: CognitiveAttribution
+/**
+ * What the improvement is attributable to, absent when cognitive did not
+ * fall. There is nothing to attribute when the number rose or held.
+ */
+attributed_to?: (CognitiveAttribution | null)
 }
 /**
  * One file's contribution to the change.
