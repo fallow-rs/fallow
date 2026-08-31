@@ -94,6 +94,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installs in the same order, and two execution tests run the real script with
   `PATH` reduced so no global install can satisfy them.
 
+- **A subprocess whose executable is momentarily busy no longer ends the run.**
+  Unix refuses to execute a file while any process holds it open for writing,
+  and a process that spawns from several threads keeps that window open longer
+  than the writer does: a fork from any other thread carries the writing
+  descriptor into its child and only releases it when that child reaches its own
+  `exec`. An MCP tool call that re-runs the Fallow binary while a package
+  manager is replacing it, or a companion sidecar started in that window, failed
+  with `Text file busy` even though the condition clears itself within
+  microseconds. Every subprocess Fallow starts through its managed spawn paths,
+  which covers the companion sidecars, the audit helpers, and both MCP paths
+  that re-run the Fallow binary, now waits the condition out for up to a second
+  before reporting it. A spawn that never meets it is unchanged.
+
 ## [3.21.0] - 2026-08-31
 
 ### Added

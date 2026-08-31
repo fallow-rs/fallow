@@ -81,7 +81,9 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
-use fallow_process::{ProcessTree, cleanup_tokio_child, configure_tokio_command};
+use fallow_process::{
+    ProcessTree, cleanup_tokio_child, configure_tokio_command, spawn_tokio_retrying_busy_executable,
+};
 
 /// Default subprocess timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -333,8 +335,8 @@ async fn spawn_fallow(
     }
     configure_tokio_command(&mut command);
 
-    let mut child = command
-        .spawn()
+    let mut child = spawn_tokio_retrying_busy_executable(&mut command)
+        .await
         .map_err(|error| subprocess_error(binary, error))?;
     let process_tree = match ProcessTree::for_tokio_child(&child) {
         Ok(process_tree) => process_tree,

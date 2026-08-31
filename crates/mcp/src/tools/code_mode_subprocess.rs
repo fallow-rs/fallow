@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use fallow_process::{ProcessTree, cleanup_std_child, configure_std_command};
+use fallow_process::{
+    ProcessTree, cleanup_std_child, configure_std_command, spawn_retrying_busy_executable,
+};
 
 const STDERR_LIMIT_BYTES: usize = 64 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -112,7 +114,7 @@ fn spawn_managed_child(
     binary: &str,
 ) -> Result<(std::process::Child, ProcessTree), String> {
     configure_std_command(&mut command);
-    let mut child = command.spawn().map_err(|err| {
+    let mut child = spawn_retrying_busy_executable(&mut command).map_err(|err| {
         format!(
             "failed to execute fallow binary '{binary}': {err}. Ensure fallow is installed and available in PATH, or set FALLOW_BIN."
         )

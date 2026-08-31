@@ -33,6 +33,7 @@ use std::process::{
 use std::sync::Arc;
 
 use super::registry;
+use super::spawn_retry::spawn_retrying_busy_executable;
 
 /// RAII handle wrapping a spawned `Child` with registry tracking.
 pub struct ScopedChild {
@@ -88,7 +89,7 @@ impl ProcessTreeTerminator {
 impl ScopedChild {
     /// Spawn the command and register the resulting child's PID.
     pub fn spawn(command: &mut Command) -> io::Result<Self> {
-        let child = command.spawn()?;
+        let child = spawn_retrying_busy_executable(command)?;
         let id = registry::register(child.id());
         Ok(Self {
             inner: Some(child),
@@ -102,7 +103,7 @@ impl ScopedChild {
     /// tree for process-wide signal cleanup.
     pub fn spawn_process_tree(command: &mut Command) -> io::Result<Self> {
         if crate::process_tree::inherits_managed_process_tree() {
-            let child = command.spawn()?;
+            let child = spawn_retrying_busy_executable(command)?;
             let pid = child.id();
             let id = registry::register(pid);
             return Ok(Self {
@@ -114,7 +115,7 @@ impl ScopedChild {
         }
 
         crate::process_tree::configure_std_command(command);
-        let mut child = command.spawn()?;
+        let mut child = spawn_retrying_busy_executable(command)?;
         let process_tree = match crate::process_tree::ProcessTree::for_std_child(&child) {
             Ok(process_tree) => Arc::new(process_tree),
             Err(error) => {
