@@ -16,6 +16,7 @@
 )]
 
 mod analysis_sarif;
+mod audit_branching;
 mod audit_brief;
 mod audit_decision_surface;
 mod audit_focus;
@@ -75,6 +76,11 @@ mod walkthrough_render;
 pub use analysis_sarif::{
     annotate_sarif_results, build_duplication_sarif, build_grouped_duplication_sarif,
     build_health_sarif,
+};
+pub use audit_branching::{
+    BranchingCognitive, BranchingFileDelta, BranchingInconclusiveReason, BranchingMetric,
+    BranchingReport, BranchingScope, BranchingSnapshot, BranchingVerdict, CognitiveAttribution,
+    DEFAULT_BRANCHING_TOLERANCE,
 };
 pub use audit_brief::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
