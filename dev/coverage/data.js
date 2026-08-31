@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788180726372,
+  "lastUpdate": 1788184339572,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "e08e3e05fe9909916f92b089fb7e8ae5ff544e32",
-          "message": "chore: release v3.17.0",
-          "timestamp": "2026-08-16T23:47:53+02:00",
-          "tree_id": "5418df7130ee9f4317fffae9b8c21e2f27282181",
-          "url": "https://github.com/fallow-rs/fallow/commit/e08e3e05fe9909916f92b089fb7e8ae5ff544e32"
-        },
-        "date": 1786917740517,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/a67216a0461decae46b5f3a9c59ed4a4ca7c3e8e"
         },
         "date": 1788180723562,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "173ee9b117aabba2a2d39795abacccc7f680bbaf",
+          "message": "feat(sveltekit): recognize the SvelteKit 3 file conventions (#2488)\n\nCloses #2400. Thanks @filiabel for the heads-up ahead of the release.\n\nSvelteKit 3 is still 3.0.0-next.25 on npm, and the issue asks to wait for the\nofficial release before implementing the migration. This does not implement it.\nIt closes the gap a version 3 project hits today, measured rather than read off\nthe migration guide.\n\nThe current binary reports src/params.ts, src/instrumentation.server.ts and\nsrc/service-worker/index.ts as unused files, all wrong: each is loaded by the\nframework rather than imported. Every matcher exported from src/params.ts is\nreported as an unused export on top of that, because version 2 matchers each\nexported a fixed match from their own file while version 3 collapses them into\none file whose export names are the matcher names.\n\nThree entry patterns and one used-exports entry, additive, with no version 2\nshape touched. Verified by a new integration test against a new fixture, proven\nto fail without the plugin change, the existing SvelteKit tests, and an end to\nend probe going from three unused-file findings to zero.\n\nConfiguration moving from svelte.config.js into sveltekit() plugin options is\ndeliberately not covered: that option shape is still moving in the release\ncandidate, so alias resolution waits for 3.0.0 final.",
+          "timestamp": "2026-08-31T15:31:39+02:00",
+          "tree_id": "d7d44be14a8c3be0a4b9f326be6158aff05b7749",
+          "url": "https://github.com/fallow-rs/fallow/commit/173ee9b117aabba2a2d39795abacccc7f680bbaf"
+        },
+        "date": 1788184336383,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
