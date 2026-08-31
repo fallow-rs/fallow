@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788211061179,
+  "lastUpdate": 1788213871251,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f44fa8e5f47a37383c5b48bea7df41ab8729087c",
-          "message": "perf(engine): preallocate health candidate paths",
-          "timestamp": "2026-08-18T10:37:56+02:00",
-          "tree_id": "f17d09561f443acf7ee864bb1c79077f03ab38fa",
-          "url": "https://github.com/fallow-rs/fallow/commit/f44fa8e5f47a37383c5b48bea7df41ab8729087c"
-        },
-        "date": 1787042781018,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/702aaca8c7f81108ac85c702c31c5ca0d1b54325"
         },
         "date": 1788211057731,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.3,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "6fdd5f78c991c0f53de0d322f72fafd6292d68f4",
+          "message": "docs(changelog): record the four Code Mode changes that landed without an entry\n\nThe output bound, the refusal text, the single-sourced allowlist, and the\nsandbox constructor fix landed as direct commits and left the Unreleased\nsection without a line for any of them.",
+          "timestamp": "2026-08-31T23:53:51+02:00",
+          "tree_id": "75ecc352ba2f06dd8af627826334cf943a94daea",
+          "url": "https://github.com/fallow-rs/fallow/commit/6fdd5f78c991c0f53de0d322f72fafd6292d68f4"
+        },
+        "date": 1788213867223,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
