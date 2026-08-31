@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788180589067,
+  "lastUpdate": 1788183730150,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "93e765835bf3aa5b3048468753ad0fd228bbef15",
-          "message": "perf: skip side-effect export indexes",
-          "timestamp": "2026-08-13T15:41:30+02:00",
-          "tree_id": "65970b121ab3e0902b67919ecf298a124e4db4eb",
-          "url": "https://github.com/fallow-rs/fallow/commit/93e765835bf3aa5b3048468753ad0fd228bbef15"
-        },
-        "date": 1786628798962,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 10310066,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 52965,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1024347,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7578,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8473,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "173ee9b117aabba2a2d39795abacccc7f680bbaf",
+          "message": "feat(sveltekit): recognize the SvelteKit 3 file conventions (#2488)\n\nCloses #2400. Thanks @filiabel for the heads-up ahead of the release.\n\nSvelteKit 3 is still 3.0.0-next.25 on npm, and the issue asks to wait for the\nofficial release before implementing the migration. This does not implement it.\nIt closes the gap a version 3 project hits today, measured rather than read off\nthe migration guide.\n\nThe current binary reports src/params.ts, src/instrumentation.server.ts and\nsrc/service-worker/index.ts as unused files, all wrong: each is loaded by the\nframework rather than imported. Every matcher exported from src/params.ts is\nreported as an unused export on top of that, because version 2 matchers each\nexported a fixed match from their own file while version 3 collapses them into\none file whose export names are the matcher names.\n\nThree entry patterns and one used-exports entry, additive, with no version 2\nshape touched. Verified by a new integration test against a new fixture, proven\nto fail without the plugin change, the existing SvelteKit tests, and an end to\nend probe going from three unused-file findings to zero.\n\nConfiguration moving from svelte.config.js into sveltekit() plugin options is\ndeliberately not covered: that option shape is still moving in the release\ncandidate, so alias resolution waits for 3.0.0 final.",
+          "timestamp": "2026-08-31T15:31:39+02:00",
+          "tree_id": "d7d44be14a8c3be0a4b9f326be6158aff05b7749",
+          "url": "https://github.com/fallow-rs/fallow/commit/173ee9b117aabba2a2d39795abacccc7f680bbaf"
+        },
+        "date": 1788183725335,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9756669,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49412,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1209022,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8514,
             "unit": "allocations"
           }
         ]
