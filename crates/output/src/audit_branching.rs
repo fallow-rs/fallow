@@ -321,8 +321,11 @@ impl BranchingReport {
         // populations. Every added file inflates the head function count while
         // carrying almost no branches, which is why the verdict rests on a
         // transfer test rather than on the sign of these deltas.
-        let both_branch_delta = i64::from(surviving_head.branch_points - added.branch_points)
-            - i64::from(surviving_base.branch_points);
+        let both_branch_delta = i64::from(
+            surviving_head
+                .branch_points
+                .saturating_sub(added.branch_points),
+        ) - i64::from(surviving_base.branch_points);
         // A transfer out of the surviving files, not merely new code arriving:
         // the added files must carry more than the tolerance, the pre-existing
         // files must have fallen beyond it, and the two must approximately
