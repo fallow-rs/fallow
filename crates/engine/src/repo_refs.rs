@@ -4,6 +4,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use fallow_config::WorkspaceInfo;
@@ -1192,7 +1193,22 @@ fn base_worktree_path() -> EngineResult<PathBuf> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|err| EngineError::new(format!("system clock before unix epoch: {err}")))?
         .as_nanos();
-    Ok(std::env::temp_dir().join(format!("fallow-audit-base-{}-{nanos}", std::process::id())))
+    Ok(std::env::temp_dir().join(base_worktree_name(nanos)))
+}
+
+/// Compose the directory name for a base worktree taken at clock read `nanos`.
+///
+/// The pid stays the FIRST `-`-separated segment so the CLI orphan sweep keeps
+/// parsing it. A process-global monotonic counter is the final segment: `nanos`
+/// is NOT monotonic and repeats across threads, so two audits running
+/// concurrently in one process could otherwise compose the same name and the
+/// loser's `git worktree add` fails with "already exists". `nanos` is a
+/// parameter so that collision is reproducible in a test without depending on
+/// the host clock resolution.
+fn base_worktree_name(nanos: u128) -> String {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("fallow-audit-base-{}-{nanos}-{seq}", std::process::id())
 }
 
 #[expect(
@@ -1262,6 +1278,57 @@ mod tests {
             .permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(path, permissions).expect("set executable mode");
+    }
+
+    /// Concurrent callers whose clock reads land in the same tick must still
+    /// each get a distinct name. Before the monotonic counter they composed the
+    /// identical name, so the second `git worktree add` failed with "already
+    /// exists" and the audit aborted with `FALLOW_AUDIT_BASE_WORKTREE_FAILED`.
+    ///
+    /// The tick is pinned rather than sampled: a real `SystemTime` read is fine
+    /// enough on most hosts that the collision would surface only as a rare
+    /// flake, which is exactly the failure this guards.
+    #[test]
+    fn base_worktree_names_are_unique_when_the_clock_read_repeats() {
+        const N: usize = 64;
+        const SAME_TICK: u128 = 1_788_187_156_297_209_000;
+
+        let barrier = std::sync::Barrier::new(N);
+        let names = std::sync::Mutex::new(Vec::with_capacity(N));
+        std::thread::scope(|scope| {
+            for _ in 0..N {
+                let barrier = &barrier;
+                let names = &names;
+                scope.spawn(move || {
+                    barrier.wait();
+                    names
+                        .lock()
+                        .expect("names lock")
+                        .push(base_worktree_name(SAME_TICK));
+                });
+            }
+        });
+
+        let mut names = names.into_inner().expect("names lock");
+        assert_eq!(names.len(), N);
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), N, "base worktree names collided");
+    }
+
+    /// The pid stays the first segment so the CLI orphan sweep keeps parsing it.
+    #[test]
+    fn base_worktree_path_keeps_the_pid_as_the_first_segment() {
+        let path = base_worktree_path().expect("path should build");
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("worktree name should be utf-8");
+        let pid = name
+            .strip_prefix("fallow-audit-base-")
+            .and_then(|rest| rest.split('-').next())
+            .expect("pid segment should be present");
+        assert_eq!(pid, std::process::id().to_string());
     }
 
     #[test]
