@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788187252989,
+  "lastUpdate": 1788190843068,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "fc234ba804a29edc872f2ace40045b6254da5c81",
-          "message": "chore(docker): pin v3.17.0 assets",
-          "timestamp": "2026-08-17T02:40:35+02:00",
-          "tree_id": "0c18118291abdea71c5f0798efb0c53da759674a",
-          "url": "https://github.com/fallow-rs/fallow/commit/fc234ba804a29edc872f2ace40045b6254da5c81"
-        },
-        "date": 1786927732692,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/829a7cd490df0492fad6fdbd9b2059813050820d"
         },
         "date": 1788187248755,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8c0f2244fe0cf5543cec5c9d65abcf3616e73ab5",
+          "message": "fix(graph): resolve root-relative HTML assets against a static directory (#2489)\n\nFound while checking SvelteKit support against the official SvelteKit RealWorld\napplication, which reported two findings that are both wrong.\n\nsrc/app.html links /conduit-theme.css, and the file it names is\nstatic/conduit-theme.css, exactly where SvelteKit expects it. Fallow reported an\nunresolved-import for /conduit-theme.css from src/app.html and an unused-file for\nstatic/conduit-theme.css: one cause, two findings, because the HTML\nroot-relative fallback in the resolver looked only in public/.\n\npublic/ is the Vite, Next and Create React App convention. SvelteKit, Gatsby and\nDocusaurus serve static/ at the site root instead, so every root-absolute asset\nreference in those projects missed and produced the same pair.\n\nBoth directories are now tried, in order. A candidate is accepted only when the\nfile is really on disk, so a project with neither directory, or with the\ndirectory but not the file, resolves exactly as before and cannot gain a\nreference it does not have. The traversal guard on the relative path is\nunchanged.\n\nGRAPH_CACHE_VERSION goes to 48: resolver output is persisted with the graph and\nthe cache key does not cover this, so a warm 47 cache would replay the earlier\nmiss as both findings.",
+          "timestamp": "2026-08-31T17:31:12+02:00",
+          "tree_id": "38efb7e9e56ccfa8dcb8bba78cdf862a5f46c6f8",
+          "url": "https://github.com/fallow-rs/fallow/commit/8c0f2244fe0cf5543cec5c9d65abcf3616e73ab5"
+        },
+        "date": 1788190838402,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
