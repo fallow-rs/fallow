@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788202014430,
+  "lastUpdate": 1788210880118,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "fb44ef467c8a032dc12453fb3b2842c115ec10da",
-          "message": "fix(audit): keep base attribution when the focus remap fails\n\nThe base-snapshot focus set is built from `git rev-parse --show-toplevel`,\nwhose spelling can differ from the caller's canonicalized root (Windows 8.3\ncomponents and drive-letter case, verbatim prefixes), so a literal\nstrip_prefix mapped no path at all. The base dead-code results were then\nfiltered against an empty focus set and every base finding disappeared, which\nmade each inherited finding look introduced and failed `--gate new-only` on\npre-existing findings.\n\nThe remap now compares simplified and canonicalized forms before giving up on\na path, and a base run whose focus set cannot be expressed leaves its results\nunfiltered instead of filtering them against an empty set.",
-          "timestamp": "2026-08-13T20:01:56+02:00",
-          "tree_id": "a32c69c82618dc6eee83c07431f87f5eed349ee2",
-          "url": "https://github.com/fallow-rs/fallow/commit/fb44ef467c8a032dc12453fb3b2842c115ec10da"
-        },
-        "date": 1786644204652,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 454,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1225,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0fabc864081f9326259b2b31cf3c01e9f5357471"
         },
         "date": 1788202010280,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "702aaca8c7f81108ac85c702c31c5ca0d1b54325",
+          "message": "fix(mcp): keep Code Mode refusals free of process-cleanup noise\n\nThe output-cap refusal and the deadline message are contract strings: the\nsnippet acts on them and the code_execute response envelope documents them.\nBoth were built with with_cleanup_errors, which appends best-effort\nprocess-teardown diagnostics, so on macOS a refusal intermittently read \"code\nmode host output exceeded 500 bytes; cleanup errors: failed to terminate\nsubprocess tree: Operation not permitted (os error 1)\". Terminating the\nprocess group is a cleanup concern, not part of the host call's outcome, and\nit fails whenever the leader has already become an unreaped zombie.\n\nThose two messages now keep their exact wording and the cleanup errors go to\ntracing::warn instead. Operational failures still carry their cleanup context\ninline, and structured programmatic errors still gain their cleanup_errors\nfield, so nothing is lost from a channel where it belongs. Three unit tests\npin the split.\n\nFollow-up to #2498, whose description claimed its crates/process change took\nthis from 1 failure in 15 runs to 0 in 15. That measurement was invalid: the\nload generators from the first half were still running during the second. Both\nvariants prebuilt and alternated under one constant load give 3 in 20 before\nthat change and 2 in 20 after, so it does not close the window; it remains\ncorrect on its own merit. With this change the message cannot vary by\nconstruction.",
+          "timestamp": "2026-08-31T23:08:51+02:00",
+          "tree_id": "94e9adcaa7cc7e4e7577a5c2c429ca1bbadbbe21",
+          "url": "https://github.com/fallow-rs/fallow/commit/702aaca8c7f81108ac85c702c31c5ca0d1b54325"
+        },
+        "date": 1788210876691,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
