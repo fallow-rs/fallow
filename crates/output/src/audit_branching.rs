@@ -358,12 +358,18 @@ impl BranchingReport {
         let nesting_weight_delta =
             i64::from(surviving_head.nesting) - i64::from(surviving_base.nesting);
 
+        // A transfer signature in one file says nothing about the changeset
+        // unless the set total also held. Without this gate a single refactored
+        // file paints a commit that added two hundred branch points as a move,
+        // and the human line then explains that splitting relocates branching
+        // on top of numbers showing it arrived.
+        let total_held = branch_points.delta.unsigned_abs() <= u64::from(tolerance);
         let (verdict, reason) = if surviving_head.functions == 0 && surviving_base.functions == 0 {
             (
                 BranchingVerdict::Inconclusive,
                 Some(BranchingInconclusiveReason::SetTooSmall),
             )
-        } else if moved_in_place || moved_out {
+        } else if total_held && (moved_in_place || moved_out) {
             (BranchingVerdict::BranchingMoved, None)
         } else if branch_points.delta.unsigned_abs() <= u64::from(tolerance)
             && functions.delta.unsigned_abs() <= u64::from(tolerance)
@@ -445,9 +451,12 @@ fn attribute_cognitive(
     let branches_removed = branch_delta < -i64::from(tolerance);
     let nesting_reset = nesting_weight_delta < 0;
     Some(match (branches_removed, nesting_reset) {
-        (true, true) => CognitiveAttribution::Mixed,
         (true, false) => CognitiveAttribution::BranchesRemoved,
-        _ => CognitiveAttribution::NestingReset,
+        (false, true) => CognitiveAttribution::NestingReset,
+        // Both moved, or neither did. The second case is cognitive falling with
+        // branching and nesting both held, where naming either cause would
+        // assert something the numbers do not show.
+        (true, true) | (false, false) => CognitiveAttribution::Mixed,
     })
 }
 
@@ -754,6 +763,49 @@ mod tests {
             BranchingVerdict::Inconclusive,
             "branching rose beyond tolerance, so this is not a clean transfer"
         );
+    }
+
+    #[test]
+    fn one_refactored_file_does_not_speak_for_a_branching_heavy_changeset() {
+        // src/a.ts is a clean in-place split, but the changeset as a whole added
+        // 190 branch points. Reporting "moved" would caption arriving branching
+        // as relocated branching.
+        let base = snapshot(&[("src/a.ts", file(10, 1, 11)), ("src/big.ts", file(5, 2, 4))]);
+        let head = snapshot(&[
+            ("src/a.ts", file(10, 4, 4)),
+            ("src/big.ts", file(195, 9, 40)),
+        ]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.branch_points.delta, 190);
+        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
+        assert!(!report.is_reportable());
+    }
+
+    #[test]
+    fn a_split_beside_a_new_branching_file_does_not_read_as_a_move() {
+        let base = snapshot(&[("src/a.ts", file(10, 1, 11))]);
+        let head = snapshot(&[("src/a.ts", file(10, 4, 4)), ("src/new.ts", file(21, 3, 8))]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.branch_points.delta, 21);
+        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
+    }
+
+    #[test]
+    fn a_real_removal_is_not_captioned_as_a_move() {
+        // Branching genuinely left. There is no positive verdict to give it, but
+        // it must not be labelled a relocation either.
+        let base = snapshot(&[("src/a.ts", file(15, 1, 16))]);
+        let head = snapshot(&[("src/a.ts", file(4, 3, 3))]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.branch_points.delta, -11);
+        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
+        assert!(!report.is_reportable());
     }
 
     #[test]
