@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788179484222,
+  "lastUpdate": 1788180117766,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "93e765835bf3aa5b3048468753ad0fd228bbef15",
-          "message": "perf: skip side-effect export indexes",
-          "timestamp": "2026-08-13T15:41:30+02:00",
-          "tree_id": "65970b121ab3e0902b67919ecf298a124e4db4eb",
-          "url": "https://github.com/fallow-rs/fallow/commit/93e765835bf3aa5b3048468753ad0fd228bbef15"
-        },
-        "date": 1786628762681,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 454,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1225,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d5a422c6206d00c813fe7c77d5038855d1051780"
         },
         "date": 1788179480755,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a67216a0461decae46b5f3a9c59ed4a4ca7c3e8e",
+          "message": "test(cli): give each migrate test its own directory (#2490)\n\nTwenty-nine tests built their working directory from a fixed name under the\nsystem temp dir, and several deleted that directory on the way in, so two\nprocesses running the suite at once shared the same paths and one removed the\nfixture another was reading.\n\nMeasured with eight concurrent instances of the lib test binary filtered to\n`migrate::`: 8 of 8 runs failed before, 0 of 8 after, with the same tests\nfailing repeatedly rather than randomly. Deterministic given overlap, not load.\n\nEach test now takes a unique directory from `tempfile::tempdir()`, which\nremoves itself on drop and retires 35 hand-written cleanup calls.\n\nRefs #2460",
+          "timestamp": "2026-08-31T14:38:38+02:00",
+          "tree_id": "c563a4b1c288c6cd671f8013f15ec8453c6ba60b",
+          "url": "https://github.com/fallow-rs/fallow/commit/a67216a0461decae46b5f3a9c59ed4a4ca7c3e8e"
+        },
+        "date": 1788180114220,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
