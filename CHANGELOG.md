@@ -54,19 +54,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [@filiabel](https://github.com/filiabel) for the heads-up ahead of the
   release and for reviewing the first cut against the specification.
 
-- **The review brief reports whether branching left or just moved.** A
-  per-function complexity ceiling constrains a partition, not a quantity:
-  splitting a function relocates its decision points instead of removing them,
-  so every per-unit metric improves while the total is untouched.
-  `fallow audit --brief` now reports the total branching against the number of
-  functions holding it, base revision against head, over the changed files, and
-  attributes a cognitive-complexity improvement to a nesting reset or to a
-  fallen branch-point count. The block is additive and optional, absent when no
-  base comparison ran, and never gates. A relocation is reported only when the
-  branching both held and demonstrably moved, with the rest of the changeset
-  still, so two unrelated moves that cancel in the sum do not qualify. It never
-  claims branching was removed, because decision points outside every function
-  are invisible to the count
+- **The review brief names files whose branching was split rather than
+  removed.** A per-function complexity ceiling constrains a partition, not a
+  quantity: splitting a function relocates its decision points instead of
+  removing them, so every per-unit metric improves while the total is
+  untouched. `fallow audit --brief` now reports, for each changed file present
+  on both revisions, whether its branching held while it gained functions and
+  its worst function shrank, which is the signature of a split. The changeset
+  totals are reported alongside as context, together with the test-path share,
+  the largest single file's share, and whether a cognitive-complexity
+  improvement came from a nesting reset or from a fallen branch-point count.
+  The claim is deliberately per file: a changeset contains arbitrary other
+  work, and an aggregate cannot attribute. The block is additive and optional,
+  absent when no base comparison ran, and never gates. It never claims
+  branching was removed, because decision points outside every function are
+  invisible to the count
   ([#2503](https://github.com/fallow-rs/fallow/issues/2503)).
 
 ### Changed

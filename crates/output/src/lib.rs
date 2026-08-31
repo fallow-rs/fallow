@@ -78,9 +78,8 @@ pub use analysis_sarif::{
     build_health_sarif,
 };
 pub use audit_branching::{
-    BranchingCognitive, BranchingFileDelta, BranchingInconclusiveReason, BranchingMetric,
-    BranchingReport, BranchingScope, BranchingSnapshot, BranchingVerdict, CognitiveAttribution,
-    DEFAULT_BRANCHING_TOLERANCE,
+    BranchingCognitive, BranchingFileDelta, BranchingMetric, BranchingReport, BranchingScope,
+    BranchingSnapshot, CognitiveAttribution, DEFAULT_BRANCHING_TOLERANCE, SplitInPlace,
 };
 pub use audit_brief::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,

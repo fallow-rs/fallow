@@ -606,37 +606,60 @@ fn print_brief_human(
     crate::audit::print_audit_findings(result, quiet, explain, false);
 }
 
-/// The two brief lines for a branching comparison, or `None` when it found
-/// nothing worth saying.
+/// The brief lines naming the files that split in place, or `None` when none
+/// did.
 ///
-/// Split out from the printer so the wording and the width are testable: both
-/// lines have to hold under 80 columns, and the brief has no other place where
-/// a reader meets the phrase "branch point".
-fn branching_human_lines(report: Option<&fallow_output::BranchingReport>) -> Option<[String; 2]> {
+/// Split out from the printer so the wording and the width are testable: every
+/// line has to hold under 80 columns, and the brief has no other place where a
+/// reader meets the phrase "branch point".
+fn branching_human_lines(report: Option<&fallow_output::BranchingReport>) -> Option<Vec<String>> {
     let report = report.filter(|report| report.is_reportable())?;
-    Some([
-        format!(
-            "  branching: {} to {} branch points, across {} to {} functions",
-            report.branch_points.previous,
-            report.branch_points.current,
-            report.functions.previous,
-            report.functions.current,
-        ),
-        if report.peak_unit_cyclomatic.delta == 0 {
-            "         a split moves branching, never removes it".to_string()
-        } else {
-            format!(
-                "         max cyclomatic {} to {}; a split moves branching, never removes it",
-                report.peak_unit_cyclomatic.previous, report.peak_unit_cyclomatic.current,
-            )
-        },
-    ])
+    let mut lines = vec![
+        "  branching: a split moves branching into new functions, it does not remove it"
+            .to_string(),
+    ];
+    for split in report.split_in_place.iter().take(2) {
+        lines.push(format!("         {}", elide_path(&split.path, 71)));
+        lines.push(format!(
+            "           {} branch points held, {} to {} functions, peak {} to {}",
+            split.branch_points,
+            split.functions_before,
+            split.functions_after,
+            split.peak_before,
+            split.peak_after,
+        ));
+    }
+    let remaining = report.split_in_place.len().saturating_sub(2);
+    if remaining > 0 {
+        lines.push(format!(
+            "         and {remaining} more file{}",
+            crate::report::plural(remaining)
+        ));
+    }
+    Some(lines)
+}
+
+/// Shorten a path from the left, keeping the file name, so a deep path cannot
+/// push a brief line past the terminal width.
+fn elide_path(path: &str, budget: usize) -> String {
+    if path.chars().count() <= budget {
+        return path.to_string();
+    }
+    let tail: String = path
+        .chars()
+        .rev()
+        .take(budget.saturating_sub(4))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!(".../{tail}")
 }
 
 /// Print branching conservation on the human brief. Caller has already gated on
-/// `!quiet`. Renders nothing unless the comparison found a move: a flat or
-/// abstaining result is not news, and every sibling section is silent when it
-/// has nothing to say.
+/// `!quiet`. Renders nothing unless a file demonstrably split in place: the set
+/// totals are context, and every sibling section is silent when it has nothing
+/// to say.
 fn print_branching_human(report: Option<&fallow_output::BranchingReport>) {
     let Some(lines) = branching_human_lines(report) else {
         return;
@@ -1432,7 +1455,7 @@ mod tests {
     ) -> fallow_output::BranchingReport {
         let unit = |(branch_points, functions, peak): (u32, u32, u16)| {
             std::iter::once((
-                "src/a.ts".to_string(),
+                "src/checkout/pricing.ts".to_string(),
                 fallow_types::extract::FileBranching {
                     branch_points,
                     functions,
@@ -1452,37 +1475,60 @@ mod tests {
     }
 
     #[test]
-    fn branching_lines_are_silent_without_a_move() {
+    fn branching_lines_are_silent_without_a_split() {
         assert!(branching_human_lines(None).is_none());
         let flat = branching_fixture((12, 3, 5), (12, 3, 5));
         assert!(
             branching_human_lines(Some(&flat)).is_none(),
-            "a flat comparison is not news, matching every sibling section"
+            "set totals alone are context, matching every sibling section"
         );
     }
 
     #[test]
-    fn branching_lines_read_base_to_current_throughout() {
+    fn branching_lines_name_the_file_that_split() {
         let report = branching_fixture((39, 1, 40), (39, 8, 6));
-        let [facts, note] = branching_human_lines(Some(&report)).expect("a move renders");
+        let lines = branching_human_lines(Some(&report)).expect("a split renders");
 
-        assert_eq!(
-            facts,
-            "  branching: 39 to 39 branch points, across 1 to 8 functions"
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].contains("does not remove it"));
+        assert!(
+            lines[1].ends_with("src/checkout/pricing.ts"),
+            "{}",
+            lines[1]
         );
         assert!(
-            note.contains("max cyclomatic 40 to 6"),
-            "the peak uses the established name and the same direction: {note}"
+            lines[2].contains("39 branch points held, 1 to 8 functions, peak 40 to 6"),
+            "{}",
+            lines[2]
         );
-        assert!(note.contains("never removes it"));
     }
 
     #[test]
     fn branching_lines_fit_eighty_columns() {
-        // Four-digit counts on a large changeset, which is the widest realistic
+        // A long path with four-digit counts, which is the widest realistic
         // shape.
-        let report = branching_fixture((9999, 1000, 9999), (9999, 4000, 12));
-        for line in branching_human_lines(Some(&report)).expect("a move renders") {
+        let long = "src/features/checkout/pricing/discounts/calculate-line-totals.ts";
+        let unit = |branch_points: u32, functions: u32, peak: u16| {
+            std::iter::once((
+                long.to_string(),
+                fallow_types::extract::FileBranching {
+                    branch_points,
+                    functions,
+                    peak_cyclomatic: peak,
+                    cognitive: branch_points,
+                    cognitive_nesting_weight: 0,
+                },
+            ))
+            .collect::<fallow_output::BranchingSnapshot>()
+        };
+        let report = fallow_output::BranchingReport::compare(
+            &unit(9999, 1000, 9999),
+            &unit(9999, 4000, 12),
+            fallow_output::DEFAULT_BRANCHING_TOLERANCE,
+            &|_| false,
+        );
+
+        for line in branching_human_lines(Some(&report)).expect("a split renders") {
             assert!(
                 line.chars().count() <= 80,
                 "{} columns: {line}",

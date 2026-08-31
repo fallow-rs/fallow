@@ -24556,24 +24556,16 @@
     "BranchingReport": {
       "type": "object",
       "properties": {
-        "verdict": {
-          "description": "What the comparison established.",
-          "$ref": "#/definitions/BranchingVerdict"
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/BranchingInconclusiveReason"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Why it abstained, when it did."
+        "split_in_place": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SplitInPlace"
+          },
+          "description": "Files that split in place. Empty when none did, which is the common\ncase and is not itself a finding."
         },
         "tolerance": {
           "type": "integer",
-          "description": "The band inside which a move counts as flat. Published because a verdict\nagainst an unpublished threshold is not reproducible by a consumer."
+          "description": "The band inside which a file's branching counts as held. Published\nbecause a claim against an unpublished threshold is not reproducible by\na consumer."
         },
         "scope": {
           "description": "Size and composition of the compared set.",
@@ -24588,7 +24580,7 @@
           "$ref": "#/definitions/BranchingMetric"
         },
         "peak_unit_cyclomatic": {
-          "description": "Highest single-function score. Reported, never a verdict input: a split\nlowers it by construction, which is the whole reason this section exists.",
+          "description": "Highest single-function score across the set. Reported as context, never\nas evidence on its own: a split lowers it by construction, which is the\nwhole reason this section exists.",
           "$ref": "#/definitions/BranchingMetric"
         },
         "branch_points_only_in_base": {
@@ -24612,7 +24604,7 @@
         }
       },
       "required": [
-        "verdict",
+        "split_in_place",
         "tolerance",
         "scope",
         "branch_points",
@@ -24802,6 +24794,44 @@
         "functions_delta"
       ],
       "description": "One file's contribution to the change."
+    },
+    "SplitInPlace": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Root-relative path."
+        },
+        "branch_points": {
+          "type": "integer",
+          "description": "Branch points on the base revision. Held within `tolerance` on head."
+        },
+        "functions_before": {
+          "type": "integer",
+          "description": "Accounted functions before the split."
+        },
+        "functions_after": {
+          "type": "integer",
+          "description": "Accounted functions after it."
+        },
+        "peak_before": {
+          "type": "integer",
+          "description": "Highest single-function cyclomatic score before."
+        },
+        "peak_after": {
+          "type": "integer",
+          "description": "And after. It falls by construction when a function is split, which is\nwhy it is evidence here and never a metric to celebrate."
+        }
+      },
+      "required": [
+        "path",
+        "branch_points",
+        "functions_before",
+        "functions_after",
+        "peak_before",
+        "peak_after"
+      ],
+      "description": "One file present on both revisions whose branching held while it gained\nfunctions and its worst function shrank.\n\nThis is the whole claim, and it is local: nothing is inferred about the rest\nof the changeset. A set-level classifier cannot make this claim, because a\nchangeset contains arbitrary other work and an aggregate cannot attribute."
     }
   }
 }

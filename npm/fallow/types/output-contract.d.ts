@@ -1027,24 +1027,6 @@ export type ConfidenceFlag = ("dynamic-dispatch" | "re-export-indirection")
  */
 export type WeakeningKind = ("test-weakened" | "threshold-lowered" | "suppression-added" | "security-check-removed")
 /**
- * What the comparison could establish about the changeset.
- *
- * Known limitation: units consolidated into a pre-existing sibling file are
- * recognized by neither transfer test, because one looks inside a single file
- * and the other looks at files the changeset added. That case abstains rather
- * than asserting.
- *
- * There is deliberately no "branching removed" value. Increments outside every
- * function are invisible to the underlying count, so a fall in branch points
- * is not proof that branching was removed: it is equally consistent with a
- * branch having been hoisted to module scope.
- */
-export type BranchingVerdict = ("branching-moved" | "branching-unchanged" | "inconclusive")
-/**
- * Why the comparison abstained.
- */
-export type BranchingInconclusiveReason = ("no-transfer-signature" | "set-too-small")
-/**
  * Where a cognitive-complexity improvement came from.
  */
 export type CognitiveAttribution = ("nesting-reset" | "fewer-branch-points" | "mixed")
@@ -12807,14 +12789,15 @@ bus_factor_one?: boolean
  * The brief's branching section.
  */
 export interface BranchingReport {
-verdict: BranchingVerdict
 /**
- * Why it abstained, when it did.
+ * Files that split in place. Empty when none did, which is the common
+ * case and is not itself a finding.
  */
-reason?: (BranchingInconclusiveReason | null)
+split_in_place: SplitInPlace[]
 /**
- * The band inside which a move counts as flat. Published because a verdict
- * against an unpublished threshold is not reproducible by a consumer.
+ * The band inside which a file's branching counts as held. Published
+ * because a claim against an unpublished threshold is not reproducible by
+ * a consumer.
  */
 tolerance: number
 scope: BranchingScope
@@ -12835,6 +12818,41 @@ by_file: BranchingFileDelta[]
  * Files with a change that the list did not name.
  */
 by_file_omitted: number
+}
+/**
+ * One file present on both revisions whose branching held while it gained
+ * functions and its worst function shrank.
+ *
+ * This is the whole claim, and it is local: nothing is inferred about the rest
+ * of the changeset. A set-level classifier cannot make this claim, because a
+ * changeset contains arbitrary other work and an aggregate cannot attribute.
+ */
+export interface SplitInPlace {
+/**
+ * Root-relative path.
+ */
+path: string
+/**
+ * Branch points on the base revision. Held within `tolerance` on head.
+ */
+branch_points: number
+/**
+ * Accounted functions before the split.
+ */
+functions_before: number
+/**
+ * Accounted functions after it.
+ */
+functions_after: number
+/**
+ * Highest single-function cyclomatic score before.
+ */
+peak_before: number
+/**
+ * And after. It falls by construction when a function is split, which is
+ * why it is evidence here and never a metric to celebrate.
+ */
+peak_after: number
 }
 /**
  * Size and composition of the compared set.

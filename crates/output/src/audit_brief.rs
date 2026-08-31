@@ -648,13 +648,20 @@ mod tests {
 
         let value = brief_wire_value(Some(report));
 
-        assert_eq!(value["branching"]["verdict"], "branching-moved");
+        assert_eq!(
+            value["branching"]["split_in_place"][0]["path"], "src/a.ts",
+            "the local claim reaches the wire, not only the digest"
+        );
+        assert_eq!(
+            value["branching"]["split_in_place"][0]["functions_after"],
+            5
+        );
         assert!(
             !value["branching"]
                 .as_object()
                 .expect("branching is an object")
-                .contains_key("reason"),
-            "a decided verdict carries no reason, and absent is not null"
+                .contains_key("verdict"),
+            "there is no changeset-level verdict to publish"
         );
         assert_eq!(value["branching"]["branch_points"]["delta"], 0);
         assert_eq!(value["branching"]["functions"]["delta"], 4);

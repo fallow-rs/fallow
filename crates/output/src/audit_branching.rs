@@ -24,42 +24,6 @@ pub const DEFAULT_BRANCHING_TOLERANCE: u32 = 2;
 /// How many files the payload names before it starts counting instead.
 const MAX_BY_FILE: usize = 5;
 
-/// What the comparison could establish about the changeset.
-///
-/// Known limitation: units consolidated into a pre-existing sibling file are
-/// recognized by neither transfer test, because one looks inside a single file
-/// and the other looks at files the changeset added. That case abstains rather
-/// than asserting.
-///
-/// There is deliberately no "branching removed" value. Increments outside every
-/// function are invisible to the underlying count, so a fall in branch points
-/// is not proof that branching was removed: it is equally consistent with a
-/// branch having been hoisted to module scope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum BranchingVerdict {
-    /// Branching was demonstrably relocated rather than removed.
-    BranchingMoved,
-    /// Both the branching and the number of functions holding it are flat.
-    BranchingUnchanged,
-    /// Neither could be established. `reason` says why.
-    Inconclusive,
-}
-
-/// Why the comparison abstained.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum BranchingInconclusiveReason {
-    /// The changeset moved branching and function count together in a way that
-    /// matches feature work as readily as a split.
-    NoTransferSignature,
-    /// Neither revision had an accounted unit in the changed files, so there
-    /// is nothing to compare.
-    SetTooSmall,
-}
-
 /// One metric across the two revisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -148,6 +112,30 @@ pub struct BranchingScope {
     pub largest_file_share_of_branch_points: f64,
 }
 
+/// One file present on both revisions whose branching held while it gained
+/// functions and its worst function shrank.
+///
+/// This is the whole claim, and it is local: nothing is inferred about the rest
+/// of the changeset. A set-level classifier cannot make this claim, because a
+/// changeset contains arbitrary other work and an aggregate cannot attribute.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SplitInPlace {
+    /// Root-relative path.
+    pub path: String,
+    /// Branch points on the base revision. Held within `tolerance` on head.
+    pub branch_points: u32,
+    /// Accounted functions before the split.
+    pub functions_before: u32,
+    /// Accounted functions after it.
+    pub functions_after: u32,
+    /// Highest single-function cyclomatic score before.
+    pub peak_before: u16,
+    /// And after. It falls by construction when a function is split, which is
+    /// why it is evidence here and never a metric to celebrate.
+    pub peak_after: u16,
+}
+
 /// One file's contribution to the change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -164,13 +152,12 @@ pub struct BranchingFileDelta {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BranchingReport {
-    /// What the comparison established.
-    pub verdict: BranchingVerdict,
-    /// Why it abstained, when it did.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<BranchingInconclusiveReason>,
-    /// The band inside which a move counts as flat. Published because a verdict
-    /// against an unpublished threshold is not reproducible by a consumer.
+    /// Files that split in place. Empty when none did, which is the common
+    /// case and is not itself a finding.
+    pub split_in_place: Vec<SplitInPlace>,
+    /// The band inside which a file's branching counts as held. Published
+    /// because a claim against an unpublished threshold is not reproducible by
+    /// a consumer.
     pub tolerance: u32,
     /// Size and composition of the compared set.
     pub scope: BranchingScope,
@@ -178,8 +165,9 @@ pub struct BranchingReport {
     pub branch_points: BranchingMetric,
     /// The number of functions holding it, over the surviving partition.
     pub functions: BranchingMetric,
-    /// Highest single-function score. Reported, never a verdict input: a split
-    /// lowers it by construction, which is the whole reason this section exists.
+    /// Highest single-function score across the set. Reported as context, never
+    /// as evidence on its own: a split lowers it by construction, which is the
+    /// whole reason this section exists.
     pub peak_unit_cyclomatic: BranchingMetric,
     /// Base-side branch points of the files that have no head entry.
     pub branch_points_only_in_base: u32,
@@ -220,16 +208,10 @@ impl Totals {
 struct Partition {
     surviving_base: Totals,
     surviving_head: Totals,
-    added: Totals,
     deleted: Totals,
     scope: BranchingScope,
     deltas: Vec<BranchingFileDelta>,
-    moved_in_place: bool,
-    /// Per-file branch-point delta for files present on both revisions, paired
-    /// with whether that file carried the in-place transfer signature. The
-    /// residual over the files that did NOT carry it is what separates a
-    /// relocation from two unrelated moves that happen to cancel in the sum.
-    both_deltas: Vec<(i64, bool)>,
+    split_in_place: Vec<SplitInPlace>,
 }
 
 fn partition(
@@ -241,7 +223,6 @@ fn partition(
     let mut out = Partition {
         surviving_base: Totals::default(),
         surviving_head: Totals::default(),
-        added: Totals::default(),
         deleted: Totals::default(),
         scope: BranchingScope {
             files_both: 0,
@@ -252,8 +233,7 @@ fn partition(
             largest_file_share_of_branch_points: 0.0,
         },
         deltas: Vec::new(),
-        moved_in_place: false,
-        both_deltas: Vec::new(),
+        split_in_place: Vec::new(),
     };
     let mut test_totals = Totals::default();
 
@@ -264,7 +244,6 @@ fn partition(
         }
         let Some(base_file) = base.get(path) else {
             out.scope.files_added += 1;
-            out.added.add(*head_file);
             out.deltas.push(BranchingFileDelta {
                 path: path.clone(),
                 branch_points_delta: i64::from(head_file.branch_points),
@@ -278,12 +257,19 @@ fn partition(
         let function_delta = i64::from(head_file.functions) - i64::from(base_file.functions);
         // Branching held while the file grew functions and its worst one got
         // smaller: the branches were repartitioned inside this file.
-        let carries_in_place_signature = branch_delta.unsigned_abs() <= u64::from(tolerance)
+        if branch_delta.unsigned_abs() <= u64::from(tolerance)
             && function_delta > 0
-            && head_file.peak_cyclomatic < base_file.peak_cyclomatic;
-        out.moved_in_place |= carries_in_place_signature;
-        out.both_deltas
-            .push((branch_delta, carries_in_place_signature));
+            && head_file.peak_cyclomatic < base_file.peak_cyclomatic
+        {
+            out.split_in_place.push(SplitInPlace {
+                path: path.clone(),
+                branch_points: base_file.branch_points,
+                functions_before: base_file.functions,
+                functions_after: head_file.functions,
+                peak_before: base_file.peak_cyclomatic,
+                peak_after: head_file.peak_cyclomatic,
+            });
+        }
         if branch_delta != 0 || function_delta != 0 {
             out.deltas.push(BranchingFileDelta {
                 path: path.clone(),
@@ -312,67 +298,6 @@ fn scope_largest(head: &BranchingSnapshot) -> u32 {
         .unwrap_or(0)
 }
 
-/// Everything the verdict rests on, so the decision reads as one rule set.
-struct Evidence<'a> {
-    both_deltas: &'a [(i64, bool)],
-    moved_in_place: bool,
-    moved_out: bool,
-    set_delta: i64,
-    function_delta: i64,
-    base_only_branch_points: u32,
-    head_functions: u32,
-    base_functions: u32,
-}
-
-/// A transfer signature in one file says nothing about the changeset unless the
-/// rest of it stayed still.
-///
-/// The set total alone is not enough, because it is a sum: an unrelated fall in
-/// one file cancels an unrelated rise in another and the total looks untouched.
-/// The residual adds the unrelated moves in absolute terms instead, so they
-/// cannot cancel. Files present only on the base revision are checked
-/// separately, since they enter neither side of the comparison and could
-/// otherwise hide a large fall behind a small local split.
-fn decide(
-    evidence: &Evidence<'_>,
-    tolerance: u32,
-) -> (BranchingVerdict, Option<BranchingInconclusiveReason>) {
-    if evidence.head_functions == 0 && evidence.base_functions == 0 {
-        return (
-            BranchingVerdict::Inconclusive,
-            Some(BranchingInconclusiveReason::SetTooSmall),
-        );
-    }
-    let unrelated: u64 = evidence
-        .both_deltas
-        .iter()
-        .filter(|(delta, in_place)| {
-            if evidence.moved_in_place {
-                !in_place
-            } else {
-                *delta >= 0
-            }
-        })
-        .map(|(delta, _)| delta.unsigned_abs())
-        .sum();
-    let story_is_local = evidence.set_delta.unsigned_abs() <= u64::from(tolerance)
-        && unrelated <= u64::from(tolerance)
-        && evidence.base_only_branch_points <= tolerance
-        && evidence.function_delta > 0;
-    if story_is_local && (evidence.moved_in_place || evidence.moved_out) {
-        return (BranchingVerdict::BranchingMoved, None);
-    }
-    if evidence.set_delta.unsigned_abs() <= u64::from(tolerance)
-        && evidence.function_delta.unsigned_abs() <= u64::from(tolerance)
-    {
-        return (BranchingVerdict::BranchingUnchanged, None);
-    }
-    (
-        BranchingVerdict::Inconclusive,
-        Some(BranchingInconclusiveReason::NoTransferSignature),
-    )
-}
-
 impl BranchingReport {
     /// Compare two revisions over the accounting set.
     ///
@@ -390,12 +315,10 @@ impl BranchingReport {
         let Partition {
             surviving_base,
             surviving_head,
-            added,
             deleted,
             mut scope,
             mut deltas,
-            moved_in_place,
-            both_deltas,
+            mut split_in_place,
         } = partition(base, head, tolerance, is_test_path);
 
         scope.largest_file_share_of_branch_points = if surviving_head.branch_points == 0 {
@@ -403,26 +326,6 @@ impl BranchingReport {
         } else {
             f64::from(scope_largest(head)) / f64::from(surviving_head.branch_points)
         };
-
-        // The surviving partition is `both` plus `added` on the head side, and
-        // `both` alone on the base side, so the two sides describe different
-        // populations. Every added file inflates the head function count while
-        // carrying almost no branches, which is why the verdict rests on a
-        // transfer test rather than on the sign of these deltas.
-        let both_branch_delta = i64::from(
-            surviving_head
-                .branch_points
-                .saturating_sub(added.branch_points),
-        ) - i64::from(surviving_base.branch_points);
-        // A transfer out of the surviving files, not merely new code arriving:
-        // the added files must carry more than the tolerance, the pre-existing
-        // files must have fallen beyond it, and the two must approximately
-        // cancel. Without all three, an ordinary commit that adds a file reads
-        // as a split.
-        let moved_out = added.branch_points > tolerance
-            && both_branch_delta <= -i64::from(tolerance)
-            && (both_branch_delta + i64::from(added.branch_points)).unsigned_abs()
-                <= u64::from(tolerance);
 
         let branch_points =
             BranchingMetric::new(surviving_base.branch_points, surviving_head.branch_points);
@@ -436,19 +339,11 @@ impl BranchingReport {
         let nesting_weight_delta =
             i64::from(surviving_head.nesting) - i64::from(surviving_base.nesting);
 
-        let (verdict, reason) = decide(
-            &Evidence {
-                both_deltas: &both_deltas,
-                moved_in_place,
-                moved_out,
-                set_delta: branch_points.delta,
-                function_delta: functions.delta,
-                base_only_branch_points: deleted.branch_points,
-                head_functions: surviving_head.functions,
-                base_functions: surviving_base.functions,
-            },
-            tolerance,
-        );
+        split_in_place.sort_by(|a, b| {
+            (b.functions_after - b.functions_before)
+                .cmp(&(a.functions_after - a.functions_before))
+                .then_with(|| a.path.cmp(&b.path))
+        });
 
         deltas.sort_by(|a, b| {
             b.branch_points_delta
@@ -461,8 +356,7 @@ impl BranchingReport {
         deltas.truncate(MAX_BY_FILE);
 
         Self {
-            verdict,
-            reason,
+            split_in_place,
             tolerance,
             scope,
             branch_points,
@@ -486,12 +380,14 @@ impl BranchingReport {
         }
     }
 
-    /// Whether the section says anything a reader needs. A flat or abstaining
-    /// comparison is rendered as nothing in the human brief, matching every
-    /// sibling section.
+    /// Whether the section says anything a reader needs.
+    ///
+    /// Only a file that demonstrably split in place qualifies. The set totals
+    /// alone are context, not news, and the human brief stays silent on them,
+    /// matching every sibling section.
     #[must_use]
-    pub const fn is_reportable(&self) -> bool {
-        matches!(self.verdict, BranchingVerdict::BranchingMoved)
+    pub fn is_reportable(&self) -> bool {
+        !self.split_in_place.is_empty()
     }
 }
 
@@ -556,183 +452,152 @@ mod tests {
     }
 
     #[test]
-    fn a_split_inside_one_file_is_a_move() {
+    fn a_file_that_splits_in_place_is_named() {
         let base = snapshot(&[("src/a.ts", file(39, 1, 40))]);
         let head = snapshot(&[("src/a.ts", file(39, 8, 6))]);
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.verdict, BranchingVerdict::BranchingMoved);
-        assert_eq!(report.branch_points.delta, 0, "the branching is conserved");
-        assert_eq!(report.functions.delta, 7, "seven new functions hold it");
-        assert_eq!(report.peak_unit_cyclomatic.delta, -34);
+        assert_eq!(report.split_in_place.len(), 1);
+        let split = &report.split_in_place[0];
+        assert_eq!(split.path, "src/a.ts");
+        assert_eq!(split.branch_points, 39);
+        assert_eq!((split.functions_before, split.functions_after), (1, 8));
+        assert_eq!((split.peak_before, split.peak_after), (40, 6));
         assert!(report.is_reportable());
     }
 
     #[test]
-    fn extraction_into_a_new_file_is_a_move() {
-        let base = snapshot(&[("src/a.ts", file(30, 1, 31))]);
-        let head = snapshot(&[
-            ("src/a.ts", file(10, 1, 11)),
-            ("src/helpers.ts", file(20, 4, 6)),
-        ]);
-
-        let report = compare(&base, &head);
-
-        assert_eq!(report.verdict, BranchingVerdict::BranchingMoved);
-        assert_eq!(report.scope.files_added, 1);
-    }
-
-    #[test]
-    fn adding_a_branching_feature_is_not_a_move() {
-        // The failure mode the transfer test exists to prevent: an ordinary
-        // commit adds files, so unit count rises with branching flat, which a
-        // naive "D flat while U rose" rule would brand a split.
-        let base = snapshot(&[("src/a.ts", file(30, 5, 8))]);
-        let head = snapshot(&[
-            ("src/a.ts", file(30, 5, 8)),
-            ("src/feature.ts", file(9, 6, 4)),
-        ]);
-
-        let report = compare(&base, &head);
-
-        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
-        assert!(!report.is_reportable());
-    }
-
-    #[test]
-    fn callbacks_added_alongside_a_feature_stay_unclassified() {
-        // New code is dominated by zero-branch callbacks, so `dD` near zero
-        // with `dU` up is the default state of a commit that adds a file.
-        let base = snapshot(&[("src/a.ts", file(30, 5, 8))]);
-        let head = snapshot(&[("src/a.ts", file(30, 5, 8)), ("src/new.ts", file(1, 20, 2))]);
-
-        let report = compare(&base, &head);
-
-        assert_eq!(report.verdict, BranchingVerdict::Inconclusive);
-        assert_eq!(
-            report.reason,
-            Some(BranchingInconclusiveReason::NoTransferSignature)
-        );
-        assert_eq!(
-            report.functions.delta, 20,
-            "the numbers stay populated while abstaining"
-        );
-    }
-
-    #[test]
-    fn a_deleted_file_is_reported_and_kept_out_of_the_headline() {
+    fn the_claim_is_local_so_unrelated_work_cannot_change_it() {
+        // The routes that defeated a changeset-level classifier: an unrelated
+        // pair of moves that cancel in the sum, a large deleted file, an empty
+        // added file, and branching arriving elsewhere. None of them can touch
+        // a statement about one file.
         let base = snapshot(&[
-            ("src/a.ts", file(30, 5, 8)),
+            ("src/a.ts", file(39, 1, 40)),
+            ("src/b.ts", file(12, 3, 5)),
+            ("src/d.ts", file(0, 1, 1)),
             ("src/gone.ts", file(300, 9, 40)),
         ]);
-        let head = snapshot(&[("src/a.ts", file(30, 5, 8))]);
+        let head = snapshot(&[
+            ("src/a.ts", file(39, 8, 6)),
+            ("src/b.ts", file(4, 3, 5)),
+            ("src/d.ts", file(208, 1, 90)),
+            ("src/added.ts", file(0, 1, 1)),
+        ]);
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.scope.files_only_in_base, 1);
-        assert_eq!(report.branch_points_only_in_base, 300);
         assert_eq!(
-            report.branch_points.delta, 0,
-            "the deleted file's branches never enter the comparison"
+            report.split_in_place.len(),
+            1,
+            "only src/a.ts split; nothing else in the changeset makes that more or less true"
         );
-        assert_eq!(report.verdict, BranchingVerdict::BranchingUnchanged);
+        assert_eq!(report.split_in_place[0].path, "src/a.ts");
     }
 
     #[test]
-    fn a_flat_changeset_is_unchanged_and_not_rendered() {
-        let base = snapshot(&[("src/a.ts", file(12, 3, 5))]);
-        let head = snapshot(&[("src/a.ts", file(12, 3, 5))]);
+    fn a_split_that_lands_in_a_test_file_is_not_an_in_place_split() {
+        // The source file did not hold its branching, it lost it.
+        let base = snapshot(&[("src/pricing.ts", file(48, 4, 20))]);
+        let head = snapshot(&[
+            ("src/pricing.ts", file(0, 1, 1)),
+            ("src/pricing.test.ts", file(48, 16, 4)),
+        ]);
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.verdict, BranchingVerdict::BranchingUnchanged);
+        assert!(report.split_in_place.is_empty());
         assert!(!report.is_reportable());
-    }
-
-    #[test]
-    fn an_empty_accounting_set_abstains() {
-        let report = compare(&snapshot(&[]), &snapshot(&[]));
-
-        assert_eq!(report.verdict, BranchingVerdict::Inconclusive);
         assert_eq!(
-            report.reason,
-            Some(BranchingInconclusiveReason::SetTooSmall)
+            report.scope.test_branch_points, 48,
+            "still reported as scope"
         );
     }
 
     #[test]
-    fn a_fall_in_one_file_and_a_rise_in_another_is_visible_per_file() {
-        // A set-level scalar cannot localize, so the per-file list is what
-        // keeps a mixed changeset readable.
-        let base = snapshot(&[("src/a.ts", file(20, 4, 9)), ("src/b.ts", file(10, 3, 6))]);
-        let head = snapshot(&[("src/a.ts", file(10, 4, 9)), ("src/b.ts", file(40, 3, 6))]);
+    fn a_split_with_a_little_glue_branching_still_counts() {
+        let base = snapshot(&[("src/a.ts", file(30, 1, 31))]);
+        let head = snapshot(&[("src/a.ts", file(32, 6, 8))]);
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.by_file.len(), 2);
-        assert_eq!(report.by_file[0].path, "src/b.ts", "largest move first");
-        assert_eq!(report.by_file[0].branch_points_delta, 30);
-        assert_eq!(report.by_file[1].branch_points_delta, -10);
+        assert_eq!(report.split_in_place.len(), 1);
     }
 
     #[test]
-    fn test_paths_are_reported_separately() {
-        let base = snapshot(&[("src/a.ts", file(10, 2, 6))]);
-        let head = snapshot(&[
-            ("src/a.ts", file(10, 2, 6)),
-            ("src/a.test.ts", file(40, 30, 3)),
-        ]);
+    fn branching_arriving_in_a_file_is_not_a_split() {
+        let base = snapshot(&[("src/a.ts", file(10, 1, 11))]);
+        let head = snapshot(&[("src/a.ts", file(40, 5, 12))]);
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.scope.test_branch_points, 40);
-        assert_eq!(report.scope.test_functions, 30);
-        assert_eq!(
-            report.branch_points.current, 50,
-            "the headline still totals"
-        );
+        assert!(report.split_in_place.is_empty());
     }
 
     #[test]
-    fn one_dominant_file_is_visible_in_the_share() {
-        let base = snapshot(&[("src/a.ts", file(1, 1, 2))]);
-        let head = snapshot(&[
-            ("src/a.ts", file(1, 1, 2)),
-            ("src/vendor/bundle.js", file(99, 5, 40)),
-        ]);
+    fn a_file_whose_peak_held_is_not_a_split() {
+        let base = snapshot(&[("src/a.ts", file(30, 2, 20))]);
+        let head = snapshot(&[("src/a.ts", file(30, 6, 20))]);
 
         let report = compare(&base, &head);
 
         assert!(
-            (report.scope.largest_file_share_of_branch_points - 0.99).abs() < 1e-9,
-            "one file owns the number: {}",
-            report.scope.largest_file_share_of_branch_points
+            report.split_in_place.is_empty(),
+            "functions rose and branching held, but the worst function is untouched"
         );
     }
 
     #[test]
-    fn the_file_list_is_capped_and_the_remainder_counted() {
-        let base = snapshot(&[]);
-        let head = snapshot(&[
-            ("src/a.ts", file(9, 1, 3)),
-            ("src/b.ts", file(8, 1, 3)),
-            ("src/c.ts", file(7, 1, 3)),
-            ("src/d.ts", file(6, 1, 3)),
-            ("src/e.ts", file(5, 1, 3)),
-            ("src/f.ts", file(4, 1, 3)),
-            ("src/g.ts", file(3, 1, 3)),
-        ]);
+    fn splits_are_ordered_by_how_far_the_file_was_partitioned() {
+        let base = snapshot(&[("src/a.ts", file(9, 1, 10)), ("src/b.ts", file(20, 1, 21))]);
+        let head = snapshot(&[("src/a.ts", file(9, 3, 4)), ("src/b.ts", file(20, 9, 5))]);
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.by_file.len(), 5);
-        assert_eq!(report.by_file_omitted, 2);
-        assert_eq!(report.by_file[0].path, "src/a.ts");
+        assert_eq!(
+            report
+                .split_in_place
+                .iter()
+                .map(|s| s.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/b.ts", "src/a.ts"]
+        );
     }
 
     #[test]
-    fn a_cognitive_win_with_flat_branching_is_a_nesting_reset() {
+    fn the_set_totals_still_describe_the_changeset() {
+        let base = snapshot(&[
+            ("src/a.ts", file(30, 5, 8)),
+            ("src/gone.ts", file(300, 9, 40)),
+        ]);
+        let head = snapshot(&[("src/a.ts", file(30, 5, 8)), ("src/new.ts", file(9, 6, 4))]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.branch_points.previous, 30);
+        assert_eq!(report.branch_points.current, 39);
+        assert_eq!(report.functions.delta, 6);
+        assert_eq!(report.scope.files_added, 1);
+        assert_eq!(report.scope.files_only_in_base, 1);
+        assert_eq!(report.branch_points_only_in_base, 300);
+        assert!(
+            !report.is_reportable(),
+            "totals alone are context, not news"
+        );
+    }
+
+    #[test]
+    fn an_empty_accounting_set_reports_nothing() {
+        let report = compare(&snapshot(&[]), &snapshot(&[]));
+
+        assert!(report.split_in_place.is_empty());
+        assert_eq!(report.branch_points.current, 0);
+        assert!(!report.is_reportable());
+    }
+
+    #[test]
+    fn a_cognitive_win_with_branching_held_is_a_nesting_reset() {
         let base = snapshot(&[(
             "src/a.ts",
             FileBranching {
@@ -756,210 +621,72 @@ mod tests {
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.verdict, BranchingVerdict::BranchingMoved);
         assert_eq!(report.cognitive.delta, -28);
         assert_eq!(
             report.cognitive.attributed_to,
-            Some(CognitiveAttribution::NestingReset),
-            "the cognitive win came from repartitioning, not from removing branches"
-        );
-    }
-
-    #[test]
-    fn a_cognitive_win_with_branching_gone_is_attributed_to_branches() {
-        let base = snapshot(&[(
-            "src/a.ts",
-            FileBranching {
-                branch_points: 30,
-                functions: 2,
-                peak_cyclomatic: 20,
-                cognitive: 30,
-                cognitive_nesting_weight: 0,
-            },
-        )]);
-        let head = snapshot(&[(
-            "src/a.ts",
-            FileBranching {
-                branch_points: 5,
-                functions: 2,
-                peak_cyclomatic: 4,
-                cognitive: 5,
-                cognitive_nesting_weight: 0,
-            },
-        )]);
-
-        let report = compare(&base, &head);
-
-        assert_eq!(
-            report.cognitive.attributed_to,
-            Some(CognitiveAttribution::FewerBranchPoints)
+            Some(CognitiveAttribution::NestingReset)
         );
     }
 
     #[test]
     fn a_cognitive_rise_is_attributed_to_nothing() {
-        // Measured on a real split routed through a nullish-coalescing chain:
-        // branching up, cognitive up. Labelling that "branches removed" reads
-        // as the opposite of what happened.
-        let base = snapshot(&[(
-            "src/a.ts",
-            FileBranching {
-                branch_points: 7,
-                functions: 1,
-                peak_cyclomatic: 8,
-                cognitive: 10,
-                cognitive_nesting_weight: 3,
-            },
-        )]);
-        let head = snapshot(&[(
-            "src/a.ts",
-            FileBranching {
-                branch_points: 11,
-                functions: 5,
-                peak_cyclomatic: 5,
-                cognitive: 11,
-                cognitive_nesting_weight: 3,
-            },
-        )]);
+        let base = snapshot(&[("src/a.ts", file(7, 1, 8))]);
+        let head = snapshot(&[("src/a.ts", file(11, 5, 5))]);
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.cognitive.delta, 1);
+        assert!(report.cognitive.delta > 0);
         assert_eq!(report.cognitive.attributed_to, None);
-        assert_eq!(
-            report.verdict,
-            BranchingVerdict::Inconclusive,
-            "branching rose beyond tolerance, so this is not a clean transfer"
+    }
+
+    #[test]
+    fn test_paths_are_reported_separately() {
+        let base = snapshot(&[("src/a.ts", file(10, 2, 6))]);
+        let head = snapshot(&[
+            ("src/a.ts", file(10, 2, 6)),
+            ("src/a.test.ts", file(40, 30, 3)),
+        ]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.scope.test_branch_points, 40);
+        assert_eq!(report.scope.test_functions, 30);
+    }
+
+    #[test]
+    fn one_dominant_file_is_visible_in_the_share() {
+        let base = snapshot(&[("src/a.ts", file(1, 1, 2))]);
+        let head = snapshot(&[
+            ("src/a.ts", file(1, 1, 2)),
+            ("src/vendor/bundle.js", file(99, 5, 40)),
+        ]);
+
+        let report = compare(&base, &head);
+
+        assert!(
+            (report.scope.largest_file_share_of_branch_points - 0.99).abs() < 1e-9,
+            "{}",
+            report.scope.largest_file_share_of_branch_points
         );
     }
 
     #[test]
-    fn one_refactored_file_does_not_speak_for_a_branching_heavy_changeset() {
-        // src/a.ts is a clean in-place split, but the changeset as a whole added
-        // 190 branch points. Reporting "moved" would caption arriving branching
-        // as relocated branching.
-        let base = snapshot(&[("src/a.ts", file(10, 1, 11)), ("src/big.ts", file(5, 2, 4))]);
+    fn the_file_list_is_capped_and_the_remainder_counted() {
+        let base = snapshot(&[]);
         let head = snapshot(&[
-            ("src/a.ts", file(10, 4, 4)),
-            ("src/big.ts", file(195, 9, 40)),
+            ("src/a.ts", file(9, 1, 3)),
+            ("src/b.ts", file(8, 1, 3)),
+            ("src/c.ts", file(7, 1, 3)),
+            ("src/d.ts", file(6, 1, 3)),
+            ("src/e.ts", file(5, 1, 3)),
+            ("src/f.ts", file(4, 1, 3)),
+            ("src/g.ts", file(3, 1, 3)),
         ]);
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.branch_points.delta, 190);
-        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
-        assert!(!report.is_reportable());
-    }
-
-    #[test]
-    fn a_split_beside_a_new_branching_file_does_not_read_as_a_move() {
-        let base = snapshot(&[("src/a.ts", file(10, 1, 11))]);
-        let head = snapshot(&[("src/a.ts", file(10, 4, 4)), ("src/new.ts", file(21, 3, 8))]);
-
-        let report = compare(&base, &head);
-
-        assert_eq!(report.branch_points.delta, 21);
-        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
-    }
-
-    #[test]
-    fn a_real_removal_is_not_captioned_as_a_move() {
-        // Branching genuinely left. There is no positive verdict to give it, but
-        // it must not be labelled a relocation either.
-        let base = snapshot(&[("src/a.ts", file(15, 1, 16))]);
-        let head = snapshot(&[("src/a.ts", file(4, 3, 3))]);
-
-        let report = compare(&base, &head);
-
-        assert_eq!(report.branch_points.delta, -11);
-        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
-        assert!(!report.is_reportable());
-    }
-
-    #[test]
-    fn two_unrelated_moves_that_cancel_are_not_a_relocation() {
-        // The set total is a sum, so an unrelated fall in one file cancels an
-        // unrelated rise in another. a.ts is a genuine local split, but b.ts
-        // lost eight branch points and d.ts gained eight, which is two changes
-        // and not one relocation.
-        let base = snapshot(&[
-            ("a.ts", file(6, 1, 7)),
-            ("b.ts", file(12, 3, 5)),
-            ("d.ts", file(0, 1, 1)),
-        ]);
-        let head = snapshot(&[
-            ("a.ts", file(6, 4, 3)),
-            ("b.ts", file(4, 3, 5)),
-            ("d.ts", file(8, 1, 9)),
-        ]);
-
-        let report = compare(&base, &head);
-
-        assert_eq!(report.branch_points.delta, 0, "the sum hides both moves");
-        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
-    }
-
-    #[test]
-    fn a_large_base_only_file_blocks_the_relocation_claim() {
-        // Base-only files enter neither side, so without this guard a small
-        // local split captions a changeset that dropped three hundred branch
-        // points with a file.
-        let base = snapshot(&[("a.ts", file(6, 1, 7)), ("gone.ts", file(300, 9, 40))]);
-        let head = snapshot(&[("a.ts", file(6, 4, 3))]);
-
-        let report = compare(&base, &head);
-
-        assert_eq!(report.branch_points_only_in_base, 300);
-        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
-    }
-
-    #[test]
-    fn a_relocation_needs_the_function_count_to_have_risen() {
-        // Peak fell and branching held, but nothing was partitioned.
-        let base = snapshot(&[("a.ts", file(6, 7, 7))]);
-        let head = snapshot(&[("a.ts", file(6, 7, 3))]);
-
-        let report = compare(&base, &head);
-
-        assert_eq!(report.functions.delta, 0);
-        assert_ne!(report.verdict, BranchingVerdict::BranchingMoved);
-    }
-
-    #[test]
-    fn a_split_with_a_little_glue_branching_still_reads_as_a_move() {
-        // The common real shape: extraction adds a guard or two. The tolerance
-        // has to absorb that or the verdict never fires in practice.
-        let base = snapshot(&[("a.ts", file(30, 1, 31))]);
-        let head = snapshot(&[("a.ts", file(32, 6, 8))]);
-
-        let report = compare(&base, &head);
-
-        assert_eq!(report.branch_points.delta, 2);
-        assert_eq!(report.verdict, BranchingVerdict::BranchingMoved);
-    }
-
-    #[test]
-    fn every_region_of_the_verdict_space_is_assigned() {
-        // The verdict must be total: no combination of deltas may fall through
-        // without a value.
-        for base_branches in [0_u32, 5, 40] {
-            for head_branches in [0_u32, 5, 40] {
-                for base_functions in [0_u32, 1, 9] {
-                    for head_functions in [0_u32, 1, 9] {
-                        let base =
-                            snapshot(&[("src/a.ts", file(base_branches, base_functions, 9))]);
-                        let head =
-                            snapshot(&[("src/a.ts", file(head_branches, head_functions, 4))]);
-                        let report = compare(&base, &head);
-                        assert_eq!(
-                            report.reason.is_some(),
-                            report.verdict == BranchingVerdict::Inconclusive,
-                            "a reason is present exactly when the verdict abstains: \
-                             {base_branches}/{base_functions} to {head_branches}/{head_functions}"
-                        );
-                    }
-                }
-            }
-        }
+        assert_eq!(report.by_file.len(), 5);
+        assert_eq!(report.by_file_omitted, 2);
+        assert_eq!(report.by_file[0].path, "src/a.ts");
     }
 }
