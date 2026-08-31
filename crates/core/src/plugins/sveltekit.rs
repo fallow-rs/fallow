@@ -29,6 +29,12 @@ const ENTRY_PATTERNS: &[&str] = &[
     "src/service-worker.{ts,js}",
     "src/params/**/*.{ts,js}",
     "src/**/*.remote.{ts,js}",
+    // SvelteKit 3 conventions. All three are loaded by the framework rather
+    // than imported, and none of them exist in a version 2 project, so both
+    // major versions stay covered by the same pattern set.
+    "src/params.{ts,js}",
+    "src/instrumentation.server.{ts,js}",
+    "src/service-worker/index.{ts,js}",
 ];
 
 const CONFIG_PATTERNS: &[&str] = &["svelte.config.{js,cjs,mjs,ts}"];
@@ -93,6 +99,9 @@ const HOOKS_SERVER_EXPORTS: &[&str] = &["handle", "handleError", "handleFetch", 
 const HOOKS_CLIENT_EXPORTS: &[&str] = &["handleError", "init"];
 const HOOKS_SHARED_EXPORTS: &[&str] = &["reroute", "transport", "handleError", "init"];
 const PARAM_MATCHER_EXPORTS: &[&str] = &["match"];
+/// SvelteKit 3 collapses `src/params/<name>.ts`, each exporting `match`, into a
+/// single `src/params.ts` whose export names ARE the matcher names.
+const PARAM_FILE_EXPORTS: &[&str] = &["*"];
 const REMOTE_EXPORTS: &[&str] = &["*"];
 
 impl Plugin for SvelteKitPlugin {
@@ -150,6 +159,7 @@ impl Plugin for SvelteKitPlugin {
             ("src/hooks.client.{ts,js}", HOOKS_CLIENT_EXPORTS),
             ("src/hooks.{ts,js}", HOOKS_SHARED_EXPORTS),
             ("src/params/**/*.{ts,js}", PARAM_MATCHER_EXPORTS),
+            ("src/params.{ts,js}", PARAM_FILE_EXPORTS),
             ("src/**/*.remote.{ts,js}", REMOTE_EXPORTS),
         ]
     }

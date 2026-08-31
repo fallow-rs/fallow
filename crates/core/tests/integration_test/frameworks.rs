@@ -1962,3 +1962,49 @@ fn wrangler_plain_json_config_main_keeps_worker_alive() {
         "wrangler.json main should be an entry point: {unused_files:?}"
     );
 }
+
+#[test]
+fn sveltekit_3_framework_loaded_files_are_entry_points() {
+    let root = fixture_path("sveltekit-3-project");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+
+    for convention in [
+        "src/params.ts",
+        "src/instrumentation.server.ts",
+        "src/service-worker/index.ts",
+    ] {
+        assert!(
+            !unused_files.iter().any(|path| path.ends_with(convention)),
+            "{convention} is loaded by SvelteKit 3, not imported: {unused_files:?}"
+        );
+    }
+
+    let unused_exports: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export.export_name.as_str())
+        .collect();
+    for matcher in ["slug", "id"] {
+        assert!(
+            !unused_exports.contains(&matcher),
+            "every export of src/params.ts is a route matcher: {unused_exports:?}"
+        );
+    }
+
+    let unused_dependencies: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dependencies.contains(&"@sveltejs/adapter-node"),
+        "the adapter is referenced from vite.config.ts in SvelteKit 3: {unused_dependencies:?}"
+    );
+}

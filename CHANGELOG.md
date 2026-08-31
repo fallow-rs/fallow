@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   published release, where those fields first exist and remain repairable.
   Verified against every 3.x release without a false failure.
 
+### Added
+
+- **SvelteKit 3 route conventions are recognized**
+  (Closes [#2400](https://github.com/fallow-rs/fallow/issues/2400)). SvelteKit 3
+  loads three files by convention rather than by import, and none of them
+  existed in version 2: `src/params.ts`, which collapses the old
+  `src/params/<name>.ts` matchers into one file whose export names are the
+  matcher names; `src/instrumentation.server.ts`, loaded before application
+  code when it exists; and `src/service-worker/index.ts`, the directory form
+  that lets a service worker carry its own `tsconfig.json`. All three used to
+  be reported as unused files, and every matcher in `src/params.ts` as an
+  unused export. The patterns are additive, so version 2 projects are
+  unaffected. Thanks [@filiabel](https://github.com/filiabel) for the heads-up
+  ahead of the release.
+
 ## [3.21.0] - 2026-08-31
 
 ### Added
