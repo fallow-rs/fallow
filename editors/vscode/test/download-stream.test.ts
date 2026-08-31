@@ -143,6 +143,20 @@ describe("httpsDownload stream-error handling", () => {
     expect(fsState.unlinked).toContain("/tmp/badfd");
   });
 
+  it("keeps a finished download when the socket fails afterwards", async () => {
+    // A keep-alive socket can fail once the body is complete and the write
+    // stream has finished. Unlinking there would fail an install whose file is
+    // already whole.
+    const pending = httpsDownload("https://example.test/bin", "/tmp/late");
+    fsState.writeStream.emit("finish");
+    httpsState.response.emit("error", new Error("socket hang up"));
+    releaseDescriptor();
+
+    await expect(pending).resolves.toBeUndefined();
+    expect(fsState.unlinked).not.toContain("/tmp/late");
+    expect((fsState.writeStream.destroy as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
   it("rejects and cleans up when the response stalls mid-body", async () => {
     const pending = httpsDownload("https://example.test/bin", "/tmp/stalled");
     // The socket goes idle with an incomplete body; the inactivity timeout

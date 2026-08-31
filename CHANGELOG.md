@@ -133,7 +133,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--version` against it. Unix refuses to execute a file that any process holds
   open for writing, so a first install could fail with `Text file busy` on
   Linux. The download now resolves only after the descriptor is really closed,
-  and a close that fails still rejects the download exactly once.
+  and a close that fails still rejects the download exactly once. A socket that
+  fails after the body is already on disk no longer deletes that file either,
+  which used to turn a keep-alive teardown into a failed install.
 
 ## [3.21.0] - 2026-08-31
 

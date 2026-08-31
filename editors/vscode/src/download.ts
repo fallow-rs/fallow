@@ -167,11 +167,22 @@ export const httpsDownload = (url: string, dest: string, signal?: AbortSignal): 
     async (response) =>
       await new Promise<void>((resolve, reject) => {
         const file = fs.createWriteStream(dest);
+        // Set once the whole body has reached disk, leaving only the descriptor
+        // close outstanding. A socket error after that point describes a
+        // connection this download is already done with.
+        let bodyWritten = false;
         // Guard the readable (response) stream as well: `pipe()` does not forward
         // a readable's errors to the writable, so a mid-download socket drop would
         // emit an unhandled `error` on `response` and crash the whole extension
         // host. Tear down the write stream, drop the partial file, and reject.
         response.on("error", (err) => {
+          // A keep-alive socket can fail after the body is complete. Deleting a
+          // finished download there would fail an install that had already
+          // succeeded, so only report an error that truncated the file. The
+          // listener stays attached: an unhandled 'error' would crash the host.
+          if (bodyWritten) {
+            return;
+          }
           file.destroy();
           fs.unlink(dest, () => {});
           reject(err);
@@ -184,6 +195,7 @@ export const httpsDownload = (url: string, dest: string, signal?: AbortSignal): 
         // place and then spawned by the same extension host. Resolve from the
         // close callback so the descriptor is gone before the caller runs.
         file.on("finish", () => {
+          bodyWritten = true;
           file.close((err) => {
             // A failed close also reaches the 'error' handler below, which
             // unlinks the partial file; whichever settles first wins, so the
