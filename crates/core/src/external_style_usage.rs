@@ -192,6 +192,7 @@ fn base_resolve_input<'a>(
         auto_imports: &[],
         scss_include_paths: &plugin_result.scss_include_paths,
         static_dir_mappings: &plugin_result.static_dir_mappings,
+        framework_static_dir_mappings: &plugin_result.static_dir_mappings,
         root: &config.root,
         extra_conditions: &config.resolve.conditions,
     }

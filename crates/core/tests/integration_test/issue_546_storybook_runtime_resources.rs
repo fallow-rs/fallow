@@ -88,3 +88,23 @@ fn storybook_static_dirs_and_manager_runtime_imports_are_framework_provided() {
         "ordinary source imports must still report unlisted manager-runtime packages, found {unlisted:?}"
     );
 }
+
+#[test]
+fn storybook_static_dirs_do_not_answer_for_an_application_document() {
+    let root = fixture_path("issue-546-storybook-runtime-resources");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    // `staticDirs` mounts src/lib/tokens at the root, so /tokens.css names a
+    // real file, but Storybook serves it only for Storybook's own documents.
+    assert!(
+        unresolved_specs.contains(&"/tokens.css"),
+        "a tool's config mount must not answer for the application's own HTML: \
+         {unresolved_specs:?}"
+    );
+}

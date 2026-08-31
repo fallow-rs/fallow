@@ -94,6 +94,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installs in the same order, and two execution tests run the real script with
   `PATH` reduced so no global install can satisfy them.
 
+- **A SvelteKit `static/` asset linked from `app.html` resolves.**
+  `<link rel="stylesheet" href="/theme.css" />` in `src/app.html` reported an
+  unresolved import, and the stylesheet it names reported as an unused file,
+  because the resolver only knew about `public/`. A framework can now declare
+  the directory it serves at a URL mount, the way Storybook's `staticDirs`
+  already did from its config, and SvelteKit declares `static/` when the
+  directory exists. A framework convention describes how the whole project is
+  served, so any HTML document reaches it, while a tool's config describes how
+  that tool serves its own documents and stays scoped to them: a Storybook
+  `staticDirs` entry does not answer for an application's own entry HTML.
+  Nothing is guessed: a project whose
+  `static/` directory no framework serves, a Rust or Python asset directory
+  beside the JavaScript, still reports the reference as unresolved instead of
+  attributing it to an unrelated file. Measured on the official SvelteKit
+  RealWorld application: one unresolved import and one unused file before,
+  neither after.
+
 - **A subprocess whose executable is momentarily busy no longer ends the run.**
   Unix refuses to execute a file while any process holds it open for writing,
   and a process that spawns from several threads keeps that window open longer

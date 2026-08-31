@@ -385,6 +385,10 @@ pub(super) struct ResolveContext<'a> {
     /// Static directory URL mappings from framework config.
     /// Each tuple is `(absolute_source_dir, normalized_url_mount)`.
     pub static_dir_mappings: &'a [(PathBuf, String)],
+    /// Mounts a framework serves for the whole project, reachable from any HTML
+    /// document, unlike `static_dir_mappings`, which stays scoped to the tool
+    /// whose config declared it.
+    pub framework_static_dir_mappings: &'a [(PathBuf, String)],
     /// Project root directory.
     pub root: &'a Path,
     /// Lazy canonical path → FileId fallback for intra-project symlinks.

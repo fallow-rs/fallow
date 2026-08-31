@@ -1482,6 +1482,7 @@ fn resolve_analysis_imports(
         auto_imports: &plugin_result.auto_imports,
         scss_include_paths: &plugin_result.scss_include_paths,
         static_dir_mappings: &plugin_result.static_dir_mappings,
+        framework_static_dir_mappings: &plugin_result.framework_static_dir_mappings,
         root: &config.root,
         extra_conditions: &config.resolve.conditions,
     });

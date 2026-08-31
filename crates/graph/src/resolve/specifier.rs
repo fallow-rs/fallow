@@ -248,7 +248,7 @@ fn try_root_relative_specifier(
     {
         return Some(result);
     }
-    if let Some(result) = try_html_public_root_relative_asset(ctx, from_file, specifier) {
+    if let Some(result) = try_html_root_relative_asset(ctx, from_file, specifier) {
         return Some(result);
     }
     Some(ResolveResult::Unresolvable(specifier.to_string()))
@@ -486,6 +486,14 @@ fn same_path(left: &Path, right: &Path) -> bool {
             .is_some_and(|(left, right)| left == right)
 }
 
+/// Only an HTML document names assets by URL path, so only one can resolve
+/// through a mount.
+fn serves_static_dir_mounts(from_file: &Path) -> bool {
+    from_file.extension().and_then(|ext| ext.to_str()) == Some("html")
+}
+
+/// Storybook serves its `staticDirs` for its own preview documents, so a mount
+/// it declared answers only for those.
 fn is_storybook_preview_html(from_file: &Path) -> bool {
     matches!(
         from_file.file_name().and_then(|name| name.to_str()),
@@ -518,7 +526,7 @@ fn strip_url_suffix(specifier: &str) -> &str {
         .map_or(specifier, |idx| &specifier[..idx])
 }
 
-fn storybook_static_url_path(specifier: &str) -> Option<String> {
+fn static_mount_url_path(specifier: &str) -> Option<String> {
     let lookup = strip_url_suffix(specifier);
     if lookup.starts_with("../") {
         return None;
@@ -572,19 +580,18 @@ fn resolve_filesystem_path(ctx: &ResolveContext<'_>, path: &Path) -> Option<Reso
         .then_some(ResolveResult::ExternalFile(canonical))
 }
 
-fn try_storybook_static_dir_mapping(
+/// Resolve through a directory served at a URL mount, preferring the longest
+/// matching mount. Neither list holds anything unless something declared a
+/// mount, so this never guesses at a directory name.
+fn resolve_through_mounts(
     ctx: &ResolveContext<'_>,
-    from_file: &Path,
-    specifier: &str,
+    mounts: &[(PathBuf, String)],
+    url_path: &str,
 ) -> Option<ResolveResult> {
-    if ctx.static_dir_mappings.is_empty() || !is_storybook_preview_html(from_file) {
-        return None;
-    }
-    let url_path = storybook_static_url_path(specifier)?;
-    ctx.static_dir_mappings
+    mounts
         .iter()
         .filter_map(|(from_dir, mount)| {
-            let relative = static_dir_relative_path(&url_path, mount)?;
+            let relative = static_dir_relative_path(url_path, mount)?;
             if !is_safe_static_dir_relative_path(relative) {
                 return None;
             }
@@ -594,7 +601,29 @@ fn try_storybook_static_dir_mapping(
         .and_then(|(_, path)| resolve_filesystem_path(ctx, &path))
 }
 
-fn try_html_public_root_relative_asset(
+/// Resolve a root-absolute reference in an HTML document through a declared
+/// mount. The two lists differ in reach, not in mechanism: a framework
+/// convention describes how the whole project is served, so any HTML document
+/// reaches it, while a tool's config describes how that tool serves its own
+/// documents, so it stays scoped to them. Merging the two would let a
+/// Storybook `staticDirs` entry answer for an application's own entry HTML.
+fn try_static_dir_mapping(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !serves_static_dir_mounts(from_file) {
+        return None;
+    }
+    let url_path = static_mount_url_path(specifier)?;
+    resolve_through_mounts(ctx, ctx.framework_static_dir_mappings, &url_path).or_else(|| {
+        is_storybook_preview_html(from_file)
+            .then(|| resolve_through_mounts(ctx, ctx.static_dir_mappings, &url_path))
+            .flatten()
+    })
+}
+
+fn try_html_root_relative_asset(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
@@ -1621,7 +1650,7 @@ fn try_pre_file_resolution_fallbacks(
     specifier: &str,
     from_style: bool,
 ) -> Option<ResolveResult> {
-    if let Some(result) = try_storybook_static_dir_mapping(ctx, from_file, specifier) {
+    if let Some(result) = try_static_dir_mapping(ctx, from_file, specifier) {
         return Some(result);
     }
 
@@ -1951,14 +1980,15 @@ mod tests {
         SpecifierNormalization, extension_alias_matches, glob_values_match, has_glob_meta,
         is_bare_style_package_reference, is_bare_style_subpath, is_js_ts_extension,
         is_node_modules_path, is_plain_css_file, is_relative_tsconfig_extends,
-        is_safe_static_dir_relative_path, is_storybook_preview_html, is_style_file,
-        is_tsconfig_error, matches_nearest_tsconfig_path_alias, normalize_resolve_specifier,
+        is_safe_static_dir_relative_path, is_style_file, is_tsconfig_error,
+        matches_nearest_tsconfig_path_alias, normalize_resolve_specifier,
         package_usage_name_for_external_bare_specifier, package_usage_name_for_resolved_package,
         path_alias_capture, path_alias_pattern_matches, path_alias_specificity,
         resolve_tsconfig_extends_candidate, resolve_tsconfig_extends_path,
-        resolve_tsconfig_reference_path, should_preserve_node_modules_style_file,
-        specifier_matches_alias_prefix, static_dir_relative_path, storybook_static_url_path,
-        strip_url_suffix, tsconfig_extends_values, with_appended_extension, with_exact_extension,
+        resolve_tsconfig_reference_path, serves_static_dir_mounts,
+        should_preserve_node_modules_style_file, specifier_matches_alias_prefix,
+        static_dir_relative_path, static_mount_url_path, strip_url_suffix, tsconfig_extends_values,
+        with_appended_extension, with_exact_extension,
     };
 
     #[test]
@@ -2147,6 +2177,7 @@ mod tests {
             path_aliases: &[],
             scss_include_paths: &[],
             static_dir_mappings: &[],
+            framework_static_dir_mappings: &[],
             root: &project_root,
             canonical_fallback: None,
             tsconfig_warned: &tsconfig_warned,
@@ -2290,41 +2321,41 @@ mod tests {
         assert_eq!(strip_url_suffix("react"), "react");
     }
 
-    // ---- storybook_static_url_path (lines 425-437) ----
+    // ---- static_mount_url_path ----
 
     #[test]
-    fn storybook_static_url_path_root_relative_returns_unchanged() {
+    fn static_mount_url_path_root_relative_returns_unchanged() {
         assert_eq!(
-            storybook_static_url_path("/js/app.js"),
+            static_mount_url_path("/js/app.js"),
             Some("/js/app.js".to_string())
         );
     }
 
     #[test]
-    fn storybook_static_url_path_dot_slash_prepends_root() {
+    fn static_mount_url_path_dot_slash_prepends_root() {
         assert_eq!(
-            storybook_static_url_path("./icons/logo.svg"),
+            static_mount_url_path("./icons/logo.svg"),
             Some("/icons/logo.svg".to_string())
         );
     }
 
     #[test]
-    fn storybook_static_url_path_bare_prepends_root() {
+    fn static_mount_url_path_bare_prepends_root() {
         assert_eq!(
-            storybook_static_url_path("fonts/inter.woff2"),
+            static_mount_url_path("fonts/inter.woff2"),
             Some("/fonts/inter.woff2".to_string())
         );
     }
 
     #[test]
-    fn storybook_static_url_path_parent_relative_returns_none() {
-        assert_eq!(storybook_static_url_path("../escape.js"), None);
+    fn static_mount_url_path_parent_relative_returns_none() {
+        assert_eq!(static_mount_url_path("../escape.js"), None);
     }
 
     #[test]
-    fn storybook_static_url_path_strips_query_before_prefix() {
+    fn static_mount_url_path_strips_query_before_prefix() {
         assert_eq!(
-            storybook_static_url_path("/js/app.js?v=1"),
+            static_mount_url_path("/js/app.js?v=1"),
             Some("/js/app.js".to_string())
         );
     }
@@ -2764,33 +2795,25 @@ mod tests {
         );
     }
 
-    // ---- is_storybook_preview_html (lines 393-401) ----
+    // ---- serves_static_dir_mounts ----
 
     #[test]
-    fn is_storybook_preview_html_matches_preview_head_html() {
-        let path = Path::new("/project/.storybook/preview-head.html");
-        assert!(is_storybook_preview_html(path));
+    fn serves_static_dir_mounts_accepts_any_html_document() {
+        for path in [
+            ".storybook/preview-head.html",
+            "src/app.html",
+            "public/index.html",
+        ] {
+            assert!(serves_static_dir_mounts(Path::new(path)), "{path}");
+        }
     }
 
     #[test]
-    fn is_storybook_preview_html_matches_preview_body_html() {
-        let path = Path::new("/project/.storybook/preview-body.html");
-        assert!(is_storybook_preview_html(path));
+    fn serves_static_dir_mounts_rejects_non_html_importers() {
+        for path in ["src/main.ts", "src/App.svelte", "styles/app.css"] {
+            assert!(!serves_static_dir_mounts(Path::new(path)), "{path}");
+        }
     }
-
-    #[test]
-    fn is_storybook_preview_html_rejects_non_storybook_dir() {
-        let path = Path::new("/project/src/preview-head.html");
-        assert!(!is_storybook_preview_html(path));
-    }
-
-    #[test]
-    fn is_storybook_preview_html_rejects_other_filenames() {
-        let path = Path::new("/project/.storybook/manager-head.html");
-        assert!(!is_storybook_preview_html(path));
-    }
-
-    // ---- tsconfig_extends_values array with non-string entries (line 318) ----
 
     #[test]
     fn tsconfig_extends_values_array_filters_out_non_string_entries() {
@@ -2987,6 +3010,7 @@ mod tests {
             path_aliases: &[],
             scss_include_paths: &[],
             static_dir_mappings: &[],
+            framework_static_dir_mappings: &[],
             root,
             canonical_fallback: None,
             tsconfig_warned: &tsconfig_warned,

@@ -151,6 +151,18 @@ impl Plugin for SvelteKitPlugin {
         ]
     }
 
+    /// `static/` is served at the site root, so `/theme.css` in `src/app.html`
+    /// names `static/theme.css`. Claimed only when the directory exists, so a
+    /// project that keeps its assets elsewhere is untouched.
+    fn static_dir_mappings(&self, root: &Path) -> Vec<(std::path::PathBuf, String)> {
+        let static_dir = root.join("static");
+        if static_dir.is_dir() {
+            vec![(static_dir, "/".to_string())]
+        } else {
+            vec![]
+        }
+    }
+
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
         vec![
             ("src/routes/**/+page.svelte", PAGE_EXPORTS),
