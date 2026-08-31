@@ -836,6 +836,17 @@ pub trait Plugin: Send + Sync {
         vec![]
     }
 
+    /// Directories this framework serves at a URL mount by convention, so a
+    /// root-absolute reference in an HTML document names a file inside one.
+    ///
+    /// Called once when plugins are activated, with the project `root`, so a
+    /// plugin can require the directory to exist before claiming it. Config-file
+    /// mounts (Storybook `staticDirs`) are declared from `resolve_config`
+    /// instead; both land in the same list.
+    fn static_dir_mappings(&self, _root: &Path) -> Vec<(std::path::PathBuf, String)> {
+        vec![]
+    }
+
     /// Convention-based auto-imports provided by this framework.
     ///
     /// Returns the names this framework exposes to user code by filesystem

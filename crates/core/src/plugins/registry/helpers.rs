@@ -142,6 +142,9 @@ fn collect_static_plugin_metadata(
     for (prefix, replacement) in plugin.path_aliases(root) {
         result.path_aliases.push((prefix.to_string(), replacement));
     }
+    result
+        .static_dir_mappings
+        .extend(plugin.static_dir_mappings(root));
     result.auto_imports.extend(plugin.auto_imports(root));
     result
         .provided_dependencies
