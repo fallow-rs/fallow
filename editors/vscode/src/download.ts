@@ -177,9 +177,23 @@ export const httpsDownload = (url: string, dest: string, signal?: AbortSignal): 
           reject(err);
         });
         response.pipe(file);
+        // 'finish' only means the bytes reached the OS; the descriptor is still
+        // open, and `close()` merely queues fs.close(fd) on the libuv
+        // threadpool. Unix refuses to exec a file that any process holds open
+        // for writing (ETXTBSY), and this very file is chmod'ed, renamed into
+        // place and then spawned by the same extension host. Resolve from the
+        // close callback so the descriptor is gone before the caller runs.
         file.on("finish", () => {
-          file.close();
-          resolve();
+          file.close((err) => {
+            // A failed close also reaches the 'error' handler below, which
+            // unlinks the partial file; whichever settles first wins, so the
+            // download still rejects exactly once.
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve();
+          });
         });
         file.on("error", (err) => {
           fs.unlink(dest, () => {});

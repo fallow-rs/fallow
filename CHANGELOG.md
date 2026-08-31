@@ -124,6 +124,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that re-run the Fallow binary, now waits the condition out for up to a second
   before reporting it. A spawn that never meets it is unchanged.
 
+- **The VS Code extension no longer starts a binary it may still hold open.** A
+  download resolved on the write stream's `finish` event, which fires once the
+  bytes reach the operating system and not once the descriptor is released;
+  closing it is queued on a background thread. The extension then marked the
+  file executable, renamed it into place, which keeps the same inode and so the
+  same open descriptor, and started it as the language server or ran
+  `--version` against it. Unix refuses to execute a file that any process holds
+  open for writing, so a first install could fail with `Text file busy` on
+  Linux. The download now resolves only after the descriptor is really closed,
+  and a close that fails still rejects the download exactly once.
+
 ## [3.21.0] - 2026-08-31
 
 ### Added
