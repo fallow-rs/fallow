@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788202852832,
+  "lastUpdate": 1788211484685,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "93e765835bf3aa5b3048468753ad0fd228bbef15",
-          "message": "perf: skip side-effect export indexes",
-          "timestamp": "2026-08-13T15:41:30+02:00",
-          "tree_id": "65970b121ab3e0902b67919ecf298a124e4db4eb",
-          "url": "https://github.com/fallow-rs/fallow/commit/93e765835bf3aa5b3048468753ad0fd228bbef15"
-        },
-        "date": 1786629364721,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503788328,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20160640,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25524984,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38055672,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 41932408,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "702aaca8c7f81108ac85c702c31c5ca0d1b54325",
+          "message": "fix(mcp): keep Code Mode refusals free of process-cleanup noise\n\nThe output-cap refusal and the deadline message are contract strings: the\nsnippet acts on them and the code_execute response envelope documents them.\nBoth were built with with_cleanup_errors, which appends best-effort\nprocess-teardown diagnostics, so on macOS a refusal intermittently read \"code\nmode host output exceeded 500 bytes; cleanup errors: failed to terminate\nsubprocess tree: Operation not permitted (os error 1)\". Terminating the\nprocess group is a cleanup concern, not part of the host call's outcome, and\nit fails whenever the leader has already become an unreaped zombie.\n\nThose two messages now keep their exact wording and the cleanup errors go to\ntracing::warn instead. Operational failures still carry their cleanup context\ninline, and structured programmatic errors still gain their cleanup_errors\nfield, so nothing is lost from a channel where it belongs. Three unit tests\npin the split.\n\nFollow-up to #2498, whose description claimed its crates/process change took\nthis from 1 failure in 15 runs to 0 in 15. That measurement was invalid: the\nload generators from the first half were still running during the second. Both\nvariants prebuilt and alternated under one constant load give 3 in 20 before\nthat change and 2 in 20 after, so it does not close the window; it remains\ncorrect on its own merit. With this change the message cannot vary by\nconstruction.",
+          "timestamp": "2026-08-31T23:08:51+02:00",
+          "tree_id": "94e9adcaa7cc7e4e7577a5c2c429ca1bbadbbe21",
+          "url": "https://github.com/fallow-rs/fallow/commit/702aaca8c7f81108ac85c702c31c5ca0d1b54325"
+        },
+        "date": 1788211481073,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 548015760,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21337352,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28029784,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 41933720,
             "unit": "bytes"
           }
         ]
