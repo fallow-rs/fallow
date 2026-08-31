@@ -12790,8 +12790,11 @@ bus_factor_one?: boolean
  */
 export interface BranchingReport {
 /**
- * Files that split in place. Empty when none did, which is the common
- * case and is not itself a finding.
+ * Files carrying the split signature: branching within `tolerance` of
+ * where it was, more functions, a smaller largest function. Empty when
+ * none do, which is the common case and is not itself a finding. See
+ * `SplitInPlace` for why this describes a shape rather than asserting a
+ * refactor.
  */
 split_in_place: SplitInPlace[]
 /**

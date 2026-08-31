@@ -24561,7 +24561,7 @@
           "items": {
             "$ref": "#/definitions/SplitInPlace"
           },
-          "description": "Files that split in place. Empty when none did, which is the common\ncase and is not itself a finding."
+          "description": "Files carrying the split signature: branching within `tolerance` of\nwhere it was, more functions, a smaller largest function. Empty when\nnone do, which is the common case and is not itself a finding. See\n`SplitInPlace` for why this describes a shape rather than asserting a\nrefactor."
         },
         "tolerance": {
           "type": "integer",
@@ -24572,11 +24572,11 @@
           "$ref": "#/definitions/BranchingScope"
         },
         "branch_points": {
-          "description": "The conserved quantity, over the surviving partition.",
+          "description": "Branch points over the accounting set. The two sides cover different\npopulations by construction: `current` includes files the changeset\nadded, `previous` cannot. Files present only on the base revision are in\nneither, and are reported in `branch_points_only_in_base`.",
           "$ref": "#/definitions/BranchingMetric"
         },
         "functions": {
-          "description": "The number of functions holding it, over the surviving partition.",
+          "description": "Functions over the same two populations, with the same asymmetry.",
           "$ref": "#/definitions/BranchingMetric"
         },
         "peak_unit_cyclomatic": {

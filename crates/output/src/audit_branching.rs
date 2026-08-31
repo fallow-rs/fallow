@@ -172,8 +172,11 @@ pub struct BranchingFileDelta {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BranchingReport {
-    /// Files that split in place. Empty when none did, which is the common
-    /// case and is not itself a finding.
+    /// Files carrying the split signature: branching within `tolerance` of
+    /// where it was, more functions, a smaller largest function. Empty when
+    /// none do, which is the common case and is not itself a finding. See
+    /// `SplitInPlace` for why this describes a shape rather than asserting a
+    /// refactor.
     pub split_in_place: Vec<SplitInPlace>,
     /// The band inside which a file's branching counts as held. Published
     /// because a claim against an unpublished threshold is not reproducible by
@@ -181,9 +184,12 @@ pub struct BranchingReport {
     pub tolerance: u32,
     /// Size and composition of the compared set.
     pub scope: BranchingScope,
-    /// The conserved quantity, over the surviving partition.
+    /// Branch points over the accounting set. The two sides cover different
+    /// populations by construction: `current` includes files the changeset
+    /// added, `previous` cannot. Files present only on the base revision are in
+    /// neither, and are reported in `branch_points_only_in_base`.
     pub branch_points: BranchingMetric,
-    /// The number of functions holding it, over the surviving partition.
+    /// Functions over the same two populations, with the same asymmetry.
     pub functions: BranchingMetric,
     /// Highest single-function score across the set. Reported as context, never
     /// as evidence on its own: a split lowers it by construction, which is the
@@ -281,6 +287,7 @@ fn partition(
             && function_delta > 0
             && head_file.peak_cyclomatic < base_file.peak_cyclomatic
             && !is_test_path(path)
+            && !is_excluded_from_the_claim(path)
             && !head_file.has_synthetic_units
             && !base_file.has_synthetic_units
         {
@@ -313,6 +320,27 @@ fn partition(
     out.scope.test_branch_points = test_totals.branch_points;
     out.scope.test_functions = test_totals.functions;
     out
+}
+
+/// Paths whose numbers describe machinery rather than authored code.
+///
+/// Deliberately a short, unambiguous list rather than a general heuristic: a
+/// wrong exclusion here silently drops a real finding, and the rendered list
+/// only has room for two files, so a vendored bundle taking a slot costs a
+/// reader the production file they needed.
+fn is_excluded_from_the_claim(path: &str) -> bool {
+    [
+        "/generated/",
+        "/vendor/",
+        "/dist/",
+        "/node_modules/",
+        "/__generated__/",
+    ]
+    .iter()
+    .any(|marker| path.contains(marker))
+        || path.starts_with("generated/")
+        || path.starts_with("vendor/")
+        || path.starts_with("dist/")
 }
 
 fn scope_largest(head: &BranchingSnapshot) -> u32 {
@@ -590,6 +618,25 @@ mod tests {
         let report = compare(&base, &head);
 
         assert!(report.split_in_place.is_empty());
+    }
+
+    #[test]
+    fn generated_and_vendored_paths_never_carry_the_claim() {
+        // The rendered list holds two files, so machinery taking a slot costs a
+        // reader the production file they needed.
+        for path in [
+            "src/__generated__/schema.ts",
+            "vendor/bundle.js",
+            "dist/main.js",
+            "packages/app/generated/api.ts",
+        ] {
+            let base = snapshot(&[(path, file(30, 1, 31))]);
+            let head = snapshot(&[(path, file(30, 8, 6))]);
+            assert!(
+                compare(&base, &head).split_in_place.is_empty(),
+                "{path} should not carry the claim"
+            );
+        }
     }
 
     #[test]

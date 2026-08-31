@@ -618,7 +618,7 @@ fn branching_human_lines(report: Option<&fallow_output::BranchingReport>) -> Opt
     // the peak is a file-level maximum, so it can also fall because the largest
     // function left the file while other functions arrived.
     let mut lines =
-        vec!["  branching: held while functions rose, the shape a split leaves".to_string()];
+        vec!["  branching: branching about level, more functions, smaller peak".to_string()];
     for split in report.split_in_place.iter().take(2) {
         lines.push(format!("         {}", elide_path(&split.path, 71)));
         lines.push(format!(
@@ -1493,7 +1493,7 @@ mod tests {
         let lines = branching_human_lines(Some(&report)).expect("a split renders");
 
         assert_eq!(lines.len(), 3);
-        assert!(lines[0].contains("the shape a split leaves"));
+        assert!(lines[0].contains("branching about level, more functions, smaller peak"));
         assert!(
             lines[1].ends_with("src/checkout/pricing.ts"),
             "{}",
