@@ -24591,9 +24591,9 @@
           "description": "Highest single-function score. Reported, never a verdict input: a split\nlowers it by construction, which is the whole reason this section exists.",
           "$ref": "#/definitions/BranchingMetric"
         },
-        "branch_points_in_deleted_files": {
+        "branch_points_only_in_base": {
           "type": "integer",
-          "description": "Base-side branch points of the deleted partition."
+          "description": "Base-side branch points of the files that have no head entry."
         },
         "cognitive": {
           "description": "The cognitive figure and what drove it.",
@@ -24618,7 +24618,7 @@
         "branch_points",
         "functions",
         "peak_unit_cyclomatic",
-        "branch_points_in_deleted_files",
+        "branch_points_only_in_base",
         "cognitive",
         "by_file",
         "by_file_omitted"
@@ -24643,7 +24643,7 @@
           "description": "Neither could be established. `reason` says why."
         }
       ],
-      "description": "What the comparison could establish about the changeset.\n\nThere is deliberately no \"branching removed\" value. Increments outside every\nfunction are invisible to the underlying count, so a fall in branch points\nis not proof that branching was removed: it is equally consistent with a\nbranch having been hoisted to module scope."
+      "description": "What the comparison could establish about the changeset.\n\nKnown limitation: units consolidated into a pre-existing sibling file are\nrecognized by neither transfer test, because one looks inside a single file\nand the other looks at files the changeset added. That case abstains rather\nthan asserting.\n\nThere is deliberately no \"branching removed\" value. Increments outside every\nfunction are invisible to the underlying count, so a fall in branch points\nis not proof that branching was removed: it is equally consistent with a\nbranch having been hoisted to module scope."
     },
     "BranchingInconclusiveReason": {
       "oneOf": [
@@ -24655,7 +24655,7 @@
         {
           "type": "string",
           "const": "set-too-small",
-          "description": "Too little surviving code carrying units to compare."
+          "description": "Neither revision had an accounted unit in the changed files, so there\nis nothing to compare."
         }
       ],
       "description": "Why the comparison abstained."
@@ -24671,9 +24671,9 @@
           "type": "integer",
           "description": "Files carrying units on the head revision only."
         },
-        "files_deleted": {
+        "files_only_in_base": {
           "type": "integer",
-          "description": "Files that carried units on the base revision only. Reported, and\nexcluded from every headline number: a deleted file contributes its\nwhole base-side total as a fall with no head counterpart."
+          "description": "Files that carried units on the base revision only, whether they were\ndeleted or merely lost every accounted unit. Reported, and excluded from\nevery headline number: such a file contributes its whole base-side total\nas a fall with no head counterpart."
         },
         "test_branch_points": {
           "type": "integer",
@@ -24691,7 +24691,7 @@
       "required": [
         "files_both",
         "files_added",
-        "files_deleted",
+        "files_only_in_base",
         "test_branch_points",
         "test_functions",
         "largest_file_share_of_branch_points"

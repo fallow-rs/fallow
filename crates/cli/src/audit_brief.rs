@@ -606,34 +606,40 @@ fn print_brief_human(
     crate::audit::print_audit_findings(result, quiet, explain, false);
 }
 
+/// The two brief lines for a branching comparison, or `None` when it found
+/// nothing worth saying.
+///
+/// Split out from the printer so the wording and the width are testable: both
+/// lines have to hold under 80 columns, and the brief has no other place where
+/// a reader meets the phrase "branch point".
+fn branching_human_lines(report: Option<&fallow_output::BranchingReport>) -> Option<[String; 2]> {
+    let report = report.filter(|report| report.is_reportable())?;
+    Some([
+        format!(
+            "  branching: {} to {} branch points, across {} to {} functions",
+            report.branch_points.previous,
+            report.branch_points.current,
+            report.functions.previous,
+            report.functions.current,
+        ),
+        format!(
+            "         max cyclomatic {} to {}; a split moves branching, never removes it",
+            report.peak_unit_cyclomatic.previous, report.peak_unit_cyclomatic.current,
+        ),
+    ])
+}
+
 /// Print branching conservation on the human brief. Caller has already gated on
 /// `!quiet`. Renders nothing unless the comparison found a move: a flat or
 /// abstaining result is not news, and every sibling section is silent when it
 /// has nothing to say.
 fn print_branching_human(report: Option<&fallow_output::BranchingReport>) {
-    let Some(report) = report.filter(|report| report.is_reportable()) else {
+    let Some(lines) = branching_human_lines(report) else {
         return;
     };
-    let peak = if report.peak_unit_cyclomatic.delta == 0 {
-        String::new()
-    } else {
-        format!(
-            "; peak per function {} to {}",
-            report.peak_unit_cyclomatic.previous, report.peak_unit_cyclomatic.current
-        )
-    };
-    eprintln!(
-        "  branching: {} branch point{} across {} function{} (base {} across {}){peak}",
-        report.branch_points.current,
-        crate::report::plural(report.branch_points.current as usize),
-        report.functions.current,
-        crate::report::plural(report.functions.current as usize),
-        report.branch_points.previous,
-        report.functions.previous,
-    );
-    eprintln!(
-        "             splitting a function moves its branches into new functions instead of removing them"
-    );
+    for line in lines {
+        eprintln!("{line}");
+    }
 }
 
 /// Print the Stage 2 partition + order on the human brief: the by-module units
@@ -1414,5 +1420,70 @@ mod tests {
         };
         assert!(gap.note.contains("attention pointer"));
         assert!(gap.note.contains("not a correctness proof"));
+    }
+
+    fn branching_fixture(
+        previous: (u32, u32, u16),
+        current: (u32, u32, u16),
+    ) -> fallow_output::BranchingReport {
+        let unit = |(branch_points, functions, peak): (u32, u32, u16)| {
+            std::iter::once((
+                "src/a.ts".to_string(),
+                fallow_types::extract::FileBranching {
+                    branch_points,
+                    functions,
+                    peak_cyclomatic: peak,
+                    cognitive: branch_points,
+                    cognitive_nesting_weight: 0,
+                },
+            ))
+            .collect::<fallow_output::BranchingSnapshot>()
+        };
+        fallow_output::BranchingReport::compare(
+            &unit(previous),
+            &unit(current),
+            fallow_output::DEFAULT_BRANCHING_TOLERANCE,
+            &|_| false,
+        )
+    }
+
+    #[test]
+    fn branching_lines_are_silent_without_a_move() {
+        assert!(branching_human_lines(None).is_none());
+        let flat = branching_fixture((12, 3, 5), (12, 3, 5));
+        assert!(
+            branching_human_lines(Some(&flat)).is_none(),
+            "a flat comparison is not news, matching every sibling section"
+        );
+    }
+
+    #[test]
+    fn branching_lines_read_base_to_current_throughout() {
+        let report = branching_fixture((39, 1, 40), (39, 8, 6));
+        let [facts, note] = branching_human_lines(Some(&report)).expect("a move renders");
+
+        assert_eq!(
+            facts,
+            "  branching: 39 to 39 branch points, across 1 to 8 functions"
+        );
+        assert!(
+            note.contains("max cyclomatic 40 to 6"),
+            "the peak uses the established name and the same direction: {note}"
+        );
+        assert!(note.contains("never removes it"));
+    }
+
+    #[test]
+    fn branching_lines_fit_eighty_columns() {
+        // Four-digit counts on a large changeset, which is the widest realistic
+        // shape.
+        let report = branching_fixture((9999, 1000, 9999), (9999, 4000, 12));
+        for line in branching_human_lines(Some(&report)).expect("a move renders") {
+            assert!(
+                line.chars().count() <= 80,
+                "{} columns: {line}",
+                line.chars().count()
+            );
+        }
     }
 }

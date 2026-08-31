@@ -26,6 +26,11 @@ const MAX_BY_FILE: usize = 5;
 
 /// What the comparison could establish about the changeset.
 ///
+/// Known limitation: units consolidated into a pre-existing sibling file are
+/// recognized by neither transfer test, because one looks inside a single file
+/// and the other looks at files the changeset added. That case abstains rather
+/// than asserting.
+///
 /// There is deliberately no "branching removed" value. Increments outside every
 /// function are invisible to the underlying count, so a fall in branch points
 /// is not proof that branching was removed: it is equally consistent with a
@@ -50,7 +55,8 @@ pub enum BranchingInconclusiveReason {
     /// The changeset moved branching and function count together in a way that
     /// matches feature work as readily as a split.
     NoTransferSignature,
-    /// Too little surviving code carrying units to compare.
+    /// Neither revision had an accounted unit in the changed files, so there
+    /// is nothing to compare.
     SetTooSmall,
 }
 
@@ -123,10 +129,11 @@ pub struct BranchingScope {
     pub files_both: u32,
     /// Files carrying units on the head revision only.
     pub files_added: u32,
-    /// Files that carried units on the base revision only. Reported, and
-    /// excluded from every headline number: a deleted file contributes its
-    /// whole base-side total as a fall with no head counterpart.
-    pub files_deleted: u32,
+    /// Files that carried units on the base revision only, whether they were
+    /// deleted or merely lost every accounted unit. Reported, and excluded from
+    /// every headline number: such a file contributes its whole base-side total
+    /// as a fall with no head counterpart.
+    pub files_only_in_base: u32,
     /// Branch points on test-shaped paths within the head totals. Test code
     /// routinely dominates both terms, so a reader needs to see its share
     /// before reading the headline.
@@ -171,8 +178,8 @@ pub struct BranchingReport {
     /// Highest single-function score. Reported, never a verdict input: a split
     /// lowers it by construction, which is the whole reason this section exists.
     pub peak_unit_cyclomatic: BranchingMetric,
-    /// Base-side branch points of the deleted partition.
-    pub branch_points_in_deleted_files: u32,
+    /// Base-side branch points of the files that have no head entry.
+    pub branch_points_only_in_base: u32,
     /// The cognitive figure and what drove it.
     pub cognitive: BranchingCognitive,
     /// The files that moved the numbers most, largest absolute branch-point
@@ -231,7 +238,7 @@ fn partition(
         scope: BranchingScope {
             files_both: 0,
             files_added: 0,
-            files_deleted: 0,
+            files_only_in_base: 0,
             test_branch_points: 0,
             test_functions: 0,
             largest_file_share_of_branch_points: 0.0,
@@ -279,7 +286,7 @@ fn partition(
 
     for (path, base_file) in base {
         if !head.contains_key(path) {
-            out.scope.files_deleted += 1;
+            out.scope.files_only_in_base += 1;
             out.deleted.add(*base_file);
         }
     }
@@ -400,7 +407,7 @@ impl BranchingReport {
             branch_points,
             functions,
             peak_unit_cyclomatic,
-            branch_points_in_deleted_files: deleted.branch_points,
+            branch_points_only_in_base: deleted.branch_points,
             cognitive: BranchingCognitive {
                 previous: surviving_base.cognitive,
                 current: surviving_head.cognitive,
@@ -562,8 +569,8 @@ mod tests {
 
         let report = compare(&base, &head);
 
-        assert_eq!(report.scope.files_deleted, 1);
-        assert_eq!(report.branch_points_in_deleted_files, 300);
+        assert_eq!(report.scope.files_only_in_base, 1);
+        assert_eq!(report.branch_points_only_in_base, 300);
         assert_eq!(
             report.branch_points.delta, 0,
             "the deleted file's branches never enter the comparison"

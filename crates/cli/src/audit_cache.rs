@@ -229,8 +229,9 @@ pub(super) fn save_cached_base_snapshot(
     }
     let data = bitcode::encode(&cached);
     if data.len() > MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE {
-        // The loader rejects anything over the cap, so writing it would cost a
-        // cold base pass on every later run instead of just this one.
+        // The loader rejects anything over the cap, so the file could only ever
+        // be written and never read. Skipping the write avoids leaving an
+        // unreadable payload on disk; the cold base pass happens either way.
         return;
     }
     let Ok(mut tmp) = tempfile::NamedTempFile::new_in(&dir) else {

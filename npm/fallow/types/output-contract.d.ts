@@ -1029,6 +1029,11 @@ export type WeakeningKind = ("test-weakened" | "threshold-lowered" | "suppressio
 /**
  * What the comparison could establish about the changeset.
  *
+ * Known limitation: units consolidated into a pre-existing sibling file are
+ * recognized by neither transfer test, because one looks inside a single file
+ * and the other looks at files the changeset added. That case abstains rather
+ * than asserting.
+ *
  * There is deliberately no "branching removed" value. Increments outside every
  * function are invisible to the underlying count, so a fall in branch points
  * is not proof that branching was removed: it is equally consistent with a
@@ -12817,9 +12822,9 @@ branch_points: BranchingMetric
 functions: BranchingMetric
 peak_unit_cyclomatic: BranchingMetric
 /**
- * Base-side branch points of the deleted partition.
+ * Base-side branch points of the files that have no head entry.
  */
-branch_points_in_deleted_files: number
+branch_points_only_in_base: number
 cognitive: BranchingCognitive
 /**
  * The files that moved the numbers most, largest absolute branch-point
@@ -12844,11 +12849,12 @@ files_both: number
  */
 files_added: number
 /**
- * Files that carried units on the base revision only. Reported, and
- * excluded from every headline number: a deleted file contributes its
- * whole base-side total as a fall with no head counterpart.
+ * Files that carried units on the base revision only, whether they were
+ * deleted or merely lost every accounted unit. Reported, and excluded from
+ * every headline number: such a file contributes its whole base-side total
+ * as a fall with no head counterpart.
  */
-files_deleted: number
+files_only_in_base: number
 /**
  * Branch points on test-shaped paths within the head totals. Test code
  * routinely dominates both terms, so a reader needs to see its share
