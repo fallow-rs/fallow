@@ -136,6 +136,20 @@ fn tools_resource_mirrors_the_shared_manifest() {
     );
     assert_eq!(analyze["read_only"], true);
     assert_eq!(analyze["license"], "free");
+
+    for row in tools {
+        let name = row["name"].as_str().expect("tool name");
+        let manifest = fallow_types::mcp_manifest::MCP_TOOLS
+            .iter()
+            .find(|entry| entry.name == name)
+            .unwrap_or_else(|| panic!("{name} in the shared manifest"));
+        assert_eq!(
+            row["code_mode_alias"].as_str(),
+            manifest.code_mode_alias,
+            "the fallow://tools resource must carry {name}'s Code Mode reachability so agents \
+             never have to parse the code_execute description"
+        );
+    }
 }
 
 #[test]

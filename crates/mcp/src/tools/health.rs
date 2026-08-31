@@ -34,25 +34,34 @@ pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolRe
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
 
-    let result = run_api_blocking("check_health", move || {
-        let options = with_resolved_coverage(options, None)?;
-        run_api_health(&options).and_then(serialize_health_programmatic_json)
-    })
-    .await?
-    .map_or_else(
-        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
-    );
+    let result = run_api_blocking("check_health", move || health_typed_value(options, None))
+        .await?
+        .map_or_else(
+            |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
+            |value| json_success(&value),
+        );
     Ok(result)
 }
 
-pub fn run_health_api_value(params: &HealthParams) -> Result<Option<serde_json::Value>, String> {
-    run_health_api_value_with_env(params, None)
+/// The typed route's blocking body: resolve the coverage inputs with the CLI's
+/// precedence (#2368), run the health analysis, and serialize it. `env`
+/// supplies the environment coverage layer, with `None` reading the process
+/// environment as [`run_health`] does. Production and the precedence tests both
+/// call this, so the tests hold the shipping code rather than a parallel copy
+/// of it.
+fn health_typed_value(
+    options: ComplexityOptions,
+    env: Option<CoverageInputs>,
+) -> Result<serde_json::Value, ProgrammaticError> {
+    let options = with_resolved_coverage(options, env)?;
+    run_api_health(&options).and_then(serialize_health_programmatic_json)
 }
 
-/// [`run_health_api_value`] with the environment coverage layer injected, so
-/// the typed route can be exercised without mutating the process environment.
-/// `None` reads the process environment, as the production entry points do.
+/// [`health_typed_value`] reached the way [`run_health`] reaches it: through
+/// the CLI-fallback decision and the same parameter mapping, without the async
+/// rmcp shell. `env` is injected so the precedence can be exercised without
+/// mutating the process environment.
+#[cfg(test)]
 fn run_health_api_value_with_env(
     params: &HealthParams,
     env: Option<CoverageInputs>,
@@ -62,12 +71,9 @@ fn run_health_api_value_with_env(
     }
 
     let options = health_options_from_params(params)?;
-    let value = with_resolved_coverage(options, env)
-        .and_then(|options| run_api_health(&options))
-        .and_then(serialize_health_programmatic_json)
-        .map_err(|err| programmatic_error_body(&err))?;
-
-    Ok(Some(value))
+    health_typed_value(options, env)
+        .map(Some)
+        .map_err(|err| programmatic_error_body(&err))
 }
 
 /// Fill the typed route's coverage inputs from the explicit parameters, the

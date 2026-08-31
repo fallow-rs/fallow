@@ -36,6 +36,8 @@ pub use check_runtime_coverage::{
     run_check_runtime_coverage, run_get_blast_radius, run_get_cleanup_candidates,
     run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
 };
+#[cfg(test)]
+pub use code_mode::code_mode_subprocess_aliases;
 pub use code_mode::execute_code_mode;
 pub use decision_surface::run_decision_surface;
 pub use dupes::{build_find_dupes_args, run_find_dupes};

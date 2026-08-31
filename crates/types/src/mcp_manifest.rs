@@ -60,6 +60,12 @@ pub struct McpToolInfo {
     /// Whether the tool leaves the project untouched (only `fix_apply`
     /// mutates files).
     pub read_only: bool,
+    /// camelCase host-API alias when the tool is reachable from Code Mode
+    /// (`code_execute`), `None` when it is not. This field is the single
+    /// source of truth for the Code Mode allowlist: `crates/mcp` builds its
+    /// sandbox bindings from it and drift tests there bind it to the
+    /// `CodeModeTool` enum in both directions.
+    pub code_mode_alias: Option<&'static str>,
 }
 
 impl McpToolInfo {
@@ -76,8 +82,33 @@ impl McpToolInfo {
             "license": self.license.as_str(),
             "license_note": self.license_note,
             "read_only": self.read_only,
+            "code_mode_alias": self.code_mode_alias,
         })
     }
+}
+
+/// Code Mode host-API helpers that have no standalone MCP tool of their own,
+/// as `(camelCase alias, wire tool name)` pairs.
+///
+/// `combined` runs dead-code, complexity, and duplication in one in-process
+/// call and exists only inside the sandbox, so it cannot ride on an
+/// [`McpToolInfo`] row: the tool router never registers it.
+pub const CODE_MODE_ONLY_TOOLS: &[(&str, &str)] = &[("combined", "combined")];
+
+/// Every `(camelCase host alias, wire tool name)` pair the Code Mode sandbox
+/// exposes, in [`MCP_TOOLS`] registration order followed by
+/// [`CODE_MODE_ONLY_TOOLS`].
+///
+/// Similar-code and the mutating fix tools are deliberately absent: Code Mode
+/// caps execution at 30 seconds, which cannot satisfy the similar-code
+/// contract, and the sandbox is read-only.
+#[must_use]
+pub fn code_mode_allowlist() -> Vec<(&'static str, &'static str)> {
+    MCP_TOOLS
+        .iter()
+        .filter_map(|tool| tool.code_mode_alias.map(|alias| (alias, tool.name)))
+        .chain(CODE_MODE_ONLY_TOOLS.iter().copied())
+        .collect()
 }
 
 /// Free/paid nuance attached to runtime-coverage capabilities. Shared with
@@ -95,6 +126,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "analyze",
@@ -112,6 +144,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("analyze"),
     },
     McpToolInfo {
         name: "check_changed",
@@ -122,6 +155,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("checkChanged"),
     },
     McpToolInfo {
         name: "security_candidates",
@@ -132,6 +166,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("securityCandidates"),
     },
     McpToolInfo {
         name: "find_similar_code",
@@ -142,6 +177,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "inspect_similar_code",
@@ -154,6 +190,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "inspect_target",
@@ -164,6 +201,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "guard",
@@ -174,6 +212,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "find_dupes",
@@ -191,6 +230,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("findDupes"),
     },
     McpToolInfo {
         name: "check_health",
@@ -211,6 +251,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("checkHealth"),
     },
     McpToolInfo {
         name: "check_runtime_coverage",
@@ -227,6 +268,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        code_mode_alias: Some("checkRuntimeCoverage"),
     },
     McpToolInfo {
         name: "get_hot_paths",
@@ -237,6 +279,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        code_mode_alias: Some("getHotPaths"),
     },
     McpToolInfo {
         name: "get_blast_radius",
@@ -247,6 +290,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        code_mode_alias: Some("getBlastRadius"),
     },
     McpToolInfo {
         name: "get_importance",
@@ -257,6 +301,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        code_mode_alias: Some("getImportance"),
     },
     McpToolInfo {
         name: "get_cleanup_candidates",
@@ -267,6 +312,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        code_mode_alias: Some("getCleanupCandidates"),
     },
     McpToolInfo {
         name: "get_token_blast_radius",
@@ -277,6 +323,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "audit",
@@ -294,6 +341,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("audit"),
     },
     McpToolInfo {
         name: "decision_surface",
@@ -304,6 +352,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "fallow_explain",
@@ -314,6 +363,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("explain"),
     },
     McpToolInfo {
         name: "fix_preview",
@@ -324,6 +374,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "fix_apply",
@@ -334,6 +385,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: false,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "project_info",
@@ -344,6 +396,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("projectInfo"),
     },
     McpToolInfo {
         name: "recommend",
@@ -354,6 +407,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "list_boundaries",
@@ -364,6 +418,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("listBoundaries"),
     },
     McpToolInfo {
         name: "feature_flags",
@@ -377,6 +432,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("featureFlags"),
     },
     McpToolInfo {
         name: "list_suppressions",
@@ -387,6 +443,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "impact",
@@ -397,6 +454,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("impact"),
     },
     McpToolInfo {
         name: "impact_all",
@@ -407,6 +465,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "trace_export",
@@ -417,6 +476,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("traceExport"),
     },
     McpToolInfo {
         name: "trace_symbol",
@@ -434,6 +494,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "symbol_impact",
@@ -453,6 +514,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "trace_file",
@@ -463,6 +525,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("traceFile"),
     },
     McpToolInfo {
         name: "impact_closure",
@@ -473,6 +536,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("impactClosure"),
     },
     McpToolInfo {
         name: "trace_dependency",
@@ -483,6 +547,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("traceDependency"),
     },
     McpToolInfo {
         name: "trace_clone",
@@ -493,6 +558,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        code_mode_alias: Some("traceClone"),
     },
 ];
 
@@ -1162,6 +1228,72 @@ mod tests {
                 "read_only flag wrong for {}",
                 tool.name
             );
+        }
+    }
+
+    #[test]
+    fn code_mode_aliases_are_unique_and_camel_case() {
+        use std::collections::BTreeSet;
+
+        let allowlist = code_mode_allowlist();
+        let aliases: BTreeSet<&str> = allowlist.iter().map(|(alias, _)| *alias).collect();
+        let tools: BTreeSet<&str> = allowlist.iter().map(|(_, tool)| *tool).collect();
+        assert_eq!(
+            aliases.len(),
+            allowlist.len(),
+            "two Code Mode tools claim the same host-API alias"
+        );
+        assert_eq!(
+            tools.len(),
+            allowlist.len(),
+            "a wire tool name appears twice in the Code Mode allowlist"
+        );
+
+        for (alias, tool) in &allowlist {
+            assert!(
+                !alias.is_empty(),
+                "tool {tool} has an empty Code Mode alias"
+            );
+            assert!(
+                !alias.contains('_') && alias.starts_with(|c: char| c.is_ascii_lowercase()),
+                "Code Mode alias {alias} must be camelCase, matching the sandbox host API"
+            );
+        }
+    }
+
+    /// Code Mode's exclusions are routing decisions, not omissions: the
+    /// sandbox is read-only and capped at 30 seconds, so fix tools and
+    /// similar-code must stay off the allowlist, and the meta-tool cannot
+    /// call itself.
+    #[test]
+    fn code_mode_excludes_fix_similar_code_and_the_meta_tool() {
+        for name in [
+            "code_execute",
+            "fix_preview",
+            "fix_apply",
+            "find_similar_code",
+            "inspect_similar_code",
+        ] {
+            let tool = MCP_TOOLS
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap_or_else(|| panic!("{name} must exist in MCP_TOOLS"));
+            assert!(
+                tool.code_mode_alias.is_none(),
+                "{name} must stay off the Code Mode allowlist"
+            );
+        }
+    }
+
+    #[test]
+    fn code_mode_only_tools_are_not_registered_mcp_tools() {
+        for (alias, tool) in CODE_MODE_ONLY_TOOLS {
+            assert!(
+                !MCP_TOOLS.iter().any(|entry| entry.name == *tool),
+                "{tool} is a registered MCP tool; give it a code_mode_alias instead of listing \
+                 it as a Code Mode-only helper"
+            );
+            assert!(!alias.is_empty(), "{tool} has an empty Code Mode alias");
         }
     }
 

@@ -26,6 +26,7 @@ rquickjs = "0.12"
 fallow-api = { workspace = true, features = ["schema"] }
 fallow-process = { workspace = true, features = ["tokio"] }
 fallow-types.workspace = true
+rustc-hash = { workspace = true }
 tokio.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }

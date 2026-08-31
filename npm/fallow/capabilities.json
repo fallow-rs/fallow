@@ -6524,7 +6524,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "analyze",
@@ -6541,7 +6542,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "analyze"
       },
       {
         "name": "check_changed",
@@ -6555,7 +6557,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "checkChanged"
       },
       {
         "name": "security_candidates",
@@ -6570,7 +6573,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "securityCandidates"
       },
       {
         "name": "find_similar_code",
@@ -6586,7 +6590,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "inspect_similar_code",
@@ -6599,7 +6604,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "inspect_target",
@@ -6613,7 +6619,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "guard",
@@ -6625,7 +6632,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "find_dupes",
@@ -6642,7 +6650,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "findDupes"
       },
       {
         "name": "check_health",
@@ -6662,7 +6671,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "checkHealth"
       },
       {
         "name": "check_runtime_coverage",
@@ -6678,7 +6688,8 @@
         ],
         "license": "freemium",
         "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "checkRuntimeCoverage"
       },
       {
         "name": "get_hot_paths",
@@ -6692,7 +6703,8 @@
         ],
         "license": "freemium",
         "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "getHotPaths"
       },
       {
         "name": "get_blast_radius",
@@ -6705,7 +6717,8 @@
         ],
         "license": "freemium",
         "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "getBlastRadius"
       },
       {
         "name": "get_importance",
@@ -6718,7 +6731,8 @@
         ],
         "license": "freemium",
         "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "getImportance"
       },
       {
         "name": "get_cleanup_candidates",
@@ -6731,7 +6745,8 @@
         ],
         "license": "freemium",
         "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "getCleanupCandidates"
       },
       {
         "name": "get_token_blast_radius",
@@ -6741,7 +6756,8 @@
         "key_params": [],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "audit",
@@ -6758,7 +6774,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "audit"
       },
       {
         "name": "decision_surface",
@@ -6772,7 +6789,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "fallow_explain",
@@ -6784,7 +6802,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "explain"
       },
       {
         "name": "fix_preview",
@@ -6796,7 +6815,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "fix_apply",
@@ -6808,7 +6828,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": false
+        "read_only": false,
+        "code_mode_alias": null
       },
       {
         "name": "project_info",
@@ -6823,7 +6844,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "projectInfo"
       },
       {
         "name": "recommend",
@@ -6835,7 +6857,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "list_boundaries",
@@ -6845,7 +6868,8 @@
         "key_params": [],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "listBoundaries"
       },
       {
         "name": "feature_flags",
@@ -6858,7 +6882,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "featureFlags"
       },
       {
         "name": "list_suppressions",
@@ -6872,7 +6897,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "impact",
@@ -6884,7 +6910,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "impact"
       },
       {
         "name": "impact_all",
@@ -6897,7 +6924,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "trace_export",
@@ -6910,7 +6938,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "traceExport"
       },
       {
         "name": "trace_symbol",
@@ -6925,7 +6954,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "symbol_impact",
@@ -6942,7 +6972,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": null
       },
       {
         "name": "trace_file",
@@ -6954,7 +6985,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "traceFile"
       },
       {
         "name": "impact_closure",
@@ -6966,7 +6998,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "impactClosure"
       },
       {
         "name": "trace_dependency",
@@ -6978,7 +7011,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "traceDependency"
       },
       {
         "name": "trace_clone",
@@ -6994,7 +7028,8 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true
+        "read_only": true,
+        "code_mode_alias": "traceClone"
       }
     ]
   },
