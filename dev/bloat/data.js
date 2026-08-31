@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788211484685,
+  "lastUpdate": 1788214028796,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "04b49162b342f0889b8eb50e3c69ba010f18aee5",
-          "message": "perf: compact source discovery globs",
-          "timestamp": "2026-08-13T16:08:41+02:00",
-          "tree_id": "354e7483492f34085f8391b63dff92dc0be7dd4b",
-          "url": "https://github.com/fallow-rs/fallow/commit/04b49162b342f0889b8eb50e3c69ba010f18aee5"
-        },
-        "date": 1786631120366,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503787056,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20160256,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25524536,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38055288,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/702aaca8c7f81108ac85c702c31c5ca0d1b54325"
         },
         "date": 1788211481073,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 548015760,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21337352,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28029784,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 41933720,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8a2b5194d09dbfd012cc8388925e9060fd5cfd54",
+          "message": "test: add component_cache bench shard for store load, save, and conversion (#2501)\n\nAdds CodSpeed coverage for the extraction cache store save, store load, and cached-module to module-info conversion. Benchmark only, no production code.",
+          "timestamp": "2026-08-31T23:47:08+02:00",
+          "tree_id": "5c9bbdf92a2d48121afb9fc543b50201d43ef463",
+          "url": "https://github.com/fallow-rs/fallow/commit/8a2b5194d09dbfd012cc8388925e9060fd5cfd54"
+        },
+        "date": 1788214024677,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
