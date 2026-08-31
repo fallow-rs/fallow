@@ -111,7 +111,7 @@ pub struct BranchingCognitive {
     pub nesting_weight_delta: i64,
     /// What the improvement is attributable to, absent when cognitive did not
     /// fall. There is nothing to attribute when the number rose or held.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attributed_to: Option<CognitiveAttribution>,
 }
 
@@ -157,7 +157,7 @@ pub struct BranchingReport {
     /// What the comparison established.
     pub verdict: BranchingVerdict,
     /// Why it abstained, when it did.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<BranchingInconclusiveReason>,
     /// The band inside which a move counts as flat. Published because a verdict
     /// against an unpublished threshold is not reproducible by a consumer.
