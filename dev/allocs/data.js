@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788176924472,
+  "lastUpdate": 1788180589067,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "e5bf4e24fafe7798e97255aa458e4b62d8660ea3",
-          "message": "fix: collect Rust walltime benchmark results\n\n* fix(benchmarks): use CodSpeed macro runner\n\n* fix(benchmarks): collect Rust walltime results",
-          "timestamp": "2026-08-13T14:57:24+02:00",
-          "tree_id": "7529a1fb2b352f9f9b7574ce36a879a04cc79876",
-          "url": "https://github.com/fallow-rs/fallow/commit/e5bf4e24fafe7798e97255aa458e4b62d8660ea3"
-        },
-        "date": 1786626105161,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 10294859,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 53018,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1022747,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7560,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8418,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a67216a0461decae46b5f3a9c59ed4a4ca7c3e8e",
+          "message": "test(cli): give each migrate test its own directory (#2490)\n\nTwenty-nine tests built their working directory from a fixed name under the\nsystem temp dir, and several deleted that directory on the way in, so two\nprocesses running the suite at once shared the same paths and one removed the\nfixture another was reading.\n\nMeasured with eight concurrent instances of the lib test binary filtered to\n`migrate::`: 8 of 8 runs failed before, 0 of 8 after, with the same tests\nfailing repeatedly rather than randomly. Deterministic given overlap, not load.\n\nEach test now takes a unique directory from `tempfile::tempdir()`, which\nremoves itself on drop and retires 35 hand-written cleanup calls.\n\nRefs #2460",
+          "timestamp": "2026-08-31T14:38:38+02:00",
+          "tree_id": "c563a4b1c288c6cd671f8013f15ec8453c6ba60b",
+          "url": "https://github.com/fallow-rs/fallow/commit/a67216a0461decae46b5f3a9c59ed4a4ca7c3e8e"
+        },
+        "date": 1788180585490,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9723765,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49409,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1195769,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8473,
             "unit": "allocations"
           }
         ]
