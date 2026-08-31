@@ -735,6 +735,11 @@ pub enum SweepDisposition {
     ReclaimedOrphan,
     /// Entry aged past the effective threshold.
     ReclaimedAged,
+    /// Foreign entry whose recorded owner root is gone, reclaimed while
+    /// age-based GC is disabled (`cacheMaxAgeDays = 0`). Nothing will ever
+    /// sweep it under its own hash again, so the age gate that `0` switches
+    /// off would otherwise strand it on disk forever.
+    ReclaimedOwnerMissing,
     /// A released SHA-keyed directory still REGISTERED as a git worktree by
     /// pre-#1815 fallow; the root-owned cache cannot reuse it, so it is
     /// deregistered AND removed.
@@ -777,9 +782,10 @@ impl SweepDisposition {
     #[must_use]
     pub const fn decision(self) -> SweepDecision {
         match self {
-            Self::ReclaimedOrphan | Self::ReclaimedAged | Self::ReclaimedLegacyRegistered => {
-                SweepDecision::Removed
-            }
+            Self::ReclaimedOrphan
+            | Self::ReclaimedAged
+            | Self::ReclaimedOwnerMissing
+            | Self::ReclaimedLegacyRegistered => SweepDecision::Removed,
             Self::KeptLegacyDeregistered
             | Self::KeptFresh
             | Self::KeptOwnerLive
@@ -801,6 +807,7 @@ impl SweepDisposition {
         match self {
             Self::ReclaimedOrphan => "orphaned-sidecars",
             Self::ReclaimedAged => "aged-out",
+            Self::ReclaimedOwnerMissing => "owner-missing",
             Self::ReclaimedLegacyRegistered => "legacy-registered",
             Self::KeptLegacyDeregistered => "legacy-deregistered",
             Self::KeptFresh => "fresh",
@@ -819,7 +826,10 @@ impl SweepDisposition {
     /// Whether this disposition increments the legacy `removed` counter used
     /// by the per-audit stderr summary. Legacy-registered reclaims never did.
     const fn counts_toward_summary(self) -> bool {
-        matches!(self, Self::ReclaimedOrphan | Self::ReclaimedAged)
+        matches!(
+            self,
+            Self::ReclaimedOrphan | Self::ReclaimedAged | Self::ReclaimedOwnerMissing
+        )
     }
 }
 
@@ -1298,8 +1308,11 @@ fn reclaim_aged_cache_entry(
 /// the outside. Entries with a dead owner, or with no recorded owner (pre-
 /// upgrade or externally created), are abandoned: nothing will ever sweep
 /// them under their own hash again, so they age out under THIS run's
-/// threshold. The grace seed for a missing sidecar stays mtime-only because
-/// the true owner is unknown here.
+/// threshold, and a probed-dead owner is reclaimed outright when that
+/// threshold is switched off (`cacheMaxAgeDays = 0`), which is the documented
+/// contract of `0` and the only thing that keeps abandoned entries from
+/// accumulating forever. The grace seed for a missing sidecar stays
+/// mtime-only because the true owner is unknown here.
 fn reclaim_foreign_cache_entry(
     repo_root: &Path,
     path: &Path,
@@ -1311,16 +1324,24 @@ fn reclaim_foreign_cache_entry(
     if !path.exists() {
         return reclaim_orphan_cache_entry(repo_root, path);
     }
+    let mut owner_missing = false;
     if let Some(owner) = read_last_used_owner(path) {
         match probe_owner_liveness(&owner) {
             OwnerLiveness::Live => return SweepDisposition::KeptOwnerLive,
             OwnerLiveness::Unverifiable(kind) => {
                 return SweepDisposition::KeptOwnerUnverifiable(kind);
             }
-            OwnerLiveness::Dead => {}
+            OwnerLiveness::Dead => owner_missing = true,
         }
     }
     let Some(max_age) = max_age else {
+        if owner_missing {
+            return remove_cache_entry_under_lock(
+                repo_root,
+                path,
+                SweepDisposition::ReclaimedOwnerMissing,
+            );
+        }
         return SweepDisposition::KeptAgeGcDisabled;
     };
     let Some(mtime) = last_used_mtime(path) else {
@@ -1378,6 +1399,7 @@ fn classify_entry_dry_run(
         }
         return classify_would_remove(path, SweepDisposition::ReclaimedOrphan);
     }
+    let mut owner_missing = false;
     if owner_gate == OwnerGate::On
         && let Some(owner) = read_last_used_owner(path)
     {
@@ -1386,10 +1408,13 @@ fn classify_entry_dry_run(
             OwnerLiveness::Unverifiable(kind) => {
                 return SweepDisposition::KeptOwnerUnverifiable(kind);
             }
-            OwnerLiveness::Dead => {}
+            OwnerLiveness::Dead => owner_missing = true,
         }
     }
     let Some(max_age) = max_age else {
+        if owner_missing {
+            return classify_would_remove(path, SweepDisposition::ReclaimedOwnerMissing);
+        }
         return SweepDisposition::KeptAgeGcDisabled;
     };
     let Some(mtime) = last_used_mtime(path) else {
@@ -1434,11 +1459,20 @@ fn remove_entry_past_max_age(
     if age < max_age {
         return SweepDisposition::KeptFresh;
     }
+    remove_cache_entry_under_lock(repo_root, path, SweepDisposition::ReclaimedAged)
+}
+
+/// Lock, remove, and map the outcome, reporting `removed` on success.
+fn remove_cache_entry_under_lock(
+    repo_root: &Path,
+    path: &Path,
+    removed: SweepDisposition,
+) -> SweepDisposition {
     let Some(_lock) = ReusableWorktreeLock::try_acquire(path, GC_LOCK_CONTEXT) else {
         return SweepDisposition::SkippedLocked;
     };
     match remove_cache_entry_for_sweep(repo_root, path) {
-        Ok(CacheRemovalOutcome::Removed) => SweepDisposition::ReclaimedAged,
+        Ok(CacheRemovalOutcome::Removed) => removed,
         Ok(CacheRemovalOutcome::NothingLeft) => SweepDisposition::KeptLockOnly,
         Ok(CacheRemovalOutcome::NotOwned) => SweepDisposition::KeptNotOwned,
         Err(err) => {
