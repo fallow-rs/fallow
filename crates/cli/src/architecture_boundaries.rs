@@ -2215,6 +2215,70 @@ fn diagnostics_outputs_use_stage_owned_lists_after_the_session_fold() {
     }
 }
 
+/// No crate may mutate the process environment, in production or in tests.
+///
+/// `set_var` and `remove_var` are process-global and unsound while any other
+/// thread reads the environment. Cargo's harness runs a crate's tests as
+/// parallel threads in one binary, so a test that sets a variable races every
+/// reader in that binary, including the ones spawning real subprocesses from a
+/// resolved path.
+///
+/// Read an environment variable on a single line in a thin outer function and
+/// move every branch into an inner function that takes the value as an
+/// argument, then point the test at the inner function. `resolve_typed_coverage_inputs`
+/// in `crates/mcp/src/tools/api_runtime.rs` is the reference shape. Passing a
+/// value to a child process with `Command::env` is unaffected and stays the
+/// way to cover a production read end to end.
+#[test]
+fn workspace_sources_never_mutate_the_process_environment() {
+    let allowed = ["crates/cli/src/architecture_boundaries.rs"];
+    let crates_dir = workspace_root().join("crates");
+    let mut sources = Vec::new();
+    for entry in std::fs::read_dir(&crates_dir).expect("read crates directory") {
+        let entry = entry.expect("read crates directory entry");
+        let crate_dir = entry.path();
+        if !crate_dir.is_dir() {
+            continue;
+        }
+        let crate_name = entry.file_name();
+        let crate_name = crate_name.to_string_lossy();
+        for subdirectory in ["src", "tests"] {
+            let root = crate_dir.join(subdirectory);
+            if !root.is_dir() {
+                continue;
+            }
+            collect_rust_sources(
+                &root,
+                &format!("crates/{crate_name}/{subdirectory}"),
+                &mut sources,
+            );
+        }
+    }
+    sources.sort();
+    assert!(
+        !sources.is_empty(),
+        "environment mutation guard walked no sources"
+    );
+
+    for source_path in sources {
+        if allowed.contains(&source_path.as_str()) {
+            continue;
+        }
+        let source = read_source_without_line_comments(&source_path)
+            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+        for forbidden in ["env::set_var", "env::remove_var"] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_path} must not call {forbidden}: process-global environment mutation is \
+                 unsound under the parallel test harness. Read the variable on one line in a thin \
+                 outer function and take the value as an argument in the inner function the test \
+                 drives, as resolve_typed_coverage_inputs does in \
+                 crates/mcp/src/tools/api_runtime.rs"
+            );
+        }
+    }
+}
+
 fn read_source_without_line_comments(path: &str) -> std::io::Result<String> {
     let source = std::fs::read_to_string(workspace_root().join(path))?;
     Ok(source
