@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788198896631,
+  "lastUpdate": 1788202852832,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "e5bf4e24fafe7798e97255aa458e4b62d8660ea3",
-          "message": "fix: collect Rust walltime benchmark results\n\n* fix(benchmarks): use CodSpeed macro runner\n\n* fix(benchmarks): collect Rust walltime results",
-          "timestamp": "2026-08-13T14:57:24+02:00",
-          "tree_id": "7529a1fb2b352f9f9b7574ce36a879a04cc79876",
-          "url": "https://github.com/fallow-rs/fallow/commit/e5bf4e24fafe7798e97255aa458e4b62d8660ea3"
-        },
-        "date": 1786626673799,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503794320,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20160832,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25525112,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38055928,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 41862968,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0fabc864081f9326259b2b31cf3c01e9f5357471",
+          "message": "fix(mcp): bound Code Mode output and single-source its allowlist\n\nCode Mode capped the fallow JSON its host calls read but not the value the\nsnippet returns, which is the one thing that reaches the calling agent. A 3 MB\nreturn value came back whole under a 1 KB cap, bounded only by the 32 MB\nsandbox heap. An oversized result is now refused with ok:false plus truncated,\nresult_bytes, and a short result_preview, and an oversized thrown message is\nclamped the same way.\n\nThe sandbox advertised that it had no Function, but undefining the global\nbinding left the intrinsic reachable: (function(){}).constructor compiled and\nran code. The function, async, generator, and async-generator prototypes now\ncarry a non-configurable undefined constructor, and a test pins the sandbox\nglobal set so a future runtime cannot widen it unnoticed.\n\nThe Code Mode allowlist lived in five hand-kept lists that had to agree by\nhand. McpToolInfo now carries code_mode_alias and CODE_MODE_ONLY_TOOLS covers\nthe one helper with no standalone tool, the sandbox bindings project that data,\nand drift tests bind the enum to the manifest in both directions. The allowlist\nreaches fallow schema, the fallow://tools resource, and capabilities.json, so\nagents read reachability from data instead of parsing the tool description.\nTests that asserted contract facts against hardcoded prose now derive them from\nthe manifest.\n\nBacking is one value per tool rather than two overlapping predicates with an\ninline exception list, which removes four dispatch arms nothing could reach.\nAbandoned in-process calls are bounded: once one has been left running, the\nnext call takes the killable subprocess.\n\nHost calls are memoized per snippet on the tool and canonicalized params, and\nfallow.all fans out independent calls under one shared output budget. Refusals\nno longer spend the analysis budget, and the recorded tool name is clamped so a\nbogus 5 KB name cannot inflate the trace.\n\nAlso fixes a macOS process-group race in crates/process: killpg returns EPERM\nwhen the leader has become an unreaped zombie, and terminate() accepted that\nonly from a cached observation, which made the user-visible max_output_bytes\nrefusal message nondeterministic. It now asks the kernel at the moment of\nfailure.\n\nBehavior changes are recorded in docs/backwards-compatibility.md.",
+          "timestamp": "2026-08-31T20:41:32+02:00",
+          "tree_id": "f1a439f34afcb6fae39008ece811265d941dc35c",
+          "url": "https://github.com/fallow-rs/fallow/commit/0fabc864081f9326259b2b31cf3c01e9f5357471"
+        },
+        "date": 1788202848924,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 548015760,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21337352,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28028440,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 41932408,
             "unit": "bytes"
           }
         ]
