@@ -1496,6 +1496,7 @@ mod tests {
         let config = FallowConfig {
             type_aware: fallow_config::TypeAwareConfig::default(),
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -1658,6 +1659,7 @@ mod tests {
         let config = FallowConfig {
             type_aware: fallow_config::TypeAwareConfig::default(),
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],

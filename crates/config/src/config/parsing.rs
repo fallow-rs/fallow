@@ -920,6 +920,54 @@ pub(super) fn capture_unknown_rule_warnings<F: FnOnce() -> R, R>(
 /// per analysis (combined mode runs check + dupes + health, each through the
 /// same config load path), so without a dedupe the same typo emits 3+ warnings
 /// per run.
+/// `MAJOR.MINOR.PATCH` as a comparable triple. Deliberately not a full semver
+/// parser: the config field mirrors the release tag format, which the release
+/// workflow already constrains to exactly three numbers.
+fn version_triple(value: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = value.split('.');
+    let triple = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    parts.next().is_none().then_some(triple)
+}
+
+/// Refuse a config written for a newer binary before `deny_unknown_fields`
+/// reports the first field this build happens not to know. Without this a team
+/// that commits a field introduced in a newer version breaks every runner still
+/// on the old one with an error that names the field, so the reader's first
+/// guess is a typo rather than version skew.
+fn assert_binary_meets_minimum_version(
+    path: &Path,
+    merged: &serde_json::Value,
+) -> Result<(), miette::Report> {
+    let Some(declared) = merged.get("minimumVersion") else {
+        return Ok(());
+    };
+    let declared = declared.as_str().and_then(version_triple).ok_or_else(|| {
+        miette::miette!(
+            "minimumVersion must be MAJOR.MINOR.PATCH in {}, found {declared}",
+            path.display()
+        )
+    })?;
+
+    let running = env!("CARGO_PKG_VERSION");
+    let Some(current) = version_triple(running) else {
+        return Ok(());
+    };
+    if current >= declared {
+        return Ok(());
+    }
+
+    let (major, minor, patch) = declared;
+    Err(miette::miette!(
+        "{} requires fallow {major}.{minor}.{patch} or newer, running {running}. \
+         Upgrade fallow, or remove minimumVersion and the fields that need it.",
+        path.display()
+    ))
+}
+
 fn warn_on_unknown_rule_keys(config_path: &Path, merged: &serde_json::Value) {
     use std::sync::{Mutex, OnceLock};
 
@@ -1123,6 +1171,7 @@ impl FallowConfig {
     }
 
     fn from_merged(path: &Path, merged: serde_json::Value) -> Result<Self, miette::Report> {
+        assert_binary_meets_minimum_version(path, &merged)?;
         warn_on_unknown_rule_keys(path, &merged);
 
         let private_type_leaks_configured = merged
@@ -1465,6 +1514,102 @@ impl FallowConfig {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn version_triple_accepts_exactly_three_numbers() {
+        assert_eq!(version_triple("3.21.0"), Some((3, 21, 0)));
+        assert_eq!(version_triple("10.0.100"), Some((10, 0, 100)));
+        for rejected in ["3.21", "3.21.0.1", "v3.21.0", "3.21.x", "", "3..0"] {
+            assert_eq!(version_triple(rejected), None, "{rejected}");
+        }
+    }
+
+    #[test]
+    fn minimum_version_at_or_below_the_binary_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".fallowrc.json");
+        let running = env!("CARGO_PKG_VERSION");
+        std::fs::write(
+            &path,
+            format!(r#"{{"minimumVersion": "{running}", "entry": ["src/main.ts"]}}"#),
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&path).expect("current version satisfies its own floor");
+        assert_eq!(config.minimum_version.as_deref(), Some(running));
+        assert_eq!(config.entry, vec!["src/main.ts".to_string()]);
+    }
+
+    #[test]
+    fn a_config_written_for_a_newer_binary_names_both_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{"minimumVersion": "999.0.0", "someFieldFromTheFuture": true}"#,
+        )
+        .unwrap();
+
+        let error = FallowConfig::load(&path).expect_err("a newer floor must stop the run");
+        let message = error.to_string();
+        assert!(
+            message.contains("requires fallow 999.0.0 or newer"),
+            "{message}"
+        );
+        assert!(message.contains(env!("CARGO_PKG_VERSION")), "{message}");
+        // The version skew is the cause, so the unknown field must not be the
+        // headline: that reads like a typo and sends the reader to the wrong fix.
+        assert!(!message.contains("unknown field"), "{message}");
+    }
+
+    #[test]
+    fn an_unknown_field_still_fails_on_a_binary_that_meets_the_floor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{"minimumVersion": "0.1.0", "ignorePaths": ["dist/**"]}"#,
+        )
+        .unwrap();
+
+        let error = FallowConfig::load(&path).expect_err("a typo is still a typo");
+        assert!(error.to_string().contains("unknown field"), "{error}");
+    }
+
+    #[test]
+    fn a_floor_declared_by_an_extended_base_config_still_applies() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("base.json"),
+            r#"{"minimumVersion": "999.0.0"}"#,
+        )
+        .unwrap();
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(&path, r#"{"extends": ["./base.json"]}"#).unwrap();
+
+        let error = FallowConfig::load(&path).expect_err("an inherited floor must stop the run");
+        assert!(
+            error
+                .to_string()
+                .contains("requires fallow 999.0.0 or newer"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_minimum_version_is_a_config_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(&path, r#"{"minimumVersion": "v3.21"}"#).unwrap();
+
+        let error = FallowConfig::load(&path).expect_err("a malformed floor must not be ignored");
+        assert!(
+            error
+                .to_string()
+                .contains("minimumVersion must be MAJOR.MINOR.PATCH"),
+            "{error}"
+        );
+    }
     use super::*;
     use crate::CacheConfig;
     use crate::PackageJson;

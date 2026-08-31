@@ -17,6 +17,7 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
+        minimum_version: None,
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],
@@ -64,6 +65,7 @@ pub fn create_production_config(root: PathBuf) -> fallow_config::ResolvedConfig 
     FallowConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
+        minimum_version: None,
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],
@@ -142,6 +144,7 @@ pub fn create_config_with_cache(
     let mut config = FallowConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
+        minimum_version: None,
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],
@@ -194,6 +197,7 @@ where
     FallowConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
+        minimum_version: None,
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],
@@ -249,6 +253,7 @@ pub fn create_config_with_overrides(
     FallowConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
+        minimum_version: None,
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],
@@ -297,6 +302,7 @@ pub fn create_config_with_ignore_decorators(
     FallowConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
+        minimum_version: None,
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec![],

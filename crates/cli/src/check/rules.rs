@@ -970,6 +970,7 @@ mod tests {
     fn config_with_rules(rules: RulesConfig) -> ResolvedConfig {
         fallow_config::FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -1352,6 +1353,7 @@ mod tests {
     fn config_with_test_override() -> ResolvedConfig {
         fallow_config::FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -1410,6 +1412,7 @@ mod tests {
     fn config_with_circular_override(pattern: &str, severity: Severity) -> ResolvedConfig {
         fallow_config::FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -1468,6 +1471,7 @@ mod tests {
     fn config_with_boundary_override(pattern: &str, severity: Severity) -> ResolvedConfig {
         fallow_config::FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -2140,6 +2144,7 @@ mod tests {
         configure(&mut partial);
         fallow_config::FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
