@@ -160,15 +160,163 @@ fn deepest_matching_workspace<'a>(path: &Path, workspace_roots: &[&'a Path]) -> 
         .max_by_key(|root| root.components().count())
 }
 
-fn dependency_owning_workspace_roots<'a>(
+/// One workspace manifest, read once for the whole unused-dependency pass.
+///
+/// The per-workspace pass reads `package.json` again to locate declaration
+/// lines, but the cross-workspace indices need only the fields below, so they
+/// are collected up front instead of inside the parallel per-workspace map.
+struct WorkspaceManifest<'a> {
+    /// Workspace root, the key every usage index is built against.
+    root: &'a Path,
+    /// Manifest `name`, falling back to the discovered workspace name. This is
+    /// the string a sibling workspace writes in its own dependency map.
+    name: String,
+    /// `"private": true`. The offline, deterministic signal that a workspace is
+    /// never published, so consumers inline its source instead of installing it
+    /// from a registry.
+    is_private: bool,
+    /// Every declared dependency name, in any category. Used to follow edges to
+    /// private siblings: a sibling's source reaches this workspace whether it is
+    /// pulled in for the shipped build or only for the local one.
+    declared: FxHashSet<String>,
+    /// Names declared in a category that travels with the package:
+    /// `dependencies`, `optionalDependencies`, and `peerDependencies`.
+    /// `devDependencies` are build-time needs of this workspace alone and are
+    /// never inlined into a consumer, so they are deliberately excluded.
+    shipped: FxHashSet<String>,
+}
+
+/// Names a workspace carries into anything that inlines its source.
+///
+/// `peerDependencies` count because a peer is by definition supplied by the
+/// consumer, and `optionalDependencies` count because an optional package that
+/// is present is loaded from the consumer's tree like any other.
+fn shipped_dependency_names(pkg: &PackageJson) -> FxHashSet<String> {
+    pkg.production_dependency_names()
+        .into_iter()
+        .chain(pkg.optional_dependency_names())
+        .chain(
+            pkg.peer_dependencies
+                .iter()
+                .flat_map(|peers| peers.keys().cloned()),
+        )
+        .collect()
+}
+
+/// Read every workspace manifest once, in parallel, dropping workspaces whose
+/// `package.json` is missing, unparsable, or covered by `ignorePatterns`.
+fn read_workspace_manifests<'a>(
     workspaces: &'a [fallow_config::WorkspaceInfo],
     config: &ResolvedConfig,
-) -> Vec<&'a Path> {
+) -> Vec<WorkspaceManifest<'a>> {
+    use rayon::prelude::*;
     workspaces
-        .iter()
-        .filter(|workspace| read_workspace_package(workspace, config).is_some())
-        .map(|workspace| workspace.root.as_path())
+        .par_iter()
+        .filter_map(|workspace| {
+            let (_, _, pkg) = read_workspace_package(workspace, config)?;
+            Some(WorkspaceManifest {
+                root: workspace.root.as_path(),
+                name: pkg.name.clone().unwrap_or_else(|| workspace.name.clone()),
+                is_private: pkg.private == Some(true),
+                declared: pkg.all_dependency_names().into_iter().collect(),
+                shipped: shipped_dependency_names(&pkg),
+            })
+        })
         .collect()
+}
+
+fn dependency_owning_workspace_roots<'a>(manifests: &[WorkspaceManifest<'a>]) -> Vec<&'a Path> {
+    manifests.iter().map(|manifest| manifest.root).collect()
+}
+
+/// Reverse index: workspace root -> third-party packages that workspace inherits
+/// from the private siblings its build inlines.
+///
+/// A private, unpublished sibling is never installed from a registry, so a
+/// consumer that depends on it bundles its source. The package manager then has
+/// to resolve that sibling's own packages from the consumer's manifest, which is
+/// why hoisting them into the consumer is correct rather than dead weight. See
+/// discussion #2244.
+///
+/// The walk follows private siblings only, transitively, because a published
+/// package brings its own dependency tree and needs no hoisting. Crediting a
+/// published sibling's packages would suppress a genuine finding. Workspace
+/// graphs can be cyclic, so each walk carries a visited set.
+fn collect_bundled_workspace_usage<'a>(
+    manifests: &[WorkspaceManifest<'a>],
+    workspace_used_packages: &FxHashMap<&'a Path, FxHashSet<&'a str>>,
+) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
+    let private_by_name: FxHashMap<&str, usize> = manifests
+        .iter()
+        .enumerate()
+        .filter(|(_, manifest)| manifest.is_private)
+        .map(|(index, manifest)| (manifest.name.as_str(), index))
+        .collect();
+    if private_by_name.is_empty() {
+        return FxHashMap::default();
+    }
+
+    use rayon::prelude::*;
+    manifests
+        .par_iter()
+        .enumerate()
+        .map(|(index, consumer)| {
+            let bundled = bundled_packages_for(
+                index,
+                consumer,
+                manifests,
+                &private_by_name,
+                workspace_used_packages,
+            );
+            (consumer.root, bundled)
+        })
+        .filter(|(_, bundled)| !bundled.is_empty())
+        .collect()
+}
+
+/// Walk the private-sibling closure reachable from one consumer workspace and
+/// return the packages those siblings actually import.
+///
+/// A package is credited only when the sibling both imports it and declares it
+/// in a shipped category, so a sibling's own unused declaration cannot mask a
+/// finding in the consumer, and a sibling's `devDependencies` stay out.
+fn bundled_packages_for<'a>(
+    consumer_index: usize,
+    consumer: &WorkspaceManifest<'a>,
+    manifests: &[WorkspaceManifest<'a>],
+    private_by_name: &FxHashMap<&str, usize>,
+    workspace_used_packages: &FxHashMap<&'a Path, FxHashSet<&'a str>>,
+) -> FxHashSet<&'a str> {
+    let private_siblings = |manifest: &WorkspaceManifest<'a>| -> Vec<usize> {
+        manifest
+            .declared
+            .iter()
+            .filter_map(|dep| private_by_name.get(dep.as_str()).copied())
+            .collect()
+    };
+
+    let mut bundled: FxHashSet<&str> = FxHashSet::default();
+    let mut visited: FxHashSet<usize> = FxHashSet::default();
+    visited.insert(consumer_index);
+    let mut pending = private_siblings(consumer);
+
+    while let Some(index) = pending.pop() {
+        if !visited.insert(index) {
+            continue;
+        }
+        let sibling = &manifests[index];
+        if let Some(imported) = workspace_used_packages.get(&sibling.root) {
+            bundled.extend(
+                imported
+                    .iter()
+                    .copied()
+                    .filter(|package| sibling.shipped.contains(*package)),
+            );
+        }
+        pending.extend(private_siblings(sibling));
+    }
+
+    bundled
 }
 
 /// Reverse index: workspace root -> packages with ANY file under that root using
@@ -463,6 +611,7 @@ impl<'a> UnusedDependencyScan<'a> {
             script_used: &self.script_used,
             ignore_deps: &self.ignore_deps,
             workspace_used_packages: &self.usage.workspace_used_packages,
+            bundled_workspace_usage: &self.usage.bundled_workspace_usage,
             package_workspace_usage: &self.usage.package_workspace_usage,
             root_flagged,
         }
@@ -517,6 +666,7 @@ struct DependencyUsageIndices<'a> {
     used_packages: FxHashSet<&'a str>,
     package_workspace_usage: FxHashMap<String, Vec<PathBuf>>,
     workspace_used_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    bundled_workspace_usage: FxHashMap<&'a Path, FxHashSet<&'a str>>,
     root_peer_used: FxHashSet<String>,
 }
 
@@ -529,10 +679,15 @@ fn collect_dependency_usage_indices<'a>(
     let used_packages: FxHashSet<&str> = graph.package_usage.keys().map(String::as_str).collect();
     let root_peer_used = PeerDependencyResolver::new()
         .peer_dependency_closure(&config.root, used_packages.iter().copied());
-    let workspace_roots = dependency_owning_workspace_roots(workspaces, config);
+    let manifests = read_workspace_manifests(workspaces, config);
+    let workspace_roots = dependency_owning_workspace_roots(&manifests);
+    let workspace_used_packages = collect_workspace_used_packages(graph, &workspace_roots);
+    let bundled_workspace_usage =
+        collect_bundled_workspace_usage(&manifests, &workspace_used_packages);
     DependencyUsageIndices {
         package_workspace_usage: collect_package_workspace_usage(graph, &workspace_roots),
-        workspace_used_packages: collect_workspace_used_packages(graph, &workspace_roots),
+        workspace_used_packages,
+        bundled_workspace_usage,
         used_packages,
         root_peer_used,
     }
@@ -619,6 +774,7 @@ struct WorkspaceUnusedDependencyInputs<'a> {
     script_used: &'a FxHashSet<&'a str>,
     ignore_deps: &'a FxHashSet<&'a str>,
     workspace_used_packages: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    bundled_workspace_usage: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
     root_flagged: &'a FxHashSet<String>,
 }
@@ -657,6 +813,7 @@ fn collect_workspace_unused_dependencies<'a>(
         ws_root,
         &ws_used_packages,
         inputs.package_workspace_usage,
+        inputs.bundled_workspace_usage.get(&ws_root),
         inputs.root_flagged,
     );
 
@@ -679,6 +836,9 @@ fn read_workspace_package(
 struct WorkspaceDependencyUsage<'a> {
     ws_root: &'a Path,
     ws_peer_used: FxHashSet<String>,
+    /// Packages this workspace inherits from the private siblings it bundles,
+    /// absent when the workspace bundles no private sibling.
+    bundled_used: Option<&'a FxHashSet<&'a str>>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
     root_flagged: &'a FxHashSet<String>,
 }
@@ -687,6 +847,9 @@ impl WorkspaceDependencyUsage<'_> {
     fn is_used_in_workspace(&self, dep: &str) -> bool {
         self.root_flagged.contains(dep)
             || self.ws_peer_used.contains(dep)
+            || self
+                .bundled_used
+                .is_some_and(|bundled| bundled.contains(dep))
             || self
                 .package_workspace_usage
                 .get(dep)
@@ -702,6 +865,7 @@ fn workspace_dependency_usage<'a>(
     ws_root: &'a Path,
     ws_used_packages: &FxHashSet<&str>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
+    bundled_used: Option<&'a FxHashSet<&'a str>>,
     root_flagged: &'a FxHashSet<String>,
 ) -> WorkspaceDependencyUsage<'a> {
     let ws_peer_used = PeerDependencyResolver::new()
@@ -709,6 +873,7 @@ fn workspace_dependency_usage<'a>(
     WorkspaceDependencyUsage {
         ws_root,
         ws_peer_used,
+        bundled_used,
         package_workspace_usage,
         root_flagged,
     }

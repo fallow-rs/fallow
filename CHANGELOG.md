@@ -79,6 +79,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A package hoisted for a private sibling workspace is no longer reported as
+  unused** (Refs
+  [discussion #2244](https://github.com/fallow-rs/fallow/discussions/2244)). A
+  workspace that is never published is not installed from a registry, so a
+  consumer that depends on it inlines its source, and the package manager then
+  has to resolve that sibling's own packages from the consumer's manifest.
+  Hoisting them there is what makes the build work, but nothing in the consumer
+  imports them, so each one was reported as an unused dependency, with
+  `move-dependency` as the suggested action. Following that advice breaks the
+  build, and the only escape was repo-global `ignoreDependencies`, which
+  silences the package everywhere. Fallow now walks the private-sibling
+  closure, transitively and cycle-safe, and credits the packages those siblings
+  import. A published sibling brings its own dependency tree and is
+  deliberately not followed, so a genuine finding still fires there. Only what
+  a sibling both imports and declares in `dependencies`,
+  `optionalDependencies`, or `peerDependencies` counts: a sibling's
+  `devDependencies` are its own build-time needs and never reach a consumer. A
+  package that nothing imports anywhere is unaffected. Measured on the public
+  NL Design System Utrecht monorepo, where a documentation site declares a
+  Storybook workspace that only its private Astro sibling imports: that finding
+  is gone, every other dependency finding is unchanged, and three further real
+  monorepos report identically before and after. Thanks
+  [@simmo](https://github.com/simmo) for the report.
+
 - **Two audits running at once no longer fail with a base worktree that
   "already exists".** The temporary base view was named from the process id
   plus a wall-clock reading. That reading is not monotonic and repeats across

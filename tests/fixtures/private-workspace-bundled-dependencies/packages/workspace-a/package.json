@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "dependencies": {
     "lodash-es": "4.17.21",
+    "nothing-uses-this": "1.0.0",
     "shared": "1.0.0"
   }
 }

@@ -1100,3 +1100,263 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         "real unused dep `is-odd` should still be reported, got: {reported:?}"
     );
 }
+
+/// Write a monorepo root that discovers every directory under `packages/`.
+fn write_private_bundle_root(root: &std::path::Path) {
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "bundle-root",
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    )
+    .expect("write root package.json");
+}
+
+/// Write one workspace package with a manifest and a single source file.
+fn write_bundle_workspace(root: &std::path::Path, name: &str, manifest: &str, source: &str) {
+    let ws_root = root.join("packages").join(name);
+    fs::create_dir_all(ws_root.join("src")).expect("create workspace package");
+    fs::write(ws_root.join("package.json"), manifest).expect("write workspace package.json");
+    fs::write(ws_root.join("src/index.ts"), source).expect("write workspace source");
+}
+
+fn unused_dependency_names_for(
+    results: &fallow_types::results::AnalysisResults,
+    workspace_suffix: &str,
+) -> Vec<String> {
+    results
+        .unused_dependencies
+        .iter()
+        .filter(|d| d.dep.path.ends_with(workspace_suffix))
+        .map(|d| d.dep.package_name.clone())
+        .collect()
+}
+
+/// Discussion #2244: a private, unpublished sibling workspace is inlined into
+/// its consumer's build, so the third-party packages the sibling imports have
+/// to be resolvable from the consumer's own manifest. Declaring them there is
+/// correct, not dead weight.
+#[test]
+fn private_sibling_bundled_dependency_is_credited_to_the_consumer() {
+    let root = fixture_path("private-workspace-bundled-dependencies");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let reported = unused_dependency_names_for(&results, "packages/workspace-a/package.json");
+
+    assert!(
+        !reported.iter().any(|name| name == "lodash-es"),
+        "lodash-es is bundled from the private `shared` workspace and must not be reported in workspace-a, got: {reported:?}"
+    );
+    assert!(
+        reported.iter().any(|name| name == "nothing-uses-this"),
+        "a dependency no workspace imports must still be reported, got: {reported:?}"
+    );
+}
+
+/// A published sibling is installed from the registry with its own dependency
+/// tree, so the consumer never needs the sibling's packages hoisted. Crediting
+/// them there would hide a real finding.
+#[test]
+fn published_sibling_does_not_credit_bundled_dependency() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    write_private_bundle_root(root);
+    write_bundle_workspace(
+        root,
+        "shared",
+        r#"{
+  "name": "shared",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "lodash-es": "4.17.21"
+  }
+}"#,
+        "import { cloneDeep } from \"lodash-es\";\n\nexport const clone = cloneDeep;\n",
+    );
+    write_bundle_workspace(
+        root,
+        "consumer",
+        r#"{
+  "name": "consumer",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "lodash-es": "4.17.21",
+    "shared": "1.0.0"
+  }
+}"#,
+        "import { clone } from \"shared\";\n\nexport const value = clone;\n",
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let reported = unused_dependency_names_for(&results, "packages/consumer/package.json");
+    assert!(
+        reported.iter().any(|name| name == "lodash-es"),
+        "a published sibling's dependency must stay reported in the consumer, got: {reported:?}"
+    );
+}
+
+/// The bundle follows the private edge as far as it goes: a private sibling of
+/// a private sibling is inlined into the consumer too.
+#[test]
+fn transitive_private_chain_credits_the_deepest_sibling_imports() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    write_private_bundle_root(root);
+    write_bundle_workspace(
+        root,
+        "deep",
+        r#"{
+  "name": "deep",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "lodash-es": "4.17.21"
+  }
+}"#,
+        "import { cloneDeep } from \"lodash-es\";\n\nexport const clone = cloneDeep;\n",
+    );
+    write_bundle_workspace(
+        root,
+        "mid",
+        r#"{
+  "name": "mid",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "deep": "1.0.0"
+  }
+}"#,
+        "import { clone } from \"deep\";\n\nexport const midClone = clone;\n",
+    );
+    write_bundle_workspace(
+        root,
+        "app",
+        r#"{
+  "name": "app",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "lodash-es": "4.17.21",
+    "mid": "1.0.0",
+    "nothing-uses-this": "1.0.0"
+  }
+}"#,
+        "import { midClone } from \"mid\";\n\nexport const value = midClone;\n",
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let reported = unused_dependency_names_for(&results, "packages/app/package.json");
+    assert!(
+        !reported.iter().any(|name| name == "lodash-es"),
+        "lodash-es reaches app through mid -> deep and must not be reported, got: {reported:?}"
+    );
+    assert!(
+        reported.iter().any(|name| name == "nothing-uses-this"),
+        "a dependency outside the bundled closure must still be reported, got: {reported:?}"
+    );
+}
+
+/// Workspace dependency graphs can be cyclic. The closure must terminate and
+/// still credit what the cycle bundles.
+#[test]
+fn cyclic_private_workspace_graph_terminates() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    write_private_bundle_root(root);
+    write_bundle_workspace(
+        root,
+        "alpha",
+        r#"{
+  "name": "alpha",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "beta": "1.0.0",
+    "lodash-es": "4.17.21"
+  }
+}"#,
+        "export const alpha = 1;\n",
+    );
+    write_bundle_workspace(
+        root,
+        "beta",
+        r#"{
+  "name": "beta",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "alpha": "1.0.0",
+    "lodash-es": "4.17.21"
+  }
+}"#,
+        "import { cloneDeep } from \"lodash-es\";\n\nexport const clone = cloneDeep;\n",
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let reported = unused_dependency_names_for(&results, "packages/alpha/package.json");
+    assert!(
+        !reported.iter().any(|name| name == "lodash-es"),
+        "the cycle must resolve and credit beta's import to alpha, got: {reported:?}"
+    );
+}
+
+/// A private sibling's devDependencies are build-time needs of that sibling,
+/// never inlined into the consumer's output, so they stay out of the closure.
+#[test]
+fn dev_dependency_of_a_private_sibling_is_not_credited() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    write_private_bundle_root(root);
+    write_bundle_workspace(
+        root,
+        "tool",
+        r#"{
+  "name": "tool",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "lodash-es": "4.17.21"
+  }
+}"#,
+        "import { cloneDeep } from \"lodash-es\";\n\nexport const clone = cloneDeep;\n",
+    );
+    write_bundle_workspace(
+        root,
+        "consumer",
+        r#"{
+  "name": "consumer",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "lodash-es": "4.17.21",
+    "tool": "1.0.0"
+  }
+}"#,
+        "import { clone } from \"tool\";\n\nexport const value = clone;\n",
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let reported = unused_dependency_names_for(&results, "packages/consumer/package.json");
+    assert!(
+        reported.iter().any(|name| name == "lodash-es"),
+        "a dev-only declaration in the private sibling must not credit the consumer, got: {reported:?}"
+    );
+}
