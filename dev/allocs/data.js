@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788210891776,
+  "lastUpdate": 1788213069747,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "fb44ef467c8a032dc12453fb3b2842c115ec10da",
-          "message": "fix(audit): keep base attribution when the focus remap fails\n\nThe base-snapshot focus set is built from `git rev-parse --show-toplevel`,\nwhose spelling can differ from the caller's canonicalized root (Windows 8.3\ncomponents and drive-letter case, verbatim prefixes), so a literal\nstrip_prefix mapped no path at all. The base dead-code results were then\nfiltered against an empty focus set and every base finding disappeared, which\nmade each inherited finding look introduced and failed `--gate new-only` on\npre-existing findings.\n\nThe remap now compares simplified and canonicalized forms before giving up on\na path, and a base run whose focus set cannot be expressed leaves its results\nunfiltered instead of filtering them against an empty set.",
-          "timestamp": "2026-08-13T20:01:56+02:00",
-          "tree_id": "a32c69c82618dc6eee83c07431f87f5eed349ee2",
-          "url": "https://github.com/fallow-rs/fallow/commit/fb44ef467c8a032dc12453fb3b2842c115ec10da"
-        },
-        "date": 1786644377680,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9753850,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48491,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1015114,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7566,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8361,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8a2b5194d09dbfd012cc8388925e9060fd5cfd54",
+          "message": "test: add component_cache bench shard for store load, save, and conversion (#2501)\n\nAdds CodSpeed coverage for the extraction cache store save, store load, and cached-module to module-info conversion. Benchmark only, no production code.",
+          "timestamp": "2026-08-31T23:47:08+02:00",
+          "tree_id": "5c9bbdf92a2d48121afb9fc543b50201d43ef463",
+          "url": "https://github.com/fallow-rs/fallow/commit/8a2b5194d09dbfd012cc8388925e9060fd5cfd54"
+        },
+        "date": 1788213066257,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9757381,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49421,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1188351,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8429,
             "unit": "allocations"
           }
         ]
