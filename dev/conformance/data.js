@@ -1,90 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788088008763,
+  "lastUpdate": 1788179469698,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "d177bab8546290ca50321e3a8ab16d02ca74d456",
-          "message": "fix(core): serialise trace output PathBufs with serde_path forward-slash (#585)\n\nAttach #[serde(serialize_with = \"serde_path::serialize\")] to every single-PathBuf field and serialize_vec to every Vec<PathBuf> field in the trace output structs (ExportTrace, ExportReference, ReExportChain, FileTrace, TracedReExport, DependencyTrace, CloneTrace). After PR #584 fixed path_matches so the lookup succeeded on Windows, the output still serialised backslash-separated paths via serde's default, breaking JSON consumers (MCP agents, CI glob filters, downstream pipelines) that expect forward-slash. CloneInstance.file already used this convention; trace structs now match.\n\nTwo cross-platform regression tests build a backslash-shaped PathBuf literal and assert the JSON contains the forward-slash form for every newly-decorated field.\n\nFixes the remaining MCP e2e e2e_trace_export_returns_json and e2e_trace_file_returns_json failures.\n\nRefs #561",
-          "timestamp": "2026-05-22T08:43:06Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/d177bab8546290ca50321e3a8ab16d02ca74d456"
-        },
-        "date": 1779440289509,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Agreement Rate",
-            "value": 2,
-            "unit": "%"
-          },
-          {
-            "name": "Agreed Issues",
-            "value": 669,
-            "unit": "issues"
-          },
-          {
-            "name": "Fallow Total",
-            "value": 31518,
-            "unit": "issues"
-          },
-          {
-            "name": "Knip Total",
-            "value": 2030,
-            "unit": "issues"
-          },
-          {
-            "name": "fastify Agreement",
-            "value": 6.1,
-            "unit": "%"
-          },
-          {
-            "name": "next.js Agreement",
-            "value": 2,
-            "unit": "%"
-          },
-          {
-            "name": "preact Agreement",
-            "value": 3.6,
-            "unit": "%"
-          },
-          {
-            "name": "query Agreement",
-            "value": 0,
-            "unit": "%"
-          },
-          {
-            "name": "svelte Agreement",
-            "value": 0.3,
-            "unit": "%"
-          },
-          {
-            "name": "vite Agreement",
-            "value": 5.3,
-            "unit": "%"
-          },
-          {
-            "name": "vue-core Agreement",
-            "value": 20.3,
-            "unit": "%"
-          },
-          {
-            "name": "zod Agreement",
-            "value": 2.8,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -8139,6 +8057,88 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/900d29a76e7cb1488930b2fa71f7053ead69b187"
         },
         "date": 1788088005631,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.8,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 574,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 30110,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 2003,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 4.9,
+            "unit": "%"
+          },
+          {
+            "name": "next.js Agreement",
+            "value": 1.7,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 4.4,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "vite Agreement",
+            "value": 6.4,
+            "unit": "%"
+          },
+          {
+            "name": "vue-core Agreement",
+            "value": 23.4,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 1.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "id": "d5a422c6206d00c813fe7c77d5038855d1051780",
+          "message": "fix(telemetry): stop asserting a lock release is instantly visible\n\n`spool_lock_excludes_concurrent_acquire` demanded that the post-drop reacquire\nsucceed on its first attempt. Dropping the holder closes the descriptor, but\nthe kernel does not promise the release is visible to the next `flock` right\naway, and under a loaded parallel workspace run it measurably is not. Refs\n#2460.\n\nThe diagnostic added in #2459 is what pinned this down. The failure arrives as\n`Contended`, not `Unusable`, so the lock file opened fine and the lock was\nsimply still held a moment after its holder was gone. That rules out the\nenvironment explanations (a missing directory, a permissions denial, a\ndescriptor limit) and leaves release visibility, which is a property of the\nplatform rather than of this code.\n\nRetrying is not a mask, because production never needed the guarantee the test\nwas asserting. Both callers of `try_acquire`, the over-cap trim and the drain,\ntreat contention as \"skip, the next run picks it up\". A release that becomes\nvisible a few milliseconds later costs nothing there. What still matters is\nthat the lock does come free once its holder is gone, and that is still\nasserted: the test fails if it never reacquires across the full window.\n\nThe sibling assertion, that a second acquire contends while the first is held,\nis unchanged and still immediate, since that direction has no visibility delay\nto absorb.",
+          "timestamp": "2026-08-31T12:28:52Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/d5a422c6206d00c813fe7c77d5038855d1051780"
+        },
+        "date": 1788179466023,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
