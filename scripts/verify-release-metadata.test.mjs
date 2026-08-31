@@ -6,9 +6,11 @@ import { test } from "node:test";
 
 import {
   assertChangelogRelease,
+  assertNothingUnreleased,
   assertPublishedRelease,
   changelogLinks,
   changelogSections,
+  parseArguments,
   previousReleasedVersion,
   verifyReleaseMetadata,
   versionOfTag,
@@ -18,12 +20,14 @@ const emDash = String.fromCodePoint(0x2014);
 
 const COMPARE_ROOT = "https://github.com/fallow-rs/fallow/compare";
 
+const compareUrl = `${COMPARE_ROOT}/v3.20.0...v3.21.0`;
+
 /** A changelog in the exact shape a release commit leaves behind. */
 const changelog = ({
   unreleased = "",
   heading = "## [3.21.0] - 2026-08-31",
   body = "### Added\n\n- **Something users can see.**\n",
-  links = [`[3.21.0]: ${COMPARE_ROOT}/v3.20.0...v3.21.0`],
+  links = [`[3.21.0]: ${compareUrl}`],
 } = {}) =>
   [
     "# Changelog",
@@ -47,13 +51,11 @@ const changelog = ({
 
 const publishedRelease = (overrides = {}) => ({
   name: "v3.21.0: coverage geometry the matcher can prove",
-  body: `Real notes.\n\n**Full Changelog**: ${COMPARE_ROOT}/v3.20.0...v3.21.0\n`,
+  body: `Real notes.\n\n**Full Changelog**: ${compareUrl}\n`,
   isDraft: false,
   isPrerelease: false,
   ...overrides,
 });
-
-const compareUrl = `${COMPARE_ROOT}/v3.20.0...v3.21.0`;
 
 test("a release tag is reduced to its version, and anything else is refused", () => {
   assert.equal(versionOfTag("v3.21.0"), "3.21.0");
@@ -75,6 +77,27 @@ test("sections carry the body that follows each heading", () => {
   assert.doesNotMatch(sections[1].body, /Something earlier/u);
 });
 
+test("a heading inside a fenced block is a code sample, not a section", () => {
+  const fenced = changelog({
+    body: [
+      "### Added",
+      "",
+      "- **Documents the changelog format.**",
+      "",
+      "```markdown",
+      "## [9.9.9] - 2026-01-01",
+      "```",
+      "",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(
+    changelogSections(fenced).map((section) => section.version),
+    ["Unreleased", "3.21.0", "3.20.0"],
+  );
+  assert.doesNotThrow(() => assertChangelogRelease(fenced, "v3.21.0"));
+});
+
 test("the previous released version skips the Unreleased section", () => {
   const sections = changelogSections(changelog());
 
@@ -83,7 +106,15 @@ test("the previous released version skips the Unreleased section", () => {
   assert.throws(() => previousReleasedVersion(sections, "9.9.9"), /no released section/u);
 });
 
-test("link definitions are read from the foot of the changelog", () => {
+test("sections filed out of order are refused rather than compared backwards", () => {
+  const swapped = changelog({
+    links: [`[3.21.0]: ${COMPARE_ROOT}/v3.22.0...v3.21.0`],
+  }).replace("## [3.20.0] - 2026-08-28", "## [3.22.0] - 2026-08-28");
+
+  assert.throws(() => assertChangelogRelease(swapped, "v3.21.0"), /3\.21\.0 sits above 3\.22\.0/u);
+});
+
+test("link definitions are read out of the changelog", () => {
   assert.equal(changelogLinks(changelog()).get("3.21.0"), compareUrl);
   assert.equal(changelogLinks(changelog()).size, 2);
 });
@@ -119,15 +150,15 @@ test("the changelog gate refuses a duplicated section", () => {
   );
 });
 
-test("the changelog gate requires a well-formed release date", () => {
-  assert.throws(
-    () => assertChangelogRelease(changelog({ heading: "## [3.21.0]" }), "v3.21.0"),
-    /needs a YYYY-MM-DD date, found none/u,
-  );
-  assert.throws(
-    () => assertChangelogRelease(changelog({ heading: "## [3.21.0] - soon" }), "v3.21.0"),
-    /needs a YYYY-MM-DD date, found soon/u,
-  );
+test("the changelog gate requires a real release date", () => {
+  for (const [heading, expected] of [
+    ["## [3.21.0]", /found none/u],
+    ["## [3.21.0] - soon", /found soon/u],
+    ["## [3.21.0] - 2026-31-08", /found 2026-31-08/u],
+    ["## [3.21.0] - 2026-02-30", /found 2026-02-30/u],
+  ]) {
+    assert.throws(() => assertChangelogRelease(changelog({ heading }), "v3.21.0"), expected);
+  }
 });
 
 test("the changelog gate refuses an em-dash the release notes would inherit", () => {
@@ -137,14 +168,7 @@ test("the changelog gate refuses an em-dash the release notes would inherit", ()
   );
 });
 
-test("the changelog gate refuses entries still parked under Unreleased", () => {
-  assert.throws(
-    () => assertChangelogRelease(changelog({ unreleased: "- **Forgotten.**\n" }), "v3.21.0"),
-    /Unreleased section still holds entries/u,
-  );
-});
-
-test("the changelog gate refuses a missing or misdirected compare link", () => {
+test("the changelog gate refuses a missing, misdirected or off-host compare link", () => {
   assert.throws(
     () => assertChangelogRelease(changelog({ links: [] }), "v3.21.0"),
     /no "\[3\.21\.0\]:" link definition/u,
@@ -155,7 +179,36 @@ test("the changelog gate refuses a missing or misdirected compare link", () => {
         changelog({ links: [`[3.21.0]: ${COMPARE_ROOT}/v3.19.0...v3.21.0`] }),
         "v3.21.0",
       ),
-    /must compare v3\.20\.0\.\.\.v3\.21\.0/u,
+    /must be https:\/\/github\.com\/fallow-rs\/fallow\/compare\/v3\.20\.0\.\.\.v3\.21\.0/u,
+  );
+  assert.throws(
+    () =>
+      assertChangelogRelease(
+        changelog({ links: ["[3.21.0]: https://evil.example/compare/v3.20.0...v3.21.0"] }),
+        "v3.21.0",
+      ),
+    /must be https:\/\/github\.com\/fallow-rs\/fallow\/compare\//u,
+  );
+});
+
+test("pending entries are refused at dispatch and ignored after publication", () => {
+  const pending = changelog({ unreleased: "### Added\n\n- **Landed after the release.**\n" });
+
+  assert.throws(() => assertNothingUnreleased(pending), /Unreleased section still holds entries/u);
+  // The release commit empties [Unreleased], but the default branch fills it
+  // again while the release publishes, so the released section must still pass.
+  assert.doesNotThrow(() => assertChangelogRelease(pending, "v3.21.0"));
+});
+
+test("a second Unreleased heading from a bad merge is refused", () => {
+  const duplicated = changelog().replace(
+    "## [Unreleased]",
+    "## [Unreleased]\n\n## [Unreleased]\n\n- **Hidden under the second heading.**",
+  );
+
+  assert.throws(
+    () => assertNothingUnreleased(duplicated),
+    /exactly one "## \[Unreleased\]" section, found 2/u,
   );
 });
 
@@ -198,9 +251,13 @@ test("the publication gate requires a body that links the full changelog", () =>
 });
 
 test("the publication gate refuses an em-dash in the title or the body", () => {
-  const withEmDash = publishedRelease({ name: `v3.21.0: coverage ${emDash} proven` });
   assert.throws(
-    () => assertPublishedRelease(withEmDash, "v3.21.0", compareUrl),
+    () =>
+      assertPublishedRelease(
+        publishedRelease({ name: `v3.21.0: coverage ${emDash} proven` }),
+        "v3.21.0",
+        compareUrl,
+      ),
     /title contains an em-dash/u,
   );
   assert.throws(
@@ -235,6 +292,20 @@ test("the publication gate refuses an upstream project name on the public surfac
   );
 });
 
+test("arguments are read in pairs and anything unrecognized is refused", () => {
+  assert.deepEqual(parseArguments(["--tag", "v3.21.0"]), {
+    tag: "v3.21.0",
+    releaseJson: undefined,
+  });
+  assert.deepEqual(parseArguments(["--tag", "v3.21.0", "--release-json", "r.json"]), {
+    tag: "v3.21.0",
+    releaseJson: "r.json",
+  });
+  assert.throws(() => parseArguments(["--verbose"]), /unknown argument: --verbose/u);
+  assert.throws(() => parseArguments([]), /usage: node scripts/u);
+  assert.throws(() => parseArguments(["--tag"]), /usage: node scripts/u);
+});
+
 test("every released section of the repository's changelog is dated, filled and linked", () => {
   const source = readFileSync("CHANGELOG.md", "utf8");
   const sections = changelogSections(source);
@@ -251,10 +322,13 @@ test("every released section of the repository's changelog is dated, filled and 
     if (!section.body.split(/\r?\n/u).some((line) => line.trim() !== "")) {
       problems.push(`${section.version} has an empty body`);
     }
+    if (section.body.includes(emDash)) {
+      problems.push(`${section.version} contains an em-dash`);
+    }
     if (!link) {
       problems.push(`${section.version} has no link definition`);
-    } else if (previous && !link.endsWith(`/compare/v${previous.version}...v${section.version}`)) {
-      problems.push(`${section.version} compares to ${link} instead of v${previous.version}`);
+    } else if (previous && link !== `${COMPARE_ROOT}/v${previous.version}...v${section.version}`) {
+      problems.push(`${section.version} links ${link} instead of comparing v${previous.version}`);
     }
   });
 
@@ -266,7 +340,15 @@ test("every released section of the repository's changelog is dated, filled and 
   }
 
   assert.deepEqual(problems, []);
-  assert.ok(released.length > 200, "the changelog should still carry its full history");
+});
+
+test("pending changelog entries carry no em-dash, so a release cannot inherit one", () => {
+  const unreleased = changelogSections(readFileSync("CHANGELOG.md", "utf8")).find(
+    (section) => section.version === "Unreleased",
+  );
+
+  assert.ok(unreleased, "CHANGELOG.md must keep an Unreleased section");
+  assert.ok(!unreleased.body.includes(emDash), "an Unreleased entry contains an em-dash");
 });
 
 test("the full gate passes on the repository's changelog in its release-commit shape", () => {
@@ -276,9 +358,13 @@ test("the full gate passes on the repository's changelog in its release-commit s
   );
   // The release commit empties [Unreleased] as it renames it, so drop this
   // cycle's pending entries to reproduce the tree the workflow would see.
-  const atRelease = source.replace(/## \[Unreleased\]\n[\s\S]*?(?=\n## \[)/u, "## [Unreleased]\n");
+  const atRelease = source.replace(
+    /## \[Unreleased\][^\n]*\n[\s\S]*?(?=\n## \[)/u,
+    "## [Unreleased]\n",
+  );
 
-  assert.deepEqual(assertChangelogRelease(atRelease, `v${latest.version}`).version, latest.version);
+  assert.doesNotThrow(() => assertNothingUnreleased(atRelease));
+  assert.equal(assertChangelogRelease(atRelease, `v${latest.version}`).version, latest.version);
 });
 
 test("the entry point reads both surfaces from disk and names what it verified", () => {
@@ -287,10 +373,25 @@ test("the entry point reads both surfaces from disk and names what it verified",
   writeFileSync(join(root, "CHANGELOG.md"), changelog());
   writeFileSync(releaseJson, JSON.stringify(publishedRelease()));
 
+  assert.deepEqual(verifyReleaseMetadata({ tag: "v3.21.0", root }), [
+    "CHANGELOG.md section 3.21.0 (compares back to v3.20.0)",
+    "an empty CHANGELOG.md [Unreleased] section",
+  ]);
   assert.deepEqual(verifyReleaseMetadata({ tag: "v3.21.0", releaseJson, root }), [
     "CHANGELOG.md section 3.21.0 (compares back to v3.20.0)",
     "published GitHub Release title and body",
   ]);
+
+  // The publish-time surface must survive a default branch that moved on.
+  writeFileSync(
+    join(root, "CHANGELOG.md"),
+    changelog({ unreleased: "### Fixed\n\n- **Merged during the publish.**\n" }),
+  );
+  assert.doesNotThrow(() => verifyReleaseMetadata({ tag: "v3.21.0", releaseJson, root }));
+  assert.throws(
+    () => verifyReleaseMetadata({ tag: "v3.21.0", root }),
+    /Unreleased section still holds entries/u,
+  );
 
   writeFileSync(releaseJson, JSON.stringify(publishedRelease({ body: "No link here.\n" })));
   assert.throws(

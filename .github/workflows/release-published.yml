@@ -24,7 +24,9 @@ jobs:
     steps:
       # Checks out the default branch rather than the released tag. The release
       # commit lands on main before the tag exists, so main already carries the
-      # changelog section, and no event-controlled value reaches `ref:`.
+      # released changelog section, and no event-controlled value reaches
+      # `ref:`. The branch keeps moving while a release publishes, so the
+      # script re-checks only that frozen section here, never pending work.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

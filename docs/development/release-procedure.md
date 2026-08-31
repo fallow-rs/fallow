@@ -64,6 +64,10 @@ invariants in this file.
    - `release-published.yml` runs it again on the `release: published` event,
      the first moment a title and body exist, against the title prefix, the
      non-empty body, the comparison URL, em-dashes, and third-party names.
+     It reads the default branch, which keeps moving while a release
+     publishes, so it re-checks only the released section, which is frozen.
+     The empty-`[Unreleased]` rule is a dispatch-time rule: anything merged
+     during the publish would otherwise fail a correct release.
 
    The changelog gate deliberately omits the third-party-name rule: changelog
    entries legitimately name a migration source or a documented parity gap,
