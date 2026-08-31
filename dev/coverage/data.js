@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788195034914,
+  "lastUpdate": 1788198394367,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6ebdf806df1a1ce1389026401af225d8fc7ab38f",
-          "message": "perf(engine): coalesce duplicate line ranges",
-          "timestamp": "2026-08-17T16:44:24+02:00",
-          "tree_id": "2c1af25ee8f999aa236ef4107e1b91d6d82d24ed",
-          "url": "https://github.com/fallow-rs/fallow/commit/6ebdf806df1a1ce1389026401af225d8fc7ab38f"
-        },
-        "date": 1786978202703,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e368c0d05060409b9bcea702972415a85193c914"
         },
         "date": 1788195030964,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "88b1bb6193f8d66e263bbeaf2defd39b93ba7945",
+          "message": "fix(audit): keep concurrent base worktree paths distinct and reclaim abandoned caches (#2500)\n\nTwo audits in one process could compose the same temporary base worktree name, because the name came from the process id plus a non-monotonic wall-clock reading, so the second git worktree add failed with 'already exists'. The name now carries a process-global monotonic counter, with the process id kept as the first segment for orphan reclamation.\n\nfallow audit-cache prune --max-age-days 0 documented that it still collects entries whose recorded owner root is gone, but a probed-dead owner fell through to the switched-off age gate. Those entries are abandoned and nothing else can reclaim them, so they now reclaim outright under a new owner-missing reason. Caches whose owner root still exists stay under their own project's policy.",
+          "timestamp": "2026-08-31T19:34:37+02:00",
+          "tree_id": "a2550cd69d4b4da6da571a82179d3015be943a9e",
+          "url": "https://github.com/fallow-rs/fallow/commit/88b1bb6193f8d66e263bbeaf2defd39b93ba7945"
+        },
+        "date": 1788198391199,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
