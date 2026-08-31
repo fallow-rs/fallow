@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788137652411,
+  "lastUpdate": 1788176796893,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8437d52e6688cd1ce823d5da8c6670e7a23f839f",
-          "message": "fix: close analysis and audit follow-ups\n\n* chore: start issue follow-up batch\n\n* chore: start issue follow-up batch\n\n* fix: close analysis and audit follow-ups",
-          "timestamp": "2026-08-16T01:07:16+02:00",
-          "tree_id": "84124fa62f20213b3fbefff9d07a20d84d5a33fd",
-          "url": "https://github.com/fallow-rs/fallow/commit/8437d52e6688cd1ce823d5da8c6670e7a23f839f"
-        },
-        "date": 1786835550900,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d0ebe05d32fa21bdb2ba7af3a02ef1c8efdde620"
         },
         "date": 1788137647898,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5ea3328cb815a8fe34ba2584d34f36d0c53cee7d",
+          "message": "ci(dependabot): stop reporting a refused auto-merge as a failure (#2484)\n\nEnabling auto-merge is refused when there is nothing left to wait for, which\nhappens whenever the helper job queues behind a burst of dependabot pull\nrequests: by the time it runs, every required context has reported and the pull\nrequest is already mergeable. The job then exited 1 and painted a red check on\na pull request whose own checks were green. It had done so 27 times since April.\n\nA refusal that means the work is already done, or that the pull request closed\nwhile the job waited, now logs and exits 0. Every other error still fails, and\nnothing about which pull requests merge, or when, changes.",
+          "timestamp": "2026-08-31T13:33:12+02:00",
+          "tree_id": "4fd086ea6db1dceb7a9647a2059f044559902d1a",
+          "url": "https://github.com/fallow-rs/fallow/commit/5ea3328cb815a8fe34ba2584d34f36d0c53cee7d"
+        },
+        "date": 1788176792460,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
