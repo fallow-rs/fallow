@@ -1032,6 +1032,7 @@ pub fn find_dev_dependencies_in_production(
     pkg: &PackageJson,
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> Vec<DevDependencyInProduction> {
     let Some(test_globs) = production_exclude_globset() else {
         return Vec::new();
@@ -1063,6 +1064,7 @@ pub fn find_dev_dependencies_in_production(
         )
         .collect();
 
+    let plugin_tooling = plugin_tooling_set(plugin_result);
     let mut findings = Vec::new();
 
     for dep in pkg.dev_dependency_names() {
@@ -1078,6 +1080,14 @@ pub fn find_dev_dependencies_in_production(
         // `@types/*`, `typescript`, `prettier`, ... are genuine dev tooling and
         // are never promoted, matching the dev category of unused-dep detection.
         if crate::plugins::is_known_tooling_dependency(&dep) {
+            continue;
+        }
+        // A framework's own packages are build-time tooling the same way, and
+        // the plugin that recognizes the framework already says which they are.
+        // Every sibling dependency rule reads that declaration; this one used
+        // to skip it, so a scaffold that keeps its framework in devDependencies
+        // was told to promote it.
+        if plugin_tooling.contains(dep.as_str()) {
             continue;
         }
 

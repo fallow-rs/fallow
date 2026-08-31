@@ -81,7 +81,7 @@ fn dev_dep_flagged_when_value_imported_from_prod() {
     let pkg = make_pkg(&[], &["yaml"], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[]);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[], None);
 
     assert!(
         flagged.iter().any(|d| d.package_name == "yaml"),
@@ -97,7 +97,7 @@ fn dev_dep_not_flagged_when_type_only() {
     let pkg = make_pkg(&[], &["type-fest"], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[]);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[], None);
 
     assert!(
         flagged.is_empty(),
@@ -114,7 +114,7 @@ fn dev_dep_not_flagged_when_imported_only_from_test_file() {
     let pkg = make_pkg(&[], &["vitest"], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[]);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[], None);
 
     assert!(
         flagged.is_empty(),
@@ -129,7 +129,7 @@ fn prod_dependency_is_out_of_scope() {
     let pkg = make_pkg(&["yaml"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[]);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[], None);
 
     assert!(
         flagged.is_empty(),
@@ -155,7 +155,7 @@ fn dev_dep_skips_ignored_deps() {
         None,
     );
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[]);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[], None);
 
     assert!(flagged.is_empty(), "ignored deps must not be flagged");
 }
@@ -172,7 +172,7 @@ fn dev_dep_skips_workspace_packages() {
         is_internal_dependency: false,
     }];
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &workspaces);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &workspaces, None);
 
     assert!(
         flagged.is_empty(),
@@ -188,7 +188,7 @@ fn dev_dep_skips_known_tooling() {
     let pkg = make_pkg(&[], &["@types/node"], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[]);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[], None);
 
     assert!(
         flagged.is_empty(),
@@ -204,7 +204,7 @@ fn dev_dep_not_flagged_when_also_peer_dependency() {
     let pkg = pkg_with_peer(&["react"], &["react"]);
     let config = test_config(PathBuf::from("/project"));
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[]);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[], None);
 
     assert!(
         flagged.is_empty(),
@@ -227,7 +227,7 @@ fn dev_dep_not_flagged_when_import_is_from_workspace_owned_file() {
         is_internal_dependency: false,
     }];
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &workspaces);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &workspaces, None);
 
     assert!(
         flagged.is_empty(),
@@ -290,10 +290,65 @@ fn dev_dep_not_flagged_when_importing_file_is_unreachable() {
     let pkg = make_pkg(&[], &["enquirer"], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[]);
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[], None);
 
     assert!(
         flagged.is_empty(),
         "imports from runtime-unreachable files must not flag a devDependency"
+    );
+}
+
+/// A framework's own packages are build-time tooling, and the plugin that
+/// recognizes the framework already declares which they are. Every sibling
+/// dependency rule reads that declaration; this one used to skip it, so a
+/// scaffold that keeps its framework in devDependencies (which is what the
+/// SvelteKit scaffold generates) was told to promote the framework itself.
+#[test]
+fn plugin_declared_framework_tooling_is_not_promoted() {
+    let (graph, _) = graph_with_import_from(
+        "/project/src/routes/+page.server.ts",
+        "@sveltejs/kit",
+        false,
+    );
+    let pkg = make_pkg(&[], &["@sveltejs/kit"], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let mut plugin_result = crate::plugins::AggregatedPluginResult::default();
+    plugin_result
+        .tooling_dependencies
+        .push("@sveltejs/kit".to_string());
+
+    assert!(
+        !find_dev_dependencies_in_production(&graph, &pkg, &config, &[], Some(&plugin_result))
+            .iter()
+            .any(|d| d.package_name == "@sveltejs/kit"),
+        "a framework package the plugin declares as tooling must not be promoted"
+    );
+    assert!(
+        find_dev_dependencies_in_production(&graph, &pkg, &config, &[], None)
+            .iter()
+            .any(|d| d.package_name == "@sveltejs/kit"),
+        "without the plugin declaration the same package is still reported"
+    );
+}
+
+/// The exemption is scoped to what a plugin declared: a runtime library the
+/// project imports is still reported, so the signal is narrowed rather than
+/// switched off for framework projects.
+#[test]
+fn a_runtime_library_is_still_reported_alongside_framework_tooling() {
+    let (graph, _) = graph_with_import_from("/project/src/lib/render.ts", "marked", false);
+    let pkg = make_pkg(&[], &["marked", "@sveltejs/kit"], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let mut plugin_result = crate::plugins::AggregatedPluginResult::default();
+    plugin_result
+        .tooling_dependencies
+        .push("@sveltejs/kit".to_string());
+
+    let flagged =
+        find_dev_dependencies_in_production(&graph, &pkg, &config, &[], Some(&plugin_result));
+
+    assert!(
+        flagged.iter().any(|d| d.package_name == "marked"),
+        "a library the project imports is not framework tooling: {flagged:?}"
     );
 }

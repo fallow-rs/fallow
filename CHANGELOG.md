@@ -65,6 +65,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `node_modules/.bin` launcher or Yarn Plug'n'Play binary without installing
   anything. The no-binary case continues to skip the audit.
 
+- **A framework's own packages are no longer reported as dependencies to
+  promote.** `dev-dependencies-in-production` reports a `devDependencies` entry
+  that production code imports, and every sibling dependency rule reads the
+  tooling declaration each framework plugin already publishes. This one did
+  not, so a scaffold that keeps its framework in `devDependencies`, which is
+  what the SvelteKit scaffold generates, was told to promote the framework
+  itself. Measured on the official SvelteKit RealWorld application: four
+  findings before, two after, the two removed being `@sveltejs/kit` and
+  `svelte`.
+
+- **The advice on a dev dependency used in production states its
+  precondition.** It read "Move to dependencies (production code imports this
+  at runtime)" and asserted that a production-only install would break the
+  import. That is true only when the deployment installs dependencies. A build
+  that inlines the package into its output resolves nothing at runtime, and one
+  common adapter externalizes exactly the packages listed in `dependencies`, so
+  following the old advice could turn a deployment that needed no install into
+  one that does. The finding still fires; it now says when the move applies.
+
+- **The agent commit gate finds a project-local Fallow the way the Lefthook job
+  does.** A real installed Git hook keeps its caller's `PATH` and does not add
+  `node_modules/.bin`, which is why the generated Lefthook job learned to
+  resolve a project-local launcher and a Yarn Plug'n'Play binary. The
+  standalone `fallow-gate.sh` had only `npx --no-install`, so a hook running
+  without `npx` on its `PATH`, and any Plug'n'Play install, fell through to
+  "binary not found" and skipped the audit silently. It now tries the same
+  installs in the same order, and two execution tests run the real script with
+  `PATH` reduced so no global install can satisfy them.
+
 - **A SvelteKit `static/` asset linked from `app.html` resolves.**
   `<link rel="stylesheet" href="/theme.css" />` in `src/app.html` reported an
   unresolved import, and the stylesheet it names reported as an unused file,
