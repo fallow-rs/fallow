@@ -24,7 +24,7 @@ expression: redact_version(&json_str)
           "type": "refactor-function",
           "auto_fixable": false,
           "description": "Refactor `processData` to reduce complexity (extract helper functions, simplify branching)",
-          "note": "Consider splitting into smaller functions with single responsibilities"
+          "note": "Split into smaller functions with single responsibilities. Splitting relocates branching, so it lowers this function's score without lowering the total"
         },
         {
           "type": "suppress-line",

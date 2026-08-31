@@ -232,7 +232,7 @@ fn build_refactor_action(
             format!(
                 "Refactor `{name}` to reduce complexity (extract helper functions, simplify branching)"
             ),
-            "Consider splitting into smaller functions with single responsibilities",
+            "Split into smaller functions with single responsibilities. Splitting relocates branching, so it lowers this function's score without lowering the total",
         )
     };
     HealthFindingAction {
