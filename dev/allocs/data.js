@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788194963304,
+  "lastUpdate": 1788197970667,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "008e2b2056841859745afae6b92047f847e5553e",
-          "message": "test(audit): surface verdict context in the reshaped-clone demotion assert",
-          "timestamp": "2026-08-13T18:13:44+02:00",
-          "tree_id": "68eb1f43b3c9b57f7f28fb4514448f3c7ba877c2",
-          "url": "https://github.com/fallow-rs/fallow/commit/008e2b2056841859745afae6b92047f847e5553e"
-        },
-        "date": 1786637883017,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9758819,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48522,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1028405,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7552,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8439,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "88b1bb6193f8d66e263bbeaf2defd39b93ba7945",
+          "message": "fix(audit): keep concurrent base worktree paths distinct and reclaim abandoned caches (#2500)\n\nTwo audits in one process could compose the same temporary base worktree name, because the name came from the process id plus a non-monotonic wall-clock reading, so the second git worktree add failed with 'already exists'. The name now carries a process-global monotonic counter, with the process id kept as the first segment for orphan reclamation.\n\nfallow audit-cache prune --max-age-days 0 documented that it still collects entries whose recorded owner root is gone, but a probed-dead owner fell through to the switched-off age gate. Those entries are abandoned and nothing else can reclaim them, so they now reclaim outright under a new owner-missing reason. Caches whose owner root still exists stay under their own project's policy.",
+          "timestamp": "2026-08-31T19:34:37+02:00",
+          "tree_id": "a2550cd69d4b4da6da571a82179d3015be943a9e",
+          "url": "https://github.com/fallow-rs/fallow/commit/88b1bb6193f8d66e263bbeaf2defd39b93ba7945"
+        },
+        "date": 1788197966110,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9727685,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49418,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1184653,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8436,
             "unit": "allocations"
           }
         ]
