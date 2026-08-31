@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788210880118,
+  "lastUpdate": 1788213105788,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "aec0bd07a5e2532ad242a3587459b7aaade345df",
-          "message": "test(audit-cache): ignore lazy directory mtimes in the prune snapshot",
-          "timestamp": "2026-08-13T20:17:19+02:00",
-          "tree_id": "93e3fee7ae6c8e79248acf298c739fe8ecdbc395",
-          "url": "https://github.com/fallow-rs/fallow/commit/aec0bd07a5e2532ad242a3587459b7aaade345df"
-        },
-        "date": 1786645132505,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 454,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1225,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/702aaca8c7f81108ac85c702c31c5ca0d1b54325"
         },
         "date": 1788210876691,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8a2b5194d09dbfd012cc8388925e9060fd5cfd54",
+          "message": "test: add component_cache bench shard for store load, save, and conversion (#2501)\n\nAdds CodSpeed coverage for the extraction cache store save, store load, and cached-module to module-info conversion. Benchmark only, no production code.",
+          "timestamp": "2026-08-31T23:47:08+02:00",
+          "tree_id": "5c9bbdf92a2d48121afb9fc543b50201d43ef463",
+          "url": "https://github.com/fallow-rs/fallow/commit/8a2b5194d09dbfd012cc8388925e9060fd5cfd54"
+        },
+        "date": 1788213101603,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
