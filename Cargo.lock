@@ -1320,6 +1320,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
  "tracing-subscriber",
  "windows-sys 0.61.2",
 ]
