@@ -249,15 +249,31 @@ impl ProcessTree {
         }
         #[cfg(target_vendor = "apple")]
         // macOS returns EPERM when the reserved process group contains only
-        // the observed zombie leader, so there are no live members to signal.
-        if error.raw_os_error() == Some(libc::EPERM)
-            && self
-                .leader_exit_observed
-                .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        // the zombie leader, so there are no live members to signal. Ask the
+        // kernel now rather than trusting an earlier poll: a leader that exits
+        // between the last observation and this call would otherwise surface as
+        // a spurious termination error in caller-visible output.
+        if error.raw_os_error() == Some(libc::EPERM) && self.leader_has_exited() {
             return Ok(());
         }
         Err(error)
+    }
+
+    /// Report whether the child leader has already exited, refreshing the
+    /// cached observation. A leader reaped elsewhere reports `ECHILD` and also
+    /// counts as exited, since termination has nothing left to signal.
+    #[cfg(all(unix, target_vendor = "apple"))]
+    fn leader_has_exited(&self) -> bool {
+        if self
+            .leader_exit_observed
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return true;
+        }
+        match self.has_exited_without_reaping() {
+            Ok(exited) => exited,
+            Err(error) => error.raw_os_error() == Some(libc::ECHILD),
+        }
     }
 
     /// Wait until the child leader exits without reaping its process-group ID.
