@@ -202,6 +202,13 @@ pub struct HealthAnalysisResult<GroupResolver = ()> {
     pub report: HealthReport,
     /// Optional TypeScript semantic metadata for advisory health overlays.
     pub type_aware_meta: Option<fallow_types::envelope::TypeAwareMeta>,
+    /// Per-file branching totals, keyed by absolute path.
+    ///
+    /// Threshold-blind and suppression-blind, unlike `report`, which holds only
+    /// units that breached a threshold. The audit compares this map across the
+    /// base and head revisions; nothing else reads it, and it is not
+    /// serialized, so it carries no schema version.
+    pub branching_by_file: crate::health::BranchingByFile,
     /// Per-group health output when grouping is active.
     ///
     /// `None` for the default run; `Some` for any grouped invocation. The
@@ -234,6 +241,7 @@ impl<GroupResolver> HealthAnalysisResult<GroupResolver> {
         HealthAnalysisResult {
             report: self.report,
             type_aware_meta: self.type_aware_meta,
+            branching_by_file: self.branching_by_file,
             grouping: self.grouping,
             group_resolver: None,
             config: self.config,
@@ -273,6 +281,7 @@ mod tests {
         .expect("project config loads");
         let result = HealthAnalysisResult {
             report: HealthReport::default(),
+            branching_by_file: crate::health::BranchingByFile::default(),
             grouping: None,
             group_resolver: Some("resolver"),
             config: project_config.config,

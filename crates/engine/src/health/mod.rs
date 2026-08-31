@@ -19,6 +19,8 @@ mod actions;
 mod analysis_data;
 mod assembly;
 mod baseline_io;
+mod branching;
+pub use branching::{BranchingByFile, branching_by_file};
 mod churn_file;
 mod component_rollup;
 mod core_pipeline;

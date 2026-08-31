@@ -55,6 +55,7 @@ pub(super) struct HealthFinalizeInput<'a, R> {
 struct HealthResultInput<R> {
     config: ResolvedConfig,
     report: HealthReport,
+    branching_by_file: super::BranchingByFile,
     grouping: Option<HealthGrouping>,
     group_resolver: Option<R>,
     elapsed: Duration,
@@ -103,6 +104,7 @@ pub(super) fn finalize_health_result<R>(
     build_health_result(HealthResultInput {
         config,
         report,
+        branching_by_file: super::branching_by_file(files, modules),
         grouping,
         group_resolver: scope.group_resolver,
         elapsed,
@@ -1222,6 +1224,7 @@ fn build_health_result<R>(input: HealthResultInput<R>) -> HealthAnalysisResult<R
     let HealthResultInput {
         config,
         report,
+        branching_by_file,
         grouping,
         group_resolver,
         elapsed,
@@ -1234,6 +1237,7 @@ fn build_health_result<R>(input: HealthResultInput<R>) -> HealthAnalysisResult<R
     HealthAnalysisResult {
         report,
         type_aware_meta: None,
+        branching_by_file,
         grouping,
         group_resolver,
         config,

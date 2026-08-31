@@ -804,6 +804,7 @@ mod tests {
         score: Option<fallow_output::HealthScore>,
     ) -> HealthResult {
         HealthResult {
+            branching_by_file: fallow_engine::health::BranchingByFile::default(),
             report: fallow_output::HealthReport {
                 findings,
                 health_score: score,
@@ -966,6 +967,7 @@ mod tests {
 
     fn fx_low_traffic_runtime_result() -> HealthResult {
         HealthResult {
+            branching_by_file: fallow_engine::health::BranchingByFile::default(),
             report: fallow_output::HealthReport {
                 runtime_coverage: Some(fallow_output::RuntimeCoverageReport {
                     schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
