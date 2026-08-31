@@ -1,5 +1,6 @@
 import { defineParams } from "@sveltejs/kit/params";
 
-export const slug = defineParams((param: string) => /^[a-z-]+$/.test(param));
-
-export const id = defineParams((param: string) => /^\d+$/.test(param));
+export const params = defineParams({
+  slug: (param: string) => (/^[a-z-]+$/.test(param) ? param : undefined),
+  id: (param: string) => (/^\d+$/.test(param) ? param : undefined),
+});

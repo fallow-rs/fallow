@@ -1977,8 +1977,10 @@ fn sveltekit_3_framework_loaded_files_are_entry_points() {
 
     for convention in [
         "src/params.ts",
+        "src/env.ts",
         "src/instrumentation.server.ts",
         "src/service-worker/index.ts",
+        "src/routes/api/remote.ts",
     ] {
         assert!(
             !unused_files.iter().any(|path| path.ends_with(convention)),
@@ -1991,10 +1993,10 @@ fn sveltekit_3_framework_loaded_files_are_entry_points() {
         .iter()
         .map(|e| e.export.export_name.as_str())
         .collect();
-    for matcher in ["slug", "id"] {
+    for framework_read in ["params", "variables", "health", "QUERY"] {
         assert!(
-            !unused_exports.contains(&matcher),
-            "every export of src/params.ts is a route matcher: {unused_exports:?}"
+            !unused_exports.contains(&framework_read),
+            "{framework_read} is read by SvelteKit 3, not imported: {unused_exports:?}"
         );
     }
 

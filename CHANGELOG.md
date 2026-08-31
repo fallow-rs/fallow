@@ -31,13 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loads three files by convention rather than by import, and none of them
   existed in version 2: `src/params.ts`, which collapses the old
   `src/params/<name>.ts` matchers into one file whose export names are the
-  matcher names; `src/instrumentation.server.ts`, loaded before application
-  code when it exists; and `src/service-worker/index.ts`, the directory form
-  that lets a service worker carry its own `tsconfig.json`. All three used to
-  be reported as unused files, and every matcher in `src/params.ts` as an
-  unused export. The patterns are additive, so version 2 projects are
-  unaffected. Thanks [@filiabel](https://github.com/filiabel) for the heads-up
-  ahead of the release.
+  matchers on one `defineParams` object; `src/env.ts`, which does the same for
+  environment variables; `src/instrumentation.server.ts`, loaded before
+  application code when it exists; `src/service-worker/index.ts`, the directory
+  form that lets a service worker carry its own `tsconfig.json`; and a remote
+  module named plainly `remote.ts` rather than `data.remote.ts`. Each was
+  reported as an unused file, and the `params` and `variables` objects as
+  unused exports. `+server.ts` also gained the `QUERY` verb alongside the rest.
+  The patterns are additive, so version 2 projects are unaffected. Thanks
+  [@filiabel](https://github.com/filiabel) for the heads-up ahead of the
+  release and for reviewing the first cut against the specification.
 
 ## [3.21.0] - 2026-08-31
 
