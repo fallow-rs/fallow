@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788176796893,
+  "lastUpdate": 1788178535992,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "jernej.barbaric@gmail.com",
-            "name": "Jerc92",
-            "username": "Jerc92"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "78632bbbada683198be1cc47e1ea9023c7c8cebc",
-          "message": "feat(ci): render type-aware feedback from saved results\n\n* feat(ci): render type-aware feedback from saved results\n\n* fix(ci): harden saved report rendering\n\n---------\n\nCo-authored-by: Jernej Barbaric <jernej.barbaric@login5.org>\nCo-authored-by: Bart Waardenburg <bart@waardenburg.dev>",
-          "timestamp": "2026-08-16T18:20:58Z",
-          "tree_id": "b5d9359e208820c8c0ff7ecb0ee38be2d3824e5b",
-          "url": "https://github.com/fallow-rs/fallow/commit/78632bbbada683198be1cc47e1ea9023c7c8cebc"
-        },
-        "date": 1786904831177,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/5ea3328cb815a8fe34ba2584d34f36d0c53cee7d"
         },
         "date": 1788176792460,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "ca3b87e0cc7c080e855c30637bf3b96f69e88871",
+          "message": "fix(release): close the version-surface gaps that let a stale example ship\n\nThree surfaces drifted during the v3.21.0 release and had to be hand-fixed,\none of which had been wrong for four releases. Closes #2486.\n\n`scripts/sync-npm-versions.sh` gains `server.json`, whose two version fields\nwere bumped by nothing, and a `--skip-napi` mode (also `FALLOW_SYNC_SKIP_NAPI`).\nThe release commit must leave `crates/napi` at the previously published version\nbecause CI runs `npm ci` there before bumping from the tag, so until now the\nrelease flow could not call this script at all and maintained a parallel list\ninstead. That parallel list is what drifted: it predated the fallow-similar-code\nwrapper family and missed nine packages. The default path is unchanged for the\ncargo-release hook.\n\n`scripts/sync-emitted-versions.mjs` is a drift gate keyed to the WORKSPACE\nversion rather than the previous release. That distinction is the point: the\nJSON examples in the shipped skill reference were last refreshed at v3.16.0 and\nwere still claiming 3.16.0 at v3.21.0, so 3.17.0 through 3.20.0 each published\nan npm package with a stale example. A check keyed to the previous release\ncannot see that, and the vendored-vs-canonical byte comparison could not\neither, because both trees were wrong identically. It covers `version` and\n`fallow_version`, the two keys that made a single-key rewrite insufficient.\n\nPrecision matters more than reach here, because most `\"version\"` strings in\nthe docs and npm trees belong to third-party packages. A string counts only\nwhen the JSON object directly holding it also carries `schema_version`, and\nonly inside a fenced JSON block, with no anchor inheritance, so a dependency\nnested inside a fallow payload is ignored. Comments are skipped outright: the\nscanner accepts jsonc and json5, where a commented-out pin inside a real\nenvelope was rewritten and a comment merely quoting the anchor key anchored an\nobject that was not an envelope. Both are pinned by tests.\n\nWired into CI and both verify tiers rather than left as an unreferenced npm\nscript.",
+          "timestamp": "2026-08-31T13:54:14+02:00",
+          "tree_id": "bfca98c4a2834baddc6acb6d6e4e4525b808d6e0",
+          "url": "https://github.com/fallow-rs/fallow/commit/ca3b87e0cc7c080e855c30637bf3b96f69e88871"
+        },
+        "date": 1788178532648,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
