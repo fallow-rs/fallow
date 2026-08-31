@@ -14,11 +14,23 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::OutputFormat;
+use fallow_engine::baseline::HealthBaselineMode;
+use fallow_engine::dead_code::enable_security_rules;
+use fallow_engine::flags::analyze_feature_flags_with_session_and_results;
+use fallow_engine::health::{
+    HealthCoverageInputs, HealthExecutionOptions, HealthGateOptions, HealthSort,
+    HealthThresholdOverrides, run_ungrouped_health_with_session_artifacts,
+};
 use fallow_engine::project_analysis::ProjectAnalysisArtifactOptions;
 use fallow_engine::session::AnalysisSession;
-use fallow_engine::viz::{VizBuildInput, VizData, VizFileStatus, build_viz_data};
+use fallow_engine::viz::{
+    VizAvailabilityState, VizBuildInput, VizData, VizFileStatus, apply_health_report,
+    build_viz_data,
+};
+use fallow_types::semantic::SemanticAnalysisIdentity;
 
 use crate::error::emit_error;
+use crate::resolve_coverage_inputs;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 
 // ── Embedded viz assets ─────────────────────────────────────────
@@ -29,7 +41,7 @@ const VIZ_CSS: &str = include_str!("../viz-assets/viz.css");
 // ── CLI types ───────────────────────────────────────────────────
 
 /// Output format for the `viz` command (`--viz-format`).
-#[derive(Clone, clap::ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum VizFormat {
     /// Interactive HTML map (default)
     Html,
@@ -103,7 +115,7 @@ pub fn benchmark_viz_html(root: &Path, threads: usize) -> Result<(usize, usize, 
 }
 
 fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCode> {
-    let config = load_config(
+    let mut config = load_config(
         opts.root,
         opts.config_path,
         LoadConfigArgs {
@@ -115,6 +127,20 @@ fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCod
             allow_remote_extends: opts.allow_remote_extends,
         },
     )?;
+
+    // The Security lens reports candidates, so it needs the advisory rules on.
+    // Text formats emit the import graph alone and never read them.
+    if opts.format == VizFormat::Html {
+        enable_security_rules(&mut config);
+    }
+
+    // Coverage feeds the Health lens through the shared precedence order
+    // (flag, then env, then `health.coverage`), reusing the config already
+    // loaded here so viz performs no second config load. Viz has no coverage
+    // flags of its own, and auto-detection stays in the engine.
+    let coverage_inputs = resolve_coverage_inputs(None, None, OutputFormat::Human, || {
+        Ok(config.health.clone())
+    })?;
 
     let session = match AnalysisSession::from_resolved_config(config) {
         Ok(session) => session,
@@ -149,7 +175,12 @@ fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCod
         return Err(emit_error("Graph not available", 2, OutputFormat::Human));
     };
 
-    Ok(build_viz_data(&VizBuildInput {
+    let feature_flags = if opts.format == VizFormat::Html {
+        analyze_feature_flags_with_session_and_results(&session, &artifacts.dead_code.results).flags
+    } else {
+        Vec::new()
+    };
+    let mut data = build_viz_data(&VizBuildInput {
         results: &artifacts.dead_code.results,
         graph,
         modules: artifacts.dead_code.modules.as_deref(),
@@ -157,7 +188,110 @@ fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCod
         duplication: &artifacts.duplication,
         workspaces: session.workspaces(),
         config: session.config(),
-    }))
+        feature_flags: &feature_flags,
+        include_analysis_details: opts.format == VizFormat::Html,
+    });
+
+    // The text formats render the import graph alone, so the Health run and
+    // everything it derives is pure cost for them.
+    if opts.format != VizFormat::Html {
+        return Ok(data);
+    }
+
+    let health_options = viz_health_options(
+        opts,
+        coverage_inputs.coverage.as_deref(),
+        coverage_inputs.coverage_root.as_deref(),
+    );
+    match run_ungrouped_health_with_session_artifacts(
+        &health_options,
+        None,
+        &session,
+        None,
+        Some(artifacts.dead_code),
+        Some(artifacts.duplication),
+    ) {
+        Ok(result) => {
+            data.health.shared_parse = result.timings.as_ref().map(|timings| timings.shared_parse);
+            apply_health_report(&mut data, &result.report, session.config().root.as_path());
+        }
+        Err(error) => {
+            data.health.availability.state = VizAvailabilityState::Unavailable;
+            data.health.availability.reason =
+                Some(format!("Health analysis unavailable: {error:?}"));
+            data.styling.availability.state = VizAvailabilityState::Unavailable;
+            data.styling.availability.reason =
+                Some("Styling analysis depends on the Health runner".to_string());
+        }
+    }
+
+    Ok(data)
+}
+
+fn viz_health_options<'a>(
+    opts: &'a VizOptions<'a>,
+    coverage: Option<&'a Path>,
+    coverage_root: Option<&'a Path>,
+) -> HealthExecutionOptions<'a> {
+    HealthExecutionOptions {
+        root: opts.root,
+        config_path: opts.config_path,
+        output: OutputFormat::Human,
+        no_cache: opts.no_cache,
+        threads: opts.threads,
+        quiet: true,
+        complexity_breakdown: false,
+        thresholds: HealthThresholdOverrides::default(),
+        top: None,
+        sort: HealthSort::Severity,
+        production: opts.production,
+        production_override: None,
+        allow_remote_extends: opts.allow_remote_extends,
+        changed_since: None,
+        diff_index: None,
+        use_shared_diff_index: false,
+        workspace: None,
+        changed_workspaces: None,
+        baseline: None,
+        save_baseline: None,
+        baseline_mode: HealthBaselineMode::default(),
+        baseline_mode_explicit: false,
+        complexity: true,
+        file_scores: true,
+        coverage_gaps: true,
+        config_activates_coverage_gaps: false,
+        // Churn and ownership require a full git-history walk. Keep Viz on the
+        // retained single-session artifacts and report those capabilities as
+        // unavailable unless a future Viz input supplies them explicitly.
+        hotspots: false,
+        ownership: false,
+        ownership_emails: None,
+        targets: false,
+        css: true,
+        css_deep: false,
+        force_full: true,
+        score_only_output: false,
+        enforce_coverage_gap_gate: false,
+        effort: None,
+        score: true,
+        gates: HealthGateOptions::default(),
+        since: None,
+        min_commits: None,
+        explain: false,
+        summary: false,
+        save_snapshot: None,
+        trend: false,
+        coverage_inputs: HealthCoverageInputs {
+            coverage,
+            coverage_root,
+            coverage_relocated: false,
+        },
+        performance: true,
+        runtime_coverage: None,
+        churn_file: None,
+        analysis_identity: SemanticAnalysisIdentity::default(),
+        group_by: None,
+    }
 }
 
 /// Emit a DOT/Mermaid document: to `--out` when given (symlink-safe,
@@ -391,7 +525,10 @@ fn generate_mermaid(data: &VizData) -> String {
 
 #[cfg(test)]
 mod tests {
-    use fallow_engine::viz::{VizFile, VizSummary};
+    use fallow_engine::viz::{
+        VIZ_SCHEMA_VERSION, VizAvailability, VizFile, VizFindingAnalysis, VizFrameworkData,
+        VizHealthCapabilities, VizHealthData, VizSecurityData, VizStylingData, VizSummary,
+    };
 
     use super::*;
 
@@ -420,8 +557,43 @@ mod tests {
         }
     }
 
+    const fn availability(unit: &'static str) -> VizAvailability {
+        VizAvailability {
+            state: VizAvailabilityState::Complete,
+            count: 0,
+            unit,
+            reason: None,
+            truncated: None,
+        }
+    }
+
+    fn health_capabilities() -> VizHealthCapabilities {
+        let unavailable = |unit| VizAvailability {
+            state: VizAvailabilityState::Unavailable,
+            count: 0,
+            unit,
+            reason: Some("not loaded".to_string()),
+            truncated: None,
+        };
+        VizHealthCapabilities {
+            complexity: availability("findings"),
+            maintainability: availability("files"),
+            crap: availability("files"),
+            coverage: availability("gaps"),
+            churn: unavailable("files"),
+            hotspots: unavailable("files"),
+            ownership: unavailable("files"),
+        }
+    }
+
     fn sample_data() -> VizData {
+        let complete = |unit| VizFindingAnalysis {
+            availability: availability(unit),
+            findings_truncated: None,
+            findings: Vec::new(),
+        };
         VizData {
+            schema_version: VIZ_SCHEMA_VERSION,
             root: "proj".to_string(),
             files: vec![
                 file("src/index.ts", VizFileStatus::EntryPoint),
@@ -450,6 +622,64 @@ mod tests {
             cycles: Vec::new(),
             clones: Vec::new(),
             violations: Vec::new(),
+            architecture: complete("violations"),
+            dependencies: complete("findings"),
+            health: VizHealthData {
+                availability: availability("files"),
+                capabilities: health_capabilities(),
+                shared_parse: Some(true),
+                score: None,
+                grade: None,
+                average_maintainability: None,
+                files: Vec::new(),
+                files_truncated: None,
+                findings_truncated: None,
+                findings: Vec::new(),
+            },
+            security: VizSecurityData {
+                availability: VizAvailability {
+                    state: VizAvailabilityState::Complete,
+                    count: 0,
+                    unit: "observations",
+                    reason: None,
+                    truncated: None,
+                },
+                runtime_availability: VizAvailability {
+                    state: VizAvailabilityState::Unavailable,
+                    count: 0,
+                    unit: "candidates",
+                    reason: Some("No runtime coverage input was provided".to_string()),
+                    truncated: None,
+                },
+                candidates: Vec::new(),
+                blind_spot_count: 0,
+                blind_spots_truncated: None,
+                blind_spots: Vec::new(),
+            },
+            frameworks: {
+                let analysis = complete("findings");
+                VizFrameworkData {
+                    availability: analysis.availability,
+                    detector_availability: availability("detectors"),
+                    findings_truncated: analysis.findings_truncated,
+                    findings: analysis.findings,
+                    detected_frameworks: Vec::new(),
+                    detectors: Vec::new(),
+                }
+            },
+            styling: {
+                let analysis = complete("findings");
+                VizStylingData {
+                    availability: analysis.availability,
+                    findings_truncated: analysis.findings_truncated,
+                    findings: analysis.findings,
+                    score: None,
+                    grade: None,
+                    confidence: None,
+                    summary: None,
+                }
+            },
+            feature_flags: complete("flags"),
         }
     }
 

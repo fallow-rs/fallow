@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow viz` gains analysis lenses that say what they do not know**
+  ([#2411](https://github.com/fallow-rs/fallow/pull/2411)). The map had four
+  lenses and one honesty problem: an analysis that never ran rendered the same
+  as an analysis that ran and found nothing, so a reader could not tell a clean
+  project from a blind one. Every family now carries an availability state
+  (complete, disabled, not applicable, unavailable) next to a unit-labelled
+  count, and only the complete state licenses reading that count as a result.
+  The map ships six primary lenses (Overview, Unused, Duplication,
+  Architecture, Health, Security) with Dependencies, Frameworks, Styling, and
+  Feature flags under an adaptive More menu. Health reuses the analysis viz
+  already performed instead of reparsing, and reports churn, hotspots, and
+  ownership as unavailable rather than empty, because viz does not walk git
+  history. Security surfaces static candidates as candidates, never as
+  verdicts, and runtime security stays explicitly unavailable without runtime
+  evidence. Coverage for the Health lens now follows the same precedence every
+  other command uses (flag, then environment, then `health.coverage`) instead
+  of reading the environment on its own. Existing lens deep links keep
+  resolving.
+
 - **Release publication is gated on the curated release metadata**
   (Closes [#2414](https://github.com/fallow-rs/fallow/issues/2414)). The rules
   for a release title and its notes lived only in the maintainer runbook, which

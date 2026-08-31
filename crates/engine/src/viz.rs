@@ -13,12 +13,14 @@ use std::path::Path;
 
 use rustc_hash::FxHashMap;
 use serde::Serialize;
+use serde_json::Value;
 
 use fallow_config::{ResolvedConfig, WorkspaceInfo};
+use fallow_output::HealthReport;
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::duplicates::{CloneInstance, DuplicationReport};
 use fallow_types::extract::{FunctionComplexity, ModuleInfo};
-use fallow_types::results::AnalysisResults;
+use fallow_types::results::{AnalysisResults, FeatureFlag, SecurityFinding};
 
 use crate::module_graph::RetainedModuleGraph;
 
@@ -41,8 +43,17 @@ const CLONE_PREVIEW_CONTEXT: usize = 4;
 /// legitimate report; a guardrail against multi-MB HTML on monorepos.
 /// Groups keep the detector's report order, so the cap keeps the first N.
 const MAX_CLONE_GROUPS: usize = 500;
+/// Maximum specialized finding records serialized per analysis family.
+const MAX_ANALYSIS_FINDINGS: usize = 1000;
+/// Maximum located security blind-spot samples beyond the aggregate rows.
+const MAX_SECURITY_BLIND_SPOT_SAMPLES: usize = 100;
+/// Maximum file-health rows serialized into the browser payload.
+const MAX_HEALTH_FILES: usize = 2000;
 /// Edge flag bit: every import of this edge is type-only.
 const EDGE_FLAG_TYPE_ONLY: u32 = 1;
+
+/// Current embedded Viz payload contract version.
+pub const VIZ_SCHEMA_VERSION: u16 = 2;
 
 /// Everything [`build_viz_data`] needs from one project analysis run.
 pub struct VizBuildInput<'a> {
@@ -60,11 +71,17 @@ pub struct VizBuildInput<'a> {
     pub workspaces: &'a [WorkspaceInfo],
     /// Resolved config (project root + boundary zones).
     pub config: &'a ResolvedConfig,
+    /// Feature flag records derived from the same parsed session.
+    pub feature_flags: &'a [FeatureFlag],
+    /// Whether to project the HTML-only lens detail payloads.
+    pub include_analysis_details: bool,
 }
 
 /// Serialized payload embedded in the viz HTML.
 #[derive(Serialize)]
 pub struct VizData {
+    /// Version of the embedded browser payload.
+    pub schema_version: u16,
     /// Project display name (root directory basename).
     pub root: String,
     /// One entry per analyzed source file, indexed by position.
@@ -84,6 +101,393 @@ pub struct VizData {
     pub clones: Vec<VizCloneGroup>,
     /// Boundary violations resolved to file indices.
     pub violations: Vec<VizViolation>,
+    /// Architecture findings that do not fit the legacy graph overlays alone.
+    pub architecture: VizFindingAnalysis,
+    /// Dependency and public-API findings, excluding unused dependencies.
+    pub dependencies: VizFindingAnalysis,
+    /// Real health scoring and hotspot data from the shared analysis session.
+    pub health: VizHealthData,
+    /// Static security candidates and explicit blind spots.
+    pub security: VizSecurityData,
+    /// Framework-specific findings and detector diagnostics.
+    pub frameworks: VizFrameworkData,
+    /// CSS and design-system findings from health analysis.
+    pub styling: VizStylingData,
+    /// Detected feature flag use sites.
+    pub feature_flags: VizFindingAnalysis,
+}
+
+/// Honest availability state for one Viz analysis family.
+#[derive(Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum VizAvailabilityState {
+    /// The analysis ran and its count is the whole answer.
+    Complete,
+    /// The analysis is switched off by configuration.
+    Disabled,
+    /// The analysis has nothing to say about this project.
+    NotApplicable,
+    /// The analysis could not run, so no count can be claimed.
+    Unavailable,
+}
+
+/// Count contract and availability for one analysis family.
+///
+/// A count is meaningful only when `state` is
+/// [`VizAvailabilityState::Complete`]. Every other state carries a count of
+/// zero that the frontend must render as missing data rather than as zero
+/// findings.
+#[derive(Serialize)]
+pub struct VizAvailability {
+    /// Whether the count below can be read as a result.
+    pub state: VizAvailabilityState,
+    /// Number of items in `unit`, valid only in the `Complete` state.
+    pub count: usize,
+    /// What `count` counts, such as `findings` or `files`.
+    pub unit: &'static str,
+    /// Why the analysis is not complete, for every non-complete state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Total before payload truncation, when the payload carries fewer items
+    /// than `count`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<usize>,
+}
+
+impl VizAvailability {
+    const fn complete(count: usize, unit: &'static str, truncated: Option<usize>) -> Self {
+        Self {
+            state: VizAvailabilityState::Complete,
+            count,
+            unit,
+            reason: None,
+            truncated,
+        }
+    }
+
+    fn unavailable(unit: &'static str, reason: impl Into<String>) -> Self {
+        Self {
+            state: VizAvailabilityState::Unavailable,
+            count: 0,
+            unit,
+            reason: Some(reason.into()),
+            truncated: None,
+        }
+    }
+
+    fn disabled(unit: &'static str, reason: impl Into<String>) -> Self {
+        Self {
+            state: VizAvailabilityState::Disabled,
+            count: 0,
+            unit,
+            reason: Some(reason.into()),
+            truncated: None,
+        }
+    }
+}
+
+/// Stable presentation record shared by finding-oriented Viz families.
+#[derive(Serialize)]
+pub struct VizFinding {
+    kind: String,
+    title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    files: Vec<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    severity: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    facts: Vec<VizFindingFact>,
+    actions: Vec<VizFindingAction>,
+}
+
+/// One stable scalar fact from an analyzer-specific record.
+#[derive(Serialize)]
+pub struct VizFindingFact {
+    label: String,
+    value: String,
+}
+
+/// One stable action projected from an analyzer-specific record.
+#[derive(Serialize)]
+pub struct VizFindingAction {
+    label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    auto_fixable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+}
+
+/// One finding-oriented analysis family.
+#[derive(Serialize)]
+pub struct VizFindingAnalysis {
+    /// Whether this family ran, and how many findings it stands behind.
+    pub availability: VizAvailability,
+    /// Total finding count before the payload was capped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub findings_truncated: Option<usize>,
+    /// The findings carried in the payload.
+    pub findings: Vec<VizFinding>,
+}
+
+/// Framework findings plus detector capability metadata.
+#[derive(Serialize)]
+pub struct VizFrameworkData {
+    /// Whether framework analysis ran, and how many findings it produced.
+    pub availability: VizAvailability,
+    /// Whether the per-detector capability list is trustworthy. A detector
+    /// can be unavailable while findings from other detectors are complete.
+    pub detector_availability: VizAvailability,
+    /// Total finding count before the payload was capped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub findings_truncated: Option<usize>,
+    /// The findings carried in the payload.
+    pub findings: Vec<VizFinding>,
+    /// Frameworks detected in the project.
+    pub detected_frameworks: Vec<String>,
+    /// Per-detector status, so a silent detector is distinguishable from a
+    /// detector that ran and found nothing.
+    pub detectors: Vec<VizFrameworkDetector>,
+}
+
+/// Status of one framework-specific detector.
+#[derive(Serialize)]
+pub struct VizFrameworkDetector {
+    id: String,
+    framework: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+/// Availability of the individual Health signal families.
+#[derive(Serialize)]
+pub struct VizHealthCapabilities {
+    /// Cyclomatic and cognitive complexity findings.
+    pub complexity: VizAvailability,
+    /// Per-file maintainability index scores.
+    pub maintainability: VizAvailability,
+    /// CRAP risk scores, which need coverage to be meaningful.
+    pub crap: VizAvailability,
+    /// Istanbul coverage ingestion.
+    pub coverage: VizAvailability,
+    /// Git churn, which needs a history walk viz does not perform.
+    pub churn: VizAvailability,
+    /// Churn-weighted complexity hotspots, gated on churn.
+    pub hotspots: VizAvailability,
+    /// Ownership attribution, which needs a history walk viz does not perform.
+    pub ownership: VizAvailability,
+}
+
+/// Real file-health metrics.
+#[derive(Serialize)]
+pub struct VizHealthFile {
+    file: u32,
+    path: String,
+    maintainability_index: f64,
+    crap_max: f64,
+    complexity_density: f64,
+    fan_in: usize,
+    fan_out: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hotspot_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commits: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ownership: Option<Value>,
+}
+
+/// Health lens payload populated after the shared health runner completes.
+#[derive(Serialize)]
+pub struct VizHealthData {
+    /// Whether the health runner completed, and how many files it scored.
+    pub availability: VizAvailability,
+    /// Per-signal availability, so the lens can dim what did not run.
+    pub capabilities: VizHealthCapabilities,
+    /// Whether the run reused the viz session's parse instead of reparsing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_parse: Option<bool>,
+    /// Overall health score.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    /// Letter grade derived from `score`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grade: Option<String>,
+    /// Mean maintainability index across scored files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub average_maintainability: Option<f64>,
+    /// Per-file metrics carried in the payload.
+    pub files: Vec<VizHealthFile>,
+    /// Total scored-file count before the payload was capped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files_truncated: Option<usize>,
+    /// Total finding count before the payload was capped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub findings_truncated: Option<usize>,
+    /// The health findings carried in the payload.
+    pub findings: Vec<VizFinding>,
+}
+
+/// Styling findings plus the project-level CSS analytics and score.
+#[derive(Serialize)]
+pub struct VizStylingData {
+    /// Whether styling analysis ran, and how many findings it produced.
+    pub availability: VizAvailability,
+    /// Total finding count before the payload was capped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub findings_truncated: Option<usize>,
+    /// The styling findings carried in the payload.
+    pub findings: Vec<VizFinding>,
+    /// Project-level styling score.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    /// Letter grade derived from `score`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grade: Option<String>,
+    /// How much evidence the score rests on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<String>,
+    /// Project-level CSS analytics, rendered as-is by the lens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<Value>,
+}
+
+/// One hop in a static security trace.
+#[derive(Serialize)]
+pub struct VizSecurityTraceHop {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<u32>,
+    path: String,
+    line: u32,
+    col: u32,
+    role: String,
+}
+
+/// One endpoint in a typed Security taint flow.
+#[derive(Serialize)]
+pub struct VizSecurityEndpoint {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<u32>,
+    path: String,
+    line: u32,
+    col: u32,
+}
+
+/// Typed source-to-sink flow summary.
+#[derive(Serialize)]
+pub struct VizSecurityTaintFlow {
+    source: VizSecurityEndpoint,
+    sink: VizSecurityEndpoint,
+    intra_module: bool,
+    cross_module_hops: u32,
+}
+
+/// Static security candidate. The record deliberately contains no
+/// exploitability verdict.
+#[derive(Serialize)]
+pub struct VizSecurityCandidate {
+    id: String,
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwe: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<u32>,
+    path: String,
+    line: u32,
+    col: u32,
+    evidence: String,
+    severity: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    taint_confidence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sink: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url_shape: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    network_destination: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reachable_from_entry: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reachable_from_untrusted_source: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blast_radius: Option<u32>,
+    crosses_boundary: bool,
+    client_server_boundary: bool,
+    cross_module_boundary: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    architecture_zone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dead_code: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    taint_flow: Option<VizSecurityTaintFlow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    observed_controls: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    control_verification_prompt: Option<String>,
+    trace: Vec<VizSecurityTraceHop>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    taint_trace: Vec<VizSecurityTraceHop>,
+    actions: Value,
+}
+
+/// Explicitly counted security blind spot.
+#[derive(Serialize)]
+pub struct VizSecurityBlindSpot {
+    kind: String,
+    count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+/// Security lens payload. Runtime evidence is a separate capability from the
+/// always-local static candidate pass.
+#[derive(Serialize)]
+pub struct VizSecurityData {
+    /// Whether the static candidate pass ran, and how many candidates it
+    /// surfaced. Candidates are unverified, never vulnerability verdicts.
+    pub availability: VizAvailability,
+    /// Runtime evidence availability. Without a runtime coverage input this
+    /// stays `Unavailable`, never a complete count of zero.
+    pub runtime_availability: VizAvailability,
+    /// The static candidates carried in the payload.
+    pub candidates: Vec<VizSecurityCandidate>,
+    /// How many places the static pass could not see into.
+    pub blind_spot_count: usize,
+    /// Total blind-spot count before the payload was capped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blind_spots_truncated: Option<usize>,
+    /// The blind spots carried in the payload.
+    pub blind_spots: Vec<VizSecurityBlindSpot>,
 }
 
 /// One analyzed source file.
@@ -285,6 +689,18 @@ pub fn build_viz_data(input: &VizBuildInput<'_>) -> VizData {
         build_clones(input.duplication, &index, MAX_CLONE_GROUPS);
     let cycles = build_cycles(input.results, &index);
     let violations = build_violations(input.results, &zones, &index);
+    let (architecture, dependencies, security, frameworks, feature_flags) =
+        if input.include_analysis_details {
+            (
+                build_architecture(input.results, &index, root),
+                build_dependencies(input.results, &index, root),
+                build_security(input.results, &index, root),
+                build_frameworks(input.results, &index, root),
+                build_feature_flags(input.feature_flags, &index, root),
+            )
+        } else {
+            skipped_analysis_details()
+        };
 
     let files = build_files(
         input,
@@ -307,6 +723,7 @@ pub fn build_viz_data(input: &VizBuildInput<'_>) -> VizData {
     );
 
     VizData {
+        schema_version: VIZ_SCHEMA_VERSION,
         root: display_root(root),
         files,
         edges: build_edges(input.graph, &index),
@@ -316,7 +733,83 @@ pub fn build_viz_data(input: &VizBuildInput<'_>) -> VizData {
         cycles,
         clones,
         violations,
+        architecture,
+        dependencies,
+        health: VizHealthData {
+            availability: VizAvailability::unavailable("files", "Health analysis did not complete"),
+            capabilities: unavailable_health_capabilities("Health analysis did not complete"),
+            shared_parse: None,
+            score: None,
+            grade: None,
+            average_maintainability: None,
+            files: Vec::new(),
+            files_truncated: None,
+            findings_truncated: None,
+            findings: Vec::new(),
+        },
+        security,
+        frameworks,
+        styling: VizStylingData {
+            availability: VizAvailability::unavailable(
+                "findings",
+                "Styling analysis did not complete",
+            ),
+            findings_truncated: None,
+            findings: Vec::new(),
+            score: None,
+            grade: None,
+            confidence: None,
+            summary: None,
+        },
+        feature_flags,
     }
+}
+
+fn skipped_analysis_details() -> (
+    VizFindingAnalysis,
+    VizFindingAnalysis,
+    VizSecurityData,
+    VizFrameworkData,
+    VizFindingAnalysis,
+) {
+    let skipped = |unit| VizFindingAnalysis {
+        availability: VizAvailability::disabled(unit, "Not needed for this Viz output format"),
+        findings_truncated: None,
+        findings: Vec::new(),
+    };
+    (
+        skipped("violations"),
+        skipped("findings"),
+        VizSecurityData {
+            availability: VizAvailability::disabled(
+                "candidates",
+                "Not needed for this Viz output format",
+            ),
+            runtime_availability: VizAvailability::disabled(
+                "observations",
+                "Not needed for this Viz output format",
+            ),
+            candidates: Vec::new(),
+            blind_spot_count: 0,
+            blind_spots_truncated: None,
+            blind_spots: Vec::new(),
+        },
+        VizFrameworkData {
+            availability: VizAvailability::disabled(
+                "findings",
+                "Not needed for this Viz output format",
+            ),
+            detector_availability: VizAvailability::disabled(
+                "detectors",
+                "Not needed for this Viz output format",
+            ),
+            findings_truncated: None,
+            findings: Vec::new(),
+            detected_frameworks: Vec::new(),
+            detectors: Vec::new(),
+        },
+        skipped("flags"),
+    )
 }
 
 /// Maps absolute paths to dense viz file indices in `FileId` order.
@@ -353,6 +846,1157 @@ impl<'a> FileIndex<'a> {
     }
 }
 
+fn analysis_from_records(
+    mut findings: Vec<VizFinding>,
+    total_findings: usize,
+    primary_count: usize,
+    unit: &'static str,
+) -> VizFindingAnalysis {
+    let findings_truncated = (total_findings > MAX_ANALYSIS_FINDINGS)
+        .then_some(total_findings.saturating_sub(MAX_ANALYSIS_FINDINGS));
+    let primary_truncated = (primary_count > MAX_ANALYSIS_FINDINGS)
+        .then_some(primary_count.saturating_sub(MAX_ANALYSIS_FINDINGS));
+    findings.truncate(MAX_ANALYSIS_FINDINGS);
+    VizFindingAnalysis {
+        availability: VizAvailability::complete(primary_count, unit, primary_truncated),
+        findings_truncated,
+        findings,
+    }
+}
+
+fn push_findings<T: Serialize>(
+    out: &mut Vec<VizFinding>,
+    kind: &str,
+    title: &str,
+    values: &[T],
+    root: &Path,
+    index: &FileIndex<'_>,
+) {
+    let remaining = MAX_ANALYSIS_FINDINGS.saturating_sub(out.len());
+    out.extend(values.iter().take(remaining).filter_map(|value| {
+        serde_json::to_value(value).ok().map(|detail| {
+            finding_from_value(kind, title, detail, root, &|path| index.index_of_path(path))
+        })
+    }));
+}
+
+fn finding_from_value(
+    kind: &str,
+    title: &str,
+    mut detail: Value,
+    root: &Path,
+    resolve_file: &dyn Fn(&Path) -> Option<u32>,
+) -> VizFinding {
+    let raw_path = find_string_key(&detail, &["path", "from_path", "consumer_path", "file"])
+        .map(str::to_owned);
+    let mut raw_paths = Vec::new();
+    collect_path_values(&detail, &mut raw_paths);
+    let mut paths = Vec::new();
+    let mut files = Vec::new();
+    for raw in raw_paths {
+        let raw_path = Path::new(&raw);
+        let absolute_path = if raw_path.is_absolute() {
+            raw_path.to_path_buf()
+        } else {
+            root.join(raw_path)
+        };
+        let display = relative_path(&absolute_path, root);
+        if !paths.contains(&display) {
+            paths.push(display);
+        }
+        if let Some(file) = resolve_file(&absolute_path)
+            && !files.contains(&file)
+        {
+            files.push(file);
+        }
+    }
+    let absolute = raw_path.as_deref().map(Path::new).map(|path| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            root.join(path)
+        }
+    });
+    let file = absolute.as_deref().and_then(resolve_file);
+    let path = absolute.as_deref().map(|path| relative_path(path, root));
+    let line = find_u64_key(&detail, &["line", "start_line"])
+        .map(|value| u32::try_from(value).unwrap_or(u32::MAX));
+    relativize_value_paths(&mut detail, root);
+    let description =
+        find_string_key(&detail, &["message", "evidence", "reason"]).map(str::to_owned);
+    let severity = find_string_key(&detail, &["severity"]).map(str::to_owned);
+    let facts = finding_facts(&detail);
+    let actions = finding_actions(&detail);
+    VizFinding {
+        kind: kind.to_string(),
+        title: title.to_string(),
+        file,
+        path,
+        line,
+        files,
+        paths,
+        description,
+        severity,
+        facts,
+        actions,
+    }
+}
+
+fn finding_facts(detail: &Value) -> Vec<VizFindingFact> {
+    const EXCLUDED: &[&str] = &[
+        "path",
+        "from_path",
+        "to_path",
+        "consumer_path",
+        "file",
+        "files",
+        "paths",
+        "line",
+        "start_line",
+        "message",
+        "evidence",
+        "reason",
+        "severity",
+        "actions",
+    ];
+    let Some(fields) = detail.as_object() else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .filter(|(label, _)| !EXCLUDED.contains(&label.as_str()))
+        .filter_map(|(label, value)| {
+            scalar_fact_value(value).map(|value| VizFindingFact {
+                label: label.clone(),
+                value,
+            })
+        })
+        .take(12)
+        .collect()
+}
+
+fn scalar_fact_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Array(values) if values.iter().all(Value::is_string) => Some(
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn finding_actions(detail: &Value) -> Vec<VizFindingAction> {
+    let mut actions = Vec::new();
+    if let Some(record) = detail.as_object() {
+        for key in ["verify_command", "trace_command", "command"] {
+            if let Some(command) = record.get(key).and_then(Value::as_str) {
+                actions.push(VizFindingAction {
+                    label: "Verify".to_string(),
+                    kind: None,
+                    auto_fixable: false,
+                    command: Some(command.to_string()),
+                    comment: None,
+                    config_key: None,
+                    value: None,
+                    description: None,
+                });
+            }
+        }
+        if let Some(value) = record.get("actions") {
+            append_projected_actions(&mut actions, value);
+        }
+    }
+    actions
+}
+
+fn append_projected_actions(actions: &mut Vec<VizFindingAction>, value: &Value) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                if let Some(action) = projected_action(value) {
+                    actions.push(action);
+                }
+            }
+        }
+        Value::Object(values) => {
+            for (label, value) in values {
+                if let Some(command) = value.as_str() {
+                    actions.push(VizFindingAction {
+                        label: label.clone(),
+                        kind: Some(label.clone()),
+                        auto_fixable: false,
+                        command: Some(command.to_string()),
+                        comment: None,
+                        config_key: None,
+                        value: None,
+                        description: None,
+                    });
+                }
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn projected_action(value: &Value) -> Option<VizFindingAction> {
+    let action = value.as_object()?;
+    let kind = ["kind", "type"]
+        .iter()
+        .find_map(|key| action.get(*key).and_then(Value::as_str))
+        .map(str::to_owned);
+    let label = ["label", "title"]
+        .iter()
+        .find_map(|key| action.get(*key).and_then(Value::as_str))
+        .map(str::to_owned)
+        .or_else(|| kind.clone())
+        .unwrap_or_else(|| "Review".to_string());
+    let command = action
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let comment = action
+        .get("comment")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let auto_fixable = action
+        .get("auto_fixable")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let config_key = action
+        .get("config_key")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let projected_value = action.get("value").cloned();
+    let description = ["description", "note"]
+        .iter()
+        .find_map(|key| action.get(*key).and_then(Value::as_str))
+        .map(str::to_owned);
+    (command.is_some()
+        || comment.is_some()
+        || description.is_some()
+        || config_key.is_some()
+        || projected_value.is_some())
+    .then_some(VizFindingAction {
+        label,
+        kind,
+        auto_fixable,
+        command,
+        comment,
+        config_key,
+        value: projected_value,
+        description,
+    })
+}
+
+fn collect_path_values(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map {
+                if is_path_key(key)
+                    && let Some(path) = value.as_str()
+                {
+                    out.push(path.to_string());
+                }
+                if is_path_collection_key(key)
+                    && let Some(values) = value.as_array()
+                {
+                    out.extend(values.iter().filter_map(Value::as_str).map(str::to_string));
+                }
+                collect_path_values(value, out);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_path_values(value, out);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn find_string_key<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    match value {
+        Value::Object(map) => {
+            for key in keys {
+                if let Some(value) = map.get(*key).and_then(Value::as_str) {
+                    return Some(value);
+                }
+            }
+            map.values().find_map(|value| find_string_key(value, keys))
+        }
+        Value::Array(values) => values.iter().find_map(|value| find_string_key(value, keys)),
+        _ => None,
+    }
+}
+
+fn find_u64_key(value: &Value, keys: &[&str]) -> Option<u64> {
+    match value {
+        Value::Object(map) => {
+            for key in keys {
+                if let Some(value) = map.get(*key).and_then(Value::as_u64) {
+                    return Some(value);
+                }
+            }
+            map.values().find_map(|value| find_u64_key(value, keys))
+        }
+        Value::Array(values) => values.iter().find_map(|value| find_u64_key(value, keys)),
+        _ => None,
+    }
+}
+
+fn relativize_value_paths(value: &mut Value, root: &Path) {
+    relativize_keyed_paths(value, root, false);
+}
+
+fn relativize_keyed_paths(value: &mut Value, root: &Path, is_path: bool) {
+    match value {
+        Value::String(text) if is_path => {
+            let path = Path::new(text);
+            if path.is_absolute() {
+                *text = relative_path(path, root);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                relativize_keyed_paths(value, root, is_path);
+            }
+        }
+        Value::Object(map) => {
+            for (key, value) in map {
+                let is_path = is_path_key(key) || is_path_collection_key(key);
+                relativize_keyed_paths(value, root, is_path);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn is_path_key(key: &str) -> bool {
+    matches!(
+        key,
+        "path"
+            | "file"
+            | "from_path"
+            | "to_path"
+            | "consumer_path"
+            | "source_path"
+            | "definition_path"
+            | "template_path"
+            | "inherited_from"
+            | "reachable_via"
+            | "new_path"
+            | "old_path"
+            | "cycle_path"
+            | "docs_path"
+            | "meta_docs_path"
+            | "full_report_path"
+    )
+}
+
+fn is_path_collection_key(key: &str) -> bool {
+    matches!(
+        key,
+        "files"
+            | "paths"
+            | "conflicting_paths"
+            | "used_in_workspaces"
+            | "hardcoded_consumers"
+            | "hot_paths"
+    )
+}
+
+fn serialized_label<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn build_architecture(
+    results: &AnalysisResults,
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> VizFindingAnalysis {
+    let mut findings = Vec::new();
+    push_findings(
+        &mut findings,
+        "boundary-violation",
+        "Forbidden import",
+        &results.boundary_violations,
+        root,
+        index,
+    );
+    push_findings(
+        &mut findings,
+        "boundary-coverage",
+        "File outside architecture zones",
+        &results.boundary_coverage_violations,
+        root,
+        index,
+    );
+    push_findings(
+        &mut findings,
+        "boundary-call",
+        "Forbidden call",
+        &results.boundary_call_violations,
+        root,
+        index,
+    );
+    push_findings(
+        &mut findings,
+        "policy-violation",
+        "Policy violation",
+        &results.policy_violations,
+        root,
+        index,
+    );
+    push_findings(
+        &mut findings,
+        "circular-dependency",
+        "Import cycle",
+        &results.circular_dependencies,
+        root,
+        index,
+    );
+    push_findings(
+        &mut findings,
+        "re-export-cycle",
+        "Re-export cycle",
+        &results.re_export_cycles,
+        root,
+        index,
+    );
+    let violation_count = results.boundary_violations.len()
+        + results.boundary_coverage_violations.len()
+        + results.boundary_call_violations.len()
+        + results.policy_violations.len();
+    let total_findings =
+        violation_count + results.circular_dependencies.len() + results.re_export_cycles.len();
+    analysis_from_records(findings, total_findings, violation_count, "violations")
+}
+
+fn build_dependencies(
+    results: &AnalysisResults,
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> VizFindingAnalysis {
+    let mut findings = Vec::new();
+    let mut count = 0;
+    macro_rules! add {
+        ($field:ident, $kind:literal, $title:literal) => {
+            count += results.$field.len();
+            push_findings(&mut findings, $kind, $title, &results.$field, root, index);
+        };
+    }
+    add!(unresolved_imports, "unresolved-import", "Unresolved import");
+    add!(
+        unlisted_dependencies,
+        "unlisted-dependency",
+        "Unlisted dependency"
+    );
+    add!(
+        type_only_dependencies,
+        "type-only-dependency",
+        "Type-only dependency"
+    );
+    add!(
+        test_only_dependencies,
+        "test-only-dependency",
+        "Test-only dependency"
+    );
+    add!(
+        dev_dependencies_in_production,
+        "dev-dependency-in-production",
+        "Development dependency used in production"
+    );
+    add!(
+        duplicate_exports,
+        "duplicate-export",
+        "Duplicate public export"
+    );
+    add!(
+        private_type_leaks,
+        "private-type-leak",
+        "Private type leaked by public API"
+    );
+    add!(
+        unused_catalog_entries,
+        "unused-catalog-entry",
+        "Unused catalog entry"
+    );
+    add!(
+        empty_catalog_groups,
+        "empty-catalog-group",
+        "Empty catalog group"
+    );
+    add!(
+        unresolved_catalog_references,
+        "unresolved-catalog-reference",
+        "Unresolved catalog reference"
+    );
+    add!(
+        unused_dependency_overrides,
+        "unused-dependency-override",
+        "Unused dependency override"
+    );
+    add!(
+        misconfigured_dependency_overrides,
+        "misconfigured-dependency-override",
+        "Misconfigured dependency override"
+    );
+    analysis_from_records(findings, count, count, "findings")
+}
+
+fn build_frameworks(
+    results: &AnalysisResults,
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> VizFrameworkData {
+    let mut findings = Vec::new();
+    let mut count = 0;
+    macro_rules! add {
+        ($field:ident, $kind:literal, $title:literal) => {
+            count += results.$field.len();
+            push_findings(&mut findings, $kind, $title, &results.$field, root, index);
+        };
+    }
+    add!(
+        invalid_client_exports,
+        "invalid-client-export",
+        "Invalid client export"
+    );
+    add!(
+        mixed_client_server_barrels,
+        "mixed-client-server-barrel",
+        "Mixed client/server barrel"
+    );
+    add!(
+        misplaced_directives,
+        "misplaced-directive",
+        "Misplaced framework directive"
+    );
+    add!(
+        unprovided_injects,
+        "unprovided-inject",
+        "Injected value is never provided"
+    );
+    add!(
+        unrendered_components,
+        "unrendered-component",
+        "Component is never rendered"
+    );
+    add!(route_collisions, "route-collision", "Route collision");
+    add!(
+        dynamic_segment_name_conflicts,
+        "dynamic-segment-conflict",
+        "Dynamic segment conflict"
+    );
+    add!(
+        unused_component_props,
+        "unused-component-prop",
+        "Unused component prop"
+    );
+    add!(
+        unused_component_emits,
+        "unused-component-emit",
+        "Unused component event"
+    );
+    add!(
+        unused_component_inputs,
+        "unused-component-input",
+        "Unused component input"
+    );
+    add!(
+        unused_component_outputs,
+        "unused-component-output",
+        "Unused component output"
+    );
+    add!(
+        unused_svelte_events,
+        "unused-svelte-event",
+        "Unused Svelte event"
+    );
+    add!(
+        unused_server_actions,
+        "unused-server-action",
+        "Unused server action"
+    );
+    add!(
+        unused_load_data_keys,
+        "unused-load-data-key",
+        "Unused load-data key"
+    );
+    add!(prop_drilling_chains, "prop-drilling", "Prop-drilling chain");
+    add!(thin_wrappers, "thin-wrapper", "Thin component wrapper");
+    add!(
+        duplicate_prop_shapes,
+        "duplicate-prop-shape",
+        "Duplicate prop shape"
+    );
+    let mut analysis = analysis_from_records(findings, count, count, "findings");
+    if results.unused_load_data_keys_global_abstain {
+        analysis.availability.reason = Some(
+            "Load-data-key analysis abstained because whole-object page data usage was detected"
+                .to_string(),
+        );
+    }
+    VizFrameworkData {
+        availability: analysis.availability,
+        detector_availability: VizAvailability::unavailable(
+            "detectors",
+            "Framework detector coverage did not complete",
+        ),
+        findings_truncated: analysis.findings_truncated,
+        findings: analysis.findings,
+        detected_frameworks: Vec::new(),
+        detectors: Vec::new(),
+    }
+}
+
+fn build_feature_flags(
+    flags: &[FeatureFlag],
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> VizFindingAnalysis {
+    let mut findings = Vec::new();
+    push_findings(
+        &mut findings,
+        "feature-flag",
+        "Feature flag use",
+        flags,
+        root,
+        index,
+    );
+    analysis_from_records(findings, flags.len(), flags.len(), "flags")
+}
+
+fn build_security(
+    results: &AnalysisResults,
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> VizSecurityData {
+    let total = results.security_findings.len();
+    let truncated =
+        (total > MAX_ANALYSIS_FINDINGS).then_some(total.saturating_sub(MAX_ANALYSIS_FINDINGS));
+    let mut sorted_findings: Vec<&SecurityFinding> = results.security_findings.iter().collect();
+    sorted_findings.sort_by_key(|finding| {
+        let severity = serialized_label(&crate::security::derive_security_severity(finding));
+        let priority = match severity.as_str() {
+            "high" => 0,
+            "medium" => 1,
+            _ => 2,
+        };
+        (priority, relative_path(&finding.path, root), finding.line)
+    });
+    let candidates = sorted_findings
+        .into_iter()
+        .take(MAX_ANALYSIS_FINDINGS)
+        .map(|finding| build_security_candidate(finding, index, root))
+        .collect();
+
+    let mut blind_spots = Vec::new();
+    if results.security_unresolved_edge_files > 0 {
+        blind_spots.push(VizSecurityBlindSpot {
+            kind: "unresolved-dynamic-imports".to_string(),
+            count: results.security_unresolved_edge_files,
+            path: None,
+            file: None,
+            line: None,
+            reason: Some("Dynamic imports prevent complete client/server reachability".to_string()),
+        });
+    }
+    if results.security_unresolved_callee_sites > 0 {
+        blind_spots.push(VizSecurityBlindSpot {
+            kind: "unresolved-callee-sites".to_string(),
+            count: results.security_unresolved_callee_sites,
+            path: None,
+            file: None,
+            line: None,
+            reason: Some(
+                "Dynamic or computed callees could not be matched to the sink catalogue"
+                    .to_string(),
+            ),
+        });
+    }
+    let diagnostic_count = results.security_unresolved_callee_diagnostics.len();
+    for diagnostic in results
+        .security_unresolved_callee_diagnostics
+        .iter()
+        .take(MAX_SECURITY_BLIND_SPOT_SAMPLES)
+    {
+        blind_spots.push(VizSecurityBlindSpot {
+            kind: "unresolved-callee-sample".to_string(),
+            count: 1,
+            path: Some(relative_path(&diagnostic.path, root)),
+            file: index.index_of_path(&diagnostic.path),
+            line: Some(diagnostic.line),
+            reason: Some(serialized_label(&diagnostic.reason)),
+        });
+    }
+
+    VizSecurityData {
+        availability: VizAvailability::complete(total, "candidates", truncated),
+        runtime_availability: VizAvailability::unavailable(
+            "observations",
+            "No runtime coverage input was provided",
+        ),
+        candidates,
+        blind_spot_count: results.security_unresolved_edge_files
+            + results.security_unresolved_callee_sites,
+        blind_spots_truncated: (diagnostic_count > MAX_SECURITY_BLIND_SPOT_SAMPLES)
+            .then_some(diagnostic_count.saturating_sub(MAX_SECURITY_BLIND_SPOT_SAMPLES)),
+        blind_spots,
+    }
+}
+
+fn build_security_candidate(
+    finding: &SecurityFinding,
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> VizSecurityCandidate {
+    let kind = serialized_label(&finding.kind);
+    let path = relative_path(&finding.path, root);
+    let severity = serialized_label(&crate::security::derive_security_severity(finding));
+    let id = crate::security::security_finding_id(finding, Path::new(&path));
+    let reachability = finding.reachability.as_ref();
+    let architecture_zone = finding
+        .candidate
+        .boundary
+        .architecture_zone
+        .as_ref()
+        .map(|zone| format!("{} -> {}", zone.from, zone.to));
+    let dead_code = serialize_relative(finding.dead_code.as_ref(), root);
+    let runtime = serialize_relative(finding.runtime.as_ref(), root);
+    let taint_flow = security_taint_flow(finding, index, root);
+    let observed_controls = security_controls(finding, root);
+    let actions = serialize_relative_value(&finding.actions, root)
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let trace = security_trace(finding, index, root);
+    let taint_trace = finding
+        .reachability
+        .as_ref()
+        .map_or_else(Vec::new, |reachability| {
+            trace_hops(&reachability.untrusted_source_trace, index, root)
+        });
+    VizSecurityCandidate {
+        id,
+        kind,
+        category: finding.category.clone(),
+        cwe: finding.cwe,
+        file: index.index_of_path(&finding.path),
+        path,
+        line: finding.line,
+        col: finding.col,
+        evidence: finding.evidence.clone(),
+        severity,
+        taint_confidence: reachability
+            .and_then(|reachability| reachability.taint_confidence.as_ref())
+            .map(serialized_label),
+        source_kind: finding.candidate.source_kind.clone(),
+        sink: finding.candidate.sink.callee.clone(),
+        url_shape: finding
+            .candidate
+            .sink
+            .url_shape
+            .as_ref()
+            .map(serialized_label),
+        network_destination: finding
+            .candidate
+            .network
+            .as_ref()
+            .and_then(|network| network.destination.clone()),
+        reachable_from_entry: reachability.map(|value| value.reachable_from_entry),
+        reachable_from_untrusted_source: reachability
+            .map(|value| value.reachable_from_untrusted_source),
+        blast_radius: reachability.map(|value| value.blast_radius),
+        crosses_boundary: reachability.is_some_and(|value| value.crosses_boundary)
+            || finding.candidate.boundary.client_server
+            || finding.candidate.boundary.cross_module
+            || architecture_zone.is_some(),
+        client_server_boundary: finding.candidate.boundary.client_server,
+        cross_module_boundary: finding.candidate.boundary.cross_module,
+        architecture_zone,
+        dead_code,
+        runtime,
+        taint_flow,
+        observed_controls,
+        control_verification_prompt: finding
+            .attack_surface
+            .as_ref()
+            .map(|surface| surface.defensive_boundary.verification_prompt.clone()),
+        trace,
+        taint_trace,
+        actions,
+    }
+}
+
+fn serialize_relative<T: Serialize>(value: Option<&T>, root: &Path) -> Option<Value> {
+    value.and_then(|value| serialize_relative_value(value, root))
+}
+
+fn serialize_relative_value<T: Serialize>(value: &T, root: &Path) -> Option<Value> {
+    let mut serialized = serde_json::to_value(value).ok()?;
+    relativize_value_paths(&mut serialized, root);
+    Some(serialized)
+}
+
+fn security_controls(finding: &SecurityFinding, root: &Path) -> Vec<Value> {
+    finding
+        .attack_surface
+        .as_ref()
+        .map_or_else(Vec::new, |surface| {
+            surface
+                .defensive_boundary
+                .controls
+                .iter()
+                .filter_map(|control| serialize_relative_value(control, root))
+                .collect()
+        })
+}
+
+fn security_trace(
+    finding: &SecurityFinding,
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> Vec<VizSecurityTraceHop> {
+    trace_hops(&finding.trace, index, root)
+}
+
+fn trace_hops(
+    hops: &[fallow_types::results::TraceHop],
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> Vec<VizSecurityTraceHop> {
+    hops.iter()
+        .map(|hop| VizSecurityTraceHop {
+            file: index.index_of_path(&hop.path),
+            path: relative_path(&hop.path, root),
+            line: hop.line,
+            col: hop.col,
+            role: serialized_label(&hop.role),
+        })
+        .collect()
+}
+
+fn security_taint_flow(
+    finding: &SecurityFinding,
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> Option<VizSecurityTaintFlow> {
+    let flow = finding.taint_flow.as_ref()?;
+    let endpoint = |value: &fallow_types::results::TaintEndpoint| VizSecurityEndpoint {
+        file: index.index_of_path(&value.path),
+        path: relative_path(&value.path, root),
+        line: value.line,
+        col: value.col,
+    };
+    Some(VizSecurityTaintFlow {
+        source: endpoint(&flow.source),
+        sink: endpoint(&flow.sink),
+        intra_module: flow.path.intra_module,
+        cross_module_hops: flow.path.cross_module_hops,
+    })
+}
+
+/// Populate Health, Framework diagnostics, and Styling from the health runner
+/// that consumed the same session artifacts.
+pub fn apply_health_report(data: &mut VizData, report: &HealthReport, root: &Path) {
+    let by_path: FxHashMap<String, u32> = data
+        .files
+        .iter()
+        .enumerate()
+        .map(|(index, file)| (file.path.clone(), clamp_u32(index)))
+        .collect();
+    apply_health_data(data, report, root, &by_path);
+    apply_framework_data(data, report);
+    apply_styling_data(data, report, root, &by_path);
+}
+
+fn apply_health_data(
+    data: &mut VizData,
+    report: &HealthReport,
+    root: &Path,
+    by_path: &FxHashMap<String, u32>,
+) {
+    let resolve = |path: &Path| by_path.get(&relative_path(path, root)).copied();
+    let hotspot_by_path: FxHashMap<String, &fallow_output::HotspotFinding> = report
+        .hotspots
+        .iter()
+        .map(|hotspot| (relative_path(&hotspot.path, root), hotspot))
+        .collect();
+    let files = health_files(report, root, by_path, &hotspot_by_path);
+    let (findings, total_findings) = health_findings(report, root, &resolve);
+    let concern_count = health_concern_count(report, root, by_path);
+    data.health = VizHealthData {
+        availability: VizAvailability::complete(concern_count, "files", None),
+        capabilities: health_capabilities(report),
+        shared_parse: data.health.shared_parse,
+        score: report.health_score.as_ref().map(|score| score.score),
+        grade: report
+            .health_score
+            .as_ref()
+            .map(|score| score.grade.to_string()),
+        average_maintainability: report.summary.average_maintainability,
+        files_truncated: report
+            .file_scores
+            .len()
+            .checked_sub(MAX_HEALTH_FILES)
+            .filter(|count| *count > 0),
+        findings_truncated: total_findings
+            .checked_sub(findings.len())
+            .filter(|count| *count > 0),
+        files,
+        findings,
+    };
+}
+
+fn health_concern_count(
+    report: &HealthReport,
+    root: &Path,
+    by_path: &FxHashMap<String, u32>,
+) -> usize {
+    let mut files = rustc_hash::FxHashSet::default();
+    let mut add = |path: &Path| {
+        if let Some(file) = by_path.get(&relative_path(path, root)) {
+            files.insert(*file);
+        }
+    };
+    for finding in &report.findings {
+        add(&finding.path);
+    }
+    for hotspot in &report.hotspots {
+        add(&hotspot.path);
+    }
+    if let Some(gaps) = &report.coverage_gaps {
+        for finding in &gaps.files {
+            add(&finding.file.path);
+        }
+        for finding in &gaps.exports {
+            add(&finding.export.path);
+        }
+    }
+    files.len()
+}
+
+fn health_files(
+    report: &HealthReport,
+    root: &Path,
+    by_path: &FxHashMap<String, u32>,
+    hotspots: &FxHashMap<String, &fallow_output::HotspotFinding>,
+) -> Vec<VizHealthFile> {
+    report
+        .file_scores
+        .iter()
+        .take(MAX_HEALTH_FILES)
+        .filter_map(|score| {
+            let path = relative_path(&score.path, root);
+            let file = by_path.get(&path).copied()?;
+            let hotspot = hotspots.get(&path).copied();
+            Some(VizHealthFile {
+                file,
+                path,
+                maintainability_index: score.maintainability_index,
+                crap_max: score.crap_max,
+                complexity_density: score.complexity_density,
+                fan_in: score.fan_in,
+                fan_out: score.fan_out,
+                hotspot_score: hotspot.map(|entry| entry.score),
+                commits: hotspot.map(|entry| entry.commits),
+                ownership: hotspot
+                    .and_then(|entry| serialize_relative(entry.ownership.as_ref(), root)),
+            })
+        })
+        .collect()
+}
+
+fn health_findings(
+    report: &HealthReport,
+    root: &Path,
+    resolve: &dyn Fn(&Path) -> Option<u32>,
+) -> (Vec<VizFinding>, usize) {
+    let coverage_count = report
+        .coverage_gaps
+        .as_ref()
+        .map_or(0, |gaps| gaps.files.len() + gaps.exports.len());
+    let total = report.findings.len() + report.hotspots.len() + coverage_count;
+    let mut findings = Vec::with_capacity(total.min(MAX_ANALYSIS_FINDINGS));
+    append_findings(
+        &mut findings,
+        &report.findings,
+        "health-finding",
+        "Health threshold exceeded",
+        root,
+        resolve,
+    );
+    append_findings(
+        &mut findings,
+        &report.hotspots,
+        "git-hotspot",
+        "Complex and frequently changed file",
+        root,
+        resolve,
+    );
+    if let Some(gaps) = &report.coverage_gaps {
+        append_findings(
+            &mut findings,
+            &gaps.files,
+            "coverage-gap-file",
+            "File has no test path",
+            root,
+            resolve,
+        );
+        append_findings(
+            &mut findings,
+            &gaps.exports,
+            "coverage-gap-export",
+            "Export has no test path",
+            root,
+            resolve,
+        );
+    }
+    (findings, total)
+}
+
+fn append_findings<T: Serialize>(
+    out: &mut Vec<VizFinding>,
+    values: &[T],
+    kind: &str,
+    title: &str,
+    root: &Path,
+    resolve: &dyn Fn(&Path) -> Option<u32>,
+) {
+    let remaining = MAX_ANALYSIS_FINDINGS.saturating_sub(out.len());
+    out.extend(values.iter().take(remaining).filter_map(|value| {
+        serde_json::to_value(value)
+            .ok()
+            .map(|detail| finding_from_value(kind, title, detail, root, resolve))
+    }));
+}
+
+fn health_capabilities(report: &HealthReport) -> VizHealthCapabilities {
+    let file_count = report.file_scores.len();
+    let coverage = report.coverage_gaps.as_ref().map_or_else(
+        || VizAvailability::unavailable("gaps", "Coverage gap analysis did not produce a result"),
+        |gaps| VizAvailability::complete(gaps.files.len() + gaps.exports.len(), "gaps", None),
+    );
+    VizHealthCapabilities {
+        complexity: VizAvailability::complete(report.findings.len(), "findings", None),
+        maintainability: VizAvailability::complete(file_count, "files", None),
+        crap: VizAvailability::complete(file_count, "files", None),
+        coverage,
+        churn: VizAvailability::disabled("files", "Git history is not loaded by Viz"),
+        hotspots: VizAvailability::disabled("files", "Git history is not loaded by Viz"),
+        ownership: VizAvailability::disabled("files", "Git history is not loaded by Viz"),
+    }
+}
+
+fn unavailable_health_capabilities(reason: &str) -> VizHealthCapabilities {
+    VizHealthCapabilities {
+        complexity: VizAvailability::unavailable("findings", reason),
+        maintainability: VizAvailability::unavailable("files", reason),
+        crap: VizAvailability::unavailable("files", reason),
+        coverage: VizAvailability::unavailable("gaps", reason),
+        churn: VizAvailability::unavailable("files", reason),
+        hotspots: VizAvailability::unavailable("files", reason),
+        ownership: VizAvailability::unavailable("files", reason),
+    }
+}
+
+fn apply_framework_data(data: &mut VizData, report: &HealthReport) {
+    let count = data.frameworks.availability.count;
+    let Some(diagnostics) = &report.framework_health else {
+        if count == 0 {
+            data.frameworks.detector_availability = VizAvailability {
+                state: VizAvailabilityState::NotApplicable,
+                count: 0,
+                unit: "detectors",
+                reason: Some("No supported framework was detected".to_string()),
+                truncated: None,
+            };
+            data.frameworks.availability.state = VizAvailabilityState::NotApplicable;
+            data.frameworks.availability.reason =
+                Some("No supported framework was detected".to_string());
+        } else {
+            data.frameworks.detector_availability = VizAvailability::unavailable(
+                "detectors",
+                "Framework detector metadata was not produced",
+            );
+        }
+        return;
+    };
+    data.frameworks
+        .detected_frameworks
+        .clone_from(&diagnostics.detected_frameworks);
+    data.frameworks.detectors = diagnostics
+        .detectors
+        .iter()
+        .map(|detector| VizFrameworkDetector {
+            id: detector.id.clone(),
+            framework: detector.framework.clone(),
+            status: serialized_label(&detector.status),
+            reason: detector.reason.clone(),
+        })
+        .collect();
+    data.frameworks.detector_availability =
+        VizAvailability::complete(diagnostics.detectors.len(), "detectors", None);
+    if diagnostics.detected_frameworks.is_empty() && count == 0 {
+        data.frameworks.availability.state = VizAvailabilityState::NotApplicable;
+        data.frameworks.availability.reason =
+            Some("No supported framework was detected".to_string());
+        data.frameworks.detector_availability.state = VizAvailabilityState::NotApplicable;
+        data.frameworks.detector_availability.reason =
+            Some("No supported framework was detected".to_string());
+    }
+}
+
+fn apply_styling_data(
+    data: &mut VizData,
+    report: &HealthReport,
+    root: &Path,
+    by_path: &FxHashMap<String, u32>,
+) {
+    let resolve = |path: &Path| by_path.get(&relative_path(path, root)).copied();
+    let count = report.styling_findings.len();
+    let mut findings = Vec::with_capacity(count.min(MAX_ANALYSIS_FINDINGS));
+    append_findings(
+        &mut findings,
+        &report.styling_findings,
+        "styling-finding",
+        "Styling health finding",
+        root,
+        &resolve,
+    );
+    let truncated = count.checked_sub(findings.len()).filter(|value| *value > 0);
+    let styling = report.styling_health.as_ref();
+    data.styling = VizStylingData {
+        availability: report.css_analytics.as_ref().map_or_else(
+            || VizAvailability {
+                state: VizAvailabilityState::NotApplicable,
+                count: 0,
+                unit: "findings",
+                reason: Some("No supported CSS or component styling was detected".to_string()),
+                truncated: None,
+            },
+            |_| VizAvailability::complete(count, "findings", truncated),
+        ),
+        findings_truncated: truncated,
+        findings,
+        score: styling.map(|health| health.score),
+        grade: styling.map(|health| health.grade.to_string()),
+        confidence: styling.map(|health| serialized_label(&health.confidence)),
+        summary: report
+            .css_analytics
+            .as_ref()
+            .and_then(|analytics| serde_json::to_value(&analytics.summary).ok()),
+    };
+}
+
 /// Per-file lookup maps threaded into [`build_files`].
 struct FilePropertyMaps<'a> {
     zone_by_file: &'a FxHashMap<u32, u16>,
@@ -369,10 +2013,16 @@ fn display_root(root: &Path) -> String {
 }
 
 fn relative_path(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    if let Ok(relative) = path.strip_prefix(root) {
+        return relative.to_string_lossy().replace('\\', "/");
+    }
+    if path.is_absolute() {
+        let name = path
+            .file_name()
+            .map_or_else(|| "path".into(), |name| name.to_string_lossy());
+        return format!("<external>/{name}");
+    }
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn build_workspaces(workspaces: &[WorkspaceInfo], root: &Path) -> Vec<VizWorkspace> {
@@ -945,6 +2595,8 @@ mod tests {
                 duplication: &self.duplication,
                 workspaces: &self.workspaces,
                 config: &self.config,
+                feature_flags: &[],
+                include_analysis_details: true,
             }
         }
     }
@@ -1398,5 +3050,87 @@ mod tests {
         assert_eq!(s.circular_deps, 1);
         assert_eq!(s.boundary_violations, data.violations.len());
         assert_eq!(s.boundary_violations, 1);
+    }
+
+    #[test]
+    fn versioned_contract_keeps_counts_and_availability_explicit() {
+        let fx = fixture();
+        let data = build_viz_data(&fx.input());
+        let value = serde_json::to_value(&data).expect("viz data serializes");
+
+        assert_eq!(value["schema_version"], VIZ_SCHEMA_VERSION);
+        assert_eq!(value["architecture"]["availability"]["unit"], "violations");
+        assert_eq!(value["dependencies"]["availability"]["unit"], "findings");
+        assert_eq!(value["security"]["availability"]["unit"], "candidates");
+        assert_eq!(value["security"]["availability"]["state"], "complete");
+        assert_eq!(
+            value["security"]["runtime_availability"]["state"],
+            "unavailable"
+        );
+        assert_eq!(value["health"]["availability"]["state"], "unavailable");
+        assert_eq!(
+            value["health"]["capabilities"]["coverage"]["state"],
+            "unavailable"
+        );
+        assert!(value["frameworks"]["detectors"].is_array());
+        assert_eq!(
+            value["frameworks"]["detector_availability"]["state"],
+            "unavailable"
+        );
+        assert!(value["styling"].get("score").is_none());
+    }
+
+    #[test]
+    fn external_absolute_paths_are_redacted() {
+        let root = Path::new("/project");
+        assert_eq!(
+            relative_path(Path::new("/project/src/a.ts"), root),
+            "src/a.ts"
+        );
+        assert_eq!(
+            relative_path(Path::new("/Users/private/secret.ts"), root),
+            "<external>/secret.ts"
+        );
+
+        let mut detail = serde_json::json!({ "path": "/Users/private/secret.ts" });
+        relativize_value_paths(&mut detail, root);
+        assert_eq!(detail["path"], "<external>/secret.ts");
+
+        let mut route = serde_json::json!({ "specifier": "/api/v1" });
+        relativize_value_paths(&mut route, root);
+        assert_eq!(route["specifier"], "/api/v1");
+
+        let mut conflicts = serde_json::json!({
+            "conflicting_paths": ["/project/app/a.ts", "/project/app/b.ts"]
+        });
+        relativize_value_paths(&mut conflicts, root);
+        assert_eq!(conflicts["conflicting_paths"][0], "app/a.ts");
+        assert_eq!(conflicts["conflicting_paths"][1], "app/b.ts");
+    }
+
+    #[test]
+    fn config_action_values_are_not_rendered_as_commands() {
+        let finding = finding_from_value(
+            "dependency",
+            "Dependency finding",
+            serde_json::json!({
+                "actions": [{
+                    "kind": "add-to-config",
+                    "auto_fixable": false,
+                    "config_key": "entry",
+                    "value": "./errors",
+                    "description": "Add the entry to configuration"
+                }]
+            }),
+            Path::new("/project"),
+            &|_| None,
+        );
+        assert_eq!(finding.actions.len(), 1);
+        let action = &finding.actions[0];
+        assert_eq!(action.kind.as_deref(), Some("add-to-config"));
+        assert!(!action.auto_fixable);
+        assert_eq!(action.config_key.as_deref(), Some("entry"));
+        assert_eq!(action.value, Some(Value::String("./errors".to_string())));
+        assert!(action.command.is_none());
     }
 }

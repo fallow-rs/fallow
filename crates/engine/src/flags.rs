@@ -31,6 +31,25 @@ pub fn analyze_feature_flags_with_session(session: &AnalysisSession) -> FeatureF
     }
 }
 
+/// Run feature flag analysis while reusing dead-code results from the same
+/// session.
+///
+/// Compound surfaces such as `fallow viz` use this path to avoid rebuilding
+/// the module graph solely to correlate guarded dead exports.
+#[must_use]
+pub fn analyze_feature_flags_with_session_and_results(
+    session: &AnalysisSession,
+    results: &AnalysisResults,
+) -> FeatureFlagsAnalysis {
+    let modules = session.shared_parsed_modules(false);
+    let mut flags = collect_flags_from_modules(session.config(), session.files(), &modules);
+    correlate_with_dead_code(&mut flags, results);
+    FeatureFlagsAnalysis {
+        flags,
+        files_scanned: session.files().len(),
+    }
+}
+
 /// Built-in environment variable prefixes treated as feature flags.
 #[must_use]
 pub fn builtin_env_prefixes() -> &'static [&'static str] {

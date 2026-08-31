@@ -120,7 +120,7 @@ Adopting on an existing codebase? `fallow audit` fails only on findings a change
 | [`npx fallow recommend`](https://docs.fallow.tools/cli/recommend) | Detect the stack and propose a config; subjective choices stay open questions |
 | [`npx fallow init`](https://docs.fallow.tools/cli/init) | Scaffold config; `--agents` scaffolds an AGENTS.md |
 | `npx fallow migrate` | Migrate from knip, jscpd, or stylelint config |
-| `npx fallow viz` | Interactive HTML map of the codebase: treemap + import graph with dead-code, duplication, boundaries, and hotspot lenses |
+| `npx fallow viz` | Interactive HTML map with Unused, Duplication, Architecture, Health, and static Security lenses, plus dependency, framework, styling, and feature-flag analysis |
 | `npx fallow schema` | Machine-readable capability manifest (always JSON) |
 
 <details>

@@ -36,6 +36,8 @@ an exit code.
   skill for installs without `node_modules/fallow`.
 - `crates/cli/src/coverage/` and `license/`: runtime coverage and license
   command orchestration.
+- `crates/cli/src/viz.rs`: the self-contained HTML map, plus the DOT and
+  Mermaid text renderings of the import graph.
 - `crates/cli/src/telemetry.rs`: local opt-in telemetry state and spooling.
 - `crates/cli/src/cli_impact.rs` and `impact.rs`: local Impact history,
   attribution, aggregation, and the status-bar surface.
@@ -101,6 +103,38 @@ an exit code.
   as inherited and additionally surface via
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
+
+## Viz lenses and availability
+
+`fallow viz` runs one engine-owned project analysis with complexity artifacts
+and the graph retained, then feeds `fallow_engine::viz::VizData`, a versioned
+payload embedded in a self-contained HTML shell. The prebuilt TypeScript
+frontend lives in `viz-frontend/` and is embedded from
+`crates/cli/viz-assets/viz.js` and `viz.css`; rebuild it with
+`cd viz-frontend && npm ci && npm run build` rather than editing the bundle.
+
+Invariants:
+
+- Every analysis family carries an availability state (complete, disabled, not
+  applicable, unavailable) alongside a unit-labelled count. A family that did
+  not run must render as missing data, never as zero findings. Only the
+  complete state licenses reading the count.
+- The Health lens reuses the retained artifacts instead of reparsing. Churn,
+  hotspots, and ownership need a git-history walk viz does not perform, so
+  they report as unavailable rather than as empty.
+- Coverage for the Health lens resolves through the shared precedence order
+  described under the audit invariants, reusing the config viz already loaded.
+  Viz has no coverage flags of its own, and auto-detection stays in the engine.
+- The Security lens enables the advisory security rules through the shared
+  `enable_security_rules` helper and reports static candidates as candidates
+  only. Runtime security stays explicitly unavailable without runtime
+  evidence.
+- The rule and finding identifiers shown in the Security lens come from
+  `fallow-security`, the same source as the JSON `finding_id` and the SARIF
+  `partialFingerprints` value, so the surfaces join and cannot drift.
+- `--viz-format dot` and `--viz-format mermaid` render the import graph alone.
+  They skip the Health run, the feature-flag pass, and the security rules,
+  because none of that reaches their output.
 
 ## Audit cache maintenance
 
