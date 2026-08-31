@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788190611750,
+  "lastUpdate": 1788194963304,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "400835b0ed607faeb8bca1443d39647223bab41e",
-          "message": "fix(audit-cache): stop counting deregistered legacy entries as reclaimed (#2260)\n\nA pre-#1815 registration at the current cache path is only deregistered\nand stays warm on disk. Prune now reports it as kept with reason\nlegacy-deregistered, surfaces an additive deregistered count in the JSON\nenvelope plus a matching human summary line, and excludes its size from\nreclaimed_bytes and the human reclaim total. Released SHA-keyed\nregistrations are genuinely removed and stay counted.\n\nThe audit-cache prune long help now states that --dry-run previews the\npolicy; no generated contract surface embeds the nested subcommand help,\nso the generated contracts are unchanged.\n\nNew-only duplication demotion diff sources gain coverage beyond the\nWorktree state: integration tests for shared-diff precedence over the\nmerge-base worktree diff, the skipped-state --explain line, and the\ndemotion note wording, plus unit tests for the diff-source labels and\nthe retained shared-diff source label.",
-          "timestamp": "2026-08-13T17:28:55+02:00",
-          "tree_id": "e55cbd805de3d86dcd4413e74351be99849a981a",
-          "url": "https://github.com/fallow-rs/fallow/commit/400835b0ed607faeb8bca1443d39647223bab41e"
-        },
-        "date": 1786635164792,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9744515,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48501,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1034772,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7636,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8382,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e368c0d05060409b9bcea702972415a85193c914",
+          "message": "fix(process): wait out an executable that is busy at spawn (#2496)\n\nUnix refuses to exec a file while any process holds it open for writing, and the\nholder is not always the process that opened it. `fs::write` closes its\ndescriptor, but a fork from any other thread during that open window carries a\nreference to the same open file description into the new child, and the inode\nkeeps counting a writer until that child reaches its own exec. A multi-threaded\nprocess that writes an executable and then runs it therefore races every other\nthread that spawns. That is how `cargo test -p fallow-api --lib` failed once in\nCI with `failed to spawn /tmp/.../fallow-similar-code: Text file busy`. The same\nshape reaches real users from the other side: an MCP tool call that re-runs the\nFallow binary while a package manager is still writing it.\n\nA new `crates/process/src/spawn_retry.rs` holds one retry schedule (200\nmicroseconds, doubling, capped at 20 milliseconds, one second total) behind two\nhelpers: a blocking one for `std::process::Command` and a Tokio one that awaits\n`tokio::time::sleep` so the pause yields instead of holding a worker. Both drive\nthe same struct, so the two paths cannot drift.\n\nWired into every managed spawn: `ScopedChild::spawn` and\n`ScopedChild::spawn_process_tree` (companion sidecars, audit helpers),\n`spawn_fallow` in the MCP tool path, and `spawn_managed_child` behind the MCP\ncode_mode tool. The last two re-run the Fallow binary itself. Each call site\nkeeps its exact error text, ProcessTree construction and cleanup behavior.\n`crates/engine/src/repo_refs.rs` deliberately keeps a plain spawn: it runs git\nfrom PATH, a binary Fallow never writes, so it cannot meet the condition.\n\nMeasured with a stress binary linked against the real crate, eight workers each\nwriting a stub and running it, 40000 spawns per row, on Linux:\n\n    Command::spawn (blocking, before)              1382 (3.455%)\n    ScopedChild::spawn_process_tree (after)           0\n    tokio::process::Command::spawn (before)         930 (2.325%)\n    spawn_tokio_retrying_busy_executable (after)      0\n\nSame wall time in both modes, so the retry costs nothing on the success path.\nTwo controls place the fault on the just-written target rather than on spawning:\nthe same loop single threaded fails 0 of 16000, and a thread that spawns a\npre-existing file under the same fork load fails 0 of 2000. On macOS an open\nwrite handle does not block exec at all, which is why this only ever failed on\nLinux CI.\n\nThe suite-level flake is not reproduced: the fallow-api lib suite is green over\n220 contended Linux runs before the change and 220 after. What is established is\nthe mechanism and the per-spawn rate, not a suite-level delta.",
+          "timestamp": "2026-08-31T18:45:13+02:00",
+          "tree_id": "df2f37a9849c34438fac9e1c90a43fdbf2c4d6e2",
+          "url": "https://github.com/fallow-rs/fallow/commit/e368c0d05060409b9bcea702972415a85193c914"
+        },
+        "date": 1788194959556,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9761437,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49419,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1188861,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8439,
             "unit": "allocations"
           }
         ]
