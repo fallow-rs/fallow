@@ -614,16 +614,22 @@ fn print_branching_human(report: Option<&fallow_output::BranchingReport>) {
     let Some(report) = report.filter(|report| report.is_reportable()) else {
         return;
     };
+    let peak = if report.peak_unit_cyclomatic.delta == 0 {
+        String::new()
+    } else {
+        format!(
+            "; peak per function {} to {}",
+            report.peak_unit_cyclomatic.previous, report.peak_unit_cyclomatic.current
+        )
+    };
     eprintln!(
-        "  branching: {} branch point{} across {} function{} (base {} across {}); peak per function {} to {}",
+        "  branching: {} branch point{} across {} function{} (base {} across {}){peak}",
         report.branch_points.current,
         crate::report::plural(report.branch_points.current as usize),
         report.functions.current,
         crate::report::plural(report.functions.current as usize),
         report.branch_points.previous,
         report.functions.previous,
-        report.peak_unit_cyclomatic.previous,
-        report.peak_unit_cyclomatic.current,
     );
     eprintln!(
         "             splitting a function moves its branches into new functions instead of removing them"

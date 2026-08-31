@@ -542,10 +542,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn review_brief_json_output_assembles_typed_wire_contract() {
+    /// Serialize a minimal brief through the real wire mapping.
+    fn brief_wire_value(branching: Option<crate::BranchingReport>) -> Value {
         let brief = ReviewBriefOutput {
-            branching: None,
+            branching,
             schema_version: ReviewBriefSchemaVersion::default(),
             version: "1.2.3".to_string(),
             command: "audit-brief".to_string(),
@@ -583,7 +583,7 @@ mod tests {
             attribution: json!({"gate": "new_only"}),
         };
 
-        let value = build_review_brief_json_output(
+        build_review_brief_json_output(
             brief,
             header,
             ReviewBriefSubtractSections::<Value, Value, Value> {
@@ -592,7 +592,12 @@ mod tests {
                 complexity: None,
             },
         )
-        .expect("brief output should serialize");
+        .expect("brief output should serialize")
+    }
+
+    #[test]
+    fn review_brief_json_output_assembles_typed_wire_contract() {
+        let value = brief_wire_value(None);
 
         assert_eq!(value["schema_version"], REVIEW_BRIEF_SCHEMA_VERSION);
         assert_eq!(value["command"], "audit-brief");
@@ -601,6 +606,59 @@ mod tests {
         assert_eq!(value["summary"]["dead_code_issues"], 0);
         assert_eq!(value["attribution"]["gate"], "new_only");
         assert_eq!(value["dead_code"]["issues"], json!([]));
+        assert!(
+            value.get("branching").is_none(),
+            "absent when no base comparison ran, so the wire shape is unchanged              for a consumer that never had a base snapshot"
+        );
+    }
+
+    #[test]
+    fn review_brief_json_output_carries_the_branching_block() {
+        // Widening `ReviewBriefOutput` alone would land the block in the
+        // walkthrough digest and leave it out of the brief JSON, because the
+        // wire struct is mapped field by field.
+        let base: crate::BranchingSnapshot = std::iter::once((
+            "src/a.ts".to_string(),
+            fallow_types::extract::FileBranching {
+                branch_points: 12,
+                functions: 1,
+                peak_cyclomatic: 13,
+                cognitive: 12,
+                cognitive_nesting_weight: 6,
+            },
+        ))
+        .collect();
+        let head: crate::BranchingSnapshot = std::iter::once((
+            "src/a.ts".to_string(),
+            fallow_types::extract::FileBranching {
+                branch_points: 12,
+                functions: 5,
+                peak_cyclomatic: 4,
+                cognitive: 6,
+                cognitive_nesting_weight: 0,
+            },
+        ))
+        .collect();
+        let report = crate::BranchingReport::compare(
+            &base,
+            &head,
+            crate::DEFAULT_BRANCHING_TOLERANCE,
+            &|_| false,
+        );
+
+        let value = brief_wire_value(Some(report));
+
+        assert_eq!(value["branching"]["verdict"], "branching-moved");
+        assert!(value["branching"]["reason"].is_null());
+        assert_eq!(value["branching"]["branch_points"]["delta"], 0);
+        assert_eq!(value["branching"]["functions"]["delta"], 4);
+        assert_eq!(value["branching"]["peak_unit_cyclomatic"]["delta"], -9);
+        assert_eq!(
+            value["branching"]["cognitive"]["attributed_to"],
+            "nesting-reset"
+        );
+        assert_eq!(value["branching"]["tolerance"], 2);
+        assert_eq!(value["branching"]["by_file"][0]["path"], "src/a.ts");
     }
 
     #[test]

@@ -1082,15 +1082,6 @@ impl FileBranching {
         totals
     }
 
-    /// Add another file's totals into this one.
-    pub fn merge(&mut self, other: Self) {
-        self.branch_points += other.branch_points;
-        self.functions += other.functions;
-        self.peak_cyclomatic = self.peak_cyclomatic.max(other.peak_cyclomatic);
-        self.cognitive += other.cognitive;
-        self.cognitive_nesting_weight += other.cognitive_nesting_weight;
-    }
-
     /// Summed cyclomatic score implied by the identity `functions + branch_points`.
     ///
     /// Equals the direct sum of `FunctionComplexity::cyclomatic` over the same

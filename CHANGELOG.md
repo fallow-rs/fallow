@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The review brief reports whether branching left or just moved.** A
+  per-function complexity ceiling constrains a partition, not a quantity:
+  splitting a function relocates its decision points instead of removing them,
+  so every per-unit metric improves while the total is untouched.
+  `fallow audit --brief` now reports the total branching against the number of
+  functions holding it, base revision against head, over the changed files, and
+  attributes a cognitive-complexity improvement to a nesting reset or to
+  branches actually removed. The block is additive and optional, absent when no
+  base comparison ran, and never gates. It reports a relocation only when the
+  set total held and a transfer is demonstrable, and it never claims branching
+  was removed, because decision points outside every function are invisible to
+  the count ([#2503](https://github.com/fallow-rs/fallow/issues/2503)).
+
+### Changed
+
+- **The complexity finding's refactor note no longer promises a reduction
+  splitting cannot deliver.** It now says that splitting relocates branching, so
+  it lowers the function's own score without lowering the total.
+
 - **Release publication is gated on the curated release metadata**
   (Closes [#2414](https://github.com/fallow-rs/fallow/issues/2414)). The rules
   for a release title and its notes lived only in the maintainer runbook, which
