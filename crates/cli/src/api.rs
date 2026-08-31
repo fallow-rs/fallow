@@ -107,8 +107,13 @@ impl fmt::Display for ApiClientError {
 impl std::error::Error for ApiClientError {}
 
 fn tls_config_from_env() -> Result<Option<TlsConfig>, ApiClientError> {
-    let Some(path) = std::env::var(CA_BUNDLE_ENV)
-        .ok()
+    tls_config_from_path(std::env::var(CA_BUNDLE_ENV).ok().as_deref())
+}
+
+/// [`tls_config_from_env`] over an injected value, so bundle parsing and its
+/// error reporting are testable without mutating the process environment.
+fn tls_config_from_path(raw: Option<&str>) -> Result<Option<TlsConfig>, ApiClientError> {
+    let Some(path) = raw
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
     else {
@@ -143,10 +148,15 @@ fn tls_config_from_env() -> Result<Option<TlsConfig>, ApiClientError> {
 /// Honors `FALLOW_API_URL` for staging/local development. Trailing slashes on
 /// the base are trimmed so `/v1/...` paths never double-slash.
 pub fn api_url(path: &str) -> String {
-    let base = std::env::var("FALLOW_API_URL")
-        .ok()
+    api_url_with_base(std::env::var("FALLOW_API_URL").ok().as_deref(), path)
+}
+
+/// [`api_url`] over an injected base, so the override and default precedence is
+/// testable without mutating the process environment.
+fn api_url_with_base(base: Option<&str>, path: &str) -> String {
+    let base = base
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_API_URL.to_owned());
+        .unwrap_or(DEFAULT_API_URL);
     format!("{}{path}", base.trim_end_matches('/'))
 }
 
@@ -610,27 +620,12 @@ mod tests {
     }
 
     #[test]
-    #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
     fn ca_bundle_read_errors_are_reported_as_client_setup_errors() {
-        let prior = std::env::var(CA_BUNDLE_ENV).ok();
-        // SAFETY: This test owns the CA_BUNDLE_ENV mutation and restores the
-        // previous value before returning.
-        unsafe {
-            std::env::set_var(CA_BUNDLE_ENV, "/definitely/missing/fallow-ca.pem");
-        }
-        let err = try_api_agent().expect_err("missing bundle should fail");
+        let err = tls_config_from_path(Some("/definitely/missing/fallow-ca.pem"))
+            .expect_err("missing bundle should fail");
         let message = err.to_string();
         assert!(message.contains(CA_BUNDLE_ENV));
         assert!(message.contains("failed to read PEM bundle"));
-        // SAFETY: Restore the process environment to the value captured before
-        // the test mutation.
-        unsafe {
-            if let Some(value) = prior {
-                std::env::set_var(CA_BUNDLE_ENV, value);
-            } else {
-                std::env::remove_var(CA_BUNDLE_ENV);
-            }
-        }
     }
 
     #[test]
@@ -819,37 +814,18 @@ mod tests {
     }
 
     #[test]
-    #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
     fn api_url_respects_env_override_and_default() {
-        let prior = std::env::var("FALLOW_API_URL").ok();
-
-        // SAFETY: This test owns the FALLOW_API_URL mutation while validating
-        // default URL behavior.
-        unsafe {
-            std::env::remove_var("FALLOW_API_URL");
-        }
         assert_eq!(
-            api_url("/v1/coverage/repo/inventory"),
+            api_url_with_base(None, "/v1/coverage/repo/inventory"),
             "https://api.fallow.cloud/v1/coverage/repo/inventory",
         );
-
-        // SAFETY: Set a scoped override for this test case only.
-        unsafe {
-            std::env::set_var("FALLOW_API_URL", "http://127.0.0.1:3000/");
-        }
         assert_eq!(
-            api_url("/v1/coverage/a/inventory"),
+            api_url_with_base(Some("   "), "/v1/coverage/repo/inventory"),
+            "https://api.fallow.cloud/v1/coverage/repo/inventory",
+        );
+        assert_eq!(
+            api_url_with_base(Some("http://127.0.0.1:3000/"), "/v1/coverage/a/inventory"),
             "http://127.0.0.1:3000/v1/coverage/a/inventory",
         );
-
-        // SAFETY: Restore the process environment to the value captured before
-        // the test mutation.
-        unsafe {
-            if let Some(value) = prior {
-                std::env::set_var("FALLOW_API_URL", value);
-            } else {
-                std::env::remove_var("FALLOW_API_URL");
-            }
-        }
     }
 }
