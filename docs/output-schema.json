@@ -24617,41 +24617,6 @@
       ],
       "description": "The brief's branching section."
     },
-    "BranchingVerdict": {
-      "oneOf": [
-        {
-          "type": "string",
-          "const": "branching-moved",
-          "description": "Branching was demonstrably relocated rather than removed."
-        },
-        {
-          "type": "string",
-          "const": "branching-unchanged",
-          "description": "Both the branching and the number of functions holding it are flat."
-        },
-        {
-          "type": "string",
-          "const": "inconclusive",
-          "description": "Neither could be established. `reason` says why."
-        }
-      ],
-      "description": "What the comparison could establish about the changeset.\n\nKnown limitation: units consolidated into a pre-existing sibling file are\nrecognized by neither transfer test, because one looks inside a single file\nand the other looks at files the changeset added. That case abstains rather\nthan asserting.\n\nThere is deliberately no \"branching removed\" value. Increments outside every\nfunction are invisible to the underlying count, so a fall in branch points\nis not proof that branching was removed: it is equally consistent with a\nbranch having been hoisted to module scope."
-    },
-    "BranchingInconclusiveReason": {
-      "oneOf": [
-        {
-          "type": "string",
-          "const": "no-transfer-signature",
-          "description": "The changeset moved branching and function count together in a way that\nmatches feature work as readily as a split."
-        },
-        {
-          "type": "string",
-          "const": "set-too-small",
-          "description": "Neither revision had an accounted unit in the changed files, so there\nis nothing to compare."
-        }
-      ],
-      "description": "Why the comparison abstained."
-    },
     "BranchingScope": {
       "type": "object",
       "properties": {
