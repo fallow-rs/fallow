@@ -134,6 +134,7 @@ pub struct PluginResult {
     /// URL-to-filesystem static directory mappings discovered from tool config.
     /// Each tuple is `(absolute_source_dir, normalized_url_mount)`.
     static_dir_mappings: Vec<(PathBuf, String)>,
+    framework_static_dir_mappings: Vec<(PathBuf, String)>,
     /// File-scoped dependency providers. Matching imports are considered
     /// available from the framework runtime and are not unlisted dependencies.
     provided_dependencies: Vec<ProvidedDependencyRule>,
@@ -178,6 +179,7 @@ impl PluginResult {
             && self.fixture_patterns.is_empty()
             && self.scss_include_paths.is_empty()
             && self.static_dir_mappings.is_empty()
+            && self.framework_static_dir_mappings.is_empty()
             && self.provided_dependencies.is_empty()
     }
 }
@@ -837,12 +839,16 @@ pub trait Plugin: Send + Sync {
     }
 
     /// Directories this framework serves at a URL mount by convention, so a
-    /// root-absolute reference in an HTML document names a file inside one.
+    /// root-absolute reference in ANY HTML document in the project names a file
+    /// inside one.
     ///
     /// Called once when plugins are activated, with the project `root`, so a
-    /// plugin can require the directory to exist before claiming it. Config-file
-    /// mounts (Storybook `staticDirs`) are declared from `resolve_config`
-    /// instead; both land in the same list.
+    /// plugin can require the directory to exist before claiming it.
+    ///
+    /// Distinct from the config-file mounts a tool declares from
+    /// `resolve_config` (Storybook `staticDirs`), which stay scoped to that
+    /// tool's own documents. A convention here describes how the whole project
+    /// is served, so it is not scoped that way.
     fn static_dir_mappings(&self, _root: &Path) -> Vec<(std::path::PathBuf, String)> {
         vec![]
     }

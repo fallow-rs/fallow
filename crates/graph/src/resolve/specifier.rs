@@ -486,10 +486,23 @@ fn same_path(left: &Path, right: &Path) -> bool {
             .is_some_and(|(left, right)| left == right)
 }
 
-/// A declared mount serves the whole document root, so any HTML file in the
-/// project reaches it, not only Storybook's own preview fragments.
+/// Only an HTML document names assets by URL path, so only one can resolve
+/// through a mount.
 fn serves_static_dir_mounts(from_file: &Path) -> bool {
     from_file.extension().and_then(|ext| ext.to_str()) == Some("html")
+}
+
+/// Storybook serves its `staticDirs` for its own preview documents, so a mount
+/// it declared answers only for those.
+fn is_storybook_preview_html(from_file: &Path) -> bool {
+    matches!(
+        from_file.file_name().and_then(|name| name.to_str()),
+        Some("preview-head.html" | "preview-body.html")
+    ) && from_file
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        == Some(".storybook")
 }
 
 /// Return `true` when `specifier` matches the plugin alias `prefix` at a
@@ -567,23 +580,18 @@ fn resolve_filesystem_path(ctx: &ResolveContext<'_>, path: &Path) -> Option<Reso
         .then_some(ResolveResult::ExternalFile(canonical))
 }
 
-/// Resolve through a directory a framework serves at a URL mount, declared
-/// either by a plugin convention (SvelteKit `static/`) or by a config file
-/// (Storybook `staticDirs`). The list is empty unless something declared a
+/// Resolve through a directory served at a URL mount, preferring the longest
+/// matching mount. Neither list holds anything unless something declared a
 /// mount, so this never guesses at a directory name.
-fn try_static_dir_mapping(
+fn resolve_through_mounts(
     ctx: &ResolveContext<'_>,
-    from_file: &Path,
-    specifier: &str,
+    mounts: &[(PathBuf, String)],
+    url_path: &str,
 ) -> Option<ResolveResult> {
-    if ctx.static_dir_mappings.is_empty() || !serves_static_dir_mounts(from_file) {
-        return None;
-    }
-    let url_path = static_mount_url_path(specifier)?;
-    ctx.static_dir_mappings
+    mounts
         .iter()
         .filter_map(|(from_dir, mount)| {
-            let relative = static_dir_relative_path(&url_path, mount)?;
+            let relative = static_dir_relative_path(url_path, mount)?;
             if !is_safe_static_dir_relative_path(relative) {
                 return None;
             }
@@ -591,6 +599,28 @@ fn try_static_dir_mapping(
         })
         .max_by_key(|(mount_len, _)| *mount_len)
         .and_then(|(_, path)| resolve_filesystem_path(ctx, &path))
+}
+
+/// Resolve a root-absolute reference in an HTML document through a declared
+/// mount. The two lists differ in reach, not in mechanism: a framework
+/// convention describes how the whole project is served, so any HTML document
+/// reaches it, while a tool's config describes how that tool serves its own
+/// documents, so it stays scoped to them. Merging the two would let a
+/// Storybook `staticDirs` entry answer for an application's own entry HTML.
+fn try_static_dir_mapping(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !serves_static_dir_mounts(from_file) {
+        return None;
+    }
+    let url_path = static_mount_url_path(specifier)?;
+    resolve_through_mounts(ctx, ctx.framework_static_dir_mappings, &url_path).or_else(|| {
+        is_storybook_preview_html(from_file)
+            .then(|| resolve_through_mounts(ctx, ctx.static_dir_mappings, &url_path))
+            .flatten()
+    })
 }
 
 fn try_html_root_relative_asset(
@@ -2147,6 +2177,7 @@ mod tests {
             path_aliases: &[],
             scss_include_paths: &[],
             static_dir_mappings: &[],
+            framework_static_dir_mappings: &[],
             root: &project_root,
             canonical_fallback: None,
             tsconfig_warned: &tsconfig_warned,
@@ -2979,6 +3010,7 @@ mod tests {
             path_aliases: &[],
             scss_include_paths: &[],
             static_dir_mappings: &[],
+            framework_static_dir_mappings: &[],
             root,
             canonical_fallback: None,
             tsconfig_warned: &tsconfig_warned,

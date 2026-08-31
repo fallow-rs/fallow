@@ -143,7 +143,7 @@ fn collect_static_plugin_metadata(
         result.path_aliases.push((prefix.to_string(), replacement));
     }
     result
-        .static_dir_mappings
+        .framework_static_dir_mappings
         .extend(plugin.static_dir_mappings(root));
     result.auto_imports.extend(plugin.auto_imports(root));
     result
@@ -682,6 +682,9 @@ fn merge_plugin_result_fields(
     result
         .static_dir_mappings
         .extend(plugin_result.static_dir_mappings);
+    result
+        .framework_static_dir_mappings
+        .extend(plugin_result.framework_static_dir_mappings);
     result
         .provided_dependencies
         .extend(plugin_result.provided_dependencies);

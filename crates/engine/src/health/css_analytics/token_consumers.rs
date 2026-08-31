@@ -356,6 +356,7 @@ fn resolve_css_in_js_import_targets(
         auto_imports: &auto_imports,
         scss_include_paths: &scss_include_paths,
         static_dir_mappings: &static_dir_mappings,
+        framework_static_dir_mappings: &static_dir_mappings,
         root: &config.root,
         extra_conditions: &config.resolve.conditions,
     };

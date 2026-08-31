@@ -32,8 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the resolver only knew about `public/`. A framework can now declare
   the directory it serves at a URL mount, the way Storybook's `staticDirs`
   already did from its config, and SvelteKit declares `static/` when the
-  directory exists. Those mounts resolve from any HTML document rather than
-  only from Storybook's preview fragments. Nothing is guessed: a project whose
+  directory exists. A framework convention describes how the whole project is
+  served, so any HTML document reaches it, while a tool's config describes how
+  that tool serves its own documents and stays scoped to them: a Storybook
+  `staticDirs` entry does not answer for an application's own entry HTML.
+  Nothing is guessed: a project whose
   `static/` directory no framework serves, a Rust or Python asset directory
   beside the JavaScript, still reports the reference as unresolved instead of
   attributing it to an unrelated file. Measured on the official SvelteKit
