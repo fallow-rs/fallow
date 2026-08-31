@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788177270562,
+  "lastUpdate": 1788182377734,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f86dc17482f42b69dc50a1bc3875c1c3812342b9",
-          "message": "Merge pull request #2242 from fallow-rs/perf/output-escape-md-single-pass\n\nperf(output): escape Markdown in one pass",
-          "timestamp": "2026-08-13T00:58:20+02:00",
-          "tree_id": "7061186070974620e90cff4b70707464e3d88765",
-          "url": "https://github.com/fallow-rs/fallow/commit/f86dc17482f42b69dc50a1bc3875c1c3812342b9"
-        },
-        "date": 1786576256605,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 495304088,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 19915424,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25263032,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 37717384,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/48417c46faa284f18304c4f49f50a6edecdcfdb7"
         },
         "date": 1788177267019,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 547901568,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21324712,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 27947768,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 41846776,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a67216a0461decae46b5f3a9c59ed4a4ca7c3e8e",
+          "message": "test(cli): give each migrate test its own directory (#2490)\n\nTwenty-nine tests built their working directory from a fixed name under the\nsystem temp dir, and several deleted that directory on the way in, so two\nprocesses running the suite at once shared the same paths and one removed the\nfixture another was reading.\n\nMeasured with eight concurrent instances of the lib test binary filtered to\n`migrate::`: 8 of 8 runs failed before, 0 of 8 after, with the same tests\nfailing repeatedly rather than randomly. Deterministic given overlap, not load.\n\nEach test now takes a unique directory from `tempfile::tempdir()`, which\nremoves itself on drop and retires 35 hand-written cleanup calls.\n\nRefs #2460",
+          "timestamp": "2026-08-31T14:38:38+02:00",
+          "tree_id": "c563a4b1c288c6cd671f8013f15ec8453c6ba60b",
+          "url": "https://github.com/fallow-rs/fallow/commit/a67216a0461decae46b5f3a9c59ed4a4ca7c3e8e"
+        },
+        "date": 1788182374403,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
