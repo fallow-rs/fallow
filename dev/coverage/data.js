@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788198394367,
+  "lastUpdate": 1788200757468,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "08aad0e35721f0adcf599f890a6a8ac3ea344f35",
-          "message": "test(npm): cover lazy verification on Windows",
-          "timestamp": "2026-08-17T19:45:34+02:00",
-          "tree_id": "4b09526a14aa4eae81f876c06ffcec173fced62c",
-          "url": "https://github.com/fallow-rs/fallow/commit/08aad0e35721f0adcf599f890a6a8ac3ea344f35"
-        },
-        "date": 1786989067464,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/88b1bb6193f8d66e263bbeaf2defd39b93ba7945"
         },
         "date": 1788198391199,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ee2150fbd1ab3425ad481c833bda81af679d6e85",
+          "message": "fix(vscode): close the downloaded binary before executing it (#2497)\n\nThe extension resolved a binary download from the write stream `finish` event,\nwhich fires when the bytes reach the operating system, not when the descriptor\nis released: `WriteStream.close()` only queues `fs.close(fd)` on the libuv\nthreadpool. The same extension host then chmods that file, renames it into\nplace, which preserves the inode and so any lingering descriptor, and spawns it\nas the language server, from the run-analysis command, and through the\n`--version` probe. Unix refuses to execute a file any process holds open for\nwriting, so a first install could fail with `Text file busy` on Linux. This is\nthe TypeScript half of the exposure fixed on the Rust side in #2496.\n\nThe download now resolves from the close callback, which Node invokes only after\n`fs.close(fd)` has run. Measured on Node 22, a failed close emits `error` on the\nstream first with the real error and only then runs the callback with no error\nargument, so the rejection comes from the existing `error` handler, which the\ncomment now says out loud so the handler is not removed as redundant later.\n\nThe response error handler no longer unlinks a download whose body is already\non disk. Resolving one `fs.close` round trip later widens the window in which a\nkeep-alive teardown could delete a file that was already whole and fail an\ninstall that had succeeded. The listener stays attached, since an unhandled\n`error` on the response would crash the extension host, and it now reports only\nan error that truncated the body. This mirrors the `complete` check the\ninactivity timeout already applies one layer up.\n\n`httpsDownload` is the only place in the extension that writes a file\nasynchronously and later executes it: the install lock and the signature and\ndigest sidecars write synchronously, and the packaging script never spawns what\nit copies.\n\nThree regression tests, each failing against the previous code: the download\nstays pending until the descriptor is released, a failed release rejects\nexactly once through the realistic event order, and a socket error after\n`finish` neither unlinks the file nor rejects. `docs/reference/vscode-internals.md`\nrecords the invariant the gap came from: a managed download is complete only\nonce its file descriptor is closed.\n\nThe underlying failure does not reproduce on macOS, where an open write\ndescriptor does not block exec, the same limitation noted on #2496.",
+          "timestamp": "2026-08-31T20:10:01+02:00",
+          "tree_id": "27d6abdf38cf2f7613993e6166ef35e95e996c2c",
+          "url": "https://github.com/fallow-rs/fallow/commit/ee2150fbd1ab3425ad481c833bda81af679d6e85"
+        },
+        "date": 1788200752918,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
