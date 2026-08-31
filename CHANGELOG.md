@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A framework's own packages are no longer reported as dependencies to
+  promote.** `dev-dependencies-in-production` reports a `devDependencies` entry
+  that production code imports, and every sibling dependency rule reads the
+  tooling declaration each framework plugin already publishes. This one did
+  not, so a scaffold that keeps its framework in `devDependencies`, which is
+  what the SvelteKit scaffold generates, was told to promote the framework
+  itself. Measured on the official SvelteKit RealWorld application: four
+  findings before, two after, the two removed being `@sveltejs/kit` and
+  `svelte`.
+
+- **The advice on a dev dependency used in production states its
+  precondition.** It read "Move to dependencies (production code imports this
+  at runtime)" and asserted that a production-only install would break the
+  import. That is true only when the deployment installs dependencies. A build
+  that inlines the package into its output resolves nothing at runtime, and one
+  common adapter externalizes exactly the packages listed in `dependencies`, so
+  following the old advice could turn a deployment that needed no install into
+  one that does. The finding still fires; it now says when the move applies.
+
 ### Added
 
 - **Release publication is gated on the curated release metadata**
