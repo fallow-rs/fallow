@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The agent commit gate finds a project-local Fallow the way the Lefthook job
+  does.** A real installed Git hook keeps its caller's `PATH` and does not add
+  `node_modules/.bin`, which is why the generated Lefthook job learned to
+  resolve a project-local launcher and a Yarn Plug'n'Play binary. The
+  standalone `fallow-gate.sh` had only `npx --no-install`, so a hook running
+  without `npx` on its `PATH`, and any Plug'n'Play install, fell through to
+  "binary not found" and skipped the audit silently. It now tries the same
+  installs in the same order, and two execution tests run the real script with
+  `PATH` reduced so no global install can satisfy them.
+
 ### Added
 
 - **Release publication is gated on the curated release metadata**

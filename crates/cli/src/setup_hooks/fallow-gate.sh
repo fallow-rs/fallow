@@ -83,14 +83,27 @@ if [ "$GIT_WRITE" -eq 0 ]; then
   exit 0
 fi
 
+# A real installed Git hook keeps its caller's PATH and does not add
+# node_modules/.bin, so a project-local install is invisible to `command -v`.
+# The arms below cover the layouts a project-local install can take, in the
+# order they are cheapest to probe. Keep them in step with the Lefthook job
+# `fallow init --hooks` prints: the two must resolve the same installs.
 if command -v fallow >/dev/null 2>&1; then
   RUNNER=(fallow)
   BIN_DESC="$(command -v fallow)"
+elif [ -x ./node_modules/.bin/fallow ]; then
+  RUNNER=(./node_modules/.bin/fallow)
+  BIN_DESC="./node_modules/.bin/fallow"
+elif command -v yarn >/dev/null 2>&1 && YARN_BIN="$(yarn bin fallow 2>/dev/null)" && [ -n "$YARN_BIN" ]; then
+  # Yarn Plug'n'Play has no node_modules/.bin at all, so neither the launcher
+  # check above nor npx can see the install.
+  RUNNER=(yarn exec fallow --)
+  BIN_DESC="yarn exec fallow"
 elif command -v npx >/dev/null 2>&1 && VER_PROBE="$(npx --no-install fallow --version 2>/dev/null || true)" && [[ "$VER_PROBE" == fallow* ]]; then
   RUNNER=(npx --no-install fallow)
   BIN_DESC="npx --no-install fallow"
 else
-  echo "fallow-gate: fallow binary not found (tried PATH and npx --no-install), skipping audit." >&2
+  echo "fallow-gate: fallow binary not found (tried PATH, node_modules/.bin, yarn and npx --no-install), skipping audit." >&2
   exit 0
 fi
 
