@@ -1,5 +1,6 @@
 /** Mirrors the Rust `fallow_engine::viz::VizData` contract. */
 export interface VizData {
+  schema_version: 2;
   root: string;
   files: VizFile[];
   /** Import edges as [from, to, flags]; flags bit 0 = all imports type-only. */
@@ -10,6 +11,188 @@ export interface VizData {
   cycles: number[][];
   clones: VizCloneGroup[];
   violations: VizViolation[];
+  architecture: VizFindingAnalysis;
+  dependencies: VizFindingAnalysis;
+  health: VizHealthData;
+  security: VizSecurityData;
+  frameworks: VizFrameworkData;
+  styling: VizStylingData;
+  feature_flags: VizFindingAnalysis;
+}
+
+export type VizAvailabilityState = "complete" | "disabled" | "notApplicable" | "unavailable";
+
+export interface VizAvailability {
+  state: VizAvailabilityState;
+  count: number;
+  unit: string;
+  reason?: string;
+  truncated?: number;
+}
+
+export interface VizFinding {
+  kind: string;
+  title: string;
+  file?: number;
+  path?: string;
+  line?: number;
+  files?: number[];
+  paths?: string[];
+  description?: string;
+  severity?: string;
+  facts?: VizFindingFact[];
+  actions: VizFindingAction[];
+}
+
+export interface VizFindingFact {
+  label: string;
+  value: string;
+}
+
+export interface VizFindingAction {
+  label: string;
+  kind?: string;
+  auto_fixable: boolean;
+  command?: string;
+  comment?: string;
+  config_key?: string;
+  value?: unknown;
+  description?: string;
+}
+
+export interface VizFindingAnalysis {
+  availability: VizAvailability;
+  findings_truncated?: number;
+  findings: VizFinding[];
+}
+
+export interface VizFrameworkDetector {
+  id: string;
+  framework: string;
+  status: string;
+  reason?: string;
+}
+
+export interface VizFrameworkData extends VizFindingAnalysis {
+  detector_availability: VizAvailability;
+  detected_frameworks: string[];
+  detectors: VizFrameworkDetector[];
+}
+
+export interface VizHealthCapabilities {
+  complexity: VizAvailability;
+  maintainability: VizAvailability;
+  crap: VizAvailability;
+  coverage: VizAvailability;
+  churn: VizAvailability;
+  hotspots: VizAvailability;
+  ownership: VizAvailability;
+}
+
+export interface VizHealthFile {
+  file: number;
+  path: string;
+  maintainability_index: number;
+  crap_max: number;
+  complexity_density: number;
+  fan_in: number;
+  fan_out: number;
+  hotspot_score?: number;
+  commits?: number;
+  ownership?: unknown;
+}
+
+export interface VizHealthData {
+  availability: VizAvailability;
+  capabilities: VizHealthCapabilities;
+  shared_parse?: boolean;
+  score?: number;
+  grade?: string;
+  average_maintainability?: number;
+  files: VizHealthFile[];
+  files_truncated?: number;
+  findings_truncated?: number;
+  findings: VizFinding[];
+}
+
+export interface VizStylingData extends VizFindingAnalysis {
+  score?: number;
+  grade?: string;
+  confidence?: string;
+  summary?: unknown;
+}
+
+export interface VizSecurityTraceHop {
+  file?: number;
+  path: string;
+  line: number;
+  col: number;
+  role: string;
+}
+
+export interface VizSecurityEndpoint {
+  file?: number;
+  path: string;
+  line: number;
+  col: number;
+}
+
+export interface VizSecurityTaintFlow {
+  source: VizSecurityEndpoint;
+  sink: VizSecurityEndpoint;
+  intra_module: boolean;
+  cross_module_hops: number;
+}
+
+export interface VizSecurityCandidate {
+  id: string;
+  kind: string;
+  category?: string;
+  cwe?: number;
+  file?: number;
+  path: string;
+  line: number;
+  col: number;
+  evidence: string;
+  severity: string;
+  taint_confidence?: string;
+  source_kind?: string;
+  sink?: string;
+  url_shape?: string;
+  network_destination?: string;
+  reachable_from_entry?: boolean;
+  reachable_from_untrusted_source?: boolean;
+  blast_radius?: number;
+  crosses_boundary: boolean;
+  client_server_boundary: boolean;
+  cross_module_boundary: boolean;
+  architecture_zone?: string;
+  dead_code?: unknown;
+  runtime?: unknown;
+  taint_flow?: VizSecurityTaintFlow;
+  observed_controls?: unknown[];
+  control_verification_prompt?: string;
+  trace: VizSecurityTraceHop[];
+  taint_trace?: VizSecurityTraceHop[];
+  actions: unknown;
+}
+
+export interface VizSecurityBlindSpot {
+  kind: string;
+  count: number;
+  path?: string;
+  file?: number;
+  line?: number;
+  reason?: string;
+}
+
+export interface VizSecurityData {
+  availability: VizAvailability;
+  runtime_availability: VizAvailability;
+  candidates: VizSecurityCandidate[];
+  blind_spot_count: number;
+  blind_spots_truncated?: number;
+  blind_spots: VizSecurityBlindSpot[];
 }
 
 export interface VizFile {
@@ -128,7 +311,9 @@ export interface LayoutCell {
 
 export type ActiveView = "map" | "graph";
 
-export type Lens = "overview" | "deadcode" | "dupes" | "boundaries" | "hotspots";
+export type Lens = "overview" | "unused" | "duplication" | "architecture" | "health" | "security";
+
+export type SecondaryAnalysis = "dependencies" | "frameworks" | "styling" | "feature_flags";
 
 /** A drilled-down aggregated road (cluster-to-cluster import bundle). */
 export interface RoadSelection {

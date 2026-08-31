@@ -183,7 +183,7 @@ const drawHullBorders = (scene: Scene): void => {
   const { state, gvs, reveal } = scene;
   const { ctx, theme } = state;
   forEachHull(scene, (cluster) => {
-    const showTangle = cluster.tangle && state.lens === "boundaries";
+    const showTangle = cluster.tangle && state.lens === "architecture";
     ctx.strokeStyle = showTangle ? theme.amber : theme.borderDefault;
     ctx.globalAlpha = (showTangle ? 0.7 : 0.6) * reveal.cluster(cluster);
     ctx.lineWidth = 1 / gvs.transform.k;
@@ -249,7 +249,7 @@ const drawRoads = (scene: Scene): void => {
     // Severity overdraw parallel to the road (boundaries lens only;
     // the overview stays neutral until the user asks a question).
     if (
-      state.lens === "boundaries" &&
+      state.lens === "architecture" &&
       (road.violations > 0 || (road.bidi && road.cycleEdges > 0))
     ) {
       ctx.beginPath();
@@ -271,7 +271,7 @@ const drawRoads = (scene: Scene): void => {
   }
 
   // Individual severity edges from mid zoom (boundaries lens only).
-  if (state.lens === "boundaries" && kRel >= LOD_SEVERITY) drawSeverityEdges(state, gvs);
+  if (state.lens === "architecture" && kRel >= LOD_SEVERITY) drawSeverityEdges(state, gvs);
 
   // Hovered / selected road highlight: bright centerline, marching when hovered.
   const focusRoad = gvs.hoveredRoad ?? gvs.selectedRoad;
@@ -463,13 +463,16 @@ const drawNodes = (scene: Scene, hover: HoverContext, width: number, height: num
     }
 
     if (!dimmed) {
-      if (state.lens === "deadcode" && file.status === "unused") {
+      if (state.lens === "unused" && file.status === "unused") {
         ctx.setLineDash([3 / transform.k, 3 / transform.k]);
         ctx.strokeStyle = theme.redText;
         ctx.lineWidth = 1.4 / transform.k;
         ctx.stroke();
         ctx.setLineDash([]);
-      } else if (state.lens === "boundaries" && state.index.violationSources.has(node.fileIndex)) {
+      } else if (
+        state.lens === "architecture" &&
+        state.index.violationSources.has(node.fileIndex)
+      ) {
         ctx.setLineDash([3 / transform.k, 3 / transform.k]);
         ctx.strokeStyle = theme.red;
         ctx.lineWidth = 1.4 / transform.k;

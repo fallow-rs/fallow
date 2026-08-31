@@ -1,8 +1,20 @@
-import type { ActiveView, Lens, LayoutCell, RoadSelection, VizData } from "./types";
+import type {
+  ActiveView,
+  Lens,
+  LayoutCell,
+  RoadSelection,
+  SecondaryAnalysis,
+  VizData,
+} from "./types";
 import type { DataIndex } from "./data";
 import type { Theme } from "./theme";
 import { getTheme, prefersReducedMotion } from "./theme";
 import { buildIndex, reachSetMulti } from "./data";
+import { parseLens, parseSecondaryAnalysis } from "./lenses";
+
+export type EntityMode = "files" | "components" | "packages";
+export type DiffScope = "all" | "changed" | "introduced" | "affected";
+export type FilterMode = "all" | "findings";
 
 export interface AppState {
   data: VizData;
@@ -13,6 +25,14 @@ export interface AppState {
 
   view: ActiveView;
   lens: Lens;
+  /** Secondary project analysis selected from More; the canvas stays on overview. */
+  activeAnalysis: SecondaryAnalysis | null;
+  /** Entity rendered by the map. Only files are available in this graph model. */
+  entity: EntityMode;
+  /** Diff scope. Non-default scopes become available when the payload contains a diff. */
+  diffScope: DiffScope;
+  /** File subset. Findings-only filtering requires graph support and is not yet available. */
+  filterMode: FilterMode;
 
   /** Treemap drill path ("" = project root, else a directory path). */
   drillPath: string;
@@ -62,6 +82,10 @@ export const createState = (data: VizData, canvas: HTMLCanvasElement): AppState 
     dpr: window.devicePixelRatio || 1,
     view: "graph",
     lens: "overview",
+    activeAnalysis: null,
+    entity: "files",
+    diffScope: "all",
+    filterMode: "all",
     drillPath: "",
     layout: [],
     hoveredCell: null,
@@ -112,8 +136,15 @@ export const runSearch = (state: AppState, query: string): void => {
 
 // ── URL hash state (deep links for demos) ───────────────────────
 
-const encodeHash = (state: AppState): string => {
-  const parts: string[] = [`view=${state.view}`, `lens=${state.lens}`];
+export const encodeHash = (state: AppState): string => {
+  const parts: string[] = [
+    `view=${state.view}`,
+    `lens=${state.lens}`,
+    `entity=${state.entity}`,
+    `diff=${state.diffScope}`,
+    `filter=${state.filterMode}`,
+  ];
+  if (state.activeAnalysis !== null) parts.push(`analysis=${state.activeAnalysis}`);
   if (state.drillPath) parts.push(`path=${encodeURIComponent(state.drillPath)}`);
   if (state.selected !== null) {
     parts.push(`file=${encodeURIComponent(state.data.files[state.selected].path)}`);
@@ -125,19 +156,21 @@ export const applyHash = (state: AppState, hash: string): void => {
   const params = new URLSearchParams(hash.replace(/^#/, ""));
   const view = params.get("view");
   if (view === "map" || view === "graph") state.view = view;
-  const lens = params.get("lens");
-  if (
-    lens === "overview" ||
-    lens === "deadcode" ||
-    lens === "dupes" ||
-    lens === "boundaries" ||
-    lens === "hotspots"
-  ) {
-    state.lens = lens;
-  }
+  const lens = parseLens(params.get("lens"));
+  if (lens !== null) state.lens = lens;
+  state.activeAnalysis = parseSecondaryAnalysis(params.get("analysis"));
+  if (state.activeAnalysis !== null) state.lens = "overview";
+  // The current graph model only has file nodes. Keeping unsupported entity
+  // modes out of state avoids a deep link claiming that it rendered data it did not.
+  if (params.get("entity") === "files") state.entity = "files";
+  // Diff subsets require per-file diff metadata. Until that is in the payload,
+  // only the honest all-files scope can be restored.
+  if (params.get("diff") === "all") state.diffScope = "all";
+  if (params.get("filter") === "all") state.filterMode = "all";
   const path = params.get("path");
-  if (path && state.index.nodesByPath.has(path)) state.drillPath = path;
+  state.drillPath = path && state.index.nodesByPath.has(path) ? path : "";
   const file = params.get("file");
+  state.selected = null;
   if (file) {
     const fileIndex = state.data.files.findIndex((fileEntry) => fileEntry.path === file);
     if (fileIndex !== -1) state.selected = fileIndex;

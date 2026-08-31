@@ -1,6 +1,6 @@
 import { applyHash, createState, runSearch, setDarkMode, syncHash } from "./state";
 import type { AppState } from "./state";
-import type { Lens, TreeNode } from "./types";
+import type { Lens, SecondaryAnalysis, TreeNode } from "./types";
 import {
   captureLensColors,
   drillInto,
@@ -39,7 +39,13 @@ import type { ChromeRefs } from "./chrome";
 import { createPanel, panelRenderKey, renderPanel } from "./panel";
 import { hideTooltip, showDirTooltip, showFileTooltip, showRoadTooltip } from "./tooltip";
 import { installHintTips } from "./hint";
-import { dirname } from "./data";
+import {
+  dirname,
+  findingsForFile,
+  healthHasFindingForFile,
+  securityCandidatesForFile,
+} from "./data";
+import { LENS_IDS } from "./lenses";
 
 const renderView = (state: AppState): void => {
   if (state.view === "map") {
@@ -103,9 +109,10 @@ const init = (): void => {
   };
 
   const setLens = (lens: Lens): void => {
-    if (state.lens === lens) return;
+    if (state.lens === lens && state.activeAnalysis === null) return;
     const prev = captureLensColors(state);
     state.lens = lens;
+    state.activeAnalysis = null;
     state.selectedClone = null;
     startLensFade(state, prev);
     // Crossfade the graph nodes too, so 1-5 animates in both views.
@@ -113,6 +120,20 @@ const init = (): void => {
     // The ranked panel opens or closes with the lens; keep the graph
     // fitted to the space that remains while the camera is untouched.
     if (state.view === "graph") refitOnResize(state);
+    requestRender();
+  };
+
+  const setSecondaryAnalysis = (analysis: SecondaryAnalysis): void => {
+    if (state.activeAnalysis === analysis) return;
+    const prev = captureLensColors(state);
+    state.activeAnalysis = analysis;
+    state.lens = "overview";
+    state.selectedClone = null;
+    startLensFade(state, prev);
+    if (state.view === "graph") {
+      startGraphLensFade(state, prev);
+      refitOnResize(state);
+    }
     requestRender();
   };
 
@@ -131,6 +152,7 @@ const init = (): void => {
   refs = buildChrome(state, app, {
     onView: setView,
     onLens: setLens,
+    onSecondary: setSecondaryAnalysis,
     onSearch: (query) => {
       runSearch(state, query);
       requestRender();
@@ -437,7 +459,7 @@ const init = (): void => {
   });
 
   // ── Keyboard ──────────────────────────────────────────────────
-  const lensOrder: Lens[] = ["overview", "deadcode", "dupes", "boundaries", "hotspots"];
+  const lensOrder: readonly Lens[] = LENS_IDS;
   /** One step back per press: help, search, selection, drill, lens. */
   const handleEscape = (inInput: boolean): void => {
     if (state.helpOpen) {
@@ -465,7 +487,7 @@ const init = (): void => {
       requestRender();
     } else if (state.view === "map" && drillUp(state)) {
       requestRender();
-    } else if (state.lens !== "overview") {
+    } else if (state.activeAnalysis !== null || state.lens !== "overview") {
       setLens("overview");
     }
   };
@@ -497,7 +519,7 @@ const init = (): void => {
       refs?.search.focus();
     } else if (event.key === "?") {
       toggleHelp();
-    } else if (event.key >= "1" && event.key <= "5") {
+    } else if (event.key >= "1" && event.key <= "6") {
       setLens(lensOrder[Number(event.key) - 1]);
     } else if (event.key === "t" || event.key === "m") {
       setView("map");
@@ -561,17 +583,20 @@ const countLensFindings = (
       switch (state.lens) {
         case "overview":
           break;
-        case "deadcode":
+        case "unused":
           if (file.status === "unused" || file.status === "hasUnusedExports") value++;
           break;
-        case "dupes":
+        case "duplication":
           if (file.dup_lines > 0) value++;
           break;
-        case "boundaries":
-          if (state.index.violationSources.has(current.fileIndex)) value++;
+        case "architecture":
+          if (findingsForFile(state.data, "architecture", current.fileIndex).length > 0) value++;
           break;
-        case "hotspots":
-          if (file.max_cyclomatic >= 10) value++;
+        case "health":
+          if (healthHasFindingForFile(state.data, current.fileIndex)) value++;
+          break;
+        case "security":
+          if (securityCandidatesForFile(state.data, current.fileIndex).length > 0) value++;
           break;
       }
       return;
@@ -581,10 +606,11 @@ const countLensFindings = (
   walk(node);
   const labels: Record<Lens, string> = {
     overview: "",
-    deadcode: "unused",
-    dupes: "with clones",
-    boundaries: "violating",
-    hotspots: "complex",
+    unused: "unused",
+    duplication: "with clones",
+    architecture: "violating",
+    health: "at risk",
+    security: "with candidates",
   };
   return { value, label: labels[state.lens] };
 };

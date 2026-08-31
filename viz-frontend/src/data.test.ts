@@ -3,18 +3,23 @@ import { runSearch } from "./state";
 import type { AppState } from "./state";
 import {
   basename,
+  analysisAvailability,
   buildIndex,
   dirname,
   reachSet,
   reachSetMulti,
   dupRatio,
   formatSize,
+  findingsForFile,
   legendText,
   lensColor,
   lensFindingLevel,
+  healthRiskForFile,
+  securityCandidatesForFile,
+  securityRuntimeAvailability,
 } from "./data";
 import { getTheme } from "./theme";
-import type { VizData, VizFile } from "./types";
+import type { Lens, VizData, VizFile } from "./types";
 
 const file = (over: Partial<VizFile> = {}): VizFile => ({
   path: "src/a.ts",
@@ -36,6 +41,7 @@ const file = (over: Partial<VizFile> = {}): VizFile => ({
 });
 
 const data = (over: Partial<VizData> = {}): VizData => ({
+  schema_version: 2,
   root: "demo",
   files: [file({ path: "src/a.ts" }), file({ path: "src/b.ts" }), file({ path: "lib/c.ts" })],
   edges: [
@@ -62,6 +68,50 @@ const data = (over: Partial<VizData> = {}): VizData => ({
   cycles: [],
   clones: [],
   violations: [],
+  architecture: {
+    availability: { state: "complete", count: 0, unit: "violations" },
+    findings: [],
+  },
+  dependencies: {
+    availability: { state: "complete", count: 0, unit: "findings" },
+    findings: [],
+  },
+  health: {
+    availability: { state: "complete", count: 0, unit: "files" },
+    capabilities: {
+      complexity: { state: "complete", count: 0, unit: "findings" },
+      maintainability: { state: "complete", count: 0, unit: "files" },
+      crap: { state: "complete", count: 0, unit: "files" },
+      coverage: { state: "complete", count: 0, unit: "gaps" },
+      churn: { state: "unavailable", count: 0, unit: "files" },
+      hotspots: { state: "unavailable", count: 0, unit: "files" },
+      ownership: { state: "unavailable", count: 0, unit: "files" },
+    },
+    files: [],
+    findings: [],
+  },
+  security: {
+    availability: { state: "complete", count: 0, unit: "candidates" },
+    runtime_availability: { state: "unavailable", count: 0, unit: "observations" },
+    candidates: [],
+    blind_spot_count: 0,
+    blind_spots: [],
+  },
+  frameworks: {
+    availability: { state: "complete", count: 0, unit: "findings" },
+    detector_availability: { state: "complete", count: 0, unit: "detectors" },
+    findings: [],
+    detected_frameworks: [],
+    detectors: [],
+  },
+  styling: {
+    availability: { state: "complete", count: 0, unit: "findings" },
+    findings: [],
+  },
+  feature_flags: {
+    availability: { state: "complete", count: 0, unit: "flags" },
+    findings: [],
+  },
   ...over,
 });
 
@@ -109,6 +159,189 @@ describe("buildIndex", () => {
   });
 });
 
+describe("analysis contract adapters", () => {
+  it("keeps complete zero findings distinct from unavailable analysis", () => {
+    const d = {
+      ...data(),
+      schema_version: 2,
+      security: {
+        availability: { state: "complete", count: 0, unit: "candidates" },
+        runtime_availability: {
+          state: "unavailable",
+          count: 0,
+          unit: "observations",
+          reason: "No runtime profile was supplied",
+        },
+        candidates: [],
+        blind_spot_count: 0,
+        blind_spots: [],
+      },
+      frameworks: {
+        availability: {
+          state: "disabled",
+          count: 0,
+          unit: "findings",
+          reason: "Framework analysis is disabled",
+        },
+        findings: [],
+      },
+    } as unknown as VizData;
+    expect(analysisAvailability(d, "security")).toMatchObject({
+      state: "complete",
+      count: 0,
+      unit: "candidates",
+    });
+    expect(analysisAvailability(d, "frameworks")).toMatchObject({
+      state: "disabled",
+      reason: "Framework analysis is disabled",
+    });
+    expect(securityRuntimeAvailability(d)).toMatchObject({
+      state: "unavailable",
+      reason: "No runtime profile was supplied",
+    });
+    d.security.availability = {
+      state: "unavailable",
+      count: 0,
+      unit: "candidates",
+      reason: "Security artifacts were not retained",
+    };
+    expect(legendText("security", d, "graph")).toContain("Security artifacts were not retained");
+  });
+
+  it("normalizes file Security evidence without calling candidates vulnerabilities", () => {
+    const d = {
+      ...data(),
+      schema_version: 2,
+      security: {
+        availability: { state: "complete", count: 1, unit: "candidates" },
+        runtime_availability: { state: "disabled", count: 0, unit: "observations" },
+        blind_spots: [],
+        candidates: [
+          {
+            id: "sql-1",
+            kind: "sql-injection",
+            category: "Injection",
+            cwe: 89,
+            file: 0,
+            path: "src/a.ts",
+            line: 12,
+            col: 4,
+            evidence: "request input reaches a query builder",
+            severity: "high",
+            taint_confidence: "strong",
+            source_kind: "request parameter",
+            sink: "db.query",
+            url_shape: "/users/:id",
+            network_destination: "database",
+            reachable_from_entry: true,
+            reachable_from_untrusted_source: true,
+            blast_radius: 7,
+            crosses_boundary: true,
+            client_server_boundary: false,
+            cross_module_boundary: true,
+            architecture_zone: "data",
+            dead_code: false,
+            runtime: { observed: true },
+            taint_flow: {
+              source: { path: "src/a.ts", line: 4, col: 2 },
+              sink: { path: "src/a.ts", line: 12, col: 4 },
+              intra_module: true,
+              cross_module_hops: 0,
+            },
+            observed_controls: ["schema validation"],
+            control_verification_prompt: "Confirm the schema rejects SQL metacharacters",
+            trace: [
+              { path: "src/a.ts", line: 4, col: 2, role: "source" },
+              { path: "src/a.ts", line: 12, col: 4, role: "sink" },
+            ],
+            actions: [{ label: "Verify", command: "fallow security --trace sql-1" }],
+          },
+        ],
+        blind_spot_count: 0,
+      },
+    } as unknown as VizData;
+    const candidate = securityCandidatesForFile(d, 0)[0];
+    expect(candidate).toMatchObject({
+      id: "sql-1",
+      title: "Injection",
+      cwe: "CWE-89",
+      confidence: "strong",
+      source: "request parameter",
+      sink: "db.query",
+      urlShape: "/users/:id",
+      networkDestination: "database",
+      reachability: "entry point, untrusted source",
+      blastRadius: 7,
+      deadCode: false,
+      observedControls: ["schema validation"],
+      verificationPrompt: "Confirm the schema rejects SQL metacharacters",
+    });
+    expect(candidate.boundary).toContain("module boundary");
+    expect(candidate.trace).toEqual(["source: src/a.ts:4:2", "sink: src/a.ts:12:4"]);
+    expect(candidate.actions).toContainEqual({
+      label: "Verify",
+      command: "fallow security --trace sql-1",
+    });
+    expect(candidate.actions).toContainEqual({
+      label: "Verify",
+      command: 'fallow security --file "src/a.ts"',
+    });
+    const index = buildIndex(d);
+    expect(lensColor("security", getTheme(true), index, d.files[0])).toBe(getTheme(true).red);
+  });
+
+  it("uses retained Health file metrics for coloring and finding levels", () => {
+    const d = {
+      ...data(),
+      schema_version: 2,
+      health: {
+        availability: { state: "complete", count: 1, unit: "files" },
+        files: [
+          {
+            file: 0,
+            path: "src/a.ts",
+            maintainability_index: 51,
+            crap_max: 28,
+            complexity_density: 0.4,
+            fan_in: 2,
+            fan_out: 3,
+          },
+        ],
+        findings: [],
+      },
+    } as unknown as VizData;
+    expect(healthRiskForFile(d, 0)).toBe(28);
+    const index = buildIndex(d);
+    expect(lensFindingLevel("health" as Lens, index, d.files[0], 0)).toBe(2);
+    expect(lensFindingLevel("health" as Lens, index, d.files[1], 1)).toBe(0);
+    expect(lensColor("health", getTheme(true), index, d.files[0])).not.toBe(
+      getTheme(true).cellNeutral,
+    );
+  });
+
+  it("associates one finding with every referenced file", () => {
+    const d = data({
+      architecture: {
+        availability: { state: "complete", count: 1, unit: "violations" },
+        findings: [
+          {
+            kind: "cross-package-cycle",
+            title: "Cross-package cycle",
+            file: 0,
+            files: [0, 1],
+            path: "src/a.ts",
+            paths: ["src/a.ts", "src/b.ts"],
+            description: "Two packages form a cycle",
+            actions: [],
+          },
+        ],
+      },
+    });
+    expect(findingsForFile(d, "architecture", 0)).toHaveLength(1);
+    expect(findingsForFile(d, "architecture", 1)).toHaveLength(1);
+  });
+});
+
 describe("dupRatio", () => {
   it("is zero without duplicated lines and capped at one", () => {
     expect(dupRatio(file())).toBe(0);
@@ -118,13 +351,14 @@ describe("dupRatio", () => {
 
 describe("legendText", () => {
   it("explains the neutral map when a finding lens is clean", () => {
-    expect(legendText("deadcode", data(), "graph")).toContain("No findings");
+    expect(legendText("unused", data(), "graph")).toContain("No findings");
   });
 
   it("keeps the color key when findings exist", () => {
     const d = data();
     d.summary.unused_files = 2;
-    expect(legendText("deadcode", d, "graph")).toContain("Red is never imported");
+    d.files[0].status = "unused";
+    expect(legendText("unused", d, "graph")).toContain("Red is never imported");
   });
 
   it("describes tiles in map view and dots in graph view", () => {
@@ -146,26 +380,24 @@ describe("lens coloring", () => {
 
   it("grades findings per lens for the non-color texture channel", () => {
     const index = buildIndex(data());
-    // deadcode: unused file severe, unused exports mild, clean none.
-    expect(lensFindingLevel("deadcode", index, file({ status: "unused" }), 0)).toBe(2);
-    expect(lensFindingLevel("deadcode", index, file({ unused_export_count: 2 }), 0)).toBe(1);
-    expect(lensFindingLevel("deadcode", index, file(), 0)).toBe(0);
-    // dupes: >= 30% duplicated lines severe, any duplication mild.
-    expect(lensFindingLevel("dupes", index, file({ size: 340, dup_lines: 9 }), 0)).toBe(2);
-    expect(lensFindingLevel("dupes", index, file({ size: 3400, dup_lines: 1 }), 0)).toBe(1);
-    expect(lensFindingLevel("dupes", index, file(), 0)).toBe(0);
-    // hotspots: cc thresholds match the panel's sev split.
-    expect(lensFindingLevel("hotspots", index, file({ max_cyclomatic: 25 }), 0)).toBe(2);
-    expect(lensFindingLevel("hotspots", index, file({ max_cyclomatic: 12 }), 0)).toBe(1);
-    expect(lensFindingLevel("hotspots", index, file({ max_cyclomatic: 5 }), 0)).toBe(0);
-    // boundaries: violation sources severe; overview always none.
+    // unused: unused file severe, unused exports mild, clean none.
+    expect(lensFindingLevel("unused", index, file({ status: "unused" }), 0)).toBe(2);
+    expect(lensFindingLevel("unused", index, file({ unused_export_count: 2 }), 0)).toBe(1);
+    expect(lensFindingLevel("unused", index, file(), 0)).toBe(0);
+    // duplication: >= 30% duplicated lines severe, any duplication mild.
+    expect(lensFindingLevel("duplication", index, file({ size: 340, dup_lines: 9 }), 0)).toBe(2);
+    expect(lensFindingLevel("duplication", index, file({ size: 3400, dup_lines: 1 }), 0)).toBe(1);
+    expect(lensFindingLevel("duplication", index, file(), 0)).toBe(0);
+    // Health without retained file metrics stays neutral.
+    expect(lensFindingLevel("health", index, file({ max_cyclomatic: 25 }), 0)).toBe(0);
+    // architecture: violation sources severe; overview always none.
     const vIndex = buildIndex(
       data({
         violations: [{ from: 0, to: 2, from_zone: 0, to_zone: 1, line: 3, specifier: "x" }],
       }),
     );
-    expect(lensFindingLevel("boundaries", vIndex, file(), 0)).toBe(2);
-    expect(lensFindingLevel("boundaries", vIndex, file(), 1)).toBe(0);
+    expect(lensFindingLevel("architecture", vIndex, file(), 0)).toBe(2);
+    expect(lensFindingLevel("architecture", vIndex, file(), 1)).toBe(0);
     expect(lensFindingLevel("overview", vIndex, file({ status: "unused" }), 0)).toBe(0);
   });
 });

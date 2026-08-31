@@ -1,6 +1,29 @@
 import type { AppState } from "./state";
-import type { Lens, VizCloneGroup, VizFile } from "./types";
-import { basename, dirname, formatCount, formatSize, reachSet } from "./data";
+import type { Lens, SecondaryAnalysis, VizCloneGroup, VizFile } from "./types";
+import {
+  analysisAvailability,
+  basename,
+  dirname,
+  findingsForAnalysis,
+  findingsForFile,
+  formatCount,
+  formatSize,
+  healthRiskForFile,
+  healthHasFindingForFile,
+  reachSet,
+  securityBlindSpots,
+  securityBlindSpotsForFile,
+  securityCandidatesForFile,
+  securityRuntimeAvailability,
+} from "./data";
+import type {
+  AnalysisAvailabilityView,
+  AnalysisId,
+  FindingActionView,
+  GenericFindingView,
+  SecurityCandidateView,
+  SecurityBlindSpotView,
+} from "./data";
 import { closeButton, copyButton, copyIconButton, el } from "./dom";
 
 /** Called when the user clicks through to another file. */
@@ -140,6 +163,283 @@ export const createPanel = (): HTMLElement => {
   panel.id = "panel";
   panel.setAttribute("aria-label", "file details");
   return panel;
+};
+
+interface FileSignalModel {
+  id: AnalysisId | "overview";
+  label: string;
+  count: number;
+  state: AnalysisAvailabilityView["state"];
+  active: boolean;
+}
+
+export interface FilePanelModel {
+  active: AnalysisId | "overview";
+  signals: FileSignalModel[];
+}
+
+const SIGNAL_LABELS: Record<AnalysisId | "overview", string> = {
+  overview: "Overview",
+  unused: "Unused",
+  duplication: "Duplication",
+  architecture: "Architecture",
+  health: "Health",
+  security: "Security",
+  dependencies: "Dependencies",
+  frameworks: "Frameworks",
+  styling: "Styling",
+  flags: "Feature flags",
+};
+
+const SIGNAL_STATE_SUFFIX: Record<
+  Exclude<AnalysisAvailabilityView["state"], "complete">,
+  string
+> = {
+  disabled: " disabled",
+  notApplicable: " not applicable",
+  unavailable: " unavailable",
+};
+
+const analysisIdForLens = (lens: Lens): AnalysisId | "overview" => {
+  switch (lens) {
+    case "unused":
+      return "unused";
+    case "duplication":
+      return "duplication";
+    case "architecture":
+      return "architecture";
+    case "health":
+      return "health";
+    case "security":
+      return "security";
+    default:
+      return "overview";
+  }
+};
+
+const analysisIdForSecondary = (analysis: SecondaryAnalysis): AnalysisId =>
+  analysis === "feature_flags" ? "flags" : analysis;
+
+const activeAnalysisId = (state: AppState): AnalysisId | "overview" =>
+  state.activeAnalysis === null
+    ? analysisIdForLens(state.lens)
+    : analysisIdForSecondary(state.activeAnalysis);
+
+const genericCountForFile = (state: AppState, id: AnalysisId, fileIdx: number): number => {
+  if (id === "security") return securityCandidatesForFile(state.data, fileIdx).length;
+  if (id === "unused") {
+    const file = state.data.files[fileIdx];
+    return file.status === "unused" ? 1 : file.unused_export_count;
+  }
+  if (id === "duplication") return state.data.files[fileIdx].clone_groups?.length ?? 0;
+  if (id === "architecture") return findingsForFile(state.data, "architecture", fileIdx).length;
+  return findingsForFile(state.data, id, fileIdx).length;
+};
+
+/** Pure file-panel ordering model used by the renderer and tests. */
+export const filePanelModel = (state: AppState, fileIdx: number): FilePanelModel => {
+  const active = activeAnalysisId(state);
+  const ids: Array<AnalysisId | "overview"> = [
+    "overview",
+    "unused",
+    "duplication",
+    "architecture",
+    "health",
+    "security",
+    "dependencies",
+    "frameworks",
+    "styling",
+    "flags",
+  ];
+  return {
+    active,
+    signals: ids.map((id) => {
+      const availability =
+        id === "overview"
+          ? ({ state: "complete", count: 1, unit: "file" } satisfies AnalysisAvailabilityView)
+          : analysisAvailability(state.data, id);
+      return {
+        id,
+        label: SIGNAL_LABELS[id],
+        count: id === "overview" ? 1 : genericCountForFile(state, id, fileIdx),
+        state: availability.state,
+        active: id === active,
+      };
+    }),
+  };
+};
+
+const sectionId = (id: AnalysisId | "overview", supporting: boolean): string =>
+  `panel-${supporting ? "supporting" : "active"}-${id}`;
+
+const signalNavigator = (model: FilePanelModel): HTMLElement => {
+  const nav = el("nav", "signal-nav");
+  nav.setAttribute("aria-label", "File signals");
+  for (const signal of model.signals) {
+    if (!signal.active && signal.count === 0 && signal.state === "complete") continue;
+    const button = el("button") as HTMLButtonElement;
+    button.type = "button";
+    button.className = signal.active ? "active" : "";
+    button.setAttribute("aria-current", signal.active ? "true" : "false");
+    const suffix =
+      signal.id === "overview"
+        ? ""
+        : signal.state === "complete"
+          ? ` ${formatCount(signal.count)}`
+          : SIGNAL_STATE_SUFFIX[signal.state];
+    button.textContent = `${signal.label}${suffix}`;
+    button.addEventListener("click", () => {
+      const target = document.getElementById(sectionId(signal.id, !signal.active));
+      target?.scrollIntoView({ block: "nearest" });
+    });
+    nav.appendChild(button);
+  }
+  return nav;
+};
+
+const availabilityMessage = (
+  id: AnalysisId,
+  availability: AnalysisAvailabilityView,
+): HTMLElement => {
+  if (availability.state === "complete") {
+    return el("div", "sev-ok", `No ${availability.unit} for this file`);
+  }
+  const labels: Record<Exclude<AnalysisAvailabilityView["state"], "complete">, string> = {
+    disabled: "Disabled",
+    notApplicable: "Not applicable",
+    unavailable: "Unavailable",
+  };
+  const message = el("div", "availability-state");
+  message.appendChild(sev("sev-info", labels[availability.state]));
+  message.appendChild(
+    document.createTextNode(
+      availability.reason ? `: ${availability.reason}` : ` for ${SIGNAL_LABELS[id]}`,
+    ),
+  );
+  return message;
+};
+
+const findingActions = (actions: FindingActionView[]): HTMLElement | null => {
+  if (actions.length === 0) return null;
+  const wrap = el("div", "finding-actions");
+  for (const action of actions) {
+    if (action.command) wrap.appendChild(commandHint(action.label, action.command));
+    else if (action.description) {
+      wrap.appendChild(el("div", "muted", `${action.label}: ${action.description}`));
+    }
+  }
+  if (wrap.childNodes.length === 0) return null;
+  return wrap;
+};
+
+const securityCandidateEl = (
+  candidate: SecurityCandidateView,
+  showOnMap: (() => void) | null,
+): HTMLElement => {
+  const article = el("article", "security-candidate");
+  const heading = el("h4", undefined, candidate.title);
+  article.appendChild(heading);
+  const badges = el("div", "status-line");
+  badges.appendChild(
+    sev(
+      ["critical", "high", "error"].includes(candidate.severity.toLowerCase())
+        ? "sev-error"
+        : "sev-warn",
+      candidate.severity,
+    ),
+  );
+  if (candidate.confidence)
+    badges.appendChild(sev("sev-info", `${candidate.confidence} confidence`));
+  article.appendChild(badges);
+  const facts: KvPair[] = [];
+  if (candidate.category) facts.push(["Category", candidate.category]);
+  if (candidate.cwe) facts.push(["CWE", candidate.cwe]);
+  if (candidate.line !== null) {
+    facts.push([
+      "Location",
+      `${candidate.path}:${candidate.line}${candidate.column === null ? "" : `:${candidate.column}`}`,
+    ]);
+  }
+  if (candidate.source) facts.push(["Source", candidate.source]);
+  if (candidate.sink) facts.push(["Sink", candidate.sink]);
+  if (candidate.urlShape) facts.push(["URL shape", candidate.urlShape]);
+  if (candidate.networkDestination) {
+    facts.push(["Network destination", candidate.networkDestination]);
+  }
+  if (candidate.boundary) facts.push(["Trust boundary", candidate.boundary]);
+  if (candidate.reachability) facts.push(["Reachability", candidate.reachability]);
+  if (candidate.blastRadius !== null) {
+    facts.push(["Blast radius", `${formatCount(candidate.blastRadius)} files`]);
+  }
+  if (candidate.deadCode !== null) facts.push(["Dead code", candidate.deadCode ? "Yes" : "No"]);
+  if (candidate.runtime) facts.push(["Runtime evidence", candidate.runtime]);
+  if (facts.length > 0) article.appendChild(kvEl(facts));
+  if (candidate.evidence) article.appendChild(el("p", "finding-evidence", candidate.evidence));
+  if (candidate.trace.length > 0) {
+    const trace = el("ol", "trace-list");
+    for (const step of candidate.trace) trace.appendChild(el("li", undefined, step));
+    article.appendChild(trace);
+  }
+  if (candidate.taintFlow) {
+    article.appendChild(el("p", "finding-evidence", `Taint flow: ${candidate.taintFlow}`));
+  }
+  if (candidate.observedControls.length > 0) {
+    const controls = el("div", "observed-controls");
+    controls.appendChild(el("strong", undefined, "Observed controls"));
+    const list = el("ul");
+    for (const control of candidate.observedControls)
+      list.appendChild(el("li", undefined, control));
+    controls.appendChild(list);
+    article.appendChild(controls);
+  }
+  if (candidate.verificationPrompt) {
+    article.appendChild(
+      el("p", "finding-evidence", `Verify controls: ${candidate.verificationPrompt}`),
+    );
+  }
+  const actions = findingActions(candidate.actions);
+  if (actions) article.appendChild(actions);
+  const localActions = el("div", "finding-actions");
+  localActions.appendChild(copyButton("finding-copy", "Copy finding ID", () => candidate.id));
+  if (candidate.evidence) {
+    localActions.appendChild(
+      copyButton("finding-copy", "Copy evidence", () => candidate.evidence ?? ""),
+    );
+  }
+  if (showOnMap) {
+    const show = el("button", undefined, "Show on map") as HTMLButtonElement;
+    show.type = "button";
+    show.addEventListener("click", showOnMap);
+    localActions.appendChild(show);
+  }
+  article.appendChild(localActions);
+  return article;
+};
+
+const genericFindingEl = (finding: GenericFindingView): HTMLElement => {
+  const article = el("article", "analysis-finding");
+  const heading = el("h4", undefined, finding.title);
+  if (finding.severity) {
+    heading.appendChild(
+      sev(
+        ["critical", "high", "error"].includes(finding.severity.toLowerCase())
+          ? "sev-error"
+          : "sev-warn",
+        ` ${finding.severity}`,
+      ),
+    );
+  }
+  article.appendChild(heading);
+  if (finding.path) {
+    article.appendChild(
+      el("div", "muted", `${finding.path}${finding.line === null ? "" : `:${finding.line}`}`),
+    );
+  }
+  if (finding.detail) article.appendChild(el("p", "finding-evidence", finding.detail));
+  if (finding.metrics.length > 0) article.appendChild(kvEl(finding.metrics));
+  const actions = findingActions(finding.actions);
+  if (actions) article.appendChild(actions);
+  return article;
 };
 
 /**
@@ -448,6 +748,290 @@ const deadCodeSection = (file: VizFile): HTMLElement | null => {
   return null;
 };
 
+const genericAnalysisSection = (
+  state: AppState,
+  id: Exclude<AnalysisId, "unused" | "duplication" | "security">,
+  fileIdx: number,
+  excludedKinds: ReadonlySet<string> = new Set(),
+): HTMLElement => {
+  const availability = analysisAvailability(state.data, id);
+  const section = sectionEl(SIGNAL_LABELS[id]);
+  const findings = findingsForFile(state.data, id, fileIdx).filter(
+    (finding) => !excludedKinds.has(finding.kind),
+  );
+  if (availability.state !== "complete" || findings.length === 0) {
+    section.appendChild(availabilityMessage(id, availability));
+    return section;
+  }
+  for (const finding of findings) section.appendChild(genericFindingEl(finding));
+  return section;
+};
+
+const blindSpotEl = (blindSpot: SecurityBlindSpotView): HTMLElement => {
+  const location = blindSpot.path
+    ? `${blindSpot.path}${blindSpot.line === null ? "" : `:${blindSpot.line}`}`
+    : null;
+  return el(
+    "p",
+    "availability-state",
+    `${blindSpot.kind.endsWith("-sample") ? "Sample: " : ""}${blindSpot.kind} (${formatCount(blindSpot.count)})${location ? ` at ${location}` : ""}${blindSpot.reason ? `: ${blindSpot.reason}` : ""}`,
+  );
+};
+
+const securitySection = (state: AppState, fileIdx: number, navigate: NavigateFn): HTMLElement => {
+  const availability = analysisAvailability(state.data, "security");
+  const section = sectionEl("Static Security candidates");
+  const candidates = securityCandidatesForFile(state.data, fileIdx);
+  if (availability.state !== "complete" || candidates.length === 0) {
+    section.appendChild(availabilityMessage("security", availability));
+  } else {
+    const note = el(
+      "p",
+      "muted",
+      "Candidates need review. Static evidence does not by itself confirm a vulnerability.",
+    );
+    section.appendChild(note);
+    for (const candidate of candidates) {
+      section.appendChild(
+        securityCandidateEl(
+          candidate,
+          candidate.fileIndex === null ? null : () => navigate(candidate.fileIndex ?? fileIdx),
+        ),
+      );
+    }
+  }
+  const blindSpots = securityBlindSpotsForFile(state.data, fileIdx);
+  if (blindSpots.length > 0) {
+    const details = el("details", "supporting-signals") as HTMLDetailsElement;
+    details.appendChild(el("summary", undefined, `Blind spots ${formatCount(blindSpots.length)}`));
+    for (const blindSpot of blindSpots) {
+      details.appendChild(blindSpotEl(blindSpot));
+    }
+    section.appendChild(details);
+  }
+  const runtime = securityRuntimeAvailability(state.data);
+  const runtimeState = el("div", "availability-state");
+  runtimeState.appendChild(el("strong", undefined, "Runtime Security: "));
+  runtimeState.appendChild(
+    document.createTextNode(
+      runtime.state === "complete"
+        ? `${formatCount(runtime.count)} ${runtime.unit}`
+        : `${runtime.state}${runtime.reason ? `, ${runtime.reason}` : ""}`,
+    ),
+  );
+  section.appendChild(runtimeState);
+  return section;
+};
+
+const securityCoverageSection = (state: AppState): HTMLElement => {
+  const section = sectionEl("Security coverage");
+  const runtime = securityRuntimeAvailability(state.data);
+  section.appendChild(
+    el(
+      "div",
+      "availability-state",
+      runtime.state === "complete"
+        ? `Runtime Security: ${formatCount(runtime.count)} ${runtime.unit}`
+        : `Runtime Security: ${runtime.state}${runtime.reason ? `, ${runtime.reason}` : ""}`,
+    ),
+  );
+  const blindSpots = securityBlindSpots(state.data);
+  if (state.data.security.blind_spot_count === 0) {
+    section.appendChild(el("div", "sev-ok", "No static-analysis blind spots reported"));
+    return section;
+  }
+  const details = el("details", "supporting-signals") as HTMLDetailsElement;
+  const truncated = state.data.security.blind_spots_truncated ?? 0;
+  details.appendChild(
+    el(
+      "summary",
+      undefined,
+      `${formatCount(state.data.security.blind_spot_count)} blind spots${truncated > 0 ? `, ${formatCount(truncated)} samples not shown` : ""}`,
+    ),
+  );
+  for (const blindSpot of blindSpots) {
+    details.appendChild(blindSpotEl(blindSpot));
+  }
+  section.appendChild(details);
+  return section;
+};
+
+const healthSummarySection = (state: AppState): HTMLElement | null => {
+  const pairs: KvPair[] = [];
+  if (state.data.health.score !== undefined) {
+    pairs.push(["Score", state.data.health.score.toFixed(1)]);
+  }
+  if (state.data.health.grade) pairs.push(["Grade", state.data.health.grade]);
+  if (state.data.health.average_maintainability !== undefined) {
+    pairs.push(["Maintainability", state.data.health.average_maintainability.toFixed(1)]);
+  }
+  if (pairs.length === 0) return null;
+  const section = sectionEl("Project Health");
+  section.appendChild(kvEl(pairs));
+  const capabilities = el("details", "supporting-signals") as HTMLDetailsElement;
+  capabilities.appendChild(el("summary", undefined, "Health signal coverage"));
+  for (const [label, availability] of Object.entries(state.data.health.capabilities)) {
+    capabilities.appendChild(
+      el(
+        "p",
+        "availability-state",
+        `${label}: ${availability.state === "complete" ? `${formatCount(availability.count)} ${availability.unit}` : `${availability.state}${availability.reason ? `, ${availability.reason}` : ""}`}`,
+      ),
+    );
+  }
+  section.appendChild(capabilities);
+  return section;
+};
+
+const frameworkSummarySection = (state: AppState): HTMLElement | null => {
+  const detectorAvailability = state.data.frameworks.detector_availability;
+  const section = sectionEl("Framework detector coverage");
+  if (state.data.frameworks.detected_frameworks.length > 0) {
+    section.appendChild(el("p", undefined, state.data.frameworks.detected_frameworks.join(", ")));
+  }
+  for (const detector of state.data.frameworks.detectors) {
+    section.appendChild(
+      el(
+        "p",
+        "availability-state",
+        `${detector.id}: ${detector.status}${detector.reason ? `, ${detector.reason}` : ""}`,
+      ),
+    );
+  }
+  if (state.data.frameworks.detectors.length === 0) {
+    section.appendChild(
+      el(
+        "p",
+        "availability-state",
+        `${detectorAvailability.state}${detectorAvailability.reason ? `, ${detectorAvailability.reason}` : ""}`,
+      ),
+    );
+  }
+  return section;
+};
+
+const stylingSummarySection = (state: AppState): HTMLElement | null => {
+  const pairs: KvPair[] = [];
+  if (state.data.styling.score !== undefined)
+    pairs.push(["Score", state.data.styling.score.toFixed(1)]);
+  if (state.data.styling.grade) pairs.push(["Grade", state.data.styling.grade]);
+  if (state.data.styling.confidence) pairs.push(["Confidence", state.data.styling.confidence]);
+  const summary = state.data.styling.summary;
+  if (typeof summary === "object" && summary !== null) {
+    for (const [label, key] of [
+      ["Stylesheets", "files_analyzed"],
+      ["Rules", "total_rules"],
+      ["Declarations", "total_declarations"],
+      ["Unique colors", "unique_colors"],
+    ] as const) {
+      const value = Reflect.get(summary, key);
+      if (typeof value === "number") pairs.push([label, formatCount(value)]);
+    }
+  }
+  if (pairs.length === 0) return null;
+  const section = sectionEl("Styling Health");
+  section.appendChild(kvEl(pairs));
+  return section;
+};
+
+const analysisContent = (
+  state: AppState,
+  id: AnalysisId | "overview",
+  file: VizFile,
+  fileIdx: number,
+  navigate: NavigateFn,
+): HTMLElement[] => {
+  if (id === "overview") {
+    return [factsSection(state, file, fileIdx), ...connectionSections(state, fileIdx, navigate)];
+  }
+  if (id === "unused") {
+    const finding = deadCodeSection(file);
+    if (finding) return [finding];
+    const section = sectionEl("Unused");
+    section.appendChild(availabilityMessage(id, analysisAvailability(state.data, id)));
+    return [section];
+  }
+  if (id === "duplication") {
+    const finding = duplicationSection(state, file, fileIdx, navigate);
+    if (finding) return [finding];
+    const section = sectionEl("Duplication");
+    section.appendChild(availabilityMessage(id, analysisAvailability(state.data, id)));
+    return [section];
+  }
+  if (id === "security") return [securitySection(state, fileIdx, navigate)];
+  if (id === "architecture") {
+    const sections: HTMLElement[] = [];
+    const boundaries = boundariesSection(state, fileIdx, navigate);
+    const cycle = cycleSection(state, file, fileIdx, navigate);
+    if (boundaries) sections.push(boundaries);
+    if (cycle) sections.push(cycle);
+    const extra = findingsForFile(state.data, "architecture", fileIdx).filter(
+      (finding) => finding.kind !== "boundary-violation" && finding.kind !== "circular-dependency",
+    );
+    if (extra.length > 0 || sections.length === 0) {
+      sections.push(
+        genericAnalysisSection(
+          state,
+          "architecture",
+          fileIdx,
+          new Set(["boundary-violation", "circular-dependency"]),
+        ),
+      );
+    }
+    return sections;
+  }
+  if (id === "health") {
+    const health = genericAnalysisSection(state, "health", fileIdx);
+    const complexity =
+      analysisAvailability(state.data, "health").state === "complete"
+        ? complexitySection(file)
+        : null;
+    return complexity ? [health, complexity] : [health];
+  }
+  return [genericAnalysisSection(state, id, fileIdx)];
+};
+
+const activeAnalysis = (
+  state: AppState,
+  model: FilePanelModel,
+  file: VizFile,
+  fileIdx: number,
+  navigate: NavigateFn,
+): HTMLElement => {
+  const container = el("div", "active-signal");
+  container.id = sectionId(model.active, false);
+  container.appendChild(el("h2", undefined, SIGNAL_LABELS[model.active]));
+  for (const section of analysisContent(state, model.active, file, fileIdx, navigate)) {
+    container.appendChild(section);
+  }
+  return container;
+};
+
+const supportingAnalyses = (
+  state: AppState,
+  model: FilePanelModel,
+  file: VizFile,
+  fileIdx: number,
+  navigate: NavigateFn,
+): HTMLElement[] => {
+  return model.signals.flatMap((signal): HTMLElement[] => {
+    if (signal.active || (signal.count === 0 && signal.state === "complete")) return [];
+    const details = el("details", "supporting-signals") as HTMLDetailsElement;
+    details.id = sectionId(signal.id, true);
+    const summary = el("summary");
+    summary.appendChild(
+      document.createTextNode(
+        signal.id === "overview" ? signal.label : `${signal.label} ${formatCount(signal.count)}`,
+      ),
+    );
+    details.appendChild(summary);
+    for (const section of analysisContent(state, signal.id, file, fileIdx, navigate)) {
+      details.appendChild(section);
+    }
+    return [details];
+  });
+};
+
 /** Path, name, status, and the copy-path affordance. */
 const fileHead = (file: VizFile, close: () => void): HTMLElement => {
   const head = el("div", "panel-head");
@@ -478,6 +1062,7 @@ export const panelRenderKey = (state: AppState): string =>
     state.selectedClone,
     state.selectedRoad ? `${state.selectedRoad.srcKey}>${state.selectedRoad.dstKey}` : null,
     state.lens,
+    state.activeAnalysis,
     state.search,
   ].join("|");
 
@@ -516,21 +1101,11 @@ export const renderPanel = (
   panel.classList.add("open");
   panel.setAttribute("aria-label", "file details");
   panel.appendChild(fileHead(file, close));
-  panel.appendChild(factsSection(state, file, fileIdx));
-  const dead = deadCodeSection(file);
-  if (dead) panel.appendChild(dead);
-
-  // Wiring first: "who imports this / what it imports" is the map's core
-  // question, so answer it before the finding-specific tables.
-  const sections = [
-    ...connectionSections(state, fileIdx, navigate),
-    complexitySection(file),
-    duplicationSection(state, file, fileIdx, navigate),
-    boundariesSection(state, fileIdx, navigate),
-    cycleSection(state, file, fileIdx, navigate),
-  ];
-  for (const section of sections) {
-    if (section) panel.appendChild(section);
+  const model = filePanelModel(state, fileIdx);
+  panel.appendChild(signalNavigator(model));
+  panel.appendChild(activeAnalysis(state, model, file, fileIdx, navigate));
+  for (const details of supportingAnalyses(state, model, file, fileIdx, navigate)) {
+    panel.appendChild(details);
   }
 };
 
@@ -658,7 +1233,8 @@ interface RankRow {
   dir?: string;
   metric: string;
   cells: { value: string; cls: string }[];
-  fileIndex: number;
+  fileIndex: number | null;
+  finding?: GenericFindingView;
   /** Clone group index; rows with this open the clone panel instead. */
   clone?: number;
   /** Optional magnitude meter, drawn between the label and the value cells. */
@@ -683,17 +1259,53 @@ interface RankView {
   columns: RankColumn[];
 }
 
+/** Keep large reports responsive while preserving the full payload for search,
+ *  selection, and graph navigation. The final row reports the omitted count. */
+export const MAX_RENDERED_RANK_ROWS = 500;
+
+export const rankRowsForRender = (rows: RankRow[]): { rows: RankRow[]; truncated: number } => ({
+  rows: rows.slice(0, MAX_RENDERED_RANK_ROWS),
+  truncated: Math.max(0, rows.length - MAX_RENDERED_RANK_ROWS),
+});
+
 /** A lens's ranked findings plus its section title and empty-state copy. */
 interface RankLensView extends RankView {
   title: string;
   empty: string;
 }
 
-export const rankRowsFor = (state: AppState): RankLensView => rankRowsForLens(state, state.lens);
+const genericRankRows = (
+  state: AppState,
+  id: Exclude<AnalysisId, "unused" | "duplication" | "security">,
+): RankRow[] =>
+  findingsForAnalysis(state.data, id).map((finding): RankRow => {
+    const pathIndex =
+      finding.path === null ? -1 : state.data.files.findIndex((file) => file.path === finding.path);
+    const indexedFile =
+      finding.fileIndex !== null && state.data.files[finding.fileIndex] !== undefined
+        ? finding.fileIndex
+        : null;
+    const fileIndex = indexedFile ?? (pathIndex >= 0 ? pathIndex : null);
+    const path =
+      finding.path ?? (fileIndex === null ? null : (state.data.files[fileIndex]?.path ?? null));
+    const metric =
+      finding.metrics.map(([label, value]) => `${label} ${value}`).join(", ") || finding.title;
+    return {
+      label: path ? basename(path) : finding.title,
+      dir: path ? dirname(path) : "project",
+      metric,
+      cells: [{ value: finding.title, cls: finding.severity ? "sev-warn" : "" }],
+      fileIndex,
+      finding,
+    };
+  });
+
+export const rankRowsFor = (state: AppState): RankLensView =>
+  rankRowsForLens(state, (state.activeAnalysis ?? state.lens) as Lens);
 
 const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
   const files = state.data.files;
-  switch (lens) {
+  switch (lens as string) {
     case "overview": {
       // The newcomer's "what should I read first": files the rest of the
       // codebase leans on hardest, ranked by how many import them. Reuses the
@@ -712,7 +1324,7 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         columns: usedByColumns,
       };
     }
-    case "deadcode": {
+    case "unused": {
       const rows: RankRow[] = [];
       const unused = files
         .map((file, index) => ({ file, index }))
@@ -757,7 +1369,7 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         ],
       };
     }
-    case "dupes": {
+    case "duplication": {
       const groupIndices = [...state.data.clones.keys()]
         .toSorted((left, right) => state.data.clones[right].lines - state.data.clones[left].lines)
         .filter((groupIdx) => {
@@ -792,83 +1404,121 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         columns: [{ header: "lines", hint: "Number of duplicated lines in the block." }],
       };
     }
-    case "boundaries": {
-      const rows: RankRow[] = [];
-      for (const violation of state.data.violations) {
-        if (files[violation.from] === undefined || files[violation.to] === undefined) continue;
-        const zoneName = state.data.zones[violation.to_zone]?.name ?? "zone";
-        rows.push({
-          label: `${basename(files[violation.from].path)} → ${basename(files[violation.to].path)}`,
-          dir: dirname(files[violation.from].path),
-          metric: `→ ${zoneName}`,
-          cells: [{ value: `→ ${zoneName}`, cls: "sev-error" }],
-          fileIndex: violation.from,
-        });
-      }
-      state.data.cycles.forEach((cycle) => {
-        if (cycle.length === 0 || files[cycle[0]] === undefined) return;
-        rows.push({
-          label: `Loop of ${formatCount(cycle.length)} files`,
-          dir: dirname(files[cycle[0]].path),
-          metric: basename(files[cycle[0]].path),
-          cells: [{ value: basename(files[cycle[0]].path), cls: "sev-warn" }],
-          fileIndex: cycle[0],
-        });
-      });
+    case "architecture": {
       return {
-        title: "Forbidden imports & loops",
-        rows,
-        empty: "No forbidden imports or loops",
-        labelHead: "import",
+        title: "Architecture findings",
+        rows: genericRankRows(state, "architecture"),
+        empty: "No architecture violations",
+        labelHead: "location",
         columns: [
           {
-            header: "detail",
-            hint: "The layer a forbidden import reaches into, or a file in the import loop.",
+            header: "finding",
+            hint: "Boundary, policy, call, import-cycle, or re-export-cycle finding.",
           },
         ],
       };
     }
-    case "hotspots": {
-      // Risk = hard to change AND widely depended on, not hardness alone;
-      // that is the "what do we refactor first" ordering a lead wants.
-      const risk = (file: VizFile): number =>
-        file.max_cyclomatic * Math.log2(2 + file.importer_count);
+    case "health": {
       const rows = files
-        .map((file, index) => ({ file, index }))
-        .filter(({ file }) => file.max_cyclomatic > 0)
-        .toSorted((left, right) => risk(right.file) - risk(left.file))
-        .map(({ file, index }) => ({
+        .map((file, index) => ({ file, index, risk: healthRiskForFile(state.data, index) ?? 0 }))
+        .filter(({ index }) => healthHasFindingForFile(state.data, index))
+        .toSorted((left, right) => right.risk - left.risk)
+        .map(({ file, index }): RankRow => {
+          const findings = findingsForFile(state.data, "health", index);
+          const fileHealth = state.data.health.files.find((entry) => entry.file === index);
+          const metric = fileHealth
+            ? `MI ${fileHealth.maintainability_index.toFixed(0)}, CRAP ${fileHealth.crap_max.toFixed(0)}`
+            : (findings[0]?.title ?? "Review Health signals");
+          return {
+            label: basename(file.path),
+            dir: dirname(file.path),
+            metric,
+            cells: [
+              {
+                value: metric,
+                cls: findings.some((finding) => finding.severity) ? "sev-warn" : "",
+              },
+            ],
+            fileIndex: index,
+          };
+        });
+      return {
+        title: "Files needing Health review",
+        rows,
+        empty: "No files need Health review",
+        labelHead: "file",
+        columns: [{ header: "health", hint: "Retained Health metrics for this file." }],
+      };
+    }
+    case "security": {
+      const priority = (severity: string): number => {
+        switch (severity.toLowerCase()) {
+          case "critical":
+            return 4;
+          case "high":
+          case "error":
+            return 3;
+          case "medium":
+          case "moderate":
+            return 2;
+          default:
+            return 1;
+        }
+      };
+      const rows = files
+        .flatMap((file, index) =>
+          securityCandidatesForFile(state.data, index).map((candidate) => ({
+            file,
+            index,
+            candidate,
+          })),
+        )
+        .toSorted(
+          (left, right) => priority(right.candidate.severity) - priority(left.candidate.severity),
+        )
+        .map(({ file, index, candidate }) => ({
           label: basename(file.path),
           dir: dirname(file.path),
-          metric: `cc ${formatCount(file.max_cyclomatic)}, used by ${formatCount(file.importer_count)}`,
+          metric: `${candidate.severity}: ${candidate.title}`,
           cells: [
             {
-              value: formatCount(file.max_cyclomatic),
+              value: candidate.severity,
               cls:
-                file.max_cyclomatic >= 20
+                priority(candidate.severity) >= 3
                   ? "sev-error"
-                  : file.max_cyclomatic >= 10
+                  : priority(candidate.severity) >= 2
                     ? "sev-warn"
-                    : "",
+                    : "sev-info",
             },
-            { value: formatCount(file.importer_count), cls: "muted" },
           ],
           fileIndex: index,
-          // Same 0-30 scale as the per-function bar; red past the danger line.
-          bar: meterSpec(file.max_cyclomatic, 30, file.max_cyclomatic >= 20 ? "error" : "warn"),
         }));
       return {
-        title: "Complexity hotspots",
+        title: "Static Security candidates",
         rows,
-        empty: "No complex functions",
+        empty: "No static Security candidates",
         labelHead: "file",
-        columns: [
-          {
-            header: "cc",
-            hint: "Branches in the file's hardest function; higher is harder to change.",
-          },
-          { header: "used by", hint: "How many files import this one." },
-        ],
+        columns: [{ header: "severity", hint: "Review priority, not proof of a vulnerability." }],
+      };
+    }
+    case "dependencies":
+    case "frameworks":
+    case "styling":
+    case "feature_flags":
+    case "flags": {
+      const wireId = lens as string;
+      const id =
+        wireId === "feature_flags"
+          ? "flags"
+          : (wireId as "dependencies" | "frameworks" | "styling" | "flags");
+      const rows = genericRankRows(state, id);
+      const noun = id === "flags" ? "uses" : "findings";
+      return {
+        title: `${SIGNAL_LABELS[id]} ${noun}`,
+        rows,
+        empty: `No ${SIGNAL_LABELS[id]} ${noun}`,
+        labelHead: "file",
+        columns: [{ header: "finding", hint: `${SIGNAL_LABELS[id]} analysis finding.` }],
       };
     }
     default:
@@ -921,6 +1571,26 @@ const fileCell = (
   return td;
 };
 
+const staticFileCell = (
+  label: string,
+  dir: string,
+  budgetHint: number,
+  finding?: GenericFindingView,
+): HTMLElement => {
+  const td = el("td", "col-file");
+  if (!finding) {
+    td.appendChild(rankLabelEl(label, dir, budgetHint));
+    return td;
+  }
+  const details = el("details", "rank-details") as HTMLDetailsElement;
+  const summary = el("summary");
+  summary.appendChild(rankLabelEl(label, dir, budgetHint));
+  details.appendChild(summary);
+  details.appendChild(genericFindingEl(finding));
+  td.appendChild(details);
+  return td;
+};
+
 /**
  * The generic ranked table: a truncating label column plus one narrow,
  * right-aligned value column per definition, each carrying its meaning
@@ -935,7 +1605,8 @@ const renderRankTable = (
   onPick: (row: RankRow) => void,
 ): HTMLElement => {
   const { rows, labelHead, columns } = view;
-  const hasBar = rows.some((row) => row.bar !== undefined);
+  const { rows: renderedRows, truncated } = rankRowsForRender(rows);
+  const hasBar = renderedRows.some((row) => row.bar !== undefined);
   const table = el("table", "rank-table");
   const thead = el("thead");
   const hr = el("tr");
@@ -950,12 +1621,14 @@ const renderRankTable = (
   thead.appendChild(hr);
   table.appendChild(thead);
   const tbody = el("tbody");
-  // Every row is rendered: the panel is the only scroller, so lists never
-  // hide behind an inner scrollbox or a "… N more" cutoff.
-  rows.forEach((row, index) => {
+  renderedRows.forEach((row, index) => {
     const tr = el("tr");
     tr.appendChild(el("td", "col-rank", formatCount(index + 1)));
-    tr.appendChild(fileCell(row.label, row.dir ?? "", row.metric.length / 2, () => onPick(row)));
+    tr.appendChild(
+      row.fileIndex === null
+        ? staticFileCell(row.label, row.dir ?? "", row.metric.length / 2, row.finding)
+        : fileCell(row.label, row.dir ?? "", row.metric.length / 2, () => onPick(row)),
+    );
     if (hasBar) {
       const barTd = el("td", "col-bar");
       if (row.bar) barTd.appendChild(meterBar(row.bar.value, row.bar.max, row.bar.tone));
@@ -968,6 +1641,17 @@ const renderRankTable = (
     }
     tbody.appendChild(tr);
   });
+  if (truncated > 0) {
+    const tr = el("tr", "rank-truncated");
+    const td = el(
+      "td",
+      "muted",
+      `${formatCount(truncated)} additional rows not rendered`,
+    ) as HTMLTableCellElement;
+    td.colSpan = 2 + columns.length + (hasBar ? 1 : 0);
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
   table.appendChild(tbody);
   return table;
 };
@@ -980,7 +1664,9 @@ const fileTable = (state: AppState, indices: number[], navigate: NavigateFn): HT
   renderRankTable(
     state,
     { rows: fileRankRows(state, indices), labelHead: "file", columns: usedByColumns },
-    (row) => navigate(row.fileIndex),
+    (row) => {
+      if (row.fileIndex !== null) navigate(row.fileIndex);
+    },
   );
 
 /** RankRows for a set of file indices, labelled with their importer count. */
@@ -1010,19 +1696,62 @@ const renderLensPanel = (
   refresh: () => void,
 ): void => {
   const { title, rows, empty, labelHead, columns } = rankRowsFor(state);
+  const analysisId = activeAnalysisId(state);
   panel.replaceChildren();
   panel.classList.add("open");
-  panel.setAttribute("aria-label", `${state.lens} findings`);
+  panel.setAttribute("aria-label", `${analysisId} findings`);
 
-  const section = sectionEl(
-    title,
-    state.lens === "hotspots"
-      ? "Riskiest first: complexity weighted by how many files use it."
-      : undefined,
-  );
+  const section = sectionEl(title);
+  if (analysisId !== "overview") {
+    const availability = analysisAvailability(state.data, analysisId);
+    if (availability.state !== "complete") {
+      section.appendChild(availabilityMessage(analysisId, availability));
+      panel.appendChild(section);
+      return;
+    }
+    if (availability.truncated && availability.truncated > 0) {
+      section.appendChild(
+        el("div", "muted", `${formatCount(availability.truncated)} ${availability.unit} not shown`),
+      );
+    }
+  }
+  if (analysisId === "health") {
+    const summary = healthSummarySection(state);
+    if (summary) panel.appendChild(summary);
+  }
+  if (analysisId === "frameworks") {
+    const summary = frameworkSummarySection(state);
+    if (summary) panel.appendChild(summary);
+  }
+  if (analysisId === "styling") {
+    const summary = stylingSummarySection(state);
+    if (summary) panel.appendChild(summary);
+  }
+  const analysisTruncated = (() => {
+    switch (analysisId) {
+      case "architecture":
+        return state.data.architecture.findings_truncated;
+      case "dependencies":
+        return state.data.dependencies.findings_truncated;
+      case "frameworks":
+        return state.data.frameworks.findings_truncated;
+      case "styling":
+        return state.data.styling.findings_truncated;
+      case "flags":
+        return state.data.feature_flags.findings_truncated;
+      default:
+        return undefined;
+    }
+  })();
+  if (analysisTruncated && analysisTruncated > 0) {
+    section.appendChild(
+      el("div", "muted", `${formatCount(analysisTruncated)} detail rows not shown`),
+    );
+  }
   if (rows.length === 0) {
     section.appendChild(el("div", "sev-ok", empty));
     panel.appendChild(section);
+    if (analysisId === "security") panel.appendChild(securityCoverageSection(state));
     return;
   }
   section.appendChild(
@@ -1031,11 +1760,30 @@ const renderLensPanel = (
         state.selectedClone = row.clone;
         refresh();
       } else {
-        navigate(row.fileIndex);
+        if (row.fileIndex !== null) navigate(row.fileIndex);
       }
     }),
   );
   panel.appendChild(section);
+  if (analysisId === "health" && (state.data.health.findings_truncated ?? 0) > 0) {
+    panel.appendChild(
+      el(
+        "div",
+        "availability-state",
+        `${formatCount(state.data.health.findings_truncated ?? 0)} Health findings not shown`,
+      ),
+    );
+  }
+  if (analysisId === "health" && (state.data.health.files_truncated ?? 0) > 0) {
+    panel.appendChild(
+      el(
+        "div",
+        "availability-state",
+        `${formatCount(state.data.health.files_truncated ?? 0)} file score rows not shown`,
+      ),
+    );
+  }
+  if (analysisId === "security") panel.appendChild(securityCoverageSection(state));
 };
 
 /**
@@ -1108,7 +1856,9 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
     renderRankTable(
       state,
       { rows: fileRankRows(state, matches), labelHead: "file", columns: usedByColumns },
-      (row) => navigate(row.fileIndex),
+      (row) => {
+        if (row.fileIndex !== null) navigate(row.fileIndex);
+      },
     ),
   );
   panel.appendChild(section);
@@ -1122,7 +1872,9 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
       renderRankTable(
         state,
         { rows: fileRankRows(state, affected), labelHead: "file", columns: usedByColumns },
-        (row) => navigate(row.fileIndex),
+        (row) => {
+          if (row.fileIndex !== null) navigate(row.fileIndex);
+        },
       ),
     );
     panel.appendChild(aff);

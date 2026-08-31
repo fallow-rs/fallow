@@ -394,8 +394,8 @@ export const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
     ctx.strokeStyle = theme.borderSubtle;
     ctx.lineWidth = 1;
     ctx.strokeRect(mid.x - textW / 2 - 3.5, mid.y - 7.5, textW + 7, 15);
-    if (state.lens === "boundaries" && road.violations > 0) ctx.fillStyle = theme.redText;
-    else if (state.lens === "boundaries" && road.bidi && road.cycleEdges > 0)
+    if (state.lens === "architecture" && road.violations > 0) ctx.fillStyle = theme.redText;
+    else if (state.lens === "architecture" && road.bidi && road.cycleEdges > 0)
       ctx.fillStyle = theme.amberText;
     else ctx.fillStyle = theme.textLow;
     ctx.fillText(label, mid.x, mid.y + 0.5);
@@ -528,7 +528,7 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
       single ? 0.75 : 0.92,
       single
         ? null
-        : cluster.tangle && state.lens === "boundaries"
+        : cluster.tangle && state.lens === "architecture"
           ? theme.amber
           : theme.borderSubtle,
     );
@@ -582,14 +582,14 @@ const legendEntries = (state: AppState): LegendEntry[] => {
         { mark: { kind: "line", color: theme.textMuted }, label: "import (thick = importer)" },
         { mark: { kind: "dot", color: theme.cellEntry }, label: "entry point" },
       ];
-    case "deadcode":
+    case "unused":
       return [
         { mark: { kind: "dot", color: theme.red }, label: "unused file" },
         { mark: { kind: "dot", color: theme.amber }, label: "unused export" },
         outlineMild,
         outlineSevere,
       ];
-    case "dupes":
+    case "duplication":
       return [
         {
           mark: { kind: "ramp", from: dupRamp(theme, 0.2), to: dupRamp(theme, 1) },
@@ -598,7 +598,7 @@ const legendEntries = (state: AppState): LegendEntry[] => {
         outlineMild,
         outlineSevere,
       ];
-    case "boundaries": {
+    case "architecture": {
       const shown = data.zones.slice(0, MAX_ZONE_LEGEND);
       const entries: LegendEntry[] = shown.map((zone, index) => ({
         mark: { kind: "dot", color: zoneColor(theme, index) },
@@ -619,7 +619,7 @@ const legendEntries = (state: AppState): LegendEntry[] => {
           label: "folder in an import loop",
         });
       }
-      if (data.summary.boundary_violations + data.summary.circular_deps > 0) {
+      if (data.architecture.availability.count + data.summary.circular_deps > 0) {
         entries.push({
           mark: { kind: "ring", color: theme.red, dash: true },
           label: "forbidden import / loop",
@@ -627,12 +627,19 @@ const legendEntries = (state: AppState): LegendEntry[] => {
       }
       return entries;
     }
-    case "hotspots":
+    case "health":
       return [
         {
           mark: { kind: "ramp", from: heatRamp(theme, 0.2), to: heatRamp(theme, 1) },
-          label: "harder to change",
+          label: "higher Health risk",
         },
+        outlineMild,
+        outlineSevere,
+      ];
+    case "security":
+      return [
+        { mark: { kind: "dot", color: theme.red }, label: "high-priority candidate" },
+        { mark: { kind: "dot", color: theme.amber }, label: "review candidate" },
         outlineMild,
         outlineSevere,
       ];

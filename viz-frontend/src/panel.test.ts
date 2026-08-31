@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { panelRenderKey, rankRowsFor, searchPanelModel } from "./panel";
+import {
+  MAX_RENDERED_RANK_ROWS,
+  filePanelModel,
+  panelRenderKey,
+  rankRowsFor,
+  rankRowsForRender,
+  searchPanelModel,
+} from "./panel";
 import { buildIndex } from "./data";
 import { getTheme } from "./theme";
 import type { AppState } from "./state";
@@ -26,6 +33,7 @@ const file = (path: string, over: Partial<VizFile> = {}): VizFile => ({
 
 const stateFor = (lens: Lens, files: VizFile[], over: Partial<VizData> = {}): AppState => {
   const data: VizData = {
+    schema_version: 2,
     root: "demo",
     files,
     edges: [],
@@ -52,10 +60,60 @@ const stateFor = (lens: Lens, files: VizFile[], over: Partial<VizData> = {}): Ap
     cycles: [],
     clones: [],
     violations: [],
+    architecture: {
+      availability: { state: "complete", count: 0, unit: "violations" },
+      findings: [],
+    },
+    dependencies: {
+      availability: { state: "complete", count: 0, unit: "findings" },
+      findings: [],
+    },
+    health: {
+      availability: { state: "complete", count: 0, unit: "files" },
+      capabilities: {
+        complexity: { state: "complete", count: 0, unit: "findings" },
+        maintainability: { state: "complete", count: 0, unit: "files" },
+        crap: { state: "complete", count: 0, unit: "files" },
+        coverage: { state: "complete", count: 0, unit: "gaps" },
+        churn: { state: "unavailable", count: 0, unit: "files" },
+        hotspots: { state: "unavailable", count: 0, unit: "files" },
+        ownership: { state: "unavailable", count: 0, unit: "files" },
+      },
+      files: [],
+      findings: [],
+    },
+    security: {
+      availability: { state: "complete", count: 0, unit: "candidates" },
+      runtime_availability: { state: "unavailable", count: 0, unit: "observations" },
+      candidates: [],
+      blind_spot_count: 0,
+      blind_spots: [],
+    },
+    frameworks: {
+      availability: { state: "complete", count: 0, unit: "findings" },
+      detector_availability: { state: "complete", count: 0, unit: "detectors" },
+      findings: [],
+      detected_frameworks: [],
+      detectors: [],
+    },
+    styling: {
+      availability: { state: "complete", count: 0, unit: "findings" },
+      findings: [],
+    },
+    feature_flags: {
+      availability: { state: "complete", count: 0, unit: "flags" },
+      findings: [],
+    },
     ...over,
   };
   // The ranking only touches data, index, and the active lens.
-  return { lens, data, index: buildIndex(data), theme: getTheme(true) } as AppState;
+  return {
+    lens,
+    activeAnalysis: null,
+    data,
+    index: buildIndex(data),
+    theme: getTheme(true),
+  } as AppState;
 };
 
 describe("panelRenderKey", () => {
@@ -71,7 +129,10 @@ describe("panelRenderKey", () => {
     const selectedKey = panelRenderKey(state);
     expect(selectedKey).not.toBe(base);
     state.selected = null;
-    state.lens = "deadcode";
+    state.lens = "unused";
+    expect(panelRenderKey(state)).not.toBe(base);
+    state.lens = "overview";
+    state.activeAnalysis = "dependencies";
     expect(panelRenderKey(state)).not.toBe(base);
   });
 
@@ -104,10 +165,170 @@ describe("panelRenderKey", () => {
   });
 });
 
+describe("filePanelModel", () => {
+  it("puts the active lens first while retaining supporting file signals", () => {
+    const state = stateFor(
+      "security" as Lens,
+      [file("src/a.ts", { status: "unused", clone_groups: [0] })],
+      {
+        clones: [
+          {
+            lines: 4,
+            tokens: 12,
+            instances: [{ file: 0, start_line: 1, end_line: 4 }],
+            preview: "",
+            highlight_start: 0,
+            highlight_lines: 0,
+          },
+        ],
+      },
+    );
+    state.data = {
+      ...state.data,
+      schema_version: 2,
+      security: {
+        availability: { state: "complete", count: 1, unit: "candidates" },
+        runtime_availability: { state: "unavailable", count: 0, unit: "observations" },
+        blind_spot_count: 0,
+        blind_spots: [],
+        candidates: [
+          {
+            id: "candidate-1",
+            kind: "injection",
+            file: 0,
+            path: "src/a.ts",
+            line: 2,
+            col: 1,
+            evidence: "input reaches sink",
+            severity: "high",
+            crosses_boundary: true,
+            client_server_boundary: false,
+            cross_module_boundary: false,
+            trace: [],
+            actions: [],
+          },
+        ],
+      },
+      architecture: {
+        availability: { state: "complete", count: 0, unit: "violations" },
+        findings: [],
+      },
+      dependencies: {
+        availability: { state: "complete", count: 0, unit: "findings" },
+        findings: [],
+      },
+      health: {
+        availability: { state: "complete", count: 0, unit: "files" },
+        files: [],
+        findings: [],
+      },
+      frameworks: {
+        availability: { state: "unavailable", count: 0, unit: "findings" },
+        findings: [],
+      },
+      styling: {
+        availability: { state: "notApplicable", count: 0, unit: "findings" },
+        findings: [],
+      },
+      feature_flags: {
+        availability: { state: "disabled", count: 0, unit: "flags" },
+        findings: [],
+      },
+    } as unknown as VizData;
+    state.index = buildIndex(state.data);
+    const model = filePanelModel(state, 0);
+    expect(model.active).toBe("security");
+    expect(model.signals.find((signal) => signal.id === "security")).toMatchObject({
+      count: 1,
+      state: "complete",
+      active: true,
+    });
+    expect(model.signals.find((signal) => signal.id === "unused")?.count).toBe(1);
+    expect(model.signals.find((signal) => signal.id === "duplication")?.count).toBe(1);
+    expect(model.signals.find((signal) => signal.id === "frameworks")?.state).toBe("unavailable");
+    expect(model.signals.find((signal) => signal.id === "styling")?.state).toBe("notApplicable");
+    expect(model.signals.find((signal) => signal.id === "flags")?.state).toBe("disabled");
+  });
+
+  it("keeps complete zero distinct from unavailable for the selected file", () => {
+    const state = stateFor("health" as Lens, [file("src/a.ts")]);
+    state.data = {
+      ...state.data,
+      schema_version: 2,
+      health: {
+        availability: { state: "complete", count: 0, unit: "files" },
+        files: [],
+        findings: [],
+      },
+      security: {
+        availability: {
+          state: "unavailable",
+          count: 0,
+          unit: "candidates",
+          reason: "Security artifacts were not retained",
+        },
+        runtime_availability: { state: "unavailable", count: 0, unit: "observations" },
+        candidates: [],
+        blind_spot_count: 0,
+        blind_spots: [],
+      },
+    } as unknown as VizData;
+    const model = filePanelModel(state, 0);
+    expect(model.signals.find((signal) => signal.id === "health")).toMatchObject({
+      state: "complete",
+      count: 0,
+    });
+    expect(model.signals.find((signal) => signal.id === "security")).toMatchObject({
+      state: "unavailable",
+      count: 0,
+    });
+  });
+
+  it("makes a More-menu analysis active for ranking and selected-file detail", () => {
+    const state = stateFor("overview", [file("src/a.ts")], {
+      dependencies: {
+        availability: { state: "complete", count: 2, unit: "findings" },
+        findings: [
+          {
+            kind: "unlisted-dependency",
+            title: "Unlisted dependency",
+            file: 0,
+            path: "src/a.ts",
+            line: 3,
+            description: "Package is imported but not declared",
+            actions: [],
+          },
+          {
+            kind: "unused-override",
+            title: "Unused dependency override",
+            path: "package.json",
+            description: "Override does not affect the resolved graph",
+            actions: [],
+          },
+        ],
+      },
+    });
+    state.activeAnalysis = "dependencies";
+    expect(filePanelModel(state, 0)).toMatchObject({ active: "dependencies" });
+    expect(
+      filePanelModel(state, 0).signals.find((signal) => signal.id === "dependencies"),
+    ).toMatchObject({ active: true, count: 1, state: "complete" });
+    expect(rankRowsFor(state).rows[0]).toMatchObject({
+      label: "a.ts",
+      metric: "Unlisted dependency",
+    });
+    expect(rankRowsFor(state).rows[1]).toMatchObject({
+      label: "package.json",
+      fileIndex: null,
+      metric: "Unused dependency override",
+    });
+  });
+});
+
 describe("rankRowsFor", () => {
   it("ranks unused files by size before partially unused files", () => {
     const rows = rankRowsFor(
-      stateFor("deadcode", [
+      stateFor("unused", [
         file("src/small.ts", { status: "unused", size: 10 }),
         file("src/big.ts", { status: "unused", size: 900 }),
         file("src/partial.ts", { unused_export_count: 3 }),
@@ -120,28 +341,96 @@ describe("rankRowsFor", () => {
 
   it("ranks complexity by risk, not raw cyclomatic", () => {
     const rows = rankRowsFor(
-      stateFor("hotspots", [
-        file("src/lonely.ts", { max_cyclomatic: 23, importer_count: 0 }),
-        file("src/popular.ts", { max_cyclomatic: 14, importer_count: 36 }),
-      ]),
+      stateFor(
+        "health",
+        [
+          file("src/lonely.ts", { max_cyclomatic: 23, importer_count: 0 }),
+          file("src/popular.ts", { max_cyclomatic: 14, importer_count: 36 }),
+        ],
+        {
+          health: {
+            availability: { state: "complete", count: 2, unit: "files" },
+            capabilities: {
+              complexity: { state: "complete", count: 2, unit: "findings" },
+              maintainability: { state: "complete", count: 2, unit: "files" },
+              crap: { state: "complete", count: 2, unit: "files" },
+              coverage: { state: "unavailable", count: 0, unit: "gaps" },
+              churn: { state: "unavailable", count: 0, unit: "files" },
+              hotspots: { state: "unavailable", count: 0, unit: "files" },
+              ownership: { state: "unavailable", count: 0, unit: "files" },
+            },
+            files: [
+              {
+                file: 0,
+                path: "src/lonely.ts",
+                maintainability_index: 70,
+                crap_max: 12,
+                complexity_density: 0.3,
+                fan_in: 0,
+                fan_out: 1,
+              },
+              {
+                file: 1,
+                path: "src/popular.ts",
+                maintainability_index: 40,
+                crap_max: 44,
+                complexity_density: 0.8,
+                fan_in: 36,
+                fan_out: 4,
+              },
+            ],
+            findings: [
+              {
+                kind: "health-finding",
+                title: "Health threshold exceeded",
+                file: 0,
+                path: "src/lonely.ts",
+                severity: "warning",
+                actions: [],
+              },
+              {
+                kind: "health-finding",
+                title: "Health threshold exceeded",
+                file: 1,
+                path: "src/popular.ts",
+                severity: "warning",
+                actions: [],
+              },
+            ],
+          },
+        },
+      ),
     ).rows;
     expect(rows[0].label).toBe("popular.ts");
-    expect(rows[0].metric).toContain("used by 36");
+    expect(rows[0].metric).toContain("CRAP 44");
   });
 
-  it("writes boundary crossings as an arrow into the target zone", () => {
+  it("ranks retained Architecture records beyond import boundaries", () => {
     const rows = rankRowsFor(
-      stateFor("boundaries", [file("src/a.ts"), file("lib/b.ts")], {
-        violations: [{ from: 0, to: 1, from_zone: 0, to_zone: 1, line: 5, specifier: "../lib/b" }],
+      stateFor("architecture", [file("src/a.ts"), file("lib/b.ts")], {
+        architecture: {
+          availability: { state: "complete", count: 1, unit: "violations" },
+          findings: [
+            {
+              kind: "boundary-call",
+              title: "Forbidden call",
+              file: 0,
+              path: "src/a.ts",
+              line: 5,
+              description: "app cannot call the data layer directly",
+              actions: [],
+            },
+          ],
+        },
       }),
     ).rows;
-    expect(rows[0].label).toBe("a.ts → b.ts");
-    expect(rows[0].metric).toBe("→ shared");
+    expect(rows[0].label).toBe("a.ts");
+    expect(rows[0].metric).toBe("Forbidden call");
   });
 
   it("drops malformed clone groups instead of throwing", () => {
     const rows = rankRowsFor(
-      stateFor("dupes", [file("src/a.ts")], {
+      stateFor("duplication", [file("src/a.ts")], {
         clones: [
           {
             lines: 9,
@@ -174,19 +463,28 @@ describe("rankRowsFor", () => {
     expect(rows[0].label).toContain("a.ts");
   });
 
-  it("skips violations and cycles that point outside the file table", () => {
+  it("keeps project findings discoverable when their file index is stale", () => {
     const rows = rankRowsFor(
-      stateFor("boundaries", [file("src/a.ts")], {
-        violations: [{ from: 0, to: 99, from_zone: 0, to_zone: 1, line: 1, specifier: "x" }],
-        cycles: [[], [99]],
+      stateFor("architecture", [file("src/a.ts")], {
+        architecture: {
+          availability: { state: "complete", count: 1, unit: "violations" },
+          findings: [
+            {
+              kind: "policy-violation",
+              title: "Policy violation",
+              file: 99,
+              actions: [],
+            },
+          ],
+        },
       }),
     ).rows;
-    expect(rows).toHaveLength(0);
+    expect(rows[0]).toMatchObject({ label: "Policy violation", fileIndex: null });
   });
 
   it("carries the clone group index so rows open the clone panel", () => {
     const rows = rankRowsFor(
-      stateFor("dupes", [file("src/a.ts"), file("src/b.ts")], {
+      stateFor("duplication", [file("src/a.ts"), file("src/b.ts")], {
         clones: [
           {
             lines: 12,
@@ -204,6 +502,17 @@ describe("rankRowsFor", () => {
     ).rows;
     expect(rows[0].clone).toBe(0);
     expect(rows[0].metric).toBe("12 lines");
+  });
+
+  it("caps rendered ranking rows and reports the omitted count", () => {
+    const files = Array.from({ length: MAX_RENDERED_RANK_ROWS + 3 }, (_, index) =>
+      file(`src/file-${index}.ts`, { importer_count: index + 1 }),
+    );
+    const ranked = rankRowsFor(stateFor("overview", files)).rows;
+    const visible = rankRowsForRender(ranked);
+    expect(visible.rows).toHaveLength(MAX_RENDERED_RANK_ROWS);
+    expect(visible.truncated).toBe(3);
+    expect(visible.rows[0].label).toBe(`file-${MAX_RENDERED_RANK_ROWS + 2}.ts`);
   });
 });
 

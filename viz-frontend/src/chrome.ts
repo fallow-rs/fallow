@@ -1,7 +1,17 @@
 import type { AppState } from "./state";
-import type { Lens } from "./types";
+import type { Lens, SecondaryAnalysis } from "./types";
 import { formatCount } from "./data";
 import { button, el } from "./dom";
+import {
+  LENSES,
+  SECONDARY_ANALYSES,
+  fitLensNavigation,
+  lensAvailabilityDetails,
+  lensById,
+  secondaryAnalysisMenuItems,
+  secondaryAnalysisById,
+  secondaryAvailabilityDetails,
+} from "./lenses";
 
 /**
  * HTML chrome around the canvas. One rule carries the affordance story:
@@ -19,6 +29,14 @@ export interface ChromeRefs {
   themeToggle: HTMLButtonElement;
   viewButtons: Map<string, HTMLButtonElement>;
   lensButtons: Map<Lens, HTMLButtonElement>;
+  lensMenuButtons: Map<Lens, HTMLButtonElement>;
+  secondaryButtons: Map<SecondaryAnalysis, HTMLButtonElement>;
+  moreButton: HTMLButtonElement;
+  moreActiveLabel: HTMLElement;
+  filtersButton: HTMLButtonElement;
+  entityButtons: Map<string, HTMLButtonElement>;
+  diffButtons: Map<string, HTMLButtonElement>;
+  refreshLensOverflow: () => void;
   clusterGroup: HTMLElement;
   clusterButtons: Map<string, HTMLButtonElement>;
   summaryLine: HTMLElement;
@@ -31,58 +49,12 @@ export interface ChromeRefs {
 export interface ChromeHandlers {
   onView: (view: "map" | "graph") => void;
   onLens: (lens: Lens) => void;
+  onSecondary: (analysis: SecondaryAnalysis) => void;
   onSearch: (query: string) => void;
   onTheme: () => void;
   onCrumb: (path: string) => void;
   onCluster: (mode: "directory" | "imports") => void;
 }
-
-interface LensDef {
-  id: Lens;
-  name: string;
-  gloss: string;
-  /** Aggregated finding count for the badge; null hides the badge. */
-  count: (state: AppState) => number | null;
-  sev: "error" | "warn";
-}
-
-const LENSES: LensDef[] = [
-  {
-    id: "overview",
-    name: "Overview",
-    gloss: "Folders & imports",
-    count: () => null,
-    sev: "warn",
-  },
-  {
-    id: "deadcode",
-    name: "Unused",
-    gloss: "Dead files & exports",
-    count: (state) => state.data.summary.unused_files + state.data.summary.unused_exports,
-    sev: "error",
-  },
-  {
-    id: "dupes",
-    name: "Duplication",
-    gloss: "Copy-pasted code",
-    count: (state) => state.data.summary.clone_groups,
-    sev: "warn",
-  },
-  {
-    id: "boundaries",
-    name: "Boundaries",
-    gloss: "Import loops & forbidden imports",
-    count: (state) => state.data.summary.circular_deps + state.data.summary.boundary_violations,
-    sev: "error",
-  },
-  {
-    id: "hotspots",
-    name: "Complexity",
-    gloss: "Hardest files to change",
-    count: (state) => state.data.summary.hotspot_files,
-    sev: "warn",
-  },
-];
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MARK_VIEW_BOX = "173.11 97.47 1008.49 1008.49";
@@ -195,8 +167,7 @@ export const buildChrome = (
   actions.appendChild(themeToggle);
   topbar.appendChild(actions);
 
-  // Row 2: the five lens tabs are the page's navigation; the view
-  // toggle is a setting and reads as one. No section labels.
+  // Row 2: primary analysis lenses plus the independent view setting.
   const toolbar = el("nav");
   toolbar.id = "toolbar";
 
@@ -205,31 +176,128 @@ export const buildChrome = (
   // the rail is a group of pressable buttons (aria-pressed) with roving
   // arrow-key navigation, like the view segment.
   tabs.setAttribute("role", "toolbar");
-  tabs.setAttribute("aria-label", "lens");
+  tabs.setAttribute("aria-label", "Analysis lens");
   const lensButtons = new Map<Lens, HTMLButtonElement>();
-  LENSES.forEach((def, index) => {
+  const lensMenuButtons = new Map<Lens, HTMLButtonElement>();
+  LENSES.forEach((def) => {
     const tabButton = button("lens-tab", "");
     tabButton.appendChild(el("span", "tab-name", def.name));
     tabButton.appendChild(el("span", "badge"));
-    // Fold the 1-5 shortcut into the tooltip, as the view toggle does.
-    tabButton.title = `${def.gloss} (press ${index + 1})`;
+    tabButton.title = `${def.gloss} (press ${def.shortcut})`;
     tabButton.setAttribute("aria-pressed", String(state.lens === def.id));
-    // Roving tabindex: only the active tab sits in the tab order.
     tabButton.tabIndex = state.lens === def.id ? 0 : -1;
     tabButton.addEventListener("click", () => handlers.onLens(def.id));
     lensButtons.set(def.id, tabButton);
     tabs.appendChild(tabButton);
   });
-  // Arrow keys move the lens selection, as toolbar semantics promise.
+
+  const moreWrap = el("div", "lens-more");
+  moreWrap.hidden = true;
+  const moreButton = button("lens-tab more-button", "");
+  moreButton.type = "button";
+  moreButton.setAttribute("aria-haspopup", "menu");
+  moreButton.setAttribute("aria-expanded", "false");
+  moreButton.appendChild(el("span", "more-label", "More"));
+  const moreActiveLabel = el("span", "more-active");
+  moreButton.appendChild(moreActiveLabel);
+  const moreMenu = el("div", "lens-menu");
+  moreMenu.setAttribute("role", "menu");
+  moreMenu.setAttribute("aria-label", "More analysis lenses");
+  moreMenu.hidden = true;
+  for (const def of LENSES) {
+    const menuButton = button("lens-menu-item", "");
+    menuButton.setAttribute("role", "menuitemradio");
+    menuButton.append(
+      el("span", "menu-item-name", def.name),
+      el("span", "badge"),
+      el("kbd", "menu-shortcut", def.shortcut),
+    );
+    menuButton.addEventListener("click", (event) => {
+      handlers.onLens(def.id);
+      moreMenu.hidden = true;
+      moreButton.setAttribute("aria-expanded", "false");
+      if (event.detail === 0) requestAnimationFrame(() => lensButtons.get(def.id)?.focus());
+    });
+    lensMenuButtons.set(def.id, menuButton);
+    moreMenu.appendChild(menuButton);
+  }
+  const secondaryHeading = el("div", "lens-menu-heading", "More analyses");
+  secondaryHeading.setAttribute("role", "separator");
+  secondaryHeading.setAttribute("aria-label", "More analyses");
+  moreMenu.appendChild(secondaryHeading);
+  const secondaryButtons = new Map<SecondaryAnalysis, HTMLButtonElement>();
+  for (const def of SECONDARY_ANALYSES) {
+    const menuButton = button("lens-menu-item secondary-analysis", "");
+    menuButton.setAttribute("role", "menuitemradio");
+    menuButton.append(el("span", "menu-item-name", def.name), el("span", "badge analysis-status"));
+    menuButton.addEventListener("click", (event) => {
+      handlers.onSecondary(def.id);
+      moreMenu.hidden = true;
+      moreButton.setAttribute("aria-expanded", "false");
+      if (event.detail === 0) moreButton.focus();
+    });
+    secondaryButtons.set(def.id, menuButton);
+    moreMenu.appendChild(menuButton);
+  }
+  moreWrap.append(moreButton, moreMenu);
+  tabs.appendChild(moreWrap);
+
+  const setMoreOpen = (open: boolean): void => {
+    moreMenu.hidden = !open;
+    moreButton.setAttribute("aria-expanded", String(open));
+  };
+  moreButton.addEventListener("click", () => setMoreOpen(Boolean(moreMenu.hidden)));
+  moreButton.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown") return;
+    event.preventDefault();
+    setMoreOpen(true);
+    moreMenu.querySelector<HTMLButtonElement>("button:not([hidden])")?.focus();
+  });
+  moreMenu.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setMoreOpen(false);
+      moreButton.focus();
+      return;
+    }
+    if (
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowUp" &&
+      event.key !== "Home" &&
+      event.key !== "End"
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const items = Array.from(moreMenu.querySelectorAll<HTMLButtonElement>("button:not([hidden])"));
+    if (items.length === 0) return;
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? items.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[nextIndex]?.focus();
+  });
+  document.addEventListener("click", (event) => {
+    if (!moreWrap.contains(event.target as Node)) setMoreOpen(false);
+  });
+
+  // Arrow keys move through the currently visible primary lenses.
   tabs.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (event.target === moreButton || moreMenu.contains(event.target as Node)) return;
     event.preventDefault();
-    const ids = LENSES.map((def) => def.id);
+    const ids = LENSES.map((def) => def.id).filter(
+      (id) => !lensButtons.get(id)?.classList.contains("overflowed"),
+    );
     const active = ids.findIndex(
       (id) => lensButtons.get(id)?.getAttribute("aria-pressed") === "true",
     );
     const delta = event.key === "ArrowRight" ? 1 : -1;
     const next = ids[(active + delta + ids.length) % ids.length];
+    if (!next) return;
     handlers.onLens(next);
     lensButtons.get(next)?.focus();
   });
@@ -253,6 +321,50 @@ export const buildChrome = (
   }
   toolbar.appendChild(viewSeg);
 
+  const naturalWidths = new Map<Lens, number>();
+  const refreshLensOverflow = (): void => {
+    const toolbarStyle = getComputedStyle(toolbar);
+    const cssPixels = (value: string): number => {
+      const pixels = Number.parseFloat(value);
+      return Number.isFinite(pixels) ? pixels : 0;
+    };
+    const horizontalPadding =
+      cssPixels(toolbarStyle.paddingLeft) + cssPixels(toolbarStyle.paddingRight);
+    const toolbarGap = cssPixels(toolbarStyle.columnGap);
+    const lensGap = cssPixels(getComputedStyle(tabs).columnGap);
+    const contentWidth = Math.max(
+      0,
+      toolbar.clientWidth - viewSeg.offsetWidth - horizontalPadding - toolbarGap,
+    );
+    for (const def of LENSES) {
+      const lensButton = lensButtons.get(def.id);
+      if (!lensButton || naturalWidths.has(def.id)) continue;
+      const width = lensButton.getBoundingClientRect().width;
+      if (width > 0) naturalWidths.set(def.id, width);
+    }
+    const widths = LENSES.map((def) => ({
+      id: def.id,
+      width: naturalWidths.get(def.id) ?? 96,
+    }));
+    moreWrap.hidden = false;
+    const moreWidth = moreButton.offsetWidth;
+    const visible = new Set(
+      fitLensNavigation(
+        widths,
+        Math.max(0, contentWidth - moreWidth - lensGap),
+        0,
+        state.lens,
+        lensGap,
+      ),
+    );
+    for (const def of LENSES) {
+      const isVisible = visible.has(def.id);
+      lensButtons.get(def.id)?.classList.toggle("overflowed", !isVisible);
+      const menuButton = lensMenuButtons.get(def.id);
+      if (menuButton) menuButton.hidden = isVisible;
+    }
+  };
+
   // Arrange lives in the context strip: it configures the graph canvas
   // and vanishes with it.
   const clusterGroup = el("div", "seg arrange");
@@ -270,11 +382,57 @@ export const buildChrome = (
     clusterGroup.appendChild(clusterButton);
   });
 
-  // One dim line that says what the active lens just did.
+  // Stable context strip: active unit and scope controls never change its height.
   const summaryLine = el("div");
   summaryLine.id = "lens-summary";
   const summaryLeft = el("div", "summary-left");
   summaryLine.appendChild(summaryLeft);
+  const summaryControls = el("div", "summary-controls");
+  const filtersButton = button("context-button filters-button", "Filters");
+  filtersButton.disabled = true;
+  filtersButton.title = "Filters are unavailable in this report";
+  filtersButton.setAttribute("aria-label", "Filters unavailable in this report");
+  summaryControls.appendChild(filtersButton);
+
+  const entityGroup = el("div", "context-group entity-group");
+  entityGroup.setAttribute("role", "group");
+  entityGroup.setAttribute("aria-label", "Map entities");
+  entityGroup.appendChild(el("span", "context-label", "Map:"));
+  const entityButtons = new Map<string, HTMLButtonElement>();
+  for (const [id, label] of [
+    ["files", "Files"],
+    ["components", "Components"],
+    ["packages", "Packages"],
+  ] as const) {
+    const entityButton = button("context-button", label);
+    entityButton.setAttribute("aria-pressed", String(id === "files"));
+    if (id !== "files") {
+      entityButton.disabled = true;
+      const unavailable = `${label} are unavailable until this report has a dedicated entity graph`;
+      entityButton.title = unavailable;
+      entityButton.setAttribute("aria-label", unavailable);
+    }
+    entityButtons.set(id, entityButton);
+    entityGroup.appendChild(entityButton);
+  }
+  summaryControls.appendChild(entityGroup);
+
+  const diffGroup = el("div", "context-group diff-group");
+  diffGroup.setAttribute("role", "group");
+  diffGroup.setAttribute("aria-label", "Diff scope");
+  const diffButtons = new Map<string, HTMLButtonElement>();
+  const allFilesButton = button("context-button", "All files");
+  allFilesButton.setAttribute("aria-pressed", "true");
+  allFilesButton.disabled = true;
+  allFilesButton.title = "Diff scopes are unavailable because this report has no diff metadata";
+  allFilesButton.setAttribute(
+    "aria-label",
+    "All files. Diff scopes are unavailable because this report has no diff metadata",
+  );
+  diffButtons.set("all", allFilesButton);
+  diffGroup.appendChild(allFilesButton);
+  summaryControls.appendChild(diffGroup);
+  summaryLine.appendChild(summaryControls);
   // clusterGroup is not in the lens header: main.ts mounts it as a
   // top-right overlay on the map, since it only changes the map layout.
 
@@ -294,7 +452,7 @@ export const buildChrome = (
   // no punctuation has to.
   const hintPairs: Array<[keys: string[], label: string]> = [
     [["/"], "Search"],
-    [["1", "5"], "Lens"],
+    [["1", "6"], "Lens"],
     [["g"], "Graph"],
     [["t"], "Treemap"],
     [["0"], "Reset"],
@@ -321,12 +479,26 @@ export const buildChrome = (
     themeToggle,
     viewButtons,
     lensButtons,
+    lensMenuButtons,
+    secondaryButtons,
+    moreButton,
+    moreActiveLabel,
+    filtersButton,
+    entityButtons,
+    diffButtons,
+    refreshLensOverflow,
     clusterGroup,
     clusterButtons,
     summaryLine,
   };
 
   helpBtn.addEventListener("click", () => refs.helpHandler?.());
+
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(refreshLensOverflow);
+    observer.observe(toolbar);
+  }
+  requestAnimationFrame(refreshLensOverflow);
 
   return refs;
 };
@@ -346,30 +518,84 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
   }
   for (const def of LENSES) {
     const lensButton = refs.lensButtons.get(def.id);
-    if (!lensButton) continue;
-    lensButton.setAttribute("aria-pressed", String(state.lens === def.id));
-    lensButton.tabIndex = state.lens === def.id ? 0 : -1;
-    const badge = lensButton.querySelector(".badge");
-    if (badge) {
-      const count = def.count(state);
-      // Bare tabular numbers; the unit words live in the context strip.
-      // Zero stays visible in muted ink so absence is never ambiguous.
-      badge.textContent = count !== null ? formatCount(count) : "";
-      // Severity drives the accent: error lenses count in red, warn in
-      // amber, matching the red/amber meaning used across the map.
-      const weight = state.lens === def.id ? "hot" : "warm";
-      badge.className = count === 0 ? "badge zero" : `badge ${weight} ${def.sev}`;
+    const menuButton = refs.lensMenuButtons.get(def.id);
+    const isActive = state.lens === def.id;
+    const lensCount = def.count(state);
+    const availability = lensAvailabilityDetails(state, def.id);
+    for (const lensControl of [lensButton, menuButton]) {
+      if (!lensControl) continue;
+      if (lensControl === lensButton) {
+        lensControl.setAttribute("aria-pressed", String(isActive));
+      } else {
+        lensControl.setAttribute("aria-checked", String(isActive));
+      }
+      lensControl.dataset.availability = availability.state;
+      if (availability.reason) lensControl.title = availability.reason;
+      lensControl.tabIndex = lensControl === lensButton && isActive ? 0 : -1;
+      const badge = lensControl.querySelector(".badge");
+      if (badge) {
+        badge.textContent =
+          availability.state === "complete"
+            ? lensCount !== null
+              ? formatCount(lensCount.value)
+              : ""
+            : availability.state === "disabled"
+              ? "off"
+              : "n/a";
+        const weight = isActive ? "hot" : "warm";
+        badge.className =
+          lensCount?.value === 0
+            ? "badge zero"
+            : `badge ${weight} ${def.severity === "neutral" ? "" : def.severity}`;
+      }
     }
   }
+  for (const item of secondaryAnalysisMenuItems(state)) {
+    const analysisButton = refs.secondaryButtons.get(item.id);
+    if (!analysisButton) continue;
+    const availability = item.availability;
+    analysisButton.setAttribute("aria-checked", String(item.active));
+    analysisButton.dataset.availability = availability.state;
+    analysisButton.title = availability.reason ?? item.gloss;
+    const badge = analysisButton.querySelector(".badge");
+    if (badge) {
+      badge.textContent =
+        availability.state === "complete"
+          ? `${formatCount(availability.value)} ${availability.unit}`
+          : availability.state === "disabled"
+            ? "disabled"
+            : availability.state === "notApplicable"
+              ? "not applicable"
+              : "unavailable";
+      badge.className = `badge analysis-status ${availability.state}`;
+    }
+  }
+  const activeSecondary =
+    state.activeAnalysis === null ? null : secondaryAnalysisById(state.activeAnalysis);
+  refs.moreActiveLabel.textContent = activeSecondary?.name ?? "";
+  refs.moreButton.classList.toggle("has-active", activeSecondary !== null);
+  refs.moreButton.setAttribute(
+    "aria-label",
+    activeSecondary ? `More analyses, ${activeSecondary.name} selected` : "More analyses",
+  );
   // Arrange configures the full-graph layout, so it is irrelevant in the ego
   // stage (a focused file) and would collide with the ego breadcrumb; hide it
   // whenever a file is selected.
   refs.clusterGroup.style.display = state.view === "graph" && state.selected === null ? "" : "none";
   refs.themeToggle.title = state.dark ? "Switch to light" : "Switch to dark";
+  refs.filtersButton.setAttribute("aria-pressed", String(state.filterMode !== "all"));
+
+  for (const [entity, entityButton] of refs.entityButtons) {
+    entityButton.setAttribute("aria-pressed", String(state.entity === entity));
+  }
+  for (const [scope, diffButton] of refs.diffButtons) {
+    diffButton.setAttribute("aria-pressed", String(state.diffScope === scope));
+  }
 
   updateSummaryLine(state, refs);
   updateCrumbs(state, refs);
   updateSearchCount(state, refs);
+  refs.refreshLensOverflow();
 };
 
 /**
@@ -378,11 +604,87 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
  * view only).
  */
 const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
-  const gloss = LENSES.find((def) => def.id === state.lens)?.gloss ?? "";
+  if (state.activeAnalysis !== null) {
+    updateSecondarySummaryLine(state, refs, state.activeAnalysis);
+    return;
+  }
+  const definition = lensById(state.lens);
   const left = refs.summaryLine.querySelector(".summary-left");
   if (!left) return;
   left.replaceChildren();
-  left.appendChild(el("span", "summary-gloss", gloss));
+  left.appendChild(el("span", "summary-gloss", definition.gloss));
+  const lensCount = definition.count(state);
+  if (lensCount !== null) {
+    left.appendChild(
+      el("span", "context-chip", `${formatCount(lensCount.value)} ${lensCount.unit}`),
+    );
+  }
+
+  if (state.lens === "architecture" && state.data.summary.circular_deps > 0) {
+    left.appendChild(
+      el(
+        "span",
+        "context-chip",
+        `${formatCount(state.data.summary.circular_deps)} dependency cycles`,
+      ),
+    );
+  }
+
+  const availability = lensAvailabilityDetails(state, state.lens);
+  if (availability.state !== "complete") {
+    const label: Record<Exclude<typeof availability.state, "complete">, string> = {
+      disabled: "Disabled",
+      notApplicable: "Not applicable",
+      unavailable: "Unavailable",
+    };
+    const availabilityEl = el(
+      "span",
+      `availability-state ${availability.state}`,
+      label[availability.state],
+    );
+    if (availability.reason) availabilityEl.title = availability.reason;
+    left.appendChild(availabilityEl);
+  }
+  if (availability.truncated > 0) {
+    left.appendChild(
+      el("span", "context-chip", `${formatCount(availability.truncated)} more not shown`),
+    );
+  }
+  refs.summaryLine.classList.add("visible");
+};
+
+const updateSecondarySummaryLine = (
+  state: AppState,
+  refs: ChromeRefs,
+  analysis: SecondaryAnalysis,
+): void => {
+  const left = refs.summaryLine.querySelector(".summary-left");
+  if (!left) return;
+  const definition = secondaryAnalysisById(analysis);
+  const availability = secondaryAvailabilityDetails(state, analysis);
+  left.replaceChildren(
+    el("span", "summary-gloss", definition.gloss),
+    el("span", "context-chip", `${formatCount(availability.value)} ${availability.unit}`),
+  );
+  if (availability.state !== "complete") {
+    const label: Record<Exclude<typeof availability.state, "complete">, string> = {
+      disabled: "Disabled",
+      notApplicable: "Not applicable",
+      unavailable: "Unavailable",
+    };
+    const availabilityEl = el(
+      "span",
+      `availability-state ${availability.state}`,
+      label[availability.state],
+    );
+    if (availability.reason) availabilityEl.title = availability.reason;
+    left.appendChild(availabilityEl);
+  }
+  if (availability.truncated > 0) {
+    left.appendChild(
+      el("span", "context-chip", `${formatCount(availability.truncated)} more not shown`),
+    );
+  }
   refs.summaryLine.classList.add("visible");
 };
 

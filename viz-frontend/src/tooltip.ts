@@ -1,5 +1,13 @@
 import type { AppState } from "./state";
-import { basename, dirname, dupRatio, formatCount, formatSize } from "./data";
+import {
+  basename,
+  dirname,
+  dupRatio,
+  formatCount,
+  formatSize,
+  healthRiskForFile,
+  securityCandidatesForFile,
+} from "./data";
 
 let tipEl: HTMLDivElement | null = null;
 
@@ -99,25 +107,36 @@ const severityLine = (state: AppState, fileIndex: number): HTMLElement | null =>
 /** One extra line only when the active lens has something to add. */
 const lensLine = (state: AppState, fileIndex: number): HTMLElement | null => {
   const file = state.data.files[fileIndex];
-  if (state.lens === "dupes" && file.dup_lines > 0) {
+  if (state.lens === "duplication" && file.dup_lines > 0) {
     return line(
       "sev-warn tip-line",
       `${formatCount(file.dup_lines)} duplicated lines, ${Math.round(dupRatio(file) * 100)}% of the file`,
     );
   }
-  if (state.lens === "hotspots" && file.max_cyclomatic > 0) {
-    const cls =
-      file.max_cyclomatic >= 20
-        ? "sev-error"
-        : file.max_cyclomatic >= 10
-          ? "sev-warn"
-          : "tip-muted";
+  if (state.lens === "health") {
+    const health = state.data.health.files.find(
+      (candidate) => candidate.file === fileIndex || candidate.path === file.path,
+    );
+    const risk = healthRiskForFile(state.data, fileIndex);
+    if (!health || risk === null) return null;
+    const cls = risk >= 20 ? "sev-error" : risk >= 10 ? "sev-warn" : "tip-muted";
     return line(
       `${cls} tip-line`,
-      `Complexity ${formatCount(file.max_cyclomatic)}, nesting ${formatCount(file.max_cognitive)}`,
+      `Health: maintainability ${Math.round(health.maintainability_index)}, CRAP ${Math.round(health.crap_max)}`,
     );
   }
-  if (state.lens === "boundaries" && file.zone !== undefined) {
+  if (state.lens === "security") {
+    const candidates = securityCandidatesForFile(state.data, fileIndex);
+    if (candidates.length === 0) return null;
+    const high = candidates.some((candidate) =>
+      ["critical", "high", "error"].includes(candidate.severity.toLowerCase()),
+    );
+    return line(
+      `${high ? "sev-error" : "sev-warn"} tip-line`,
+      `${formatCount(candidates.length)} static Security candidate${candidates.length === 1 ? "" : "s"}`,
+    );
+  }
+  if (state.lens === "architecture" && file.zone !== undefined) {
     const zone = state.data.zones[file.zone]?.name;
     return zone ? line("tip-muted tip-line", `Zone ${zone}`) : null;
   }
