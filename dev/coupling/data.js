@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788183376998,
+  "lastUpdate": 1788187089708,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "74f5a847a45709ef4d09a5d8f7918d6fcb70cb9d",
-          "message": "perf(core): cache default entry matchers",
-          "timestamp": "2026-08-13T16:57:26+02:00",
-          "tree_id": "5f23453ab749809c83ad7f68b0ce87b612840b0f",
-          "url": "https://github.com/fallow-rs/fallow/commit/74f5a847a45709ef4d09a5d8f7918d6fcb70cb9d"
-        },
-        "date": 1786633350065,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 454,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1225,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/173ee9b117aabba2a2d39795abacccc7f680bbaf"
         },
         "date": 1788183373284,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "829a7cd490df0492fad6fdbd9b2059813050820d",
+          "message": "fix(cli): resolve a project-local Fallow from the standalone commit gate (#2492)\n\nFollow-up to #2465, which fixed the generated Lefthook job: a real installed Git\nhook keeps its caller PATH and does not add node_modules/.bin, so command -v\nfallow misses a project-local install and the job exits 0 without auditing.\n\nThe standalone .claude/hooks/fallow-gate.sh never learned any of it. Its only\nproject-local arm was npx --no-install, which needs npx on the hook own PATH\nrather than the shell one, and cannot see a Plug and Play install at all,\nbecause Plug and Play has no node_modules/.bin for npx to look in. Both cases\nfell through to \"binary not found, skipping audit\", the same silent success\n#2464 was filed for.\n\nThe script now tries the same installs in the same order as the job it ships\nalongside: PATH, the node_modules/.bin launcher, Yarn Plug and Play, then npx\n--no-install as a last resort. A comment in each file points at the other, since\nthe two must stay in step.\n\nTwo execution tests run the real rendered script rather than asserting on a\nstring: a project-local launcher with no global install reachable, and a Plug\nand Play install with no node_modules directory at all. Both reduce PATH to the\nprobe directory plus the system ones and link jq into the probe directory, since\non a developer machine the jq directory also holds the global fallow and would\nsatisfy the very resolution step under test. An unreachable\nFALLOW_GATE_MIN_VERSION makes the chosen runner observable in the block message.\nBoth fail without the new arms.",
+          "timestamp": "2026-08-31T16:29:15+02:00",
+          "tree_id": "6a331d36aadb5ec386086234912afceff48c2285",
+          "url": "https://github.com/fallow-rs/fallow/commit/829a7cd490df0492fad6fdbd9b2059813050820d"
+        },
+        "date": 1788187085203,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
