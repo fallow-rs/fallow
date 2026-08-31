@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788176588946,
+  "lastUpdate": 1788179484222,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "e5bf4e24fafe7798e97255aa458e4b62d8660ea3",
-          "message": "fix: collect Rust walltime benchmark results\n\n* fix(benchmarks): use CodSpeed macro runner\n\n* fix(benchmarks): collect Rust walltime results",
-          "timestamp": "2026-08-13T14:57:24+02:00",
-          "tree_id": "7529a1fb2b352f9f9b7574ce36a879a04cc79876",
-          "url": "https://github.com/fallow-rs/fallow/commit/e5bf4e24fafe7798e97255aa458e4b62d8660ea3"
-        },
-        "date": 1786626182172,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 454,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1225,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/48417c46faa284f18304c4f49f50a6edecdcfdb7"
         },
         "date": 1788176586271,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "d5a422c6206d00c813fe7c77d5038855d1051780",
+          "message": "fix(telemetry): stop asserting a lock release is instantly visible\n\n`spool_lock_excludes_concurrent_acquire` demanded that the post-drop reacquire\nsucceed on its first attempt. Dropping the holder closes the descriptor, but\nthe kernel does not promise the release is visible to the next `flock` right\naway, and under a loaded parallel workspace run it measurably is not. Refs\n#2460.\n\nThe diagnostic added in #2459 is what pinned this down. The failure arrives as\n`Contended`, not `Unusable`, so the lock file opened fine and the lock was\nsimply still held a moment after its holder was gone. That rules out the\nenvironment explanations (a missing directory, a permissions denial, a\ndescriptor limit) and leaves release visibility, which is a property of the\nplatform rather than of this code.\n\nRetrying is not a mask, because production never needed the guarantee the test\nwas asserting. Both callers of `try_acquire`, the over-cap trim and the drain,\ntreat contention as \"skip, the next run picks it up\". A release that becomes\nvisible a few milliseconds later costs nothing there. What still matters is\nthat the lock does come free once its holder is gone, and that is still\nasserted: the test fails if it never reacquires across the full window.\n\nThe sibling assertion, that a second acquire contends while the first is held,\nis unchanged and still immediate, since that direction has no visibility delay\nto absorb.",
+          "timestamp": "2026-08-31T14:28:52+02:00",
+          "tree_id": "8a6961c9cdf1897e714ac1f552d596f80568273e",
+          "url": "https://github.com/fallow-rs/fallow/commit/d5a422c6206d00c813fe7c77d5038855d1051780"
+        },
+        "date": 1788179480755,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
