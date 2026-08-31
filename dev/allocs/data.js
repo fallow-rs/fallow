@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788183730150,
+  "lastUpdate": 1788186939736,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "04b49162b342f0889b8eb50e3c69ba010f18aee5",
-          "message": "perf: compact source discovery globs",
-          "timestamp": "2026-08-13T16:08:41+02:00",
-          "tree_id": "354e7483492f34085f8391b63dff92dc0be7dd4b",
-          "url": "https://github.com/fallow-rs/fallow/commit/04b49162b342f0889b8eb50e3c69ba010f18aee5"
-        },
-        "date": 1786630446062,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9741098,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48469,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1026456,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7596,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8514,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "829a7cd490df0492fad6fdbd9b2059813050820d",
+          "message": "fix(cli): resolve a project-local Fallow from the standalone commit gate (#2492)\n\nFollow-up to #2465, which fixed the generated Lefthook job: a real installed Git\nhook keeps its caller PATH and does not add node_modules/.bin, so command -v\nfallow misses a project-local install and the job exits 0 without auditing.\n\nThe standalone .claude/hooks/fallow-gate.sh never learned any of it. Its only\nproject-local arm was npx --no-install, which needs npx on the hook own PATH\nrather than the shell one, and cannot see a Plug and Play install at all,\nbecause Plug and Play has no node_modules/.bin for npx to look in. Both cases\nfell through to \"binary not found, skipping audit\", the same silent success\n#2464 was filed for.\n\nThe script now tries the same installs in the same order as the job it ships\nalongside: PATH, the node_modules/.bin launcher, Yarn Plug and Play, then npx\n--no-install as a last resort. A comment in each file points at the other, since\nthe two must stay in step.\n\nTwo execution tests run the real rendered script rather than asserting on a\nstring: a project-local launcher with no global install reachable, and a Plug\nand Play install with no node_modules directory at all. Both reduce PATH to the\nprobe directory plus the system ones and link jq into the probe directory, since\non a developer machine the jq directory also holds the global fallow and would\nsatisfy the very resolution step under test. An unreachable\nFALLOW_GATE_MIN_VERSION makes the chosen runner observable in the block message.\nBoth fail without the new arms.",
+          "timestamp": "2026-08-31T16:29:15+02:00",
+          "tree_id": "6a331d36aadb5ec386086234912afceff48c2285",
+          "url": "https://github.com/fallow-rs/fallow/commit/829a7cd490df0492fad6fdbd9b2059813050820d"
+        },
+        "date": 1788186936207,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9714819,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49343,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1167360,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8336,
             "unit": "allocations"
           }
         ]
