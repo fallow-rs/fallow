@@ -271,6 +271,10 @@ pub struct AuditKeySnapshot {
     /// Exports-aware public-export keys (`<rel_path>::<name>`), the surface
     /// reachable through `package.json` `exports` + re-export reachability.
     public_api: FxHashSet<String>,
+    /// Branching totals per root-relative path. Threshold-blind and
+    /// suppression-blind, so the head-versus-base comparison cannot be moved
+    /// by a threshold override or an ignore comment.
+    branching: FxHashMap<String, fallow_types::extract::FileBranching>,
 }
 
 /// If fallow's process inherited any ambient git repo-state env vars (typical
@@ -423,7 +427,22 @@ fn snapshot_from_results(
         boundary_edges,
         cycles,
         public_api,
+        branching: health.map_or_else(FxHashMap::default, |r| {
+            branching_keys(&r.branching_by_file, &r.config.root)
+        }),
     }
+}
+
+/// Re-key absolute branching paths into the audit's root-relative key space so
+/// base and head entries join, and so the rename remap can move them.
+fn branching_keys(
+    by_file: &fallow_engine::health::BranchingByFile,
+    root: &Path,
+) -> FxHashMap<String, fallow_types::extract::FileBranching> {
+    by_file
+        .iter()
+        .map(|(path, totals)| (keys::relative_key_path(path, root), *totals))
+        .collect()
 }
 
 /// Why type-aware base and head attribution cannot be compared directly, or
@@ -965,6 +984,17 @@ fn remap_base_snapshot_for_renames(
     snapshot.dupes = keys::remap_keys_for_renames(&snapshot.dupes, &rename_map);
     snapshot.cycles = keys::remap_keys_for_renames(&snapshot.cycles, &rename_map);
     snapshot.public_api = keys::remap_keys_for_renames(&snapshot.public_api, &rename_map);
+    // `remap_keys_for_renames` rewrites path segments inside opaque key
+    // strings; the branching payload is keyed by a bare path, so it needs its
+    // own remap rather than that helper.
+    snapshot.branching = snapshot
+        .branching
+        .drain()
+        .map(|(path, totals)| match rename_map.get(&path) {
+            Some(renamed) => (renamed.clone(), totals),
+            None => (path, totals),
+        })
+        .collect();
 }
 
 #[cfg(test)]

@@ -1019,7 +1019,7 @@ pub fn is_synthetic_template_unit(name: &str) -> bool {
 /// and no frame is pushed at module scope, so a branch hoisted to the top level
 /// of a module lowers `branch_points` without removing any branching. Consumers
 /// must not read a fall in `branch_points` as proof that branching was removed.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
 pub struct FileBranching {
     /// Summed weight of `Cyclomatic` contributions. The conserved quantity.
     pub branch_points: u32,

@@ -6,17 +6,18 @@ use fallow_types::audit_cache::{
     AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFingerprint,
 };
 use fallow_types::source_fingerprint::SourceFingerprint;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
 use super::{AuditKeySnapshot, AuditOptions};
 use crate::base_worktree::{git_rev_parse, git_toplevel};
 use crate::error::emit_error;
 
-/// Version 7: the base pass rebases Istanbul coverage paths onto the base
-/// worktree (#2347), so snapshots computed by the coverage-blind base pass
-/// must not be reused.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 7;
+/// Version 8: the snapshot carries per-file branching totals, so a version-7
+/// payload cannot answer the head-versus-base branching comparison. Version 7
+/// rebased Istanbul coverage paths onto the base worktree (#2347), so snapshots
+/// computed by the coverage-blind base pass must not be reused.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 8;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {
@@ -51,6 +52,17 @@ pub(super) struct CachedAuditKeySnapshot {
     pub(super) boundary_edges: Vec<String>,
     pub(super) cycles: Vec<String>,
     pub(super) public_api: Vec<String>,
+    /// Branching totals per root-relative path, sorted by path so the encoded
+    /// bytes are stable for identical input.
+    pub(super) branching: Vec<CachedFileBranching>,
+}
+
+/// One file's branching totals in the cached snapshot. A named struct rather
+/// than a tuple so a later field addition stays readable in the decode path.
+#[derive(bitcode::Encode, bitcode::Decode)]
+pub(super) struct CachedFileBranching {
+    pub(super) path: String,
+    pub(super) totals: fallow_types::extract::FileBranching,
 }
 
 pub(super) fn sorted_keys(keys: &FxHashSet<String>) -> Vec<String> {
@@ -81,6 +93,11 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
         boundary_edges: cached.boundary_edges.into_iter().collect(),
         cycles: cached.cycles.into_iter().collect(),
         public_api: cached.public_api.into_iter().collect(),
+        branching: cached
+            .branching
+            .into_iter()
+            .map(|entry| (entry.path, entry.totals))
+            .collect(),
     })
 }
 
@@ -111,7 +128,22 @@ pub(super) fn cached_from_snapshot(
         boundary_edges: sorted_keys(&snapshot.boundary_edges),
         cycles: sorted_keys(&snapshot.cycles),
         public_api: sorted_keys(&snapshot.public_api),
+        branching: sorted_branching(&snapshot.branching),
     })
+}
+
+fn sorted_branching(
+    branching: &FxHashMap<String, fallow_types::extract::FileBranching>,
+) -> Vec<CachedFileBranching> {
+    let mut rows: Vec<CachedFileBranching> = branching
+        .iter()
+        .map(|(path, totals)| CachedFileBranching {
+            path: path.clone(),
+            totals: *totals,
+        })
+        .collect();
+    rows.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    rows
 }
 
 pub(super) fn audit_base_snapshot_cache_dir(cache_dir: &Path) -> PathBuf {
@@ -196,6 +228,11 @@ pub(super) fn save_cached_base_snapshot(
         return;
     }
     let data = bitcode::encode(&cached);
+    if data.len() > MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE {
+        // The loader rejects anything over the cap, so writing it would cost a
+        // cold base pass on every later run instead of just this one.
+        return;
+    }
     let Ok(mut tmp) = tempfile::NamedTempFile::new_in(&dir) else {
         return;
     };

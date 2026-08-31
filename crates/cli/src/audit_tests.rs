@@ -2442,6 +2442,7 @@ fn empty_snapshot_with_type_aware(
     gap_signature: Vec<String>,
 ) -> AuditKeySnapshot {
     AuditKeySnapshot {
+        branching: rustc_hash::FxHashMap::default(),
         type_aware_identity: identity,
         type_aware_gap_signature: gap_signature,
         syntactic_dead_code: None,
@@ -2574,6 +2575,7 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         base_sha: "abc123".to_string(),
     };
     let snapshot = AuditKeySnapshot {
+        branching: rustc_hash::FxHashMap::default(),
         type_aware_identity: Some(identity_with_hash("hash-roundtrip")),
         type_aware_gap_signature: vec!["SymbolUse:None:".to_string()],
         syntactic_dead_code: Some(
@@ -2721,6 +2723,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         base_sha: "abc123".to_string(),
     };
     let snapshot = AuditKeySnapshot {
+        branching: rustc_hash::FxHashMap::default(),
         type_aware_identity: None,
         type_aware_gap_signature: Vec::new(),
         syntactic_dead_code: None,
@@ -2798,6 +2801,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         base_sha: "head".to_string(),
     };
     let cached = CachedAuditKeySnapshot {
+        branching: Vec::new(),
         version: AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
         cli_version: env!("CARGO_PKG_VERSION").to_string(),
         key_hash: key.hash,
