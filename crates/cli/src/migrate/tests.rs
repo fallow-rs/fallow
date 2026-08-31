@@ -61,9 +61,8 @@ fn migrate_stylelint_with_selector_thresholds() {
 
 #[test]
 fn migrate_stylelint_js_config_file() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-stylelint-js");
-    let _ = std::fs::remove_dir_all(&tmpdir);
-    std::fs::create_dir_all(&tmpdir).unwrap();
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("stylelint.config.js");
     std::fs::write(
         &path,
@@ -77,33 +76,29 @@ fn migrate_stylelint_js_config_file() {
     assert_eq!(result.config["audit"]["css"], true);
     assert_eq!(result.warnings.len(), 1);
     assert_eq!(result.warnings[0].field, "color-hex-case");
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn auto_detect_stylelintrc_json() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-stylelintrc-json");
-    let _ = std::fs::remove_dir_all(&tmpdir);
-    std::fs::create_dir_all(&tmpdir).unwrap();
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     std::fs::write(
         tmpdir.join(".stylelintrc.json"),
         r#"{"rules":{"selector-max-combinators":3}}"#,
     )
     .unwrap();
 
-    let result = migrate_auto_detect(&tmpdir).unwrap();
+    let result = migrate_auto_detect(tmpdir).unwrap();
 
     assert_eq!(result.sources, vec![".stylelintrc.json"]);
     assert_eq!(result.config["rules"]["css-selector-complexity"], "warn");
     assert_eq!(result.config["audit"]["cssDeep"], true);
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_package_json_stylelint_key() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-pkg-stylelint");
-    let _ = std::fs::remove_dir_all(&tmpdir);
-    std::fs::create_dir_all(&tmpdir).unwrap();
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("package.json");
     std::fs::write(
         &path,
@@ -116,7 +111,6 @@ fn migrate_package_json_stylelint_key() {
     assert_eq!(result.sources.len(), 1);
     assert!(result.sources[0].contains("stylelint"));
     assert_eq!(result.config["rules"]["css-selector-complexity"], "warn");
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
@@ -292,8 +286,8 @@ fn jsonc_output_deserializes_as_valid_config() {
 
 #[test]
 fn jsonc_comments_stripped() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-jsonc");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("knip.jsonc");
     std::fs::write(
         &path,
@@ -308,14 +302,12 @@ fn jsonc_comments_stripped() {
     let value = load_json_or_jsonc(&path).unwrap();
     assert_eq!(value["entry"], serde_json::json!(["src/index.ts"]));
     assert_eq!(value["ignore"], serde_json::json!(["dist/**"]));
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn auto_detect_package_json_knip() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-pkg-knip");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let pkg_path = tmpdir.join("package.json");
     std::fs::write(
         &pkg_path,
@@ -323,7 +315,7 @@ fn auto_detect_package_json_knip() {
     )
     .unwrap();
 
-    let result = migrate_auto_detect(&tmpdir).unwrap();
+    let result = migrate_auto_detect(tmpdir).unwrap();
     assert!(!result.sources.is_empty());
     assert!(result.sources[0].contains("package.json"));
 
@@ -332,26 +324,22 @@ fn auto_detect_package_json_knip() {
         config_obj.get("entry").unwrap(),
         &serde_json::json!(["src/main.ts"])
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn auto_detect_package_json_jscpd() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-pkg-jscpd");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let pkg_path = tmpdir.join("package.json");
     std::fs::write(&pkg_path, r#"{"name": "test", "jscpd": {"minTokens": 75}}"#).unwrap();
 
-    let result = migrate_auto_detect(&tmpdir).unwrap();
+    let result = migrate_auto_detect(tmpdir).unwrap();
     assert!(!result.sources.is_empty());
     assert!(result.sources[0].contains("package.json"));
 
     let config_obj = result.config.as_object().unwrap();
     let dupes = config_obj.get("duplicates").unwrap().as_object().unwrap();
     assert_eq!(dupes.get("minTokens").unwrap(), 75);
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
@@ -416,36 +404,30 @@ fn load_json_or_jsonc_file_not_found() {
 
 #[test]
 fn load_json_or_jsonc_invalid_json_and_invalid_jsonc() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-invalid-json");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("bad.json");
     std::fs::write(&path, "not { valid json at all !!!").unwrap();
 
     let err = load_json_or_jsonc(&path).unwrap_err();
     assert!(err.contains("failed to parse"));
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn load_json_or_jsonc_rejects_malformed_leading_comma() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-jsonc-leading-comma");
-    let _ = std::fs::remove_dir_all(&tmpdir);
-    std::fs::create_dir_all(&tmpdir).unwrap();
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("knip.jsonc");
     std::fs::write(&path, "{,}").unwrap();
 
     let err = load_json_or_jsonc(&path).unwrap_err();
     assert!(err.contains("failed to parse"));
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn load_json_or_jsonc_accepts_trailing_commas() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-jsonc-trailing");
-    let _ = std::fs::remove_dir_all(&tmpdir);
-    std::fs::create_dir_all(&tmpdir).unwrap();
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("knip.jsonc");
     std::fs::write(
         &path,
@@ -469,15 +451,12 @@ fn load_json_or_jsonc_accepts_trailing_commas() {
             "ignore": ["dist/**"],
         })
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn load_json_or_jsonc_handles_comments_and_trailing_commas_together() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-jsonc-mixed");
-    let _ = std::fs::remove_dir_all(&tmpdir);
-    std::fs::create_dir_all(&tmpdir).unwrap();
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("knip.jsonc");
     std::fs::write(
         &path,
@@ -498,8 +477,6 @@ fn load_json_or_jsonc_handles_comments_and_trailing_commas_together() {
         value.get("ignore").unwrap(),
         &serde_json::json!(["dist/**"])
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
@@ -558,8 +535,8 @@ fn migrate_from_file_nonexistent_path() {
 
 #[test]
 fn migrate_from_file_knip_ts_rejected() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-knip-ts");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("knip.ts");
     std::fs::write(&path, "export default {};").unwrap();
 
@@ -570,14 +547,12 @@ fn migrate_from_file_knip_ts_rejected() {
         }
         Ok(_) => panic!("expected error for .ts knip config"),
     }
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_knip_json() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-from-knip");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("knip.json");
     std::fs::write(&path, r#"{"entry": ["src/main.ts"]}"#).unwrap();
 
@@ -589,14 +564,12 @@ fn migrate_from_file_knip_json() {
         config_obj.get("entry").unwrap(),
         &serde_json::json!(["src/main.ts"])
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_jscpd_json() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-from-jscpd");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join(".jscpd.json");
     std::fs::write(&path, r#"{"minTokens": 50, "mode": "strict"}"#).unwrap();
 
@@ -606,14 +579,12 @@ fn migrate_from_file_jscpd_json() {
     let dupes = config_obj.get("duplicates").unwrap().as_object().unwrap();
     assert_eq!(dupes.get("minTokens").unwrap(), 50);
     assert_eq!(dupes.get("mode").unwrap(), "strict");
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_package_json_with_both_knip_and_jscpd() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-pkg-both");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("package.json");
     std::fs::write(
         &path,
@@ -635,14 +606,12 @@ fn migrate_from_file_package_json_with_both_knip_and_jscpd() {
     assert!(config_obj.contains_key("ignoreFindings"));
     assert!(!config_obj.contains_key("ignorePatterns"));
     assert!(config_obj.contains_key("duplicates"));
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_package_json_without_known_migrate_keys() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-pkg-empty");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("package.json");
     std::fs::write(&path, r#"{"name": "test", "version": "1.0.0"}"#).unwrap();
 
@@ -650,14 +619,12 @@ fn migrate_from_file_package_json_without_known_migrate_keys() {
         Err(err) => assert!(err.contains("no knip, jscpd, or stylelint configuration found")),
         Ok(_) => panic!("expected error for package.json without migration keys"),
     }
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_package_json_with_only_jscpd() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-pkg-jscpd-only");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("package.json");
     std::fs::write(
         &path,
@@ -672,14 +639,12 @@ fn migrate_from_file_package_json_with_only_jscpd() {
         result.config.get("duplicates").is_some(),
         "should have duplicates key from jscpd migration"
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_unrecognized_file_detected_as_knip() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-detect-knip");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("custom-config.json");
     std::fs::write(
         &path,
@@ -691,14 +656,12 @@ fn migrate_from_file_unrecognized_file_detected_as_knip() {
     assert_eq!(result.sources.len(), 1);
     let config_obj = result.config.as_object().unwrap();
     assert!(config_obj.contains_key("entry"));
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_unrecognized_file_detected_as_jscpd() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-detect-jscpd");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("custom-dupes.json");
     std::fs::write(&path, r#"{"minTokens": 100, "threshold": 5.0}"#).unwrap();
 
@@ -706,14 +669,12 @@ fn migrate_from_file_unrecognized_file_detected_as_jscpd() {
     assert_eq!(result.sources.len(), 1);
     let config_obj = result.config.as_object().unwrap();
     assert!(config_obj.contains_key("duplicates"));
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_unrecognized_file_unknown_format() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-detect-unknown");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("random.json");
     std::fs::write(&path, r#"{"foo": "bar", "baz": 123}"#).unwrap();
 
@@ -721,14 +682,12 @@ fn migrate_from_file_unrecognized_file_unknown_format() {
         Err(err) => assert!(err.contains("could not determine config format")),
         Ok(_) => panic!("expected error for unrecognized config format"),
     }
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_knip_heuristic_via_rules_field() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-detect-rules");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("my-config.json");
     std::fs::write(&path, r#"{"rules": {"files": "warn"}}"#).unwrap();
 
@@ -737,14 +696,12 @@ fn migrate_from_file_knip_heuristic_via_rules_field() {
     let config_obj = result.config.as_object().unwrap();
     let rules = config_obj.get("rules").unwrap().as_object().unwrap();
     assert_eq!(rules.get("unused-files").unwrap(), "warn");
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_knip_heuristic_via_ignore_dependencies() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-detect-ignoredeps");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("my-config.json");
     std::fs::write(&path, r#"{"ignoreDependencies": ["lodash"]}"#).unwrap();
 
@@ -755,14 +712,12 @@ fn migrate_from_file_knip_heuristic_via_ignore_dependencies() {
         config_obj.get("ignoreDependencies").unwrap(),
         &serde_json::json!(["lodash"])
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_knip_heuristic_via_ignore_exports_used_in_file() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-detect-ignoreexportsusedinfile");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("my-config.json");
     std::fs::write(&path, r#"{"ignoreExportsUsedInFile": true}"#).unwrap();
 
@@ -773,14 +728,12 @@ fn migrate_from_file_knip_heuristic_via_ignore_exports_used_in_file() {
         config_obj.get("ignoreExportsUsedInFile").unwrap(),
         &serde_json::json!(true)
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn migrate_from_file_jscpd_heuristic_via_mode() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-detect-mode");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     let path = tmpdir.join("duplication.json");
     std::fs::write(&path, r#"{"mode": "mild"}"#).unwrap();
 
@@ -789,14 +742,12 @@ fn migrate_from_file_jscpd_heuristic_via_mode() {
     let config_obj = result.config.as_object().unwrap();
     let dupes = config_obj.get("duplicates").unwrap().as_object().unwrap();
     assert_eq!(dupes.get("mode").unwrap(), "mild");
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn auto_detect_no_configs_found() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-auto-empty");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     for name in &[
         "knip.json",
         "knip.jsonc",
@@ -810,16 +761,14 @@ fn auto_detect_no_configs_found() {
         let _ = std::fs::remove_file(tmpdir.join(name));
     }
 
-    let result = migrate_auto_detect(&tmpdir).unwrap();
+    let result = migrate_auto_detect(tmpdir).unwrap();
     assert!(result.sources.is_empty());
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn auto_detect_knip_ts_skipped_with_warning() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-auto-knip-ts");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     for name in &[
         "knip.json",
         "knip.jsonc",
@@ -833,7 +782,7 @@ fn auto_detect_knip_ts_skipped_with_warning() {
     let path = tmpdir.join("knip.ts");
     std::fs::write(&path, "export default {};").unwrap();
 
-    let result = migrate_auto_detect(&tmpdir).unwrap();
+    let result = migrate_auto_detect(tmpdir).unwrap();
     assert!(result.sources.is_empty());
     assert!(!result.warnings.is_empty());
     assert!(
@@ -841,14 +790,12 @@ fn auto_detect_knip_ts_skipped_with_warning() {
             .message
             .contains("TypeScript config files")
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn auto_detect_knip_json_takes_precedence_over_knip_jsonc() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-auto-precedence");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     for name in &[".knip.json", ".knip.jsonc", ".jscpd.json", "package.json"] {
         let _ = std::fs::remove_file(tmpdir.join(name));
     }
@@ -860,7 +807,7 @@ fn auto_detect_knip_json_takes_precedence_over_knip_jsonc() {
     )
     .unwrap();
 
-    let result = migrate_auto_detect(&tmpdir).unwrap();
+    let result = migrate_auto_detect(tmpdir).unwrap();
     assert_eq!(result.sources.len(), 1);
     assert_eq!(result.sources[0], "knip.json");
     let config_obj = result.config.as_object().unwrap();
@@ -868,14 +815,12 @@ fn auto_detect_knip_json_takes_precedence_over_knip_jsonc() {
         config_obj.get("entry").unwrap(),
         &serde_json::json!(["from-knip-json"])
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn auto_detect_standalone_knip_prevents_package_json_knip() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-auto-standalone-over-pkg");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     for name in &[
         "knip.jsonc",
         ".knip.json",
@@ -894,7 +839,7 @@ fn auto_detect_standalone_knip_prevents_package_json_knip() {
     )
     .unwrap();
 
-    let result = migrate_auto_detect(&tmpdir).unwrap();
+    let result = migrate_auto_detect(tmpdir).unwrap();
     assert_eq!(result.sources.len(), 1);
     assert_eq!(result.sources[0], "knip.json");
     let config_obj = result.config.as_object().unwrap();
@@ -902,14 +847,12 @@ fn auto_detect_standalone_knip_prevents_package_json_knip() {
         config_obj.get("entry").unwrap(),
         &serde_json::json!(["standalone"])
     );
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn auto_detect_standalone_jscpd_prevents_package_json_jscpd() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-auto-jscpd-standalone");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     for name in &[
         "knip.json",
         "knip.jsonc",
@@ -928,7 +871,7 @@ fn auto_detect_standalone_jscpd_prevents_package_json_jscpd() {
     )
     .unwrap();
 
-    let result = migrate_auto_detect(&tmpdir).unwrap();
+    let result = migrate_auto_detect(tmpdir).unwrap();
     let jscpd_source = result
         .sources
         .iter()
@@ -938,14 +881,12 @@ fn auto_detect_standalone_jscpd_prevents_package_json_jscpd() {
     let config_obj = result.config.as_object().unwrap();
     let dupes = config_obj.get("duplicates").unwrap().as_object().unwrap();
     assert_eq!(dupes.get("minTokens").unwrap(), 200);
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
 fn auto_detect_package_json_with_both_knip_and_jscpd() {
-    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-auto-pkg-both");
-    let _ = std::fs::create_dir_all(&tmpdir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let tmpdir = temp.path();
     for name in &[
         "knip.json",
         "knip.jsonc",
@@ -964,12 +905,10 @@ fn auto_detect_package_json_with_both_knip_and_jscpd() {
     )
     .unwrap();
 
-    let result = migrate_auto_detect(&tmpdir).unwrap();
+    let result = migrate_auto_detect(tmpdir).unwrap();
     assert_eq!(result.sources.len(), 2);
     assert!(result.sources[0].contains("knip"));
     assert!(result.sources[1].contains("jscpd"));
-
-    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
