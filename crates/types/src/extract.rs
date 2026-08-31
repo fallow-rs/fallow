@@ -1041,6 +1041,10 @@ pub struct FileBranching {
     /// that shows up here and not in `branch_points` came from repartitioning,
     /// not from removing branching.
     pub cognitive_nesting_weight: u32,
+    /// Whether the file carried a synthetic template unit that these counts
+    /// exclude. When it did, the numbers describe the file's script only, so a
+    /// consumer must not present them as describing the whole file.
+    pub has_synthetic_units: bool,
 }
 
 impl FileBranching {
@@ -1053,7 +1057,12 @@ impl FileBranching {
     /// branches from the total.
     #[must_use]
     pub fn from_units(units: &[FunctionComplexity]) -> Self {
-        let mut totals = Self::default();
+        let mut totals = Self {
+            has_synthetic_units: units
+                .iter()
+                .any(|unit| is_synthetic_template_unit(&unit.name)),
+            ..Self::default()
+        };
         for unit in units
             .iter()
             .filter(|unit| !is_synthetic_template_unit(&unit.name))

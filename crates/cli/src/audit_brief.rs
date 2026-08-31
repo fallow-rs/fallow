@@ -614,15 +614,17 @@ fn print_brief_human(
 /// reader meets the phrase "branch point".
 fn branching_human_lines(report: Option<&fallow_output::BranchingReport>) -> Option<Vec<String>> {
     let report = report.filter(|report| report.is_reportable())?;
-    let mut lines = vec![
-        "  branching: a split moves branching into new functions, it does not remove it"
-            .to_string(),
-    ];
+    // States what was measured. Concluding "this was split" would overclaim:
+    // the peak is a file-level maximum, so it can also fall because the largest
+    // function left the file while other functions arrived.
+    let mut lines =
+        vec!["  branching: held while functions rose, the shape a split leaves".to_string()];
     for split in report.split_in_place.iter().take(2) {
         lines.push(format!("         {}", elide_path(&split.path, 71)));
         lines.push(format!(
-            "           {} branch points held, {} to {} functions, peak {} to {}",
-            split.branch_points,
+            "           {} to {} branch points, {} to {} functions, peak {} to {}",
+            split.branch_points_before,
+            split.branch_points_after,
             split.functions_before,
             split.functions_after,
             split.peak_before,
@@ -1462,6 +1464,7 @@ mod tests {
                     peak_cyclomatic: peak,
                     cognitive: branch_points,
                     cognitive_nesting_weight: 0,
+                    has_synthetic_units: false,
                 },
             ))
             .collect::<fallow_output::BranchingSnapshot>()
@@ -1490,14 +1493,14 @@ mod tests {
         let lines = branching_human_lines(Some(&report)).expect("a split renders");
 
         assert_eq!(lines.len(), 3);
-        assert!(lines[0].contains("does not remove it"));
+        assert!(lines[0].contains("the shape a split leaves"));
         assert!(
             lines[1].ends_with("src/checkout/pricing.ts"),
             "{}",
             lines[1]
         );
         assert!(
-            lines[2].contains("39 branch points held, 1 to 8 functions, peak 40 to 6"),
+            lines[2].contains("39 to 39 branch points, 1 to 8 functions, peak 40 to 6"),
             "{}",
             lines[2]
         );
@@ -1517,6 +1520,7 @@ mod tests {
                     peak_cyclomatic: peak,
                     cognitive: branch_points,
                     cognitive_nesting_weight: 0,
+                    has_synthetic_units: false,
                 },
             ))
             .collect::<fallow_output::BranchingSnapshot>()

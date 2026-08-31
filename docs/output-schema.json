@@ -24732,7 +24732,7 @@
         {
           "type": "string",
           "const": "mixed",
-          "description": "Both moved."
+          "description": "Both moved, or neither did. The second case is cognitive falling while\nbranching and nesting both held, where naming either cause would assert\nsomething the numbers do not show."
         }
       ],
       "description": "Where a cognitive-complexity improvement came from."
@@ -24767,9 +24767,13 @@
           "type": "string",
           "description": "Root-relative path."
         },
-        "branch_points": {
+        "branch_points_before": {
           "type": "integer",
-          "description": "Branch points on the base revision. Held within `tolerance` on head."
+          "description": "Branch points on the base revision."
+        },
+        "branch_points_after": {
+          "type": "integer",
+          "description": "And on head. Within `tolerance` of `branch_points_before`, which is what\n\"held\" means here. Both are reported because one number alone cannot be\nchecked."
         },
         "functions_before": {
           "type": "integer",
@@ -24790,13 +24794,14 @@
       },
       "required": [
         "path",
-        "branch_points",
+        "branch_points_before",
+        "branch_points_after",
         "functions_before",
         "functions_after",
         "peak_before",
         "peak_after"
       ],
-      "description": "One file present on both revisions whose branching held while it gained\nfunctions and its worst function shrank.\n\nThis is the whole claim, and it is local: nothing is inferred about the rest\nof the changeset. A set-level classifier cannot make this claim, because a\nchangeset contains arbitrary other work and an aggregate cannot attribute."
+      "description": "One file present on both revisions whose branching held while it gained\nfunctions and its largest function shrank.\n\nLocal by construction: nothing here depends on any other file, so unrelated\nwork in the changeset cannot make it more or less true. A set-level\nclassifier cannot make this claim, because a changeset contains arbitrary\nother work and an aggregate cannot attribute.\n\nIt is a description, not an inference. The three conditions are the\nsignature a split leaves, and they are also satisfiable without one: the\npeak is a file-level maximum (`FileBranching::peak_cyclomatic`), so it can\nfall because the largest function left the file while arriving helpers\nhappen to carry the branching it took with it. Both numbers are reported so\na reader can see that for themselves, and the rendered text states what was\nmeasured rather than concluding a refactor happened.\n\nFiles carrying synthetic template units are excluded, because those units\nare outside every count here, so the numbers would not describe the file a\nreader opens. Test paths are excluded too: their totals are reported in\n`BranchingScope` instead."
     }
   }
 }

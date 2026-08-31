@@ -13,11 +13,11 @@ use super::{AuditKeySnapshot, AuditOptions};
 use crate::base_worktree::{git_rev_parse, git_toplevel};
 use crate::error::emit_error;
 
-/// Version 8: the snapshot carries per-file branching totals, so a version-7
-/// payload cannot answer the head-versus-base branching comparison. Version 7
+/// Version 9: the per-file branching payload gained a field, so a version-8
+/// payload no longer decodes. Version 8 introduced that payload, and version 7
 /// rebased Istanbul coverage paths onto the base worktree (#2347), so snapshots
 /// computed by the coverage-blind base pass must not be reused.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 8;
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 9;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {

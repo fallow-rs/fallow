@@ -4812,6 +4812,7 @@ fn branching_totals(
         peak_cyclomatic: peak,
         cognitive: branch_points,
         cognitive_nesting_weight: 0,
+        has_synthetic_units: false,
     }
 }
 

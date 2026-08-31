@@ -12821,11 +12821,25 @@ by_file_omitted: number
 }
 /**
  * One file present on both revisions whose branching held while it gained
- * functions and its worst function shrank.
+ * functions and its largest function shrank.
  *
- * This is the whole claim, and it is local: nothing is inferred about the rest
- * of the changeset. A set-level classifier cannot make this claim, because a
- * changeset contains arbitrary other work and an aggregate cannot attribute.
+ * Local by construction: nothing here depends on any other file, so unrelated
+ * work in the changeset cannot make it more or less true. A set-level
+ * classifier cannot make this claim, because a changeset contains arbitrary
+ * other work and an aggregate cannot attribute.
+ *
+ * It is a description, not an inference. The three conditions are the
+ * signature a split leaves, and they are also satisfiable without one: the
+ * peak is a file-level maximum (`FileBranching::peak_cyclomatic`), so it can
+ * fall because the largest function left the file while arriving helpers
+ * happen to carry the branching it took with it. Both numbers are reported so
+ * a reader can see that for themselves, and the rendered text states what was
+ * measured rather than concluding a refactor happened.
+ *
+ * Files carrying synthetic template units are excluded, because those units
+ * are outside every count here, so the numbers would not describe the file a
+ * reader opens. Test paths are excluded too: their totals are reported in
+ * `BranchingScope` instead.
  */
 export interface SplitInPlace {
 /**
@@ -12833,9 +12847,15 @@ export interface SplitInPlace {
  */
 path: string
 /**
- * Branch points on the base revision. Held within `tolerance` on head.
+ * Branch points on the base revision.
  */
-branch_points: number
+branch_points_before: number
+/**
+ * And on head. Within `tolerance` of `branch_points_before`, which is what
+ * "held" means here. Both are reported because one number alone cannot be
+ * checked.
+ */
+branch_points_after: number
 /**
  * Accounted functions before the split.
  */

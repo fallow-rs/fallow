@@ -60,7 +60,9 @@ pub enum CognitiveAttribution {
     /// invisible here, which is the same reason there is no "branching
     /// removed" verdict.
     FewerBranchPoints,
-    /// Both moved.
+    /// Both moved, or neither did. The second case is cognitive falling while
+    /// branching and nesting both held, where naming either cause would assert
+    /// something the numbers do not show.
     Mixed,
 }
 
@@ -113,18 +115,36 @@ pub struct BranchingScope {
 }
 
 /// One file present on both revisions whose branching held while it gained
-/// functions and its worst function shrank.
+/// functions and its largest function shrank.
 ///
-/// This is the whole claim, and it is local: nothing is inferred about the rest
-/// of the changeset. A set-level classifier cannot make this claim, because a
-/// changeset contains arbitrary other work and an aggregate cannot attribute.
+/// Local by construction: nothing here depends on any other file, so unrelated
+/// work in the changeset cannot make it more or less true. A set-level
+/// classifier cannot make this claim, because a changeset contains arbitrary
+/// other work and an aggregate cannot attribute.
+///
+/// It is a description, not an inference. The three conditions are the
+/// signature a split leaves, and they are also satisfiable without one: the
+/// peak is a file-level maximum (`FileBranching::peak_cyclomatic`), so it can
+/// fall because the largest function left the file while arriving helpers
+/// happen to carry the branching it took with it. Both numbers are reported so
+/// a reader can see that for themselves, and the rendered text states what was
+/// measured rather than concluding a refactor happened.
+///
+/// Files carrying synthetic template units are excluded, because those units
+/// are outside every count here, so the numbers would not describe the file a
+/// reader opens. Test paths are excluded too: their totals are reported in
+/// `BranchingScope` instead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SplitInPlace {
     /// Root-relative path.
     pub path: String,
-    /// Branch points on the base revision. Held within `tolerance` on head.
-    pub branch_points: u32,
+    /// Branch points on the base revision.
+    pub branch_points_before: u32,
+    /// And on head. Within `tolerance` of `branch_points_before`, which is what
+    /// "held" means here. Both are reported because one number alone cannot be
+    /// checked.
+    pub branch_points_after: u32,
     /// Accounted functions before the split.
     pub functions_before: u32,
     /// Accounted functions after it.
@@ -260,10 +280,14 @@ fn partition(
         if branch_delta.unsigned_abs() <= u64::from(tolerance)
             && function_delta > 0
             && head_file.peak_cyclomatic < base_file.peak_cyclomatic
+            && !is_test_path(path)
+            && !head_file.has_synthetic_units
+            && !base_file.has_synthetic_units
         {
             out.split_in_place.push(SplitInPlace {
                 path: path.clone(),
-                branch_points: base_file.branch_points,
+                branch_points_before: base_file.branch_points,
+                branch_points_after: head_file.branch_points,
                 functions_before: base_file.functions,
                 functions_after: head_file.functions,
                 peak_before: base_file.peak_cyclomatic,
@@ -435,6 +459,7 @@ mod tests {
             peak_cyclomatic: peak,
             cognitive: branch_points,
             cognitive_nesting_weight: 0,
+            has_synthetic_units: false,
         }
     }
 
@@ -461,7 +486,10 @@ mod tests {
         assert_eq!(report.split_in_place.len(), 1);
         let split = &report.split_in_place[0];
         assert_eq!(split.path, "src/a.ts");
-        assert_eq!(split.branch_points, 39);
+        assert_eq!(
+            (split.branch_points_before, split.branch_points_after),
+            (39, 39)
+        );
         assert_eq!((split.functions_before, split.functions_after), (1, 8));
         assert_eq!((split.peak_before, split.peak_after), (40, 6));
         assert!(report.is_reportable());
@@ -513,6 +541,55 @@ mod tests {
             report.scope.test_branch_points, 48,
             "still reported as scope"
         );
+    }
+
+    #[test]
+    fn a_file_whose_branching_fell_reports_both_numbers() {
+        // Rendering only the base value would read as "2 branch points held"
+        // for a file that now has none.
+        let base = snapshot(&[("src/a.ts", file(2, 1, 3))]);
+        let head = snapshot(&[("src/a.ts", file(0, 2, 1))]);
+
+        let report = compare(&base, &head);
+
+        let split = &report.split_in_place[0];
+        assert_eq!(
+            (split.branch_points_before, split.branch_points_after),
+            (2, 0)
+        );
+    }
+
+    #[test]
+    fn a_test_file_never_carries_the_claim() {
+        // Its totals are reported in scope instead, so a test file cannot take
+        // a slot from production code in the rendered list.
+        let base = snapshot(&[("src/a.test.ts", file(30, 1, 31))]);
+        let head = snapshot(&[("src/a.test.ts", file(30, 8, 6))]);
+
+        let report = compare(&base, &head);
+
+        assert!(report.split_in_place.is_empty());
+        assert_eq!(report.scope.test_branch_points, 30);
+    }
+
+    #[test]
+    fn a_file_with_synthetic_template_units_never_carries_the_claim() {
+        // Template units sit outside every count here, so the numbers would not
+        // describe the file a reader opens.
+        let with_template = |branch_points: u32, functions: u32, peak: u16| FileBranching {
+            branch_points,
+            functions,
+            peak_cyclomatic: peak,
+            cognitive: branch_points,
+            cognitive_nesting_weight: 0,
+            has_synthetic_units: true,
+        };
+        let base = snapshot(&[("src/App.vue", with_template(6, 1, 7))]);
+        let head = snapshot(&[("src/App.vue", with_template(6, 4, 3))]);
+
+        let report = compare(&base, &head);
+
+        assert!(report.split_in_place.is_empty());
     }
 
     #[test]
@@ -606,6 +683,7 @@ mod tests {
                 peak_cyclomatic: 11,
                 cognitive: 40,
                 cognitive_nesting_weight: 30,
+                has_synthetic_units: false,
             },
         )]);
         let head = snapshot(&[(
@@ -616,6 +694,7 @@ mod tests {
                 peak_cyclomatic: 4,
                 cognitive: 12,
                 cognitive_nesting_weight: 2,
+                has_synthetic_units: false,
             },
         )]);
 
