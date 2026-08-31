@@ -856,6 +856,7 @@ mod tests {
     fn resolve_rules_for_path_no_overrides() {
         let config = FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -911,6 +912,7 @@ mod tests {
     fn resolve_rules_for_path_with_matching_override() {
         let config = FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -977,6 +979,7 @@ mod tests {
     fn resolve_rules_for_path_later_override_wins() {
         let config = FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -1051,6 +1054,7 @@ mod tests {
     fn resolve_keeps_inter_file_rule_override_after_warning() {
         let config = FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -1157,6 +1161,7 @@ mod tests {
         let files = vec!["__test_resolve_dedup/**".to_string()];
         let build_config = || FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],
@@ -1222,6 +1227,7 @@ mod tests {
     fn make_config(production: bool) -> FallowConfig {
         FallowConfig {
             schema: None,
+            minimum_version: None,
             extends: vec![],
             entry: vec![],
             ignore_patterns: vec![],

@@ -24,6 +24,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   published release, where those fields first exist and remain repairable.
   Verified against every 3.x release without a false failure.
 
+### Added
+
+- **`minimumVersion` says which fallow a config is written for**
+  (Closes [#2451](https://github.com/fallow-rs/fallow/issues/2451)). An
+  unrecognized config key fails the run with exit 2, which is what catches an
+  `ignorePaths` written where `ignorePatterns` was meant, but it also makes every new config field a
+  coordinated fleet upgrade: a team that commits a field introduced in a newer
+  version breaks every runner still on the old one, on the commit that adds the
+  field rather than on the upgrade that would explain it, with an error naming
+  the field so the first guess is a typo. A config may now declare the lowest
+  version it is written for. A binary below that floor stops with both versions
+  and the upgrade named, before it reports any field it does not recognize. The
+  floor is inherited through `extends`, so a monorepo base config declares it
+  once. At or above the floor an unknown key still fails, because there it
+  really is a typo. Absent, nothing changes.
+
 ## [3.21.0] - 2026-08-31
 
 ### Added

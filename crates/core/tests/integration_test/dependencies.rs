@@ -1031,6 +1031,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
     let config = FallowConfig {
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
+        minimum_version: None,
         extends: vec![],
         entry: vec![],
         ignore_patterns: vec!["**/dist/**".to_string()],
