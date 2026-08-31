@@ -45,6 +45,7 @@ REQUIRED_FAST_TARGETS = {
     ("fallow-engine", "dupes_detect"),
     ("fallow-benchmarks", "programmatic_stable"),
     ("fallow-benchmarks", "representative_sources"),
+    ("fallow-benchmarks", "component_cache"),
     ("fallow-benchmarks", "component_config"),
     ("fallow-benchmarks", "component_engine"),
     ("fallow-benchmarks", "component_graph"),

@@ -22,6 +22,10 @@ name = "representative_sources"
 harness = false
 
 [[bench]]
+name = "component_cache"
+harness = false
+
+[[bench]]
 name = "component_config"
 harness = false
 

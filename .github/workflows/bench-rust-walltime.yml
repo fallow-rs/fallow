@@ -17,6 +17,7 @@ on:
           - component-engine
           - component-config
           - component-output
+          - component-cache
           - dupes-detect
           - representative-sources
 
@@ -75,6 +76,10 @@ jobs:
             component-output)
               echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
               echo "bench=component_output" >> "$GITHUB_OUTPUT"
+              ;;
+            component-cache)
+              echo "package=fallow-benchmarks" >> "$GITHUB_OUTPUT"
+              echo "bench=component_cache" >> "$GITHUB_OUTPUT"
               ;;
             dupes-detect)
               echo "package=fallow-engine" >> "$GITHUB_OUTPUT"

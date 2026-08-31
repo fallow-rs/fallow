@@ -52,6 +52,8 @@ Fast PR shards:
   analysis, list inventory rendering, and Viz HTML payload paths.
 - `fallow-benchmarks/representative_sources`: focused source-shape extraction
   probes.
+- `fallow-benchmarks/component_cache`: extraction cache store save, store load,
+  and cached-module to module-info conversion.
 - `fallow-benchmarks/component_config`: config loading, resolution, workspace
   discovery, and workspace diagnostics.
 - `fallow-benchmarks/component_engine`: typed engine session loading, parser

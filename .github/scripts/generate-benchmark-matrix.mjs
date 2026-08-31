@@ -101,6 +101,13 @@ export const FAST_BENCHMARKS = [
     ],
   },
   {
+    label: "cache component",
+    cache_key: "component-cache",
+    package: "fallow-benchmarks",
+    bench: "component_cache",
+    paths: ["crates/benchmarks/benches/component_cache.rs", "crates/extract/", "crates/types/"],
+  },
+  {
     label: "graph component",
     cache_key: "component-graph",
     package: "fallow-benchmarks",
