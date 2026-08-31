@@ -2575,7 +2575,12 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         base_sha: "abc123".to_string(),
     };
     let snapshot = AuditKeySnapshot {
-        branching: rustc_hash::FxHashMap::default(),
+        branching: [
+            ("src/z.ts".to_string(), branching_totals(7, 3, 9)),
+            ("src/a.ts".to_string(), branching_totals(2, 1, 3)),
+        ]
+        .into_iter()
+        .collect(),
         type_aware_identity: Some(identity_with_hash("hash-roundtrip")),
         type_aware_gap_signature: vec!["SymbolUse:None:".to_string()],
         syntactic_dead_code: Some(
@@ -2606,7 +2611,21 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         Some(vec!["syn:a".to_string(), "syn:b".to_string()])
     );
 
+    assert_eq!(
+        cached
+            .branching
+            .iter()
+            .map(|row| row.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["src/a.ts", "src/z.ts"],
+        "the cached payload is sorted, so identical input encodes to identical bytes"
+    );
+
     let decoded = snapshot_from_cached(cached).expect("cached snapshot should decode");
+    assert_eq!(
+        decoded.branching, snapshot.branching,
+        "branching totals survive the cache round trip"
+    );
     assert_eq!(decoded.type_aware_identity, snapshot.type_aware_identity);
     assert_eq!(
         decoded.type_aware_gap_signature,
@@ -4780,4 +4799,80 @@ fn base_file_reader_distinguishes_missing_from_pipe_error() {
         matches!(reader.read("HEAD", Path::new("README.md")), BaseRead::Error),
         "a severed request pipe is an Error, never Missing or empty content"
     );
+}
+
+fn branching_totals(
+    branch_points: u32,
+    functions: u32,
+    peak: u16,
+) -> fallow_types::extract::FileBranching {
+    fallow_types::extract::FileBranching {
+        branch_points,
+        functions,
+        peak_cyclomatic: peak,
+        cognitive: branch_points,
+        cognitive_nesting_weight: 0,
+    }
+}
+
+fn snapshot_with_branching(
+    entries: &[(&str, fallow_types::extract::FileBranching)],
+) -> AuditKeySnapshot {
+    AuditKeySnapshot {
+        branching: entries
+            .iter()
+            .map(|(path, totals)| ((*path).to_string(), *totals))
+            .collect(),
+        type_aware_identity: None,
+        type_aware_gap_signature: Vec::new(),
+        syntactic_dead_code: None,
+        dead_code: FxHashSet::default(),
+        health: FxHashSet::default(),
+        styling: FxHashSet::default(),
+        dupes: FxHashSet::default(),
+        boundary_edges: FxHashSet::default(),
+        cycles: FxHashSet::default(),
+        public_api: FxHashSet::default(),
+    }
+}
+
+#[test]
+fn renaming_a_file_moves_its_branching_totals_onto_the_head_path() {
+    // Without this the base entry keeps the old path, the head entry looks
+    // like a new file, and a pure rename reads as branching arriving.
+    let root = std::path::Path::new("/repo");
+    let mut snapshot = snapshot_with_branching(&[("src/old.ts", branching_totals(11, 4, 6))]);
+    let renames = vec![fallow_engine::changed_files::RenamedFile {
+        from: root.join("src/old.ts"),
+        to: root.join("src/new.ts"),
+    }];
+
+    remap_base_snapshot_for_renames(&mut snapshot, &renames, root);
+
+    assert!(!snapshot.branching.contains_key("src/old.ts"));
+    assert_eq!(
+        snapshot.branching.get("src/new.ts").copied(),
+        Some(branching_totals(11, 4, 6))
+    );
+}
+
+#[test]
+fn a_file_untouched_by_a_rename_keeps_its_branching_key() {
+    let root = std::path::Path::new("/repo");
+    let mut snapshot = snapshot_with_branching(&[
+        ("src/old.ts", branching_totals(11, 4, 6)),
+        ("src/other.ts", branching_totals(3, 2, 4)),
+    ]);
+    let renames = vec![fallow_engine::changed_files::RenamedFile {
+        from: root.join("src/old.ts"),
+        to: root.join("src/new.ts"),
+    }];
+
+    remap_base_snapshot_for_renames(&mut snapshot, &renames, root);
+
+    assert_eq!(
+        snapshot.branching.get("src/other.ts").copied(),
+        Some(branching_totals(3, 2, 4))
+    );
+    assert_eq!(snapshot.branching.len(), 2);
 }
