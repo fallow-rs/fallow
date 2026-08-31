@@ -32,6 +32,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '22'
+
       - name: Verify dispatch inputs and release version
         shell: bash
         env:
@@ -99,6 +103,17 @@ jobs:
               sys.exit(1)
           print(f"type-aware companion matches the workspace at {expected}")
           PY
+
+      # The GitHub Release does not exist while this workflow runs, so its
+      # title and body cannot be read here. The changelog section they are
+      # drafted from does exist, and publication is irreversible, so an
+      # uncurated section fails the dispatch before anything is built.
+      # release-published.yml carries the matching gate for the title and body.
+      - name: Verify curated release metadata
+        shell: bash
+        env:
+          TAG_NAME: ${{ inputs.tag }}
+        run: node scripts/verify-release-metadata.mjs --tag "$TAG_NAME"
 
       # Release immutability is verified in the maintainer release flow, not
       # here. `repos/{owner}/{repo}/immutable-releases` requires the

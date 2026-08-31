@@ -1,0 +1,47 @@
+# The other half of the curated-metadata gate that `release.yml` cannot run.
+#
+# `release.yml` is tag-last: it publishes every registry while the version tag
+# is still absent, so the GitHub Release does not exist yet and its title and
+# body cannot be read there. Publication is the first moment they exist. Assets,
+# tag and target freeze at that point, but the title and body stay editable, so
+# a failure here is repairable with `gh release edit --title` / `--notes-file`
+# rather than merely informational.
+name: Release Published
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  release-metadata:
+    name: Verify published release metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # Checks out the default branch rather than the released tag. The release
+      # commit lands on main before the tag exists, so main already carries the
+      # changelog section, and no event-controlled value reaches `ref:`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '22'
+
+      - name: Verify curated release metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
+            --json name,body,isDraft,isPrerelease > release.json
+          node scripts/verify-release-metadata.mjs \
+            --tag "$TAG_NAME" \
+            --release-json release.json

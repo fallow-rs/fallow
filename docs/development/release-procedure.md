@@ -51,6 +51,23 @@ invariants in this file.
 
    Store the notes outside the repository, for example
    `/tmp/fallow-release-vX.Y.Z.md`, and require the file to be non-empty.
+
+   `scripts/verify-release-metadata.mjs` enforces the machine-checkable half of
+   this list, so skipping the runbook no longer skips the gates. Two surfaces,
+   because the notes and the release exist at different moments:
+
+   - `release.yml` runs it at dispatch against `CHANGELOG.md`, the source the
+     notes are drafted from. It requires one dated `## [X.Y.Z]` section with a
+     non-empty body and no em-dash, the matching compare-link definition back
+     to the previous released version, and an empty `[Unreleased]` section so
+     nothing ships uncredited. Publication cannot start without it.
+   - `release-published.yml` runs it again on the `release: published` event,
+     the first moment a title and body exist, against the title prefix, the
+     non-empty body, the comparison URL, em-dashes, and third-party names.
+
+   The changelog gate deliberately omits the third-party-name rule: changelog
+   entries legitimately name a migration source or a documented parity gap,
+   while the public release surface does not.
 8. Apply version changes transactionally. Regenerate every public contract,
    adapter, packaged skill, and version-bearing artifact. Synchronize
    `fallow-docs` and `fallow-skills` from their canonical sources.
@@ -92,8 +109,9 @@ invariants in this file.
     test -s "$NOTES_FILE"
     grep -qF "https://github.com/fallow-rs/fallow/compare/${PREVIOUS_TAG}...${TAG}" "$NOTES_FILE"
 
-    # The workflow can no longer validate release metadata, because the release
-    # does not exist yet, and an immutable release cannot be repaired later.
+    # release.yml gates the changelog section these notes are drafted from, but
+    # the release does not exist while it runs, so the title and the notes file
+    # are checked here, before the dispatch that publishes every registry.
     case "$TITLE" in
      "${TAG}: "?*) ;;
      *) echo "release title must be '${TAG}: <summary>'" >&2; exit 1 ;;
@@ -178,6 +196,11 @@ invariants in this file.
 12. Query the GitHub Release and require a non-draft, non-prerelease release
     marked immutable, with the expected title, a non-empty body, the exact
     comparison link, the signed tag at `RELEASE_COMMIT`, and uploaded assets.
+    Publication also triggers `release-published.yml`, which asserts the same
+    title, body, comparison link, and naming rules. Require that run green.
+    Assets, tag and target are frozen at publication, but the title and body
+    are not, so a failure there is repaired with `gh release edit --title` or
+    `--notes-file` rather than by recreating anything.
     Then verify every published crate, npm package, editor package, binary,
     schema, documentation deployment, and companion contract from its real
     public endpoint.

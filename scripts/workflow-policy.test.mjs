@@ -594,6 +594,10 @@ test("release keeps the version tag last and requires curated public notes", () 
   assert.match(procedure, /release title must be/u);
   assert.match(procedure, /release title or notes contain an em-dash/u);
   assert.match(procedure, /name no competing or upstream third-party project/u);
+  // The curated notes are drafted from the changelog section, which is the one
+  // half of the metadata the tag-last workflow can still read at dispatch.
+  assert.match(context, /node scripts\/verify-release-metadata\.mjs --tag "\$TAG_NAME"/u);
+  assert.match(procedure, /scripts\/verify-release-metadata\.mjs/u);
   assert.match(procedure, /--name release-assets/u);
   assert.match(procedure, /--verify-tag/u);
   assert.match(procedure, /--notes-file "\$NOTES_FILE"/u);
@@ -604,6 +608,35 @@ test("release keeps the version tag last and requires curated public notes", () 
   assert.ok(workflowDispatch < downloadBundle, "workflow must complete before asset download");
   assert.ok(downloadBundle < signedTag, "asset bundle must exist before tag creation");
   assert.ok(signedTag < createRelease, "signed tag must exist before release creation");
+});
+
+test("publication re-checks the release metadata the tag-last workflow cannot read", () => {
+  const workflow = readWorkflow(".github/workflows/release-published.yml");
+  const job = indentedBlock(workflow, "release-metadata", 2);
+  const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
+
+  assert.match(workflow, /^on:\n {2}release:\n {4}types: \[published\]$/mu);
+  assert.match(workflow, /^permissions: \{\}$/mu);
+  assert.match(job, /permissions:\n\s+contents: read/u);
+  assert.match(job, /persist-credentials: false/u);
+  assert.match(job, /--json name,body,isDraft,isPrerelease/u);
+  assert.match(job, /node scripts\/verify-release-metadata\.mjs/u);
+  assert.match(job, /--release-json release\.json/u);
+
+  // The tag name comes from the event, so it reaches the shell as an
+  // environment variable and never as a template expansion inside `run:`.
+  assert.match(job, /TAG_NAME: \$\{\{ github\.event\.release\.tag_name \}\}/u);
+  const runBlocks = job
+    .split(/^\s+run: \|?$/mu)
+    .slice(1)
+    .join("\n");
+  assert.doesNotMatch(runBlocks, /\$\{\{ github\.event/u);
+
+  // Checking out an event-controlled ref is what makes a release-triggered
+  // workflow exploitable; the default branch already carries the changelog.
+  assert.doesNotMatch(job, /^\s+ref:/mu);
+
+  assert.match(procedure, /release-published\.yml/u);
 });
 
 test("release verifies committed signing-key parity before signing", () => {

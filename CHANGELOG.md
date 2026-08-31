@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Release publication is gated on the curated release metadata**
+  (Closes [#2414](https://github.com/fallow-rs/fallow/issues/2414)). The rules
+  for a release title and its notes lived only in the maintainer runbook, which
+  said so out loud: nothing enforced them, so a dispatch that skipped the
+  runbook published every registry against notes that were never written. The
+  release is tag-last, so the two halves of that metadata exist at different
+  moments and are now checked at both. `release.yml` verifies `CHANGELOG.md` at
+  dispatch, before anything builds: one dated section for the tag, a non-empty
+  body, no em-dash, a compare link back to the previous released version, and
+  an empty `[Unreleased]` section so nothing ships uncredited. A new
+  `release-published.yml` re-checks the title prefix and summary, the non-empty
+  body, the comparison URL, em-dashes, and third-party names against the
+  published release, where those fields first exist and remain repairable.
+  Verified against every 3.x release without a false failure.
+
 ## [3.21.0] - 2026-08-31
 
 ### Added

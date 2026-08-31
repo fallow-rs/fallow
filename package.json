@@ -26,6 +26,7 @@
     "check:coverage-producer-drift": "node scripts/coverage-producer-refresh.mjs --check",
     "refresh:coverage-producers": "node scripts/coverage-producer-refresh.mjs",
     "check:similar-code-sidecar-audit": "node scripts/check-similar-code-sidecar-audit.mjs",
+    "check:release-metadata": "node scripts/verify-release-metadata.mjs",
     "test:semantic-clone-conformance": "node --test scripts/semantic-clone-conformance.test.mjs",
     "type-aware:corpus": "node scripts/type-aware-corpus.mjs",
     "test:type-aware-corpus": "node --test scripts/type-aware-corpus.test.mjs",
