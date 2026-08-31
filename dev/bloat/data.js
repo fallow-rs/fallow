@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788187996955,
+  "lastUpdate": 1788191204877,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6866dc917cb85276c2ef8c2d16d0deff25d2a09b",
-          "message": "fix(analyze): align jest/vitest __mocks__ manual-mock semantics (#2250)\n\n* fix(analyze): align jest/vitest __mocks__ manual-mock semantics\n\nFactory-less vi.mock and jest.mock calls with a bare package specifier now\nsynthesize a speculative root-level __mocks__/<specifier> candidate. The\nresolver probes ancestor __mocks__ directories of the test file and credits\nthe manual mock file when it exists, so root-level node-module manual mocks\nno longer surface as unused files in vitest projects (issue #2225). A root\nmock without a matching mock call keeps surfacing under vitest, which\napplies manual mocks only through vi.mock; jest keeps its __mocks__ entry\npatterns, matching its automatic node-module mocking.\n\nThe vitest plugin no longer declares the /__mocks__ virtual package suffix:\nliteral X/__mocks__ imports carry no runner semantics, so they are reported\nas unlisted dependencies under both runners (issue #2226). Extract and\ngraph cache versions are bumped because extraction output and resolution\nbehavior changed.\n\n* docs(agents): align plugins rule with removed vitest /__mocks__ suffix\n\nNo built-in plugin declares a virtual package suffix since issue #2226;\nthe old example claimed @aws-sdk/__mocks__ stays suppressed, which is\nexactly the literal-import case that now reports as unlisted.",
-          "timestamp": "2026-08-13T11:58:20+02:00",
-          "tree_id": "2a54471f69408aab37ebdc1af6cd88709ce26aaf",
-          "url": "https://github.com/fallow-rs/fallow/commit/6866dc917cb85276c2ef8c2d16d0deff25d2a09b"
-        },
-        "date": 1786616555096,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503430992,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20157312,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25517304,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38034008,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 41850072,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8c0f2244fe0cf5543cec5c9d65abcf3616e73ab5",
+          "message": "fix(graph): resolve root-relative HTML assets against a static directory (#2489)\n\nFound while checking SvelteKit support against the official SvelteKit RealWorld\napplication, which reported two findings that are both wrong.\n\nsrc/app.html links /conduit-theme.css, and the file it names is\nstatic/conduit-theme.css, exactly where SvelteKit expects it. Fallow reported an\nunresolved-import for /conduit-theme.css from src/app.html and an unused-file for\nstatic/conduit-theme.css: one cause, two findings, because the HTML\nroot-relative fallback in the resolver looked only in public/.\n\npublic/ is the Vite, Next and Create React App convention. SvelteKit, Gatsby and\nDocusaurus serve static/ at the site root instead, so every root-absolute asset\nreference in those projects missed and produced the same pair.\n\nBoth directories are now tried, in order. A candidate is accepted only when the\nfile is really on disk, so a project with neither directory, or with the\ndirectory but not the file, resolves exactly as before and cannot gain a\nreference it does not have. The traversal guard on the relative path is\nunchanged.\n\nGRAPH_CACHE_VERSION goes to 48: resolver output is persisted with the graph and\nthe cache key does not cover this, so a warm 47 cache would replay the earlier\nmiss as both findings.",
+          "timestamp": "2026-08-31T17:31:12+02:00",
+          "tree_id": "38efb7e9e56ccfa8dcb8bba78cdf862a5f46c6f8",
+          "url": "https://github.com/fallow-rs/fallow/commit/8c0f2244fe0cf5543cec5c9d65abcf3616e73ab5"
+        },
+        "date": 1788191200868,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 547988672,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21336680,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 27959736,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 41858872,
             "unit": "bytes"
           }
         ]
