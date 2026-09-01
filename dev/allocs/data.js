@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788265745221,
+  "lastUpdate": 1788269615898,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6ab2c847bad9bc88a85e6fa29139a811db7203a0",
-          "message": "fix(type-aware): bound generic scans and identify Svelte host gaps\n\n* chore: start type-aware issue fixes\n\n* fix: harden type-aware generic and Svelte analysis",
-          "timestamp": "2026-08-14T11:14:51+02:00",
-          "tree_id": "e9541817bdca9b64870fd20eab3e4911020d11d0",
-          "url": "https://github.com/fallow-rs/fallow/commit/6ab2c847bad9bc88a85e6fa29139a811db7203a0"
-        },
-        "date": 1786699202217,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9718139,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48512,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1023571,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7582,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8366,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "53633741+PrinceD96@users.noreply.github.com",
+            "name": "Daniel Morales",
+            "username": "PrinceD96"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bc8ca0575cd4c0c35337e6c212afea61c58e87b9",
+          "message": "feat(core): support React Native Storybook (#2506)\n\nCloses #2505.\n\nReact Native Storybook uses `.rnstorybook` as its configuration directory, and\nfallow's Storybook plugin scoped every config, entry, always-used and\nused-export pattern to `.storybook`. A conventional React Native Storybook setup\ntherefore sat outside the source graph: files under `.rnstorybook` surfaced\nthrough the skipped hidden-directory diagnostic, and packages referenced only\nthrough `deviceAddons` reported as unused dependencies.\n\nThe plugin now activates for @storybook/react-native, registers `.rnstorybook`\nas the canonical hidden directory, recognizes the main config, the swapped\napplication entry and the generated requires module, preserves config-relative\nstory reachability, and credits the documented deviceAddons string and object\nforms for React Native configs only, so web configs are unchanged.\n\nValidated against a real React Native Storybook example: the supported\n`.rnstorybook` path bundled its canonical entry, connected the runtime, rendered\na story on an iOS simulator and recorded an on-device action. All three expected\ndependency false positives cleared with no new finding.\n\nThanks @PrinceD96 for reporting the gap and implementing it.",
+          "timestamp": "2026-09-01T15:18:07+02:00",
+          "tree_id": "382fe346ec097051cc82d4a881c06934cfca6b29",
+          "url": "https://github.com/fallow-rs/fallow/commit/bc8ca0575cd4c0c35337e6c212afea61c58e87b9"
+        },
+        "date": 1788269611421,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9755305,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49410,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1185219,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8401,
             "unit": "allocations"
           }
         ]
