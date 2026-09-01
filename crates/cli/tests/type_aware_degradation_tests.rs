@@ -81,8 +81,13 @@ fn check_still_fails_closed_under_require_complete() {
     );
 }
 
+/// `fix` is the one command that does not degrade. The reporting commands can
+/// fall back to the syntactic set because it is a superset, so a gate only gets
+/// stricter. Applying that same superset from a command that removes code would
+/// delete the entries a working type-aware pass would have proven live, which is
+/// the opposite of conservative.
 #[test]
-fn fix_dry_run_degrades_under_best_effort() {
+fn fix_dry_run_fails_closed_even_under_best_effort() {
     let output = run_with_missing_companion(&[
         "fix",
         "--type-aware",
@@ -92,9 +97,9 @@ fn fix_dry_run_degrades_under_best_effort() {
         "--quiet",
     ]);
 
-    assert_ne!(output.code, 2, "stderr: {}", output.stderr);
+    assert_eq!(output.code, 2, "stdout: {}", output.stdout);
     assert!(
-        !output.stdout.contains("Type-aware analysis failed"),
+        output.stdout.contains("Type-aware analysis failed"),
         "stdout: {}",
         output.stdout
     );

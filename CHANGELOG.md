@@ -112,11 +112,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `typeAware.require`, whose default is `best-effort`. Syntactic analysis
   reports a superset of the refined findings and the semantic pass only removes
   candidates it confirms are used, so continuing is the conservative outcome,
-  not a laxer one. `check`, `fix`, `watch`, `health` and the combined run now
-  warn and finish with the syntactic findings, recording the reason in
+  not a laxer one. `check`, `watch`, `health` and the combined run now warn and
+  finish with the syntactic findings, recording the reason in
   `_meta.type_aware.warnings` and `warning_count` for CI consumers.
-  `typeAware.require = complete` still exits 2, unchanged. The ceiling itself is
-  now settable with `FALLOW_TYPE_AWARE_TIMEOUT_SECS`, because a semantic query
+  `fallow fix` is the deliberate exception and still stops: it removes code, and
+  the extra entries in the unrefined set are precisely the ones the semantic pass
+  would have proven live, so widening a deletion is the opposite of conservative.
+  `typeAware.require = complete` still exits 2 everywhere, unchanged. The
+  ceiling itself is now settable with `FALLOW_TYPE_AWARE_TIMEOUT_SECS`, because
+  a semantic query
   costs a whole-program scan and a very large TypeScript program needs more than
   two minutes of it. This makes the run complete and say what happened; it does
   not make the semantic pass fast enough to finish on a very large project on

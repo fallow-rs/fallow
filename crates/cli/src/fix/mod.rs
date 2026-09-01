@@ -47,18 +47,21 @@ fn run_analyze(
             false,
         ) {
             Ok(outcome) => outcome,
+            // `fix` deletes code, so it fails closed where the reporting
+            // commands degrade. Degrading a report is conservative: the
+            // syntactic set is a superset, so a gate only gets stricter. The
+            // same superset applied by a mutating command is the opposite,
+            // because the extra entries are exactly the ones a working
+            // type-aware pass would have proven live and removed. Asking for
+            // `--type-aware` on a command that removes code is asking for that
+            // verification, so its absence must stop the run rather than widen
+            // the deletion.
             Err(error) => {
-                crate::type_aware_degrade::degrade_or_fail(
-                    &crate::type_aware_degrade::DegradeContext {
-                        root: &config.root,
-                        error: &error.to_string(),
-                        failure_label: "Type-aware analysis failed",
-                        require: config.type_aware.require,
-                        quiet,
-                        output,
-                    },
-                )?;
-                None
+                return Err(crate::error::emit_error(
+                    &format!("Type-aware analysis failed: {error}"),
+                    2,
+                    output,
+                ));
             }
         };
         if let Some(outcome) = outcome {
