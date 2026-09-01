@@ -152,6 +152,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the ceiling from the editor. Thanks
   [@VariableVince](https://github.com/VariableVince) for the report.
 
+- **Branching outside every function is no longer invisible to every
+  complexity metric**
+  (Closes [#2503](https://github.com/fallow-rs/fallow/issues/2503)). Complexity
+  is counted into a per-function frame, and no frame was open at module scope,
+  so a top-level `if` ladder, a `const mode = env.MODE ?? "dev"` default, or an
+  `export const url = cfg?.api` access contributed nothing to any cyclomatic or
+  cognitive number. Hoisting a branch out of a function removed it from the
+  file's totals and from the review brief's branching conservation, where the
+  point of the section is that branching which only moved is still there. A
+  file that branches at module scope now reports a `<module>` unit carrying
+  those decision points. It is aggregate-only: it moves vital signs, per-file
+  scores and density, and the branching totals, and it never becomes a finding,
+  a large-function entry, a CRAP score, or a code lens, because "extract a
+  helper" is not advice that applies to module scope. Saved baselines therefore
+  do not move. A file with no module-scope decision point emits no unit and
+  keeps every number it had, and no per-function score changes anywhere.
+
 - **Two audits running at once no longer fail with a base worktree that
   "already exists".** The temporary base view was named from the process id
   plus a wall-clock reading. That reading is not monotonic and repeats across
