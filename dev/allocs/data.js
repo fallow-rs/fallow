@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788257396519,
+  "lastUpdate": 1788258782617,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c64f703114d452f52077a3a1737696a22a342ec9",
-          "message": "perf(graph): reserve named export index capacity",
-          "timestamp": "2026-08-13T23:53:47+02:00",
-          "tree_id": "bdbad5be9280f810e1c0cf7527b6a71fc6d80ef4",
-          "url": "https://github.com/fallow-rs/fallow/commit/c64f703114d452f52077a3a1737696a22a342ec9"
-        },
-        "date": 1786658334992,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9760211,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48528,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1018706,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7270,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8390,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fa40ef0946a90523ba1a7eb1366db0166b9cdd2d",
+          "message": "fix(mcp): bound the Code Mode call trace\n\nMemoization gave a snippet a way to grow the response without limit. A memo\nhit spends no max_host_calls slot and no output budget, by design, but it\nstill appended an entry to calls[], and nothing bounded that array. A loop of\n5000 identical cached calls produced a 430 KB response carrying a four-byte\nresult, with every documented limit reporting as respected, which reads as\ncompliant and is worse for it. Before memoization the same loop stopped at\neight entries because the budget was derived from calls[] length, so this\narrived with the memo cache rather than preceding it.\n\ncalls[] now stops at max_recorded_calls entries, reported in limits. Past the\nbound the host calls still run and still return, so bounding the trace never\nchanges what the snippet sees; only the trace entries are dropped, and the\nadditive calls_omitted field reports how many. It is absent when nothing was\ndropped, so an ordinary response keeps the shape its consumers already parse.\nThe same loop now returns 5836 bytes with 64 entries and calls_omitted 4936,\nasserted by test rather than left to inspection.\n\ndocs/reference/mcp-internals.md said the rejection budget was what kept a\nsnippet from growing calls[] without limit. It never did, for memo hits.\nCorrected, with the trace bound documented alongside it.",
+          "timestamp": "2026-09-01T12:24:58+02:00",
+          "tree_id": "429de7eea2934d4379bf30827f2ef0c77f2e158f",
+          "url": "https://github.com/fallow-rs/fallow/commit/fa40ef0946a90523ba1a7eb1366db0166b9cdd2d"
+        },
+        "date": 1788258778498,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9735453,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49427,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1187535,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8449,
             "unit": "allocations"
           }
         ]
