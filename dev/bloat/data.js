@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788286702104,
+  "lastUpdate": 1788293243043,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "8b32aa4f6a285d1ae6897986f99dde834ecb7579",
-          "message": "chore(docker): pin FALLOW_VERSION 3.16.0 with refreshed checksums",
-          "timestamp": "2026-08-14T00:38:42+02:00",
-          "tree_id": "362c1fbc84741f399cd199621f74bde72b1d11cf",
-          "url": "https://github.com/fallow-rs/fallow/commit/8b32aa4f6a285d1ae6897986f99dde834ecb7579"
-        },
-        "date": 1786661414354,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503757312,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20160672,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25527704,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38059320,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/79a0e8d8dbcaa408dce348b3df14fc1e824f988b"
         },
         "date": 1788286698747,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 555490968,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21348744,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28054552,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 42326648,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "c7163e9b5475baf95d2b607c531e4e390fda99a2",
+          "message": "chore(napi): sync package.json / package-lock / index.js to v3.22.0",
+          "timestamp": "2026-09-01T21:51:22+02:00",
+          "tree_id": "a84f4e04a32804a83983a2fd13d349a2846d9e3c",
+          "url": "https://github.com/fallow-rs/fallow/commit/c7163e9b5475baf95d2b607c531e4e390fda99a2"
+        },
+        "date": 1788293239853,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
