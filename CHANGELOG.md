@@ -370,6 +370,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace and fails on a new mutation, naming the file and the pattern to use
   instead, because serializing such tests hides the race rather than removing it.
 
+- **`deno` is no longer missing from the built-in plugin roster.** The engine
+  kept a hand-written copy of core's plugin names rather than asking for them,
+  and nothing pinned the two together, so the copy drifted: core registered a
+  Deno plugin that the roster never listed. Any surface reading that roster was
+  one plugin short and could not see Deno at all. The roster now delegates to
+  the core registry, so the copy is gone rather than corrected, and a test
+  pins the two together.
+
 ### Security
 
 - **The Code Mode sandbox no longer leaves the `Function` constructor
