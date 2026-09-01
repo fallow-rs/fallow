@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788277314486,
+  "lastUpdate": 1788282488730,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "jernej.barbaric@gmail.com",
-            "name": "Jerc92",
-            "username": "Jerc92"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "78632bbbada683198be1cc47e1ea9023c7c8cebc",
-          "message": "feat(ci): render type-aware feedback from saved results\n\n* feat(ci): render type-aware feedback from saved results\n\n* fix(ci): harden saved report rendering\n\n---------\n\nCo-authored-by: Jernej Barbaric <jernej.barbaric@login5.org>\nCo-authored-by: Bart Waardenburg <bart@waardenburg.dev>",
-          "timestamp": "2026-08-16T18:20:58Z",
-          "tree_id": "b5d9359e208820c8c0ff7ecb0ee38be2d3824e5b",
-          "url": "https://github.com/fallow-rs/fallow/commit/78632bbbada683198be1cc47e1ea9023c7c8cebc"
-        },
-        "date": 1786904766683,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9717727,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48900,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1038668,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7621,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8433,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a212b0f01d061898405c11dc5b908f54b9055b6a",
+          "message": "fix(viz): gate every path-redaction site on rooted rather than absolute (#2538)\n\nFollow-up to #2537, which corrected one of four sites.\n\nThree siblings in the same file made the same is_absolute assumption. The JSON\nlayer left a rooted path without a drive letter untouched in the payload, and\ntwo join-onto-root decisions joined such a path onto the project root, so an\nexternal path rendered as project-relative rather than being redacted at all.\n\nAll four now gate on has_root. A value outside a path key, such as a route\nspecifier, is excluded by the key gate rather than by the absoluteness test, so\nbroadening the predicate does not widen what gets rewritten.\n\ncrates/engine/src/viz.rs now contains no is_absolute.",
+          "timestamp": "2026-09-01T19:02:43+02:00",
+          "tree_id": "f6d71789df67da0f04bd6bd7ab8cdca15f8123df",
+          "url": "https://github.com/fallow-rs/fallow/commit/a212b0f01d061898405c11dc5b908f54b9055b6a"
+        },
+        "date": 1788282484022,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9776257,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49438,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1146730,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 7060,
             "unit": "allocations"
           }
         ]
