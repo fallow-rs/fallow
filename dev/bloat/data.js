@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788273728260,
+  "lastUpdate": 1788274957555,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "aec0bd07a5e2532ad242a3587459b7aaade345df",
-          "message": "test(audit-cache): ignore lazy directory mtimes in the prune snapshot",
-          "timestamp": "2026-08-13T20:17:19+02:00",
-          "tree_id": "93e3fee7ae6c8e79248acf298c739fe8ecdbc395",
-          "url": "https://github.com/fallow-rs/fallow/commit/aec0bd07a5e2532ad242a3587459b7aaade345df"
-        },
-        "date": 1786645641308,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503809536,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20160352,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25524696,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38056536,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 42345496,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0beb9fb4ae56c799fca0088b7e167430d815254d",
+          "message": "fix(cli): complete the knip and jscpd migration tables (#2523)\n\nCloses #2507.\n\nA systematic diff against knip 6.34.0 and @jscpd/core 4.2.5 found 128 knip gaps\nand 15 jscpd gaps. The serious category is not the missing entries: 16 keys were\nclaimed as auto-detected by fallow when no fallow plugin covers them, so\nmigration was telling users their tooling was handled when it was not. Those now\nreport honestly as unsupported.\n\nCoverage is exact. The covered and unsupported knip tables together are the 184\nreal keys, taken as the union of knip's Plugins map and its published schema.\njscpd is 6 mapped plus 31 reported across IOptions plus colors. Plausible but\nunreal mappings were rejected rather than padding the covered list: metro is\nonly reachable through the react-native plugin, i18next is the library rather\nthan the CLI, and parsing a file type is not plugin coverage.\n\nThe tables are now guarded rather than merely correct. A first pass claimed the\ntests pinned each table against the upstream key set; they asserted sorting and\neight hardcoded names and consulted nothing, so renaming a plugin would have\nleft every test green while migration promised auto-detection that would not\nhappen. Every covered key now resolves through a named alias table to the\nbuilt-in plugin roster, with the reverse check and a no-stale-alias check.\n\nUnknown keys no longer vanish either. Both migrators were allowlist-only with no\nelse branch, so a real knip root key produced zero warnings. They now report what\nneither table names, following the existing unmapped-rule-key wording.\n\nAlso maps knip's cycles rule to circular-dependencies, which fallow has and the\ntable missed.\n\nFallow still has no Marko plugin; only the table side is fixed here.\n\nThanks @VariableVince for the report, and for the hunch that more than Marko was\nmissing.",
+          "timestamp": "2026-09-01T16:43:48+02:00",
+          "tree_id": "4e92ea67e3ab4cccf52afdc3108411b5b2bcc67c",
+          "url": "https://github.com/fallow-rs/fallow/commit/0beb9fb4ae56c799fca0088b7e167430d815254d"
+        },
+        "date": 1788274953811,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 555488280,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21348616,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28053912,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 42331128,
             "unit": "bytes"
           }
         ]
