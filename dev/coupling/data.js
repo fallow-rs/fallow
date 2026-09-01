@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788257538562,
+  "lastUpdate": 1788258100809,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c2b6c9efff2e4de57a32bfad828bc5a3a3574070",
-          "message": "perf(output): insert root kind in place",
-          "timestamp": "2026-08-14T00:15:47+02:00",
-          "tree_id": "9aa3e9c8065828466f34323fb9593765664c96cf",
-          "url": "https://github.com/fallow-rs/fallow/commit/c2b6c9efff2e4de57a32bfad828bc5a3a3574070"
-        },
-        "date": 1786659425433,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 454,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1225,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/05374a4d878f73f0b42337fe417b985d7732ced3"
         },
         "date": 1788257534218,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "45bddc6859377636bc1e0ea0374cd318bd7f9e70",
+          "message": "fix(deps): credit packages hoisted for a bundled private sibling workspace (#2512)\n\nRefs discussion #2244.\n\nA private, unpublished sibling workspace is not installed from a registry, so a\nconsumer that depends on it inlines its source and the package manager resolves\nthat sibling's own packages from the consumer's manifest. Hoisting them there is\nwhat makes the build work, but nothing in the consumer imports them, so each was\nreported as an unused dependency with `move-dependency` as the suggested action.\nFollowing that advice breaks the build, and the only escape was repo-global\n`ignoreDependencies`.\n\nFallow now walks the private-sibling closure, transitively and cycle-safe, and\ncredits the packages those siblings import. A published sibling brings its own\ndependency tree and is deliberately not followed. Only what a sibling both\nimports and declares in dependencies, optionalDependencies, or peerDependencies\ncounts; devDependencies never reach a consumer.\n\nPreviously `private` was not consulted at all: removing it produced a byte\nidentical finding. The old behavior was not conservative, it was uninformed.\n\nMeasured safe on a warm cache in both directions, and against suppression\nbaselines and regression gates, which detect increases only.",
+          "timestamp": "2026-09-01T12:19:12+02:00",
+          "tree_id": "3942da4a7cd4852d7abd3599ea4d4f151e981392",
+          "url": "https://github.com/fallow-rs/fallow/commit/45bddc6859377636bc1e0ea0374cd318bd7f9e70"
+        },
+        "date": 1788258096606,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
