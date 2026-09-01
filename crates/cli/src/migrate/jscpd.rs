@@ -1,5 +1,9 @@
 use super::{MigrationWarning, string_or_array};
 
+/// Docs URL surfaced as a suggestion when a jscpd config key is unknown to the
+/// migrator (typo, or an option jscpd added after this table was written).
+const MIGRATION_DOCS_URL: &str = "https://docs.fallow.tools/migration/from-jscpd";
+
 /// jscpd fields that cannot be mapped and generate warnings.
 ///
 /// Together with the fields `duplicate_options_from_jscpd` migrates, this covers
@@ -131,6 +135,20 @@ const JSCPD_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     ),
 ];
 
+/// jscpd options that migrate into the fallow `duplicates` block, plus the
+/// `$schema` key a JSON config may carry. A key here is either translated or
+/// structural, so the unknown-key ladder in `push_unhandled_jscpd_warnings`
+/// must stay quiet about it.
+const JSCPD_MIGRATED_FIELDS: &[&str] = &[
+    "$schema",
+    "ignore",
+    "minLines",
+    "minTokens",
+    "mode",
+    "skipLocal",
+    "threshold",
+];
+
 pub(super) fn migrate_jscpd(
     jscpd: &serde_json::Value,
     config: &mut serde_json::Map<String, serde_json::Value>,
@@ -151,7 +169,7 @@ pub(super) fn migrate_jscpd(
         config.insert("duplicates".to_string(), serde_json::Value::Object(dupes));
     }
 
-    push_unmappable_jscpd_warnings(obj, warnings);
+    push_unhandled_jscpd_warnings(obj, warnings);
 }
 
 fn duplicate_options_from_jscpd(
@@ -258,7 +276,13 @@ fn insert_jscpd_ignore(
     }
 }
 
-fn push_unmappable_jscpd_warnings(
+/// Warn about every configured jscpd option the migration did not translate.
+///
+/// A documented-unmappable option is reported with its own explanation, in
+/// table order. An option in neither the migrated nor the unmappable table is
+/// reported as unknown, so a key outside both tables is never spread into
+/// nothing.
+fn push_unhandled_jscpd_warnings(
     obj: &serde_json::Map<String, serde_json::Value>,
     warnings: &mut Vec<MigrationWarning>,
 ) {
@@ -271,6 +295,24 @@ fn push_unmappable_jscpd_warnings(
                 suggestion: suggestion.map(std::string::ToString::to_string),
             });
         }
+    }
+
+    for key in obj.keys() {
+        if JSCPD_MIGRATED_FIELDS.contains(&key.as_str())
+            || JSCPD_UNMAPPABLE_FIELDS
+                .iter()
+                .any(|(field, _, _)| *field == key.as_str())
+        {
+            continue;
+        }
+        warnings.push(MigrationWarning {
+            source: "jscpd",
+            field: key.clone(),
+            message: format!("unknown jscpd option `{key}`; not migrated"),
+            suggestion: Some(format!(
+                "check for a typo or report the missing mapping at {MIGRATION_DOCS_URL}"
+            )),
+        });
     }
 }
 
@@ -897,20 +939,10 @@ mod tests {
         "verbose",
     ];
 
-    /// Options that migrate into the fallow `duplicates` block.
-    const JSCPD_MAPPED_OPTIONS: &[&str] = &[
-        "ignore",
-        "minLines",
-        "minTokens",
-        "mode",
-        "skipLocal",
-        "threshold",
-    ];
-
     #[test]
     fn every_jscpd_option_is_mapped_or_reported() {
         for option in JSCPD_OPTIONS {
-            let mapped = JSCPD_MAPPED_OPTIONS.contains(option);
+            let mapped = JSCPD_MIGRATED_FIELDS.contains(option);
             let reported = JSCPD_UNMAPPABLE_FIELDS.iter().any(|(f, _, _)| f == option);
             assert!(
                 mapped ^ reported,
@@ -938,6 +970,51 @@ mod tests {
                 "JSCPD_UNMAPPABLE_FIELDS has duplicate entry `{field}`"
             );
         }
+    }
+
+    /// `$schema` is structural rather than an option, so it is the one entry
+    /// that does not have to appear in jscpd's own option list.
+    #[test]
+    fn migrated_jscpd_fields_are_real_jscpd_options() {
+        for field in JSCPD_MIGRATED_FIELDS {
+            if *field == "$schema" {
+                continue;
+            }
+            assert!(
+                JSCPD_OPTIONS.contains(field),
+                "JSCPD_MIGRATED_FIELDS entry `{field}` is not a jscpd option"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_jscpd_option_is_reported() {
+        let jscpd: serde_json::Value =
+            serde_json::from_str(r#"{"minTokens": 50, "treatHintsAsErrors": true}"#).unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_jscpd(&jscpd, &mut config, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "treatHintsAsErrors");
+        assert!(
+            warnings[0].message.contains("unknown jscpd option"),
+            "{}",
+            warnings[0].message
+        );
+        let dupes = config.get("duplicates").unwrap().as_object().unwrap();
+        assert_eq!(dupes.get("minTokens").unwrap(), 50);
+    }
+
+    #[test]
+    fn schema_key_is_not_reported_as_unknown() {
+        let jscpd: serde_json::Value =
+            serde_json::from_str(r#"{"$schema": "https://example.test/jscpd.json"}"#).unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_jscpd(&jscpd, &mut config, &mut warnings);
+
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 
     #[test]

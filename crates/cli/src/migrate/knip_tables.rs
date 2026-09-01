@@ -69,6 +69,23 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
         None,
     ),
     ("treatConfigHintsAsErrors", "No equivalent in fallow", None),
+    ("treatTagHintsAsErrors", "No equivalent in fallow", None),
+];
+
+/// Knip root keys that `migrate_knip` translates into fallow config, plus the
+/// `$schema` key every JSON config may carry. A key here is neither a plugin
+/// section nor an unmappable field, so the unknown-key ladder in
+/// `warn_unhandled_root_keys` must stay quiet about it.
+pub(super) const KNIP_MIGRATED_FIELDS: &[&str] = &[
+    "$schema",
+    "entry",
+    "exclude",
+    "ignore",
+    "ignoreDependencies",
+    "ignoreExportsUsedInFile",
+    "include",
+    "rules",
+    "workspaces",
 ];
 
 /// Knip issue type names that have no fallow equivalent.
@@ -432,6 +449,30 @@ mod tests {
             assert!(
                 !unmappable.contains(key),
                 "KNIP_PLUGIN_KEYS entry `{key}` overlaps with KNIP_UNMAPPABLE_FIELDS"
+            );
+        }
+    }
+
+    /// The unknown-root-key ladder decides by table membership, so a key that
+    /// sits in two tables would either warn twice or warn wrongly.
+    #[test]
+    fn migrated_fields_do_not_overlap_with_the_other_tables() {
+        let unmappable: FxHashSet<&str> =
+            KNIP_UNMAPPABLE_FIELDS.iter().map(|(f, _, _)| *f).collect();
+        let covered: FxHashSet<&str> = KNIP_PLUGIN_KEYS.iter().copied().collect();
+        let unsupported: FxHashSet<&str> = KNIP_UNSUPPORTED_PLUGIN_KEYS.iter().copied().collect();
+        for field in KNIP_MIGRATED_FIELDS {
+            assert!(
+                !unmappable.contains(field),
+                "KNIP_MIGRATED_FIELDS entry `{field}` overlaps with KNIP_UNMAPPABLE_FIELDS"
+            );
+            assert!(
+                !covered.contains(field),
+                "KNIP_MIGRATED_FIELDS entry `{field}` overlaps with KNIP_PLUGIN_KEYS"
+            );
+            assert!(
+                !unsupported.contains(field),
+                "KNIP_MIGRATED_FIELDS entry `{field}` overlaps with KNIP_UNSUPPORTED_PLUGIN_KEYS"
             );
         }
     }

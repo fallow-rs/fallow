@@ -1,8 +1,8 @@
 use serde_json::{Map, Value};
 
 use super::knip_tables::{
-    KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS, KNIP_UNMAPPABLE_ISSUE_TYPES,
-    KNIP_UNSUPPORTED_PLUGIN_KEYS,
+    KNIP_MIGRATED_FIELDS, KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS,
+    KNIP_UNMAPPABLE_ISSUE_TYPES, KNIP_UNSUPPORTED_PLUGIN_KEYS,
 };
 use super::{MigrationWarning, string_or_array};
 
@@ -268,12 +268,15 @@ pub(super) fn warn_unmappable_fields(obj: &JsonMap, warnings: &mut Vec<Migration
     }
 }
 
-/// Warn about knip plugin-specific config keys.
+/// Warn about every root key the migration did not translate.
 ///
 /// A key that a built-in fallow plugin covers is reported as auto-detected. A
-/// key that no fallow plugin covers is reported as unsupported rather than
-/// dropped in silence, so a migration never loses a section without saying so.
-pub(super) fn warn_plugin_keys(obj: &JsonMap, warnings: &mut Vec<MigrationWarning>) {
+/// key that no fallow plugin covers is reported as unsupported. A key in
+/// neither plugin table and in neither the migrated nor the unmappable table
+/// is reported as unknown, so a migration never loses a section without saying
+/// so. `warn_unmappable_fields` already reports the documented-unmappable
+/// keys, so they are skipped here rather than reported twice.
+pub(super) fn warn_unhandled_root_keys(obj: &JsonMap, warnings: &mut Vec<MigrationWarning>) {
     for key in obj.keys() {
         if KNIP_PLUGIN_KEYS.contains(&key.as_str()) {
             warnings.push(MigrationWarning {
@@ -297,6 +300,19 @@ pub(super) fn warn_plugin_keys(obj: &JsonMap, warnings: &mut Vec<MigrationWarnin
                      dependencies as unused"
                         .to_string(),
                 ),
+            });
+        } else if !KNIP_MIGRATED_FIELDS.contains(&key.as_str())
+            && !KNIP_UNMAPPABLE_FIELDS
+                .iter()
+                .any(|(field, _, _)| *field == key.as_str())
+        {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field: key.clone(),
+                message: format!("unknown knip config key `{key}`; not migrated"),
+                suggestion: Some(format!(
+                    "check for a typo or report the missing mapping at {MIGRATION_DOCS_URL}"
+                )),
             });
         }
     }
@@ -752,11 +768,11 @@ mod tests {
     }
 
     #[test]
-    fn warn_plugin_keys_detects_plugins() {
+    fn warn_unhandled_root_keys_detects_plugins() {
         let obj: JsonMap =
             serde_json::from_str(r#"{"eslint": {"entry": ["a.js"]}, "jest": true}"#).unwrap();
         let mut warnings = Vec::new();
-        warn_plugin_keys(&obj, &mut warnings);
+        warn_unhandled_root_keys(&obj, &mut warnings);
 
         assert_eq!(warnings.len(), 2);
         let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
@@ -768,30 +784,30 @@ mod tests {
     }
 
     #[test]
-    fn warn_plugin_keys_empty_object_no_warnings() {
+    fn warn_unhandled_root_keys_empty_object_no_warnings() {
         let obj = Map::new();
         let mut warnings = Vec::new();
-        warn_plugin_keys(&obj, &mut warnings);
+        warn_unhandled_root_keys(&obj, &mut warnings);
 
         assert!(warnings.is_empty());
     }
 
     #[test]
-    fn warn_plugin_keys_non_plugin_keys_no_warnings() {
+    fn warn_unhandled_root_keys_non_plugin_keys_no_warnings() {
         let obj: JsonMap =
             serde_json::from_str(r#"{"entry": ["x"], "ignore": ["y"], "rules": {}}"#).unwrap();
         let mut warnings = Vec::new();
-        warn_plugin_keys(&obj, &mut warnings);
+        warn_unhandled_root_keys(&obj, &mut warnings);
 
         assert!(warnings.is_empty());
     }
 
     #[test]
-    fn warn_plugin_keys_reports_unsupported_plugin() {
+    fn warn_unhandled_root_keys_reports_unsupported_plugin() {
         let obj: JsonMap = serde_json::from_str(r#"{"marko": {"entry": ["src/**/*.marko"]}}"#)
             .expect("valid json");
         let mut warnings = Vec::new();
-        warn_plugin_keys(&obj, &mut warnings);
+        warn_unhandled_root_keys(&obj, &mut warnings);
 
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].field, "marko");
@@ -804,11 +820,11 @@ mod tests {
     }
 
     #[test]
-    fn warn_plugin_keys_separates_covered_from_unsupported() {
+    fn warn_unhandled_root_keys_separates_covered_from_unsupported() {
         let obj: JsonMap =
             serde_json::from_str(r#"{"sveltekit": true, "vue": true}"#).expect("valid json");
         let mut warnings = Vec::new();
-        warn_plugin_keys(&obj, &mut warnings);
+        warn_unhandled_root_keys(&obj, &mut warnings);
 
         let sveltekit = warnings
             .iter()
@@ -821,5 +837,65 @@ mod tests {
             .find(|w| w.field == "vue")
             .expect("vue warning");
         assert!(vue.message.contains("no fallow plugin equivalent"));
+    }
+
+    #[test]
+    fn warn_unhandled_root_keys_reports_a_key_in_neither_table() {
+        let obj: JsonMap = serde_json::from_str(r#"{"cycles": true}"#).expect("valid json");
+        let mut warnings = Vec::new();
+        warn_unhandled_root_keys(&obj, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "cycles");
+        assert!(
+            warnings[0].message.contains("unknown knip config key"),
+            "{}",
+            warnings[0].message
+        );
+        assert!(
+            warnings[0]
+                .suggestion
+                .as_ref()
+                .is_some_and(|s| s.contains(MIGRATION_DOCS_URL))
+        );
+    }
+
+    #[test]
+    fn warn_unhandled_root_keys_stays_quiet_about_documented_unmappable_keys() {
+        let obj: JsonMap =
+            serde_json::from_str(r#"{"treatTagHintsAsErrors": true, "$schema": "x"}"#)
+                .expect("valid json");
+        let mut warnings = Vec::new();
+        warn_unhandled_root_keys(&obj, &mut warnings);
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    /// `warn_unmappable_fields` owns the documented-unmappable keys, so a
+    /// full migration reports `treatTagHintsAsErrors` exactly once while an
+    /// sibling in neither table still gets its own warning.
+    #[test]
+    fn documented_and_unknown_keys_each_warn_once() {
+        let obj: JsonMap =
+            serde_json::from_str(r#"{"treatTagHintsAsErrors": true, "cycles": true}"#)
+                .expect("valid json");
+        let mut warnings = Vec::new();
+        warn_unmappable_fields(&obj, &mut warnings);
+        warn_unhandled_root_keys(&obj, &mut warnings);
+
+        let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
+        assert_eq!(
+            fields
+                .iter()
+                .filter(|f| **f == "treatTagHintsAsErrors")
+                .count(),
+            1,
+            "{fields:?}"
+        );
+        assert_eq!(
+            fields.iter().filter(|f| **f == "cycles").count(),
+            1,
+            "{fields:?}"
+        );
     }
 }
