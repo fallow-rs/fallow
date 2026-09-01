@@ -1003,6 +1003,18 @@ pub fn is_synthetic_template_unit(name: &str) -> bool {
     name == "<template>" || name.starts_with("<snippet:")
 }
 
+/// Units an Istanbul `fnMap` can never contain, so no coverage can be matched
+/// to them.
+///
+/// The template family plus the module body: module-scope code runs at import
+/// time and belongs to no function, so a coverage report has no entry for it.
+/// Wider than [`is_synthetic_template_unit`], which stays template-specific for
+/// the rendering paths that speak about templates.
+#[must_use]
+pub fn is_coverage_exempt_unit(name: &str) -> bool {
+    is_synthetic_template_unit(name) || name == "<module>"
+}
+
 /// Branching totals for one file: the quantity that survives extraction, and
 /// the number of units now holding it.
 ///

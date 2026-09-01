@@ -742,6 +742,15 @@ fn is_hook_callee(name: &str) -> bool {
 }
 
 /// Compute per-function complexity metrics from a parsed Oxc program.
+/// Name of the synthetic unit holding a module body's own branching.
+///
+/// Part of the `<...>` synthetic family alongside `<template>`, and excluded
+/// from the CRAP dimension for the same reason: it carries no directly
+/// measurable test coverage. It does count towards cyclomatic and cognitive
+/// totals, because its branching runs at import time and is exactly what the
+/// per-function view was missing.
+pub const MODULE_UNIT_NAME: &str = "<module>";
+
 pub fn compute_complexity(
     program: &Program<'_>,
     source: &str,
@@ -749,7 +758,34 @@ pub fn compute_complexity(
 ) -> Vec<FunctionComplexity> {
     let mut visitor = ComplexityVisitor::new(source, line_offsets);
 
+    // A frame for the module body itself. Without it every increment outside a
+    // function is dropped: `push_contribution` and `inc_cyclomatic` write to
+    // the innermost frame and there was none, so a top-level `if` ladder or an
+    // environment guard scored nothing at all, and hoisting a branch out of a
+    // function lowered the file's total without removing any branching
+    // (#2503).
+    visitor.push_function(
+        FunctionIdentity::public(MODULE_UNIT_NAME),
+        program.span,
+        0,
+        0,
+    );
     visitor.visit_program(program);
+    visitor.pop_function();
+
+    // The module unit is kept only when the module body actually branches.
+    // Emitting it for every file would add a unit to every denominator in the
+    // product, moving averages and percentiles on projects that gained no new
+    // information.
+    if let Some(index) = visitor
+        .results
+        .iter()
+        .position(|unit| unit.name == MODULE_UNIT_NAME)
+        && visitor.results[index].cyclomatic <= 1
+        && visitor.results[index].cognitive == 0
+    {
+        visitor.results.remove(index);
+    }
 
     visitor.results
 }
@@ -1286,9 +1322,71 @@ mod tests {
     }
 
     #[test]
-    fn top_level_code_not_reported() {
+    fn top_level_branching_lands_on_the_module_unit() {
+        // Previously dropped entirely: no frame was pushed for the module body,
+        // so this scored nothing (#2503).
         let results = analyze("if (true) { console.log('hello'); }");
-        assert!(results.is_empty());
+        let module = find_fn(&results, MODULE_UNIT_NAME);
+        assert_eq!(module.cyclomatic, 2, "base 1 plus the top-level if");
+        assert_eq!(module.cognitive, 1);
+    }
+
+    #[test]
+    fn every_increment_family_counts_at_module_scope() {
+        // One fixture per syntactic form, since the module frame is a new
+        // context for constructs that were only ever exercised inside a
+        // function.
+        for (source, cyclomatic) in [
+            ("if (a) { b(); }", 2),
+            ("if (a) { b(); } else if (c) { d(); }", 3),
+            ("for (const x of xs) { use(x); }", 2),
+            ("while (a) { b(); }", 2),
+            ("const v = a ? 1 : 2;", 2),
+            ("const v = a && b;", 2),
+            ("const v = a ?? b;", 2),
+            ("switch (a) { case 1: b(); break; default: c(); }", 2),
+            ("try { a(); } catch (e) { b(); }", 2),
+            ("const v = a?.b;", 2),
+        ] {
+            let results = analyze(source);
+            let module = find_fn(&results, MODULE_UNIT_NAME);
+            assert_eq!(
+                module.cyclomatic, cyclomatic,
+                "module-scope cyclomatic for `{source}`"
+            );
+            assert_conservation(source);
+        }
+    }
+
+    #[test]
+    fn a_function_declared_at_module_scope_keeps_its_own_unit() {
+        // The module frame must not swallow the functions inside it.
+        let results = analyze(
+            "if (flag) { setup(); }
+             export function handle(a) { if (a) { return 1; } return 0; }",
+        );
+
+        let module = find_fn(&results, MODULE_UNIT_NAME);
+        let handle = find_fn(&results, "handle");
+        assert_eq!(module.cyclomatic, 2, "the top-level if only");
+        assert_eq!(handle.cyclomatic, 2, "its own if only");
+    }
+
+    #[test]
+    fn a_module_without_branching_emits_no_module_unit() {
+        // Emitting one per file would add a unit to every denominator in the
+        // product without adding information.
+        for source in [
+            "export const a = 1;",
+            "import { x } from './x';\nexport default x;",
+            "function f(a) { if (a) { return 1; } return 0; }",
+        ] {
+            let results = analyze(source);
+            assert!(
+                !results.iter().any(|unit| unit.name == MODULE_UNIT_NAME),
+                "unexpected module unit for `{source}`"
+            );
+        }
     }
 
     #[test]
@@ -1859,11 +1957,10 @@ mod tests {
     }
 
     #[test]
-    fn hoisting_a_branch_to_module_scope_hides_it() {
-        // Documented blind spot, asserted so a future frame change is visible.
-        // `push_function` runs only for functions and arrows, and both
-        // `push_contribution` and `inc_cyclomatic` write to the innermost
-        // frame, so a top-level branch contributes nothing at all.
+    fn hoisting_a_branch_to_module_scope_keeps_it_counted() {
+        // The branch moves from a function to the module body and stays in the
+        // total. Before #2503 the hoisted form scored zero, so hoisting looked
+        // like removal.
         let inside = assert_conservation("const f = (a) => { if (a) { return 1; } return 0; };");
         let hoisted = assert_conservation(
             "let value = 0;
@@ -1872,8 +1969,8 @@ mod tests {
         );
         assert_eq!(inside.branch_points, 1);
         assert_eq!(
-            hoisted.branch_points, 0,
-            "module-scope branching is invisible, so a fall in branch_points is not proof of removal"
+            hoisted.branch_points, 1,
+            "the branch is still counted once it runs at import time"
         );
     }
 }

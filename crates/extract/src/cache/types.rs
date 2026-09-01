@@ -1017,7 +1017,7 @@ use crate::MemberKind;
 /// Bumped to 284 for issue #2448: complexity units now persist private-member
 /// provenance separately from their display name. Warm 283 caches cannot
 /// distinguish an ECMAScript private member from a public quoted `#` name.
-pub(super) const CACHE_VERSION: u32 = 284;
+pub(super) const CACHE_VERSION: u32 = 285;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

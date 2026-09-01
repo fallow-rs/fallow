@@ -421,11 +421,12 @@ fn compute_crap_scores_istanbul(
     let mut total = 0usize;
     let mut per_function = Vec::with_capacity(complexity.len());
     for f in complexity {
-        // Synthetic template-family units carry no measurable coverage (an
-        // Istanbul fnMap can never contain them), so they are excluded from
-        // the CRAP dimension entirely: no per-function entry, no max /
-        // above-threshold contribution, no match-statistics slot.
-        if fallow_types::extract::is_synthetic_template_unit(&f.name) {
+        // Units an Istanbul fnMap can never contain carry no measurable
+        // coverage, so they are excluded from the CRAP dimension entirely: no
+        // per-function entry, no max / above-threshold contribution, no
+        // match-statistics slot. That is the template family plus the module
+        // body, whose code runs at import time and belongs to no function.
+        if fallow_types::extract::is_coverage_exempt_unit(&f.name) {
             continue;
         }
         total += 1;

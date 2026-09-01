@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Branching outside every function is now counted.** No frame was pushed for
+  a module body, so a top-level `if` ladder, an environment guard, or a
+  conditional export scored nothing at all, and hoisting a branch out of a
+  function lowered a file's complexity without removing any branching. Such
+  code now lands on a synthetic `<module>` unit, in the same family as
+  `<template>`. The unit is emitted only when the module body actually
+  branches, so a file that gains no information gains no unit, and it is
+  excluded from the CRAP dimension because an Istanbul function map can never
+  contain it. Measured across four real projects, this adds between 0.1 and 0.5
+  percent more units and moves no health aggregate at one decimal place
+  ([#2503](https://github.com/fallow-rs/fallow/issues/2503)).
+
 - **Release publication is gated on the curated release metadata**
   (Closes [#2414](https://github.com/fallow-rs/fallow/issues/2414)). The rules
   for a release title and its notes lived only in the maintainer runbook, which
