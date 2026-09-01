@@ -54,6 +54,7 @@ import { buildHealthArgs, parseUnknownHealthSubcommand } from "./health-utils.js
 import { registerChild, unregisterChild } from "./process-registry.js";
 import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
 import { appendTypeAwareArgs, TYPE_AWARE_MIN_CLI_VERSION } from "./type-aware-utils.js";
+import { noteTypeAwareDegradation, typeAwareDegradationWarnings } from "./typeAwareDegradation.js";
 import {
   cacheWorkspacesOutput,
   getCachedWorkspacesOutput,
@@ -746,6 +747,7 @@ export const runAnalysis = async (
     }
 
     const result = JSON.parse(output) as FallowCombinedResult;
+    noteTypeAwareDegradation(typeAwareDegradationWarnings(result), outputChannel);
     check = result.check ? filterCheckResult(result.check) : null;
     dupes = result.dupes ?? null;
     backoff.recordSuccess(backoffKey);

@@ -162,6 +162,7 @@ import {
 } from "../src/commands.js";
 import { AnalysisFailureBackoff } from "../src/analysisBackoff.js";
 import { resetBinarySkewToast } from "../src/binary-skew.js";
+import { resetTypeAwareDegradationNotice } from "../src/typeAwareDegradation.js";
 
 const context = {} as unknown as vscode.ExtensionContext;
 const workspaceContext = {
@@ -583,6 +584,42 @@ describe("runAnalysis retry backoff", () => {
       expect(calls[0]?.args).toEqual(["--format", "json", "--quiet", "--skip", "health"]);
     } finally {
       restoreMaxFileSizeEnv(originalLimit);
+      setWorkspaceRoot(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("warns once when the analysis kept the syntactic findings of a failed semantic pass", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-analysis-degraded-"));
+    const script = join(dir, "fallow-cli.js");
+    const warning = "type-aware refinement unavailable for /repo: sidecar timed out";
+    const output = JSON.stringify({
+      _meta: { check: { type_aware: { executed: false, warnings: [warning, warning] } } },
+      check: emptyCheck,
+      dupes: emptyDupes,
+    });
+
+    try {
+      resetTypeAwareDegradationNotice();
+      await writeFile(
+        script,
+        ["#!/usr/bin/env node", `process.stdout.write(${JSON.stringify(output)});`].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+
+      const backoff = new AnalysisFailureBackoff();
+      await runAnalysis(workspaceContext, undefined, { backoff });
+      await runAnalysis(workspaceContext, undefined, { backoff });
+
+      const shown = vi.mocked(mockWindow.showWarningMessage).mock.calls;
+      expect(shown).toHaveLength(1);
+      expect(String(shown[0]?.[0])).toContain(warning);
+    } finally {
+      resetTypeAwareDegradationNotice();
       setWorkspaceRoot(null);
       await rm(dir, { recursive: true, force: true });
     }
