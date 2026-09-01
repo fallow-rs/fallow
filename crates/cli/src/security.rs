@@ -1550,6 +1550,12 @@ fn function_spans(
         };
         let path = relative_key(path, root);
         for function in &module.complexity {
+            // A module-scope security finding would otherwise be attributed to
+            // the synthetic `<module>` unit and reported under that name, and
+            // no runtime sample can ever carry it.
+            if fallow_types::extract::is_synthetic_module_unit(&function.name) {
+                continue;
+            }
             spans.push(FunctionSpan {
                 key: RuntimeFunctionKey {
                     path: path.clone(),
