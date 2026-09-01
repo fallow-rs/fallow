@@ -236,7 +236,11 @@ pub struct HealthThresholdOverride {
     /// Project-root-relative file globs this override applies to.
     pub files: Vec<String>,
     /// Exact emitted function names this override applies to. Empty means every
-    /// function in matching files.
+    /// function in matching files. Synthetic units are matched by their emitted
+    /// name, so `"<template>"` and `"<snippet:NAME>"` are valid keys. The
+    /// synthetic `"<module>"` unit is not: it carries a file's module-scope
+    /// decision points into the aggregate metrics and never produces a finding,
+    /// so there is no ceiling for an override to move.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub functions: Vec<String>,
     /// Local cyclomatic complexity ceiling.

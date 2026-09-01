@@ -1139,7 +1139,7 @@
           }
         },
         "functions": {
-          "description": "Exact emitted function names this override applies to. Empty means every\nfunction in matching files.",
+          "description": "Exact emitted function names this override applies to. Empty means every\nfunction in matching files. Synthetic units are matched by their emitted\nname, so `\"<template>\"` and `\"<snippet:NAME>\"` are valid keys. The\nsynthetic `\"<module>\"` unit is not: it carries a file's module-scope\ndecision points into the aggregate metrics and never produces a finding,\nso there is no ceiling for an override to move.",
           "type": "array",
           "items": {
             "type": "string"

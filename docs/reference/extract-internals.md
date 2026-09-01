@@ -11,7 +11,8 @@ and parse-cache changes.
 - `crates/extract/src/visitor/`: JavaScript and TypeScript import, export,
   member, call, and framework facts.
 - `crates/extract/src/cache/`: cache types, conversion, storage, and tests.
-- `crates/extract/src/complexity.rs`: JavaScript and TypeScript complexity.
+- `crates/extract/src/complexity.rs`: JavaScript and TypeScript complexity,
+  including the synthetic `<module>` unit for module-scope branching.
 - `crates/extract/src/template_complexity/`: synthetic `<template>` complexity
   for Angular, Vue, Svelte, and Astro, over a shared JS-expression engine.
 - `crates/extract/src/sfc.rs`, `astro.rs`, `glimmer.rs`, `mdx.rs`, and
@@ -142,6 +143,17 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   parser then rejects still costs that MDX file its whole token stream there.
   Duplication findings inside such a file are missing rather than wrong, and
   the classifier is what keeps the common prose sentence out of that path.
+- Complexity extraction opens a root frame per program, so decision points
+  outside every function are counted instead of dropped by the
+  `stack.last_mut()` guard every counter writer uses. The frame is emitted as a
+  synthetic `<module>` unit only when it actually branched, anchored at its
+  first contributing construct and sized from its first to its last
+  contribution, with `source_hash: None`. A file with no module-scope decision
+  point produces no unit, so its numbers are unchanged. The unit is
+  aggregate-only downstream: vital signs, file-score totals, and branching
+  conservation count it, while findings, large functions, CRAP, the component
+  rollup, the runtime-coverage static payload, and the editor code lens all
+  exclude it.
 
 ## Verification
 

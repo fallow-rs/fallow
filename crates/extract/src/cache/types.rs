@@ -1017,7 +1017,14 @@ use crate::MemberKind;
 /// Bumped to 284 for issue #2448: complexity units now persist private-member
 /// provenance separately from their display name. Warm 283 caches cannot
 /// distinguish an ECMAScript private member from a public quoted `#` name.
-pub(super) const CACHE_VERSION: u32 = 284;
+///
+/// Bumped to 285 for issue #2503: complexity extraction opens a root frame for
+/// module scope and emits a synthetic `<module>` unit whenever a file branches
+/// outside every function, changing the serialized `module.complexity` for any
+/// file with a top-level guard, `??` / `||` default, or `?.` access. Warm 284
+/// caches lack the unit, so vital signs, file scores, and branching
+/// conservation would keep replaying the module-scope blind spot.
+pub(super) const CACHE_VERSION: u32 = 285;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
