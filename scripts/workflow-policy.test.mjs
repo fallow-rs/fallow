@@ -318,39 +318,6 @@ test("MSRV CI forces Rust 1.92 despite the repository toolchain override", () =>
   assert.match(msrvJob, /run: cargo check --workspace/);
 });
 
-test("Rust walltime benchmarks use CodSpeed macro runners", () => {
-  const workflow = readWorkflow(".github/workflows/bench-rust-walltime.yml");
-  const cargoManifest = readFileSync("Cargo.toml", "utf8");
-  const job = indentedBlock(workflow, "benchmark", 2);
-
-  assert.match(workflow, /^  workflow_dispatch:/m);
-  assert.doesNotMatch(workflow, /^  (push|pull_request|schedule):/m);
-  assert.match(job, /runs-on: codspeed-macro/);
-  assert.match(job, /permissions:\n\s+contents: read\n\s+id-token: write/);
-  assert.match(job, /cargo codspeed build -m walltime/);
-  assert.match(job, /cargo codspeed run -m walltime/);
-  assert.match(job, /mode: walltime/);
-  assert.doesNotMatch(workflow, /--cfg codspeed/);
-  assert.match(
-    cargoManifest,
-    /criterion = \{ package = "codspeed-criterion-compat", version = "=4\.7\.0"/,
-  );
-  assert.match(job, /tool: cargo-codspeed@4\.7\.0/);
-  assert.match(job, /case "\$WALLTIME_WORKLOAD" in/);
-  assert.match(workflow, /- component-config/);
-  assert.match(job, /component-config\)[\s\S]*bench=component_config/);
-  assert.match(workflow, /- component-output/);
-  assert.match(job, /component-output\)[\s\S]*bench=component_output/);
-  assert.match(workflow, /- dupes-detect/);
-  assert.match(job, /dupes-detect\)[\s\S]*package=fallow-engine[\s\S]*bench=dupes_detect/);
-  assert.match(workflow, /- representative-sources/);
-  assert.match(
-    job,
-    /representative-sources\)[\s\S]*package=fallow-benchmarks[\s\S]*bench=representative_sources/,
-  );
-  assert.doesNotMatch(job, /run:.*\$\{\{ inputs\.workload \}\}/);
-});
-
 test("release runs Windows correctness and lifecycle verification without credentials", () => {
   const releaseWorkflow = readWorkflow(".github/workflows/release.yml");
   const validationWorkflow = readWorkflow(".github/workflows/release-validation.yml");

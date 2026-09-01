@@ -11,26 +11,30 @@ its child process, so `tools/type-aware-sidecar/bench/session.mjs` uses the
 supported Tinybench integration to track cold Program construction and warm
 persistent-session reuse as distinct benchmarks.
 
-Rust walltime retain gates run through the separate, manual
-`.github/workflows/bench-rust-walltime.yml` workflow. Its fixed suite choices
-cover core analysis, stable programmatic sessions, duplicate detection, focused
-source extraction, and config, engine, and output components without accepting
-arbitrary commands. Keeping it manual avoids adding release-LTO builds to every
-pull request while preserving comparable Linux base/head evidence on CodSpeed's
-dedicated macro runners:
+Rust walltime retain gates are a local, manual procedure. Trustworthy
+wall-clock numbers for release-LTO builds need dedicated hardware, and a shared
+CI runner does not qualify: its variance swamps the five to ten percent deltas
+a retain gate decides on, so a green-but-noisy lane would be worse than none.
+
+Run one on a quiet machine, and check the load average first, because a loaded
+machine can inflate a single benchmark several times over:
 
 ```bash
-gh workflow run bench-rust-walltime.yml \
-  --ref <commit-or-branch> \
-  -f workload=analysis
+uptime
+cargo codspeed build -p fallow-benchmarks --bench component_cache --features codspeed
+codspeed run -m walltime -- cargo codspeed run -p fallow-benchmarks --bench component_cache
 ```
+
+Measure the base and head commits the same way, and do not compare values
+across different benchmarks. The upload succeeds before the follow-up poll
+finishes, so a `Waiting for results...` timeout is server-side processing
+rather than a failed run: read the numbers from the CodSpeed dashboard instead
+of waiting on the poll. Simulation mode cannot run locally on macOS, since its
+valgrind executor is unsupported there.
 
 The Rust benchmark crates use CodSpeed's official Criterion compatibility
 layer. Keep its major version aligned with `cargo-codspeed` so both simulation
 and walltime result collection remain available.
-
-Use the same workload on the exact base and head refs, then compare those two
-walltime runs in CodSpeed. Do not compare values across workload choices.
 
 Fast PR shards are selected by `.github/scripts/generate-benchmark-matrix.mjs`.
 Like Oxc's benchmark workflow, this keeps the tracked surface broad while only
