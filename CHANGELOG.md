@@ -376,7 +376,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Deno plugin that the roster never listed. Any surface reading that roster was
   one plugin short and could not see Deno at all. The roster now delegates to
   the core registry, so the copy is gone rather than corrected, and a test
-  pins the two together.
+  pins the two together. The published `capabilities.json` contract advertised
+  124 plugins and omitted `deno` with it, so an agent reading that contract
+  could not see the plugin at all; it now reports 125.
 
 ### Security
 

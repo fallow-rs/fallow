@@ -7105,7 +7105,7 @@
     ]
   },
   "plugins": {
-    "count": 124,
+    "count": 125,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -7231,7 +7231,8 @@
       "wuchale",
       "varlock",
       "pnpm",
-      "bun"
+      "bun",
+      "deno"
     ]
   },
   "task_matrix": [
