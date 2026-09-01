@@ -1,90 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788179469698,
+  "lastUpdate": 1788260634539,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "f92318a75a2aee0732382d8069d8366931f01572",
-          "message": "fix(tanstack): suppress Start virtual modules\n\nTanStack Start imports manifest and injected-head script modules through framework-provided virtual specifiers with a :v suffix. Those specifiers are not npm packages, but the TanStack plugin did not register them as virtual modules, so dead-code analysis reported them as unlisted dependencies.\n\nRegister the colon-suffixed TanStack Start virtual module prefixes through the existing plugin virtual-prefix hook. Add plugin-gated positive and negative coverage, including unresolved-import suppression and end-to-end analysis fixtures for static and dynamic imports.\n\nFixes #636.",
-          "timestamp": "2026-05-23T07:33:06Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/f92318a75a2aee0732382d8069d8366931f01572"
-        },
-        "date": 1779524115672,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Agreement Rate",
-            "value": 2,
-            "unit": "%"
-          },
-          {
-            "name": "Agreed Issues",
-            "value": 670,
-            "unit": "issues"
-          },
-          {
-            "name": "Fallow Total",
-            "value": 32013,
-            "unit": "issues"
-          },
-          {
-            "name": "Knip Total",
-            "value": 2030,
-            "unit": "issues"
-          },
-          {
-            "name": "fastify Agreement",
-            "value": 6.1,
-            "unit": "%"
-          },
-          {
-            "name": "next.js Agreement",
-            "value": 1.9,
-            "unit": "%"
-          },
-          {
-            "name": "preact Agreement",
-            "value": 3.6,
-            "unit": "%"
-          },
-          {
-            "name": "query Agreement",
-            "value": 0,
-            "unit": "%"
-          },
-          {
-            "name": "svelte Agreement",
-            "value": 0.3,
-            "unit": "%"
-          },
-          {
-            "name": "vite Agreement",
-            "value": 5.3,
-            "unit": "%"
-          },
-          {
-            "name": "vue-core Agreement",
-            "value": 22.7,
-            "unit": "%"
-          },
-          {
-            "name": "zod Agreement",
-            "value": 2.8,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -8189,6 +8107,88 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite Agreement",
             "value": 6.4,
+            "unit": "%"
+          },
+          {
+            "name": "vue-core Agreement",
+            "value": 23.4,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 1.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "fa40ef0946a90523ba1a7eb1366db0166b9cdd2d",
+          "message": "fix(mcp): bound the Code Mode call trace\n\nMemoization gave a snippet a way to grow the response without limit. A memo\nhit spends no max_host_calls slot and no output budget, by design, but it\nstill appended an entry to calls[], and nothing bounded that array. A loop of\n5000 identical cached calls produced a 430 KB response carrying a four-byte\nresult, with every documented limit reporting as respected, which reads as\ncompliant and is worse for it. Before memoization the same loop stopped at\neight entries because the budget was derived from calls[] length, so this\narrived with the memo cache rather than preceding it.\n\ncalls[] now stops at max_recorded_calls entries, reported in limits. Past the\nbound the host calls still run and still return, so bounding the trace never\nchanges what the snippet sees; only the trace entries are dropped, and the\nadditive calls_omitted field reports how many. It is absent when nothing was\ndropped, so an ordinary response keeps the shape its consumers already parse.\nThe same loop now returns 5836 bytes with 64 entries and calls_omitted 4936,\nasserted by test rather than left to inspection.\n\ndocs/reference/mcp-internals.md said the rejection budget was what kept a\nsnippet from growing calls[] without limit. It never did, for memo hits.\nCorrected, with the trace bound documented alongside it.",
+          "timestamp": "2026-09-01T10:24:58Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/fa40ef0946a90523ba1a7eb1366db0166b9cdd2d"
+        },
+        "date": 1788260631463,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.8,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 567,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 30103,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 2003,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 4.9,
+            "unit": "%"
+          },
+          {
+            "name": "next.js Agreement",
+            "value": 1.7,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 4.4,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "vite Agreement",
+            "value": 5.9,
             "unit": "%"
           },
           {
