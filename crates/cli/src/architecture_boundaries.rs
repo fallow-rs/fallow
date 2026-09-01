@@ -2266,14 +2266,20 @@ fn workspace_sources_never_mutate_the_process_environment() {
         }
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
-        for forbidden in ["env::set_var", "env::remove_var"] {
+        // Both the path form and the call form. The path alone misses
+        // `use std::env::*` and `use std::env::{self, set_var}`, which put the
+        // call in scope without ever writing `env::set_var`. The call form alone
+        // would miss a re-exported alias. The bare identifier is not usable as a
+        // needle: `reset_variants` in crates/core/src/plugins/sveltekit.rs
+        // contains it.
+        for forbidden in ["env::set_var", "env::remove_var", "set_var(", "remove_var("] {
             assert!(
                 !source.contains(forbidden),
-                "{source_path} must not call {forbidden}: process-global environment mutation is \
-                 unsound under the parallel test harness. Read the variable on one line in a thin \
-                 outer function and take the value as an argument in the inner function the test \
-                 drives, as resolve_typed_coverage_inputs does in \
-                 crates/mcp/src/tools/api_runtime.rs"
+                "{source_path} mutates the process environment (matched {forbidden:?}), which is \
+                 unsound under the parallel test harness: the whole workspace shares one \
+                 environment across test threads. Read the variable on one line in a thin outer \
+                 function and take the value as an argument in the inner function the test drives, \
+                 as resolve_typed_coverage_inputs does in crates/mcp/src/tools/api_runtime.rs"
             );
         }
     }

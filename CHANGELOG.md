@@ -205,6 +205,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schema, the `fallow://tools` resource, and `capabilities.json`, so an agent
   reads reachability from data instead of parsing a tool description.
 
+- **An intermittent CI failure in Fallow's own test suite is fixed.** The MCP
+  test binary links its unit tests and its end-to-end tests together, so they run
+  as threads in one process sharing one environment. One unit test set and then
+  removed `FALLOW_BIN`, the variable the end-to-end tests read to locate the
+  binary they spawn, and the coverage workflow sets exactly that variable for the
+  whole workspace run. Every environment read in `crates/cli` and `crates/mcp`
+  now happens once in a thin wrapper, with the value passed to the function under
+  test, so no test mutates state another test is reading. A guard test walks the
+  workspace and fails on a new mutation, naming the file and the pattern to use
+  instead, because serializing such tests hides the race rather than removing it.
+
 ### Security
 
 - **The Code Mode sandbox no longer leaves the `Function` constructor
