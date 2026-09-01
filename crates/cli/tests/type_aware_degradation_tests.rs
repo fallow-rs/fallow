@@ -81,6 +81,71 @@ fn check_still_fails_closed_under_require_complete() {
     );
 }
 
+/// The notice is the user's only signal that the report is unrefined, so it has
+/// to arrive once. `check` used to print it twice: once from the shared degrade
+/// policy and once more from the per-warning printer that copied it out of the
+/// metadata.
+#[test]
+fn human_check_states_the_degradation_once_and_claims_no_success() {
+    let output = run_with_missing_companion(&["dead-code", "--type-aware", "--unused-exports"]);
+    let emitted = format!("{}{}", output.stdout, output.stderr);
+
+    assert_eq!(
+        emitted.matches(DEGRADED_NOTICE).count(),
+        1,
+        "stdout: {}\nstderr: {}",
+        output.stdout,
+        output.stderr
+    );
+    assert!(
+        !emitted.contains("Type-aware refinement:"),
+        "a pass that never ran must not report counts: {emitted}"
+    );
+}
+
+#[test]
+fn human_health_coupling_states_the_degradation_once() {
+    let output = run_with_missing_companion(&["health", "--type-aware", "--type-coupling"]);
+    let emitted = format!("{}{}", output.stdout, output.stderr);
+
+    assert_eq!(
+        emitted.matches(DEGRADED_NOTICE).count(),
+        1,
+        "stdout: {}\nstderr: {}",
+        output.stdout,
+        output.stderr
+    );
+}
+
+/// `--quiet` has to silence the notice on every stream while the machine-facing
+/// copy in `_meta` survives, so a JSON consumer still learns the report is
+/// unrefined.
+#[test]
+fn quiet_json_keeps_the_degradation_out_of_stderr() {
+    let output = run_with_missing_companion(&[
+        "dead-code",
+        "--type-aware",
+        "--unused-exports",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        !output.stderr.contains(DEGRADED_NOTICE),
+        "stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert!(
+        json["_meta"]["type_aware"]["warnings"][0]
+            .as_str()
+            .is_some_and(|warning| warning.contains(DEGRADED_NOTICE)),
+        "stdout: {}",
+        output.stdout
+    );
+}
+
 /// `fix` is the one command that does not degrade. The reporting commands can
 /// fall back to the syntactic set because it is a superset, so a gate only gets
 /// stricter. Applying that same superset from a command that removes code would
@@ -100,6 +165,18 @@ fn fix_dry_run_fails_closed_even_under_best_effort() {
     assert_eq!(output.code, 2, "stdout: {}", output.stdout);
     assert!(
         output.stdout.contains("Type-aware analysis failed"),
+        "stdout: {}",
+        output.stdout
+    );
+    // `fix` is the only surface that can still stop, so it is the only place a
+    // user can get stuck, and the error has to name both ways out.
+    assert!(
+        output.stdout.contains("FALLOW_TYPE_AWARE_TIMEOUT_SECS"),
+        "stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("--no-type-aware"),
         "stdout: {}",
         output.stdout
     );

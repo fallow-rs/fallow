@@ -23,6 +23,13 @@ pub fn line(status: HumanStatus, message: impl std::fmt::Display) -> String {
 }
 
 pub fn type_aware_meta_status(meta: &TypeAwareMeta) -> HumanStatus {
+    // A pass that executed no query cannot be graded a success. `executed` is
+    // the field the degraded path sets to mark exactly that, and the counted
+    // dimensions below are all zero in that case, which would otherwise read
+    // as a clean run.
+    if !meta.executed {
+        return HumanStatus::Inactive;
+    }
     let identity_status = meta.identity.as_ref().map(|identity| identity.completeness);
     if identity_status == Some(SemanticCompleteness::Unavailable)
         || meta
@@ -64,5 +71,22 @@ mod tests {
             line(HumanStatus::Inactive, "unavailable"),
             "[-] unavailable"
         );
+    }
+
+    #[test]
+    fn a_pass_that_never_executed_is_not_graded_ok() {
+        let degraded = TypeAwareMeta {
+            executed: false,
+            warning_count: 1,
+            warnings: vec!["type-aware refinement unavailable".to_owned()],
+            ..TypeAwareMeta::default()
+        };
+        assert_eq!(type_aware_meta_status(&degraded), HumanStatus::Inactive);
+
+        let executed = TypeAwareMeta {
+            executed: true,
+            ..TypeAwareMeta::default()
+        };
+        assert_eq!(type_aware_meta_status(&executed), HumanStatus::Ok);
     }
 }
