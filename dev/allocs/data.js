@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788274303961,
+  "lastUpdate": 1788277314486,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8437d52e6688cd1ce823d5da8c6670e7a23f839f",
-          "message": "fix: close analysis and audit follow-ups\n\n* chore: start issue follow-up batch\n\n* chore: start issue follow-up batch\n\n* fix: close analysis and audit follow-ups",
-          "timestamp": "2026-08-16T01:07:16+02:00",
-          "tree_id": "84124fa62f20213b3fbefff9d07a20d84d5a33fd",
-          "url": "https://github.com/fallow-rs/fallow/commit/8437d52e6688cd1ce823d5da8c6670e7a23f839f"
-        },
-        "date": 1786835482982,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9730199,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48919,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1031285,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7608,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8387,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4b0e6ab9a37ee22d70b9d7986288e6f2a821e63",
+          "message": "docs(config): stop the rule-name guard claiming a check it does not make (#2536)\n\nKNOWN_RULE_NAMES drives the typo detector for user configs. Its doc comment said\nthe known_rule_names_count_matches_struct test fails when the lists drift. That\ntest asserts a length literal and never mentions RulesConfig, so adding a rule to\nthe struct and forgetting the list leaves every test green while the new rule\nname warns as an unknown key in real configs.\n\nNothing is drifted today; the only absent field is serde(skip) bookkeeping and\ncorrectly excluded.\n\nA real pin needs the provenance of all 98 entries, because the list also covers\nnames no RulesConfig field produces, so a field-count comparison would not even\nbe correct. That is deliberately not attempted here. The false assurance is\nseparable and is what misleads: the test is renamed to what it does, and both it\nand the constant now state what is and is not enforced. The guard is unchanged.\n\nThe four sibling guards whose names promise a comparison were checked and all\ngenuinely compare sources, so this was an isolated case.",
+          "timestamp": "2026-09-01T17:35:32+02:00",
+          "tree_id": "8b52d198cb772c19208fd0d246a3f1b57319114b",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4b0e6ab9a37ee22d70b9d7986288e6f2a821e63"
+        },
+        "date": 1788277310364,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9760889,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49416,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1194854,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8433,
             "unit": "allocations"
           }
         ]
