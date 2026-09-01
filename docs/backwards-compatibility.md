@@ -180,7 +180,12 @@ These are documented for the rare CI script that depended on the old behavior. N
   element the whole of it. The envelope keeps `schema_version`
   `mcp-code-execute/v1`: every new field is optional and appears only when it
   applies. A caller that wants the old headroom can raise `max_output_bytes`,
-  which accepts up to 4000000.
+  which accepts up to 4000000. The `calls[]` trace is bounded too, at
+  `limits.max_recorded_calls` entries: a memo hit spends no budget, so a
+  snippet looping one cached call used to grow the response without limit
+  while every documented limit still reported as respected. Past the bound the
+  host calls still run and still return, only their trace entries are dropped,
+  and the additive `calls_omitted` field reports how many.
 
 - **A referenced `tsconfig.json` without `include` or `files` no longer claims
   every file** ([#2436](https://github.com/fallow-rs/fallow/pull/2436)). When

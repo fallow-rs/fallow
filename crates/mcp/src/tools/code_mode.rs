@@ -43,6 +43,12 @@ const MAX_REJECTED_HOST_CALLS: usize = 8;
 /// `fallow.run(<huge string>)` can push into the response envelope.
 const MAX_TOOL_NAME_BYTES: usize = 64;
 
+/// Longest `calls[]` trace a response carries. Dispatches and refusals have
+/// their own budgets, but a memo hit spends neither, so a snippet looping one
+/// cached call would otherwise grow the envelope without limit while every
+/// documented limit still reported as respected.
+const MAX_RECORDED_CALLS: usize = 64;
+
 /// How much of an oversized snippet result is kept as a preview, so the
 /// rejection still shows what the snippet was about to return.
 const RESULT_PREVIEW_BYTES: usize = 256;
@@ -82,6 +88,7 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
         return Err(error_envelope(
             &format!("code mode snippet exceeded {MAX_CODE_BYTES} bytes"),
             &[],
+            0,
             &limits,
             error_limit,
         ));
@@ -100,7 +107,9 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
 
     let result = run_code_mode_eval(&context, &state, &params.code);
 
-    let calls = &state.borrow().calls;
+    let borrowed = state.borrow();
+    let calls = &borrowed.calls;
+    let calls_omitted = borrowed.calls_omitted;
     match result {
         Ok(result_json) if result_json.len() > max_output_bytes => Err(json!({
             "schema_version": "mcp-code-execute/v1",
@@ -114,6 +123,7 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
             "result_bytes": result_json.len(),
             "result_preview": clamp_utf8(&result_json, RESULT_PREVIEW_BYTES.min(max_output_bytes)),
             "calls": calls,
+            "calls_omitted": omitted_field(calls_omitted),
             "limits": limits
         })
         .to_string()),
@@ -123,16 +133,24 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
             "result": serde_json::from_str::<serde_json::Value>(&result_json)
                 .unwrap_or(serde_json::Value::Null),
             "calls": calls,
+            "calls_omitted": omitted_field(calls_omitted),
             "limits": limits
         })
         .to_string()),
         Err(err) => Err(error_envelope(
             &normalize_code_mode_error(&err, deadline),
             calls,
+            calls_omitted,
             &limits,
             error_limit,
         )),
     }
+}
+
+/// Render the dropped-entry count only when the trace actually overflowed, so
+/// an ordinary response keeps the shape its consumers already parse.
+fn omitted_field(calls_omitted: usize) -> Option<usize> {
+    (calls_omitted > 0).then_some(calls_omitted)
 }
 
 /// Build a failed code-mode response, clamping `error` so a thrown message
@@ -142,6 +160,7 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
 fn error_envelope(
     error: &str,
     calls: &[CodeModeCall],
+    calls_omitted: usize,
     limits: &serde_json::Value,
     max_error_bytes: usize,
 ) -> String {
@@ -150,6 +169,7 @@ fn error_envelope(
         "ok": false,
         "error": clamp_utf8(error, max_error_bytes),
         "calls": calls,
+        "calls_omitted": omitted_field(calls_omitted),
         "limits": limits
     });
     if error.len() > max_error_bytes
@@ -167,7 +187,8 @@ fn code_mode_limits(timeout_ms: u64, max_output_bytes: usize) -> serde_json::Val
         "timeout_ms": timeout_ms,
         "max_output_bytes": max_output_bytes,
         "max_host_calls": MAX_HOST_CALLS,
-        "max_rejected_host_calls": MAX_REJECTED_HOST_CALLS
+        "max_rejected_host_calls": MAX_REJECTED_HOST_CALLS,
+        "max_recorded_calls": MAX_RECORDED_CALLS
     })
 }
 
@@ -462,6 +483,9 @@ struct CodeModeState {
     max_output_bytes: usize,
     output_bytes: usize,
     calls: Vec<CodeModeCall>,
+    /// Calls the trace could not hold once it reached [`MAX_RECORDED_CALLS`].
+    /// Reported so a truncated trace says so instead of looking complete.
+    calls_omitted: usize,
     rejected_calls: usize,
     /// Host calls that actually reached a backing. This is the only thing the
     /// `max_host_calls` budget is derived from, so entries `calls[]` records
@@ -498,6 +522,7 @@ impl CodeModeState {
             max_output_bytes,
             output_bytes: 0,
             calls: Vec::new(),
+            calls_omitted: 0,
             rejected_calls: 0,
             dispatched: 0,
             memo: FxHashMap::default(),
@@ -541,9 +566,20 @@ impl CodeModeState {
         Ok(())
     }
 
+    /// Append to the trace until it is full, then count what it drops. The
+    /// host call itself still runs and still returns; only its trace entry is
+    /// dropped, so bounding the envelope never changes what the snippet sees.
+    fn push_call(&mut self, call: CodeModeCall) {
+        if self.calls.len() >= MAX_RECORDED_CALLS {
+            self.calls_omitted += 1;
+            return;
+        }
+        self.calls.push(call);
+    }
+
     fn record_success(&mut self, mut call: CodeModeCall) {
         call.ok = true;
-        self.calls.push(call);
+        self.push_call(call);
     }
 
     /// Record a failed host call and return the message the snippet sees.
@@ -588,7 +624,7 @@ impl CodeModeState {
             self.rejected_calls += 1;
         }
         call.error_kind = Some(classify_host_error(&error));
-        self.calls.push(call);
+        self.push_call(call);
         error
     }
 
@@ -3170,6 +3206,55 @@ mod tests {
     /// slot, so composition lost to separate MCP round-trips exactly where it
     /// should have won. The output cap here is smaller than two payloads, so
     /// the test also fails if a memo hit charges its bytes twice.
+    #[test]
+    fn the_trace_is_bounded_even_when_memo_hits_are_not() {
+        let (ok, json, bytes) = run_snippet(
+            r#"
+            let count = 0;
+            for (let index = 0; index < 5000; index += 1) {
+                fallow.explain({ issue_type: "unused-export" });
+                count += 1;
+            }
+            return count;
+            "#,
+            200_000,
+        );
+
+        assert!(ok, "memo hits must not fail the snippet: {json}");
+        assert!(
+            bytes < 32_000,
+            "the response a memo loop produces must stay small, got {bytes} bytes"
+        );
+        assert_eq!(json["result"], 5000, "every call is still served");
+        let calls = json["calls"].as_array().expect("calls");
+        assert_eq!(
+            calls.len(),
+            MAX_RECORDED_CALLS,
+            "the trace stops growing at its bound"
+        );
+        assert_eq!(
+            json["calls_omitted"],
+            5000 - MAX_RECORDED_CALLS,
+            "a truncated trace must say how much it dropped: {json}"
+        );
+        assert_eq!(json["limits"]["max_recorded_calls"], MAX_RECORDED_CALLS);
+    }
+
+    #[test]
+    fn an_untruncated_trace_omits_the_dropped_count() {
+        let (ok, json, _) = run_snippet(
+            r#"return fallow.explain({ issue_type: "unused-export" }).kind;"#,
+            200_000,
+        );
+
+        assert!(ok, "{json}");
+        assert!(
+            json.get("calls_omitted")
+                .is_none_or(serde_json::Value::is_null),
+            "an ordinary response keeps the shape consumers already parse: {json}"
+        );
+    }
+
     #[test]
     fn memo_hits_spend_neither_a_host_call_slot_nor_the_output_budget() {
         let (ok, json, _) = run_snippet(

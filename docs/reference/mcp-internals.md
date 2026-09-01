@@ -128,6 +128,15 @@ Contract rules:
   dies with the snippet: nothing persists between `code_execute` invocations.
   The cache is therefore bounded by `MAX_HOST_CALLS` entries and by
   `max_output_bytes` in total size.
+- The `calls[]` trace is bounded independently, at `MAX_RECORDED_CALLS`
+  entries, reported as `limits.max_recorded_calls`. Dispatches and refusals
+  each have a budget, but a memo hit spends neither, so without this bound a
+  snippet looping one cached call would grow the response envelope without
+  limit while every documented limit still reported as respected. Past the
+  bound the host calls still run and still return; only their trace entries
+  are dropped, and the response carries `calls_omitted` with the count. The
+  field is absent when nothing was dropped, so an ordinary response keeps the
+  shape its consumers already parse.
 - `fallow.all(requests)` is the fan-out. It runs in Rust, not in JS: the
   sandbox stays synchronous and promise-free, and the call blocks until every
   element has resolved. Elements are returned positionally aligned with the
@@ -173,9 +182,10 @@ Contract rules:
   neither a rejection nor a memo hit shrinks what a later distinct call can
   spend. Every such refusal is charged to `max_rejected_host_calls` instead,
   which is what keeps a snippet looping over bad names, or over a spent output
-  budget, from growing `calls[]` without limit; the recorded tool name is
-  clamped as well, so an unvalidated `fallow.run` argument cannot inflate the
-  response envelope.
+  budget, from spending an analysis budget it never used; the recorded tool
+  name is clamped as well, so an unvalidated `fallow.run` argument cannot
+  inflate the response envelope. Bounding the trace itself is a separate
+  concern, handled by `max_recorded_calls` above.
 - Keep tool ordering deterministic.
 - The `audit` and `check_health` typed routes resolve Istanbul coverage
   through `fallow_api::coverage::resolve_coverage_inputs` with the CLI's

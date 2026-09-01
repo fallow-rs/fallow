@@ -185,8 +185,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   number: a larger one is refused with `ok:false` and reported through the
   additive `truncated`, `result_bytes`, and `result_preview` fields. A thrown
   error message is clamped the same way, and a `fallow.all` fan-out shares one
-  budget rather than giving each element the whole of it. `schema_version`
-  stays `mcp-code-execute/v1` and every new field is optional.
+  budget rather than giving each element the whole of it. The `calls[]` trace
+  is bounded as well, at `limits.max_recorded_calls` entries. It has to be
+  separately: a memoized host call spends no call slot and no output budget by
+  design, so a snippet looping one cached call could return a 430 KB response
+  carrying a four-byte result while every documented limit still reported as
+  respected, which reads as compliant and is worse for it. Past the bound the
+  host calls still run and still return, so nothing a snippet sees changes;
+  only their trace entries are dropped, and the additive `calls_omitted` field
+  reports how many. `schema_version` stays `mcp-code-execute/v1` and every new
+  field is optional.
 
 - **A Code Mode refusal no longer carries process-cleanup noise.** The
   output-cap refusal and the deadline message are contract strings that a
