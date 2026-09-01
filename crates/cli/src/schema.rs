@@ -700,11 +700,11 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     ),
     (
         "FALLOW_COVERAGE",
-        "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this; it wins over the health.coverage config field. Honored by the health, bare fallow, and audit CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage parameter overrides it.",
+        "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this; it wins over the health.coverage config field. Honored by the health, bare fallow, audit, and viz CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage parameter overrides it. Viz reads it through the same precedence and has no coverage flag of its own.",
     ),
     (
         "FALLOW_COVERAGE_ROOT",
-        "Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. CLI --coverage-root flag overrides this; it wins over the health.coverageRoot config field. Honored by the health, bare fallow, and audit CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage_root parameter overrides it.",
+        "Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. CLI --coverage-root flag overrides this; it wins over the health.coverageRoot config field. Honored by the health, bare fallow, audit, and viz CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage_root parameter overrides it. Viz reads it through the same precedence and has no coverage flag of its own.",
     ),
     (
         "FALLOW_MAX_FILE_SIZE",
@@ -951,7 +951,7 @@ mod tests {
             let description = env_vars[var].as_str().unwrap();
             for required in [
                 config_field,
-                "health, bare fallow, and audit CLI commands",
+                "health, bare fallow, audit, and viz CLI commands",
                 "MCP audit and check_health tools",
                 "typed route",
                 "CLI fallback",

@@ -1074,7 +1074,7 @@
           "default": 60
         },
         "coverage": {
-          "description": "Path to Istanbul-format coverage data for accurate per-function CRAP\nscores. Relative paths resolve against the project root. The CLI\n`--coverage` flag and `FALLOW_COVERAGE` environment variable override\nthis value. Consulted by `fallow health`, bare `fallow`, `fallow audit`,\nand the MCP `audit` / `check_health` tools.",
+          "description": "Path to Istanbul-format coverage data for accurate per-function CRAP\nscores. Relative paths resolve against the project root. The CLI\n`--coverage` flag and `FALLOW_COVERAGE` environment variable override\nthis value. Consulted by `fallow health`, bare `fallow`, `fallow audit`,\n`fallow viz`, and the MCP `audit` / `check_health` tools.",
           "type": [
             "string",
             "null"
@@ -1082,7 +1082,7 @@
           "default": null
         },
         "coverageRoot": {
-          "description": "Absolute prefix to strip from Istanbul file paths before CRAP matching.\nUse when coverage was generated under a different checkout root in CI\nor Docker. The CLI `--coverage-root` flag and `FALLOW_COVERAGE_ROOT`\nenvironment variable override this value. Consulted by `fallow health`,\nbare `fallow`, `fallow audit`, and the MCP `audit` / `check_health`\ntools.",
+          "description": "Absolute prefix to strip from Istanbul file paths before CRAP matching.\nUse when coverage was generated under a different checkout root in CI\nor Docker. The CLI `--coverage-root` flag and `FALLOW_COVERAGE_ROOT`\nenvironment variable override this value. Consulted by `fallow health`,\nbare `fallow`, `fallow audit`, `fallow viz`, and the MCP `audit` /\n`check_health` tools.",
           "type": [
             "string",
             "null"
