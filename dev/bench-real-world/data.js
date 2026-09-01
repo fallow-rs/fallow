@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788188073678,
+  "lastUpdate": 1788265623530,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "f92318a75a2aee0732382d8069d8366931f01572",
-          "message": "fix(tanstack): suppress Start virtual modules\n\nTanStack Start imports manifest and injected-head script modules through framework-provided virtual specifiers with a :v suffix. Those specifiers are not npm packages, but the TanStack plugin did not register them as virtual modules, so dead-code analysis reported them as unlisted dependencies.\n\nRegister the colon-suffixed TanStack Start virtual module prefixes through the existing plugin virtual-prefix hook. Add plugin-gated positive and negative coverage, including unresolved-import suppression and end-to-end analysis fixtures for static and dynamic imports.\n\nFixes #636.",
-          "timestamp": "2026-05-23T07:33:06Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/f92318a75a2aee0732382d8069d8366931f01572"
-        },
-        "date": 1779527180055,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 151,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 143,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 260,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 240,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 145,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 130,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 446,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 379,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1194,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1160,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 891,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 874,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 786,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 710,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7728,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 6880,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9459,6 +9357,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1325,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "9db28bf7c2ff6c83384baf66194a7a3f75777904",
+          "message": "feat(extract): count module-scope branching as a synthetic unit (#2516)\n\nCloses #2503.\n\nNo frame was pushed at module scope, so decision points outside every function\ncontributed nothing to any complexity number fallow reports. Wider than the issue\ntext says: module-scope ??, || and ?. scored zero too, not just if ladders. The\nconsequence that motivated this is that \"this change removed branching\" was\nunprovable, because a fall was equally consistent with a branch having been\nhoisted out of a function.\n\nA synthetic per-file <module> unit, in the same family as <template>, but\naggregate-only: visible to vital signs, file scores and the branching section,\nand never producing a user-facing finding. \"Extract helper functions\" is\nmeaningless advice for module scope, and emitting findings would churn every\nsaved baseline for advice we cannot give. That single decision bounds the change.\n\nIt gets its own predicate rather than widening is_synthetic_template_unit,\nbecause FileBranching::from_units filters on that one and folding <module> in\nwould have left the branching section exactly as blind as before.\n\nValidated on five projects, old binary against new. Findings arrays are\ndeep-equal on all five; <module> appears zero times in any output format. Only\nthree vitals moved anywhere and each is decomposed: two are pure denominator\neffects with byte-identical numerators. Largest per-file deltas hand-verified\nagainst source, exact matches on both metrics. No baseline churn, warm cache\npicks the change up, and SFC files report both units without double counting.\n\nThe blast radius is much smaller than predicted: two of five projects showed zero\nvital movement and no score moved more than 0.2. Well-factored TypeScript keeps\nits boolean operators inside functions where they were already counted.",
+          "timestamp": "2026-09-01T12:20:16Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/9db28bf7c2ff6c83384baf66194a7a3f75777904"
+        },
+        "date": 1788265615565,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 207,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 509,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 407,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1328,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1126,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1020,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 915,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1224,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1222,
             "unit": "ms"
           }
         ]
