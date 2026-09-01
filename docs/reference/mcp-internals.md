@@ -98,6 +98,84 @@ Contract rules:
 - Apply bounded timeouts and clean up the complete owned process tree on
   completion, cancellation, or timeout.
 - Never inherit unbounded environment or filesystem authority into code mode.
+- The Code Mode allowlist lives in `fallow_types::mcp_manifest`: a tool is
+  reachable from `code_execute` exactly when its `McpToolInfo` row carries a
+  `code_mode_alias`, and `CODE_MODE_ONLY_TOOLS` holds the few host helpers with
+  no standalone tool. The sandbox bindings, the `fallow schema` `mcp_tools`
+  rows, and the `fallow://tools` resource are all projections of that field, so
+  an agent on those surfaces reads reachability from data instead of the
+  `code_execute` description. The generated skill reference
+  (`npm/fallow/skills/fallow/references/mcp.md`) does not carry the column; an
+  agent reading only that file still has to read the description.
+  Drift tests bind the manifest to the `CodeModeTool` enum in both directions.
+- Each Code Mode host call has exactly one backing, `CodeModeBacking::Api` or
+  `CodeModeBacking::Subprocess`, derived from the single `api_route` match that
+  also performs the dispatch, so no tool can be listed as in-process without a
+  route. `fallow-api` has no cancellation, so whole-project analyses (`analyze`,
+  `find_dupes`, `check_health`, `audit`) take the killable subprocess even
+  though a typed route exists for them: a timeout has to stop the work, not just
+  stop waiting for it. An in-process call that does outlive `timeout_ms` is
+  counted as abandoned, and while abandoned work is still running later host
+  calls fall back to the subprocess, which bounds how much orphaned analysis a
+  long-lived server can accumulate. Cancellation in `fallow-api` is what would
+  remove the split.
+- Host calls are memoized per snippet, keyed on the tool plus its merged params
+  in canonical form (object keys sorted, array order preserved), so
+  `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` are one entry. A hit spawns nothing,
+  spends no `max_host_calls` slot, and charges no output bytes, but still
+  appears in `calls[]` with `cache_hit: true` so the trace stays honest. Only
+  successful calls are memoized, the cache lives in `CodeModeState`, and it
+  dies with the snippet: nothing persists between `code_execute` invocations.
+  The cache is therefore bounded by `MAX_HOST_CALLS` entries and by
+  `max_output_bytes` in total size.
+- `fallow.all(requests)` is the fan-out. It runs in Rust, not in JS: the
+  sandbox stays synchronous and promise-free, and the call blocks until every
+  element has resolved. Elements are returned positionally aligned with the
+  requests as `{ ok, value }` or `{ ok, error }`, so a batch degrades per
+  element rather than as a whole; only whole-batch problems (a non-array
+  argument, an element that is not an object carrying a `tool` string, more
+  elements than `max_host_calls`, a batch bigger than the remaining budget, an
+  expired deadline) throw. Every element goes through the
+  same `resolve` (tool allowlist, `root` merging, memo key), the same shared
+  deadline, and the same output accounting as a single call, and the accounting
+  is applied in element order so the response does not depend on which element
+  finished first. The output budget is shared, not per element: what is left of
+  `max_output_bytes` is divided evenly across the dispatches a batch makes, so a
+  fan-out reads at most `max_output_bytes` in total. Dividing up front rather
+  than charging on arrival is what keeps the outcome independent of which worker
+  reported first. Subprocess-backed elements overlap on a worker pool capped at
+  `MAX_BATCH_CONCURRENCY`; in-process elements run one at a time on the calling
+  thread, because `fallow-api` has no cancellation and two concurrent in-process
+  analyses would be exactly the uncancellable pile-up the abandoned-call
+  accounting exists to prevent.
+- `max_output_bytes` bounds two independent things: the total fallow JSON read
+  by host calls, and the serialized snippet result. The result is the only part
+  of a Code Mode response that enters the calling agent's context, so an
+  oversized one is refused with `ok:false`, `truncated:true`, `result_bytes`,
+  and a short `result_preview`, never returned whole and never truncated into
+  invalid JSON. The envelope's `error` string is clamped the same way, at
+  `max_output_bytes` or a 4 KiB floor, whichever is larger, so a structured
+  programmatic error stays readable while a thrown megabyte does not reach the
+  agent.
+- The sandbox denies dynamic code compilation, not just the `Function` global.
+  Undefining the binding leaves the intrinsic reachable through
+  `(function () {}).constructor`, so a hardening prelude replaces the
+  `constructor` slot on the function, async-function, generator-function, and
+  async-generator-function prototypes with a non-configurable `undefined`
+  before the snippet runs. `harden_globals` stays a denylist, so a test
+  enumerates `globalThis` own property names against a reviewed allowlist: a
+  runtime upgrade that adds a global fails the build instead of widening the
+  sandbox silently.
+- Host calls refused before dispatch (unknown or unsupported tool name,
+  malformed params, an output budget with nothing left to spend) run no
+  analysis and read no output, so they do not spend the `max_host_calls`
+  budget. The budget counts dispatches rather than `calls[]` entries, so
+  neither a rejection nor a memo hit shrinks what a later distinct call can
+  spend. Every such refusal is charged to `max_rejected_host_calls` instead,
+  which is what keeps a snippet looping over bad names, or over a spent output
+  budget, from growing `calls[]` without limit; the recorded tool name is
+  clamped as well, so an unvalidated `fallow.run` argument cannot inflate the
+  response envelope.
 - Keep tool ordering deterministic.
 - The `audit` and `check_health` typed routes resolve Istanbul coverage
   through `fallow_api::coverage::resolve_coverage_inputs` with the CLI's

@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+use fallow_types::mcp_manifest::{MCP_TOOLS, code_mode_allowlist};
 use regex::Regex;
 use rmcp::ServerHandler;
 
 use super::super::FallowMcp;
+use crate::tools::code_mode_subprocess_aliases;
 
 #[test]
 fn server_info_is_correct() {
@@ -373,32 +375,77 @@ fn inspect_similar_code_schema_requires_the_exact_candidate_snapshot() {
     }
 }
 
+/// The camelCase host alias a wire tool name would take if Code Mode ever
+/// exposed it. Used to prove the published description advertises no helper
+/// the manifest keeps off the allowlist.
+fn host_alias_shape(wire_name: &str) -> String {
+    let mut segments = wire_name.split('_');
+    let head = segments.next().unwrap_or_default().to_string();
+    segments.fold(head, |mut alias, segment| {
+        let mut chars = segment.chars();
+        if let Some(first) = chars.next() {
+            alias.push(first.to_ascii_uppercase());
+            alias.push_str(chars.as_str());
+        }
+        alias
+    })
+}
+
+/// `code_execute`'s published description is the contract agents read instead
+/// of introspecting the sandbox, so every expectation here is derived from
+/// `fallow_types::mcp_manifest` and the backing enum. Changing which tools
+/// Code Mode exposes, or which of them keep the cancellable subprocess path,
+/// fails this test until the prose follows.
 #[test]
-fn code_execute_description_routes_similar_code_to_standalone_tools() {
+fn code_execute_description_matches_the_manifest_code_mode_allowlist() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "code_execute").unwrap();
     let description = tool.description.as_deref().expect("description");
 
+    let allowlist = code_mode_allowlist();
+    for (alias, wire_name) in &allowlist {
+        assert!(
+            description.contains(alias),
+            "the description omits the `{alias}` host call ({wire_name}) the manifest exposes"
+        );
+    }
+
+    for entry in MCP_TOOLS
+        .iter()
+        .filter(|entry| entry.code_mode_alias.is_none())
+    {
+        let unexposed = host_alias_shape(entry.name);
+        assert!(
+            !description.contains(&unexposed),
+            "the description advertises `{unexposed}`, but {} is not on the Code Mode allowlist",
+            entry.name
+        );
+    }
+
+    let subprocess = code_mode_subprocess_aliases();
+    let sentence = description
+        .split(". ")
+        .find(|sentence| sentence.contains("stay subprocess-backed"))
+        .expect("the description must explain which host calls stay subprocess-backed");
+    for (alias, wire_name) in &allowlist {
+        assert_eq!(
+            sentence.contains(alias),
+            subprocess.contains(alias),
+            "the subprocess-backed sentence disagrees with the backing enum about {wire_name}: \
+             {sentence}"
+        );
+    }
+
+    for wire_name in ["find_similar_code", "inspect_similar_code"] {
+        assert!(
+            description.contains(wire_name),
+            "the description must route similar-code to the standalone {wire_name} MCP tool"
+        );
+    }
     assert!(
-        description.contains("combined"),
-        "code_execute description must list the combined host call"
-    );
-    assert!(
-        description.contains("analyze, findDupes, checkHealth, and audit stay subprocess-backed"),
-        "the description must list only the four subprocess-backed calls: {description}"
-    );
-    assert!(
-        description.contains("standalone find_similar_code and inspect_similar_code MCP tools"),
-        "the description must route similar-code to the standalone tools: {description}"
-    );
-    assert!(
-        !description.contains("findSimilarCode") && !description.contains("inspectSimilarCode"),
-        "Code Mode must not advertise similar-code aliases: {description}"
-    );
-    assert!(
-        !description.contains("analyze, combined, findDupes"),
-        "combined is API-backed in Code Mode: {description}"
+        description.contains("standalone"),
+        "the description must name the similar-code tools as standalone: {description}"
     );
 }
 

@@ -1779,6 +1779,7 @@ mod tests {
                 "license",
                 "license_note",
                 "read_only",
+                "code_mode_alias",
             ] {
                 assert!(
                     obj.contains_key(key),
@@ -1808,6 +1809,50 @@ mod tests {
             analyze["cli_command"],
             "fallow dead-code --format json --quiet"
         );
+    }
+
+    /// Agents must be able to read the Code Mode allowlist off the manifest
+    /// instead of parsing `code_execute`'s free-text description, so every row
+    /// carries its host-API alias (or an explicit null) and the projection
+    /// matches the shared manifest exactly.
+    #[test]
+    fn mcp_tools_block_projects_the_code_mode_allowlist() {
+        let schema = schema();
+        let tools = schema["mcp_tools"]["tools"].as_array().unwrap();
+
+        for (row, manifest) in tools.iter().zip(MCP_TOOLS) {
+            assert_eq!(row["name"], manifest.name);
+            assert_eq!(
+                row["code_mode_alias"].as_str(),
+                manifest.code_mode_alias,
+                "code_mode_alias for {} diverges from the shared manifest",
+                manifest.name
+            );
+        }
+
+        for name in [
+            "code_execute",
+            "fix_preview",
+            "fix_apply",
+            "find_similar_code",
+            "inspect_similar_code",
+        ] {
+            let row = tools
+                .iter()
+                .find(|row| row["name"] == name)
+                .unwrap_or_else(|| panic!("{name} in mcp_tools"));
+            assert!(
+                row["code_mode_alias"].is_null(),
+                "{name} must advertise itself as unreachable from Code Mode"
+            );
+        }
+
+        let exposed: Vec<&str> = tools
+            .iter()
+            .filter_map(|row| row["code_mode_alias"].as_str())
+            .collect();
+        assert!(exposed.contains(&"checkHealth"));
+        assert!(exposed.contains(&"explain"));
     }
 
     #[test]

@@ -167,6 +167,21 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **`code_execute` bounds the value a snippet returns, not only the fallow JSON
+  it reads.** `max_output_bytes` previously capped host-call output alone, and
+  any snippet result was returned whole with `ok:true`. The serialized result is
+  now measured against the same number: a larger one is refused with `ok:false`
+  and reported through the additive `truncated`, `result_bytes`, and
+  `result_preview` fields instead of being returned, so a snippet that used to
+  hand back an entire report now fails and has to return a projection. A thrown
+  error message is clamped the same way, at `max_output_bytes` or 4096 bytes,
+  whichever is larger, and reported with `truncated` and `error_bytes`. A
+  `fallow.all` fan-out also shares one output budget rather than giving each
+  element the whole of it. The envelope keeps `schema_version`
+  `mcp-code-execute/v1`: every new field is optional and appears only when it
+  applies. A caller that wants the old headroom can raise `max_output_bytes`,
+  which accepts up to 4000000.
+
 - **A referenced `tsconfig.json` without `include` or `files` no longer claims
   every file** ([#2436](https://github.com/fallow-rs/fallow/pull/2436)). When
   fallow follows project `references`, such a config now applies only to files

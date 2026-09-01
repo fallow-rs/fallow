@@ -53,6 +53,9 @@ test("component bench file changes select the matching shard", () => {
   assert.deepEqual(names(selectFastTargets(["crates/benchmarks/benches/component_engine.rs"])), [
     "component_engine",
   ]);
+  assert.deepEqual(names(selectFastTargets(["crates/benchmarks/benches/component_cache.rs"])), [
+    "component_cache",
+  ]);
 });
 
 test("health ingestion and CRAP scoring changes select engine benchmark coverage", () => {

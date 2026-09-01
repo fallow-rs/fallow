@@ -78,6 +78,8 @@ pub struct ResolveAllImportsInput<'a> {
     pub scss_include_paths: &'a [PathBuf],
     /// Static directory mappings for framework-specific asset resolution.
     pub static_dir_mappings: &'a [(PathBuf, String)],
+    /// Mounts a framework serves for the whole project; see `ResolveContext`.
+    pub framework_static_dir_mappings: &'a [(PathBuf, String)],
     /// Project root used for package manifest and relative-path resolution.
     pub root: &'a Path,
     /// Extra resolver conditions supplied by configuration.
@@ -208,6 +210,7 @@ pub fn resolve_all_imports_with_session(
         path_aliases: input.path_aliases,
         scss_include_paths: input.scss_include_paths,
         static_dir_mappings: input.static_dir_mappings,
+        framework_static_dir_mappings: input.framework_static_dir_mappings,
         root: input.root,
         canonical_fallback: canonical_fallback.as_ref(),
         tsconfig_warned: &tsconfig_warned,

@@ -47,21 +47,6 @@ pub async fn run_find_dupes(
     Ok(result)
 }
 
-pub fn run_find_dupes_api_value(
-    params: &FindDupesParams,
-) -> Result<Option<serde_json::Value>, String> {
-    if requires_cli_fallback(params) {
-        return Ok(None);
-    }
-
-    let options = duplication_options_from_params(params)?;
-    let value = run_duplication(&options)
-        .and_then(serialize_duplication_programmatic_json)
-        .map_err(|err| programmatic_error_body(&err))?;
-
-    Ok(Some(value))
-}
-
 /// Build CLI arguments for the `find_dupes` tool.
 /// Returns `Err(message)` if an invalid mode is provided.
 pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, String> {

@@ -167,19 +167,48 @@ export const httpsDownload = (url: string, dest: string, signal?: AbortSignal): 
     async (response) =>
       await new Promise<void>((resolve, reject) => {
         const file = fs.createWriteStream(dest);
+        // Set once the whole body has reached disk, leaving only the descriptor
+        // close outstanding. A socket error after that point describes a
+        // connection this download is already done with.
+        let bodyWritten = false;
         // Guard the readable (response) stream as well: `pipe()` does not forward
         // a readable's errors to the writable, so a mid-download socket drop would
         // emit an unhandled `error` on `response` and crash the whole extension
         // host. Tear down the write stream, drop the partial file, and reject.
         response.on("error", (err) => {
+          // A keep-alive socket can fail after the body is complete. Deleting a
+          // finished download there would fail an install that had already
+          // succeeded, so only report an error that truncated the file. The
+          // listener stays attached: an unhandled 'error' would crash the host.
+          if (bodyWritten) {
+            return;
+          }
           file.destroy();
           fs.unlink(dest, () => {});
           reject(err);
         });
         response.pipe(file);
+        // 'finish' only means the bytes reached the OS; the descriptor is still
+        // open, and `close()` merely queues fs.close(fd) on the libuv
+        // threadpool. Unix refuses to exec a file that any process holds open
+        // for writing (ETXTBSY), and this very file is chmod'ed, renamed into
+        // place and then spawned by the same extension host. Resolve from the
+        // close callback so the descriptor is gone before the caller runs.
         file.on("finish", () => {
-          file.close();
-          resolve();
+          bodyWritten = true;
+          file.close((err) => {
+            // Measured on Node 22: a failed `fs.close` emits 'error' on the
+            // stream first and only then runs this callback, with no error
+            // argument. So a close failure rejects through the 'error' handler
+            // below, which must stay for that reason, and this branch never
+            // fires there. It remains as a guard for a runtime that reports the
+            // failure here instead.
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve();
+          });
         });
         file.on("error", (err) => {
           fs.unlink(dest, () => {});

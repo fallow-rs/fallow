@@ -11,7 +11,7 @@ type FakeStream = EventEmitter & {
   resume?: () => void;
   pipe?: () => void;
   destroy?: (err?: Error) => void;
-  close?: () => void;
+  close?: (cb?: (err?: Error | null) => void) => void;
 };
 
 const httpsState = vi.hoisted(() => ({
@@ -24,6 +24,9 @@ const httpsState = vi.hoisted(() => ({
 const fsState = vi.hoisted(() => ({
   writeStream: null as unknown as FakeStream,
   unlinked: [] as string[],
+  // The callback fs.WriteStream.close() invokes once fs.close(fd) has really
+  // run on the libuv threadpool. Held here so a test drives that release.
+  pendingClose: null as ((err?: Error | null) => void) | null,
 }));
 
 vi.mock("node:https", () => ({
@@ -67,11 +70,29 @@ describe("httpsDownload stream-error handling", () => {
     httpsState.onRequestTimeout = null;
     const ws = Object.assign(new EventEmitter(), {
       destroy: vi.fn(),
-      close: vi.fn(),
+      // Real fs write streams only queue fs.close(fd) here; the callback fires
+      // later, once the descriptor is actually released.
+      close: vi.fn((cb?: (err?: Error | null) => void) => {
+        fsState.pendingClose = cb ?? null;
+      }),
     });
     fsState.writeStream = ws;
     fsState.unlinked = [];
+    fsState.pendingClose = null;
   });
+
+  /** Run the pending fs.close(fd) completion. A real stream passes no error
+   *  argument here even when the close failed; it emits 'error' instead. */
+  const releaseDescriptor = (): void => {
+    const done = fsState.pendingClose;
+    fsState.pendingClose = null;
+    done?.();
+  };
+
+  /** Let queued microtasks and the macrotask queue drain. */
+  const flush = async (): Promise<void> => {
+    await new Promise((done) => setImmediate(done));
+  };
 
   it("rejects, destroys the write stream, and unlinks the partial on a response error", async () => {
     const pending = httpsDownload("https://example.test/bin", "/tmp/partial");
@@ -88,9 +109,60 @@ describe("httpsDownload stream-error handling", () => {
   it("still resolves on the normal finish path", async () => {
     const pending = httpsDownload("https://example.test/bin", "/tmp/ok");
     fsState.writeStream.emit("finish");
+    releaseDescriptor();
     await expect(pending).resolves.toBeUndefined();
     expect((fsState.writeStream.close as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
     expect(fsState.unlinked).not.toContain("/tmp/ok");
+  });
+
+  it("stays pending until the file descriptor is released", async () => {
+    // 'finish' fires once the bytes reach the OS, with the descriptor still
+    // open. Resolving there lets the caller chmod, rename and exec a file this
+    // process still holds open for writing, which Unix rejects with ETXTBSY.
+    const pending = httpsDownload("https://example.test/bin", "/tmp/busy");
+    const settled = vi.fn();
+    void pending.then(settled, settled);
+
+    fsState.writeStream.emit("finish");
+    await flush();
+    expect(settled).not.toHaveBeenCalled();
+
+    releaseDescriptor();
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it("rejects once when releasing the descriptor fails", async () => {
+    const pending = httpsDownload("https://example.test/bin", "/tmp/badfd");
+    const settled: string[] = [];
+    void pending.then(
+      () => settled.push("resolved"),
+      () => settled.push("rejected"),
+    );
+
+    fsState.writeStream.emit("finish");
+    // Order a real fs.WriteStream produces for a failed close: 'error' carries
+    // the failure, then the close callback runs with nothing. The resolve in
+    // that callback must not undo the rejection.
+    fsState.writeStream.emit("error", new Error("EBADF"));
+    releaseDescriptor();
+
+    await expect(pending).rejects.toThrow("EBADF");
+    expect(settled).toEqual(["rejected"]);
+    expect(fsState.unlinked).toContain("/tmp/badfd");
+  });
+
+  it("keeps a finished download when the socket fails afterwards", async () => {
+    // A keep-alive socket can fail once the body is complete and the write
+    // stream has finished. Unlinking there would fail an install whose file is
+    // already whole.
+    const pending = httpsDownload("https://example.test/bin", "/tmp/late");
+    fsState.writeStream.emit("finish");
+    httpsState.response.emit("error", new Error("socket hang up"));
+    releaseDescriptor();
+
+    await expect(pending).resolves.toBeUndefined();
+    expect(fsState.unlinked).not.toContain("/tmp/late");
+    expect((fsState.writeStream.destroy as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 
   it("rejects and cleans up when the response stalls mid-body", async () => {
@@ -109,6 +181,7 @@ describe("httpsDownload stream-error handling", () => {
     const pending = httpsDownload("https://example.test/bin", "/tmp/done");
     httpsState.response.complete = true;
     fsState.writeStream.emit("finish");
+    releaseDescriptor();
     await expect(pending).resolves.toBeUndefined();
 
     // A keep-alive socket can fire the inactivity timeout after the download

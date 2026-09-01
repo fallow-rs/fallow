@@ -955,6 +955,51 @@ fn reusable_cache_gc_reclaims_abandoned_foreign_entry() {
     cleanup_reusable_worktree(&repo, &other_path);
 }
 
+/// `--max-age-days 0` / `cacheMaxAgeDays = 0` documents that it still reclaims
+/// entries whose recorded owner root is gone. Such an entry is abandoned:
+/// nothing will ever sweep it under its own hash again, so letting the
+/// switched-off age gate keep it stranded it on disk forever.
+#[test]
+fn reusable_cache_gc_reclaims_abandoned_foreign_entry_with_age_gc_disabled() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-gc-abandoned-nogc-self");
+    let other_repo = init_throwaway_repo(tmp.path(), "repo-gc-abandoned-nogc-other");
+    let other_path = create_unregistered_foreign_cache(&other_repo, tmp.path());
+    record_last_used(&other_path, &other_repo);
+    fs::remove_dir_all(&other_repo).expect("owner repo should be removable");
+
+    sweep_old_reusable_caches_in(&repo, None, true, tmp.path());
+
+    assert!(
+        !other_path.exists(),
+        "age-gc-disabled must still reclaim an entry whose owner root is gone",
+    );
+    assert!(
+        !reusable_worktree_last_used_path(&other_path).exists(),
+        "the abandoned entry's `.last-used` sidecar must be reclaimed with it",
+    );
+    cleanup_reusable_worktree(&repo, &other_path);
+}
+
+/// The `0` escape hatch must not become a cross-repo delete: a foreign entry
+/// whose owner root is still on disk stays under that repo's own policy.
+#[test]
+fn reusable_cache_gc_keeps_live_owner_foreign_entry_with_age_gc_disabled() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-gc-live-nogc-self");
+    let other_repo = init_throwaway_repo(tmp.path(), "repo-gc-live-nogc-other");
+    let other_path = create_unregistered_foreign_cache(&other_repo, tmp.path());
+    record_last_used(&other_path, &other_repo);
+
+    sweep_old_reusable_caches_in(&repo, None, true, tmp.path());
+
+    assert!(
+        other_path.is_dir(),
+        "age-gc-disabled must not reclaim a foreign entry whose owner root still exists",
+    );
+    cleanup_reusable_worktree(&other_repo, &other_path);
+}
+
 #[test]
 fn reusable_cache_gc_reclaims_aged_foreign_entry_without_recorded_owner() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");

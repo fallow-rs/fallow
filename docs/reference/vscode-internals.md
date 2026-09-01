@@ -27,6 +27,10 @@ Do not duplicate the full setting list in durable prose.
 - Binary resolution follows the documented priority: explicit user path,
   workspace dependency, system path, managed binary, then auto-download.
 - Validate managed downloads before execution.
+- A managed download is complete only once its file descriptor is closed.
+  Stream completion is not enough: Unix refuses to execute a file that any
+  process still holds open for writing, and the extension chmods, renames,
+  and spawns what it just downloaded.
 - Keep LSP analysis, health, audit, security, and runtime coverage as separate
   lazy workflows unless a measured UX change justifies combining them.
 - Configuration changes restart only the surfaces whose initialization state

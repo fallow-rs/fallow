@@ -1,0 +1,5 @@
+{
+  "name": "html-static-dir-without-framework",
+  "type": "module",
+  "dependencies": { "lit": "^3.0.0" }
+}

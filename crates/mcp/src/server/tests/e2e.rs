@@ -124,6 +124,61 @@ fn e2e_code_execute_runs_project_info_on_basic_project() {
     assert_eq!(json["calls"][0]["tool"].as_str(), Some("project_info"));
 }
 
+/// A real fan-out over the real binary: one in-process element and two
+/// subprocess-backed ones, positionally aligned, with the repeat served from
+/// the snippet's memo instead of a third analysis.
+///
+/// The subprocess elements are deliberately git-independent. `audit` resolves
+/// a base branch, which a detached shallow CI checkout cannot detect, so it
+/// exits 2 there and would fail this element on CI while passing locally.
+#[test]
+fn e2e_code_execute_batches_real_analyses_and_reuses_the_memo() {
+    let bin = fallow_binary();
+    let root = fixture_path("basic-project");
+    let output = execute_code_mode(
+        bin,
+        crate::params::CodeExecuteParams {
+            code: r#"
+            const batch = fallow.all([
+                { tool: "project_info", params: { files: true } },
+                { tool: "analyze", params: { issue_types: ["unused-exports"] } },
+                { tool: "find_dupes", params: {} },
+                { tool: "project_info", params: { files: true } }
+            ]);
+            return {
+                ok: batch.map((element) => element.ok),
+                fileCount: batch[0].value.file_count,
+                deadCodeKind: batch[1].value.kind,
+                dupesKind: batch[2].value.kind,
+                repeated: batch[3].value.file_count
+            };
+            "#
+            .to_string(),
+            root: Some(root.to_string_lossy().to_string()),
+            timeout_ms: Some(30_000),
+            max_output_bytes: Some(4_000_000),
+        },
+    )
+    .unwrap_or_else(|err| panic!("batched code mode should succeed: {err}"));
+
+    let json: serde_json::Value = serde_json::from_str(&output)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {output}"));
+    assert_eq!(json["ok"].as_bool(), Some(true));
+    assert_eq!(
+        json["result"]["ok"],
+        serde_json::json!([true, true, true, true])
+    );
+    assert!(json["result"]["fileCount"].as_u64().unwrap_or(0) > 0);
+    assert_eq!(json["result"]["deadCodeKind"], "dead-code");
+    assert_eq!(json["result"]["dupesKind"], "dupes");
+    assert_eq!(json["result"]["repeated"], json["result"]["fileCount"]);
+
+    let calls = json["calls"].as_array().expect("calls");
+    assert_eq!(calls.len(), 4, "every element stays in the trace: {output}");
+    assert_eq!(calls[3]["cache_hit"], true);
+    assert!(calls[0].get("cache_hit").is_none());
+}
+
 #[test]
 fn e2e_code_execute_enforces_host_output_limit() {
     let bin = fallow_binary();

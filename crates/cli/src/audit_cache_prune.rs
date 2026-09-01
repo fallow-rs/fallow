@@ -304,6 +304,13 @@ fn entry_row(entry: &SweepEntry, dry_run: bool) -> String {
                 segments.push(format!("owner missing: {}", sanitize_owner_path(owner)));
             }
         }
+        "owner-missing" => {
+            if let Some(owner) = entry.owner_root.as_deref() {
+                segments.push(format!("owner missing: {}", sanitize_owner_path(owner)));
+            } else {
+                segments.push("owner missing".to_string());
+            }
+        }
         "orphaned-sidecars" => segments.push("orphaned sidecars".to_string()),
         "legacy-registered" => segments.push("legacy git registration".to_string()),
         "legacy-deregistered" => {

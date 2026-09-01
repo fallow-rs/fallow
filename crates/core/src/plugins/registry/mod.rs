@@ -342,6 +342,9 @@ pub struct AggregatedPluginResult {
     pub scss_include_paths: Vec<PathBuf>,
     /// Static directory mappings contributed by plugins.
     pub static_dir_mappings: Vec<(PathBuf, String)>,
+    /// Mounts a framework serves for the whole project, so any HTML document
+    /// reaches them, unlike the tool-scoped mounts above.
+    pub framework_static_dir_mappings: Vec<(PathBuf, String)>,
     /// File-scoped dependency provider rules from active plugins.
     pub provided_dependencies: Vec<ProvidedDependencyRule>,
 }
@@ -446,6 +449,7 @@ impl AggregatedPluginResult {
             fixture_patterns,
             scss_include_paths,
             static_dir_mappings,
+            framework_static_dir_mappings,
             provided_dependencies,
         } = other;
 
@@ -485,6 +489,8 @@ impl AggregatedPluginResult {
         self.fixture_patterns.extend(fixture_patterns);
         self.scss_include_paths.extend(scss_include_paths);
         self.static_dir_mappings.extend(static_dir_mappings);
+        self.framework_static_dir_mappings
+            .extend(framework_static_dir_mappings);
         self.provided_dependencies.extend(provided_dependencies);
     }
 }

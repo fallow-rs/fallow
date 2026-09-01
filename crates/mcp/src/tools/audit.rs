@@ -26,15 +26,14 @@ pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResu
             Ok(options) => options,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
-        let result = run_api_blocking("audit", move || {
-            let options = with_resolved_coverage(options, None)?;
-            run_audit_api(&options).and_then(serialize_audit_programmatic_json)
-        })
-        .await?
-        .map_or_else(
-            |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-            |value| json_success(&value),
-        );
+        let result = run_api_blocking("audit", move || audit_typed_value(options, None))
+            .await?
+            .map_or_else(
+                |err| {
+                    CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))])
+                },
+                |value| json_success(&value),
+            );
         return Ok(result);
     }
 
@@ -44,13 +43,30 @@ pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResu
     }
 }
 
-pub fn run_audit_api_value(params: &AuditParams) -> Result<Option<serde_json::Value>, String> {
+/// The typed route's blocking body: resolve the coverage inputs with the CLI's
+/// precedence (#2368), run the audit, and serialize it. `env` supplies the
+/// environment coverage layer, with `None` reading the process environment as
+/// [`run_audit`] does. Production and the precedence tests both call this, so
+/// the tests hold the shipping code rather than a parallel copy of it.
+fn audit_typed_value(
+    options: AuditOptions,
+    env: Option<CoverageInputs>,
+) -> Result<serde_json::Value, ProgrammaticError> {
+    let options = with_resolved_coverage(options, env)?;
+    run_audit_api(&options).and_then(serialize_audit_programmatic_json)
+}
+
+/// [`audit_typed_value`] reached the way [`run_audit`] reaches it: through the
+/// CLI-fallback decision and the same parameter mapping, without the async
+/// rmcp shell.
+#[cfg(test)]
+fn run_audit_api_value(params: &AuditParams) -> Result<Option<serde_json::Value>, String> {
     run_audit_api_value_with_env(params, None)
 }
 
 /// [`run_audit_api_value`] with the environment coverage layer injected, so
-/// the typed route can be exercised without mutating the process environment.
-/// `None` reads the process environment, as the production entry points do.
+/// the precedence can be exercised without mutating the process environment.
+#[cfg(test)]
 fn run_audit_api_value_with_env(
     params: &AuditParams,
     env: Option<CoverageInputs>,
@@ -59,9 +75,7 @@ fn run_audit_api_value_with_env(
         return Ok(None);
     }
     let options = audit_options_from_params(params)?;
-    with_resolved_coverage(options, env)
-        .and_then(|options| run_audit_api(&options))
-        .and_then(serialize_audit_programmatic_json)
+    audit_typed_value(options, env)
         .map(Some)
         .map_err(|err| programmatic_error_body(&err))
 }

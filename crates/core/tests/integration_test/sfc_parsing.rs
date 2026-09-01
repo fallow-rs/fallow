@@ -615,3 +615,51 @@ fn sveltekit_remote_exports_credited_under_include_entry_exports() {
         );
     }
 }
+
+#[test]
+fn sveltekit_app_html_resolves_root_relative_static_assets() {
+    let root = fixture_path("sveltekit-static-asset");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specs.contains(&"/theme.css"),
+        "SvelteKit serves static/ at the site root: {unresolved_specs:?}"
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("static/theme.css")),
+        "the stylesheet app.html links is reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn a_static_directory_no_framework_serves_is_not_a_document_root() {
+    let root = fixture_path("html-static-dir-without-framework");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved_specs.contains(&"/theme.css"),
+        "no plugin declared static/ as a mount here, so the reference stays \
+         unresolved rather than being attributed to an unrelated directory: \
+         {unresolved_specs:?}"
+    );
+}

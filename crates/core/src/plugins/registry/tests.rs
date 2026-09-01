@@ -1161,6 +1161,7 @@ fn process_config_result_merges_all_fields() {
         fixture_patterns: vec![],
         scss_include_paths: vec![],
         static_dir_mappings: vec![],
+        framework_static_dir_mappings: vec![],
         provided_dependencies: vec![],
     };
     process_config_result("test-plugin", config_result, &mut aggregated, None).unwrap();
@@ -1250,6 +1251,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
         fixture_patterns: vec![],
         scss_include_paths: vec![],
         static_dir_mappings: vec![],
+        framework_static_dir_mappings: vec![],
         provided_dependencies: vec![],
     };
     let result2 = PluginResult {
@@ -1265,6 +1267,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
         fixture_patterns: vec![],
         scss_include_paths: vec![],
         static_dir_mappings: vec![],
+        framework_static_dir_mappings: vec![],
         provided_dependencies: vec![],
     };
 

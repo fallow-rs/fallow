@@ -2809,6 +2809,7 @@ mod tests {
             active_plugins: vec![],
             fixture_patterns: vec![],
             static_dir_mappings: vec![],
+            framework_static_dir_mappings: vec![],
             provided_dependencies: vec![],
         }
     }

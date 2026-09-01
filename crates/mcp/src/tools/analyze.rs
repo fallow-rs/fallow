@@ -57,27 +57,6 @@ pub async fn run_analyze(binary: &str, params: AnalyzeParams) -> Result<CallTool
     Ok(result)
 }
 
-pub fn run_analyze_api_value(params: &AnalyzeParams) -> Result<Option<serde_json::Value>, String> {
-    if requires_cli_fallback(params) {
-        return Ok(None);
-    }
-
-    let family = analyze_family(params);
-    let options = dead_code_options_from_params(params)?;
-    let value = match family {
-        AnalyzeFamily::Boundary => run_boundary_violations(&options)
-            .and_then(serialize_boundary_violations_programmatic_json),
-        AnalyzeFamily::Circular => run_circular_dependencies(&options)
-            .and_then(serialize_circular_dependencies_programmatic_json),
-        AnalyzeFamily::DeadCode => {
-            run_dead_code(&options).and_then(serialize_dead_code_programmatic_json)
-        }
-    }
-    .map_err(|err| programmatic_error_body(&err))?;
-
-    Ok(Some(value))
-}
-
 /// Build CLI arguments for the `analyze` tool.
 /// Returns `Err(message)` if an invalid issue type is provided.
 pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String> {

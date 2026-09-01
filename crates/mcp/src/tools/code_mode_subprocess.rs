@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use fallow_process::{ProcessTree, cleanup_std_child, configure_std_command};
+use fallow_process::{
+    ProcessTree, cleanup_std_child, configure_std_command, spawn_retrying_busy_executable,
+};
 
 const STDERR_LIMIT_BYTES: usize = 64 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -83,7 +85,7 @@ pub(super) fn run_fallow_sync(
 
         if Instant::now() >= deadline {
             let cleanup = cleanup_std_child(Some(&process_tree), &mut child);
-            return Err(with_cleanup_errors(
+            return Err(with_cleanup_context(
                 "code mode execution timed out while running fallow".to_string(),
                 &cleanup.errors,
             ));
@@ -97,7 +99,7 @@ pub(super) fn run_fallow_sync(
         };
         if stdout_len > max_output_bytes as u64 {
             let cleanup = cleanup_std_child(Some(&process_tree), &mut child);
-            return Err(with_cleanup_errors(
+            return Err(with_cleanup_context(
                 format!("code mode host output exceeded {max_output_bytes} bytes"),
                 &cleanup.errors,
             ));
@@ -112,7 +114,7 @@ fn spawn_managed_child(
     binary: &str,
 ) -> Result<(std::process::Child, ProcessTree), String> {
     configure_std_command(&mut command);
-    let mut child = command.spawn().map_err(|err| {
+    let mut child = spawn_retrying_busy_executable(&mut command).map_err(|err| {
         format!(
             "failed to execute fallow binary '{binary}': {err}. Ensure fallow is installed and available in PATH, or set FALLOW_BIN."
         )
@@ -128,6 +130,39 @@ fn spawn_managed_child(
         }
     };
     Ok((child, process_tree))
+}
+
+/// Messages the snippet acts on and the response envelope documents. They are
+/// part of the Code Mode contract, so they must read the same on every run.
+fn is_contract_refusal(message: &str) -> bool {
+    message.starts_with("code mode host output exceeded")
+        || message == "code mode execution timed out while running fallow"
+}
+
+/// Report best-effort teardown failures without letting them reach the caller.
+/// Killing the process group is a cleanup concern, not part of the host call's
+/// outcome, and on macOS it fails whenever the leader has already become an
+/// unreaped zombie. Folding that into a contract refusal would make a message
+/// the agent reads depend on how the kernel scheduled the child's exit.
+fn log_cleanup_errors(context: &str, cleanup_errors: &[String]) {
+    if cleanup_errors.is_empty() {
+        return;
+    }
+    tracing::warn!(
+        context,
+        errors = cleanup_errors.join("; "),
+        "fallow subprocess cleanup reported errors"
+    );
+}
+
+/// Attach cleanup context to an error, except when the error is a contract
+/// refusal, which keeps its exact wording and logs the cleanup instead.
+fn with_cleanup_context(message: String, cleanup_errors: &[String]) -> String {
+    if is_contract_refusal(&message) {
+        log_cleanup_errors(&message, cleanup_errors);
+        return message;
+    }
+    with_cleanup_errors(message, cleanup_errors)
 }
 
 fn with_cleanup_errors(message: String, cleanup_errors: &[String]) -> String {
@@ -154,6 +189,10 @@ fn with_completed_cleanup<T>(
 
 fn with_structured_cleanup_errors(error: String, cleanup_errors: &[String]) -> String {
     if cleanup_errors.is_empty() {
+        return error;
+    }
+    if is_contract_refusal(&error) {
+        log_cleanup_errors(&error, cleanup_errors);
         return error;
     }
 
@@ -427,5 +466,48 @@ $child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
             wait_for_process_exit(descendant_pid),
             "completed subprocess descendant {descendant_pid} survived"
         );
+    }
+
+    #[test]
+    fn contract_refusals_keep_their_exact_wording_when_cleanup_fails() {
+        let cleanup = vec![
+            "failed to terminate subprocess tree: Operation not permitted (os error 1)".to_string(),
+        ];
+        for message in [
+            "code mode host output exceeded 500 bytes",
+            "code mode execution timed out while running fallow",
+        ] {
+            assert_eq!(
+                with_cleanup_context(message.to_string(), &cleanup),
+                message,
+                "a message the snippet acts on must not depend on teardown timing"
+            );
+            assert_eq!(
+                with_structured_cleanup_errors(message.to_string(), &cleanup),
+                message
+            );
+        }
+    }
+
+    #[test]
+    fn operational_failures_still_carry_their_cleanup_context() {
+        let cleanup = vec!["failed to reap direct subprocess after retry: boom".to_string()];
+        let joined = with_cleanup_context(
+            "failed to configure fallow subprocess tree: nope".to_string(),
+            &cleanup,
+        );
+        assert!(joined.contains("failed to configure fallow subprocess tree: nope"));
+        assert!(joined.contains("cleanup errors: failed to reap direct subprocess after retry"));
+    }
+
+    #[test]
+    fn structured_programmatic_errors_still_gain_cleanup_errors() {
+        let cleanup = vec!["failed to terminate subprocess tree: boom".to_string()];
+        let error = with_structured_cleanup_errors(
+            r#"{"error":true,"code":"config-invalid"}"#.to_string(),
+            &cleanup,
+        );
+        let value: serde_json::Value = serde_json::from_str(&error).expect("structured error");
+        assert_eq!(value["cleanup_errors"][0], cleanup[0]);
     }
 }

@@ -36,6 +36,8 @@ pub use check_runtime_coverage::{
     run_check_runtime_coverage, run_get_blast_radius, run_get_cleanup_candidates,
     run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
 };
+#[cfg(test)]
+pub use code_mode::code_mode_subprocess_aliases;
 pub use code_mode::execute_code_mode;
 pub use decision_surface::run_decision_surface;
 pub use dupes::{build_find_dupes_args, run_find_dupes};
@@ -81,7 +83,9 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
-use fallow_process::{ProcessTree, cleanup_tokio_child, configure_tokio_command};
+use fallow_process::{
+    ProcessTree, cleanup_tokio_child, configure_tokio_command, spawn_tokio_retrying_busy_executable,
+};
 
 /// Default subprocess timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -333,8 +337,8 @@ async fn spawn_fallow(
     }
     configure_tokio_command(&mut command);
 
-    let mut child = command
-        .spawn()
+    let mut child = spawn_tokio_retrying_busy_executable(&mut command)
+        .await
         .map_err(|error| subprocess_error(binary, error))?;
     let process_tree = match ProcessTree::for_tokio_child(&child) {
         Ok(process_tree) => process_tree,
