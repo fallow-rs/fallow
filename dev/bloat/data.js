@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788277933330,
+  "lastUpdate": 1788283124686,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c64f703114d452f52077a3a1737696a22a342ec9",
-          "message": "perf(graph): reserve named export index capacity",
-          "timestamp": "2026-08-13T23:53:47+02:00",
-          "tree_id": "bdbad5be9280f810e1c0cf7527b6a71fc6d80ef4",
-          "url": "https://github.com/fallow-rs/fallow/commit/c64f703114d452f52077a3a1737696a22a342ec9"
-        },
-        "date": 1786658883597,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503685032,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20160672,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25524440,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38056472,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4384,6 +4340,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow)",
             "value": 555502592,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21348616,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28053912,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 42325880,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a212b0f01d061898405c11dc5b908f54b9055b6a",
+          "message": "fix(viz): gate every path-redaction site on rooted rather than absolute (#2538)\n\nFollow-up to #2537, which corrected one of four sites.\n\nThree siblings in the same file made the same is_absolute assumption. The JSON\nlayer left a rooted path without a drive letter untouched in the payload, and\ntwo join-onto-root decisions joined such a path onto the project root, so an\nexternal path rendered as project-relative rather than being redacted at all.\n\nAll four now gate on has_root. A value outside a path key, such as a route\nspecifier, is excluded by the key gate rather than by the absoluteness test, so\nbroadening the predicate does not widen what gets rewritten.\n\ncrates/engine/src/viz.rs now contains no is_absolute.",
+          "timestamp": "2026-09-01T19:02:43+02:00",
+          "tree_id": "f6d71789df67da0f04bd6bd7ab8cdca15f8123df",
+          "url": "https://github.com/fallow-rs/fallow/commit/a212b0f01d061898405c11dc5b908f54b9055b6a"
+        },
+        "date": 1788283120555,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 555503080,
             "unit": "bytes"
           },
           {
