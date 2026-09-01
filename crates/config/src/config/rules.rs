@@ -1017,8 +1017,12 @@ pub struct PartialRulesConfig {
 /// emit a `tracing::warn!` suggestion at config load time.
 ///
 /// Keep in sync with the `#[serde]` attributes on `RulesConfig` and
-/// `PartialRulesConfig`; the `known_rule_names_count_matches_struct` test
-/// fails when the lists drift.
+/// `PartialRulesConfig`. Nothing enforces that: the only guard here pins the
+/// list's length to a literal, so adding a rule to the struct and forgetting
+/// this list leaves every test green while the new name warns as an unknown
+/// key in user configs. A real pin needs the provenance of each entry, because
+/// the list also covers rule names that no `RulesConfig` field produces, so a
+/// field-count comparison would not even be correct.
 pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-files",
     "unused-exports",
@@ -1569,8 +1573,12 @@ mod tests {
         );
     }
 
+    /// Pins the list's length only. This does NOT compare against
+    /// `RulesConfig`, so it cannot catch a rule added to the struct and
+    /// missing here. It exists to make an accidental deletion loud, nothing
+    /// more. See the note on [`KNOWN_RULE_NAMES`].
     #[test]
-    fn known_rule_names_count_matches_struct() {
+    fn known_rule_names_list_length_is_pinned() {
         assert_eq!(KNOWN_RULE_NAMES.len(), 98);
     }
 
