@@ -410,7 +410,7 @@ fn attach_combined_type_coupling(
         Ok(outcome) => outcome.type_aware.meta,
         Err(error) => crate::type_aware_degrade::degrade_or_fail(
             &crate::type_aware_degrade::DegradeContext {
-                root: &check.config.root,
+                root: opts.root,
                 error: &error.to_string(),
                 failure_label: "Type-aware coupling failed",
                 require: check.config.type_aware.require,
