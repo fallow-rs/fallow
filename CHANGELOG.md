@@ -77,8 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   splitting cannot deliver.** It now says that splitting relocates branching, so
   it lowers the function's own score without lowering the total.
 
-### Fixed
-
 - **A package hoisted for a private sibling workspace is no longer reported as
   unused** (Refs
   [discussion #2244](https://github.com/fallow-rs/fallow/discussions/2244)). A
@@ -100,8 +98,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   NL Design System Utrecht monorepo, where a documentation site declares a
   Storybook workspace that only its private Astro sibling imports: that finding
   is gone, every other dependency finding is unchanged, and three further real
-  monorepos report identically before and after. Thanks
-  [@simmo](https://github.com/simmo) for the report.
+  monorepos report identically before and after. If you previously removed a
+  hoisted package on this advice and hit an unresolved import at build time, or
+  added one to `ignoreDependencies` to quiet it, that entry is no longer needed
+  and can be dropped. Thanks [@simmo](https://github.com/simmo) for the report.
+
+### Fixed
 
 - **Two audits running at once no longer fail with a base worktree that
   "already exists".** The temporary base view was named from the process id
