@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788269615898,
+  "lastUpdate": 1788271165759,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "7a8442440410c9e3211ac28028fd415e8ee4e303",
-          "message": "perf(types): bucket clone spread locations",
-          "timestamp": "2026-08-15T23:51:41+02:00",
-          "tree_id": "5f52d8af626c7e62b2ce1239d7963bbfc93e8c92",
-          "url": "https://github.com/fallow-rs/fallow/commit/7a8442440410c9e3211ac28028fd415e8ee4e303"
-        },
-        "date": 1786831009344,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9718283,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48512,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1018706,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7270,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8401,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5b045900bc0ad7cd1f859b95d75cec27fa791a5",
+          "message": "feat(api): cooperative cancellation, and a staleness gate for curated agent-doc cells\n\nAn MCP Code Mode host call that ran in this process could be answered on its\ndeadline but not stopped: the thread was abandoned and kept running a full\nanalysis inside a long-lived server. AnalysisOptions now carries an optional\ncancellation token, matching the Option<Arc<AtomicBool>> idiom the type-aware\ntransport already uses. It reaches the dead-code pipeline's stage boundaries\nand the per-file parse loop, which is the one place work stops per item rather\nthan per stage, and cancellation is always an error so a truncated module set\ncannot reach the graph.\n\nThe stop is cooperative and has no upper bound: duplication detection and the\ndead-code detectors hold no check once entered, so analyze, find_dupes,\ncheck_health and audit keep the killable subprocess, and every description\nthat touches this says which stops are promised and which are not. Threading a\ntoken into those loops was deliberately not done, because the suffix-array\nstage after the tokenize loop holds no check either, so the stop would have\nstayed unbounded while the change touched eight public entry points.\n\nMeasured on a 520-file project: every in-process route returns FALLOW_CANCELLED\nin a fraction of its uncancelled time, where three of them previously returned\na completed analysis. The engine test asserts work performed, a strictly\nsmaller module count, rather than how long the caller took to return.\n\nSeparately, the agent-doc generator prefers hand-written prose over its\ngenerated seed and preserves it forever, which is right except when the\nmanifest text a cell was written from moves later: the published cell then\ndescribes a surface that has changed and nothing says so. A record beside the\ngenerator holds the seed each of the 400 curated cells was last accepted\nagainst, outside the vendored skill tree so it never touches the public skills\nsurface. generate:contracts:check fails naming the cell and both seeds;\ngenerate:contracts re-records.",
+          "timestamp": "2026-09-01T15:34:29+02:00",
+          "tree_id": "65e54c61456f9199c92fc54a58bf7f4cb43a6fe6",
+          "url": "https://github.com/fallow-rs/fallow/commit/a5b045900bc0ad7cd1f859b95d75cec27fa791a5"
+        },
+        "date": 1788271162559,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9702055,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49327,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1168670,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8354,
             "unit": "allocations"
           }
         ]
