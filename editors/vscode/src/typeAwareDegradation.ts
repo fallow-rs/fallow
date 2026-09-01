@@ -5,9 +5,9 @@ import * as vscode from "vscode";
 /**
  * Shape read from `_meta.type_aware` of an analysis envelope. Only the two
  * fields that describe a degraded pass are needed here; the generated contract
- * owns the rest.
+ * owns the rest. Module-local: callers pass whole envelopes, not this type.
  */
-export interface TypeAwareDegradationMeta {
+interface TypeAwareDegradationMeta {
   readonly executed?: boolean;
   readonly warnings?: readonly string[] | null;
 }
