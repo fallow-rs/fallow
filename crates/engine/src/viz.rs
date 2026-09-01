@@ -2024,7 +2024,11 @@ fn relative_path(path: &Path, root: &Path) -> String {
     if let Ok(relative) = path.strip_prefix(root) {
         return relative.to_string_lossy().replace('\\', "/");
     }
-    if path.is_absolute() {
+    // has_root, not is_absolute: on Windows a drive-less rooted path such as
+    // `\\Users\\private\\secret.ts` is rooted but NOT absolute, so gating on
+    // is_absolute let it skip redaction and leak the full path into the payload.
+    // has_root is a strict superset and covers `C:\\...` and `/...` alike.
+    if path.has_root() {
         let name = path
             .file_name()
             .map_or_else(|| "path".into(), |name| name.to_string_lossy());
@@ -3107,6 +3111,24 @@ mod tests {
             value["security"]["runtime_availability"]["reason"],
             NO_RUNTIME_COVERAGE_REASON
         );
+    }
+
+    /// A drive-less rooted path is rooted but NOT absolute on Windows, so a
+    /// redaction gated on `is_absolute` skipped it there and leaked the full
+    /// path. Pinned on every platform because the predicate must not regress.
+    #[test]
+    fn rooted_paths_without_a_drive_are_redacted() {
+        let root = Path::new("/project");
+        assert_eq!(
+            relative_path(Path::new("/Users/private/secret.ts"), root),
+            "<external>/secret.ts"
+        );
+        assert_eq!(
+            relative_path(Path::new("/etc/passwd"), root),
+            "<external>/passwd"
+        );
+        // A genuinely relative path is not redacted; it is project-relative.
+        assert_eq!(relative_path(Path::new("src/a.ts"), root), "src/a.ts");
     }
 
     #[test]

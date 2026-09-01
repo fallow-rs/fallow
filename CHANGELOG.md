@@ -411,6 +411,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   124 plugins and omitted `deno` with it, so an agent reading that contract
   could not see the plugin at all; it now reports 125.
 
+- **A rooted path without a drive letter is redacted from the viz payload on
+  Windows.** The redaction that keeps paths outside the project out of the
+  generated HTML gated on whether a path was absolute. On Windows a path like
+  `\Users\private\secret.ts` is rooted but not absolute, because absolute
+  there means a drive letter or a UNC prefix, so it fell through the check and
+  was written into the payload in full instead of being reduced to its file
+  name. It now gates on whether the path is rooted, which covers both forms.
+  Paths carrying a drive letter were always redacted correctly.
+
 ### Security
 
 - **The Code Mode sandbox no longer leaves the `Function` constructor
