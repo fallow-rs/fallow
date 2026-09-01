@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788274957555,
+  "lastUpdate": 1788277933330,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "45fd28766199acb1f939f6862274a37aad12770b",
-          "message": "chore: release v3.16.0",
-          "timestamp": "2026-08-13T21:13:19+02:00",
-          "tree_id": "75fc52ec7f7b8ff5a32073a0c7f8f8145dd2f75a",
-          "url": "https://github.com/fallow-rs/fallow/commit/45fd28766199acb1f939f6862274a37aad12770b"
-        },
-        "date": 1786649136231,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503683960,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20160736,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25524568,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38056536,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 42331128,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4b0e6ab9a37ee22d70b9d7986288e6f2a821e63",
+          "message": "docs(config): stop the rule-name guard claiming a check it does not make (#2536)\n\nKNOWN_RULE_NAMES drives the typo detector for user configs. Its doc comment said\nthe known_rule_names_count_matches_struct test fails when the lists drift. That\ntest asserts a length literal and never mentions RulesConfig, so adding a rule to\nthe struct and forgetting the list leaves every test green while the new rule\nname warns as an unknown key in real configs.\n\nNothing is drifted today; the only absent field is serde(skip) bookkeeping and\ncorrectly excluded.\n\nA real pin needs the provenance of all 98 entries, because the list also covers\nnames no RulesConfig field produces, so a field-count comparison would not even\nbe correct. That is deliberately not attempted here. The false assurance is\nseparable and is what misleads: the test is renamed to what it does, and both it\nand the constant now state what is and is not enforced. The guard is unchanged.\n\nThe four sibling guards whose names promise a comparison were checked and all\ngenuinely compare sources, so this was an isolated case.",
+          "timestamp": "2026-09-01T17:35:32+02:00",
+          "tree_id": "8b52d198cb772c19208fd0d246a3f1b57319114b",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4b0e6ab9a37ee22d70b9d7986288e6f2a821e63"
+        },
+        "date": 1788277929748,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 555502592,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21348616,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28053912,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 42325880,
             "unit": "bytes"
           }
         ]
