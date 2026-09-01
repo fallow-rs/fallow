@@ -526,8 +526,8 @@ fn generate_mermaid(data: &VizData) -> String {
 #[cfg(test)]
 mod tests {
     use fallow_engine::viz::{
-        VIZ_SCHEMA_VERSION, VizAvailability, VizFile, VizFindingAnalysis, VizFrameworkData,
-        VizHealthCapabilities, VizHealthData, VizSecurityData, VizStylingData, VizSummary,
+        VizAvailability, VizFile, VizFindingAnalysis, VizFrameworkData, VizHealthCapabilities,
+        VizHealthData, VizSecurityData, VizStylingData, VizSummary,
     };
 
     use super::*;
@@ -593,7 +593,6 @@ mod tests {
             findings: Vec::new(),
         };
         VizData {
-            schema_version: VIZ_SCHEMA_VERSION,
             root: "proj".to_string(),
             files: vec![
                 file("src/index.ts", VizFileStatus::EntryPoint),

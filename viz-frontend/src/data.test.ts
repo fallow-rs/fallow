@@ -41,7 +41,6 @@ const file = (over: Partial<VizFile> = {}): VizFile => ({
 });
 
 const data = (over: Partial<VizData> = {}): VizData => ({
-  schema_version: 2,
   root: "demo",
   files: [file({ path: "src/a.ts" }), file({ path: "src/b.ts" }), file({ path: "lib/c.ts" })],
   edges: [
@@ -163,7 +162,6 @@ describe("analysis contract adapters", () => {
   it("keeps complete zero findings distinct from unavailable analysis", () => {
     const d = {
       ...data(),
-      schema_version: 2,
       security: {
         availability: { state: "complete", count: 0, unit: "candidates" },
         runtime_availability: {
@@ -211,7 +209,6 @@ describe("analysis contract adapters", () => {
   it("normalizes file Security evidence without calling candidates vulnerabilities", () => {
     const d = {
       ...data(),
-      schema_version: 2,
       security: {
         availability: { state: "complete", count: 1, unit: "candidates" },
         runtime_availability: { state: "disabled", count: 0, unit: "observations" },
@@ -293,7 +290,6 @@ describe("analysis contract adapters", () => {
   it("uses retained Health file metrics for coloring and finding levels", () => {
     const d = {
       ...data(),
-      schema_version: 2,
       health: {
         availability: { state: "complete", count: 1, unit: "files" },
         files: [

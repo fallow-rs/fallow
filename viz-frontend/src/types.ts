@@ -1,6 +1,5 @@
 /** Mirrors the Rust `fallow_engine::viz::VizData` contract. */
 export interface VizData {
-  schema_version: 2;
   root: string;
   files: VizFile[];
   /** Import edges as [from, to, flags]; flags bit 0 = all imports type-only. */

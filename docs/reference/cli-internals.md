@@ -107,8 +107,10 @@ an exit code.
 ## Viz lenses and availability
 
 `fallow viz` runs one engine-owned project analysis with complexity artifacts
-and the graph retained, then feeds `fallow_engine::viz::VizData`, a versioned
-payload embedded in a self-contained HTML shell. The prebuilt TypeScript
+and the graph retained, then feeds `fallow_engine::viz::VizData` into a
+self-contained HTML shell. `render_html` inlines the CSS, the frontend bundle,
+and the payload into one file, so producer and consumer always ship together
+and the payload carries no version of its own. The prebuilt TypeScript
 frontend lives in `viz-frontend/` and is embedded from
 `crates/cli/viz-assets/viz.js` and `viz.css`; rebuild it with
 `cd viz-frontend && npm ci && npm run build` rather than editing the bundle.

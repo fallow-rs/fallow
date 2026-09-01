@@ -33,7 +33,6 @@ const file = (path: string, over: Partial<VizFile> = {}): VizFile => ({
 
 const stateFor = (lens: Lens, files: VizFile[], over: Partial<VizData> = {}): AppState => {
   const data: VizData = {
-    schema_version: 2,
     root: "demo",
     files,
     edges: [],
@@ -185,7 +184,6 @@ describe("filePanelModel", () => {
     );
     state.data = {
       ...state.data,
-      schema_version: 2,
       security: {
         availability: { state: "complete", count: 1, unit: "candidates" },
         runtime_availability: { state: "unavailable", count: 0, unit: "observations" },
@@ -254,7 +252,6 @@ describe("filePanelModel", () => {
     const state = stateFor("health" as Lens, [file("src/a.ts")]);
     state.data = {
       ...state.data,
-      schema_version: 2,
       health: {
         availability: { state: "complete", count: 0, unit: "files" },
         files: [],

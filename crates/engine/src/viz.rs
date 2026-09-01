@@ -52,9 +52,6 @@ const MAX_HEALTH_FILES: usize = 2000;
 /// Edge flag bit: every import of this edge is type-only.
 const EDGE_FLAG_TYPE_ONLY: u32 = 1;
 
-/// Current embedded Viz payload contract version.
-pub const VIZ_SCHEMA_VERSION: u16 = 2;
-
 /// Everything [`build_viz_data`] needs from one project analysis run.
 pub struct VizBuildInput<'a> {
     /// Dead-code analysis results (unused files/exports, cycles, boundaries).
@@ -80,8 +77,6 @@ pub struct VizBuildInput<'a> {
 /// Serialized payload embedded in the viz HTML.
 #[derive(Serialize)]
 pub struct VizData {
-    /// Version of the embedded browser payload.
-    pub schema_version: u16,
     /// Project display name (root directory basename).
     pub root: String,
     /// One entry per analyzed source file, indexed by position.
@@ -723,7 +718,6 @@ pub fn build_viz_data(input: &VizBuildInput<'_>) -> VizData {
     );
 
     VizData {
-        schema_version: VIZ_SCHEMA_VERSION,
         root: display_root(root),
         files,
         edges: build_edges(input.graph, &index),
@@ -3053,12 +3047,11 @@ mod tests {
     }
 
     #[test]
-    fn versioned_contract_keeps_counts_and_availability_explicit() {
+    fn payload_keeps_counts_and_availability_explicit() {
         let fx = fixture();
         let data = build_viz_data(&fx.input());
         let value = serde_json::to_value(&data).expect("viz data serializes");
 
-        assert_eq!(value["schema_version"], VIZ_SCHEMA_VERSION);
         assert_eq!(value["architecture"]["availability"]["unit"], "violations");
         assert_eq!(value["dependencies"]["availability"]["unit"], "findings");
         assert_eq!(value["security"]["availability"]["unit"], "candidates");
