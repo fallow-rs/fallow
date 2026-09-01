@@ -105,8 +105,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   globs declared by `main` keep reaching stories elsewhere in the project.
   On-device addons are declared under `deviceAddons` rather than `addons`, in
   the same string and object forms, and are now credited as referenced the same
-  way. Web Storybook projects are unaffected. Thanks
-  [@PrinceD96](https://github.com/PrinceD96) for the report.
+  way. A web-only Storybook project is unaffected, verified byte for byte
+  against nine real ones. A web project that also happens to carry a
+  `.rnstorybook` directory now traverses it, which can only silence a finding
+  and never create one. Thanks [@PrinceD96](https://github.com/PrinceD96) for
+  the report.
 
 ### Changed
 
