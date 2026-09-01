@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788253355813,
+  "lastUpdate": 1788257867884,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "21b304caa4484b4395588e526df4663db8a1d7aa",
-          "message": "perf(core): cache discovery file type matchers",
-          "timestamp": "2026-08-18T22:20:39+02:00",
-          "tree_id": "d8ecea9f32a90f11c1f4b6fb18ae40000db1ba7e",
-          "url": "https://github.com/fallow-rs/fallow/commit/21b304caa4484b4395588e526df4663db8a1d7aa"
-        },
-        "date": 1787084920049,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/79085fb4e009ff6768ee02eeb1139857231998b8"
         },
         "date": 1788253352229,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.3,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "05374a4d878f73f0b42337fe417b985d7732ced3",
+          "message": "fix(cli): stop mutating the process environment from tests (#2510)\n\nCloses #2494.\n\ncrates/cli and crates/mcp tests called std::env::set_var / remove_var from inside\ntest functions. The harness runs tests as parallel threads in one process, so\nthose calls mutated state other threads were concurrently reading.\n\nThe issue filed this on soundness grounds with no claim it was breaking anything.\nIt was: crates/mcp links its unit tests and its end-to-end tests into one binary,\nso one test removed and repointed FALLOW_BIN while concurrent end-to-end tests\nread that same variable to locate the binary they spawn, and the coverage\nworkflow sets it for the whole workspace run.\n\nEvery environment read is now a thin one-line wrapper delegating to a pure inner\nfunction the test drives, following the pattern established for #2368.\nFALLOW_BOT_LOGIN needed a tri-state rather than an Option, because its three\nreaders distinguish set, set-but-not-unicode, and absent, and one reader is\nstricter than the other two. Semantics are byte-identical.\n\nA guard test walks the workspace and fails on a new mutation, matching both the\npath form and the call form so a glob import cannot slip past it.",
+          "timestamp": "2026-09-01T12:03:02+02:00",
+          "tree_id": "f570d80e28c88e31fd0399df4f2fad13325aa9bf",
+          "url": "https://github.com/fallow-rs/fallow/commit/05374a4d878f73f0b42337fe417b985d7732ced3"
+        },
+        "date": 1788257864253,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
