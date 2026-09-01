@@ -118,16 +118,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow fix` is the deliberate exception and still stops: it removes code, and
   the extra entries in the unrefined set are precisely the ones the semantic pass
   would have proven live, so widening a deletion is the opposite of conservative.
-  `typeAware.require = complete` still exits 2 everywhere, unchanged. The
+  `typeAware.require = complete` still exits 2 everywhere, unchanged. When `fix`
+  does stop, it now names both ways forward instead of only the failure. The
   ceiling itself is now settable with `FALLOW_TYPE_AWARE_TIMEOUT_SECS`, because
-  a semantic query
-  costs a whole-program scan and a very large TypeScript program needs more than
-  two minutes of it. This makes the run complete and say what happened; it does
-  not make the semantic pass fast enough to finish on a very large project on
-  Windows, where the sidecar transport is a named pipe. The VS Code extension
-  also reads the CLI's own diagnostic now: under `--format json` that message
-  goes to stdout, and the analysis path was reporting only "exited with code 2".
-  Thanks [@VariableVince](https://github.com/VariableVince) for the report.
+  a semantic query costs a whole-program scan and a very large TypeScript
+  program needs more than two minutes of it. This makes the run complete and say
+  what happened; it does not make the semantic pass fast enough to finish on a
+  very large project on Windows, where the sidecar transport is a named pipe.
+  The VS Code extension also reads the CLI's own diagnostic now: under
+  `--format json` that message goes to stdout, and the analysis path was
+  reporting only "exited with code 2". It also says when a shown result came
+  from a pass that did not run, so the wider syntactic set is never mistaken for
+  a refined one, and the new `fallow.typeAware.timeoutSeconds` setting raises
+  the ceiling from the editor. Thanks
+  [@VariableVince](https://github.com/VariableVince) for the report.
 
 - **Two audits running at once no longer fail with a base worktree that
   "already exists".** The temporary base view was named from the process id
