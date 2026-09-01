@@ -1,6 +1,10 @@
 use super::{MigrationWarning, string_or_array};
 
 /// jscpd fields that cannot be mapped and generate warnings.
+///
+/// Together with the fields `duplicate_options_from_jscpd` migrates, this covers
+/// every key of jscpd's `IOptions`, so a migration never drops a configured
+/// option without reporting it.
 const JSCPD_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     ("maxLines", "No maximum line count limit in fallow", None),
     ("maxSize", "No maximum file size limit in fallow", None),
@@ -61,6 +65,69 @@ const JSCPD_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
         "path",
         "Source path configuration is not supported",
         Some("run fallow from the project root directory"),
+    ),
+    (
+        "config",
+        "fallow discovers its own config file",
+        Some("use --config to point at a specific fallow config"),
+    ),
+    (
+        "cache",
+        "Caching is not configured in the config file",
+        Some("caching is on by default; pass --no-cache to disable it"),
+    ),
+    ("gitignore", "fallow always respects .gitignore", None),
+    (
+        "silent",
+        "Output verbosity is not configurable in fallow",
+        Some("use --quiet to suppress progress output"),
+    ),
+    (
+        "verbose",
+        "Output verbosity is not configurable in fallow",
+        None,
+    ),
+    ("debug", "No debug output mode in fallow", None),
+    ("noTips", "fallow does not print tips", None),
+    (
+        "colors",
+        "Color output is not configurable in the config file",
+        Some("fallow follows NO_COLOR and TTY detection"),
+    ),
+    (
+        "list",
+        "Listing detected formats is not supported in fallow",
+        None,
+    ),
+    (
+        "formatsNames",
+        "Custom file name mappings are not configurable in fallow",
+        None,
+    ),
+    (
+        "storePath",
+        "Store backend is not configurable in fallow",
+        None,
+    ),
+    (
+        "reportersOptions",
+        "Reporters are not configurable in fallow",
+        Some("use --format flag instead (human/json/sarif/compact)"),
+    ),
+    (
+        "listeners",
+        "Custom listeners are not supported in fallow",
+        None,
+    ),
+    (
+        "hashFunction",
+        "The duplication hash function is not configurable in fallow",
+        None,
+    ),
+    (
+        "executionId",
+        "Execution identifiers are not supported in fallow",
+        None,
     ),
 ];
 
@@ -419,7 +486,22 @@ mod tests {
                 "tokensToSkip": ["if"],
                 "exitCode": 1,
                 "pattern": "*.ts",
-                "path": ["src/"]
+                "path": ["src/"],
+                "config": ".jscpd.json",
+                "cache": true,
+                "gitignore": true,
+                "silent": true,
+                "verbose": true,
+                "debug": true,
+                "noTips": true,
+                "colors": false,
+                "list": true,
+                "formatsNames": {"javascript": ["Jakefile"]},
+                "storePath": "./.jscpd",
+                "reportersOptions": {},
+                "listeners": ["log"],
+                "hashFunction": "md5",
+                "executionId": "run-1"
             }"#,
         )
         .unwrap();
@@ -517,7 +599,7 @@ mod tests {
     #[test]
     fn migrate_jscpd_unmappable_without_suggestions() {
         let jscpd: serde_json::Value = serde_json::from_str(
-            r#"{"maxLines": 1000, "maxSize": "50kb", "blame": true, "absolute": true, "noSymlinks": false, "ignoreCase": true, "format": ["js"], "formatsExts": {}, "store": "redis", "tokensToSkip": ["x"], "pattern": "*.ts"}"#,
+            r#"{"maxLines": 1000, "maxSize": "50kb", "blame": true, "absolute": true, "noSymlinks": false, "ignoreCase": true, "format": ["js"], "formatsExts": {}, "store": "redis", "tokensToSkip": ["x"], "pattern": "*.ts", "gitignore": true, "verbose": true, "debug": true, "noTips": true, "list": true, "formatsNames": {}, "storePath": "./.jscpd", "listeners": ["log"], "hashFunction": "md5", "executionId": "run-1"}"#,
         )
         .unwrap();
         let mut config = empty_config();
@@ -771,5 +853,104 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].field, "(root)");
         assert!(config.is_empty());
+    }
+
+    /// Every key of jscpd's `IOptions`. A configured option must either reach
+    /// the fallow `duplicates` block or produce a warning, never vanish.
+    const JSCPD_OPTIONS: &[&str] = &[
+        "absolute",
+        "blame",
+        "cache",
+        "colors",
+        "config",
+        "debug",
+        "executionId",
+        "exitCode",
+        "format",
+        "formatsExts",
+        "formatsNames",
+        "gitignore",
+        "hashFunction",
+        "ignore",
+        "ignoreCase",
+        "ignorePattern",
+        "list",
+        "listeners",
+        "maxLines",
+        "maxSize",
+        "minLines",
+        "minTokens",
+        "mode",
+        "noSymlinks",
+        "noTips",
+        "output",
+        "path",
+        "pattern",
+        "reporters",
+        "reportersOptions",
+        "silent",
+        "skipLocal",
+        "storePath",
+        "store",
+        "threshold",
+        "tokensToSkip",
+        "verbose",
+    ];
+
+    /// Options that migrate into the fallow `duplicates` block.
+    const JSCPD_MAPPED_OPTIONS: &[&str] = &[
+        "ignore",
+        "minLines",
+        "minTokens",
+        "mode",
+        "skipLocal",
+        "threshold",
+    ];
+
+    #[test]
+    fn every_jscpd_option_is_mapped_or_reported() {
+        for option in JSCPD_OPTIONS {
+            let mapped = JSCPD_MAPPED_OPTIONS.contains(option);
+            let reported = JSCPD_UNMAPPABLE_FIELDS.iter().any(|(f, _, _)| f == option);
+            assert!(
+                mapped ^ reported,
+                "jscpd option `{option}` should be either migrated or reported, not neither or both"
+            );
+        }
+    }
+
+    #[test]
+    fn unmappable_jscpd_fields_are_real_jscpd_options() {
+        for (field, _, _) in JSCPD_UNMAPPABLE_FIELDS {
+            assert!(
+                JSCPD_OPTIONS.contains(field),
+                "JSCPD_UNMAPPABLE_FIELDS entry `{field}` is not a jscpd option"
+            );
+        }
+    }
+
+    #[test]
+    fn unmappable_jscpd_fields_have_no_duplicates() {
+        let mut seen = rustc_hash::FxHashSet::default();
+        for (field, _, _) in JSCPD_UNMAPPABLE_FIELDS {
+            assert!(
+                seen.insert(*field),
+                "JSCPD_UNMAPPABLE_FIELDS has duplicate entry `{field}`"
+            );
+        }
+    }
+
+    #[test]
+    fn newly_covered_jscpd_options_warn() {
+        let jscpd: serde_json::Value =
+            serde_json::from_str(r#"{"gitignore": true, "cache": false, "silent": true}"#).unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_jscpd(&jscpd, &mut config, &mut warnings);
+
+        let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
+        assert!(fields.contains(&"gitignore"), "{fields:?}");
+        assert!(fields.contains(&"cache"), "{fields:?}");
+        assert!(fields.contains(&"silent"), "{fields:?}");
     }
 }

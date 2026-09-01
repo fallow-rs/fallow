@@ -79,56 +79,82 @@ pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] = &[
     "catalog",
 ];
 
-/// Known knip plugin config keys (framework-specific). These are auto-detected by fallow plugins.
+/// Knip plugin config keys that a built-in fallow plugin covers. Fallow
+/// detects these frameworks and tools from the project itself, so the knip
+/// section has no fallow counterpart and can be dropped.
+///
+/// Keys come from the `Plugins` map in knip and from the plugin sections of
+/// knip's published JSON schema, which still accepts a few keys that the
+/// plugin map has since renamed. A key belongs here only when a plugin in
+/// `fallow_core::plugins` registers the same tool. Keys that no fallow plugin
+/// covers belong in `KNIP_UNSUPPORTED_PLUGIN_KEYS` instead.
 pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "angular",
     "astro",
     "ava",
     "babel",
     "biome",
+    "bun",
+    "c8",
     "capacitor",
     "changesets",
     "commitizen",
     "commitlint",
+    "convex",
     "cspell",
     "cucumber",
     "cypress",
+    "danger",
+    "dependency-cruiser",
     "docusaurus",
     "drizzle",
-    "eleventy",
+    "electron-vite",
     "eslint",
     "expo",
+    "fumadocs",
     "gatsby",
-    "github-actions",
     "graphql-codegen",
+    "hardhat",
     "husky",
     "jest",
+    "karma",
     "knex",
     "lefthook",
     "lint-staged",
+    "lit",
     "markdownlint",
     "mocha",
-    "moonrepo",
     "msw",
     "nest",
     "next",
-    "node-test-runner",
-    "npm-package-json-lint",
+    "next-intl",
+    "nitro",
+    "nodemon",
     "nuxt",
     "nx",
     "nyc",
-    "oclif",
+    "openapi-ts",
+    "oxlint",
+    "panda-css",
+    "parcel",
     "playwright",
+    "plop",
+    "pm2",
+    "pnpm",
     "postcss",
     "prettier",
     "prisma",
-    "react-cosmos",
+    "qwik",
+    "react-native",
     "react-router",
-    "release-it",
+    "relay",
     "remark",
     "remix",
+    "rolldown",
     "rollup",
+    "rsbuild",
     "rspack",
+    "sanity",
     "semantic-release",
     "sentry",
     "simple-git-hooks",
@@ -136,24 +162,123 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "storybook",
     "stryker",
     "stylelint",
-    "svelte",
+    "sveltekit",
+    "svgo",
+    "svgr",
+    "swc",
     "syncpack",
     "tailwind",
+    "tanstack-router",
+    "tsd",
+    "tsdown",
     "tsup",
-    "tsx",
     "typedoc",
     "typescript",
-    "unbuild",
     "unocss",
-    "vercel-og",
+    "vercel",
     "vite",
+    "vitepress",
     "vitest",
-    "vue",
+    "webdriver-io",
     "webpack",
-    "wireit",
     "wrangler",
+    "wxt",
+];
+
+/// Knip plugin config keys that no built-in fallow plugin covers. The section
+/// is still recognized so a migration reports it instead of dropping it in
+/// silence, but fallow makes no claim to detect the tool.
+pub(super) const KNIP_UNSUPPORTED_PLUGIN_KEYS: &[&str] = &[
+    "astro-db",
+    "astro-markdoc",
+    "astro-og-canvas",
+    "borp",
+    "bumpp",
+    "catalyst",
+    "changelogen",
+    "changelogithub",
+    "create-typescript-app",
+    "dotenv",
+    "eleventy",
+    "esbuild",
+    "eve",
+    "execa",
+    "expressive-code",
+    "fast",
+    "github-action",
+    "github-actions",
+    "glob",
+    "i18next-parser",
+    "ladle",
+    "laravel-vite-plugin",
+    "linthtml",
+    "lockfile-lint",
+    "lost-pixel",
+    "lunaria",
+    "marko",
+    "mdx",
+    "mdxlint",
+    "metro",
+    "moonrepo",
+    "nano-spawn",
+    "nano-staged",
+    "netlify",
+    "next-mdx",
+    "node",
+    "node-modules-inspector",
+    "node-test-runner",
+    "npm-package-json-lint",
+    "nuxtjs-i18n",
+    "oclif",
+    "openclaw",
+    "orval",
+    "oxfmt",
+    "payload",
+    "pino",
+    "playwright-ct",
+    "playwright-test",
+    "pre-commit",
+    "preconstruct",
+    "quasar",
+    "raycast",
+    "react-cosmos",
+    "react-email",
+    "release-it",
+    "rslib",
+    "rstest",
+    "serverless-framework",
+    "sst",
+    "starlight",
+    "stencil",
+    "svelte",
+    "sveltejs-package",
+    "tanstack-start",
+    "taskfile",
+    "tauri",
+    "temporal",
+    "travis",
+    "ts-node",
+    "tsx",
+    "unbuild",
+    "unplugin-auto-import",
+    "unplugin-icons",
+    "unplugin-vue-components",
+    "unplugin-vue-i18n",
+    "unplugin-vue-markdown",
+    "unplugin-vue-router",
+    "vercel-og",
+    "vike",
+    "vite-plugin-pages",
+    "vite-plugin-pwa",
+    "vite-plugin-vue-layouts-next",
+    "vite-plus",
+    "vite-pwa-assets-generator",
+    "vue",
+    "wireit",
     "xo",
+    "yarn",
     "yorkie",
+    "zx",
 ];
 
 #[cfg(test)]
@@ -304,6 +429,94 @@ mod tests {
             assert!(
                 !unmappable.contains(key),
                 "KNIP_PLUGIN_KEYS entry `{key}` overlaps with KNIP_UNMAPPABLE_FIELDS"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_plugin_keys_is_non_empty() {
+        assert!(
+            !KNIP_UNSUPPORTED_PLUGIN_KEYS.is_empty(),
+            "KNIP_UNSUPPORTED_PLUGIN_KEYS should not be empty"
+        );
+    }
+
+    #[test]
+    fn unsupported_plugin_keys_are_sorted() {
+        for window in KNIP_UNSUPPORTED_PLUGIN_KEYS.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "KNIP_UNSUPPORTED_PLUGIN_KEYS is not sorted: `{}` should come after `{}`",
+                window[1],
+                window[0]
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_plugin_keys_have_no_duplicates() {
+        let mut seen = FxHashSet::default();
+        for key in KNIP_UNSUPPORTED_PLUGIN_KEYS {
+            assert!(
+                seen.insert(*key),
+                "KNIP_UNSUPPORTED_PLUGIN_KEYS has duplicate entry `{key}`"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_plugin_keys_do_not_overlap_with_plugin_keys() {
+        let covered: FxHashSet<&str> = KNIP_PLUGIN_KEYS.iter().copied().collect();
+        for key in KNIP_UNSUPPORTED_PLUGIN_KEYS {
+            assert!(
+                !covered.contains(key),
+                "`{key}` is in both KNIP_PLUGIN_KEYS and KNIP_UNSUPPORTED_PLUGIN_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_plugin_keys_do_not_overlap_with_unmappable_fields() {
+        let unmappable: FxHashSet<&str> =
+            KNIP_UNMAPPABLE_FIELDS.iter().map(|(f, _, _)| *f).collect();
+        for key in KNIP_UNSUPPORTED_PLUGIN_KEYS {
+            assert!(
+                !unmappable.contains(key),
+                "KNIP_UNSUPPORTED_PLUGIN_KEYS entry `{key}` overlaps with KNIP_UNMAPPABLE_FIELDS"
+            );
+        }
+    }
+
+    /// Fallow has no Marko plugin, so the knip `marko` section must land in the
+    /// unsupported table rather than claim auto-detection.
+    #[test]
+    fn marko_is_recognized_as_unsupported() {
+        assert!(
+            KNIP_UNSUPPORTED_PLUGIN_KEYS.contains(&"marko"),
+            "KNIP_UNSUPPORTED_PLUGIN_KEYS should contain `marko`"
+        );
+        assert!(
+            !KNIP_PLUGIN_KEYS.contains(&"marko"),
+            "KNIP_PLUGIN_KEYS should not claim to cover `marko`"
+        );
+    }
+
+    #[test]
+    fn plugin_keys_cover_recently_added_fallow_plugins() {
+        let expected = [
+            "bun",
+            "electron-vite",
+            "oxlint",
+            "panda-css",
+            "pnpm",
+            "sveltekit",
+            "tanstack-router",
+            "webdriver-io",
+        ];
+        for name in expected {
+            assert!(
+                KNIP_PLUGIN_KEYS.contains(&name),
+                "KNIP_PLUGIN_KEYS should contain `{name}`"
             );
         }
     }

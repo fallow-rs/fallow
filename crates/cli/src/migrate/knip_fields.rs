@@ -2,6 +2,7 @@ use serde_json::{Map, Value};
 
 use super::knip_tables::{
     KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS, KNIP_UNMAPPABLE_ISSUE_TYPES,
+    KNIP_UNSUPPORTED_PLUGIN_KEYS,
 };
 use super::{MigrationWarning, string_or_array};
 
@@ -267,7 +268,11 @@ pub(super) fn warn_unmappable_fields(obj: &JsonMap, warnings: &mut Vec<Migration
     }
 }
 
-/// Warn about knip plugin-specific config keys that are auto-detected in fallow.
+/// Warn about knip plugin-specific config keys.
+///
+/// A key that a built-in fallow plugin covers is reported as auto-detected. A
+/// key that no fallow plugin covers is reported as unsupported rather than
+/// dropped in silence, so a migration never loses a section without saying so.
 pub(super) fn warn_plugin_keys(obj: &JsonMap, warnings: &mut Vec<MigrationWarning>) {
     for key in obj.keys() {
         if KNIP_PLUGIN_KEYS.contains(&key.as_str()) {
@@ -279,6 +284,17 @@ pub(super) fn warn_plugin_keys(obj: &JsonMap, warnings: &mut Vec<MigrationWarnin
                 ),
                 suggestion: Some(
                     "remove this section; fallow detects framework config automatically"
+                        .to_string(),
+                ),
+            });
+        } else if KNIP_UNSUPPORTED_PLUGIN_KEYS.contains(&key.as_str()) {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field: key.clone(),
+                message: format!("plugin config `{key}` has no fallow plugin equivalent"),
+                suggestion: Some(
+                    "remove this section; fallow may report this tool's config files or \
+                     dependencies as unused"
                         .to_string(),
                 ),
             });
@@ -768,5 +784,42 @@ mod tests {
         warn_plugin_keys(&obj, &mut warnings);
 
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn warn_plugin_keys_reports_unsupported_plugin() {
+        let obj: JsonMap = serde_json::from_str(r#"{"marko": {"entry": ["src/**/*.marko"]}}"#)
+            .expect("valid json");
+        let mut warnings = Vec::new();
+        warn_plugin_keys(&obj, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "marko");
+        assert!(
+            warnings[0].message.contains("no fallow plugin equivalent"),
+            "{}",
+            warnings[0].message
+        );
+        assert!(warnings[0].suggestion.is_some());
+    }
+
+    #[test]
+    fn warn_plugin_keys_separates_covered_from_unsupported() {
+        let obj: JsonMap =
+            serde_json::from_str(r#"{"sveltekit": true, "vue": true}"#).expect("valid json");
+        let mut warnings = Vec::new();
+        warn_plugin_keys(&obj, &mut warnings);
+
+        let sveltekit = warnings
+            .iter()
+            .find(|w| w.field == "sveltekit")
+            .expect("sveltekit warning");
+        assert!(sveltekit.message.contains("auto-detected"));
+
+        let vue = warnings
+            .iter()
+            .find(|w| w.field == "vue")
+            .expect("vue warning");
+        assert!(vue.message.contains("no fallow plugin equivalent"));
     }
 }
