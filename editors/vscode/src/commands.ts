@@ -31,6 +31,7 @@ import {
   buildAnalysisArgs,
   compareVersions,
   countCheckIssues,
+  describeAnalysisFailure,
   planDegradation,
 } from "./analysis-utils.js";
 import {
@@ -752,7 +753,15 @@ export const runAnalysis = async (
     if (err instanceof AnalysisBackoffBlockedError) {
       throw err;
     }
-    const message = err instanceof Error ? err.message : String(err);
+    // Under `--format json` the CLI's diagnostic is the stdout envelope, not
+    // stderr, so the FallowExecError message alone would report a bare exit
+    // code and drop the reason (issue #2499).
+    const message =
+      err instanceof FallowExecError
+        ? describeAnalysisFailure(err.stdout, err.message)
+        : err instanceof Error
+          ? err.message
+          : String(err);
     const paused =
       backoffKey !== null && options.force !== true ? backoff.recordFailure(backoffKey) : null;
     if (paused) {

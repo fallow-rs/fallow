@@ -4,6 +4,7 @@ import {
   buildCleanAnalysisSummary,
   compareVersions,
   countDuplicationGroups,
+  describeAnalysisFailure,
   parseUnexpectedArgument,
   planDegradation,
   stripArgument,
@@ -500,5 +501,34 @@ describe("planDegradation", () => {
     expect(
       planDegradation("unexpected argument '--dupes-min-occurrences' found", ["--format", "json"]),
     ).toEqual({ kind: "rethrow" });
+  });
+});
+
+describe("describeAnalysisFailure", () => {
+  it("recovers the CLI message from the stdout error envelope", () => {
+    const stdout = JSON.stringify({
+      error: true,
+      message: "Type-aware analysis failed: semantic companion timed out after 120s",
+      exit_code: 2,
+    });
+
+    expect(describeAnalysisFailure(stdout, "fallow exited with code 2")).toBe(
+      "Type-aware analysis failed: semantic companion timed out after 120s",
+    );
+  });
+
+  it("falls back to the stderr-derived message when stdout is empty", () => {
+    expect(describeAnalysisFailure("", "fallow exited with code 2")).toBe(
+      "fallow exited with code 2",
+    );
+  });
+
+  it("falls back when stdout is not a structured error envelope", () => {
+    expect(describeAnalysisFailure('{"check":{}}', "fallow exited with code 2")).toBe(
+      "fallow exited with code 2",
+    );
+    expect(describeAnalysisFailure("not json at all", "fallow exited with code 2")).toBe(
+      "fallow exited with code 2",
+    );
   });
 });

@@ -406,3 +406,37 @@ export const buildCleanAnalysisSummary = (
     ],
   };
 };
+
+/** Narrow a parsed CLI JSON envelope to the structured-error shape. */
+const isStructuredError = (value: unknown): value is { error: true; message?: string } =>
+  typeof value === "object" &&
+  value !== null &&
+  "error" in value &&
+  (value as { error: unknown }).error === true;
+
+/**
+ * Recover the CLI's own diagnostic from a failed analysis spawn.
+ *
+ * Under `--format json` the CLI writes `{"error":true,"message":..,"exit_code":N}`
+ * to stdout and leaves stderr empty, so the rejection carries only
+ * "fallow exited with code N" and the actionable message is discarded. Prefer
+ * the envelope message when stdout holds one, and fall back to the
+ * stderr-derived message otherwise (plain formats, an older CLI, or partial
+ * output). Kept pure so the recovery can be unit-tested; mirrors
+ * `buildCoverageGateMessage` in `coverage-utils.ts`.
+ */
+export const describeAnalysisFailure = (stdout: string, fallbackMessage: string): string => {
+  const trimmed = stdout.trim();
+  if (trimmed.length === 0) {
+    return fallbackMessage;
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (isStructuredError(parsed) && parsed.message !== undefined && parsed.message.length > 0) {
+      return parsed.message;
+    }
+  } catch {
+    // Non-JSON stdout (plain format, older CLI, partial output): use the fallback.
+  }
+  return fallbackMessage;
+};
