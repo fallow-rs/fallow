@@ -10,6 +10,7 @@ pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
     ("unlisted", "unlisted-dependencies"),
     ("unresolved", "unresolved-imports"),
     ("duplicates", "duplicate-exports"),
+    ("cycles", "circular-dependencies"),
 ];
 
 /// Knip fields that cannot be mapped and generate warnings.
@@ -77,6 +78,8 @@ pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] = &[
     "nsExports",
     "nsTypes",
     "catalog",
+    "catalogReferences",
+    "namespaceMembers",
 ];
 
 /// Knip plugin config keys that a built-in fallow plugin covers. Fallow

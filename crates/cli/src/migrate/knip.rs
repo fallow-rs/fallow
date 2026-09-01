@@ -603,7 +603,8 @@ mod tests {
     fn migrate_knip_exclude_all_mappable_types() {
         let knip: serde_json::Value = serde_json::from_str(
             r#"{"exclude": ["files", "dependencies", "devDependencies", "exports",
-                "types", "enumMembers", "classMembers", "unlisted", "unresolved", "duplicates"]}"#,
+                "types", "enumMembers", "classMembers", "unlisted", "unresolved", "duplicates",
+                "cycles"]}"#,
         )
         .unwrap();
         let mut config = empty_config();
