@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788262831604,
+  "lastUpdate": 1788266169345,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9d14001d7fefd519a89116d156a07149b51b4314",
-          "message": "perf(benchmarks): track feature flags command",
-          "timestamp": "2026-08-19T02:12:42+02:00",
-          "tree_id": "55c0cc4f0e9285a1d46628492bbec72928b07ca7",
-          "url": "https://github.com/fallow-rs/fallow/commit/9d14001d7fefd519a89116d156a07149b51b4314"
-        },
-        "date": 1787098863237,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea"
         },
         "date": 1788262828022,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9db28bf7c2ff6c83384baf66194a7a3f75777904",
+          "message": "feat(extract): count module-scope branching as a synthetic unit (#2516)\n\nCloses #2503.\n\nNo frame was pushed at module scope, so decision points outside every function\ncontributed nothing to any complexity number fallow reports. Wider than the issue\ntext says: module-scope ??, || and ?. scored zero too, not just if ladders. The\nconsequence that motivated this is that \"this change removed branching\" was\nunprovable, because a fall was equally consistent with a branch having been\nhoisted out of a function.\n\nA synthetic per-file <module> unit, in the same family as <template>, but\naggregate-only: visible to vital signs, file scores and the branching section,\nand never producing a user-facing finding. \"Extract helper functions\" is\nmeaningless advice for module scope, and emitting findings would churn every\nsaved baseline for advice we cannot give. That single decision bounds the change.\n\nIt gets its own predicate rather than widening is_synthetic_template_unit,\nbecause FileBranching::from_units filters on that one and folding <module> in\nwould have left the branching section exactly as blind as before.\n\nValidated on five projects, old binary against new. Findings arrays are\ndeep-equal on all five; <module> appears zero times in any output format. Only\nthree vitals moved anywhere and each is decomposed: two are pure denominator\neffects with byte-identical numerators. Largest per-file deltas hand-verified\nagainst source, exact matches on both metrics. No baseline churn, warm cache\npicks the change up, and SFC files report both units without double counting.\n\nThe blast radius is much smaller than predicted: two of five projects showed zero\nvital movement and no score moved more than 0.2. Well-factored TypeScript keeps\nits boolean operators inside functions where they were already counted.",
+          "timestamp": "2026-09-01T14:20:16+02:00",
+          "tree_id": "e5570cb5d860f5fb6cc223f461d1ea67eaa45613",
+          "url": "https://github.com/fallow-rs/fallow/commit/9db28bf7c2ff6c83384baf66194a7a3f75777904"
+        },
+        "date": 1788266165905,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
