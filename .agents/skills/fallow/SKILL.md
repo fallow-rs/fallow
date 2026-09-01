@@ -84,6 +84,7 @@ cargo install fallow-cli        # build from source
 | `ci reconcile-review` | Resolve stale review threads on a PR/MR by joining a typed review envelope (`--format review-github` / `review-gitlab`) against the provider's existing comments + threads. Posts an idempotent "Resolved in `<sha>`" follow-up per stale fingerprint, marker keyed on (fingerprint, short-sha) so re-runs on the same commit don't duplicate. Provider mutations are fail-fast; JSON can include `apply_hint`, `failed_fingerprints`, and `unapplied_fingerprints` when `apply_errors` is non-empty. | `--provider`, `--pr` (GH) / `--mr` (GL), `--repo` / `--project-id`, `--api-url`, `--envelope`, `--dry-run` |
 | `schema` | Dump CLI definition as JSON | |
 | `config` | Show the loaded config path and resolved config (verifies which `.fallowrc.json` is in effect) | `--path` |
+| `viz` | Render the codebase as a self-contained interactive HTML map (treemap + import graph) with six primary lenses (Overview, Unused, Duplication, Architecture, Health, Security) and Dependencies, Frameworks, Styling, and Feature flags under an adaptive More menu. Every lens carries an availability state (complete, disabled, not applicable, unavailable) next to its count, so an analysis that did not run reads as missing data instead of as zero findings. Read-only; `--viz-format dot\|mermaid` emits the import graph as text instead. | `--out <path>`, `--no-open`, `--viz-format html\|dot\|mermaid`, `--root`, `--config`, `--production`, `--no-cache` |
 
 ## Issue Types
 
