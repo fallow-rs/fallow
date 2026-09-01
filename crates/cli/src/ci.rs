@@ -593,6 +593,15 @@ struct ProviderState {
     github_discussions_by_fingerprint: BTreeMap<String, Vec<GithubDiscussion>>,
     github_unattached_resolved_markers: Vec<GithubUnattachedResolvedMarker>,
     gitlab_discussions_by_fingerprint: BTreeMap<String, Vec<GitlabDiscussion>>,
+    /// Posting login that owns Fallow's comments, resolved once at the command
+    /// boundary from `FALLOW_BOT_LOGIN`.
+    ///
+    /// Held here rather than read per comment so ownership cannot depend on
+    /// when in a run the check happens. Reading the process environment from
+    /// inside this logic made two tests fail intermittently: the three tests
+    /// that override the variable serialized against each other, but every
+    /// other test read it unguarded while an override was in effect.
+    bot_login: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -736,7 +745,10 @@ fn load_github_state(
         .unwrap_or("https://api.github.com")
         .trim_end_matches('/');
     let agent = try_api_agent().map_err(|err| err.to_string())?;
-    let mut state = ProviderState::default();
+    let mut state = ProviderState {
+        bot_login: resolved_bot_login(),
+        ..ProviderState::default()
+    };
     let mut review_comments = Vec::new();
 
     for page in 1..=100 {
@@ -794,7 +806,7 @@ fn record_github_review_root(
     provider_position: usize,
 ) -> Result<(), String> {
     let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-    if is_github_bot_comment(comment)
+    if is_github_bot_comment(comment, state.bot_login.as_deref())
         && let Some(fingerprint) = extract_fallow_fingerprint(body)
     {
         if fallow_output::parse_review_id_marker(body)?.as_ref() != review_id {
@@ -834,7 +846,7 @@ fn record_github_resolution_marker(
     provider_position: usize,
 ) -> Result<(), String> {
     let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-    if is_github_bot_comment(comment) {
+    if is_github_bot_comment(comment, state.bot_login.as_deref()) {
         let Some(marker) = parse_resolution_marker(body)? else {
             return Ok(());
         };
@@ -1408,7 +1420,10 @@ fn load_gitlab_state(
         .unwrap_or_else(|| "https://gitlab.com/api/v4".to_owned());
     let api = api.trim_end_matches('/').to_owned();
     let agent = try_api_agent().map_err(|err| err.to_string())?;
-    let mut state = ProviderState::default();
+    let mut state = ProviderState {
+        bot_login: resolved_bot_login(),
+        ..ProviderState::default()
+    };
     let mut all_discussions = Vec::new();
 
     for page in 1..=100 {
@@ -1434,11 +1449,12 @@ fn load_gitlab_state(
             );
         }
     }
-    let authenticated_user = if needs_gitlab_authenticated_user(&all_discussions) {
-        Some(load_gitlab_authenticated_user(&agent, &api, &token)?)
-    } else {
-        None
-    };
+    let authenticated_user =
+        if needs_gitlab_authenticated_user(&all_discussions, state.bot_login.as_deref()) {
+            Some(load_gitlab_authenticated_user(&agent, &api, &token)?)
+        } else {
+            None
+        };
     for discussion in &all_discussions {
         collect_gitlab_discussion_fingerprints(
             &mut state,
@@ -1450,11 +1466,8 @@ fn load_gitlab_state(
     Ok(state)
 }
 
-fn needs_gitlab_authenticated_user(discussions: &[Value]) -> bool {
-    if !matches!(
-        std::env::var("FALLOW_BOT_LOGIN"),
-        Err(std::env::VarError::NotPresent)
-    ) {
+fn needs_gitlab_authenticated_user(discussions: &[Value], bot_login: Option<&str>) -> bool {
+    if bot_login.is_some() {
         return false;
     }
     discussions
@@ -1521,7 +1534,7 @@ fn collect_gitlab_discussion_fingerprints(
         .ok_or_else(|| format!("GitLab discussion {discussion_id} did not contain a root note"))?;
     {
         let body = root.get("body").and_then(Value::as_str).unwrap_or("");
-        if is_gitlab_bot_note(root, authenticated_user)
+        if is_gitlab_bot_note(root, authenticated_user, state.bot_login.as_deref())
             && let Some(fingerprint) = extract_fallow_fingerprint(body)
         {
             if fallow_output::parse_review_id_marker(body)?.as_ref() != review_id {
@@ -1550,7 +1563,7 @@ fn collect_gitlab_discussion_fingerprints(
             let mut has_resolution_marker = false;
             for note in notes {
                 let note_body = note.get("body").and_then(Value::as_str).unwrap_or("");
-                if !is_gitlab_bot_note(note, authenticated_user) {
+                if !is_gitlab_bot_note(note, authenticated_user, state.bot_login.as_deref()) {
                     continue;
                 }
                 let Some(marker) = parse_resolution_marker(note_body)? else {
@@ -2156,10 +2169,16 @@ fn read_json_response(
 /// is the compatibility trust boundary. Setting `FALLOW_BOT_LOGIN` narrows
 /// ownership to that exact posting login and also supports PAT-backed human
 /// accounts that lack native bot metadata.
-fn is_github_bot_comment(comment: &Value) -> bool {
+/// The configured posting login, or `None` when the variable is absent or
+/// blank. Resolved once per command so the value cannot change mid-run.
+fn resolved_bot_login() -> Option<String> {
+    std::env::var("FALLOW_BOT_LOGIN").ok()
+}
+
+fn is_github_bot_comment(comment: &Value, bot_login: Option<&str>) -> bool {
     let user = comment.get("user");
     let login = user.and_then(|u| u.get("login")).and_then(Value::as_str);
-    match std::env::var("FALLOW_BOT_LOGIN") {
+    match bot_login.ok_or(std::env::VarError::NotPresent) {
         Ok(allow) => {
             let allow = allow.trim();
             return !allow.is_empty() && login == Some(allow);
@@ -2175,12 +2194,16 @@ fn is_github_bot_comment(comment: &Value) -> bool {
 /// Without an explicit login, GitLab's native bot metadata and the identity
 /// returned for the authenticated token are trusted. Setting
 /// `FALLOW_BOT_LOGIN` narrows ownership to that exact username.
-fn is_gitlab_bot_note(note: &Value, authenticated_user: Option<&GitlabAuthenticatedUser>) -> bool {
+fn is_gitlab_bot_note(
+    note: &Value,
+    authenticated_user: Option<&GitlabAuthenticatedUser>,
+    bot_login: Option<&str>,
+) -> bool {
     let author = note.get("author");
     let username = author
         .and_then(|a| a.get("username"))
         .and_then(Value::as_str);
-    match std::env::var("FALLOW_BOT_LOGIN") {
+    match bot_login.ok_or(std::env::VarError::NotPresent) {
         Ok(allow) => {
             let allow = allow.trim();
             return !allow.is_empty() && username == Some(allow);
@@ -2499,79 +2522,74 @@ mod tests {
 
     #[test]
     fn github_bot_check_accepts_bot_user_type() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({
             "user": { "type": "Bot", "login": "github-actions[bot]" },
         });
-        assert!(is_github_bot_comment(&comment));
+        assert!(is_github_bot_comment(&comment, None));
     }
 
     #[test]
     fn github_bot_check_rejects_human_user_type() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({
             "user": { "type": "User", "login": "alice" },
             "body": "<!-- fallow-resolved-fingerprint: abc123 -->",
         });
-        assert!(!is_github_bot_comment(&comment));
+        assert!(!is_github_bot_comment(&comment, None));
     }
 
-    // Serializes the FALLOW_BOT_LOGIN env-mutating tests so the GitHub and
-    // GitLab override cases cannot overwrite each other's value when run in
-    // parallel (which raced and failed on Windows CI).
-    static BOT_LOGIN_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
+    /// The one place the process environment is still read. Every other test
+    /// passes the resolved value, so nothing else in this module can observe a
+    /// mutation from here.
     #[test]
-    #[allow(
-        unsafe_code,
-        reason = "test-only env mutation, serialized via BOT_LOGIN_ENV_LOCK"
-    )]
-    fn github_bot_check_accepts_explicit_login_override() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let comment = serde_json::json!({
-            "user": { "type": "User", "login": "fallow-bot-account" },
-        });
-        // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
+    #[allow(unsafe_code, reason = "the only env-mutating test in this module")]
+    fn resolved_bot_login_reads_the_environment_once() {
+        assert_eq!(resolved_bot_login(), None, "unset by default under test");
+
+        // SAFETY: no other test in this module reads FALLOW_BOT_LOGIN, and the
+        // variable is cleared before returning.
         unsafe {
             std::env::set_var("FALLOW_BOT_LOGIN", "fallow-bot-account");
         }
-        assert!(is_github_bot_comment(&comment));
-        // SAFETY: Restore the process environment after the scoped override.
+        let resolved = resolved_bot_login();
+        // SAFETY: restore the process environment before asserting, so a
+        // failure cannot leak the override into the rest of the run.
         unsafe {
             std::env::remove_var("FALLOW_BOT_LOGIN");
         }
+
+        assert_eq!(resolved.as_deref(), Some("fallow-bot-account"));
+        assert!(is_github_bot_comment(
+            &serde_json::json!({ "user": { "type": "User", "login": "fallow-bot-account" } }),
+            resolved.as_deref()
+        ));
+    }
+
+    #[test]
+    fn github_bot_check_accepts_explicit_login_override() {
+        let comment = serde_json::json!({
+            "user": { "type": "User", "login": "fallow-bot-account" },
+        });
+        assert!(is_github_bot_comment(&comment, Some("fallow-bot-account")));
     }
 
     #[test]
     fn gitlab_bot_check_accepts_system_and_bot_flag() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let system_note = serde_json::json!({ "system": true });
-        assert!(is_gitlab_bot_note(&system_note, None));
+        assert!(is_gitlab_bot_note(&system_note, None, None));
         let bot_author = serde_json::json!({
             "system": false,
             "author": { "bot": true, "username": "project-bot" },
         });
-        assert!(is_gitlab_bot_note(&bot_author, None));
+        assert!(is_gitlab_bot_note(&bot_author, None, None));
     }
 
     #[test]
     fn gitlab_bot_check_rejects_human_author() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let human = serde_json::json!({
             "system": false,
             "author": { "bot": false, "username": "alice" },
         });
-        assert!(!is_gitlab_bot_note(&human, None));
+        assert!(!is_gitlab_bot_note(&human, None, None));
     }
 
     #[test]
@@ -3428,92 +3446,55 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        unsafe_code,
-        reason = "test-only env mutation, serialized via BOT_LOGIN_ENV_LOCK"
-    )]
     fn empty_configured_bot_login_trusts_no_native_bot() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
-        unsafe {
-            std::env::set_var("FALLOW_BOT_LOGIN", "   ");
-        }
-        assert!(!is_github_bot_comment(&serde_json::json!({
-            "user": { "type": "Bot", "login": "foreign[bot]" }
-        })));
+        assert!(!is_github_bot_comment(
+            &serde_json::json!({ "user": { "type": "Bot", "login": "foreign[bot]" } }),
+            Some("   ")
+        ));
         assert!(!is_gitlab_bot_note(
             &serde_json::json!({
                 "system": false,
                 "author": { "bot": true, "username": "foreign-bot" }
             }),
-            None
+            None,
+            Some("   ")
         ));
-        // SAFETY: Restore the process environment after the scoped override.
-        unsafe {
-            std::env::remove_var("FALLOW_BOT_LOGIN");
-        }
     }
 
     // --- is_github_bot_comment: missing branch (line 1323-1331) ---
 
     #[test]
     fn github_bot_check_returns_false_when_no_user_field() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({ "body": "no user" });
-        assert!(!is_github_bot_comment(&comment));
+        assert!(!is_github_bot_comment(&comment, None));
     }
 
     #[test]
     fn github_bot_check_returns_false_when_fallow_bot_login_not_set_and_type_not_bot() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({
             "user": { "type": "User", "login": "someperson" },
         });
-        assert!(!is_github_bot_comment(&comment));
+        assert!(!is_github_bot_comment(&comment, None));
     }
 
     // --- is_gitlab_bot_note: FALLOW_BOT_LOGIN path (lines 1356-1364) ---
 
     #[test]
-    #[allow(
-        unsafe_code,
-        reason = "test-only env mutation, serialized via BOT_LOGIN_ENV_LOCK"
-    )]
     fn gitlab_bot_check_accepts_explicit_login_override() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let note = serde_json::json!({
             "system": false,
             "author": { "bot": false, "username": "fallow-gl-bot" },
         });
-        // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
-        unsafe {
-            std::env::set_var("FALLOW_BOT_LOGIN", "fallow-gl-bot");
-        }
-        assert!(is_gitlab_bot_note(&note, None));
-        // SAFETY: Restore the process environment after the scoped override.
-        unsafe {
-            std::env::remove_var("FALLOW_BOT_LOGIN");
-        }
+        assert!(is_gitlab_bot_note(&note, None, Some("fallow-gl-bot")));
     }
 
     #[test]
     fn gitlab_bot_check_returns_false_when_bot_flag_is_false_and_no_login_override() {
-        let _env = BOT_LOGIN_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let note = serde_json::json!({
             "system": false,
             "author": { "bot": false, "username": "contributor" },
         });
-        assert!(!is_gitlab_bot_note(&note, None));
+        assert!(!is_gitlab_bot_note(&note, None, None));
     }
 
     // --- read_json_response: non-2xx path (lines 1288-1303) ---
