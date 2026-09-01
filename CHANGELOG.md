@@ -19,9 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The map ships six primary lenses (Overview, Unused, Duplication,
   Architecture, Health, Security) with Dependencies, Frameworks, Styling, and
   Feature flags under an adaptive More menu. Health reuses the analysis viz
-  already performed instead of reparsing, and reports churn, hotspots, and
-  ownership as unavailable rather than empty, because viz does not walk git
-  history. Security surfaces static candidates as candidates, never as
+  already performed instead of reparsing, and reports churn, hotspots,
+  ownership, and runtime execution evidence as unavailable rather than empty,
+  because viz does not walk git history and takes no runtime coverage input. Security surfaces static candidates as candidates, never as
   verdicts, and runtime security stays explicitly unavailable without runtime
   evidence. Coverage for the Health lens now follows the same precedence every
   other command uses (flag, then environment, then `health.coverage`) instead

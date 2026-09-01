@@ -580,6 +580,7 @@ mod tests {
             maintainability: availability("files"),
             crap: availability("files"),
             coverage: availability("gaps"),
+            runtime: unavailable("observations"),
             churn: unavailable("files"),
             hotspots: unavailable("files"),
             ownership: unavailable("files"),

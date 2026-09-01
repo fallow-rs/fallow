@@ -82,6 +82,7 @@ const data = (over: Partial<VizData> = {}): VizData => ({
       maintainability: { state: "complete", count: 0, unit: "files" },
       crap: { state: "complete", count: 0, unit: "files" },
       coverage: { state: "complete", count: 0, unit: "gaps" },
+      runtime: { state: "unavailable", count: 0, unit: "observations" },
       churn: { state: "unavailable", count: 0, unit: "files" },
       hotspots: { state: "unavailable", count: 0, unit: "files" },
       ownership: { state: "unavailable", count: 0, unit: "files" },

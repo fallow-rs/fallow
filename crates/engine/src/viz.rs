@@ -51,6 +51,10 @@ const MAX_SECURITY_BLIND_SPOT_SAMPLES: usize = 100;
 const MAX_HEALTH_FILES: usize = 2000;
 /// Edge flag bit: every import of this edge is type-only.
 const EDGE_FLAG_TYPE_ONLY: u32 = 1;
+/// Reason reported by every family that needs runtime evidence viz was not
+/// given. Viz takes no runtime coverage input, so the Health and Security
+/// lenses say so instead of presenting a static-only answer as the whole one.
+const NO_RUNTIME_COVERAGE_REASON: &str = "No runtime coverage input was provided";
 
 /// Everything [`build_viz_data`] needs from one project analysis run.
 pub struct VizBuildInput<'a> {
@@ -284,6 +288,8 @@ pub struct VizHealthCapabilities {
     pub crap: VizAvailability,
     /// Istanbul coverage ingestion.
     pub coverage: VizAvailability,
+    /// Runtime execution evidence, which needs a runtime coverage input.
+    pub runtime: VizAvailability,
     /// Git churn, which needs a history walk viz does not perform.
     pub churn: VizAvailability,
     /// Churn-weighted complexity hotspots, gated on churn.
@@ -1538,7 +1544,7 @@ fn build_security(
         availability: VizAvailability::complete(total, "candidates", truncated),
         runtime_availability: VizAvailability::unavailable(
             "observations",
-            "No runtime coverage input was provided",
+            NO_RUNTIME_COVERAGE_REASON,
         ),
         candidates,
         blind_spot_count: results.security_unresolved_edge_files
@@ -1879,11 +1885,18 @@ fn health_capabilities(report: &HealthReport) -> VizHealthCapabilities {
         || VizAvailability::unavailable("gaps", "Coverage gap analysis did not produce a result"),
         |gaps| VizAvailability::complete(gaps.files.len() + gaps.exports.len(), "gaps", None),
     );
+    let runtime = report.runtime_coverage.as_ref().map_or_else(
+        || VizAvailability::unavailable("observations", NO_RUNTIME_COVERAGE_REASON),
+        |runtime| {
+            VizAvailability::complete(runtime.summary.functions_tracked, "observations", None)
+        },
+    );
     VizHealthCapabilities {
         complexity: VizAvailability::complete(report.findings.len(), "findings", None),
         maintainability: VizAvailability::complete(file_count, "files", None),
         crap: VizAvailability::complete(file_count, "files", None),
         coverage,
+        runtime,
         churn: VizAvailability::disabled("files", "Git history is not loaded by Viz"),
         hotspots: VizAvailability::disabled("files", "Git history is not loaded by Viz"),
         ownership: VizAvailability::disabled("files", "Git history is not loaded by Viz"),
@@ -1896,6 +1909,7 @@ fn unavailable_health_capabilities(reason: &str) -> VizHealthCapabilities {
         maintainability: VizAvailability::unavailable("files", reason),
         crap: VizAvailability::unavailable("files", reason),
         coverage: VizAvailability::unavailable("gaps", reason),
+        runtime: VizAvailability::unavailable("observations", NO_RUNTIME_COVERAGE_REASON),
         churn: VizAvailability::unavailable("files", reason),
         hotspots: VizAvailability::unavailable("files", reason),
         ownership: VizAvailability::unavailable("files", reason),
@@ -3071,6 +3085,28 @@ mod tests {
             "unavailable"
         );
         assert!(value["styling"].get("score").is_none());
+    }
+
+    /// A completed Health run still knows nothing about production execution
+    /// unless a runtime coverage input was supplied. The lens must say that
+    /// instead of letting a complete static answer imply a complete one.
+    #[test]
+    fn health_reports_runtime_evidence_as_unavailable_without_a_runtime_input() {
+        let fx = fixture();
+        let mut data = build_viz_data(&fx.input());
+        apply_health_report(&mut data, &HealthReport::default(), Path::new("/project"));
+        let value = serde_json::to_value(&data).expect("viz data serializes");
+
+        assert_eq!(value["health"]["availability"]["state"], "complete");
+        let runtime = &value["health"]["capabilities"]["runtime"];
+        assert_eq!(runtime["state"], "unavailable");
+        assert_eq!(runtime["unit"], "observations");
+        assert_eq!(runtime["reason"], NO_RUNTIME_COVERAGE_REASON);
+        assert_eq!(runtime["count"], 0);
+        assert_eq!(
+            value["security"]["runtime_availability"]["reason"],
+            NO_RUNTIME_COVERAGE_REASON
+        );
     }
 
     #[test]

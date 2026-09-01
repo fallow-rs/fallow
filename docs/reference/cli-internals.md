@@ -123,7 +123,10 @@ Invariants:
   complete state licenses reading the count.
 - The Health lens reuses the retained artifacts instead of reparsing. Churn,
   hotspots, and ownership need a git-history walk viz does not perform, so
-  they report as unavailable rather than as empty.
+  they report as unavailable rather than as empty. Runtime evidence needs a
+  runtime coverage input viz does not take, so the `runtime` capability
+  reports unavailable with that reason instead of letting a complete static
+  answer read as a complete one.
 - Coverage for the Health lens resolves through the shared precedence order
   described under the audit invariants, reusing the config viz already loaded.
   Viz has no coverage flags of its own, and auto-detection stays in the engine.

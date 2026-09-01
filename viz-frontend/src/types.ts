@@ -83,6 +83,7 @@ export interface VizHealthCapabilities {
   maintainability: VizAvailability;
   crap: VizAvailability;
   coverage: VizAvailability;
+  runtime: VizAvailability;
   churn: VizAvailability;
   hotspots: VizAvailability;
   ownership: VizAvailability;
