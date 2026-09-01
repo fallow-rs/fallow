@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788262279239,
+  "lastUpdate": 1788262831604,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "65c0f80a2e29e607eda9eafb5f9457f92c3b3127",
-          "message": "perf(benchmarks): track circular dependency command",
-          "timestamp": "2026-08-19T01:42:41+02:00",
-          "tree_id": "ba73445056731c31c7ea2a97760c02a5aaef20b6",
-          "url": "https://github.com/fallow-rs/fallow/commit/65c0f80a2e29e607eda9eafb5f9457f92c3b3127"
-        },
-        "date": 1787097135125,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c3c701f6783ac5798cd70fcd0aa47cdd3e812e49"
         },
         "date": 1788262275680,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea",
+          "message": "fix(cli): keep syntactic findings when type-aware analysis cannot run (#2514)\n\nCloses #2499.\n\nThe semantic pass has a fixed two-minute ceiling, and a project large enough to\nreach it lost the entire report: every CLI surface exited 2 regardless of\ntypeAware.require, whose default is best-effort. The LSP already handled the\nidentical failure correctly, so the same condition produced a warning through\none surface and a hard error through the other.\n\nSyntactic analysis reports a superset and the semantic pass only removes\ncandidates it confirms are used, so continuing is the conservative outcome. check,\nwatch, health and both combined sites now warn and finish with the syntactic\nfindings, recording the reason in _meta.type_aware.warnings for CI consumers.\n\nfallow fix is the deliberate exception and still stops. It removes code, and the\nextra entries in the unrefined set are precisely the ones a working semantic pass\nwould have proven live, so widening a deletion is the opposite of conservative.\nIts error now names the way out.\n\nSix call sites, not the five originally scoped: run_combined_health has a second\none reached by a bare fallow --only health.\n\nThe CLI's own diagnostic was already being discarded. Under --format json it goes\nto stdout while the extension read stderr only, which is why this report and #2284\nboth say just \"code 2\". The extension now recovers it, says when results came from\na semantic pass that did not run, and exposes the ceiling as a setting.",
+          "timestamp": "2026-09-01T13:33:19+02:00",
+          "tree_id": "c74fe3b9cb37ed66138b09b7da2141488e2177ef",
+          "url": "https://github.com/fallow-rs/fallow/commit/6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea"
+        },
+        "date": 1788262828022,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
