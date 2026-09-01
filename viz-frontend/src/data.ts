@@ -187,8 +187,8 @@ const actionViews = (value: unknown): FindingActionView[] => {
   if (Array.isArray(raw)) {
     return [
       ...direct,
-      ...raw.flatMap((value): FindingActionView[] => {
-        const action = asRecord(value);
+      ...raw.flatMap((entry): FindingActionView[] => {
+        const action = asRecord(entry);
         if (!action) return [];
         const command = stringValue(action, "command", "value");
         const description = stringValue(action, "description", "note");
@@ -202,8 +202,8 @@ const actionViews = (value: unknown): FindingActionView[] => {
   if (!actions) return direct;
   return [
     ...direct,
-    ...Object.entries(actions).flatMap(([label, value]): FindingActionView[] =>
-      typeof value === "string" ? [{ label: humanLabel(label), command: value }] : [],
+    ...Object.entries(actions).flatMap(([label, command]): FindingActionView[] =>
+      typeof command === "string" ? [{ label: humanLabel(label), command }] : [],
     ),
   ];
 };
