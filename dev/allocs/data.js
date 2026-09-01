@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788253133440,
+  "lastUpdate": 1788257396519,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "45fd28766199acb1f939f6862274a37aad12770b",
-          "message": "chore: release v3.16.0",
-          "timestamp": "2026-08-13T21:13:19+02:00",
-          "tree_id": "75fc52ec7f7b8ff5a32073a0c7f8f8145dd2f75a",
-          "url": "https://github.com/fallow-rs/fallow/commit/45fd28766199acb1f939f6862274a37aad12770b"
-        },
-        "date": 1786648677752,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9755307,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48522,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1018706,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7270,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8418,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "05374a4d878f73f0b42337fe417b985d7732ced3",
+          "message": "fix(cli): stop mutating the process environment from tests (#2510)\n\nCloses #2494.\n\ncrates/cli and crates/mcp tests called std::env::set_var / remove_var from inside\ntest functions. The harness runs tests as parallel threads in one process, so\nthose calls mutated state other threads were concurrently reading.\n\nThe issue filed this on soundness grounds with no claim it was breaking anything.\nIt was: crates/mcp links its unit tests and its end-to-end tests into one binary,\nso one test removed and repointed FALLOW_BIN while concurrent end-to-end tests\nread that same variable to locate the binary they spawn, and the coverage\nworkflow sets it for the whole workspace run.\n\nEvery environment read is now a thin one-line wrapper delegating to a pure inner\nfunction the test drives, following the pattern established for #2368.\nFALLOW_BOT_LOGIN needed a tri-state rather than an Option, because its three\nreaders distinguish set, set-but-not-unicode, and absent, and one reader is\nstricter than the other two. Semantics are byte-identical.\n\nA guard test walks the workspace and fails on a new mutation, matching both the\npath form and the call form so a glob import cannot slip past it.",
+          "timestamp": "2026-09-01T12:03:02+02:00",
+          "tree_id": "f570d80e28c88e31fd0399df4f2fad13325aa9bf",
+          "url": "https://github.com/fallow-rs/fallow/commit/05374a4d878f73f0b42337fe417b985d7732ced3"
+        },
+        "date": 1788257392702,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9723195,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49352,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1172476,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8390,
             "unit": "allocations"
           }
         ]
