@@ -192,6 +192,12 @@ fn dep_in_subset(subset: &crate::health::SubsetFilter<'_>, dep_path: &std::path:
 /// Aggregate complexity totals from a parsed module.
 ///
 /// Returns `(total_cyclomatic, total_cognitive, function_count, lines)`.
+///
+/// Every unit counts, including the synthetic `<module>` unit that carries the
+/// file's module-scope decision points. `function_count` therefore counts a
+/// non-function unit on files that branch outside every function, which is the
+/// point: complexity density measured against a total that skipped module
+/// scope understated the file.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "line count is bounded by source file size"
@@ -424,8 +430,14 @@ fn compute_crap_scores_istanbul(
         // Synthetic template-family units carry no measurable coverage (an
         // Istanbul fnMap can never contain them), so they are excluded from
         // the CRAP dimension entirely: no per-function entry, no max /
-        // above-threshold contribution, no match-statistics slot.
-        if fallow_types::extract::is_synthetic_template_unit(&f.name) {
+        // above-threshold contribution, no match-statistics slot. The
+        // module-scope unit leaves for the same reason plus one more: it has no
+        // fnMap identity to match, so counting it would score every branching
+        // file as one more uncovered high-CRAP unit and drag the reported
+        // Istanbul match rate down.
+        if fallow_types::extract::is_synthetic_template_unit(&f.name)
+            || fallow_types::extract::is_synthetic_module_unit(&f.name)
+        {
             continue;
         }
         total += 1;
@@ -549,7 +561,10 @@ fn compute_crap_scores_estimated(
         // Template-family units leave the CRAP dimension: their name never
         // appears in `test_referenced_exports`, so the estimate could only
         // ever restate the file's reachability as a disguised cyclomatic gate.
-        if fallow_types::extract::is_synthetic_template_unit(&f.name) {
+        // The module-scope unit is not an export either, so it leaves too.
+        if fallow_types::extract::is_synthetic_template_unit(&f.name)
+            || fallow_types::extract::is_synthetic_module_unit(&f.name)
+        {
             continue;
         }
         let cc = f64::from(f.cyclomatic);
@@ -2874,14 +2889,19 @@ fn collect_top_complex_fns(
         let Some(path) = file_paths.get(&module.file_id) else {
             continue;
         };
+        // The module-scope unit is excluded: this list feeds the refactoring
+        // target's evidence copy, which would otherwise render
+        // "<module> has cognitive complexity 12" next to advice about
+        // extracting helpers.
         let mut funcs: Vec<(String, u32, u16)> = module
             .complexity
             .iter()
+            .filter(|f| !fallow_types::extract::is_synthetic_module_unit(&f.name))
             .map(|f| (f.name.clone(), f.line, f.cognitive))
             .collect();
         funcs.sort_by_key(|f| std::cmp::Reverse(f.2));
         funcs.truncate(3);
-        if funcs[0].2 > 0 {
+        if funcs.first().is_some_and(|worst| worst.2 > 0) {
             top_complex_fns.insert((*path).clone(), funcs);
         }
     }

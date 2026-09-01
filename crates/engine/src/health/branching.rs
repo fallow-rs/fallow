@@ -23,6 +23,10 @@ pub type BranchingByFile = FxHashMap<PathBuf, FileBranching>;
 /// Files whose module holds no units are omitted rather than recorded as zero:
 /// a file with no functions contributes nothing to either term, and omitting it
 /// keeps the payload proportional to the code that has units.
+///
+/// A file whose only unit is the synthetic `<module>` unit is included. Its
+/// module scope is the only place it branches, and that branching is exactly
+/// what these totals exist to conserve.
 #[must_use]
 pub fn branching_by_file(files: &[DiscoveredFile], modules: &[ModuleInfo]) -> BranchingByFile {
     let mut by_file = BranchingByFile::default();
@@ -129,6 +133,21 @@ mod tests {
         assert!(
             branching_by_file(&files, &modules).is_empty(),
             "a synthetic template unit is excluded, so the file has nothing to report"
+        );
+    }
+
+    #[test]
+    fn reports_a_module_whose_only_unit_is_module_scope() {
+        let files = vec![file(0, "/p/config.ts")];
+        let modules = vec![module(0, vec![unit("<module>", 3, 2)])];
+
+        let totals = branching_by_file(&files, &modules)[&PathBuf::from("/p/config.ts")];
+
+        assert_eq!(totals.branch_points, 2, "module-scope branching is counted");
+        assert_eq!(totals.functions, 1);
+        assert!(
+            !totals.has_synthetic_units,
+            "the module unit is not a template unit and excludes nothing"
         );
     }
 

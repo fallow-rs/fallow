@@ -64,6 +64,10 @@ pub struct AnalysisCounts {
     pub(crate) total_deps: usize,
 }
 
+/// Every unit's cyclomatic score, sorted, feeding the average, the critical
+/// share, and p90. The synthetic module-scope unit is included: its decision
+/// points are real branching, and leaving them out is what let a file's average
+/// read low while its top level was a guard ladder.
 fn collect_sorted_cyclomatic(input: &VitalSignsInput<'_>) -> Vec<u16> {
     let mut values: Vec<u16> = input
         .selected_modules()
@@ -152,8 +156,18 @@ fn selected_module_metrics(input: &VitalSignsInput<'_>) -> SelectedModuleMetrics
 
     for module in input.selected_modules() {
         total_loc += module.line_offsets.len() as u64;
-        line_counts.extend(module.complexity.iter().map(|c| c.line_count));
-        param_counts.extend(module.complexity.iter().map(|c| c.param_count));
+        // The synthetic module-scope unit is excluded from both distributions.
+        // It has no parameter list, and its size is the distance between its
+        // first and last decision point rather than a body anyone can shorten,
+        // so it is not a refactoring signal in the unit-size profile.
+        let units = module
+            .complexity
+            .iter()
+            .filter(|c| !fallow_types::extract::is_synthetic_module_unit(&c.name));
+        for unit in units {
+            line_counts.push(unit.line_count);
+            param_counts.push(unit.param_count);
+        }
     }
 
     SelectedModuleMetrics {

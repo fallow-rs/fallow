@@ -338,6 +338,12 @@ pub fn collect_inline_complexity(
         }
 
         for function in &module.complexity {
+            // The module-scope unit is aggregate-only and never becomes a
+            // finding, so it gets no code lens either: a permanent lens at the
+            // top of every branching file is noise, not a refactoring cue.
+            if fallow_types::extract::is_synthetic_module_unit(&function.name) {
+                continue;
+            }
             if fallow_types::suppress::is_suppressed(
                 &module.suppressions,
                 function.line,

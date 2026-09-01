@@ -88,6 +88,15 @@ pub(super) fn collect_findings_with_resolver(
         // files (empty `hook_uses`).
         let hook_profiles = react_hooks::build_module_hook_profiles(module);
         for (fc_idx, fc) in module.complexity.iter().enumerate() {
+            // The synthetic module-scope unit is aggregate-only: it feeds vital
+            // signs, file scores, and branching conservation, and never becomes
+            // a finding. "Extract a helper" is not advice that applies to
+            // module scope, and emitting a finding would churn every saved
+            // baseline for advice we cannot give. Skipped before
+            // `total_functions` too, because a module is not a function.
+            if fallow_types::extract::is_synthetic_module_unit(&fc.name) {
+                continue;
+            }
             total_functions += 1;
             if crate::suppress::is_suppressed(
                 &module.suppressions,
@@ -423,6 +432,13 @@ fn build_complexity_by_position<'a>(
         };
         let entry = complexity_by_pos.entry(path.as_path()).or_default();
         for fc in &module.complexity {
+            // The module unit produces no finding, so an entry here could only
+            // ever shadow a real unit that happens to start at the same
+            // position (a module-scope construct anchoring on the same line and
+            // column as a function).
+            if fallow_types::extract::is_synthetic_module_unit(&fc.name) {
+                continue;
+            }
             entry.insert((fc.line, fc.col), fc);
         }
     }

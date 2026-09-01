@@ -203,9 +203,14 @@ fn component_template_owner(
     }
 }
 
+/// Whether a finding is a candidate for the class half of a `<component>`
+/// rollup: a real method on a `.ts`-family component file. Every synthetic
+/// name is rejected, including the module-scope unit, which is aggregate-only
+/// and must never become the "worst class method" a rollup is anchored at.
 fn is_component_class_finding(finding: &ComplexityViolation) -> bool {
     finding.name != COMPONENT_ROLLUP_NAME
         && !fallow_types::extract::is_synthetic_template_unit(&finding.name)
+        && !fallow_types::extract::is_synthetic_module_unit(&finding.name)
         && finding
             .path
             .extension()

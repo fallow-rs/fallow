@@ -55,10 +55,10 @@ pub enum CognitiveAttribution {
     /// Nesting depth was reset, which extraction does for free. No branching
     /// left.
     NestingReset,
-    /// The branch-point count fell. Deliberately a statement about the count
-    /// and not about the program: increments outside every function are
-    /// invisible here, which is the same reason there is no "branching
-    /// removed" verdict.
+    /// The branch-point count fell. Still a statement about the count and not
+    /// about the program: decision points are counted per file, including at
+    /// module scope, but a branch can leave one file for another that the
+    /// changeset did not touch, so there is no "branching removed" verdict.
     FewerBranchPoints,
     /// Both moved, or neither did. The second case is cognitive falling while
     /// branching and nesting both held, where naming either cause would assert

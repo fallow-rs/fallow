@@ -865,6 +865,10 @@ fn build_static_files(
         let functions = module
             .complexity
             .iter()
+            // The synthetic module-scope unit has no runtime identity: it would
+            // be a phantom function per file that never matches a runtime
+            // sample and only depresses the reported match rate.
+            .filter(|function| !fallow_types::extract::is_synthetic_module_unit(&function.name))
             .map(|function| {
                 mark_ambiguous_function_line(&mut locations, path, &function.name, function.line);
                 build_static_function(&BuildStaticFunctionInput {

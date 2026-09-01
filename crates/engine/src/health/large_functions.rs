@@ -52,6 +52,12 @@ pub(super) fn collect_large_functions(
             continue;
         }
         for func in &module.complexity {
+            // The module-scope unit is sized by its own contributions, not by
+            // the file, and there is no helper to extract it into. It never
+            // appears in the large-function list.
+            if fallow_types::extract::is_synthetic_module_unit(&func.name) {
+                continue;
+            }
             let max_unit_size = input
                 .thresholds
                 .effective_max_unit_size(relative, func.name.as_str());
