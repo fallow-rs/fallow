@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788253033381,
+  "lastUpdate": 1788257538562,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c64f703114d452f52077a3a1737696a22a342ec9",
-          "message": "perf(graph): reserve named export index capacity",
-          "timestamp": "2026-08-13T23:53:47+02:00",
-          "tree_id": "bdbad5be9280f810e1c0cf7527b6a71fc6d80ef4",
-          "url": "https://github.com/fallow-rs/fallow/commit/c64f703114d452f52077a3a1737696a22a342ec9"
-        },
-        "date": 1786658366303,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 454,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1225,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/79085fb4e009ff6768ee02eeb1139857231998b8"
         },
         "date": 1788253030488,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1278,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "05374a4d878f73f0b42337fe417b985d7732ced3",
+          "message": "fix(cli): stop mutating the process environment from tests (#2510)\n\nCloses #2494.\n\ncrates/cli and crates/mcp tests called std::env::set_var / remove_var from inside\ntest functions. The harness runs tests as parallel threads in one process, so\nthose calls mutated state other threads were concurrently reading.\n\nThe issue filed this on soundness grounds with no claim it was breaking anything.\nIt was: crates/mcp links its unit tests and its end-to-end tests into one binary,\nso one test removed and repointed FALLOW_BIN while concurrent end-to-end tests\nread that same variable to locate the binary they spawn, and the coverage\nworkflow sets it for the whole workspace run.\n\nEvery environment read is now a thin one-line wrapper delegating to a pure inner\nfunction the test drives, following the pattern established for #2368.\nFALLOW_BOT_LOGIN needed a tri-state rather than an Option, because its three\nreaders distinguish set, set-but-not-unicode, and absent, and one reader is\nstricter than the other two. Semantics are byte-identical.\n\nA guard test walks the workspace and fails on a new mutation, matching both the\npath form and the call form so a glob import cannot slip past it.",
+          "timestamp": "2026-09-01T12:03:02+02:00",
+          "tree_id": "f570d80e28c88e31fd0399df4f2fad13325aa9bf",
+          "url": "https://github.com/fallow-rs/fallow/commit/05374a4d878f73f0b42337fe417b985d7732ced3"
+        },
+        "date": 1788257534218,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
