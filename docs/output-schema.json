@@ -2894,7 +2894,7 @@
         },
         "functions_analyzed": {
           "type": "integer",
-          "description": "Functions scored across the analyzed files."
+          "description": "Real functions scored across the analyzed files. This counts functions\nonly, so it is smaller than the sum of `file_scores[].function_count`,\nwhich also counts the synthetic per-file units (`<module>` for\nmodule-scope branching, `<template>` and `<snippet:NAME>` for component\ntemplates). The complexity aggregates below, including\n`average_cyclomatic` and `p90_cyclomatic`, are computed over that larger\npopulation rather than over this count."
         },
         "functions_above_threshold": {
           "type": "integer",

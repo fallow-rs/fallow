@@ -5702,7 +5702,13 @@ export interface HealthSummary {
  */
 files_analyzed: number
 /**
- * Functions scored across the analyzed files.
+ * Real functions scored across the analyzed files. This counts functions
+ * only, so it is smaller than the sum of `file_scores[].function_count`,
+ * which also counts the synthetic per-file units (`<module>` for
+ * module-scope branching, `<template>` and `<snippet:NAME>` for component
+ * templates). The complexity aggregates below, including
+ * `average_cyclomatic` and `p90_cyclomatic`, are computed over that larger
+ * population rather than over this count.
  */
 functions_analyzed: number
 /**
