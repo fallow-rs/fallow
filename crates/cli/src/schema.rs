@@ -715,6 +715,10 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "Enable or disable TypeScript semantic (type-aware) analysis for the run (true/false/1/0/yes/no/on/off). Precedence: --type-aware/--no-type-aware CLI flags, then FALLOW_TYPE_AWARE, then the audit.typeAware config field, then typeAware.enabled.",
     ),
     (
+        "FALLOW_TYPE_AWARE_TIMEOUT_SECS",
+        "Wall clock in seconds allowed for one TypeScript semantic sidecar request (default 120; unset, 0, or a non-numeric value keeps the default). Raise it for very large TypeScript programs, where a semantic query scans the whole program.",
+    ),
+    (
         "FALLOW_TYPE_AWARE_BIN",
         "Trusted executable override for the TypeScript semantic refinement sidecar used by dead-code --type-aware. Relative paths resolve from the caller's working directory before --root is applied; project node_modules and PATH are intentionally not searched. Default: sibling of the active Fallow executable.",
     ),

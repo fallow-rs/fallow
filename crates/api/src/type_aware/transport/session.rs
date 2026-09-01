@@ -244,7 +244,7 @@ impl TypeAwareSession {
                     "failed to write persistent type-aware request: {error}"
                 ))
             })?;
-        let timeout = SidecarTimeout::start(process.terminator.clone(), SIDECAR_TIMEOUT);
+        let timeout = SidecarTimeout::start(process.terminator.clone(), sidecar_timeout());
         let mut response_bytes = Vec::new();
         process
             .stdout

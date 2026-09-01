@@ -199,7 +199,13 @@ or `installed-sibling` (found next to the active executable). Requests, response
 candidate counts, project counts, and execution time are bounded. The child
 process receives a minimal environment. Relative, missing, and project-local
 search-path entries are removed before its Node interpreter is resolved. Its
-complete process group is terminated on timeout.
+complete process group is terminated on timeout. One request may take up to two
+minutes, raised or lowered with `FALLOW_TYPE_AWARE_TIMEOUT_SECS`: a semantic
+query costs a whole-program scan, so a very large TypeScript program can need
+more time than the default allows. When the limit is reached and
+`typeAware.require` is `best-effort`, the run reports the conservative syntactic
+findings and records the reason in `_meta.type_aware.warnings` instead of
+failing; `complete` still fails the run.
 
 ## Output and integration contract
 

@@ -41,7 +41,8 @@ pub use session::{TypeAwareFileChanges, TypeAwareSession};
 
 #[cfg(windows)]
 const SIDECAR_SCRIPT_ENV: &str = "FALLOW_TYPE_AWARE_SCRIPT";
-const SIDECAR_TIMEOUT: Duration = Duration::from_mins(2);
+const SIDECAR_TIMEOUT_ENV: &str = "FALLOW_TYPE_AWARE_TIMEOUT_SECS";
+const DEFAULT_SIDECAR_TIMEOUT_SECS: u64 = 120;
 const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SEMANTIC_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
@@ -55,6 +56,27 @@ static ACTIVE_SIDECARS: OnceLock<Mutex<BTreeMap<u64, fallow_process::ProcessTree
 
 fn active_sidecars() -> &'static Mutex<BTreeMap<u64, fallow_process::ProcessTreeTerminator>> {
     ACTIVE_SIDECARS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+/// Wall clock allowed for one sidecar request, overridable with
+/// `FALLOW_TYPE_AWARE_TIMEOUT_SECS`.
+///
+/// The cost of a semantic query is a whole-program scan, so the ceiling that
+/// suits a typical project is not the ceiling a very large TypeScript program
+/// needs, especially on Windows where the sidecar transport is a named pipe.
+fn sidecar_timeout() -> Duration {
+    sidecar_timeout_from(non_empty_env(SIDECAR_TIMEOUT_ENV).as_deref())
+}
+
+/// Parse a raw `FALLOW_TYPE_AWARE_TIMEOUT_SECS` value, falling back to the
+/// default for absent, zero, or non-numeric input. Pure so the parsing branches
+/// stay testable without mutating the process env.
+fn sidecar_timeout_from(raw: Option<&str>) -> Duration {
+    raw.and_then(|value| value.parse::<u64>().ok().filter(|&secs| secs > 0))
+        .map_or(
+            Duration::from_secs(DEFAULT_SIDECAR_TIMEOUT_SECS),
+            Duration::from_secs,
+        )
 }
 
 /// Terminate every active type-aware sidecar started by this process.
@@ -206,7 +228,7 @@ pub fn status(root: &Path) -> TypeAwareStatus {
         &sidecar,
         root,
         &request,
-        SIDECAR_TIMEOUT,
+        sidecar_timeout(),
         MAX_RESPONSE_BYTES,
     ) {
         Ok(response)
@@ -292,7 +314,7 @@ where
         &sidecar,
         &root,
         request,
-        SIDECAR_TIMEOUT,
+        sidecar_timeout(),
         MAX_SEMANTIC_RESPONSE_BYTES,
     )
     .map_err(TypeAwareError)
@@ -309,6 +331,18 @@ mod tests {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+    }
+
+    #[test]
+    fn sidecar_timeout_honors_a_valid_override_and_falls_back_otherwise() {
+        let default = Duration::from_secs(DEFAULT_SIDECAR_TIMEOUT_SECS);
+        assert_eq!(sidecar_timeout_from(Some("600")), Duration::from_mins(10));
+        assert_eq!(sidecar_timeout_from(None), default);
+        // Zero would mean "no time at all"; treat it as unset, like the other
+        // timeout overrides in this repository.
+        assert_eq!(sidecar_timeout_from(Some("0")), default);
+        assert_eq!(sidecar_timeout_from(Some("not-a-number")), default);
+        assert_eq!(sidecar_timeout_from(Some("-30")), default);
     }
 
     #[test]

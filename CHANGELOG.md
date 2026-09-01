@@ -105,6 +105,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A type-aware pass that cannot finish no longer takes the whole run with it**
+  (Closes [#2499](https://github.com/fallow-rs/fallow/issues/2499)). The
+  semantic pass has a fixed two-minute ceiling, and a project large enough to
+  reach it lost the entire report: every CLI surface exited 2 regardless of
+  `typeAware.require`, whose default is `best-effort`. Syntactic analysis
+  reports a superset of the refined findings and the semantic pass only removes
+  candidates it confirms are used, so continuing is the conservative outcome,
+  not a laxer one. `check`, `fix`, `watch`, `health` and the combined run now
+  warn and finish with the syntactic findings, recording the reason in
+  `_meta.type_aware.warnings` and `warning_count` for CI consumers.
+  `typeAware.require = complete` still exits 2, unchanged. The ceiling itself is
+  now settable with `FALLOW_TYPE_AWARE_TIMEOUT_SECS`, because a semantic query
+  costs a whole-program scan and a very large TypeScript program needs more than
+  two minutes of it. This makes the run complete and say what happened; it does
+  not make the semantic pass fast enough to finish on a very large project on
+  Windows, where the sidecar transport is a named pipe. The VS Code extension
+  also reads the CLI's own diagnostic now: under `--format json` that message
+  goes to stdout, and the analysis path was reporting only "exited with code 2".
+  Thanks [@VariableVince](https://github.com/VariableVince) for the report.
+
 - **Two audits running at once no longer fail with a base worktree that
   "already exists".** The temporary base view was named from the process id
   plus a wall-clock reading. That reading is not monotonic and repeats across
