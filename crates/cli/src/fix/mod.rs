@@ -19,6 +19,22 @@ pub use fallow_config::is_config_fixable;
 
 use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
 
+/// Compose the hard error for a `fix` run whose type-aware pass could not run.
+///
+/// `fix` is the one surface that still stops here, so it is also the one place
+/// a user can get stuck. The failure alone does not say that: it names neither
+/// the ceiling that most often causes it nor the flag that continues without
+/// semantic evidence. Both belong in the message, the way the transport error
+/// carries its own install line.
+fn type_aware_failure_message(error: &str) -> String {
+    format!(
+        "Type-aware analysis failed: {error}. Raise the per-request ceiling with \
+         FALLOW_TYPE_AWARE_TIMEOUT_SECS (seconds, default 120) when the pass ran out of time, \
+         or rerun with --no-type-aware to fix without semantic evidence, which removes more \
+         because nothing confirmed the extra findings are unused."
+    )
+}
+
 fn run_analyze(
     config: &fallow_config::ResolvedConfig,
     output: OutputFormat,
@@ -58,7 +74,7 @@ fn run_analyze(
             // the deletion.
             Err(error) => {
                 return Err(crate::error::emit_error(
-                    &format!("Type-aware analysis failed: {error}"),
+                    &type_aware_failure_message(&error.to_string()),
                     2,
                     output,
                 ));
@@ -835,5 +851,23 @@ mod tests {
 
         assert_eq!(fixes[0]["applied"], false);
         assert_eq!(fixes[1]["applied"], false);
+    }
+
+    #[test]
+    fn type_aware_failure_names_both_ways_forward() {
+        let message = type_aware_failure_message("sidecar timed out after 120s");
+
+        assert!(
+            message.starts_with("Type-aware analysis failed: sidecar timed out after 120s"),
+            "the original failure must stay first: {message}"
+        );
+        assert!(
+            message.contains("FALLOW_TYPE_AWARE_TIMEOUT_SECS"),
+            "the ceiling is the usual cause, so name the knob: {message}"
+        );
+        assert!(
+            message.contains("--no-type-aware"),
+            "the user must know fix can run without semantic evidence: {message}"
+        );
     }
 }
