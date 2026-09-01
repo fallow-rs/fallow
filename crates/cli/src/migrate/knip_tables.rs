@@ -304,7 +304,26 @@ pub(super) const KNIP_UNSUPPORTED_PLUGIN_KEYS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustc_hash::FxHashSet;
+    use rustc_hash::{FxHashMap, FxHashSet};
+
+    /// Knip plugin keys whose spelling differs from the built-in fallow plugin
+    /// that covers the same tool. Every other entry of `KNIP_PLUGIN_KEYS` has
+    /// to match a registered plugin name exactly, so a sixth spelling
+    /// difference fails `plugin_keys_resolve_to_builtin_plugins` until it is
+    /// declared here.
+    const KNIP_PLUGIN_KEY_ALIASES: &[(&str, &str)] = &[
+        ("electron-vite", "electron"),
+        ("nest", "nestjs"),
+        ("next", "nextjs"),
+        ("panda-css", "pandacss"),
+        ("webdriver-io", "webdriverio"),
+    ];
+
+    fn builtin_plugins() -> FxHashSet<&'static str> {
+        fallow_engine::plugins::registry::builtin_plugin_names()
+            .into_iter()
+            .collect()
+    }
 
     #[test]
     fn rule_map_has_no_empty_keys_or_values() {
@@ -543,6 +562,53 @@ mod tests {
             !KNIP_PLUGIN_KEYS.contains(&"marko"),
             "KNIP_PLUGIN_KEYS should not claim to cover `marko`"
         );
+    }
+
+    /// The claim `KNIP_PLUGIN_KEYS` makes is that fallow auto-detects the tool,
+    /// so every key has to resolve to a plugin the built-in registry actually
+    /// registers. Renaming or removing a plugin without moving its knip key
+    /// fails here instead of shipping a migration that promises detection
+    /// fallow no longer performs.
+    #[test]
+    fn plugin_keys_resolve_to_builtin_plugins() {
+        let builtin = builtin_plugins();
+        let aliases: FxHashMap<&str, &str> = KNIP_PLUGIN_KEY_ALIASES.iter().copied().collect();
+        for key in KNIP_PLUGIN_KEYS {
+            let plugin = aliases.get(key).copied().unwrap_or(key);
+            assert!(
+                builtin.contains(plugin),
+                "KNIP_PLUGIN_KEYS entry `{key}` resolves to plugin `{plugin}`, which the built-in registry does not register; move the key to KNIP_UNSUPPORTED_PLUGIN_KEYS or declare its alias in KNIP_PLUGIN_KEY_ALIASES"
+            );
+        }
+    }
+
+    /// The other half of the same invariant: a key parked as unsupported must
+    /// not name a plugin fallow does register, or the migration understates
+    /// what fallow covers.
+    #[test]
+    fn unsupported_plugin_keys_name_no_builtin_plugin() {
+        let builtin = builtin_plugins();
+        for key in KNIP_UNSUPPORTED_PLUGIN_KEYS {
+            assert!(
+                !builtin.contains(key),
+                "KNIP_UNSUPPORTED_PLUGIN_KEYS entry `{key}` names a registered built-in plugin; move it to KNIP_PLUGIN_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_key_aliases_are_used_and_needed() {
+        let builtin = builtin_plugins();
+        for (key, plugin) in KNIP_PLUGIN_KEY_ALIASES {
+            assert!(
+                KNIP_PLUGIN_KEYS.contains(key),
+                "KNIP_PLUGIN_KEY_ALIASES declares `{key}`, which is not a knip plugin key"
+            );
+            assert!(
+                !builtin.contains(key),
+                "KNIP_PLUGIN_KEY_ALIASES entry `{key}` is itself a built-in plugin name; the alias to `{plugin}` is not needed"
+            );
+        }
     }
 
     #[test]
