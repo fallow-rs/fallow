@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788274831041,
+  "lastUpdate": 1788277807288,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d52e91244c091b25b097d15050635516cc3d0c28",
-          "message": "perf(benchmarks): track suppression inventory",
-          "timestamp": "2026-08-19T03:38:28+02:00",
-          "tree_id": "ae26aa0d130443e83e0b96cdc5d4280477f3f00f",
-          "url": "https://github.com/fallow-rs/fallow/commit/d52e91244c091b25b097d15050635516cc3d0c28"
-        },
-        "date": 1787103983551,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0beb9fb4ae56c799fca0088b7e167430d815254d"
         },
         "date": 1788274826472,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "edb39549d14f356c5463763339ef09d47bf0ecca",
+          "message": "docs(changelog): credit React Native Storybook, the lefthook fix, and the version-surface gate\n\nThe React Native Storybook feature landed with no entry at all, the lefthook\nfix credited its issue but not the contributor who wrote it, and the\nversion-surface drift gate closed an issue without a line.",
+          "timestamp": "2026-09-01T17:39:45+02:00",
+          "tree_id": "cc8187f5e470f27b175796bf73e0f2ec30b350f1",
+          "url": "https://github.com/fallow-rs/fallow/commit/edb39549d14f356c5463763339ef09d47bf0ecca"
+        },
+        "date": 1788277803308,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
