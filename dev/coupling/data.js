@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788274639941,
+  "lastUpdate": 1788277328034,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "jernej.barbaric@gmail.com",
-            "name": "Jerc92",
-            "username": "Jerc92"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "78632bbbada683198be1cc47e1ea9023c7c8cebc",
-          "message": "feat(ci): render type-aware feedback from saved results\n\n* feat(ci): render type-aware feedback from saved results\n\n* fix(ci): harden saved report rendering\n\n---------\n\nCo-authored-by: Jernej Barbaric <jernej.barbaric@login5.org>\nCo-authored-by: Bart Waardenburg <bart@waardenburg.dev>",
-          "timestamp": "2026-08-16T18:20:58Z",
-          "tree_id": "b5d9359e208820c8c0ff7ecb0ee38be2d3824e5b",
-          "url": "https://github.com/fallow-rs/fallow/commit/78632bbbada683198be1cc47e1ea9023c7c8cebc"
-        },
-        "date": 1786904718569,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 455,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1230,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0beb9fb4ae56c799fca0088b7e167430d815254d"
         },
         "date": 1788274635013,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1279,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4b0e6ab9a37ee22d70b9d7986288e6f2a821e63",
+          "message": "docs(config): stop the rule-name guard claiming a check it does not make (#2536)\n\nKNOWN_RULE_NAMES drives the typo detector for user configs. Its doc comment said\nthe known_rule_names_count_matches_struct test fails when the lists drift. That\ntest asserts a length literal and never mentions RulesConfig, so adding a rule to\nthe struct and forgetting the list leaves every test green while the new rule\nname warns as an unknown key in real configs.\n\nNothing is drifted today; the only absent field is serde(skip) bookkeeping and\ncorrectly excluded.\n\nA real pin needs the provenance of all 98 entries, because the list also covers\nnames no RulesConfig field produces, so a field-count comparison would not even\nbe correct. That is deliberately not attempted here. The false assurance is\nseparable and is what misleads: the test is renamed to what it does, and both it\nand the constant now state what is and is not enforced. The guard is unchanged.\n\nThe four sibling guards whose names promise a comparison were checked and all\ngenuinely compare sources, so this was an isolated case.",
+          "timestamp": "2026-09-01T17:35:32+02:00",
+          "tree_id": "8b52d198cb772c19208fd0d246a3f1b57319114b",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4b0e6ab9a37ee22d70b9d7986288e6f2a821e63"
+        },
+        "date": 1788277323997,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
