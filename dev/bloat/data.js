@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788266264870,
+  "lastUpdate": 1788273728260,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "fb44ef467c8a032dc12453fb3b2842c115ec10da",
-          "message": "fix(audit): keep base attribution when the focus remap fails\n\nThe base-snapshot focus set is built from `git rev-parse --show-toplevel`,\nwhose spelling can differ from the caller's canonicalized root (Windows 8.3\ncomponents and drive-letter case, verbatim prefixes), so a literal\nstrip_prefix mapped no path at all. The base dead-code results were then\nfiltered against an empty focus set and every base finding disappeared, which\nmade each inherited finding look introduced and failed `--gate new-only` on\npre-existing findings.\n\nThe remap now compares simplified and canonicalized forms before giving up on\na path, and a base run whose focus set cannot be expressed leaves its results\nunfiltered instead of filtering them against an empty set.",
-          "timestamp": "2026-08-13T20:01:56+02:00",
-          "tree_id": "a32c69c82618dc6eee83c07431f87f5eed349ee2",
-          "url": "https://github.com/fallow-rs/fallow/commit/fb44ef467c8a032dc12453fb3b2842c115ec10da"
-        },
-        "date": 1786644797566,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503809536,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20160352,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25524696,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38056536,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 42327704,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5b045900bc0ad7cd1f859b95d75cec27fa791a5",
+          "message": "feat(api): cooperative cancellation, and a staleness gate for curated agent-doc cells\n\nAn MCP Code Mode host call that ran in this process could be answered on its\ndeadline but not stopped: the thread was abandoned and kept running a full\nanalysis inside a long-lived server. AnalysisOptions now carries an optional\ncancellation token, matching the Option<Arc<AtomicBool>> idiom the type-aware\ntransport already uses. It reaches the dead-code pipeline's stage boundaries\nand the per-file parse loop, which is the one place work stops per item rather\nthan per stage, and cancellation is always an error so a truncated module set\ncannot reach the graph.\n\nThe stop is cooperative and has no upper bound: duplication detection and the\ndead-code detectors hold no check once entered, so analyze, find_dupes,\ncheck_health and audit keep the killable subprocess, and every description\nthat touches this says which stops are promised and which are not. Threading a\ntoken into those loops was deliberately not done, because the suffix-array\nstage after the tokenize loop holds no check either, so the stop would have\nstayed unbounded while the change touched eight public entry points.\n\nMeasured on a 520-file project: every in-process route returns FALLOW_CANCELLED\nin a fraction of its uncancelled time, where three of them previously returned\na completed analysis. The engine test asserts work performed, a strictly\nsmaller module count, rather than how long the caller took to return.\n\nSeparately, the agent-doc generator prefers hand-written prose over its\ngenerated seed and preserves it forever, which is right except when the\nmanifest text a cell was written from moves later: the published cell then\ndescribes a surface that has changed and nothing says so. A record beside the\ngenerator holds the seed each of the 400 curated cells was last accepted\nagainst, outside the vendored skill tree so it never touches the public skills\nsurface. generate:contracts:check fails naming the cell and both seeds;\ngenerate:contracts re-records.",
+          "timestamp": "2026-09-01T15:34:29+02:00",
+          "tree_id": "65e54c61456f9199c92fc54a58bf7f4cb43a6fe6",
+          "url": "https://github.com/fallow-rs/fallow/commit/a5b045900bc0ad7cd1f859b95d75cec27fa791a5"
+        },
+        "date": 1788273725043,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 556033376,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21374344,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28081304,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 42345496,
             "unit": "bytes"
           }
         ]
