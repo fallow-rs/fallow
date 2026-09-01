@@ -375,6 +375,15 @@ fn opencode_detected_from_plugin_api_dependency() {
 }
 
 #[test]
+fn storybook_contributes_react_native_discovery_hidden_dir_when_active() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg_dev(&["@storybook/react-native"]);
+    let dirs = registry.discovery_hidden_dirs(&pkg, Path::new("/project"));
+
+    assert_eq!(dirs, vec![".rnstorybook".to_string()]);
+}
+
+#[test]
 fn discovery_hidden_dirs_empty_without_router_plugins() {
     let registry = PluginRegistry::default();
     let pkg = make_pkg(&["react", "react-dom"]);

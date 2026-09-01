@@ -1,0 +1,14 @@
+{
+  "name": "rn-storybook-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "react-native": "^0.79.0"
+  },
+  "devDependencies": {
+    "@storybook/addon-ondevice-actions": "^9.0.0",
+    "@storybook/addon-ondevice-controls": "^9.0.0",
+    "@storybook/react-native": "^9.0.0"
+  }
+}

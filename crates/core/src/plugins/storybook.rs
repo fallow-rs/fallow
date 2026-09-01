@@ -3,6 +3,14 @@
 //! Detects Storybook projects and marks story files and config as entry points.
 //! Parses .storybook/main config to extract addons, framework, stories,
 //! core.builder, and typescript.reactDocgen as referenced dependencies.
+//!
+//! React Native Storybook keeps the same shape under a different directory.
+//! `withStorybook` defaults `configPath` to `./.rnstorybook`, entry-point
+//! swapping makes `.rnstorybook/index` the application entry, the bundler
+//! generates `.rnstorybook/storybook.requires.{ts,js}`, and on-device addons
+//! are declared under `deviceAddons` instead of `addons`. That directory is
+//! dot-prefixed and not on the discovery allowlist, so the plugin declares it
+//! through `discovery_hidden_dirs`.
 
 use super::config_parser;
 use super::{Plugin, PluginResult, ProvidedDependencyRule};
@@ -13,9 +21,13 @@ const ENABLERS: &[&str] = &["storybook", "@storybook/"];
 const ENTRY_PATTERNS: &[&str] = &[
     "**/*.stories.{ts,tsx,js,jsx,mdx}",
     ".storybook/**/*.{ts,tsx,js,jsx}",
+    ".rnstorybook/**/*.{ts,tsx,js,jsx}",
 ];
 
-const CONFIG_PATTERNS: &[&str] = &[".storybook/main.{ts,js,mjs,cjs}"];
+const CONFIG_PATTERNS: &[&str] = &[
+    ".storybook/main.{ts,js,mjs,cjs}",
+    ".rnstorybook/main.{ts,js,mjs,cjs}",
+];
 
 const ALWAYS_USED: &[&str] = &[
     ".storybook/main.{ts,js,mjs,cjs}",
@@ -23,7 +35,16 @@ const ALWAYS_USED: &[&str] = &[
     ".storybook/preview-head.html",
     ".storybook/preview-body.html",
     ".storybook/manager.{ts,tsx,js,jsx}",
+    ".rnstorybook/main.{ts,js,mjs,cjs}",
+    ".rnstorybook/preview.{ts,tsx,js,jsx}",
+    ".rnstorybook/index.{ts,tsx,js,jsx}",
+    ".rnstorybook/storybook.requires.{ts,js}",
 ];
+
+/// React Native Storybook's default `configPath`. Storybook owns every file in
+/// it, including the generated requires module, so discovery has to reach it
+/// before any of the patterns above can match.
+const DISCOVERY_HIDDEN_DIRS: &[&str] = &[".rnstorybook"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "storybook",
@@ -39,7 +60,12 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@storybook/test",
     "@storybook/manager-api",
     "@storybook/preview-api",
+    "@storybook/react-native",
 ];
+
+/// Config keys whose entries name an addon package. `addons` is the web list;
+/// `deviceAddons` is the React Native on-device list.
+const ADDON_KEYS: &[&str] = &["addons", "deviceAddons"];
 
 const STORYBOOK_EXPORTS: &[&str] = &["*"];
 
@@ -101,10 +127,12 @@ define_plugin! {
     config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
+    discovery_hidden_dirs: DISCOVERY_HIDDEN_DIRS,
     provided_dependencies: manager_runtime_dependencies(),
     used_exports: [
         ("**/*.stories.{ts,tsx,js,jsx,mdx}", STORYBOOK_EXPORTS),
         (".storybook/**/*.{ts,tsx,js,jsx}", STORYBOOK_EXPORTS),
+        (".rnstorybook/**/*.{ts,tsx,js,jsx}", STORYBOOK_EXPORTS),
     ],
     resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
@@ -115,17 +143,19 @@ define_plugin! {
             result.referenced_dependencies.push(dep);
         }
 
-        let addons = config_parser::extract_config_shallow_strings(source, config_path, "addons");
-        for addon in &addons {
-            let dep = crate::resolve::extract_package_name(addon);
-            result.referenced_dependencies.push(dep);
-        }
-        let addon_strings =
-            config_parser::extract_config_property_strings(source, config_path, "addons");
-        for s in &addon_strings {
-            let dep = crate::resolve::extract_package_name(s);
-            if !result.referenced_dependencies.contains(&dep) {
+        for key in ADDON_KEYS {
+            let addons = config_parser::extract_config_shallow_strings(source, config_path, key);
+            for addon in &addons {
+                let dep = crate::resolve::extract_package_name(addon);
                 result.referenced_dependencies.push(dep);
+            }
+            let addon_strings =
+                config_parser::extract_config_property_strings(source, config_path, key);
+            for s in &addon_strings {
+                let dep = crate::resolve::extract_package_name(s);
+                if !result.referenced_dependencies.contains(&dep) {
+                    result.referenced_dependencies.push(dep);
+                }
             }
         }
 
@@ -290,6 +320,94 @@ mod tests {
             std::path::Path::new("/project"),
         );
         assert!(!result.referenced_dependencies.iter().any(|d| d == "false"));
+    }
+
+    #[test]
+    fn discovery_hidden_dirs_include_react_native_config_dir() {
+        let plugin = StorybookPlugin;
+        assert_eq!(plugin.discovery_hidden_dirs(), [".rnstorybook"]);
+    }
+
+    #[test]
+    fn react_native_config_patterns_cover_the_rnstorybook_directory() {
+        let plugin = StorybookPlugin;
+        assert!(
+            plugin
+                .config_patterns()
+                .contains(&".rnstorybook/main.{ts,js,mjs,cjs}")
+        );
+        assert!(
+            plugin
+                .entry_patterns()
+                .contains(&".rnstorybook/**/*.{ts,tsx,js,jsx}")
+        );
+        assert!(
+            plugin
+                .always_used()
+                .contains(&".rnstorybook/storybook.requires.{ts,js}")
+        );
+        assert!(
+            plugin
+                .always_used()
+                .contains(&".rnstorybook/index.{ts,tsx,js,jsx}")
+        );
+    }
+
+    #[test]
+    fn resolve_config_device_addons_string_form() {
+        let source = r#"
+            import type { StorybookConfig } from '@storybook/react-native';
+
+            const config: StorybookConfig = {
+                stories: ["../src/**/*.stories.?(ts|tsx|js|jsx)"],
+                deviceAddons: [
+                    "@storybook/addon-ondevice-controls",
+                    "@storybook/addon-ondevice-actions"
+                ]
+            };
+            export default config;
+        "#;
+        let plugin = StorybookPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new(".rnstorybook/main.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"@storybook/addon-ondevice-controls".to_string()));
+        assert!(deps.contains(&"@storybook/addon-ondevice-actions".to_string()));
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|pattern| pattern.contains("*.stories.")),
+            "the story glob still becomes an entry pattern: {:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
+    fn resolve_config_device_addons_object_form() {
+        let source = r#"
+            export default {
+                deviceAddons: [
+                    { name: "@storybook/addon-ondevice-controls", options: {} },
+                    "@storybook/addon-ondevice-actions"
+                ]
+            };
+        "#;
+        let plugin = StorybookPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new(".rnstorybook/main.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(
+            deps.contains(&"@storybook/addon-ondevice-controls".to_string()),
+            "object-form device addon credited via its name property"
+        );
+        assert!(deps.contains(&"@storybook/addon-ondevice-actions".to_string()));
     }
 
     #[test]

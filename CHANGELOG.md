@@ -90,6 +90,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invisible to the count
   ([#2503](https://github.com/fallow-rs/fallow/issues/2503)).
 
+- **React Native Storybook's `.rnstorybook` directory is understood**
+  (Closes [#2505](https://github.com/fallow-rs/fallow/issues/2505)). The
+  Storybook plugin already activated on `@storybook/react-native`, but every
+  pattern it carried named `.storybook`, so the directory React Native
+  Storybook actually uses sat outside the source graph: dot-prefixed and not on
+  the traversal allowlist, it was dropped whole and then reported through the
+  skipped-hidden-directory advisory, while the packages reachable only from it
+  read as unused. The plugin now declares `.rnstorybook` as a directory to
+  traverse and recognizes the conventional files inside it, so
+  `.rnstorybook/main.{ts,js,mjs,cjs}` is configuration, the entry-point-swapped
+  `.rnstorybook/index` and the bundler-generated `storybook.requires` module
+  join the runtime graph without anyone editing a generated file, and story
+  globs declared by `main` keep reaching stories elsewhere in the project.
+  On-device addons are declared under `deviceAddons` rather than `addons`, in
+  the same string and object forms, and are now credited as referenced the same
+  way. Web Storybook projects are unaffected. Thanks
+  [@PrinceD96](https://github.com/PrinceD96) for the report.
+
 ### Changed
 
 - **The complexity finding's refactor note no longer promises a reduction
