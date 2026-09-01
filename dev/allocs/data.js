@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788262046874,
+  "lastUpdate": 1788262646799,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "8b32aa4f6a285d1ae6897986f99dde834ecb7579",
-          "message": "chore(docker): pin FALLOW_VERSION 3.16.0 with refreshed checksums",
-          "timestamp": "2026-08-14T00:38:42+02:00",
-          "tree_id": "362c1fbc84741f399cd199621f74bde72b1d11cf",
-          "url": "https://github.com/fallow-rs/fallow/commit/8b32aa4f6a285d1ae6897986f99dde834ecb7579"
-        },
-        "date": 1786660972519,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9751147,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48520,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1029918,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7588,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8391,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea",
+          "message": "fix(cli): keep syntactic findings when type-aware analysis cannot run (#2514)\n\nCloses #2499.\n\nThe semantic pass has a fixed two-minute ceiling, and a project large enough to\nreach it lost the entire report: every CLI surface exited 2 regardless of\ntypeAware.require, whose default is best-effort. The LSP already handled the\nidentical failure correctly, so the same condition produced a warning through\none surface and a hard error through the other.\n\nSyntactic analysis reports a superset and the semantic pass only removes\ncandidates it confirms are used, so continuing is the conservative outcome. check,\nwatch, health and both combined sites now warn and finish with the syntactic\nfindings, recording the reason in _meta.type_aware.warnings for CI consumers.\n\nfallow fix is the deliberate exception and still stops. It removes code, and the\nextra entries in the unrefined set are precisely the ones a working semantic pass\nwould have proven live, so widening a deletion is the opposite of conservative.\nIts error now names the way out.\n\nSix call sites, not the five originally scoped: run_combined_health has a second\none reached by a bare fallow --only health.\n\nThe CLI's own diagnostic was already being discarded. Under --format json it goes\nto stdout while the extension read stderr only, which is why this report and #2284\nboth say just \"code 2\". The extension now recovers it, says when results came from\na semantic pass that did not run, and exposes the ceiling as a setting.",
+          "timestamp": "2026-09-01T13:33:19+02:00",
+          "tree_id": "c74fe3b9cb37ed66138b09b7da2141488e2177ef",
+          "url": "https://github.com/fallow-rs/fallow/commit/6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea"
+        },
+        "date": 1788262643508,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9762877,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49421,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1185156,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8372,
             "unit": "allocations"
           }
         ]
