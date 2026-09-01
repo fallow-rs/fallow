@@ -1087,16 +1087,25 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             opts.retain_modules_for_health,
         );
         data.results.unused_files = reported_unused_files;
-        let outcome = outcome.map_err(|error| {
-            emit_error(
-                &format!("Type-aware analysis failed: {error}"),
-                2,
-                opts.output,
-            )
-        })?;
-        outcome.map_or((None, None), |outcome| {
-            (Some(outcome.type_aware), outcome.type_coupling)
-        })
+        match outcome {
+            Ok(outcome) => outcome.map_or((None, None), |outcome| {
+                (Some(outcome.type_aware), outcome.type_coupling)
+            }),
+            Err(error) => {
+                let meta = crate::type_aware_degrade::degrade_or_fail(
+                    &crate::type_aware_degrade::DegradeContext {
+                        root: &config.root,
+                        error: &error.to_string(),
+                        failure_label: "Type-aware analysis failed",
+                        require: config.type_aware.require,
+                        quiet: opts.quiet,
+                        output: opts.output,
+                    },
+                )?;
+                let warnings = meta.warnings.clone();
+                (Some(fallow_api::TypeAwareOutcome { meta, warnings }), None)
+            }
+        }
     } else {
         (None, None)
     };

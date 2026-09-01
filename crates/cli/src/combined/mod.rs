@@ -294,18 +294,24 @@ fn run_combined_health(
             &config,
         )
         .map_err(|message| crate::error::emit_error(&message, 2, opts.output))?;
+        let mut degraded_meta = None;
         let semantic = if resolved.enabled {
-            Some(
-                fallow_api::analyze_type_coupling(opts.root, &resolved.projects, &[]).map_err(
-                    |error| {
-                        crate::error::emit_error(
-                            &format!("Type-aware coupling failed: {error}"),
-                            2,
-                            opts.output,
-                        )
-                    },
-                )?,
-            )
+            match fallow_api::analyze_type_coupling(opts.root, &resolved.projects, &[]) {
+                Ok(outcome) => Some(outcome),
+                Err(error) => {
+                    degraded_meta = Some(crate::type_aware_degrade::degrade_or_fail(
+                        &crate::type_aware_degrade::DegradeContext {
+                            root: opts.root,
+                            error: &error.to_string(),
+                            failure_label: "Type-aware coupling failed",
+                            require: resolved.require,
+                            quiet: opts.quiet,
+                            output: opts.output,
+                        },
+                    )?);
+                    None
+                }
+            }
         } else {
             None
         };
@@ -317,7 +323,9 @@ fn run_combined_health(
         }
         let mut result =
             crate::health::execute_health_with_config(&health_opts, config, config_ms)?;
-        result.type_aware_meta = semantic.map(|outcome| outcome.type_aware.meta);
+        result.type_aware_meta = semantic
+            .map(|outcome| outcome.type_aware.meta)
+            .or(degraded_meta);
         *health_result = Some(result);
         return Ok(());
     }
@@ -398,15 +406,19 @@ fn attach_combined_type_coupling(
         .iter()
         .map(std::path::PathBuf::from)
         .collect::<Vec<_>>();
-    let outcome =
-        fallow_api::analyze_type_coupling(opts.root, &projects, &[]).map_err(|error| {
-            crate::error::emit_error(
-                &format!("Type-aware coupling failed: {error}"),
-                2,
-                opts.output,
-            )
-        })?;
-    let coupling_meta = outcome.type_aware.meta;
+    let coupling_meta = match fallow_api::analyze_type_coupling(opts.root, &projects, &[]) {
+        Ok(outcome) => outcome.type_aware.meta,
+        Err(error) => crate::type_aware_degrade::degrade_or_fail(
+            &crate::type_aware_degrade::DegradeContext {
+                root: &check.config.root,
+                error: &error.to_string(),
+                failure_label: "Type-aware coupling failed",
+                require: check.config.type_aware.require,
+                quiet: opts.quiet,
+                output: opts.output,
+            },
+        )?,
+    };
     health_result.type_aware_meta = Some(coupling_meta.clone());
     match check.type_aware_meta.as_mut() {
         Some(meta) => fallow_api::merge_type_aware_meta(meta, coupling_meta),

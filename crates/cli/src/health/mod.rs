@@ -381,6 +381,7 @@ pub fn run_health(
         Err(message) => return emit_error(&message, 2, opts.output),
     };
     let requested = type_aware.requested || (type_aware.unfiltered && resolved_type_aware.enabled);
+    let mut degraded_meta = None;
     let semantic = if requested {
         let enabled = resolved_type_aware.enabled;
         if !enabled {
@@ -393,18 +394,29 @@ pub fn run_health(
         let projects = resolved_type_aware.projects;
         let require = resolved_type_aware.require;
         let outcome = match fallow_api::analyze_type_coupling(opts.root, &projects, &[]) {
-            Ok(outcome) => outcome,
+            Ok(outcome) => Some(outcome),
             Err(error) => {
-                return emit_error(
-                    &format!("Type-aware coupling failed: {error}"),
-                    2,
-                    opts.output,
-                );
+                match crate::type_aware_degrade::degrade_or_fail(
+                    &crate::type_aware_degrade::DegradeContext {
+                        root: opts.root,
+                        error: &error.to_string(),
+                        failure_label: "Type-aware coupling failed",
+                        require,
+                        quiet: opts.quiet,
+                        output: opts.output,
+                    },
+                ) {
+                    Ok(meta) => degraded_meta = Some(meta),
+                    Err(code) => return code,
+                }
+                None
             }
         };
-        completeness_failed = require == fallow_config::TypeAwareRequire::Complete
-            && outcome.report.status != fallow_types::semantic::SemanticCompleteness::Complete;
-        Some(outcome)
+        completeness_failed = outcome.as_ref().is_some_and(|outcome| {
+            require == fallow_config::TypeAwareRequire::Complete
+                && outcome.report.status != fallow_types::semantic::SemanticCompleteness::Complete
+        });
+        outcome
     } else {
         None
     };
@@ -420,11 +432,13 @@ pub fn run_health(
         Err(code) => return code,
     };
     let required_completeness = result.config.type_aware.require.into();
-    result.type_aware_meta = semantic.map(|outcome| {
-        let mut meta = outcome.type_aware.meta;
-        meta.required_completeness = Some(required_completeness);
-        meta
-    });
+    result.type_aware_meta = semantic
+        .map(|outcome| {
+            let mut meta = outcome.type_aware.meta;
+            meta.required_completeness = Some(required_completeness);
+            meta
+        })
+        .or(degraded_meta);
     if let Some(ref timings) = result.timings {
         report::print_health_performance(timings, opts.output, json_style);
     }

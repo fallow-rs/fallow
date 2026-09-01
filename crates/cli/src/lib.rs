@@ -86,6 +86,7 @@ mod suppressions;
 mod task_matrix;
 mod telemetry;
 mod trace_chain;
+mod type_aware_degrade;
 mod update_check;
 use fallow_engine::validate;
 use fallow_engine::vital_signs;

@@ -37,7 +37,7 @@ fn run_analyze(
             .iter()
             .map(PathBuf::from)
             .collect::<Vec<_>>();
-        let outcome = fallow_api::refine_type_aware_results_with_config(
+        let outcome = match fallow_api::refine_type_aware_results_with_config(
             config,
             &mut results,
             &projects,
@@ -45,10 +45,22 @@ fn run_analyze(
             true,
             false,
             false,
-        )
-        .map_err(|error| {
-            crate::error::emit_error(&format!("Type-aware analysis failed: {error}"), 2, output)
-        })?;
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                crate::type_aware_degrade::degrade_or_fail(
+                    &crate::type_aware_degrade::DegradeContext {
+                        root: &config.root,
+                        error: &error.to_string(),
+                        failure_label: "Type-aware analysis failed",
+                        require: config.type_aware.require,
+                        quiet,
+                        output,
+                    },
+                )?;
+                None
+            }
+        };
         if let Some(outcome) = outcome {
             if !quiet {
                 for warning in &outcome.type_aware.warnings {
