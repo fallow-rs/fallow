@@ -895,7 +895,10 @@ fn finding_from_value(
     let mut files = Vec::new();
     for raw in raw_paths {
         let raw_path = Path::new(&raw);
-        let absolute_path = if raw_path.is_absolute() {
+        // has_root, not is_absolute: joining a Windows rooted path that carries
+        // no drive letter onto root would reinterpret an external path as
+        // project-relative and expose its components instead of redacting it.
+        let absolute_path = if raw_path.has_root() {
             raw_path.to_path_buf()
         } else {
             root.join(raw_path)
@@ -911,7 +914,7 @@ fn finding_from_value(
         }
     }
     let absolute = raw_path.as_deref().map(Path::new).map(|path| {
-        if path.is_absolute() {
+        if path.has_root() {
             path.to_path_buf()
         } else {
             root.join(path)
@@ -1158,7 +1161,12 @@ fn relativize_keyed_paths(value: &mut Value, root: &Path, is_path: bool) {
     match value {
         Value::String(text) if is_path => {
             let path = Path::new(text);
-            if path.is_absolute() {
+            // has_root, not is_absolute, for the same reason as relative_path:
+            // a Windows rooted path without a drive letter is not absolute, so
+            // gating on is_absolute left it unredacted in the payload. Only
+            // values under a path key reach this arm, so a route specifier such
+            // as `/api/v1` is excluded by the key gate rather than by this test.
+            if path.has_root() {
                 *text = relative_path(path, root);
             }
         }
@@ -3129,6 +3137,17 @@ mod tests {
         );
         // A genuinely relative path is not redacted; it is project-relative.
         assert_eq!(relative_path(Path::new("src/a.ts"), root), "src/a.ts");
+
+        // The JSON layer gates on the same predicate and must agree.
+        let mut detail = serde_json::json!({ "path": "/Users/private/secret.ts" });
+        relativize_value_paths(&mut detail, root);
+        assert_eq!(detail["path"], "<external>/secret.ts");
+
+        // A value that is not under a path key is left alone regardless, so a
+        // route specifier does not get treated as a filesystem path.
+        let mut route = serde_json::json!({ "specifier": "/api/v1" });
+        relativize_value_paths(&mut route, root);
+        assert_eq!(route["specifier"], "/api/v1");
     }
 
     #[test]

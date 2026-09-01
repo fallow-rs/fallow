@@ -417,8 +417,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `\Users\private\secret.ts` is rooted but not absolute, because absolute
   there means a drive letter or a UNC prefix, so it fell through the check and
   was written into the payload in full instead of being reduced to its file
-  name. It now gates on whether the path is rooted, which covers both forms.
-  Paths carrying a drive letter were always redacted correctly.
+  name. The same test decided whether to join a path onto the project root, so
+  such a path was also reinterpreted as project-relative, which exposed its
+  components a second way. All four sites now gate on whether the path is
+  rooted, which covers both forms. Paths carrying a drive letter were always
+  redacted correctly, and a value that is not under a path key, such as a route
+  specifier, is still left alone.
 
 ### Security
 
