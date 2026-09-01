@@ -176,6 +176,63 @@ impl<'a> ComplexityVisitor<'a> {
         }
     }
 
+    /// Pop the root module frame and emit it as a synthetic `<module>` unit.
+    ///
+    /// Separate from [`Self::pop_function`] on three points:
+    ///
+    /// 1. No `fold_component_prop_count`. That fold is a component signal and
+    ///    the root frame is not a function, let alone a component.
+    /// 2. The unit is dropped when it never branched (`cyclomatic == 1 &&
+    ///    cognitive == 0`), mirroring the template unit's emission gate. A file
+    ///    with no module-scope decision point gets no new unit, so its existing
+    ///    numbers are untouched.
+    /// 3. It is anchored and sized by its own contributions rather than by the
+    ///    program span, matching the template unit's anchor convention. The
+    ///    anchor points at real branching instead of at line 1, and the size is
+    ///    the distance between the first and last decision point rather than
+    ///    the file's line count, which would otherwise push nearly every file
+    ///    into the very-high-risk unit-size bin.
+    ///
+    /// `source_hash` is `None` like the template unit's: a whole-file slice
+    /// joins nothing in the Istanbul or runtime-coverage function maps.
+    fn pop_module_frame(&mut self) {
+        let Some(frame) = self.stack.pop() else {
+            return;
+        };
+        if frame.cyclomatic == 1 && frame.cognitive == 0 {
+            return;
+        }
+        let Some((line, col)) = frame
+            .contributions
+            .iter()
+            .map(|contribution| (contribution.line, contribution.col))
+            .min()
+        else {
+            return;
+        };
+        let end_line = frame
+            .contributions
+            .iter()
+            .map(|contribution| contribution.line)
+            .max()
+            .unwrap_or(line);
+        self.results.push(FunctionComplexity {
+            name: fallow_types::extract::MODULE_UNIT_NAME.to_string(),
+            is_private_member: false,
+            line,
+            col,
+            cyclomatic: frame.cyclomatic,
+            cognitive: frame.cognitive,
+            line_count: end_line.saturating_sub(line) + 1,
+            param_count: 0,
+            react_hook_count: 0,
+            react_jsx_max_depth: 0,
+            react_prop_count: 0,
+            source_hash: None,
+            contributions: frame.contributions,
+        });
+    }
+
     /// Fold a component's prop count past [`PROP_COUNT_FLOOR`] into cognitive,
     /// recorded as a single `PropCount` contribution anchored at the function
     /// span. Fires only when the frame rendered JSX (`jsx_max_depth > 0`), so a
@@ -436,6 +493,24 @@ const fn logical_kind(op: LogicalOperator) -> ComplexityContributionKind {
 }
 
 impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
+    /// Open a root frame for module scope before walking the program.
+    ///
+    /// Every counter writer targets `self.stack.last_mut()` and silently drops
+    /// its increment when the stack is empty, so without this frame a top-level
+    /// `if` ladder, `??` default, or `?.` access contributed to no metric at
+    /// all. The frame is closed by [`ComplexityVisitor::pop_module_frame`],
+    /// which drops it again when nothing branched.
+    fn visit_program(&mut self, program: &Program<'ast>) {
+        self.push_function(
+            FunctionIdentity::public(fallow_types::extract::MODULE_UNIT_NAME),
+            program.span,
+            0,
+            0,
+        );
+        walk::walk_program(self, program);
+        self.pop_module_frame();
+    }
+
     fn visit_function(&mut self, func: &Function<'ast>, flags: ScopeFlags) {
         if func.body.is_none() {
             walk::walk_function(self, func, flags);
@@ -1286,9 +1361,12 @@ mod tests {
     }
 
     #[test]
-    fn top_level_code_not_reported() {
+    fn top_level_code_reported_as_the_module_unit() {
         let results = analyze("if (true) { console.log('hello'); }");
-        assert!(results.is_empty());
+        assert_eq!(results.len(), 1);
+        let module = find_fn(&results, "<module>");
+        assert_eq!(module.cyclomatic, 2);
+        assert_eq!(module.cognitive, 1);
     }
 
     #[test]
@@ -1859,11 +1937,10 @@ mod tests {
     }
 
     #[test]
-    fn hoisting_a_branch_to_module_scope_hides_it() {
-        // Documented blind spot, asserted so a future frame change is visible.
-        // `push_function` runs only for functions and arrows, and both
-        // `push_contribution` and `inc_cyclomatic` write to the innermost
-        // frame, so a top-level branch contributes nothing at all.
+    fn hoisting_a_branch_to_module_scope_keeps_it_counted() {
+        // The root module frame is what makes this hold: hoisting an `if` out
+        // of a function moves the increment into the `<module>` unit instead of
+        // deleting it, exactly as moving it into a new function would.
         let inside = assert_conservation("const f = (a) => { if (a) { return 1; } return 0; };");
         let hoisted = assert_conservation(
             "let value = 0;
@@ -1872,8 +1949,100 @@ mod tests {
         );
         assert_eq!(inside.branch_points, 1);
         assert_eq!(
-            hoisted.branch_points, 0,
-            "module-scope branching is invisible, so a fall in branch_points is not proof of removal"
+            hoisted.branch_points, 1,
+            "a branch hoisted to module scope stays in the total"
         );
+        assert_eq!(
+            hoisted.functions, 2,
+            "the module unit is counted alongside the arrow"
+        );
+    }
+
+    #[test]
+    fn module_scope_unit_is_emitted_only_when_it_branches() {
+        let plain = analyze("const a = 1;\nexport const b = a;\n");
+        assert!(
+            !plain.iter().any(|unit| unit.name == "<module>"),
+            "a file with no module-scope decision point gets no unit: {plain:?}"
+        );
+
+        let branching = analyze("export const b = globalThis.cfg ?? fallback;\n");
+        let unit = find_fn(&branching, "<module>");
+        assert_eq!(unit.cyclomatic, 2);
+        assert_eq!(unit.cognitive, 1);
+        assert_eq!(unit.param_count, 0);
+        assert!(unit.source_hash.is_none());
+    }
+
+    #[test]
+    fn module_scope_unit_anchors_and_sizes_on_its_own_contributions() {
+        // Line 1 is a comment and lines 5-9 are a function body, so an anchor at
+        // line 1 or a whole-file line count would both be wrong.
+        let source = "// header\n\
+                      \n\
+                      const mode = globalThis.MODE ?? 'dev';\n\
+                      \n\
+                      export function run(items) {\n\
+                      \x20 for (const item of items) {\n\
+                      \x20   if (item) { return item; }\n\
+                      \x20 }\n\
+                      \x20 return null;\n\
+                      }\n";
+        let units = analyze(source);
+        let module = find_fn(&units, "<module>");
+        assert_eq!(
+            module.line, 3,
+            "anchored at the first contributing construct"
+        );
+        assert_eq!(module.line_count, 1, "sized by its own contributions");
+    }
+
+    #[test]
+    fn a_root_frame_does_not_move_any_per_function_number() {
+        // The root frame flips `is_nested` to true for top-level functions,
+        // which now calls `inc_nesting` on it. Nothing may accrue to the root
+        // while a child frame is on top, and no child number may move.
+        let source = "let flag = 0;\n\
+                      if (globalThis.debug) { flag = 1; }\n\
+                      export function run(items) {\n\
+                      \x20 for (const item of items) {\n\
+                      \x20   if (item && item.id) { return item; }\n\
+                      \x20 }\n\
+                      \x20 return null;\n\
+                      }\n";
+        let with_module_branching = analyze(source);
+        let without = analyze(
+            "export function run(items) {\n\
+                      \x20 for (const item of items) {\n\
+                      \x20   if (item && item.id) { return item; }\n\
+                      \x20 }\n\
+                      \x20 return null;\n\
+                      }\n",
+        );
+        let run_with = find_fn(&with_module_branching, "run");
+        let run_without = find_fn(&without, "run");
+        assert_eq!(run_with.cyclomatic, run_without.cyclomatic);
+        assert_eq!(run_with.cognitive, run_without.cognitive);
+        assert_eq!(
+            run_with.contributions.len(),
+            run_without.contributions.len()
+        );
+        for (a, b) in run_with
+            .contributions
+            .iter()
+            .zip(run_without.contributions.iter())
+        {
+            assert_eq!(
+                (a.metric, a.kind, a.weight, a.nesting),
+                (b.metric, b.kind, b.weight, b.nesting),
+                "a per-function contribution moved"
+            );
+        }
+        let module = find_fn(&with_module_branching, "<module>");
+        assert_eq!(
+            module.cyclomatic, 2,
+            "only the module-scope `if` accrues to the root frame"
+        );
+        assert_eq!(module.cognitive, 1);
     }
 }

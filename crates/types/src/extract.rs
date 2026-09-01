@@ -1003,6 +1003,30 @@ pub fn is_synthetic_template_unit(name: &str) -> bool {
     name == "<template>" || name.starts_with("<snippet:")
 }
 
+/// Emitted name of the synthetic module-scope complexity unit.
+pub const MODULE_UNIT_NAME: &str = "<module>";
+
+/// True when `name` identifies the synthetic per-file module-scope unit.
+///
+/// Extraction pushes one root frame per program so decision points outside
+/// every function (an environment guard, a top-level `??` / `||` default, an
+/// `?.` access on a config object) are counted instead of silently dropped.
+/// The unit is emitted only when it actually branches, and it is
+/// aggregate-only: it feeds vital signs, file scores, and branching
+/// conservation, and never becomes a user-facing finding. "Extract a helper"
+/// is not advice that applies to module scope, so the unit reports the
+/// quantity without asking anyone to act on it.
+///
+/// Deliberately NOT part of [`is_synthetic_template_unit`]. That predicate
+/// carries template-family CRAP, suppression, and display semantics, and
+/// [`FileBranching::from_units`] filters on it: folding `<module>` in would
+/// exclude module-scope branching from the branching totals, which is the
+/// blind spot this unit exists to close.
+#[must_use]
+pub fn is_synthetic_module_unit(name: &str) -> bool {
+    name == MODULE_UNIT_NAME
+}
+
 /// Branching totals for one file: the quantity that survives extraction, and
 /// the number of units now holding it.
 ///
@@ -1014,11 +1038,12 @@ pub fn is_synthetic_template_unit(name: &str) -> bool {
 /// `functions` rises. Reporting the two terms separately is what distinguishes
 /// branching that left from branching that only moved.
 ///
-/// Known blind spot: increments outside every function are invisible here.
-/// `push_contribution` and `inc_cyclomatic` both write to the innermost frame
-/// and no frame is pushed at module scope, so a branch hoisted to the top level
-/// of a module lowers `branch_points` without removing any branching. Consumers
-/// must not read a fall in `branch_points` as proof that branching was removed.
+/// Module scope is accounted for. Extraction pushes a root frame per program
+/// and emits it as a synthetic `<module>` unit whenever it branches, so a
+/// branch hoisted out of a function to the top level of the module keeps its
+/// increment in `branch_points` and adds one to `functions`, exactly as moving
+/// it into a new function would. A fall in `branch_points` is therefore a
+/// statement about the file's measured decision points, not about a partition.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
 pub struct FileBranching {
     /// Summed weight of `Cyclomatic` contributions. The conserved quantity.
@@ -1043,7 +1068,10 @@ pub struct FileBranching {
     pub cognitive_nesting_weight: u32,
     /// Whether the file carried a synthetic template unit that these counts
     /// exclude. When it did, the numbers describe the file's script only, so a
-    /// consumer must not present them as describing the whole file.
+    /// consumer must not present them as describing the whole file. The
+    /// synthetic `<module>` unit is NOT a template unit and does not set this
+    /// flag: it is counted like any other unit, because module-scope branching
+    /// is part of the script the numbers describe.
     pub has_synthetic_units: bool,
 }
 
@@ -1055,6 +1083,11 @@ impl FileBranching {
     /// Suppression is deliberately not consulted, so a
     /// `fallow-ignore-next-line complexity` comment cannot remove a unit's
     /// branches from the total.
+    ///
+    /// The synthetic `<module>` unit IS counted. It carries the file's
+    /// module-scope decision points, and leaving it out would restore the blind
+    /// spot that let a branch disappear from the total by being hoisted out of
+    /// every function.
     #[must_use]
     pub fn from_units(units: &[FunctionComplexity]) -> Self {
         let mut totals = Self {
