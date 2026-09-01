@@ -459,6 +459,7 @@ pub fn run_complexity_with_runner(
     runner: &impl ProgrammaticHealthRunner,
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::validate_complexity_options(options)?;
+    crate::analysis_context::ensure_options_not_cancelled(&options.analysis, "health analysis")?;
     Ok(assemble_health_programmatic_output(
         options,
         runner.run_programmatic_health(options)?,
@@ -513,5 +514,7 @@ const fn root_envelope_mode() -> RootEnvelopeMode {
     RootEnvelopeMode::Tagged
 }
 
+#[cfg(test)]
+mod cancellation_tests;
 #[cfg(test)]
 mod tests;

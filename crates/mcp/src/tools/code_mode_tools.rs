@@ -1,4 +1,6 @@
+use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::atomic::AtomicBool;
 
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CombinedParams,
@@ -200,18 +202,35 @@ impl CodeModeTool {
 ///
 /// Standalone MCP tools always prefer `fallow-api`. Code Mode is stricter,
 /// because `timeout_ms` has to mean something inside a sandbox capped at 30
-/// seconds, and `fallow-api` exposes no cancellation: once an in-process
-/// analysis starts, nothing can stop it early.
+/// seconds, and `fallow-api` cancellation is cooperative: the deadline asks an
+/// in-process analysis to stop, and it stops at its next stage boundary rather
+/// than immediately.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CodeModeBacking {
-    /// Runs in this process through `fallow-api`. `timeout_ms` is a response
-    /// deadline rather than a stop signal: the host call returns on time, and
-    /// the analysis behind it keeps running until it finishes on its own.
+    /// Runs in this process through `fallow-api`. The deadline both answers the
+    /// caller and sets the call's cancellation token.
+    ///
+    /// What that buys differs per route, and the difference is the reason this
+    /// backing is not a promise of promptness:
+    ///
+    /// - `combined`, `checkChanged`, `featureFlags`, and the four trace routes
+    ///   carry the token into the engine session. They stop inside the per-file
+    ///   parse loop and at each pipeline stage boundary.
+    /// - `projectInfo` and `listBoundaries` parse nothing. Config load and file
+    ///   discovery are the whole call, so the token is read on either side of
+    ///   that and nowhere within it.
+    /// - `explain` reads a static table and never looks at the token.
+    ///
+    /// Even on the first group the stop is cooperative and unbounded: a token
+    /// set inside duplication detection or the dead-code detectors is not seen
+    /// until that stage ends, which on a large repository is seconds. This is
+    /// why the abandoned-call accounting still exists rather than being
+    /// replaced by cancellation.
     Api,
     /// Runs as a child `fallow` process that is killed when `timeout_ms`
     /// expires. Either `fallow-api` has no programmatic route for the tool, or
-    /// the route exists and Code Mode deliberately trades its speed for a run
-    /// it can actually stop.
+    /// the route exists and Code Mode trades its speed for a stop that is
+    /// bounded rather than cooperative.
     Subprocess,
 }
 
@@ -224,52 +243,57 @@ pub(super) enum CodeModeBacking {
 /// unreachable.
 fn api_route(tool: CodeModeTool) -> Option<ApiRoute> {
     match tool {
-        CodeModeTool::Combined => Some(|params| {
+        CodeModeTool::Combined => Some(|params, cancellation| {
             let params: CombinedParams = parse_params(params)?;
-            run_combined_api_value(&params)
+            run_combined_api_value(&params, cancellation)
         }),
-        CodeModeTool::CheckChanged => Some(|params| {
+        CodeModeTool::CheckChanged => Some(|params, cancellation| {
             let params: CheckChangedParams = parse_params(params)?;
-            run_check_changed_api_value(&params)
+            run_check_changed_api_value(&params, cancellation)
         }),
-        CodeModeTool::ProjectInfo => Some(|params| {
+        CodeModeTool::ProjectInfo => Some(|params, cancellation| {
             let params: ProjectInfoParams = parse_params(params)?;
-            run_project_info_api_value(&params)
+            run_project_info_api_value(&params, cancellation)
         }),
-        CodeModeTool::TraceExport => Some(|params| {
+        CodeModeTool::TraceExport => Some(|params, cancellation| {
             let params: TraceExportParams = parse_params(params)?;
-            run_trace_export_api_value(&params).map(Some)
+            run_trace_export_api_value(&params, cancellation).map(Some)
         }),
-        CodeModeTool::TraceFile => Some(|params| {
+        CodeModeTool::TraceFile => Some(|params, cancellation| {
             let params: TraceFileParams = parse_params(params)?;
-            run_trace_file_api_value(&params).map(Some)
+            run_trace_file_api_value(&params, cancellation).map(Some)
         }),
-        CodeModeTool::TraceDependency => Some(|params| {
+        CodeModeTool::TraceDependency => Some(|params, cancellation| {
             let params: TraceDependencyParams = parse_params(params)?;
-            run_trace_dependency_api_value(&params).map(Some)
+            run_trace_dependency_api_value(&params, cancellation).map(Some)
         }),
-        CodeModeTool::TraceClone => Some(|params| {
+        CodeModeTool::TraceClone => Some(|params, cancellation| {
             let params: TraceCloneParams = parse_params(params)?;
-            run_trace_clone_api_value(&params).map(Some)
+            run_trace_clone_api_value(&params, cancellation).map(Some)
         }),
-        CodeModeTool::FallowExplain => Some(|params| {
+        CodeModeTool::FallowExplain => Some(|params, _cancellation| {
             let params: ExplainParams = parse_params(params)?;
             serialize_explain_programmatic_json(&params.issue_type, RootEnvelopeMode::Tagged, None)
                 .map(Some)
                 .map_err(|error| error.message)
         }),
-        CodeModeTool::FeatureFlags => Some(|params| {
+        CodeModeTool::FeatureFlags => Some(|params, cancellation| {
             let params: FeatureFlagsParams = parse_params(params)?;
-            run_feature_flags_api_value(&params)
+            run_feature_flags_api_value(&params, cancellation)
         }),
-        CodeModeTool::ListBoundaries => Some(|params| {
+        CodeModeTool::ListBoundaries => Some(|params, cancellation| {
             let params: ListBoundariesParams = parse_params(params)?;
-            run_list_boundaries_api_value(&params)
+            run_list_boundaries_api_value(&params, cancellation)
         }),
-        // `fallow-api` can run the first four (their standalone MCP tools do),
-        // but a whole-project analysis cannot be cancelled once it starts, so
-        // Code Mode gives up the in-process speed to keep `timeout_ms` able to
-        // stop the work. The rest have no `fallow-api` route at all.
+        // `fallow-api` can run the first four (their standalone MCP tools do).
+        // They stay on the subprocess because killing the child is the only
+        // stop with an upper bound: cooperative cancellation unwinds at the
+        // next stage boundary, and a detector or graph pass on a large
+        // repository is not a bound `timeout_ms` can promise. `check_health`
+        // additionally builds its own session below the API options, and
+        // `audit` runs a second analysis in a temporary base worktree whose
+        // cleanup under cancellation is unexamined. The rest have no
+        // `fallow-api` route at all.
         CodeModeTool::Analyze
         | CodeModeTool::FindDupes
         | CodeModeTool::CheckHealth
@@ -285,8 +309,14 @@ fn api_route(tool: CodeModeTool) -> Option<ApiRoute> {
     }
 }
 
-/// An in-process host call: params in, serialized fallow JSON out.
-type ApiRoute = fn(serde_json::Value) -> Result<Option<serde_json::Value>, String>;
+/// An in-process host call: params and a cancellation token in, serialized
+/// fallow JSON out.
+///
+/// The token is a parameter rather than a captured value because `ApiRoute` is
+/// a bare `fn` pointer. Setting it asks the analysis behind the call to stop at
+/// its next stage boundary and return a `FALLOW_CANCELLED` error.
+type ApiRoute =
+    fn(serde_json::Value, Option<Arc<AtomicBool>>) -> Result<Option<serde_json::Value>, String>;
 
 /// The sandbox host API, as `(camelCase alias, wire tool name)` pairs,
 /// projected from `fallow_types::mcp_manifest` so the allowlist has exactly
@@ -296,7 +326,7 @@ pub(super) static CODE_MODE_ALIASES: LazyLock<Vec<(&'static str, &'static str)>>
     LazyLock::new(fallow_types::mcp_manifest::code_mode_allowlist);
 
 /// Host-call aliases whose backing is [`CodeModeBacking::Subprocess`], so
-/// `timeout_ms` kills them instead of only abandoning them. The `code_execute`
+/// `timeout_ms` kills them instead of asking them to stop. The `code_execute`
 /// description names exactly this set, and a server test binds that prose to
 /// this projection.
 #[cfg(test)]
@@ -335,8 +365,9 @@ pub(super) fn merge_default_root(
 pub(super) fn run_api_tool(
     tool: CodeModeTool,
     params: serde_json::Value,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    api_route(tool).map_or(Ok(None), |route| route(params))
+    api_route(tool).map_or(Ok(None), |route| route(params, cancellation))
 }
 
 pub(super) fn build_tool_args(
@@ -493,8 +524,12 @@ fn build_runtime_coverage_tool_args(
     }
 }
 
-fn run_combined_api_value(params: &CombinedParams) -> Result<Option<serde_json::Value>, String> {
-    let options = combined_options_from_params(params)?;
+fn run_combined_api_value(
+    params: &CombinedParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<Option<serde_json::Value>, String> {
+    let mut options = combined_options_from_params(params)?;
+    options.analysis.cancellation = cancellation;
     let value = run_combined(&options)
         .and_then(serialize_combined_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
@@ -964,9 +999,81 @@ mod tests {
             .filter(|tool| tool.backing() == CodeModeBacking::Subprocess)
         {
             assert_eq!(
-                run_api_tool(*tool, serde_json::json!({})).expect("fallback decision"),
+                run_api_tool(*tool, serde_json::json!({}), None).expect("fallback decision"),
                 None,
                 "{} must fall back to its subprocess",
+                tool.name()
+            );
+        }
+    }
+
+    fn cancellation_fixture() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"cancellation","main":"src/index.ts"}"#,
+        )
+        .expect("package.json");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export const entry = 1;\nconsole.log(entry);\n",
+        )
+        .expect("entry");
+        std::fs::write(root.join("src/orphan.ts"), "export const orphan = 1;\n").expect("orphan");
+        project
+    }
+
+    /// Params that reach each route's analysis rather than being refused for a
+    /// missing or invalid argument first.
+    fn cancellation_params(tool: CodeModeTool, root: &str) -> serde_json::Value {
+        match tool {
+            CodeModeTool::CheckChanged => serde_json::json!({ "root": root, "since": "HEAD" }),
+            CodeModeTool::TraceExport => {
+                serde_json::json!({ "root": root, "file": "src/orphan.ts", "export_name": "orphan" })
+            }
+            CodeModeTool::TraceFile => {
+                serde_json::json!({ "root": root, "file": "src/orphan.ts" })
+            }
+            CodeModeTool::TraceDependency => {
+                serde_json::json!({ "root": root, "package_name": "left-pad" })
+            }
+            CodeModeTool::TraceClone => {
+                serde_json::json!({ "root": root, "file": "src/orphan.ts", "line": 1 })
+            }
+            _ => serde_json::json!({ "root": root }),
+        }
+    }
+
+    /// A Code Mode deadline is only a stop signal for routes that read the
+    /// token it sets. Every Api-backed tool must report `FALLOW_CANCELLED`
+    /// rather than a report, so a route wired to accept a token but never read
+    /// one fails here instead of quietly running to completion.
+    ///
+    /// `explain` is the single exemption: it reads a static issue-type table
+    /// and never opens a project.
+    #[test]
+    fn api_backed_tools_stop_for_a_token_that_is_already_set() {
+        let project = cancellation_fixture();
+        let root = project.path().to_string_lossy().to_string();
+
+        for tool in CodeModeTool::ALL
+            .iter()
+            .filter(|tool| tool.backing() == CodeModeBacking::Api)
+        {
+            if matches!(tool, CodeModeTool::FallowExplain) {
+                continue;
+            }
+            let cancelled = Arc::new(AtomicBool::new(true));
+            let error = run_api_tool(*tool, cancellation_params(*tool, &root), Some(cancelled))
+                .err()
+                .unwrap_or_else(|| {
+                    panic!("{} returned a result for a cancelled call", tool.name())
+                });
+            assert!(
+                error.contains("FALLOW_CANCELLED"),
+                "{} did not stop for a token that was already set: {error}",
                 tool.name()
             );
         }

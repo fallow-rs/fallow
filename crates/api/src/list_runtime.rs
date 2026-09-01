@@ -192,14 +192,19 @@ pub struct LogicalGroupInfo {
 /// # Errors
 ///
 /// Returns a structured programmatic error for invalid options or config-load
-/// failures.
+/// failures, and `FALLOW_CANCELLED` when the caller's cancellation token is
+/// set. This route parses nothing: config load and file discovery are its only
+/// stage, so the token is observed on either side of that and nowhere within
+/// it.
 pub fn run_list_boundaries(
     options: &ListBoundariesOptions,
 ) -> ProgrammaticResult<ListBoundariesProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
+        resolved.ensure_not_cancelled("config load and file discovery")?;
         let project_config = load_list_project_config(&resolved)?;
         let session = fallow_engine::session::AnalysisSession::from_config(project_config);
+        resolved.ensure_not_cancelled("the boundary listing")?;
         let changed_files = changed_files_for_run(&resolved)?;
         let discovered = scoped_discovered_files(session.files(), changed_files.as_ref());
         let data = compute_boundary_data(session.config(), Some(&discovered));
@@ -216,14 +221,19 @@ pub fn run_list_boundaries(
 /// # Errors
 ///
 /// Returns a structured programmatic error for invalid options, config-load
-/// failures, or plugin regex errors.
+/// failures, or plugin regex errors, and `FALLOW_CANCELLED` when the caller's
+/// cancellation token is set. This route parses nothing: config load and file
+/// discovery are its only stage, so the token is observed on either side of
+/// that and nowhere within it.
 pub fn run_project_info(
     options: &ProjectInfoOptions,
 ) -> ProgrammaticResult<ProjectInfoProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
+        resolved.ensure_not_cancelled("config load and file discovery")?;
         let project_config = load_list_project_config(&resolved)?;
         let session = fallow_engine::session::AnalysisSession::from_config(project_config);
+        resolved.ensure_not_cancelled("the project listing")?;
         let config = session.config();
         let workspaces = session.workspaces();
         let show_all = project_info_should_show_all(options);

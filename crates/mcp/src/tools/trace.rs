@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::params::{TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams};
 
 use fallow_api::{
@@ -89,15 +92,23 @@ pub async fn run_trace_clone_tool(params: TraceCloneParams) -> Result<CallToolRe
     Ok(result)
 }
 
-pub fn run_trace_export_api_value(params: &TraceExportParams) -> Result<serde_json::Value, String> {
-    let options = trace_export_options_from_params(params)?;
+pub fn run_trace_export_api_value(
+    params: &TraceExportParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<serde_json::Value, String> {
+    let mut options = trace_export_options_from_params(params)?;
+    options.analysis.cancellation = cancellation;
     run_trace_export(&options)
         .and_then(serialize_trace_export_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))
 }
 
-pub fn run_trace_file_api_value(params: &TraceFileParams) -> Result<serde_json::Value, String> {
-    let options = trace_file_options_from_params(params)?;
+pub fn run_trace_file_api_value(
+    params: &TraceFileParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<serde_json::Value, String> {
+    let mut options = trace_file_options_from_params(params)?;
+    options.analysis.cancellation = cancellation;
     run_trace_file(&options)
         .and_then(serialize_trace_file_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))
@@ -105,15 +116,21 @@ pub fn run_trace_file_api_value(params: &TraceFileParams) -> Result<serde_json::
 
 pub fn run_trace_dependency_api_value(
     params: &TraceDependencyParams,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<serde_json::Value, String> {
-    let options = trace_dependency_options_from_params(params)?;
+    let mut options = trace_dependency_options_from_params(params)?;
+    options.analysis.cancellation = cancellation;
     run_trace_dependency(&options)
         .and_then(serialize_trace_dependency_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))
 }
 
-pub fn run_trace_clone_api_value(params: &TraceCloneParams) -> Result<serde_json::Value, String> {
-    let options = trace_clone_options_from_params(params)?;
+pub fn run_trace_clone_api_value(
+    params: &TraceCloneParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<serde_json::Value, String> {
+    let mut options = trace_clone_options_from_params(params)?;
+    options.duplication.analysis.cancellation = cancellation;
     run_trace_clone(&options)
         .and_then(serialize_trace_clone_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))

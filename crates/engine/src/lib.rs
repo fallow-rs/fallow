@@ -91,6 +91,7 @@ pub type EngineResult<T> = Result<T, EngineError>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineError {
     message: String,
+    cancelled: bool,
 }
 
 impl EngineError {
@@ -99,7 +100,27 @@ impl EngineError {
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            cancelled: false,
         }
+    }
+
+    /// Create the error an analysis returns when its caller cancelled it.
+    ///
+    /// `stage` names the pipeline boundary the run stopped at, so a caller can
+    /// tell how far the analysis got before it was stopped.
+    #[must_use]
+    pub fn cancelled(stage: &str) -> Self {
+        Self {
+            message: format!("analysis was cancelled before {stage}"),
+            cancelled: true,
+        }
+    }
+
+    /// Whether this error reports a caller-requested cancellation rather than
+    /// a failed analysis.
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
+        self.cancelled
     }
 
     /// User-facing error message from the backend.

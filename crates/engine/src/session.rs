@@ -1,6 +1,7 @@
 //! Engine-owned analysis session orchestration.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -39,6 +40,7 @@ pub struct AnalysisSession {
     workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     parsed_cache: Mutex<Option<ParsedModuleCache>>,
     styling_cache: Mutex<Option<Arc<crate::health::StylingAnalysisArtifacts>>>,
+    cancellation: Option<Arc<AtomicBool>>,
 }
 
 #[derive(Debug)]
@@ -226,7 +228,43 @@ impl AnalysisSession {
             workspace_diagnostics,
             parsed_cache: Mutex::new(None),
             styling_cache: Mutex::new(None),
+            cancellation: None,
         }
+    }
+
+    /// Attach a caller-owned cancellation token to this session.
+    ///
+    /// Analyses that run through the session check the token at each pipeline
+    /// stage boundary and inside the per-file parse loop, and return
+    /// [`crate::EngineError::cancelled`] instead of a partial result once it is
+    /// set. A session without a token can never be cancelled, so existing
+    /// callers keep their current behavior.
+    ///
+    /// The stop is cooperative, and how long it takes is bounded by the
+    /// longest stage that holds no check, not by any promised latency. Only
+    /// the parse loop stops per file. Duplication detection (tokenization plus
+    /// suffix-array matching) and the dead-code detectors run to the end of the
+    /// stage once entered, and on a large repository either is seconds of work.
+    /// A caller that needs a bounded stop has to kill the process instead.
+    #[must_use]
+    pub fn with_cancellation(mut self, cancellation: Arc<AtomicBool>) -> Self {
+        self.cancellation = Some(cancellation);
+        self
+    }
+
+    /// Whether this session's caller has requested cancellation.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation
+            .as_ref()
+            .is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
+    }
+
+    fn ensure_not_cancelled(&self, stage: &str) -> EngineResult<()> {
+        if self.is_cancelled() {
+            return Err(crate::EngineError::cancelled(stage));
+        }
+        Ok(())
     }
 
     /// Build a session from a resolved config when the caller already owns
@@ -381,7 +419,7 @@ impl AnalysisSession {
             modules,
             metrics,
             source_diagnostics,
-        } = parse_files_with_config(&config, &files, need_complexity);
+        } = parse_files_with_config(&config, &files, need_complexity, None);
         ParsedAnalysisSessionParts {
             config,
             config_path,
@@ -403,7 +441,7 @@ impl AnalysisSession {
     /// Parse discovered files without consuming the session.
     #[must_use]
     pub fn parsed_parts(&self, need_complexity: bool) -> ParsedAnalysisSessionParts {
-        let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity);
+        let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity, None);
         self.parsed_parts_from_modules(modules.to_vec(), metrics)
     }
 
@@ -413,7 +451,7 @@ impl AnalysisSession {
         &self,
         need_complexity: bool,
     ) -> SharedParsedAnalysisSessionParts {
-        let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity);
+        let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity, None);
         SharedParsedAnalysisSessionParts {
             config: self.config.clone(),
             files: self.discovery.files().to_vec(),
@@ -433,7 +471,30 @@ impl AnalysisSession {
     #[doc(hidden)]
     #[must_use]
     pub(crate) fn shared_parsed_modules(&self, need_complexity: bool) -> Arc<[ModuleInfo]> {
-        self.parse_modules(need_complexity).modules
+        self.parse_modules(need_complexity, None).modules
+    }
+
+    /// Parse the discovered files, stopping if the session's caller cancelled.
+    ///
+    /// The token is checked on both sides of the parse loop, so the truncated
+    /// module set a cancelled parse produces is never returned as a smaller
+    /// project. `stage` names the work that would have followed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::EngineError::cancelled`] when the token is set. A
+    /// session without a token can never return it.
+    pub(crate) fn shared_parsed_modules_cancellable(
+        &self,
+        need_complexity: bool,
+        stage: &str,
+    ) -> EngineResult<Arc<[ModuleInfo]>> {
+        self.ensure_not_cancelled("parsing")?;
+        let modules = self
+            .parse_modules(need_complexity, self.cancellation.as_deref())
+            .modules;
+        self.ensure_not_cancelled(stage)?;
+        Ok(modules)
     }
 
     /// Parse discovered files without consuming the session or retaining parser
@@ -444,7 +505,7 @@ impl AnalysisSession {
             modules,
             metrics,
             source_diagnostics: _,
-        } = parse_files_with_config(&self.config, self.files(), need_complexity);
+        } = parse_files_with_config(&self.config, self.files(), need_complexity, None);
         self.parsed_parts_from_modules(modules, metrics)
     }
 
@@ -575,6 +636,7 @@ impl AnalysisSession {
             retain_graph: true,
             retain_modules: false,
             retain_files: false,
+            cancellation: self.cancellation.as_deref(),
         })
         .map(SharedDeadCodeAnalysisArtifacts::into_owned)
     }
@@ -585,7 +647,13 @@ impl AnalysisSession {
         retain_graph: bool,
         retain_files: bool,
     ) -> EngineResult<SharedDeadCodeAnalysisArtifacts> {
-        let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity);
+        self.ensure_not_cancelled("parsing")?;
+        let SharedParsedModules { modules, metrics } =
+            self.parse_modules(need_complexity, self.cancellation.as_deref());
+        // The parse loop no-ops the files it has not reached yet, so a token
+        // set during parsing leaves `modules` truncated. It must never reach
+        // the graph as if it were the whole project.
+        self.ensure_not_cancelled("the dead-code pipeline")?;
         run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
             config: &self.config,
             discovery: &self.discovery,
@@ -595,6 +663,7 @@ impl AnalysisSession {
             retain_graph,
             retain_modules: need_complexity,
             retain_files,
+            cancellation: self.cancellation.as_deref(),
         })
     }
 
@@ -670,6 +739,7 @@ impl AnalysisSession {
         duplicates_config: &DuplicatesConfig,
         options: ProjectAnalysisArtifactOptions,
     ) -> EngineResult<ProjectAnalysisArtifacts> {
+        self.ensure_not_cancelled("duplication detection")?;
         let cache_dir = (!self.config.no_cache).then_some(self.config.cache_dir.as_path());
         let duplication = if let Some(changed_files) = options.changed_files.as_ref() {
             let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
@@ -683,6 +753,10 @@ impl AnalysisSession {
             self.find_duplicates_with_defaults(duplicates_config, cache_dir)
                 .report
         };
+        // Duplication detection is infallible, so a token set while it ran can
+        // only be reported here, before its report is handed on as a complete
+        // one.
+        self.ensure_not_cancelled("the dead-code half of project analysis")?;
         let source_fingerprints = options
             .collect_source_fingerprints
             .then(|| self.source_fingerprints());
@@ -729,7 +803,16 @@ impl AnalysisSession {
         )
     }
 
-    fn parse_modules(&self, need_complexity: bool) -> SharedParsedModules {
+    /// Parse the discovered files, reusing the session's warm module cache.
+    ///
+    /// `cancellation` is threaded through to the per-file parse loop, so a set
+    /// token truncates the returned modules. Only callers that convert a set
+    /// token into an error may pass one.
+    fn parse_modules(
+        &self,
+        need_complexity: bool,
+        cancellation: Option<&AtomicBool>,
+    ) -> SharedParsedModules {
         let fingerprints = source_fingerprints_for_files(self.files());
         if let Some(fingerprints) = fingerprints.as_ref()
             && let Some(modules) = self.cached_modules(need_complexity, fingerprints)
@@ -750,9 +833,13 @@ impl AnalysisSession {
             modules,
             metrics,
             source_diagnostics: _,
-        } = parse_files_with_config(&self.config, self.files(), need_complexity);
+        } = parse_files_with_config(&self.config, self.files(), need_complexity, cancellation);
         let modules: Arc<[ModuleInfo]> = modules.into();
-        if let Some(fingerprints) = fingerprints
+        // A cancelled parse returns a truncated module set. Storing it would
+        // serve that truncation to the next call as a warm cache hit, long
+        // after the cancellation itself is forgotten.
+        if !token_is_set(cancellation)
+            && let Some(fingerprints) = fingerprints
             && let Ok(mut cache) = self.parsed_cache.lock()
         {
             *cache = Some(ParsedModuleCache {
@@ -792,10 +879,15 @@ struct SharedParsedModules {
     metrics: core_backend::ParseMetrics,
 }
 
+fn token_is_set(cancellation: Option<&AtomicBool>) -> bool {
+    cancellation.is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
+}
+
 fn parse_files_with_config(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
     need_complexity: bool,
+    cancellation: Option<&AtomicBool>,
 ) -> ParsedModules {
     let parse_start = Instant::now();
     let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
@@ -808,7 +900,8 @@ fn parse_files_with_config(
             cache_max_size_bytes,
         )
     };
-    let parse_result = crate::source::parse_all_files(files, cache.as_ref(), need_complexity);
+    let parse_result =
+        crate::source::parse_all_files(files, cache.as_ref(), need_complexity, cancellation);
     let source_diagnostics =
         fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
     let mut modules = parse_result.modules;
@@ -816,7 +909,11 @@ fn parse_files_with_config(
         module.prepare_analysis_facts();
     }
     let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
-    let cache_ms = update_parse_cache_if_enabled(config, &mut cache, &modules, files);
+    let cache_ms = if token_is_set(cancellation) {
+        0.0
+    } else {
+        update_parse_cache_if_enabled(config, &mut cache, &modules, files)
+    };
     let metrics = core_backend::ParseMetrics {
         parse_ms,
         cache_ms,
@@ -926,6 +1023,7 @@ struct EngineDeadCodePipelineInput<'a> {
     retain_graph: bool,
     retain_modules: bool,
     retain_files: bool,
+    cancellation: Option<&'a AtomicBool>,
 }
 
 fn run_engine_owned_dead_code_pipeline(
@@ -940,11 +1038,22 @@ fn run_engine_owned_dead_code_pipeline(
         retain_graph,
         retain_modules,
         retain_files,
+        cancellation,
     } = input;
+    let stopped = |stage: &str| -> EngineResult<()> {
+        if token_is_set(cancellation) {
+            return Err(crate::EngineError::cancelled(stage));
+        }
+        Ok(())
+    };
+    stopped("the dead-code prelude")?;
     let prelude = core_backend::prepare_dead_code_backend_prelude(config, discovery)?;
     let prelude_timings = prelude.timings();
+    stopped("dead-code entry-point discovery")?;
     let entry_points = core_backend::discover_dead_code_entry_points(&prelude);
+    stopped("import resolution and graph construction")?;
     let (resolved, graph) = resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
+    stopped("the dead-code detectors")?;
 
     let mut detector = core_backend::run_dead_code_detectors(
         &prelude,
@@ -955,6 +1064,11 @@ fn run_engine_owned_dead_code_pipeline(
         &entry_points,
     );
     crate::dead_code::filter_configured_ignored_findings(&mut detector.results, config);
+    // The detectors are the longest uninterruptible stage. Without this a
+    // token set inside them yields a complete report, so the same request
+    // would be answered with results or with `cancelled` depending only on
+    // which side of the stage the flip landed.
+    stopped("assembling the dead-code report")?;
     let profile =
         core_backend::dead_code_pipeline_profile(core_backend::DeadCodePipelineProfileInput {
             retain_timings: retain_graph,
@@ -1038,12 +1152,16 @@ pub(crate) fn analyze_dead_code_with_parse_result_from_config(
         retain_graph: true,
         retain_modules: false,
         retain_files: false,
+        cancellation: None,
     })
     .map(SharedDeadCodeAnalysisArtifacts::into_owned)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+    use std::time::Duration;
+
     use super::*;
 
     fn session_with_source(source: &str) -> (tempfile::TempDir, AnalysisSession) {
@@ -1053,6 +1171,161 @@ mod tests {
         std::fs::write(root.join("src/index.ts"), source).expect("write source");
         let session = AnalysisSession::load_default(root);
         (project, session)
+    }
+
+    /// A cancelled session reports the failure and names the boundary it
+    /// stopped at, so a caller can tell a stopped run from a broken one.
+    #[test]
+    fn a_cancelled_session_returns_a_cancellation_error_not_an_empty_result() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("create source directory");
+        std::fs::write(root.join("src/index.ts"), "export const entry = 1;\n").expect("entry");
+        std::fs::write(root.join("src/orphan.ts"), "export const orphan = 1;\n").expect("orphan");
+
+        let baseline = AnalysisSession::load_default(root)
+            .analyze_dead_code()
+            .expect("an uncancelled session analyzes");
+        assert!(
+            !baseline.results.unused_files.is_empty(),
+            "the fixture must have findings, so an empty result would be a plausible wrong answer"
+        );
+
+        let error = AnalysisSession::load_default(root)
+            .with_cancellation(Arc::new(AtomicBool::new(true)))
+            .analyze_dead_code()
+            .expect_err("a cancelled session must not return results");
+        assert!(error.is_cancelled(), "unexpected error: {error}");
+        assert!(error.message().contains("cancelled"));
+    }
+
+    /// A session that is not given a token can never be cancelled, so every
+    /// existing caller keeps its current behavior.
+    #[test]
+    fn a_session_without_a_token_is_never_cancelled() {
+        let (_project, session) = session_with_source("export const unused = 1;\n");
+        assert!(!session.is_cancelled());
+        session
+            .analyze_dead_code()
+            .expect("a session without a token analyzes");
+    }
+
+    /// Files per fixture for the parse-loop tests. Large enough that a parse
+    /// takes long enough to be cancelled part way through, small enough to
+    /// stay a unit test.
+    const PARSE_LOOP_FILES: usize = 400;
+
+    fn parse_loop_project() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        let src = project.path().join("src");
+        std::fs::create_dir_all(&src).expect("src dir");
+        for module in 0..PARSE_LOOP_FILES {
+            let mut source = String::new();
+            for symbol in 0..20 {
+                let _ = writeln!(
+                    source,
+                    "export const helper{symbol} = (input: number): number => {{\n  \
+                     if (input > {symbol}) {{\n    return input * {symbol};\n  }}\n  \
+                     return input - {symbol};\n}};"
+                );
+            }
+            std::fs::write(src.join(format!("mod{module}.ts")), source).expect("module");
+        }
+        project
+    }
+
+    /// A session over `root` that never reads or writes the on-disk parse
+    /// cache, so repeated parses in one test all do the same work.
+    fn uncached_session(root: &Path) -> AnalysisSession {
+        let mut project_config = crate::project_config::default_project_config(root);
+        project_config.config.no_cache = true;
+        AnalysisSession::from_config(project_config)
+    }
+
+    /// The parse loop is the one place cancellation stops work per item rather
+    /// than at a stage boundary, so it is the one place the stop can be
+    /// asserted from what was parsed instead of from how long the call took.
+    ///
+    /// A truncated parse is also the most dangerous thing cancellation
+    /// produces: served from a cache it would read as a project with fewer
+    /// modules long after the cancellation was forgotten. The second half
+    /// asserts it is not retained.
+    #[test]
+    fn a_cancelled_parse_stops_partway_and_leaves_no_truncated_cache_behind() {
+        let project = parse_loop_project();
+        let root = project.path();
+
+        // Warm the page cache, so the timed run measures parsing.
+        drop(uncached_session(root).parse_modules(false, None));
+
+        let started = Instant::now();
+        let full = uncached_session(root).parse_modules(false, None);
+        let full_parse = started.elapsed();
+        let full_count = full.modules.len();
+        assert_eq!(
+            full_count, PARSE_LOOP_FILES,
+            "the fixture must parse every generated module"
+        );
+        assert!(
+            full_parse >= Duration::from_millis(20),
+            "the fixture is too small to cancel part way through: {full_parse:?}"
+        );
+
+        // Where the flip lands is a scheduling outcome, so this retries until
+        // one attempt lands strictly inside the loop. Every attempt asserts the
+        // property; the retry only chooses an attempt that measures the stop
+        // part way through rather than at the entry guard.
+        let mut partial = None;
+        let mut cancelled_session = None;
+        for attempt in 1..=6_u32 {
+            let token = Arc::new(AtomicBool::new(false));
+            // Build the session before arming the watchdog. Discovery runs in
+            // the constructor, and a delay spent there would leave the token
+            // already set when the loop starts.
+            let session = uncached_session(root).with_cancellation(Arc::clone(&token));
+            let watchdog = {
+                let token = Arc::clone(&token);
+                let delay = full_parse * attempt / 6;
+                std::thread::spawn(move || {
+                    std::thread::sleep(delay);
+                    token.store(true, Ordering::SeqCst);
+                })
+            };
+            let cancelled = session.parse_modules(false, Some(&token));
+            watchdog.join().expect("watchdog thread");
+
+            let parsed = cancelled.modules.len();
+            assert!(
+                parsed < full_count,
+                "the parse returned all {full_count} modules, so the loop never read the token"
+            );
+            cancelled_session = Some(session);
+            if parsed > 0 {
+                partial = Some(parsed);
+                break;
+            }
+        }
+        let parsed = partial.expect(
+            "no attempt flipped the token while the loop was running, so this never measured a \
+             stop part way through",
+        );
+        assert!(parsed < full_count);
+
+        assert!(
+            cancelled_session
+                .expect("a cancelled session")
+                .parsed_cache
+                .lock()
+                .expect("parse cache")
+                .is_none(),
+            "a truncated parse must not be retained as this session's warm cache"
+        );
+        let recovered = uncached_session(root).parse_modules(false, None);
+        assert_eq!(
+            recovered.modules.len(),
+            full_count,
+            "a later uncancelled parse must still see the whole project"
+        );
     }
 
     #[test]
@@ -1188,8 +1461,8 @@ mod tests {
     #[test]
     fn warm_parse_cache_reuses_module_storage() {
         let (_project, session) = session_with_source("export function value() { return 1; }\n");
-        let first = session.parse_modules(true);
-        let second = session.parse_modules(false);
+        let first = session.parse_modules(true, None);
+        let second = session.parse_modules(false, None);
 
         assert!(
             Arc::ptr_eq(&first.modules, &second.modules),
@@ -1243,7 +1516,7 @@ mod tests {
     #[test]
     fn warm_complexity_artifacts_reuse_cached_module_storage() {
         let (_project, session) = session_with_source("export function value() { return 1; }\n");
-        let cached = session.parse_modules(true);
+        let cached = session.parse_modules(true, None);
         let artifacts = session
             .analyze_dead_code_with_reuse_artifacts(true, true, false)
             .expect("analysis succeeds");

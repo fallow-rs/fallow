@@ -111,14 +111,21 @@ Contract rules:
 - Each Code Mode host call has exactly one backing, `CodeModeBacking::Api` or
   `CodeModeBacking::Subprocess`, derived from the single `api_route` match that
   also performs the dispatch, so no tool can be listed as in-process without a
-  route. `fallow-api` has no cancellation, so whole-project analyses (`analyze`,
-  `find_dupes`, `check_health`, `audit`) take the killable subprocess even
-  though a typed route exists for them: a timeout has to stop the work, not just
-  stop waiting for it. An in-process call that does outlive `timeout_ms` is
-  counted as abandoned, and while abandoned work is still running later host
-  calls fall back to the subprocess, which bounds how much orphaned analysis a
-  long-lived server can accumulate. Cancellation in `fallow-api` is what would
-  remove the split.
+  route. `fallow-api` cancellation is cooperative: a deadline sets the call's
+  token and the analysis stops at its next pipeline stage boundary, or inside
+  the per-file parse loop, which is the one place work stops per item. That has
+  no upper bound, because duplication detection and the dead-code detectors
+  hold no check once entered and are each seconds of work on a large
+  repository. So the whole-project analyses (`analyze`, `find_dupes`,
+  `check_health`, `audit`) still take the killable subprocess even though a
+  typed route exists for them: killing the child is the only stop `timeout_ms`
+  can promise. `check_health` additionally builds its own session below the API
+  options, so the token would not reach it, and `audit` runs a second analysis
+  in a temporary base worktree whose cleanup under cancellation is unexamined.
+  An in-process call that does outlive `timeout_ms` is counted as abandoned,
+  and while abandoned work is still winding down later host calls fall back to
+  the subprocess, which bounds how much orphaned analysis a long-lived server
+  can accumulate.
 - Host calls are memoized per snippet, keyed on the tool plus its merged params
   in canonical form (object keys sorted, array order preserved), so
   `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` are one entry. A hit spawns nothing,
@@ -154,8 +161,8 @@ Contract rules:
   than charging on arrival is what keeps the outcome independent of which worker
   reported first. Subprocess-backed elements overlap on a worker pool capped at
   `MAX_BATCH_CONCURRENCY`; in-process elements run one at a time on the calling
-  thread, because `fallow-api` has no cancellation and two concurrent in-process
-  analyses would be exactly the uncancellable pile-up the abandoned-call
+  thread, because `fallow-api` stops only cooperatively and two concurrent
+  in-process analyses would be exactly the pile-up the abandoned-call
   accounting exists to prevent.
 - `max_output_bytes` bounds two independent things: the total fallow JSON read
   by host calls, and the serialized snippet result. The result is the only part

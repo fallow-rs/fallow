@@ -16,6 +16,8 @@
 )]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use fallow_config::EmailMode;
 use fallow_output::EffortEstimate;
@@ -331,6 +333,35 @@ pub struct AnalysisOptions {
     /// Optional project-wide TypeScript semantic analysis. Disabled by default
     /// and never changes compiler or typed-lint ownership.
     pub type_aware: TypeAwareOptions,
+    /// Caller-owned cooperative cancellation for this analysis.
+    ///
+    /// Setting the flag asks the analysis to stop at its next stage boundary
+    /// and return a `FALLOW_CANCELLED` error. `None`, the default, is an
+    /// analysis that always runs to completion.
+    ///
+    /// The field is on the shared options struct, but the entry points do not
+    /// all honor it, so read the one being called before relying on it:
+    ///
+    /// - Cancelled at the entry, on both sides of the per-file parse loop, and
+    ///   at each pipeline stage boundary: [`run_dead_code`],
+    ///   [`run_circular_dependencies`], [`run_boundary_violations`],
+    ///   [`run_combined`], [`run_duplication`], [`run_feature_flags`], and the
+    ///   four trace routes.
+    /// - Cancelled only at the boundaries around config load and file
+    ///   discovery, because they are the whole run: [`run_project_info`] and
+    ///   [`run_list_boundaries`].
+    /// - Cancelled only at the entry, then run to completion:
+    ///   [`run_health`], which hands off to a runner that builds its own
+    ///   session below these options.
+    /// - Not cancellable at all: [`run_decision_surface`] and
+    ///   [`run_similar_code`].
+    ///
+    /// The stop is cooperative everywhere it exists, so it has no upper bound:
+    /// it is only as prompt as the longest stage holding no check, and
+    /// duplication detection and the dead-code detectors are each seconds of
+    /// uninterruptible work on a large repository. A caller that needs a
+    /// bounded stop has to run Fallow as a child process and kill it.
+    pub cancellation: Option<Arc<AtomicBool>>,
 }
 
 /// Typed options for Fallow's optional TypeScript semantic companion.

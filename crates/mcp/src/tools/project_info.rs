@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::params::ProjectInfoParams;
 
 use fallow_api::{
@@ -34,8 +37,11 @@ pub async fn run_project_info(
 
 pub fn run_project_info_api_value(
     params: &ProjectInfoParams,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let value = run_api_project_info(&project_info_options_from_params(params))
+    let mut options = project_info_options_from_params(params);
+    options.analysis.cancellation = cancellation;
+    let value = run_api_project_info(&options)
         .and_then(serialize_project_info_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
 
@@ -91,6 +97,7 @@ fn project_info_options_from_params(params: &ProjectInfoParams) -> ProjectInfoOp
             changed_workspaces: None,
             explain: false,
             type_aware: fallow_api::TypeAwareOptions::default(),
+            ..AnalysisOptions::default()
         },
         entry_points: params.entry_points == Some(true),
         files: params.files == Some(true),

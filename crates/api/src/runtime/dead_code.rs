@@ -47,6 +47,26 @@ pub fn run_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<DeadCodePr
     resolved.install(|| run_dead_code_inner(options, &resolved, |_| {}))
 }
 
+/// Turn an engine failure into a programmatic error, keeping a cancelled run
+/// distinguishable from a failed one.
+///
+/// The engine's cancellation message already names the pipeline boundary the
+/// run stopped at, so it is carried through rather than replaced.
+pub(super) fn map_engine_error(
+    err: &fallow_engine::EngineError,
+    failure_message: &str,
+    failure_code: &'static str,
+    context: &'static str,
+) -> ProgrammaticError {
+    if err.is_cancelled() {
+        return crate::analysis_context::cancelled_error_message(err.message())
+            .with_context(context);
+    }
+    ProgrammaticError::new(format!("{failure_message}: {err}"), 2)
+        .with_code(failure_code)
+        .with_context(context)
+}
+
 /// Run circular-dependency analysis and return typed API output before JSON.
 ///
 /// # Errors
@@ -81,6 +101,7 @@ fn run_dead_code_inner(
     post_filter: impl FnOnce(&mut AnalysisResults),
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let start = Instant::now();
+    resolved.ensure_not_cancelled("config load and file discovery")?;
     let session = load_dead_code_session(options, resolved)?;
     run_dead_code_with_session(options, resolved, &session, None, post_filter, start)
 }
@@ -93,10 +114,14 @@ pub(super) fn run_dead_code_with_session(
     post_filter: impl FnOnce(&mut AnalysisResults),
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
+    resolved.ensure_not_cancelled("dead-code analysis")?;
     let analysis = session.analyze_dead_code().map_err(|err| {
-        ProgrammaticError::new(format!("dead-code analysis failed: {err}"), 2)
-            .with_code("FALLOW_DEAD_CODE_FAILED")
-            .with_context("dead-code")
+        map_engine_error(
+            &err,
+            "dead-code analysis failed",
+            "FALLOW_DEAD_CODE_FAILED",
+            "dead-code",
+        )
     })?;
     let mut results = analysis.results;
     let unfiltered_unused_files = results.unused_files.clone();
@@ -130,12 +155,16 @@ pub(super) fn run_dead_code_with_session_artifacts(
     post_filter: impl FnOnce(&mut AnalysisResults),
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticRunWithArtifacts> {
+    resolved.ensure_not_cancelled("dead-code analysis")?;
     let mut artifacts = session
         .analyze_dead_code_with_artifacts(true, true)
         .map_err(|err| {
-            ProgrammaticError::new(format!("dead-code analysis failed: {err}"), 2)
-                .with_code("FALLOW_DEAD_CODE_FAILED")
-                .with_context("dead-code")
+            map_engine_error(
+                &err,
+                "dead-code analysis failed",
+                "FALLOW_DEAD_CODE_FAILED",
+                "dead-code",
+            )
         })?;
     let unfiltered_unused_files = artifacts.results.unused_files.clone();
 
@@ -322,7 +351,24 @@ pub(super) fn load_dead_code_session(
             .with_context("analysis.configPath")
     })?;
     let project_config = configure_project_for_dead_code(project_config, options);
-    Ok(AnalysisSession::from_config(project_config))
+    Ok(attach_cancellation(
+        AnalysisSession::from_config(project_config),
+        resolved,
+    ))
+}
+
+/// Hand the caller's cancellation token to the engine session.
+///
+/// Without this the session runs to completion no matter what the API layer
+/// checks between its own stages.
+pub(super) fn attach_cancellation(
+    session: AnalysisSession,
+    resolved: &ProgrammaticAnalysisContext,
+) -> AnalysisSession {
+    match resolved.cancellation() {
+        Some(cancellation) => session.with_cancellation(std::sync::Arc::clone(cancellation)),
+        None => session,
+    }
 }
 
 pub(super) fn default_dead_code_options_for_context(

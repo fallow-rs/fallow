@@ -23,7 +23,10 @@ use super::{ProgrammaticResult, root_envelope_mode};
 /// # Errors
 ///
 /// Returns a structured programmatic error for invalid options, config load
-/// failures, git changed-file failures, or analysis failures.
+/// failures, git changed-file failures, or analysis failures, and
+/// `FALLOW_CANCELLED` when the caller's cancellation token is set. The scan
+/// observes the token at its entry, on both sides of the parse loop, and at
+/// the stage boundaries of the dead-code correlation behind it.
 pub fn run_feature_flags(
     options: &FeatureFlagsOptions,
 ) -> ProgrammaticResult<FeatureFlagsProgrammaticOutput> {
@@ -36,8 +39,17 @@ fn run_feature_flags_inner(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<FeatureFlagsProgrammaticOutput> {
     let start = Instant::now();
+    resolved.ensure_not_cancelled("config load and file discovery")?;
     let session = load_feature_flags_session(resolved)?;
-    let analysis = fallow_engine::flags::analyze_feature_flags_with_session(&session);
+    let analysis =
+        fallow_engine::flags::analyze_feature_flags_with_session(&session).map_err(|err| {
+            super::dead_code::map_engine_error(
+                &err,
+                "feature-flag analysis failed",
+                "FALLOW_FEATURE_FLAGS_FAILED",
+                "feature-flags",
+            )
+        })?;
     if analysis.files_scanned == 0 {
         return Err(ProgrammaticError::new("no files discovered", 2)
             .with_code("FALLOW_NO_FILES_DISCOVERED")
@@ -79,8 +91,12 @@ fn load_feature_flags_session(
             .with_code("FALLOW_CONFIG_LOAD_FAILED")
             .with_context("analysis.configPath")
     })?;
-    Ok(AnalysisSession::from_config(
-        configure_project_for_feature_flags(project_config, resolved),
+    Ok(super::dead_code::attach_cancellation(
+        AnalysisSession::from_config(configure_project_for_feature_flags(
+            project_config,
+            resolved,
+        )),
+        resolved,
     ))
 }
 

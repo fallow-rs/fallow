@@ -48,6 +48,7 @@ mod template_usage;
 pub mod visitor;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rayon::prelude::*;
 
@@ -148,16 +149,33 @@ pub fn parse_all_files(
     cache: Option<&CacheStore>,
     need_complexity: bool,
 ) -> ParseResult {
+    parse_all_files_cancellable(files, cache, need_complexity, None)
+}
+
+/// Parse all files, abandoning the remaining ones once `cancellation` is set.
+///
+/// Rayon's `map`/`collect` cannot short-circuit, so cancellation makes the
+/// per-file body a no-op instead of stopping the iteration: the scheduled
+/// items still drain, but at one atomic load each. The returned
+/// [`ParseResult`] is therefore truncated whenever the token flipped, and
+/// callers must treat a set token as a failed run rather than as a project
+/// with fewer modules.
+pub fn parse_all_files_cancellable(
+    files: &[DiscoveredFile],
+    cache: Option<&CacheStore>,
+    need_complexity: bool,
+    cancellation: Option<&AtomicBool>,
+) -> ParseResult {
+    let parse_one = |file: &DiscoveredFile| {
+        if cancellation.is_some_and(|cancelled| cancelled.load(Ordering::SeqCst)) {
+            return ParseFileResult::default();
+        }
+        parse_single_file_cached(file, cache, need_complexity)
+    };
     let results: Vec<ParseFileResult> = if files.len() <= PARALLEL_PARSE_FILE_THRESHOLD {
-        files
-            .iter()
-            .map(|file| parse_single_file_cached(file, cache, need_complexity))
-            .collect()
+        files.iter().map(parse_one).collect()
     } else {
-        files
-            .par_iter()
-            .map(|file| parse_single_file_cached(file, cache, need_complexity))
-            .collect()
+        files.par_iter().map(parse_one).collect()
     };
 
     let mut modules = Vec::with_capacity(results.len());
@@ -195,6 +213,7 @@ pub fn parse_all_files(
     }
 }
 
+#[derive(Default)]
 struct ParseFileResult {
     module: Option<ModuleInfo>,
     read_failure: Option<SourceReadFailure>,

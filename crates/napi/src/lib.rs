@@ -216,6 +216,9 @@ fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOp
         changed_workspaces: input.changed_workspaces,
         explain: input.explain.unwrap_or(false),
         type_aware,
+        // A JS embedder cannot hold a Rust cancellation token, so the napi
+        // surface never carries one.
+        ..api::AnalysisOptions::default()
     })
 }
 

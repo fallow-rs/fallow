@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use fallow_api::{
     AnalysisOptions, DeadCodeFilters, DeadCodeOptions, run_dead_code,
     serialize_dead_code_programmatic_json,
@@ -42,12 +45,15 @@ pub async fn run_check_changed(
 
 pub fn run_check_changed_api_value(
     params: &CheckChangedParams,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
     if requires_cli_fallback(params) {
         return Ok(None);
     }
 
-    let value = run_dead_code(&check_changed_options_from_params(params))
+    let mut options = check_changed_options_from_params(params);
+    options.analysis.cancellation = cancellation;
+    let value = run_dead_code(&options)
         .and_then(serialize_dead_code_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
 
@@ -216,7 +222,7 @@ mod tests {
 
         assert!(requires_cli_fallback(&params));
         assert!(
-            run_check_changed_api_value(&params)
+            run_check_changed_api_value(&params, None)
                 .expect("fallback check")
                 .is_none()
         );

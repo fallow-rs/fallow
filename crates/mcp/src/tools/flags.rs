@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::params::FeatureFlagsParams;
 
 use fallow_api::{
@@ -32,8 +35,11 @@ pub async fn run_feature_flags(
 
 pub fn run_feature_flags_api_value(
     params: &FeatureFlagsParams,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let value = run_api_feature_flags(&feature_flags_options_from_params(params))
+    let mut options = feature_flags_options_from_params(params);
+    options.analysis.cancellation = cancellation;
+    let value = run_api_feature_flags(&options)
         .and_then(serialize_feature_flags_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
 
@@ -92,6 +98,7 @@ fn feature_flags_options_from_params(params: &FeatureFlagsParams) -> FeatureFlag
             changed_workspaces: None,
             explain: true,
             type_aware: fallow_api::TypeAwareOptions::default(),
+            ..AnalysisOptions::default()
         },
         top: params.top,
     }
