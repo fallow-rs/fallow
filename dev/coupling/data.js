@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788272880076,
+  "lastUpdate": 1788274639941,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8437d52e6688cd1ce823d5da8c6670e7a23f839f",
-          "message": "fix: close analysis and audit follow-ups\n\n* chore: start issue follow-up batch\n\n* chore: start issue follow-up batch\n\n* fix: close analysis and audit follow-ups",
-          "timestamp": "2026-08-16T01:07:16+02:00",
-          "tree_id": "84124fa62f20213b3fbefff9d07a20d84d5a33fd",
-          "url": "https://github.com/fallow-rs/fallow/commit/8437d52e6688cd1ce823d5da8c6670e7a23f839f"
-        },
-        "date": 1786835300596,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 455,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1230,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/a5b045900bc0ad7cd1f859b95d75cec27fa791a5"
         },
         "date": 1788272876124,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1279,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0beb9fb4ae56c799fca0088b7e167430d815254d",
+          "message": "fix(cli): complete the knip and jscpd migration tables (#2523)\n\nCloses #2507.\n\nA systematic diff against knip 6.34.0 and @jscpd/core 4.2.5 found 128 knip gaps\nand 15 jscpd gaps. The serious category is not the missing entries: 16 keys were\nclaimed as auto-detected by fallow when no fallow plugin covers them, so\nmigration was telling users their tooling was handled when it was not. Those now\nreport honestly as unsupported.\n\nCoverage is exact. The covered and unsupported knip tables together are the 184\nreal keys, taken as the union of knip's Plugins map and its published schema.\njscpd is 6 mapped plus 31 reported across IOptions plus colors. Plausible but\nunreal mappings were rejected rather than padding the covered list: metro is\nonly reachable through the react-native plugin, i18next is the library rather\nthan the CLI, and parsing a file type is not plugin coverage.\n\nThe tables are now guarded rather than merely correct. A first pass claimed the\ntests pinned each table against the upstream key set; they asserted sorting and\neight hardcoded names and consulted nothing, so renaming a plugin would have\nleft every test green while migration promised auto-detection that would not\nhappen. Every covered key now resolves through a named alias table to the\nbuilt-in plugin roster, with the reverse check and a no-stale-alias check.\n\nUnknown keys no longer vanish either. Both migrators were allowlist-only with no\nelse branch, so a real knip root key produced zero warnings. They now report what\nneither table names, following the existing unmapped-rule-key wording.\n\nAlso maps knip's cycles rule to circular-dependencies, which fallow has and the\ntable missed.\n\nFallow still has no Marko plugin; only the table side is fixed here.\n\nThanks @VariableVince for the report, and for the hunch that more than Marko was\nmissing.",
+          "timestamp": "2026-09-01T16:43:48+02:00",
+          "tree_id": "4e92ea67e3ab4cccf52afdc3108411b5b2bcc67c",
+          "url": "https://github.com/fallow-rs/fallow/commit/0beb9fb4ae56c799fca0088b7e167430d815254d"
+        },
+        "date": 1788274635013,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
