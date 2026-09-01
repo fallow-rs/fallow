@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788214028796,
+  "lastUpdate": 1788253920945,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "74f5a847a45709ef4d09a5d8f7918d6fcb70cb9d",
-          "message": "perf(core): cache default entry matchers",
-          "timestamp": "2026-08-13T16:57:26+02:00",
-          "tree_id": "5f23453ab749809c83ad7f68b0ce87b612840b0f",
-          "url": "https://github.com/fallow-rs/fallow/commit/74f5a847a45709ef4d09a5d8f7918d6fcb70cb9d"
-        },
-        "date": 1786633767638,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 503794120,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20160352,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25524696,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38055512,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 41933720,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "79085fb4e009ff6768ee02eeb1139857231998b8",
+          "message": "feat(brief): name files whose branching was split rather than removed (#2502)\n\n* feat(types): aggregate branching separately from unit count\n\nA per-function cyclomatic ceiling constrains a partition, not a quantity.\nMcCabe gives a function 1 plus one increment per decision point, so across a\nset of units the summed cyclomatic score is functions + branch points. Moving\nan if from one function into a new one removes an increment from the first and\nadds it to the second, so every per-unit metric improves while the branching is\nuntouched.\n\nFileBranching reports the two terms separately from the per-increment\nbreakdown that is already computed and cached for every unit. Cognitive\nexcludes PropCount and HookDensity: both are cognitive-only, and PropCount\nrecords an excess over a floor, so it is superlinear in a split and would move\nthe number with branching and nesting both flat.\n\nTests assert the set-level identity together with the absence of u16\nsaturation, since the identity alone holds vacuously once a unit saturates.\nOne test pins the known blind spot: no frame is pushed at module scope, so a\nbranch hoisted to the top level of a module lowers the count without removing\nany branching.\n\n* feat(engine): carry per-file branching totals on the health result\n\nThe audit needs branching totals from both revisions to compare them, and\nnothing carries them today: the health findings path drops every unit below\nits threshold, and it skips suppressed units before aggregation, so one\nfallow-ignore-next-line comment would remove a unit's branches from the total.\n\nbranching_by_file aggregates ModuleInfo directly, threshold-blind and\nsuppression-blind, and rides on HealthAnalysisResult. That type derives Debug\nonly and carries no schema version, so the carrier costs no wire contract.\nHealthReport is deliberately untouched.\n\nFiles whose module holds no accounted units are omitted rather than recorded as\nzero, so the payload stays proportional to the code that has units.\n\n* feat(cli): persist per-file branching totals in the audit base snapshot\n\nThe head-versus-base comparison needs both revisions' totals, so the snapshot\ncarries a branching payload keyed by root-relative path, and the cached form\nsorts it by path to keep the encoded bytes stable.\n\nRename handling needs its own line: remap_keys_for_renames rewrites path\nsegments inside opaque key strings, while this payload is keyed by a bare path.\n\nAUDIT_BASE_SNAPSHOT_CACHE_VERSION moves to 8, since a version-7 payload cannot\nanswer the comparison. The bump adds no cold pass beyond what a release already\ncauses: the cache key payload already includes cli_version.\n\nsave_cached_base_snapshot gains the size guard the loader already had. Without\nit an oversized snapshot was written once and then rejected on every read,\ncosting a cold base pass on every later run instead of just this one.\n\n* feat(output): branching conservation report for the review brief\n\nCompares branch points against the number of functions holding them, base\nversus head, over the audit accounting set.\n\nThe verdict rests on a transfer test rather than on the sign of the deltas.\nThe two sides describe different populations: the base cannot contain added\nfiles and the head does, and new JS/TS code is dominated by zero-branch\ncallbacks, so branching flat with function count up is the default state of any\ncommit that adds a file, not the signature of a split. A move is reported only\nwhen branching stayed flat inside a file whose peak fell, or when the fall in\npre-existing files approximately cancels what the added files carry.\n\nThere is no \"branching removed\" verdict. Increments outside every function are\ninvisible to the count, so a fall is equally consistent with a branch having\nbeen hoisted to module scope, and the tool must not claim what it cannot prove.\n\nScope reports the test-path share and the largest single file's share, because\ntest code and vendored bundles routinely dominate both terms. The per-file list\nis what keeps a mixed changeset readable: a set-level scalar cannot localize.\n\n* test(cli): cover the branching payload's cache and rename paths\n\nTwo gaps in the committed code. The bitcode round trip was never exercised, so\na field addition could silently fail to decode, and the sorted encoding that\nkeeps identical input byte-identical was unasserted.\n\nThe rename remap had no test at all, which is the one place a pure rename can\nread as branching arriving: without the remap the base entry keeps the old path\nand the head entry looks like a new file.\n\n* refactor(output): guard the branching subtraction against a later change\n\nThe added partition is a subset of the head partition by construction, so the\nsubtraction cannot underflow today. It is a latent trap on a line whose\ninvariant is not locally visible: a later change to how the partition is built\nwould wrap in release and panic in debug.\n\n* feat(brief): report branching conservation on the review brief\n\nThe block lands on both the brief payload and the wire envelope. Widening the\npayload alone would put it in the walkthrough digest and leave it out of\n`fallow audit --brief --format json`, because the wire struct is mapped field\nby field.\n\nBoth revisions are restricted to the changed files before comparing. The base\npass analyzes the whole base worktree, so an unrestricted comparison would\ndescribe the repository rather than the changeset.\n\nAdditive and optional, absent when no base comparison ran, so a consumer that\nnever had a base snapshot sees a byte-identical wire shape and no schema\nversion moves.\n\nThe human brief renders one line, and only when the comparison found a move.\nEvery sibling section is silent when it has nothing to say, and a flat result\nis not news.\n\n* fix(output): do not attribute a cognitive rise to removed branches\n\nRunning the real binary across a split routed through a nullish-coalescing\nchain produced branching up by four, cognitive up by one, and the label\n\"branches-removed\". Every fixture missed it because the attribution keyed on\nthe absolute size of the branching change and ignored its sign.\n\nThe field answers where a cognitive improvement came from, so it is now absent\nwhen there was no improvement, and \"branches-removed\" requires branching to\nhave actually fallen.\n\n* fix(output): pair the branching skip attributes with serde default\n\nRepository policy requires every JsonSchema Option field that skips\nserialization to also declare a default, so a consumer deserializing an\nenvelope without the field gets None instead of an error.\n\n* fix(output): stop the refactor note promising a reduction splitting cannot deliver\n\nThe complexity finding told agents to split a function \"to reduce complexity\",\nand the agent contract points them at that action. Splitting relocates\nbranching: it lowers the per-function score while the total is untouched, which\nis the behavior the branching section reports on the same envelope. The note\nnow says which of the two it moves.\n\n* fix(output): a move verdict now requires the set total to have held\n\nA transfer signature in one file said nothing about the changeset, yet it alone\ndecided the verdict. Measured: a changeset whose total branch points rose from\n15 to 205 reported branching-moved, and the human line then explained that\nsplitting relocates branching on top of numbers showing it had arrived. A\nchangeset that genuinely removed eleven branch points was captioned the same\nway.\n\nThe verdict now requires the set total to sit inside the tolerance as well, so\na relocation is reported only when the branching both held and demonstrably\nmoved. The three measured cases are tests.\n\nThe cognitive attribution no longer falls back to naming a nesting reset when\nneither branching nor nesting moved. That case reports mixed, because naming\neither cause would assert something the numbers do not show.\n\n* docs(brief): document the branching block and cover its wire shape\n\nThe block reached the envelope with nothing asserting it arrives there.\nWidening the payload struct alone would land it in the walkthrough digest and\nleave it out of the brief JSON, since the wire struct is mapped field by field,\nso the mapping now has a test.\n\nThe human line drops the peak clause when the peak did not move, rather than\nrendering \"peak per function 15 to 15\" beside a sentence about splitting.\n\nFileBranching::merge had no caller.\n\n* fix(brief): make the branching lines fit and read one direction\n\nThe human lines could not fit 80 columns at any input, reversed direction\nmid-line, and introduced a third name for a quantity the health reports already\ncall max cyclomatic. They are now split out from the printer so the wording and\nthe width are testable, and a test pins both lines under 80 columns at\nfour-digit counts.\n\nfiles_deleted also collected files that merely lost every accounted unit, so a\ncomplete removal of a file's branching was the one outcome filed under a field\nnamed for deletion. Renamed to files_only_in_base with the matching total.\n\nThe SetTooSmall doc promised a size threshold the code does not apply, and the\ncache size-guard comment claimed a benefit that does not hold: skipping the\nwrite costs a cold base pass either way, it just avoids leaving an unreadable\npayload on disk. The verdict doc now states the consolidation case both\ntransfer tests miss.\n\n* fix(output): a relocation claim now requires the rest of the changeset to be still\n\nThe previous gate required the set total to hold, but that total is a sum, so\nthree routes reached a move verdict without one. Measured: a genuine split in\none file while an unrelated file lost eight branch points and another gained\neight, which is two changes and not one relocation; a split beside a deleted\nfile carrying three hundred branch points, since base-only files enter neither\nside; and a changeset whose function count never rose at all.\n\nThe residual over the files that carried no transfer signature is now summed in\nabsolute terms, so opposing moves cannot cancel, and base-only branch points\nand a risen function count are checked too. A test pins that a split adding a\nguard or two of glue still qualifies, so the gate did not make the verdict\nunreachable.\n\nThe cognitive label branches-removed published the exact claim the verdict\nrefuses as unprovable. It is now fewer-branch-points, a statement about the\ncount rather than about the program.\n\n* refactor(output): make the branching claim per file instead of per changeset\n\nThree review rounds found eight ways to reach a wrong changeset-level verdict,\neach in the same predicate, and each fix added a conjunct that both leaked and\nover-blocked. The last version reported a relocation for a split that moved\neverything into a test file, and flipped from unchanged to moved when an empty\nconstants file was added.\n\nThe cause is structural: inferring \"a split happened here\" from aggregates over\na changeset that also contains arbitrary other work is an attribution problem,\nand aggregates cannot attribute.\n\nThe claim is now local. For each changed file present on both revisions, report\nwhether its branching held while it gained functions and its worst function\nshrank. That is true by construction, so unrelated work elsewhere cannot make\nit more or less true, and one test pins exactly that: the same split beside a\ncancelling pair, a deleted file carrying three hundred branch points, an added\nfile, and branching arriving elsewhere, all leaving the result unchanged.\n\nThe changeset totals stay in the JSON as context with no verdict attached, and\nthe human brief is silent about them.\n\nGone with the classifier: BranchingVerdict, BranchingInconclusiveReason,\nEvidence, decide, and the residual.\n\nThe human lines put the path on its own line, elided from the left, because a\ndeep path pushed the line to 138 columns.\n\n* fix(schema): drop the definitions the deleted verdict types left behind\n\nThe schema emitter merges its derived definitions with the committed file, so\na removed type keeps riding along until its entry is pruned by hand. The drift\ngate exists for exactly this and was the only check that caught it: contract\ngeneration and the doc-sync check both passed while two orphaned definitions\nsat in the published schema.\n\n* fix(brief): report both branch-point numbers and stop the header concluding\n\nThe rendered line showed the base revision's branch points and called them\nheld, so a file that went from two to none read as \"2 branch points held\". Both\nnumbers are now printed.\n\nThe header asserted that a split moves branching into new functions. The peak\nis a file-level maximum, so all three conditions are also satisfiable when the\nlargest function left the file while other functions arrived. The header now\nstates what was measured and leaves the conclusion to the reader.\n\nTest paths and files carrying synthetic template units no longer carry the\nclaim. A test file could take a slot from production code in the rendered list\nwhile its totals were already reported in scope, and template units sit outside\nevery count here, so a Vue file that gained nine template branch points read as\nhaving held six.\n\nFileBranching gained a field and rides in the bitcode snapshot cache, so\nAUDIT_BASE_SNAPSHOT_CACHE_VERSION moves to 9.\n\n* docs(brief): stop the branching text claiming more than it measures\n\nThe header said branching \"held\" while the line beneath it could print a fall\nfrom two to zero, which the tolerance permits. Two field docs still called a\nsplit a fact where the struct doc retracts that inference. And the branch-point\nmetric was documented as covering the surviving partition, which describes the\nbase side only: head includes files the changeset added and base cannot.\n\nGenerated and vendored paths are excluded from the claim as well. The rendered\nlist holds two files, so a bundle taking a slot costs a reader the production\nfile they needed. Deliberately a short unambiguous marker list rather than a\ngeneral heuristic, since a wrong exclusion drops a real finding in silence.",
+          "timestamp": "2026-09-01T10:53:31+02:00",
+          "tree_id": "27d628e7887b776c9c1550ea62a27006b7143017",
+          "url": "https://github.com/fallow-rs/fallow/commit/79085fb4e009ff6768ee02eeb1139857231998b8"
+        },
+        "date": 1788253917622,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 549142504,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21337352,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28033304,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 41992664,
             "unit": "bytes"
           }
         ]
