@@ -52,6 +52,11 @@ pub(super) fn collect_large_functions(
             continue;
         }
         for func in &module.complexity {
+            // A module body's line count is the whole file, which is not a
+            // function length and must not be reported as one.
+            if fallow_types::extract::is_synthetic_unit(&func.name) {
+                continue;
+            }
             let max_unit_size = input
                 .thresholds
                 .effective_max_unit_size(relative, func.name.as_str());

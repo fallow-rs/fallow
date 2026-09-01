@@ -15,10 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function lowered a file's complexity without removing any branching. Such
   code now lands on a synthetic `<module>` unit, in the same family as
   `<template>`. The unit is emitted only when the module body actually
-  branches, so a file that gains no information gains no unit, and it is
-  excluded from the CRAP dimension because an Istanbul function map can never
-  contain it. Measured across four real projects, this adds between 0.1 and 0.5
-  percent more units and moves no health aggregate at one decimal place
+  branches, so a file that gains no information gains no unit. It is not an
+  authored function, so it stays out of the CRAP dimension, the large-function
+  list, the unit-size and parameter distributions, and the component rollup,
+  and its suppression action points at the branching statement rather than at a
+  function declaration that does not exist. On four real projects this added
+  between 0.1 and 0.5 percent more units and moved no health aggregate at one
+  decimal place; a file whose module body branches heavily will see its own
+  numbers change
   ([#2503](https://github.com/fallow-rs/fallow/issues/2503)).
 
 - **Release publication is gated on the curated release metadata**

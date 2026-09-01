@@ -205,7 +205,7 @@ fn component_template_owner(
 
 fn is_component_class_finding(finding: &ComplexityViolation) -> bool {
     finding.name != COMPONENT_ROLLUP_NAME
-        && !fallow_types::extract::is_synthetic_template_unit(&finding.name)
+        && !fallow_types::extract::is_synthetic_unit(&finding.name)
         && finding
             .path
             .extension()

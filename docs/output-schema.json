@@ -24727,7 +24727,7 @@
         {
           "type": "string",
           "const": "fewer-branch-points",
-          "description": "The branch-point count fell. Deliberately a statement about the count\nand not about the program: increments outside every function are\ninvisible here, which is the same reason there is no \"branching\nremoved\" verdict."
+          "description": "The branch-point count fell. Deliberately a statement about the count\nand not about the program: a fall can also come from code leaving the\naccounting set, which is the same reason this section names no\nchangeset-level verdict."
         },
         {
           "type": "string",

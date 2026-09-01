@@ -56,9 +56,9 @@ pub enum CognitiveAttribution {
     /// left.
     NestingReset,
     /// The branch-point count fell. Deliberately a statement about the count
-    /// and not about the program: increments outside every function are
-    /// invisible here, which is the same reason there is no "branching
-    /// removed" verdict.
+    /// and not about the program: a fall can also come from code leaving the
+    /// accounting set, which is the same reason this section names no
+    /// changeset-level verdict.
     FewerBranchPoints,
     /// Both moved, or neither did. The second case is cognitive falling while
     /// branching and nesting both held, where naming either cause would assert

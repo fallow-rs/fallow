@@ -426,7 +426,7 @@ fn compute_crap_scores_istanbul(
         // per-function entry, no max / above-threshold contribution, no
         // match-statistics slot. That is the template family plus the module
         // body, whose code runs at import time and belongs to no function.
-        if fallow_types::extract::is_coverage_exempt_unit(&f.name) {
+        if fallow_types::extract::is_synthetic_unit(&f.name) {
             continue;
         }
         total += 1;
@@ -547,10 +547,11 @@ fn compute_crap_scores_estimated(
     let mut signals = CrapThresholdSignals::default();
     let mut per_function = Vec::with_capacity(complexity.len());
     for f in complexity {
-        // Template-family units leave the CRAP dimension: their name never
-        // appears in `test_referenced_exports`, so the estimate could only
-        // ever restate the file's reachability as a disguised cyclomatic gate.
-        if fallow_types::extract::is_synthetic_template_unit(&f.name) {
+        // Units that are not an authored function leave the CRAP dimension:
+        // their name never appears in `test_referenced_exports`, so the
+        // estimate could only ever restate the file's reachability as a
+        // disguised cyclomatic gate.
+        if fallow_types::extract::is_synthetic_unit(&f.name) {
             continue;
         }
         let cc = f64::from(f.cyclomatic);

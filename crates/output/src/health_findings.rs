@@ -137,6 +137,7 @@ pub fn build_health_finding_actions(
 
     let inherited_from = violation.inherited_from.as_deref();
     if includes_crap
+        && !fallow_types::extract::is_synthetic_unit(name)
         && let Some(action) = build_crap_coverage_action(
             name,
             violation.coverage_tier,
@@ -282,6 +283,15 @@ fn build_suppress_action(
     is_component: bool,
 ) -> HealthFindingAction {
     let extension = violation.path.extension().and_then(|ext| ext.to_str());
+    // A module body has no declaration to place a comment above; the finding is
+    // anchored at the first line of the file.
+    if violation.name == "<module>" {
+        return suppress_line_action(
+            "Suppress with an inline comment above the branching statement",
+            DEFAULT_SUPPRESS_COMMENT,
+            "above-module-statement",
+        );
+    }
     if is_template && extension.is_some_and(|ext| ext.eq_ignore_ascii_case("html")) {
         return suppress_file_action(
             "Suppress with an HTML comment at the top of the template",

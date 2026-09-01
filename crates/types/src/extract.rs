@@ -1003,15 +1003,19 @@ pub fn is_synthetic_template_unit(name: &str) -> bool {
     name == "<template>" || name.starts_with("<snippet:")
 }
 
-/// Units an Istanbul `fnMap` can never contain, so no coverage can be matched
-/// to them.
+/// Units that are not an authored function.
 ///
-/// The template family plus the module body: module-scope code runs at import
-/// time and belongs to no function, so a coverage report has no entry for it.
+/// The template family plus the module body. Nothing here has a signature, a
+/// parameter list, a length a reader would call a function length, or an entry
+/// in an Istanbul function map. Consumers that treat a unit as a function must
+/// skip these: a module body's line count is the whole file, and asking for
+/// test coverage of code that belongs to no function is asking for something
+/// that cannot exist.
+///
 /// Wider than [`is_synthetic_template_unit`], which stays template-specific for
 /// the rendering paths that speak about templates.
 #[must_use]
-pub fn is_coverage_exempt_unit(name: &str) -> bool {
+pub fn is_synthetic_unit(name: &str) -> bool {
     is_synthetic_template_unit(name) || name == "<module>"
 }
 
@@ -1026,11 +1030,9 @@ pub fn is_coverage_exempt_unit(name: &str) -> bool {
 /// `functions` rises. Reporting the two terms separately is what distinguishes
 /// branching that left from branching that only moved.
 ///
-/// Known blind spot: increments outside every function are invisible here.
-/// `push_contribution` and `inc_cyclomatic` both write to the innermost frame
-/// and no frame is pushed at module scope, so a branch hoisted to the top level
-/// of a module lowers `branch_points` without removing any branching. Consumers
-/// must not read a fall in `branch_points` as proof that branching was removed.
+/// Module-scope increments are included: they land on a synthetic `<module>`
+/// unit, so a branch hoisted out of a function to the top level of a module
+/// stays counted rather than vanishing from the total.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
 pub struct FileBranching {
     /// Summed weight of `Cyclomatic` contributions. The conserved quantity.

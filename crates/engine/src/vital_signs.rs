@@ -152,8 +152,22 @@ fn selected_module_metrics(input: &VitalSignsInput<'_>) -> SelectedModuleMetrics
 
     for module in input.selected_modules() {
         total_loc += module.line_offsets.len() as u64;
-        line_counts.extend(module.complexity.iter().map(|c| c.line_count));
-        param_counts.extend(module.complexity.iter().map(|c| c.param_count));
+        // Unit-size and parameter distributions describe authored functions.
+        // A module body has the file's length and no parameter list.
+        line_counts.extend(
+            module
+                .complexity
+                .iter()
+                .filter(|c| !fallow_types::extract::is_synthetic_unit(&c.name))
+                .map(|c| c.line_count),
+        );
+        param_counts.extend(
+            module
+                .complexity
+                .iter()
+                .filter(|c| !fallow_types::extract::is_synthetic_unit(&c.name))
+                .map(|c| c.param_count),
+        );
     }
 
     SelectedModuleMetrics {
