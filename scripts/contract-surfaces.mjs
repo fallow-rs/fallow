@@ -83,6 +83,7 @@ export const contractSurfaces = Object.freeze([
       "npm/fallow/skills/fallow/SKILL.md",
       "npm/fallow/skills/fallow/references/cli-reference.md",
       "npm/fallow/skills/fallow/references/mcp.md",
+      "scripts/agent-doc-curated-seeds.json",
     ],
     checkCommand: "npm run generate:contracts:check",
     docs: ["docs/analyzer-authoring.md"],

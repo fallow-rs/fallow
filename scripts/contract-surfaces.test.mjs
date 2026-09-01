@@ -21,6 +21,7 @@ const EXPECTED_GENERATED_PATHS = [
   "plugin-schema.json",
   "rule-pack-schema.json",
   "schema.json",
+  "scripts/agent-doc-curated-seeds.json",
   "tools/type-aware-sidecar/src/generated-protocol.mjs",
 ].toSorted();
 

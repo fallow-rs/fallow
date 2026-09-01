@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **In-process analysis can be asked to stop.** `AnalysisOptions` carries an
+  optional cancellation token, and the MCP Code Mode deadline now sets the one
+  it previously had to abandon: a host call that ran in this process was
+  answered on time while its analysis kept running inside a long-lived server.
+  The token reaches the dead-code pipeline's stage boundaries and the per-file
+  parse loop, which is the one place work stops per item rather than per stage,
+  and cancellation is always an error so a truncated module set cannot reach the
+  graph. The stop is cooperative and has no upper bound: duplication detection
+  and the dead-code detectors hold no check once entered, so `analyze`,
+  `find_dupes`, `check_health` and `audit` keep the killable subprocess, and
+  every description that touches this says which stops are promised and which
+  are not. Measured on a 520-file project: every in-process route now returns
+  `FALLOW_CANCELLED` in a fraction of its uncancelled time, where three of them
+  previously returned a completed analysis.
+
+- **A curated agent-doc cell whose source text moved is flagged.** The
+  generator prefers hand-written prose over its generated seed and preserves it
+  forever, which is the right default with one failure mode: when the manifest
+  text a cell was written from changes later, the published cell keeps
+  describing a surface that has changed and nothing says so. A new record beside
+  the generator holds the seed each curated cell was last accepted against, so
+  `npm run generate:contracts:check` fails naming the cell and both seeds, and
+  `npm run generate:contracts` re-records. A drifted seed is a prompt to review
+  the prose, not an automatic rewrite.
+
 - **`fallow viz` gains analysis lenses that say what they do not know**
   ([#2411](https://github.com/fallow-rs/fallow/pull/2411)). The map had four
   lenses and one honesty problem: an analysis that never ran rendered the same

@@ -93,6 +93,7 @@ jobs:
               - 'scripts/generation-transaction.mjs'
               - 'scripts/contract-surfaces.mjs'
               - 'scripts/generate-agent-docs.mjs'
+              - 'scripts/agent-doc-curated-seeds.json'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'deny.toml'
