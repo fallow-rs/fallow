@@ -7,8 +7,9 @@ const MIGRATION_DOCS_URL: &str = "https://docs.fallow.tools/migration/from-jscpd
 /// jscpd fields that cannot be mapped and generate warnings.
 ///
 /// Together with the fields `duplicate_options_from_jscpd` migrates, this covers
-/// every key of jscpd's `IOptions`, so a migration never drops a configured
-/// option without reporting it.
+/// every key of jscpd's `IOptions` plus `colors`, so a migration never drops a
+/// configured option without reporting it. `colors` is not declared in
+/// `IOptions`; jscpd reads it off the config object for its `--colors` flag.
 const JSCPD_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     ("maxLines", "No maximum line count limit in fallow", None),
     ("maxSize", "No maximum file size limit in fallow", None),
@@ -897,8 +898,10 @@ mod tests {
         assert!(config.is_empty());
     }
 
-    /// Every key of jscpd's `IOptions`. A configured option must either reach
-    /// the fallow `duplicates` block or produce a warning, never vanish.
+    /// Every key of jscpd's `IOptions`, plus `colors`, which jscpd reads off
+    /// the config object for its `--colors` flag without declaring it in
+    /// `IOptions`. A configured option must either reach the fallow
+    /// `duplicates` block or produce a warning, never vanish.
     const JSCPD_OPTIONS: &[&str] = &[
         "absolute",
         "blame",

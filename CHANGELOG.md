@@ -128,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Closes [#2507](https://github.com/fallow-rs/fallow/issues/2507)). The knip
   plugin table had drifted well behind both projects: it named 73 of knip's 184
   plugin config keys, so a `marko`, `pnpm` or `sveltekit` section passed through
-  the migration without a single word, and the jscpd table covered 22 of the 37
+  the migration without a single word, and the jscpd table covered 22 of the 36
   options in jscpd's own `IOptions`, so `gitignore`, `cache` and `hashFunction`
   vanished the same way. A dropped section that says nothing is worse than one
   that says it was dropped, because the reader has no way to notice. Both tables
@@ -137,10 +137,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported as auto-detected, and a key no plugin covers is reported as having no
   equivalent rather than promising detection that will not happen. Sixteen keys
   moved from the first group to the second on that rule, among them `eleventy`,
-  `oclif`, `vue` and `xo`, which fallow has no plugin for and never did. Tests
-  now pin each table against the upstream key set, so the next round of
-  additions shows up as a failure instead of as silence. Marko itself still has
-  no fallow plugin; only the migration reporting is fixed here. Thanks
+  `oclif`, `vue` and `xo`, which fallow has no plugin for and never did.
+  Completeness is not the only guard: a key in neither table, on either side, is
+  now reported as unknown instead of being skipped, so an option added upstream
+  after this release surfaces on the first migration that uses it rather than
+  disappearing. `rules.cycles` migrates to `circular-dependencies`, which fallow
+  has, and the two knip issue types fallow genuinely has no answer for,
+  `namespaceMembers` and `catalogReferences`, are named as such instead of
+  reading like typos. A test pins the covered half of the knip table against
+  fallow's built-in plugin roster, in both directions, so renaming or removing a
+  plugin fails the build instead of shipping a promise of detection that no
+  longer happens. The five keys knip spells differently (`next`, `nest`,
+  `panda-css`, `webdriver-io`, `electron-vite`) are declared as aliases, and a
+  sixth has to be declared before that test accepts it. jscpd's `colors` is
+  covered as well; it is not declared in `IOptions`, jscpd reads it off the
+  config object for its `--colors` flag. Marko itself still has no fallow
+  plugin; only the migration reporting is fixed here. Thanks
   [@VariableVince](https://github.com/VariableVince) for the report.
 
 - **A type-aware pass that cannot finish no longer takes the whole run with it**
