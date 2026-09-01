@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788266169345,
+  "lastUpdate": 1788272474439,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d6e16368e9a9b04f1d232b2b35442021146945a4",
-          "message": "perf(benchmarks): track guard policy resolution",
-          "timestamp": "2026-08-19T02:40:52+02:00",
-          "tree_id": "c463c7ff2489653698a1ba698389908c45313317",
-          "url": "https://github.com/fallow-rs/fallow/commit/d6e16368e9a9b04f1d232b2b35442021146945a4"
-        },
-        "date": 1787100525913,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/9db28bf7c2ff6c83384baf66194a7a3f75777904"
         },
         "date": 1788266165905,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5b045900bc0ad7cd1f859b95d75cec27fa791a5",
+          "message": "feat(api): cooperative cancellation, and a staleness gate for curated agent-doc cells\n\nAn MCP Code Mode host call that ran in this process could be answered on its\ndeadline but not stopped: the thread was abandoned and kept running a full\nanalysis inside a long-lived server. AnalysisOptions now carries an optional\ncancellation token, matching the Option<Arc<AtomicBool>> idiom the type-aware\ntransport already uses. It reaches the dead-code pipeline's stage boundaries\nand the per-file parse loop, which is the one place work stops per item rather\nthan per stage, and cancellation is always an error so a truncated module set\ncannot reach the graph.\n\nThe stop is cooperative and has no upper bound: duplication detection and the\ndead-code detectors hold no check once entered, so analyze, find_dupes,\ncheck_health and audit keep the killable subprocess, and every description\nthat touches this says which stops are promised and which are not. Threading a\ntoken into those loops was deliberately not done, because the suffix-array\nstage after the tokenize loop holds no check either, so the stop would have\nstayed unbounded while the change touched eight public entry points.\n\nMeasured on a 520-file project: every in-process route returns FALLOW_CANCELLED\nin a fraction of its uncancelled time, where three of them previously returned\na completed analysis. The engine test asserts work performed, a strictly\nsmaller module count, rather than how long the caller took to return.\n\nSeparately, the agent-doc generator prefers hand-written prose over its\ngenerated seed and preserves it forever, which is right except when the\nmanifest text a cell was written from moves later: the published cell then\ndescribes a surface that has changed and nothing says so. A record beside the\ngenerator holds the seed each of the 400 curated cells was last accepted\nagainst, outside the vendored skill tree so it never touches the public skills\nsurface. generate:contracts:check fails naming the cell and both seeds;\ngenerate:contracts re-records.",
+          "timestamp": "2026-09-01T15:34:29+02:00",
+          "tree_id": "65e54c61456f9199c92fc54a58bf7f4cb43a6fe6",
+          "url": "https://github.com/fallow-rs/fallow/commit/a5b045900bc0ad7cd1f859b95d75cec27fa791a5"
+        },
+        "date": 1788272471212,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
