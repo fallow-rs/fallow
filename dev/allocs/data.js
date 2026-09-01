@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788262646799,
+  "lastUpdate": 1788265745221,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "95a7ae9faf9e987616fe2366b74e99626dfd58c6",
-          "message": "fix: surface star-export ambiguity instead of blaming the sources (#2268)\n\nWhen two star re-export sources supply the same name, the barrel exports nothing under that name. Unused-export and unused-type findings are now suppressed for the declarations that contribute to such a collision, instead of blaming both source files for a mistake in the barrel. Traces carry an optional star_export_ambiguity block naming the contributing files and namespaces, so an ambiguous name is no longer indistinguishable from a misspelled one. The unrendered-component and unprovided-inject headers now state the guarantee the code actually offers, including the abstain carve-out that remains. The value-derived type fallback lane is seeded lazily, which makes barrel-chain resolution roughly ten percent cheaper.\n\nCloses #2262\nCloses #2263\nCloses #2264",
-          "timestamp": "2026-08-14T08:35:39+02:00",
-          "tree_id": "daf704ab51453c6880b4fb3c5d8775efa97cafce",
-          "url": "https://github.com/fallow-rs/fallow/commit/95a7ae9faf9e987616fe2366b74e99626dfd58c6"
-        },
-        "date": 1786689583048,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9712147,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48503,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1039022,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7621,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8372,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9db28bf7c2ff6c83384baf66194a7a3f75777904",
+          "message": "feat(extract): count module-scope branching as a synthetic unit (#2516)\n\nCloses #2503.\n\nNo frame was pushed at module scope, so decision points outside every function\ncontributed nothing to any complexity number fallow reports. Wider than the issue\ntext says: module-scope ??, || and ?. scored zero too, not just if ladders. The\nconsequence that motivated this is that \"this change removed branching\" was\nunprovable, because a fall was equally consistent with a branch having been\nhoisted out of a function.\n\nA synthetic per-file <module> unit, in the same family as <template>, but\naggregate-only: visible to vital signs, file scores and the branching section,\nand never producing a user-facing finding. \"Extract helper functions\" is\nmeaningless advice for module scope, and emitting findings would churn every\nsaved baseline for advice we cannot give. That single decision bounds the change.\n\nIt gets its own predicate rather than widening is_synthetic_template_unit,\nbecause FileBranching::from_units filters on that one and folding <module> in\nwould have left the branching section exactly as blind as before.\n\nValidated on five projects, old binary against new. Findings arrays are\ndeep-equal on all five; <module> appears zero times in any output format. Only\nthree vitals moved anywhere and each is decomposed: two are pure denominator\neffects with byte-identical numerators. Largest per-file deltas hand-verified\nagainst source, exact matches on both metrics. No baseline churn, warm cache\npicks the change up, and SFC files report both units without double counting.\n\nThe blast radius is much smaller than predicted: two of five projects showed zero\nvital movement and no score moved more than 0.2. Well-factored TypeScript keeps\nits boolean operators inside functions where they were already counted.",
+          "timestamp": "2026-09-01T14:20:16+02:00",
+          "tree_id": "e5570cb5d860f5fb6cc223f461d1ea67eaa45613",
+          "url": "https://github.com/fallow-rs/fallow/commit/9db28bf7c2ff6c83384baf66194a7a3f75777904"
+        },
+        "date": 1788265741636,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9755669,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49419,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1182941,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8366,
             "unit": "allocations"
           }
         ]
