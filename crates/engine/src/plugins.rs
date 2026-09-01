@@ -159,13 +159,24 @@ mod tests {
 
 #[cfg(test)]
 mod roster_tests {
-    /// The engine roster mirrored core by hand and drifted, omitting `deno`.
-    /// Delegation removes the copy; this pins that it stays delegated.
+    /// The engine mirrored core's roster by hand and the copy drifted, omitting
+    /// `deno`. Delegation removes the copy, so there is nothing left to diverge;
+    /// this pins the name the drift lost and that the roster is really populated.
+    ///
+    /// The roster is read through `core_backend`, not from `fallow_core`
+    /// directly, because the boundary guard requires every crossing to go
+    /// through that adapter.
     #[test]
-    fn roster_matches_the_core_registry() {
-        let engine = super::registry::builtin_plugin_names();
-        let core = fallow_core::plugins::registry::builtin_plugin_names();
-        assert_eq!(engine, core, "engine roster must not diverge from core");
-        assert!(engine.contains(&"deno"), "deno must be present");
+    fn roster_carries_every_registered_plugin() {
+        let names = super::registry::builtin_plugin_names();
+        assert!(
+            names.contains(&"deno"),
+            "deno is registered in core and must reach the roster"
+        );
+        assert!(
+            names.len() > 100,
+            "roster looks truncated: {} names",
+            names.len()
+        );
     }
 }
