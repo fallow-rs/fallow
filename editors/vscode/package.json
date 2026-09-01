@@ -258,6 +258,12 @@
           "default": "best-effort",
           "markdownDescription": "Choose whether incomplete semantic evidence stays advisory or fails the analysis after emitting its conservative result."
         },
+        "fallow.typeAware.timeoutSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Wall clock in seconds allowed for one semantic request, forwarded to the CLI as `FALLOW_TYPE_AWARE_TIMEOUT_SECS`. A semantic query scans the whole TypeScript program, so a very large program can need more than the 120-second default. `0` keeps the CLI default and any value already set in the environment."
+        },
         "fallow.autoDownload": {
           "type": "boolean",
           "default": true,

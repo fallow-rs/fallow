@@ -25,6 +25,7 @@ import {
   getResolvedConfigPath,
   getAutoDownload,
   getTypeAwareSettings,
+  getTypeAwareTimeoutSeconds,
   type TypeAwareSettings,
 } from "./config.js";
 import {
@@ -735,7 +736,7 @@ export const runAnalysis = async (
     noteSkippedCapabilities(skipped, cliBinary, outputChannel);
 
     const output = await execFallowTolerant(analysisArgs, root, cliBinary, outputChannel, {
-      env: buildAnalysisProcessEnv(),
+      env: buildAnalysisProcessEnv(process.env, getTypeAwareTimeoutSeconds()),
     });
 
     if (output.trim().length === 0) {

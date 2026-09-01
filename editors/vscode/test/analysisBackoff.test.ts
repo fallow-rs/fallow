@@ -59,4 +59,19 @@ describe("buildAnalysisProcessEnv", () => {
       FALLOW_MAX_FILE_SIZE: "2",
     });
   });
+
+  it("forwards a configured semantic timeout", () => {
+    expect(buildAnalysisProcessEnv({}, 600)).toEqual({
+      FALLOW_MAX_FILE_SIZE: ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB,
+      FALLOW_TYPE_AWARE_TIMEOUT_SECS: "600",
+    });
+  });
+
+  it("leaves the semantic timeout to the CLI and the environment when unset", () => {
+    for (const unset of [0, -30, 1.5, Number.NaN]) {
+      expect(buildAnalysisProcessEnv({ FALLOW_TYPE_AWARE_TIMEOUT_SECS: "900" }, unset)).toEqual({
+        FALLOW_MAX_FILE_SIZE: ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB,
+      });
+    }
+  });
 });

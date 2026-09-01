@@ -56,6 +56,18 @@ export const getTypeAwareSettings = (): TypeAwareSettings => ({
   require: getConfig().get<TypeAwareRequireSetting>("typeAware.require", "best-effort"),
 });
 
+/**
+ * Wall clock in seconds allowed for one semantic sidecar request, forwarded as
+ * `FALLOW_TYPE_AWARE_TIMEOUT_SECS`. `0` keeps the CLI default. A semantic query
+ * scans the whole TypeScript program, so a very large program can need more
+ * than the default, and the editor is the surface where that is least
+ * discoverable.
+ */
+export const getTypeAwareTimeoutSeconds = (): number => {
+  const configured = getConfig().get<number>("typeAware.timeoutSeconds", 0);
+  return Number.isInteger(configured) && configured > 0 ? configured : 0;
+};
+
 const getConfigPath = (resource?: vscode.Uri): string =>
   getConfig(resource).get<string>("configPath", "").trim();
 

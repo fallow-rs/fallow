@@ -101,6 +101,7 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 | `fallow.audit.gate` | `"new-only"` | Which findings affect the audit verdict. `new-only` fails only on findings introduced by the current change set (runs an extra base-snapshot pass); `all` fails on every finding in changed files. Mirrors `fallow audit --gate`. |
 | `fallow.audit.statusBar.enabled` | `true` | Show the audit verdict (pass/warn/fail) for the current change set in the status bar. Toggling takes effect immediately, no window reload needed. |
 | `fallow.audit.runOnSave` | `false` | Re-run the audit verdict automatically when a JS/TS file is saved. Off by default to avoid added latency; the **Fallow: Audit Changed Files** command and the status-bar item run it on demand. |
+| `fallow.typeAware.timeoutSeconds` | `0` | Wall clock in seconds allowed for one semantic request when `fallow.typeAware.enabled` is on, forwarded to the CLI as `FALLOW_TYPE_AWARE_TIMEOUT_SECS`. A semantic query scans the whole TypeScript program, so a very large program can need more than the 120-second default. `0` keeps the CLI default and any value already set in the environment. |
 | `fallow.trace.server` | `"off"` | LSP trace level: `off`, `messages`, or `verbose`. |
 
 ## Binary resolution

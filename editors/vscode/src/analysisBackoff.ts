@@ -76,10 +76,17 @@ export const buildAnalysisBackoffKey = (root: string, args: ReadonlyArray<string
 
 export const buildAnalysisProcessEnv = (
   env: NodeJS.ProcessEnv = process.env,
+  typeAwareTimeoutSeconds = 0,
 ): Readonly<Record<string, string>> => {
   const configured = env.FALLOW_MAX_FILE_SIZE?.trim();
-  return {
+  const overrides: Record<string, string> = {
     FALLOW_MAX_FILE_SIZE:
       configured && configured.length > 0 ? configured : ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB,
   };
+  // Unset leaves the CLI default and any OS-level variable untouched, so an
+  // unconfigured workspace behaves exactly as before.
+  if (Number.isInteger(typeAwareTimeoutSeconds) && typeAwareTimeoutSeconds > 0) {
+    overrides.FALLOW_TYPE_AWARE_TIMEOUT_SECS = String(typeAwareTimeoutSeconds);
+  }
+  return overrides;
 };

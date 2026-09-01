@@ -25,6 +25,7 @@ let mockTypeAwareSettings: {
   projects: [],
   require: "best-effort",
 };
+let mockTypeAwareTimeoutSeconds = 0;
 let mockActiveTextEditor:
   | {
       readonly document: {
@@ -94,6 +95,7 @@ vi.mock("../src/config.js", () => ({
   getAutoDownload: () => mockAutoDownload,
   getProductionOverride: () => undefined,
   getTypeAwareSettings: () => mockTypeAwareSettings,
+  getTypeAwareTimeoutSeconds: () => mockTypeAwareTimeoutSeconds,
   getAuditGate: () => "new-only",
   getDuplicationCrossLanguageOverride: () => undefined,
   getDuplicationIgnoreImportsOverride: () => undefined,
@@ -176,6 +178,7 @@ beforeEach(() => {
   mockConfigPathSetting = "";
   mockResolvedConfigRoots = [];
   mockTypeAwareSettings = { enabled: false, projects: [], require: "best-effort" };
+  mockTypeAwareTimeoutSeconds = 0;
 });
 
 const emptyCheck = {
@@ -584,6 +587,39 @@ describe("runAnalysis retry backoff", () => {
       expect(calls[0]?.args).toEqual(["--format", "json", "--quiet", "--skip", "health"]);
     } finally {
       restoreMaxFileSizeEnv(originalLimit);
+      setWorkspaceRoot(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("forwards the configured semantic timeout to the analysis process", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-analysis-timeout-"));
+    const script = join(dir, "fallow-cli.js");
+    const logPath = join(dir, "spawn.log");
+    const output = JSON.stringify({ check: emptyCheck, dupes: emptyDupes });
+
+    try {
+      await writeFile(
+        script,
+        [
+          "#!/usr/bin/env node",
+          'const fs = require("node:fs");',
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ env: process.env.FALLOW_TYPE_AWARE_TIMEOUT_SECS, args: process.argv.slice(2) }) + "\\n");`,
+          `process.stdout.write(${JSON.stringify(output)});`,
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+
+      mockPathBinary = script;
+      mockTypeAwareTimeoutSeconds = 600;
+      setWorkspaceRoot(dir);
+
+      await runAnalysis(workspaceContext, undefined, { backoff: new AnalysisFailureBackoff() });
+      const calls = await readSpawnLog(logPath);
+
+      expect(calls[0]?.env).toBe("600");
+    } finally {
       setWorkspaceRoot(null);
       await rm(dir, { recursive: true, force: true });
     }
