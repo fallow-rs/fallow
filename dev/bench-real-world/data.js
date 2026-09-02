@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788265623530,
+  "lastUpdate": 1788350617863,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "id": "e32cc0a415dcfddc776e9ec032eed6de218e0135",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v2.80.0",
-          "timestamp": "2026-05-24T08:10:02Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/e32cc0a415dcfddc776e9ec032eed6de218e0135"
-        },
-        "date": 1779614608573,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 170,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 146,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 262,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 223,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 141,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 127,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 433,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 356,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1090,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 955,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 852,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 893,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 755,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 674,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7470,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 6742,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9449,6 +9347,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1222,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "dependabot[bot]",
+            "username": "dependabot[bot]",
+            "email": "49699333+dependabot[bot]@users.noreply.github.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "885dee43a93584f51ebfb4a05ac7462dce976a2f",
+          "message": "chore(deps-dev): bump @types/node in /editors/vscode (#2522)\n\nBumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 26.2.0 to 26.3.0.\n- [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases)\n- [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)\n\n---\nupdated-dependencies:\n- dependency-name: \"@types/node\"\n  dependency-version: 26.3.0\n  dependency-type: direct:development\n  update-type: version-update:semver-minor\n...\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+          "timestamp": "2026-09-02T09:29:12Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/885dee43a93584f51ebfb4a05ac7462dce976a2f"
+        },
+        "date": 1788350613789,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 102,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 102,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 102,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 404,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 304,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1117,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 911,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 813,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 709,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 812,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 712,
             "unit": "ms"
           }
         ]
