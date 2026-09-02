@@ -264,52 +264,52 @@ fn server_info_has_description() {
 }
 
 #[test]
-fn server_instructions_mention_all_tools() {
+fn server_instructions_route_instead_of_enumerating_tools() {
     let server = FallowMcp::new();
     let info = ServerHandler::get_info(&server);
     let instructions = info.instructions.as_deref().unwrap();
-    assert!(instructions.contains("code_execute"));
-    assert!(instructions.contains("analyze"));
-    assert!(instructions.contains("check_changed"));
-    assert!(instructions.contains("security_candidates"));
-    assert!(instructions.contains("inspect_target"));
-    assert!(instructions.contains("guard"));
-    assert!(instructions.contains("find_dupes"));
-    assert!(instructions.contains("fix_preview"));
-    assert!(instructions.contains("fix_apply"));
-    assert!(instructions.contains("project_info"));
-    assert!(instructions.contains("trace_export"));
-    assert!(instructions.contains("trace_file"));
-    assert!(instructions.contains("impact_closure"));
-    assert!(instructions.contains("trace_dependency"));
-    assert!(instructions.contains("trace_clone"));
-    assert!(instructions.contains("check_health"));
-    assert!(instructions.contains("audit"));
-    assert!(instructions.contains("decision_surface"));
-    assert!(instructions.contains("recommend"));
-    assert!(instructions.contains("fallow_explain"));
-    assert!(instructions.contains("list_boundaries"));
-    assert!(instructions.contains("feature_flags"));
-    assert!(instructions.contains("list_suppressions"));
+    // The per-tool catalogue lives in tools/list; the instructions only route.
+    assert!(instructions.contains("tools/list"));
     assert!(instructions.contains("check_runtime_coverage"));
-    assert!(instructions.contains("get_hot_paths"));
-    assert!(instructions.contains("get_blast_radius"));
-    assert!(instructions.contains("get_importance"));
-    assert!(instructions.contains("get_cleanup_candidates"));
+    assert!(instructions.contains("check_health"));
+    assert!(instructions.contains("fallow_explain"));
+    for resource in [
+        "fallow://tools",
+        "fallow://issue-types",
+        "fallow://explain",
+        "fallow://task-matrix",
+    ] {
+        assert!(
+            instructions.contains(resource),
+            "instructions should name the {resource} resource"
+        );
+    }
+    for tool in ["trace_clone", "get_cleanup_candidates", "list_suppressions"] {
+        assert!(
+            !instructions.contains(tool),
+            "instructions must not re-list '{tool}'; tools/list already carries its description"
+        );
+    }
 }
 
 #[test]
-fn server_instructions_licensing_matches_runtime_tool_descriptions() {
+fn server_instructions_do_not_flatten_licensing_and_tool_descriptions_carry_it() {
     let server = FallowMcp::new();
     let info = ServerHandler::get_info(&server);
     let instructions = info.instructions.as_deref().unwrap();
     assert!(
         !instructions.contains("(paid"),
-        "instructions must not flatten runtime coverage tools to 'paid'; a single local capture is free per the tool descriptions"
+        "instructions must not flatten runtime coverage tools to 'paid'"
     );
+    let tools = server.tool_router.list_all();
+    let coverage = tools
+        .iter()
+        .find(|t| t.name == "check_runtime_coverage")
+        .unwrap();
+    let description = coverage.description.as_deref().unwrap_or_default();
     assert!(
-        instructions.contains("a single local capture is free"),
-        "instructions should state the free single-capture tier like the tool descriptions do"
+        description.contains("single local capture"),
+        "check_runtime_coverage must state the free single-capture tier in its own description"
     );
 }
 

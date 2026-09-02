@@ -158,7 +158,7 @@ impl FallowMcp {
         inspect_target(&self.binary, &params.0).await
     }
 
-    /// Report the architecture rules that apply to specific files BEFORE editing them: boundary zone, which zones the file may import from, forbidden call patterns, and every rule-pack policy in scope with its severity and suppression token. Works for files that do not exist yet, so call it before writing new code.
+    /// Report the architecture rules that apply to specific files before editing them: the file's boundary zone, which zones it may import from (same-zone imports are always allowed), forbidden call patterns, and every rule-pack policy in scope with its severity and suppression token. Works for files that do not exist yet, so it can be called before writing new code. A path that matches no configured zone returns an empty rule set rather than an error. It reads config only and runs no analysis; to find existing violations use `analyze` or `list_boundaries`.
     #[tool(annotations(read_only_hint = true, open_world_hint = false))]
     async fn guard(&self, params: Parameters<GuardParams>) -> Result<CallToolResult, McpError> {
         run_guard(&self.binary, params.0).await
@@ -411,29 +411,10 @@ impl ServerHandler for FallowMcp {
                     .with_description("Codebase analysis for TypeScript/JavaScript projects"),
             )
             .with_instructions(
-                "Fallow MCP server, codebase analysis for TypeScript/JavaScript projects. \
-                 Tools: code_execute (bounded read-only Code Mode composition over fallow analysis tools), \
-                 analyze (full analysis), check_changed (incremental/PR analysis), \
-                 security_candidates (unverified local security candidates for agent verification), \
-                 inspect_target (one evidence bundle for a file or exported symbol), \
-                 guard (architecture rules that apply to files before editing them), \
-                 find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
-                 project_info (plugins, files, entry points, boundary zones), \
-                 recommend (project-tailored config recommendation for cold-start onboarding: detected + a loader-validated proposed_config + three-valued auto/default/taste decisions; read-only, runs detection not analysis), \
-                 trace_export / trace_file / impact_closure / trace_dependency / trace_clone (graph and clone evidence), \
-                 check_health (code complexity metrics), \
-                 check_runtime_coverage (merges a V8 or Istanbul runtime coverage dump into the health report; a single local capture is free, continuous/multi-capture monitoring requires a license), \
-                 get_hot_paths / get_blast_radius / get_importance / get_cleanup_candidates (runtime context slices; same licensing: single local capture free), \
-                 get_token_blast_radius (free; design-token blast radius for Tailwind v4 @theme + CSS-in-JS defineVars/createTheme tokens, including StyleX theme-group calls, via health --css token_consumers), \
-                 audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
-                 decision_surface (the few consequential structural decisions a change embeds, ranked, capped, and signal_id-anchored, each as a judgment question with the routed expert), \
-                 fallow_explain (rule rationale and fix guidance without running analysis), \
-                 list_boundaries (architecture boundary zones and access rules), \
-                 feature_flags (detect feature flag patterns), \
-                 list_suppressions (governance inventory of active fallow-ignore markers grouped per file; read-only, always exits 0), \
-                 impact (read the local, opt-in value report: surfacing / trend / gate containment / resolved attribution; local-dev only, runs no analysis). \
-                 Picking check_health vs check_runtime_coverage: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want surfaced dead-in-production verdicts; use check_health for general complexity / hotspot / CRAP analysis without a coverage dump. \
-                 Resources (read-only reference material, no analysis run, safe to cache per server version): fallow://tools (tool manifest with CLI fallbacks), fallow://issue-types (every issue type with default severity, fixable flag, docs URL), fallow://explain (index) and fallow://explain/{issue_type} (the same document as fallow_explain), fallow://task-matrix (which read-only command to run before a task), and fallow://schema/config, fallow://schema/plugin, fallow://schema/rule-pack (JSON Schemas). Read a resource instead of calling fallow_explain when you only need reference material.",
+                "Fallow MCP server: deterministic codebase analysis for TypeScript and JavaScript projects. \
+                 Every tool description states what it returns and when to use it; read tools/list rather than guessing from names. \
+                 Two routing rules: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want dead-in-production verdicts, and check_health for complexity, hotspot, and CRAP analysis without one; read a fallow:// resource instead of calling fallow_explain when you only need reference material. \
+                 Resources are read-only, run no analysis, and are safe to cache per server version: fallow://tools, fallow://issue-types, fallow://explain and fallow://explain/{issue_type}, fallow://task-matrix, and fallow://schema/config, fallow://schema/plugin, fallow://schema/rule-pack (JSON Schemas).",
             )
     }
 
