@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788292628027,
+  "lastUpdate": 1788337013124,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6ebdf806df1a1ce1389026401af225d8fc7ab38f",
-          "message": "perf(engine): coalesce duplicate line ranges",
-          "timestamp": "2026-08-17T16:44:24+02:00",
-          "tree_id": "2c1af25ee8f999aa236ef4107e1b91d6d82d24ed",
-          "url": "https://github.com/fallow-rs/fallow/commit/6ebdf806df1a1ce1389026401af225d8fc7ab38f"
-        },
-        "date": 1786977942866,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 455,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1230,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c7163e9b5475baf95d2b607c531e4e390fda99a2"
         },
         "date": 1788292624355,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 51,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 469,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1279,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "83b7d71bf8273c41809074b335246293fc6f259b",
+          "message": "test(config): prove every listed rule name is reachable (#2541)\n\nThe forward direction was already guarded: known_rule_names_covers_every_struct_field\nasserts every serialized RulesConfig field appears in KNOWN_RULE_NAMES, and\nRulesConfig has no skip_serializing_if, so no field can hide from it.\n\nThe reverse was not guarded, so a removed or renamed rule left in the list stayed\nthere silently. That is not inert: closest_known_rule_name draws its suggestions\nfrom this list, so a stale entry gets offered to a user as the fix for their typo,\npointing at a rule that no longer exists.\n\nProvenance, previously unwritten: the 98 entries are the 53 canonical kebab-case\nnames (54 fields minus one serde(skip)) unioned with the 53 declared aliases.",
+          "timestamp": "2026-09-02T10:11:01+02:00",
+          "tree_id": "39eb4ea1275aa1762a0719ec4e0f08eecd86e583",
+          "url": "https://github.com/fallow-rs/fallow/commit/83b7d71bf8273c41809074b335246293fc6f259b"
+        },
+        "date": 1788337010049,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
