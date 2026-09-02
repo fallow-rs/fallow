@@ -110,12 +110,17 @@ test("root Node API overview follows the published declarations", () => {
 test("canonical Fallow skill follows the published Node API", () => {
   const declarations = readFileSync("crates/napi/types/index.d.ts", "utf8");
   const skill = readFileSync(".agents/skills/fallow/SKILL.md", "utf8");
-  const section = markdownSection(skill, "Node.js Bindings");
+  assert.match(
+    skill,
+    /references\/node-bindings\.md/u,
+    "canonical skill must point at the Node reference",
+  );
+  const reference = readFileSync(".agents/skills/fallow/references/node-bindings.md", "utf8");
   const missing = exportedNodeFunctions(declarations).filter(
-    (functionName) => !section.includes(`\`${functionName}\``),
+    (functionName) => !reference.includes(`\`${functionName}\``),
   );
 
-  assert.deepEqual(missing, [], `canonical Fallow skill is missing: ${missing.join(", ")}`);
+  assert.deepEqual(missing, [], `canonical Node reference is missing: ${missing.join(", ")}`);
 });
 
 test("Fallow skills preserve exit status and avoid volatile plugin counts", () => {

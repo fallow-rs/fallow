@@ -6,6 +6,9 @@ import { contractSurfacePaths, contractSurfaces } from "./contract-surfaces.mjs"
 import { checkGithubActionsPathFilter } from "./check-contract-surfaces.mjs";
 
 const EXPECTED_GENERATED_PATHS = [
+  ".agents/skills/fallow/SKILL.md",
+  ".agents/skills/fallow/references/cli-reference.md",
+  ".agents/skills/fallow/references/mcp.md",
   "crates/napi/index.d.ts",
   "docs/output-schema.json",
   "editors/vscode/package.json",
