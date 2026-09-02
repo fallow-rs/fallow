@@ -1066,6 +1066,11 @@ pub struct FileBranching {
     /// that shows up here and not in `branch_points` came from repartitioning,
     /// not from removing branching.
     pub cognitive_nesting_weight: u32,
+    /// Whether one of the counted units is the module body. Its branching is
+    /// real and belongs in `branch_points`, but it is not a function anyone
+    /// split into, so a consumer judging whether a file was split must not
+    /// count it towards the function tax.
+    pub has_module_unit: bool,
     /// Whether the file carried a synthetic template unit that these counts
     /// exclude. When it did, the numbers describe the file's script only, so a
     /// consumer must not present them as describing the whole file. The
@@ -1091,6 +1096,9 @@ impl FileBranching {
     #[must_use]
     pub fn from_units(units: &[FunctionComplexity]) -> Self {
         let mut totals = Self {
+            has_module_unit: units
+                .iter()
+                .any(|unit| is_synthetic_module_unit(&unit.name)),
             has_synthetic_units: units
                 .iter()
                 .any(|unit| is_synthetic_template_unit(&unit.name)),

@@ -625,6 +625,7 @@ mod tests {
                 peak_cyclomatic: 13,
                 cognitive: 12,
                 cognitive_nesting_weight: 6,
+                has_module_unit: false,
                 has_synthetic_units: false,
             },
         ))
@@ -637,6 +638,7 @@ mod tests {
                 peak_cyclomatic: 4,
                 cognitive: 6,
                 cognitive_nesting_weight: 0,
+                has_module_unit: false,
                 has_synthetic_units: false,
             },
         ))

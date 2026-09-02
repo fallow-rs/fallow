@@ -281,10 +281,17 @@ fn partition(
         out.surviving_base.add(*base_file);
         let branch_delta = i64::from(head_file.branch_points) - i64::from(base_file.branch_points);
         let function_delta = i64::from(head_file.functions) - i64::from(base_file.functions);
+        // The module unit is counted in `functions` because it holds real
+        // branching, but nobody split a function into it. Judging a split on
+        // the raw count would read a branch hoisted out of a function to module
+        // scope as an in-place split: the branching holds, the count rises by
+        // one, and the worst function shrinks.
+        let authored_function_delta = function_delta - i64::from(head_file.has_module_unit)
+            + i64::from(base_file.has_module_unit);
         // Branching held while the file grew functions and its worst one got
         // smaller: the branches were repartitioned inside this file.
         if branch_delta.unsigned_abs() <= u64::from(tolerance)
-            && function_delta > 0
+            && authored_function_delta > 0
             && head_file.peak_cyclomatic < base_file.peak_cyclomatic
             && !is_test_path(path)
             && !is_excluded_from_the_claim(path)
@@ -487,6 +494,7 @@ mod tests {
             peak_cyclomatic: peak,
             cognitive: branch_points,
             cognitive_nesting_weight: 0,
+            has_module_unit: false,
             has_synthetic_units: false,
         }
     }
@@ -601,6 +609,71 @@ mod tests {
     }
 
     #[test]
+    fn hoisting_branching_to_module_scope_is_not_an_in_place_split() {
+        // The module unit holds real branching and is counted in `functions`,
+        // but nobody split a function into it. On the raw count this reads as a
+        // split: branching held, the count rose by one, the worst function
+        // shrank.
+        let base = snapshot(&[("src/a.ts", file(5, 1, 6))]);
+        let head = snapshot(&[(
+            "src/a.ts",
+            FileBranching {
+                branch_points: 5,
+                functions: 2,
+                peak_cyclomatic: 3,
+                cognitive: 5,
+                cognitive_nesting_weight: 0,
+                has_module_unit: true,
+                has_synthetic_units: false,
+            },
+        )]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(
+            report.branch_points.delta, 0,
+            "the branching survives the hoist, which is why it is counted"
+        );
+        assert!(
+            report.split_in_place.is_empty(),
+            "no authored function was added, so this is not a split"
+        );
+    }
+
+    #[test]
+    fn a_split_in_a_file_that_also_has_module_branching_still_counts() {
+        // The module unit must not mask a real split in the same file.
+        let base = snapshot(&[(
+            "src/a.ts",
+            FileBranching {
+                branch_points: 40,
+                functions: 2,
+                peak_cyclomatic: 39,
+                cognitive: 40,
+                cognitive_nesting_weight: 0,
+                has_module_unit: true,
+                has_synthetic_units: false,
+            },
+        )]);
+        let head = snapshot(&[(
+            "src/a.ts",
+            FileBranching {
+                branch_points: 40,
+                functions: 9,
+                peak_cyclomatic: 6,
+                cognitive: 40,
+                cognitive_nesting_weight: 0,
+                has_module_unit: true,
+                has_synthetic_units: false,
+            },
+        )]);
+
+        let report = compare(&base, &head);
+
+        assert_eq!(report.split_in_place.len(), 1);
+    }
+
+    #[test]
     fn a_file_with_synthetic_template_units_never_carries_the_claim() {
         // Template units sit outside every count here, so the numbers would not
         // describe the file a reader opens.
@@ -610,6 +683,7 @@ mod tests {
             peak_cyclomatic: peak,
             cognitive: branch_points,
             cognitive_nesting_weight: 0,
+            has_module_unit: false,
             has_synthetic_units: true,
         };
         let base = snapshot(&[("src/App.vue", with_template(6, 1, 7))]);
@@ -730,6 +804,7 @@ mod tests {
                 peak_cyclomatic: 11,
                 cognitive: 40,
                 cognitive_nesting_weight: 30,
+                has_module_unit: false,
                 has_synthetic_units: false,
             },
         )]);
@@ -741,6 +816,7 @@ mod tests {
                 peak_cyclomatic: 4,
                 cognitive: 12,
                 cognitive_nesting_weight: 2,
+                has_module_unit: false,
                 has_synthetic_units: false,
             },
         )]);
