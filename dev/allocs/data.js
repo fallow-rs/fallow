@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788292621872,
+  "lastUpdate": 1788336994243,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "aba36fe9c341c4365ead772ba7ff274a74ecf8eb",
-          "message": "chore(benchmarks): remove stale CodSpeed coverage\n\n* chore: start CodSpeed benchmark cleanup\n\n* chore(benchmarks): remove stale CodSpeed coverage",
-          "timestamp": "2026-08-17T09:32:16+02:00",
-          "tree_id": "1ae690447248416f42d7419692136895a319c362",
-          "url": "https://github.com/fallow-rs/fallow/commit/aba36fe9c341c4365ead772ba7ff274a74ecf8eb"
-        },
-        "date": 1786952246326,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9728295,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48911,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1040349,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7637,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4394,6 +4350,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Memory",
             "value": 1191723,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8442,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "83b7d71bf8273c41809074b335246293fc6f259b",
+          "message": "test(config): prove every listed rule name is reachable (#2541)\n\nThe forward direction was already guarded: known_rule_names_covers_every_struct_field\nasserts every serialized RulesConfig field appears in KNOWN_RULE_NAMES, and\nRulesConfig has no skip_serializing_if, so no field can hide from it.\n\nThe reverse was not guarded, so a removed or renamed rule left in the list stayed\nthere silently. That is not inert: closest_known_rule_name draws its suggestions\nfrom this list, so a stale entry gets offered to a user as the fix for their typo,\npointing at a rule that no longer exists.\n\nProvenance, previously unwritten: the 98 entries are the 53 canonical kebab-case\nnames (54 fields minus one serde(skip)) unioned with the 53 declared aliases.",
+          "timestamp": "2026-09-02T10:11:01+02:00",
+          "tree_id": "39eb4ea1275aa1762a0719ec4e0f08eecd86e583",
+          "url": "https://github.com/fallow-rs/fallow/commit/83b7d71bf8273c41809074b335246293fc6f259b"
+        },
+        "date": 1788336990554,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9754369,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49426,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1190067,
             "unit": "bytes"
           },
           {
