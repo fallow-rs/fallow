@@ -1582,6 +1582,34 @@ mod tests {
         assert_eq!(KNOWN_RULE_NAMES.len(), 98);
     }
 
+    /// The reverse of `known_rule_names_covers_every_struct_field`. That one
+    /// proves every real rule is listed; this one proves every listed name is
+    /// real. A stale entry is not inert: `closest_known_rule_name` suggests
+    /// from this list, so a removed or renamed rule left behind here gets
+    /// offered to a user as the fix for their typo.
+    #[test]
+    fn known_rule_names_holds_no_unreachable_entry() {
+        let serialized =
+            serde_json::to_value(RulesConfig::default()).expect("RulesConfig serializes");
+        let canonical = serialized
+            .as_object()
+            .expect("RulesConfig serializes to an object");
+        let source = include_str!("rules.rs");
+
+        let unreachable: Vec<&&str> = KNOWN_RULE_NAMES
+            .iter()
+            .filter(|name| !canonical.contains_key(**name))
+            .filter(|name| !source.contains(&format!("alias = \"{name}\"")))
+            .collect();
+
+        assert!(
+            unreachable.is_empty(),
+            "KNOWN_RULE_NAMES entries that are neither a serialized rule nor a declared \
+             serde alias: {unreachable:?}. closest_known_rule_name suggests from this list, \
+             so each one can be offered to a user as a rule that does not exist."
+        );
+    }
+
     #[test]
     fn known_rule_names_has_no_duplicates() {
         let mut sorted: Vec<&str> = KNOWN_RULE_NAMES.to_vec();
