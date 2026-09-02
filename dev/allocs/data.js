@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788339053520,
+  "lastUpdate": 1788357155216,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f44fa8e5f47a37383c5b48bea7df41ab8729087c",
-          "message": "perf(engine): preallocate health candidate paths",
-          "timestamp": "2026-08-18T10:37:56+02:00",
-          "tree_id": "f17d09561f443acf7ee864bb1c79077f03ab38fa",
-          "url": "https://github.com/fallow-rs/fallow/commit/f44fa8e5f47a37383c5b48bea7df41ab8729087c"
-        },
-        "date": 1787042594418,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9714999,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48911,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1027694,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7596,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8433,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "08aac92679c9d3729d10e0068296f3e020c31357",
+          "message": "feat(lsp): add Zed diagnostic muting\n\n* chore: initialize Zed parity work\n\n* feat(lsp): add Zed diagnostic muting",
+          "timestamp": "2026-09-02T15:47:08+02:00",
+          "tree_id": "d86915316d49d0c4b7a0944db095d87e3df8c825",
+          "url": "https://github.com/fallow-rs/fallow/commit/08aac92679c9d3729d10e0068296f3e020c31357"
+        },
+        "date": 1788357151532,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9766697,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49432,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1175572,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8091,
             "unit": "allocations"
           }
         ]
