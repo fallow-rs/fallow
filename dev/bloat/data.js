@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788337572590,
+  "lastUpdate": 1788339620728,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6ab2c847bad9bc88a85e6fa29139a811db7203a0",
-          "message": "fix(type-aware): bound generic scans and identify Svelte host gaps\n\n* chore: start type-aware issue fixes\n\n* fix: harden type-aware generic and Svelte analysis",
-          "timestamp": "2026-08-14T11:14:51+02:00",
-          "tree_id": "e9541817bdca9b64870fd20eab3e4911020d11d0",
-          "url": "https://github.com/fallow-rs/fallow/commit/6ab2c847bad9bc88a85e6fa29139a811db7203a0"
-        },
-        "date": 1786699571106,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 504607224,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20183456,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25550520,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38093720,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 42326648,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0a827f8e8302f4d2187fcc5f75f1ca61e8518cf5",
+          "message": "fix(brief): stop a hoist to module scope reading as an in-place split (#2539)\n\nThe split signature counts units as functions. Counting module-scope branching\nas a synthetic unit made a branch hoisted out of a function into that unit look\nlike a split: the branching holds, the count rises by one, and the worst\nfunction shrinks. Reproduced against a real binary on a two-commit repository,\nwhere the brief named the file and called it the shape a split leaves.\n\nBoth changes are right on their own; the interaction is not. The module unit\nbelongs in the branch-point total, because those decision points are real and\nrun at import time, and it must stay in the unit count so the conservation\nidentity holds. What it must not do is count towards the tax a split adds,\nsince nobody split a function into it.\n\nFileBranching therefore records that a module unit is present and the signature\njudges on authored functions. Fixing this in the counts instead would break the\nidentity, which the conservation test caught.\n\nTests pin both directions: a hoist is not a split, and a real split in a file\nthat also has module-scope branching still is one.",
+          "timestamp": "2026-09-02T10:46:52+02:00",
+          "tree_id": "f9d52a4b306bfae9de84fba3636e3c6f38904a80",
+          "url": "https://github.com/fallow-rs/fallow/commit/0a827f8e8302f4d2187fcc5f75f1ca61e8518cf5"
+        },
+        "date": 1788339617413,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 555506016,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21348744,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28054680,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 42327288,
             "unit": "bytes"
           }
         ]
