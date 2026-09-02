@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788293243043,
+  "lastUpdate": 1788337572590,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "95a7ae9faf9e987616fe2366b74e99626dfd58c6",
-          "message": "fix: surface star-export ambiguity instead of blaming the sources (#2268)\n\nWhen two star re-export sources supply the same name, the barrel exports nothing under that name. Unused-export and unused-type findings are now suppressed for the declarations that contribute to such a collision, instead of blaming both source files for a mistake in the barrel. Traces carry an optional star_export_ambiguity block naming the contributing files and namespaces, so an ambiguous name is no longer indistinguishable from a misspelled one. The unrendered-component and unprovided-inject headers now state the guarantee the code actually offers, including the abstain carve-out that remains. The value-derived type fallback lane is seeded lazily, which makes barrel-chain resolution roughly ten percent cheaper.\n\nCloses #2262\nCloses #2263\nCloses #2264",
-          "timestamp": "2026-08-14T08:35:39+02:00",
-          "tree_id": "daf704ab51453c6880b4fb3c5d8775efa97cafce",
-          "url": "https://github.com/fallow-rs/fallow/commit/95a7ae9faf9e987616fe2366b74e99626dfd58c6"
-        },
-        "date": 1786690029099,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 504620768,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20183328,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25550424,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38094904,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c7163e9b5475baf95d2b607c531e4e390fda99a2"
         },
         "date": 1788293239853,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 555490968,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21348744,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28054552,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 42326648,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "83b7d71bf8273c41809074b335246293fc6f259b",
+          "message": "test(config): prove every listed rule name is reachable (#2541)\n\nThe forward direction was already guarded: known_rule_names_covers_every_struct_field\nasserts every serialized RulesConfig field appears in KNOWN_RULE_NAMES, and\nRulesConfig has no skip_serializing_if, so no field can hide from it.\n\nThe reverse was not guarded, so a removed or renamed rule left in the list stayed\nthere silently. That is not inert: closest_known_rule_name draws its suggestions\nfrom this list, so a stale entry gets offered to a user as the fix for their typo,\npointing at a rule that no longer exists.\n\nProvenance, previously unwritten: the 98 entries are the 53 canonical kebab-case\nnames (54 fields minus one serde(skip)) unioned with the 53 declared aliases.",
+          "timestamp": "2026-09-02T10:11:01+02:00",
+          "tree_id": "39eb4ea1275aa1762a0719ec4e0f08eecd86e583",
+          "url": "https://github.com/fallow-rs/fallow/commit/83b7d71bf8273c41809074b335246293fc6f259b"
+        },
+        "date": 1788337567884,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
