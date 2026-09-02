@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788336994243,
+  "lastUpdate": 1788339053520,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6ebdf806df1a1ce1389026401af225d8fc7ab38f",
-          "message": "perf(engine): coalesce duplicate line ranges",
-          "timestamp": "2026-08-17T16:44:24+02:00",
-          "tree_id": "2c1af25ee8f999aa236ef4107e1b91d6d82d24ed",
-          "url": "https://github.com/fallow-rs/fallow/commit/6ebdf806df1a1ce1389026401af225d8fc7ab38f"
-        },
-        "date": 1786978559980,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9722039,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 48911,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1022404,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7587,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8442,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0a827f8e8302f4d2187fcc5f75f1ca61e8518cf5",
+          "message": "fix(brief): stop a hoist to module scope reading as an in-place split (#2539)\n\nThe split signature counts units as functions. Counting module-scope branching\nas a synthetic unit made a branch hoisted out of a function into that unit look\nlike a split: the branching holds, the count rises by one, and the worst\nfunction shrinks. Reproduced against a real binary on a two-commit repository,\nwhere the brief named the file and called it the shape a split leaves.\n\nBoth changes are right on their own; the interaction is not. The module unit\nbelongs in the branch-point total, because those decision points are real and\nrun at import time, and it must stay in the unit count so the conservation\nidentity holds. What it must not do is count towards the tax a split adds,\nsince nobody split a function into it.\n\nFileBranching therefore records that a module unit is present and the signature\njudges on authored functions. Fixing this in the counts instead would break the\nidentity, which the conservation test caught.\n\nTests pin both directions: a hoist is not a split, and a real split in a file\nthat also has module-scope branching still is one.",
+          "timestamp": "2026-09-02T10:46:52+02:00",
+          "tree_id": "f9d52a4b306bfae9de84fba3636e3c6f38904a80",
+          "url": "https://github.com/fallow-rs/fallow/commit/0a827f8e8302f4d2187fcc5f75f1ca61e8518cf5"
+        },
+        "date": 1788339049524,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9708689,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49398,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1184493,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8433,
             "unit": "allocations"
           }
         ]
