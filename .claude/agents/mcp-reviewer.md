@@ -4,6 +4,7 @@ description: Reviews MCP server tool definitions, parameter design, response str
 tools: Glob, Grep, Read, Bash
 model: opus
 ---
+<!-- Generated from .agents/agents. Do not edit. -->
 
 Review changes to fallow's MCP (Model Context Protocol) server. This is how AI agents (Claude Code, Cursor, Copilot) interact with fallow programmatically.
 

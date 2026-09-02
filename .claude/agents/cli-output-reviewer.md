@@ -4,6 +4,7 @@ description: Reviews CLI human output formatting, terminal colors, information h
 tools: Glob, Grep, Read, Bash
 model: opus
 ---
+<!-- Generated from .agents/agents. Do not edit. -->
 
 Review changes to fallow's human-readable CLI output. This is the default user-facing surface and the most subjective.
 
@@ -21,9 +22,13 @@ Review changes to fallow's human-readable CLI output. This is the default user-f
 
 For each human-format diff, walk this list in addition to the generic checks above:
 
-- [ ] **User-facing messages with dynamic counts pluralize the noun**: any `eprintln!` / `println!` / format string that interpolates a count (`"skipped {} files"`, `"{} issues found"`, `"{} clone groups"`) must branch on `count == 1` for singular vs plural. Grep the diff for new format strings containing `{} <noun>s` and trace whether the count can be 1: `git diff origin/main..HEAD | grep -nE '^\+.*"\{\} [a-z]+s'`. The fix pattern is `let noun = if count == 1 { "file" } else { "files" };` then `"{} {noun}"` in the format string. JSON / SARIF / compact / codeclimate output bypasses this because the count is a structured integer, but human / markdown / stderr notes are read by humans and "skipped 1 files" is jarring. Compilation does not catch it; tests rarely catch it because most test fixtures produce 0 or many, and the singular case slips through the cracks until a real user runs the binary on a real corpus that happens to skip exactly one item.
+- [ ] **User-facing messages with dynamic counts pluralize the noun**: any `eprintln!` / `println!` / format string that interpolates a count (`"skipped {} files"`, `"{} issues found"`, `"{} clone groups"`) must branch on `count == 1` for singular vs plural. Grep the diff for new format strings containing `{} <noun>s` and trace whether the count can be 1: `git diff origin/main..HEAD | grep -nE '^\+.*"\{\} [a-z]+s'`. The fix pattern is `let noun = if count == 1 { "file" } else { "files" };` then `"{} {noun}"` in the format string. JSON / SARIF / compact / codeclimate output bypasses this because the count is a structured integer, but human / markdown / stderr notes are read by humans and "skipped 1 files" is jarring. Compilation does not catch it; tests rarely catch it because most test fixtures produce 0 or many, and the singular case slips through until a real user runs the binary on a corpus that happens to skip exactly one item.
 
 ### Human format audit
+
+The real-world corpus is intentionally untracked. Before its first use, follow
+the [benchmark setup](../../BENCHMARKS.md#comparative-benchmarks) and run
+`npm --prefix benchmarks run download-fixtures`.
 
 ```bash
 FALLOW_QUIET=1 fallow <command> --root benchmarks/fixtures/real-world/zod 2>/dev/null
@@ -36,7 +41,7 @@ Check:
 
 ## Design system reference
 
-Use the existing terminal output patterns in `crates/cli/src/report/human/` as the design reference: clear section hierarchy, restrained ANSI color, readable spacing, progressive disclosure, and compatibility with compact and machine-readable modes.
+Use the existing terminal output patterns in `crates/cli/src/report/human/` as the design reference: clear section hierarchy, restrained ANSI color, readable spacing, progressive disclosure, and compatibility with compact and machine-readable modes. There are three output modes (human, compact, machine) and a closed set of state prefixes; neither the palette nor the prefix set is extended per feature.
 
 ## Key files
 

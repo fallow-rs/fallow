@@ -1,18 +1,21 @@
 #!/usr/bin/env node
 /**
- * Generate Claude skill adapters from the client-neutral `.agents/skills`
- * source tree.
+ * Generate Claude skill and reviewer-agent adapters from the client-neutral
+ * `.agents/skills` and `.agents/agents` source trees.
  *
- * Codex and other Agent Skills clients consume `.agents/skills` directly.
- * Claude receives byte-stable generated copies under `.claude/skills`.
+ * Codex and other Agent Skills clients consume `.agents/skills` and
+ * `.agents/agents` directly. Claude receives byte-stable generated copies
+ * under `.claude/skills` and `.claude/agents`.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const GENERATED_MARKER = "<!-- Generated from .agents/skills. Do not edit. -->";
+const SKILL_GENERATED_MARKER = "<!-- Generated from .agents/skills. Do not edit. -->";
+const AGENT_GENERATED_MARKER = "<!-- Generated from .agents/agents. Do not edit. -->";
+const AGENT_TEMPLATE_NAME = "_template.md";
 
 const parseFrontmatter = (text, sourcePath) => {
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -25,6 +28,9 @@ const parseFrontmatter = (text, sourcePath) => {
   }
   return { body: match[2], frontmatter: match[1], name: nameMatch[1] };
 };
+
+const renderAdapter = ({ body, frontmatter }, marker) =>
+  `---\n${frontmatter}\n---\n${marker}\n${body}`;
 
 const canonicalSkills = (repoRoot = REPO_ROOT) => {
   const sourceRoot = join(repoRoot, ".agents", "skills");
@@ -50,12 +56,9 @@ const canonicalSkills = (repoRoot = REPO_ROOT) => {
     .toSorted((left, right) => left.name.localeCompare(right.name));
 };
 
-const renderAdapter = ({ body, frontmatter }) =>
-  `---\n${frontmatter}\n---\n${GENERATED_MARKER}\n${body}`;
+const skillAdapterPath = (repoRoot, name) => join(repoRoot, ".claude", "skills", name, "SKILL.md");
 
-const adapterPath = (repoRoot, name) => join(repoRoot, ".claude", "skills", name, "SKILL.md");
-
-const staleGeneratedAdapters = (repoRoot, names) => {
+const staleGeneratedSkillAdapters = (repoRoot, names) => {
   const root = join(repoRoot, ".claude", "skills");
   if (!existsSync(root)) {
     return [];
@@ -63,7 +66,9 @@ const staleGeneratedAdapters = (repoRoot, names) => {
   return readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !names.has(entry.name))
     .map((entry) => join(root, entry.name, "SKILL.md"))
-    .filter((path) => existsSync(path) && readFileSync(path, "utf8").includes(GENERATED_MARKER));
+    .filter(
+      (path) => existsSync(path) && readFileSync(path, "utf8").includes(SKILL_GENERATED_MARKER),
+    );
 };
 
 /// Files a skill ships alongside its SKILL.md, relative to the skill directory.
@@ -83,12 +88,12 @@ const companionFiles = (skillDir, prefix = "") => {
   });
 };
 
-export const generateAgentAdapters = ({ check = false, repoRoot = REPO_ROOT } = {}) => {
+const generateSkillAdapters = (repoRoot, check) => {
   const skills = canonicalSkills(repoRoot);
   const drifted = [];
   for (const skill of skills) {
-    const destination = adapterPath(repoRoot, skill.name);
-    const expected = renderAdapter(skill);
+    const destination = skillAdapterPath(repoRoot, skill.name);
+    const expected = renderAdapter(skill, SKILL_GENERATED_MARKER);
     const current = existsSync(destination) ? readFileSync(destination, "utf8") : null;
     if (current !== expected) {
       drifted.push(relative(repoRoot, destination));
@@ -131,12 +136,84 @@ export const generateAgentAdapters = ({ check = false, repoRoot = REPO_ROOT } = 
   }
 
   const names = new Set(skills.map(({ name }) => name));
-  for (const stalePath of staleGeneratedAdapters(repoRoot, names)) {
+  for (const stalePath of staleGeneratedSkillAdapters(repoRoot, names)) {
     drifted.push(relative(repoRoot, stalePath));
     if (!check) {
       rmSync(dirname(stalePath), { recursive: true, force: true });
     }
   }
+  return drifted;
+};
+
+const canonicalAgents = (repoRoot = REPO_ROOT) => {
+  const sourceRoot = join(repoRoot, ".agents", "agents");
+  if (!existsSync(sourceRoot)) {
+    throw new Error(`missing canonical agent root: ${relative(repoRoot, sourceRoot)}`);
+  }
+  return readdirSync(sourceRoot, { withFileTypes: true })
+    .filter(
+      (entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== AGENT_TEMPLATE_NAME,
+    )
+    .map((entry) => {
+      const sourcePath = join(sourceRoot, entry.name);
+      const expectedName = basename(entry.name, ".md");
+      const source = readFileSync(sourcePath, "utf8");
+      const parsed = parseFrontmatter(source, relative(repoRoot, sourcePath));
+      if (parsed.name !== expectedName) {
+        throw new Error(
+          `${relative(repoRoot, sourcePath)}: name ${parsed.name} does not match file ${expectedName}`,
+        );
+      }
+      return { ...parsed, sourcePath };
+    })
+    .toSorted((left, right) => left.name.localeCompare(right.name));
+};
+
+const agentAdapterPath = (repoRoot, name) => join(repoRoot, ".claude", "agents", `${name}.md`);
+
+const staleGeneratedAgentAdapters = (repoRoot, names) => {
+  const root = join(repoRoot, ".claude", "agents");
+  if (!existsSync(root)) {
+    return [];
+  }
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .filter((entry) => !names.has(basename(entry.name, ".md")))
+    .map((entry) => join(root, entry.name))
+    .filter((path) => readFileSync(path, "utf8").includes(AGENT_GENERATED_MARKER));
+};
+
+const generateAgentDefinitionAdapters = (repoRoot, check) => {
+  const agents = canonicalAgents(repoRoot);
+  const drifted = [];
+  for (const agent of agents) {
+    const destination = agentAdapterPath(repoRoot, agent.name);
+    const expected = renderAdapter(agent, AGENT_GENERATED_MARKER);
+    const current = existsSync(destination) ? readFileSync(destination, "utf8") : null;
+    if (current !== expected) {
+      drifted.push(relative(repoRoot, destination));
+      if (!check) {
+        mkdirSync(dirname(destination), { recursive: true });
+        writeFileSync(destination, expected);
+      }
+    }
+  }
+
+  const names = new Set(agents.map(({ name }) => name));
+  for (const stalePath of staleGeneratedAgentAdapters(repoRoot, names)) {
+    drifted.push(relative(repoRoot, stalePath));
+    if (!check) {
+      rmSync(stalePath, { force: true });
+    }
+  }
+  return drifted;
+};
+
+export const generateAgentAdapters = ({ check = false, repoRoot = REPO_ROOT } = {}) => {
+  const drifted = [
+    ...generateSkillAdapters(repoRoot, check),
+    ...generateAgentDefinitionAdapters(repoRoot, check),
+  ];
   return drifted.toSorted();
 };
 

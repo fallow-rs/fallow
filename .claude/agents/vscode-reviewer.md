@@ -4,6 +4,7 @@ description: Reviews VS Code extension UX, commands, tree views, settings, binar
 tools: Glob, Grep, Read, Bash
 model: sonnet
 ---
+<!-- Generated from .agents/agents. Do not edit. -->
 
 Review changes to fallow's VS Code extension. This is the editor integration layer that connects VS Code to the fallow LSP server.
 

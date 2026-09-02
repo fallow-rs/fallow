@@ -4,6 +4,7 @@ description: Reviews LSP server protocol compliance, diagnostic design, code act
 tools: Glob, Grep, Read, Bash
 model: sonnet
 ---
+<!-- Generated from .agents/agents. Do not edit. -->
 
 Review changes to fallow's LSP server. This is the language server that editors connect to via stdio. It must be editor-agnostic (VS Code, Neovim, Helix, Zed all consume it).
 

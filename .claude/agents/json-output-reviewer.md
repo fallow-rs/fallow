@@ -4,6 +4,7 @@ description: Reviews JSON output schema design, backwards compatibility, actions
 tools: Glob, Grep, Read, Bash
 model: sonnet
 ---
+<!-- Generated from .agents/agents. Do not edit. -->
 
 Review changes to fallow's JSON output format. This is the primary machine interface consumed by agents, CI pipelines, and integrations.
 
@@ -31,12 +32,21 @@ For each JSON-output diff, walk this list in addition to the generic checks abov
     npm/fallow/package.json \
     npm/fallow/README.md
   ```
-  Each hit must either be the new count or have an explicit reason to lag (e.g., historical tables). The `.claude/rules/*.md` files specifically are easy to forget because they live outside the user-facing docs surface but feed Claude sessions, so a stale count there silently misinforms future implement passes. Treat `npm/fallow/skills/**` as a vendored release artifact rather than a canonical edit target. Principle: the hardcoded-count check covers WHAT to compare against (the registry), not WHERE all the ascending surfaces live. Each surface that ever cites the count must be enumerated explicitly so the next bump catches all of them. Caught 2026-05-04 on the tap+tsd plugin addition: README + detection.md + companion repos got bumped, but `.claude/rules/plugins.md`, `.claude/rules/core-crate.md`, `docs/positioning.md`, `npm/fallow/package.json`, and `npm/fallow/README.md` all silently retained 89/90/91.
+  Positioning and marketing copy live outside this repository and are swept separately.
+  Each hit must either be the new count or have an explicit reason to lag (e.g., historical tables). For `npm/fallow/skills/**`, the existing project memory `project_npm_skills_vendored_drift.md` is authoritative; those refresh at release time only and do NOT need a manual bump. The `.claude/rules/*.md` files specifically are easy to forget because they live OUTSIDE the user-facing docs surface but feed every Claude session's system context, so a stale count there silently misinforms future implement passes. Principle: the hardcoded-count check covers WHAT to compare against (the registry), not WHERE all the ascending surfaces live. Each surface that ever cites the count must be enumerated explicitly so the next bump catches all of them. Caught 2026-05-04 on the tap+tsd plugin addition: README + detection.md + companion repos got bumped, but `.claude/rules/plugins.md`, `.claude/rules/core-crate.md`, `docs/positioning.md`, `npm/fallow/package.json`, and `npm/fallow/README.md` all silently retained 89/90/91.
 
 ### JSON format audit
 
+The real-world corpus is intentionally untracked. Before its first use, follow
+the [benchmark setup](../../BENCHMARKS.md#comparative-benchmarks) and run
+`npm --prefix benchmarks run download-fixtures`.
+
 ```bash
-FALLOW_QUIET=1 fallow <command> --format json --root benchmarks/fixtures/real-world/zod 2>/dev/null | jq . | head -c 2000
+FALLOW_QUIET=1 fallow <command> --format json --root benchmarks/fixtures/real-world/zod 2>/dev/null | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(json.dumps(d, indent=2)[:2000])
+"
 ```
 
 Check:

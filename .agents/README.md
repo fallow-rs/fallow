@@ -30,13 +30,31 @@ Every skill must:
 - route stable architecture and reference knowledge into indexed `docs/`
 - avoid private cloud knowledge and local absolute paths
 
+## Reviewer agents
+
+Canonical reviewer agent definitions live at:
+
+```text
+.agents/agents/<agent-name>.md
+```
+
+Codex and other Agent Skills clients discover this tree directly. Claude
+adapters under `.claude/agents/` are generated from it, the same way skills
+are:
+
+```bash
+npm run generate:agent-adapters
+npm run check:agent-adapters
+```
+
+Never edit generated Claude agent copies. `.agents/agents/_template.md` is a
+starting point for new agents and is not itself emitted as an adapter.
+
 ## Runtime-specific configuration
 
 - `AGENTS.md` is the universal repository router.
 - `CLAUDE.md` is the thin Claude adapter.
 - `.claude/rules/` contains Claude-specific path-scoped constraints.
-- `.claude/agents/` and `.codex/agents/` contain runtime-specific reviewer
-  definitions where their formats genuinely differ.
 
 Runtime adapters may differ in format, but their observable review contract
 must remain equivalent and pass the knowledge architecture gate.

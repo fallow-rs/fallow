@@ -4,6 +4,7 @@ description: Reviews Rust code changes for correctness, performance, and project
 tools: Glob, Grep, Read, Bash
 model: sonnet
 ---
+<!-- Generated from .agents/agents. Do not edit. -->
 
 Review Rust code changes in the fallow project. Focus on:
 
