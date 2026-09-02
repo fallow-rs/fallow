@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788337261135,
+  "lastUpdate": 1788339346152,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c2f8b129689a7c12abe7f35e7727d4e18f670d0a",
-          "message": "perf(benchmarks): track dead-code JSON pipeline",
-          "timestamp": "2026-08-19T11:48:45+02:00",
-          "tree_id": "a3efe51eadca4bb26f3e02b73b1284f3092f8419",
-          "url": "https://github.com/fallow-rs/fallow/commit/c2f8b129689a7c12abe7f35e7727d4e18f670d0a"
-        },
-        "date": 1787133241330,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/83b7d71bf8273c41809074b335246293fc6f259b"
         },
         "date": 1788337256103,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0a827f8e8302f4d2187fcc5f75f1ca61e8518cf5",
+          "message": "fix(brief): stop a hoist to module scope reading as an in-place split (#2539)\n\nThe split signature counts units as functions. Counting module-scope branching\nas a synthetic unit made a branch hoisted out of a function into that unit look\nlike a split: the branching holds, the count rises by one, and the worst\nfunction shrinks. Reproduced against a real binary on a two-commit repository,\nwhere the brief named the file and called it the shape a split leaves.\n\nBoth changes are right on their own; the interaction is not. The module unit\nbelongs in the branch-point total, because those decision points are real and\nrun at import time, and it must stay in the unit count so the conservation\nidentity holds. What it must not do is count towards the tax a split adds,\nsince nobody split a function into it.\n\nFileBranching therefore records that a module unit is present and the signature\njudges on authored functions. Fixing this in the counts instead would break the\nidentity, which the conservation test caught.\n\nTests pin both directions: a hoist is not a split, and a real split in a file\nthat also has module-scope branching still is one.",
+          "timestamp": "2026-09-02T10:46:52+02:00",
+          "tree_id": "f9d52a4b306bfae9de84fba3636e3c6f38904a80",
+          "url": "https://github.com/fallow-rs/fallow/commit/0a827f8e8302f4d2187fcc5f75f1ca61e8518cf5"
+        },
+        "date": 1788339342151,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
