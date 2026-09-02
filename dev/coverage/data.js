@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788292890990,
+  "lastUpdate": 1788335782036,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "43b0526540c84f669ea1f4a43bf23dbba0c596da",
-          "message": "perf(benchmarks): track viz rendering",
-          "timestamp": "2026-08-19T09:01:34+02:00",
-          "tree_id": "15e94a0e35a06b619a40ab796fbb2d25b45a0ef0",
-          "url": "https://github.com/fallow-rs/fallow/commit/43b0526540c84f669ea1f4a43bf23dbba0c596da"
-        },
-        "date": 1787123362518,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/118eb77fb9f7149250f94b54f3560079f59d681e"
         },
         "date": 1788292886832,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9c30f94b673ce87cb1fa8b6a406d1659f03775a9",
+          "message": "docs(agents): name dead-code where the reference still said check (#2540)\n\nThree references in the agent CLI reference used fallow check, the legacy alias\nfor fallow dead-code. One of them quotes an stderr string that the source had\nalready moved on from: crates/cli/src/fix/plan.rs emits \"file content changed\nsince `fallow dead-code` ran\", while the reference still said \"since fallow\ncheck ran\", so text matched against real output would not find it. The other two\nname which command reports an export and which commands carry\nworkspace_diagnostics[].\n\nThe alias still resolves, so nothing was broken. The reference described a\ncommand by a name the binary no longer uses in its own output.\n\n.agents/ is canonical and .claude/ is generated from it, regenerated here. The\npublished npm/fallow/skills copy was already correct and is untouched, as is the\nRust source.",
+          "timestamp": "2026-09-02T09:43:27+02:00",
+          "tree_id": "58f8aa80c4e32209a361c76a72dc0485269d0c6e",
+          "url": "https://github.com/fallow-rs/fallow/commit/9c30f94b673ce87cb1fa8b6a406d1659f03775a9"
+        },
+        "date": 1788335778510,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
