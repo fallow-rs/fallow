@@ -17,8 +17,7 @@ Apply the review lenses that match the changed paths.
 | MCP | Tool contracts, parameters, structured errors, safe actions, timeouts |
 | LSP | Protocol compliance, diagnostics, edits, workspace-root selection, single-root analysis |
 | VS Code | Binary resolution, lifecycle, lazy work, configuration, UX |
-| GitHub Action | Shell quoting, tokens, jq, annotations, comments |
-| GitLab CI | Shell quoting, tokens, Code Quality, MR comments |
+| GitHub Action, GitLab CI | Shell quoting, tokens, jq, annotations, comments, Code Quality |
 | Visualization | Data minimization, browser security, accessibility, large-project behavior |
 | Release | Version and changelog parity, artifacts, signatures, registries, companion contracts |
 | Docs, skills, adapters | Canonical ownership, fresh-clone discovery, drift, privacy |

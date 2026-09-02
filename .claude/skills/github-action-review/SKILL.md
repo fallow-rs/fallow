@@ -7,7 +7,7 @@ description: Review fallow's GitHub Action, shell scripts, jq filters, annotatio
 # GitHub Action Review
 
 Read:
-- `.agents/agents/github-action-reviewer.md`
+- `.agents/agents/ci-integration-reviewer.md`
 - `.agents/rules/testing.md`
 
 Review the actual changed scripts, jq filters, action definition, and tests.

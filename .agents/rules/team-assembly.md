@@ -36,13 +36,9 @@ Spawn: `rust-reviewer`, `ci-formats-reviewer`
 Spawn: `rust-reviewer`
 If the change affects output formatting, also add the relevant output reviewer(s).
 
-### GitHub Action changes (`action/`, `action.yml`)
+### CI integration changes (`action/`, `action.yml`, `ci/`)
 
-Spawn: `github-action-reviewer`
-
-### GitLab CI changes (`ci/`)
-
-Spawn: `gitlab-ci-reviewer`
+Spawn: `ci-integration-reviewer`
 
 ### MCP server changes (`crates/mcp/`)
 
@@ -63,9 +59,9 @@ Optional: `user-panel` for UX/positioning review (advisory only, excluded from A
 
 ### New output format or issue type
 
-Spawn: `rust-reviewer`, `cli-output-reviewer`, `json-output-reviewer`, `ci-formats-reviewer`, `github-action-reviewer`, `gitlab-ci-reviewer`, `mcp-reviewer`, `lsp-reviewer`
+Spawn: `rust-reviewer`, `cli-output-reviewer`, `json-output-reviewer`, `ci-formats-reviewer`, `ci-integration-reviewer`, `mcp-reviewer`, `lsp-reviewer`
 
 ### Security-sensitive changes (auth, tokens, shell scripts, binary downloads)
 
-Always add: `github-action-reviewer` or `gitlab-ci-reviewer` (whichever is relevant)
-Their BLOCK on token exposure or command injection is a hard veto.
+Always add: `ci-integration-reviewer` when the change touches `action/` or `ci/`
+Its BLOCK on token exposure or command injection is a hard veto.

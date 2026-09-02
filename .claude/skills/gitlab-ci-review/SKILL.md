@@ -6,7 +6,7 @@ description: Review fallow's GitLab CI integration, scripts, jq filters, MR comm
 
 # GitLab CI Review
 
-Read `.agents/agents/gitlab-ci-reviewer.md` before reviewing.
+Read `.agents/agents/ci-integration-reviewer.md` before reviewing.
 
 Also check the relevant tests in `ci/tests/` and any formatting or quoting behavior in shell scripts and jq filters.
 
