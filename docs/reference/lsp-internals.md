@@ -30,10 +30,38 @@ lifecycle behavior.
   including clears for stale findings.
 - Diagnostics keep stable codes, `source: "fallow"`, actionable messages, and
   project-relative evidence where appropriate.
+- `initializationOptions.mutedCategories` accepts exact diagnostic codes from
+  the shared issue catalogue. Known string codes are unioned with diagnostics
+  disabled through `issueTypes: false`; unknown and non-string entries are
+  ignored so older servers remain permissive with newer clients.
+- Initialization options are read once during `initialize`. Clients must
+  restart the language server after changing `mutedCategories` or
+  `health.inlineComplexity`.
+- `health.inlineComplexity` is opt-in and supplies threshold-exceeding function
+  complexity to Code Lens. It is not a project Health report or an editor-owned
+  Health view.
+- Security candidate diagnostics remain opt-in through the project config.
+  `security-sink` and `security-client-server-leak` default to `off`, retain
+  those exact diagnostic codes, and publish at information severity because
+  candidates are not verified vulnerabilities.
 - Code actions must be safe, scoped, and derived from the current issue.
 - Initialization options and issue metadata stay aligned with generated VS
   Code contracts.
 - Shutdown must prevent late publication and clean up owned subprocess work.
+
+## Editor parity boundary
+
+The shared LSP owns diagnostics, hover, quick fixes, Code Lens, and their
+initialization contract. Host-specific sidebars, status items, full Health
+reports, and full Security reports are outside that protocol. Editors without
+custom UI contribution points should expose the shared LSP features and direct
+users to a separately installed `fallow` CLI for the complete project reports.
+
+When documenting CLI invocation from an editor, preserve the process contract:
+run from the project root, treat exit `1` as a successful analysis with
+findings, and treat exit `2` as a configuration, input, or execution error.
+`fallow security` is advisory unless `--fail-on-issues`, an error-severity
+security rule, or an explicit security gate changes its exit behavior.
 
 ## Verification
 

@@ -26,6 +26,7 @@ pub struct LspInitializationOptions {
     pub config_path: Option<String>,
     pub allow_remote_extends: bool,
     pub issue_types: Option<BTreeMap<String, bool>>,
+    pub muted_categories: Option<Vec<String>>,
     pub changed_since: Option<String>,
     pub duplication: Option<LspDuplicationOptions>,
     pub production: Option<bool>,
@@ -55,6 +56,15 @@ pub fn parse_initialization_options(opts: Option<&serde_json::Value>) -> LspInit
                 .filter_map(|(key, value)| value.as_bool().map(|enabled| (key.clone(), enabled)))
                 .collect::<BTreeMap<_, _>>();
             (!issue_types.is_empty()).then_some(issue_types)
+        }),
+        muted_categories: obj.get("mutedCategories").and_then(|value| {
+            let categories = value
+                .as_array()?
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            (!categories.is_empty()).then_some(categories)
         }),
         changed_since: obj
             .get("changedSince")

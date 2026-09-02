@@ -83,6 +83,98 @@ Fallow currently reads issue toggles from LSP initialization options:
 }
 ```
 
+`issueTypes` uses Fallow config keys, which are plural for many rules. To give
+the whole team the same quieter editor baseline, commit exact LSP diagnostic
+codes in `.zed/settings.json` instead:
+
+```json
+{
+  "lsp": {
+    "fallow": {
+      "initialization_options": {
+        "mutedCategories": [
+          "unused-file",
+          "unused-export",
+          "code-duplication",
+          "stale-suppression"
+        ]
+      }
+    }
+  }
+}
+```
+
+Diagnostic codes are singular where shown above. The security codes are
+exactly `security-sink` and `security-client-server-leak`. A mute affects only
+editor diagnostics; CLI, audit, and CI output remain unchanged. After changing
+an initialization option, run `editor: restart language server` from Zed's
+command palette.
+
+### Inline complexity
+
+Inline complexity is off by default in the editor-agnostic LSP. Enable its Code
+Lens in the same initialization options:
+
+```json
+{
+  "code_lens": "on",
+  "lsp": {
+    "fallow": {
+      "initialization_options": {
+        "health": {
+          "inlineComplexity": true
+        }
+      }
+    }
+  }
+}
+```
+
+This adds a compact complexity lens above functions that exceed Fallow's
+thresholds. Use `"code_lens": "menu"` instead if you prefer to reveal lenses
+from the editor menu. It does not run or render the complete Health report.
+
+### Security candidate diagnostics
+
+Security candidates are deliberately opt-in. Enable either or both project
+rules in `.fallowrc.json`:
+
+```json
+{
+  "rules": {
+    "security-sink": "warn",
+    "security-client-server-leak": "warn"
+  }
+}
+```
+
+The LSP reuses this project configuration and publishes matching candidates as
+information diagnostics. Setting the same keys to `true` under `issueTypes`
+does not enable rules that remain `off` in the Fallow config. Candidates are
+items to verify, not confirmed vulnerabilities.
+
+## Full Health and Security reports
+
+The Zed extension provides the shared LSP surface. For project-wide Health and
+Security reports, install the `fallow` CLI separately and run it from the
+project root, for example in Zed's terminal:
+
+```bash
+npm install --save-dev fallow
+npx fallow health
+npx fallow security --fail-on-issues
+```
+
+For these commands, exit code `0` is a successful clean run, `1` is a
+successful run with findings, and `2` is a configuration, input, or execution
+error. Without `--fail-on-issues`, `fallow security` remains advisory and can
+exit `0` with candidates.
+
+The current Zed extension API does not provide contribution points for a
+Fallow-owned sidebar tree or status-bar item. Use Zed's built-in Problems and
+LSP surfaces for diagnostics, and the CLI for the complete reports. This is the
+best available parity with the current API, not full VS Code UI parity.
+
 ## Development
 
 1. Open Zed.

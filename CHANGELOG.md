@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Zed now exposes the best available Fallow parity through the shared LSP
+  contract.** Teams can commit exact diagnostic codes in
+  `initialization_options.mutedCategories`, opt into inline complexity Code
+  Lens through `health.inlineComplexity`, and enable advisory security
+  candidate diagnostics through project rules. The Zed guide now separates
+  those LSP features from complete `fallow health` and `fallow security` CLI
+  runs, including their exit-code contract, and makes clear that the current
+  Zed extension API has no contribution points for a Fallow-owned sidebar or
+  status-bar item. This is editor parity where the host API supports it, not a
+  claim of full VS Code UI parity. (Closes
+  [#2542](https://github.com/fallow-rs/fallow/issues/2542).)
+
 ## [3.22.0] - 2026-09-01
 
 ### Added

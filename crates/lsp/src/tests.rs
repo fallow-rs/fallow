@@ -1083,6 +1083,7 @@ fn parse_initialization_options_reads_full_payload() {
         "issueTypes": {
             "unused-exports": false
         },
+        "mutedCategories": ["code-duplication", "unused-file"],
         "changedSince": "origin/main",
         "production": true,
         "duplication": {
@@ -1110,6 +1111,10 @@ fn parse_initialization_options_reads_full_payload() {
             .as_ref()
             .and_then(|issue_types| issue_types.get("unused-exports")),
         Some(&false)
+    );
+    assert_eq!(
+        parsed.muted_categories.as_deref(),
+        Some(["code-duplication".to_string(), "unused-file".to_string()].as_slice())
     );
     assert_eq!(parsed.changed_since.as_deref(), Some("origin/main"));
     assert_eq!(parsed.production, Some(true));
@@ -1150,15 +1155,52 @@ fn parse_initialization_options_is_permissive_for_missing_or_malformed_payload()
         parse_initialization_options(Some(&json!("not an object"))),
         LspInitializationOptions::default()
     );
+    let malformed = parse_initialization_options(Some(&json!({
+        "production": "on",
+        "mutedCategories": "code-duplication",
+        "health": {
+            "inlineComplexity": "yes"
+        }
+    })));
+    assert_eq!(malformed.production, None);
+    assert_eq!(malformed.muted_categories, None);
+
+    let parsed = parse_initialization_options(Some(&json!({
+        "mutedCategories": [
+            "code-duplication",
+            7,
+            null,
+            "unused-export"
+        ]
+    })));
     assert_eq!(
-        parse_initialization_options(Some(&json!({
-            "production": "on",
-            "health": {
-                "inlineComplexity": "yes"
-            }
-        })))
-        .production,
-        None
+        parsed.muted_categories.as_deref(),
+        Some(["code-duplication".to_string(), "unused-export".to_string()].as_slice()),
+        "malformed array entries must not discard valid category codes",
+    );
+}
+
+#[test]
+fn disabled_diagnostic_codes_union_issue_types_and_exact_muted_categories() {
+    let options = LspInitializationOptions {
+        issue_types: Some(std::collections::BTreeMap::from([
+            ("unused-exports".to_string(), false),
+            ("unused-files".to_string(), true),
+        ])),
+        muted_categories: Some(vec![
+            "code-duplication".to_string(),
+            "Code-Duplication".to_string(),
+            "future-diagnostic".to_string(),
+        ]),
+        ..LspInitializationOptions::default()
+    };
+
+    let disabled = disabled_diagnostic_codes(&options);
+
+    assert_eq!(
+        disabled,
+        FxHashSet::from_iter(["code-duplication".to_string(), "unused-export".to_string()]),
+        "muted diagnostic codes and disabled issue-type keys form a validated union",
     );
 }
 
@@ -3754,6 +3796,156 @@ async fn publish_inserts_skipped_uri_into_new_uris() {
         backend.previous_diagnostic_uris.read().await.contains(&uri),
         "skipped stale URI must still be tracked in previous_diagnostic_uris",
     );
+}
+
+fn muted_analysis_output(source: &Path) -> BlockingAnalysisOutput {
+    let results = AnalysisResults {
+        unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
+            path: source.to_path_buf(),
+        })],
+        unused_exports: vec![UnusedExportFinding::with_actions(UnusedExport {
+            path: source.to_path_buf(),
+            export_name: "unused".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 13,
+            span_start: 13,
+            is_re_export: false,
+        })],
+        ..AnalysisResults::default()
+    };
+    let duplication = DuplicationReport {
+        clone_groups: vec![CloneGroup {
+            instances: vec![CloneInstance {
+                file: source.to_path_buf(),
+                start_line: 2,
+                end_line: 2,
+                start_col: 0,
+                end_col: 27,
+                fragment: "export const duplicate = 2;".to_string(),
+            }],
+            token_count: 5,
+            line_count: 1,
+            similarity: None,
+        }],
+        stats: DuplicationStats {
+            clone_groups: 1,
+            clone_instances: 1,
+            ..DuplicationStats::default()
+        },
+        ..DuplicationReport::default()
+    };
+    BlockingAnalysisOutput {
+        analysis: EditorAnalysisOutput::new(results, duplication),
+        inline_complexity: Vec::new(),
+        config_messages: Vec::new(),
+        changed_message: None,
+        applied_changed_since: None,
+        changed_since_scope: None,
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn initialization_mutes_the_same_diagnostics_for_push_and_pull() {
+    use futures::StreamExt;
+
+    let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
+    let initialize = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "initializationOptions": {
+                "issueTypes": {
+                    "unused-exports": false,
+                    "unused-files": true
+                },
+                "mutedCategories": [
+                    "code-duplication",
+                    "Code-Duplication",
+                    "future-diagnostic",
+                    7
+                ]
+            }
+        }))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("service ready")
+        .call(initialize)
+        .await
+        .expect("initialize call")
+        .expect("initialize response");
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = canonicalize_for_lsp(dir.path());
+    let source = root.join("muted.ts");
+    std::fs::write(
+        &source,
+        "export const unused = 1;\nexport const duplicate = 2;\n",
+    )
+    .expect("write source");
+    let uri = Uri::from_file_path(&source).expect("source URI");
+    let backend = service.inner();
+    assert_eq!(
+        *backend.disabled_diagnostic_codes.read().await,
+        FxHashSet::from_iter(["code-duplication".to_string(), "unused-export".to_string()]),
+    );
+
+    let receive_protocol_output = async {
+        let mut pushed = None;
+        loop {
+            let message = tokio::time::timeout(Duration::from_millis(500), socket.next())
+                .await
+                .expect("protocol output must arrive")
+                .expect("client socket must stay open");
+            match message.method() {
+                "textDocument/publishDiagnostics" => pushed = Some(message),
+                "fallow/analysisComplete" => break (pushed, message),
+                _ => {}
+            }
+        }
+    };
+    let output = muted_analysis_output(&source);
+    let version_snapshot = VersionSnapshot::default();
+    let apply = backend.apply_analysis_output(output, &root, &version_snapshot);
+    let ((), (pushed, completion)) = tokio::join!(apply, receive_protocol_output);
+
+    let cached = backend.cached_diagnostics.read().await;
+    assert_eq!(cached[&uri].len(), 1);
+    assert!(matches!(
+        cached[&uri][0].code.as_ref(),
+        Some(NumberOrString::String(code)) if code == "unused-file"
+    ));
+    drop(cached);
+
+    let pushed = pushed.expect("publishDiagnostics must precede analysisComplete");
+    let params = pushed.params().expect("publishDiagnostics params");
+    assert_eq!(params["diagnostics"].as_array().map(Vec::len), Some(1));
+    assert_eq!(params["diagnostics"][0]["code"], "unused-file");
+    let completion = completion.params().expect("analysisComplete params");
+    assert_eq!(completion["unusedFiles"], 1);
+    assert_eq!(completion["unusedExports"], 1);
+    assert_eq!(completion["cloneGroups"], 1);
+
+    let pull = Request::build("textDocument/diagnostic")
+        .params(json!({
+            "textDocument": { "uri": uri.to_string() },
+            "identifier": "fallow"
+        }))
+        .id(2)
+        .finish();
+    let response = service
+        .ready()
+        .await
+        .expect("service ready")
+        .call(pull)
+        .await
+        .expect("diagnostic request")
+        .expect("diagnostic response");
+    let result = response.result().expect("pull result");
+    assert_eq!(result["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(result["items"][0]["code"], "unused-file");
 }
 
 // -------------------------------------------------------------------------

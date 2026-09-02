@@ -66,6 +66,18 @@ describe("generated/output-contract.d.ts", () => {
     };
 
     expect(sample.issueTypes["unused-exports"]).toBe(false);
+    expect(sample.mutedCategories).toBeUndefined();
+  });
+
+  it("exposes optional muted diagnostic categories for LSP clients", () => {
+    expectTypeOf<LspInitializationOptions["mutedCategories"]>().toEqualTypeOf<
+      readonly string[] | undefined
+    >();
+
+    const sample: Pick<LspInitializationOptions, "mutedCategories"> = {
+      mutedCategories: ["code-duplication"],
+    };
+    expect(sample.mutedCategories).toEqual(["code-duplication"]);
   });
 
   it("exposes CombinedOutput with optional check/dupes/health branches", () => {

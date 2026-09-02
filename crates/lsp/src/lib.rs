@@ -141,13 +141,13 @@ use fallow_config::DetectionMode;
 #[cfg(test)]
 use fallow_config::DuplicatesConfig;
 use initialization::{
-    LspDuplicationOptions, LspTypeAwareOptions, initialization_config_path,
-    parse_initialization_options,
+    LspDuplicationOptions, LspInitializationOptions, LspTypeAwareOptions,
+    initialization_config_path, parse_initialization_options,
 };
 #[cfg(test)]
 use initialization::{
-    LspInitializationOptions, initialization_duplication_options,
-    initialization_inline_complexity_enabled, initialization_production_override,
+    initialization_duplication_options, initialization_inline_complexity_enabled,
+    initialization_production_override,
 };
 use path_utils::canonicalize_for_lsp;
 #[cfg(test)]
@@ -173,6 +173,30 @@ const WATCHED_FILE_GLOBS: &[&str] = &[
     "**/{package.json,package-lock.json,pnpm-lock.yaml,yarn.lock,bun.lock,bun.lockb}",
     "**/{fallow.json,fallow.jsonc,fallow.yaml,fallow.yml,fallow.toml}",
 ];
+
+fn disabled_diagnostic_codes(options: &LspInitializationOptions) -> FxHashSet<String> {
+    let muted_categories: FxHashSet<&str> = options
+        .muted_categories
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(String::as_str)
+        .collect();
+
+    diagnostic_issue_type_metas()
+        .filter(|issue_type| {
+            muted_categories.contains(issue_type.code)
+                || issue_type.config_key.is_some_and(|config_key| {
+                    options
+                        .issue_types
+                        .as_ref()
+                        .and_then(|issue_types| issue_types.get(config_key))
+                        == Some(&false)
+                })
+        })
+        .map(|issue_type| issue_type.code.to_string())
+        .collect()
+}
 
 #[derive(Clone)]
 struct FallowLspServer {
@@ -201,7 +225,8 @@ struct FallowLspServer {
     /// documents and project state are ready. The first open or save runs the
     /// initial analysis instead.
     startup_analysis_started: Arc<AtomicBool>,
-    /// Diagnostic codes to suppress (parsed from initializationOptions.issueTypes)
+    /// Diagnostic codes suppressed by `initializationOptions.issueTypes` or
+    /// `initializationOptions.mutedCategories`.
     disabled_diagnostic_codes: Arc<RwLock<FxHashSet<String>>>,
     /// Optional git ref from `initializationOptions.changedSince`. When set,
     /// analysis results and duplication reports are scoped to files changed
@@ -290,19 +315,8 @@ impl LanguageServer for FallowLspServer {
 
         if let Some(opts) = &params.initialization_options {
             let parsed_options = parse_initialization_options(Some(opts));
-
-            if let Some(issue_types) = &parsed_options.issue_types {
-                let mut disabled = FxHashSet::default();
-                for issue_type in diagnostic_issue_type_metas() {
-                    let Some(config_key) = issue_type.config_key else {
-                        continue;
-                    };
-                    if issue_types.get(config_key) == Some(&false) {
-                        disabled.insert(issue_type.code.to_string());
-                    }
-                }
-                *self.disabled_diagnostic_codes.write().await = disabled;
-            }
+            *self.disabled_diagnostic_codes.write().await =
+                disabled_diagnostic_codes(&parsed_options);
 
             if let Some(git_ref) = parsed_options.changed_since.as_deref() {
                 let trimmed = git_ref.trim();
