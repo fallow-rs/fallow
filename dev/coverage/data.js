@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788341564024,
+  "lastUpdate": 1788357531859,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "0bae5b1d371aeadeea21373ced69584dfdcacbcd",
-          "message": "perf(benchmarks): cover recommend workspace JSON",
-          "timestamp": "2026-08-19T15:16:31+02:00",
-          "tree_id": "e8991454566277d66ccf2ef7e58cdab167cb8b81",
-          "url": "https://github.com/fallow-rs/fallow/commit/0bae5b1d371aeadeea21373ced69584dfdcacbcd"
-        },
-        "date": 1787145732627,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2899,6 +2870,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "Code Coverage",
             "value": 92.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "320786e34e688499abb39a7655623f1e5191c2cc",
+          "message": "chore(agents): clean up the agent-facing instruction surface after a prompt audit (#2544)\n\nCleanup of the agent-facing instruction surface after a prompt audit of the skill tree, reviewer definitions, and MCP descriptions.\n\n- Skill tree: rotted numbers removed (gate version floor, clippy thresholds, struct sizes), `--changed-since` described as a scope filter, the six-step Instructions block replaced by a client-neutral arguments line, phase labels and migration-relative wording dropped from the reviewers, the two orphaned incident logs deleted with their one live mechanic moved into `open-draft-pr`.\n- MCP: every tool parameter now carries a description taken from the CLI help, `guard` states its contract (empty rule set for unzoned paths, config-only, no analysis), and the server instructions route to `tools/list` and the resources instead of re-listing all tools. The two tests that asserted the old enumeration now assert routing and resource coverage.\n- Reviewer roster: the GitHub and GitLab reviewers are one `ci-integration-reviewer` that decides the provider from the touched paths.\n- `.claude/agents/*.md` are generated from `.agents/agents/*.md` by the adapter script, with drift check and tests; the diverged copies were reconciled with the richer version winning per file.\n- `.agents/skills/fallow` is a generator target next to the npm skill, wired into the contract surfaces and both CI path filters. The `gotchas`, `patterns`, and `cli-reference` references under `.agents` were left as-is and still lag the npm copies; that is a follow-up.\n\nVerification: `node --test scripts/*.test.mjs`, `cargo test -p fallow-mcp`, clippy, `lint:js`, `fmt:js:check`, `generate:contracts:check`, `check:agent-adapters` all pass; both drift checks fail on a deliberate one-character drift.",
+          "timestamp": "2026-09-02T15:52:44+02:00",
+          "tree_id": "05580f95f2c0194fc16bd0d2f5cf008903ad9dfa",
+          "url": "https://github.com/fallow-rs/fallow/commit/320786e34e688499abb39a7655623f1e5191c2cc"
+        },
+        "date": 1788357528615,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.3,
             "unit": "%"
           }
         ]
