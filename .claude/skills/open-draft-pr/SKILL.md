@@ -15,7 +15,9 @@ Workflow:
 2. Run the smallest relevant validation for the touched area.
 3. Prepare a concise conventional commit message.
 4. Commit with signing if committing is requested.
-5. Push the branch.
+5. Push the branch. GitHub refuses a PR for a branch with no commits; make an
+   intentional empty coordination commit before the first push when the
+   branch is fresh.
 6. Open a ready PR with a high-signal conventional title and body.
 
 Requirements:

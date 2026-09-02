@@ -27,13 +27,13 @@ Review Rust code changes in the fallow project. Focus on:
 
 Can **BLOCK** on:
 - Unsafe code without justification
-- Missing `--all-targets` in test/clippy commands
+- Missing `--all-targets` in test/clippy commands (benchmark-only crates are the exception: their targets are opt-in)
 - `HashMap`/`HashSet` instead of `FxHashMap`/`FxHashSet`
 - Panicking code (`unwrap`/`expect`) on user-facing paths
 
 ## Output format
 
-Only report issues with HIGH confidence. For each issue:
+Report an issue only when you can name the line and the concrete failure or cost it causes; describe uncertain observations separately as questions. For each issue:
 - File and line
 - What's wrong
 - Suggested fix

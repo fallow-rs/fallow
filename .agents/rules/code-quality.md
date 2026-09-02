@@ -10,12 +10,12 @@ paths:
 ## Clippy configuration
 - Lint groups: `all`, `pedantic`, `nursery`, `cargo` (priority -1) with strategic allow-list
 - Restriction lints including `excessive_nesting` (threshold 7 in `.clippy.toml`), `allow_attributes_without_reason`, `unimplemented`; see `[workspace.lints.clippy]` in `Cargo.toml` for the full list
-- SIG-aligned thresholds in `.clippy.toml`: `too_many_lines` (150 LOC, ratchet toward 100), `too_many_arguments` (7 params), `cognitive_complexity` (25). These map to SIG Unit Size, Unit Interfacing, and Unit Complexity properties respectively
+- SIG-aligned thresholds live in `.clippy.toml` (`too-many-lines-threshold`, `too-many-arguments-threshold`, `cognitive-complexity-threshold`) and map to SIG Unit Size, Unit Interfacing, and Unit Complexity respectively. Read the file for the current values.
 - Compiler lints: `unsafe_op_in_unsafe_fn`, `unused_unsafe`, `non_ascii_idents`, `tail_expr_drop_order`
 - All suppressions use `#[expect(clippy::..., reason = "...")]` — warns when unnecessary, preventing dead annotations. Every `#[allow]` and `#[expect]` must include a `reason` attribute. Use `#[allow]` only for pedantic-only or target-dependent lints where `#[expect]` would be unfulfilled.
 
 ## Size assertions
-`ModuleNode` (96 bytes), `ModuleInfo` (400 bytes), `ExportInfo` (112 bytes), `ImportInfo` (96 bytes), `Edge` (32 bytes), `MemberAccess` (48 bytes), `ImportedName` / `ExportName` (24 bytes each), prevents accidental struct bloat. Source of truth is `const _: () = assert!(...)` in `crates/types/src/extract.rs`; this doc is informational and may lag the code.
+Compile-time size assertions (`const _: () = assert!(...)` in `crates/types/src/extract.rs`) pin the graph structs so a field addition cannot silently bloat them. Read the assertions for the current sizes before changing those structs.
 
 ## Formatting
 `.rustfmt.toml` with `style_edition = "2024"`.

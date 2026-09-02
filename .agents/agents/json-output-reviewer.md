@@ -25,7 +25,7 @@ For each JSON-output diff, walk this list in addition to the generic checks abov
 - [ ] **Closed-enum field violations across hand-rolled emit paths**: when a new code path constructs a struct with `Serialize`-derived `String` fields that the published schema constrains to closed enums (`docs/output-schema.json` `enum: [...]`), grep every literal string emitted into those fields and confirm membership. Concrete recipe: for each new `<StructWithSchema> { field: "...".to_owned(), }` in the diff, run `grep -nE '"<field>"' docs/output-schema.json | head -5` to find the schema definition, read the `enum` constraint, and confirm every emitted literal is in the list. Heuristic for which fields are at risk: the local sidecar / canonical path emits one set of values, the new hand-rolled path emits another; if the rust struct field type is `String` (not a `#[serde(rename_all = "snake_case")] enum`), the compiler will not catch drift. Pattern target list for runtime coverage: `evidence.static_status` (`["used","unused"]`), `evidence.test_coverage` (`["covered","not_covered"]`), `evidence.v8_tracking` (`["tracked","untracked"]`), `verdict` (already enum-typed, safe). Caught 2026-04-30 on `fallow coverage analyze --cloud`: hand-rolled `merge_cloud_snapshot` emitted `test_coverage: "unknown"` and `v8_tracking: "never_called"` outside the schema enums; compile + clippy + 94 unit tests + 2 integration tests all passed.
 - [ ] **Plugin-count drift sweep across non-companion surfaces**: when the change bumps the plugin count, beyond the companion-repo flag-gate sweep AND the existing `README.md` / detection.md updates, ALSO grep these additional in-repo and internal locations for stale counts:
   ```bash
-  /usr/bin/grep -nE "\b(89|90|91|92|93)\b.*plugin" \
+  /usr/bin/grep -nE "\b[0-9]{2,3}\+? (built-in |framework )?plugins?\b" \
     .claude/rules/plugins.md \
     .claude/rules/core-crate.md \
     npm/fallow/package.json \
@@ -34,7 +34,7 @@ For each JSON-output diff, walk this list in addition to the generic checks abov
   Positioning and marketing copy live outside this repository and are swept separately.
   Each hit must either be the new count or have an explicit reason to lag (e.g., historical tables). For `npm/fallow/skills/**`, the existing project memory `project_npm_skills_vendored_drift.md` is authoritative; those refresh at release time only and do NOT need a manual bump. The `.claude/rules/*.md` files specifically are easy to forget because they live OUTSIDE the user-facing docs surface but feed every Claude session's system context, so a stale count there silently misinforms future implement passes. Principle: the hardcoded-count check covers WHAT to compare against (the registry), not WHERE all the ascending surfaces live. Each surface that ever cites the count must be enumerated explicitly so the next bump catches all of them. Caught 2026-05-04 on the tap+tsd plugin addition: README + detection.md + companion repos got bumped, but `.claude/rules/plugins.md`, `.claude/rules/core-crate.md`, `docs/positioning.md`, `npm/fallow/package.json`, and `npm/fallow/README.md` all silently retained 89/90/91.
 
-### JSON format audit (Phase 3a)
+### JSON format audit
 
 The real-world corpus is intentionally untracked. Before its first use, follow
 the [benchmark setup](../../BENCHMARKS.md#comparative-benchmarks) and run

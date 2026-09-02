@@ -392,21 +392,14 @@ export const deprecatedHelper = () => {};
 ## Key Gotchas
 
 - **`fix --yes` is required** in non-TTY (agent) environments. Without it, `fix` exits with code 2
-- **Zero config by default.** Built-in framework plugins auto-detect, including Wuchale config, Contentlayer content roots, tap and tsd test entry points. Read `fallow schema.plugins` for the current registry and don't create config unless customization is needed
+- **Zero config by default.** Built-in framework plugins auto-detect entry points and framework-consumed exports. Read `fallow schema.plugins` for the current registry and don't create config unless customization is needed
 - **Syntactic analysis only.** No TypeScript compiler, so fully dynamic `import(variable)` is not resolved
 - **Function overloads are deduplicated.** TypeScript function overload signatures are merged into a single export (not reported as separate unused exports)
 - **Re-export chains are resolved.** Exports through barrel files are tracked, not falsely flagged
-- **`--changed-since` is additive.** Only new issues in changed files, not all issues in the project
+- **`--changed-since` narrows scope.** It reports only issues in files changed since the ref, not the whole project; new-versus-inherited attribution is `fallow audit`'s job
 
 For the full list with examples, see [references/gotchas.md](references/gotchas.md).
 
-## Instructions
+## Arguments
 
-1. **Identify the task** from the user's request (audit, fix, find dupes, set up CI, migrate, debug)
-2. **Run the appropriate command** with `--format json --quiet`
-3. **Use filter flags** to limit output when the user asks about specific issue types
-4. **Always dry-run before fix.** Show the user what will change, then apply
-5. **Report results clearly.** Summarize issue counts, list specific findings, suggest next steps
-6. **For false positives,** suggest inline suppression comments or config rule adjustments
-
-If `$ARGUMENTS` is provided, use it as the `--root` path or pass it as the target for the appropriate fallow command.
+When the skill is invoked with an argument (a path, a git ref, or a symbol), pass it as `--root`, `--changed-since`, or the trace target of the matching command. Otherwise analyze the current project root.

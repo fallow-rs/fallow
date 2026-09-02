@@ -33,8 +33,8 @@ For each GitLab CI diff, walk this list in addition to the generic checks above:
 - `ci/gitlab-ci.yml` (template definition)
 - `ci/scripts/comment.sh` (MR comment posting)
 - `ci/scripts/review.sh` (MR inline review discussions)
-- `ci/jq/` (remaining GitLab summary jq helpers)
-- `ci/tests/` (shell integration tests for remaining jq plus typed MR/review scripts)
+- `ci/jq/` (GitLab summary jq helpers)
+- `ci/tests/` (shell integration tests for the jq helpers and the typed MR/review scripts)
 
 ## Veto rights
 

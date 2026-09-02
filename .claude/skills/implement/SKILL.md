@@ -23,6 +23,6 @@ Deliver the requested change through the native Fallow lifecycle.
    `docs/development/review-routing.md`. Resolve every block.
 9. Update the pull request with current verification evidence.
 
-Use `apply_patch` for edits. Preserve unrelated work. Never create process
-artifacts under committed `docs/`. Prefer durable knowledge in indexed docs and
-keep this skill procedural.
+Preserve unrelated work. Never create process artifacts under committed
+`docs/`. Prefer durable knowledge in indexed docs and keep this skill
+procedural.

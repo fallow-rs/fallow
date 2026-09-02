@@ -325,7 +325,7 @@ If you use utility decorators that DO NOT imply reflective use (Playwright's `@s
 
 Conservative semantics: a method carrying any decorator NOT in the list still gets skipped. So `@step` + `@Inject` on the same method stays treated as framework-managed. Matching rule: entries containing `.` (`"decorators.log"`) match the full dotted path; bare entries (`"step"` or `"decorators"`) match the leftmost segment, so a single bare `"decorators"` entry collapses an entire `@decorators.*` namespace. Both `"@step"` and `"step"` round-trip equivalently. Unmatched entries (a decorator name in the config that never appears in your codebase) surface as a one-time warning at end of run.
 
-The default empty list preserves today's skip-all behavior, so existing NestJS / Angular / TypeORM projects see no change.
+With the default empty list every decorated method is treated as framework-managed, which is what NestJS, Angular, and TypeORM projects need.
 
 ---
 

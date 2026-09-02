@@ -36,8 +36,8 @@ For each GitHub Action diff, walk this list in addition to the generic checks ab
 - `action/scripts/comment.sh` (PR comment posting)
 - `action/scripts/review.sh` (PR review with inline suggestions)
 - `action/scripts/summary.sh` (workflow summary)
-- `action/jq/` (remaining summary, annotation, and changed-file jq helpers)
-- `action/tests/` (shell integration tests for remaining jq plus typed PR/review scripts)
+- `action/jq/` (summary, annotation, and changed-file jq helpers)
+- `action/tests/` (shell integration tests for the jq helpers and the typed PR/review scripts)
 
 ## Veto rights
 
