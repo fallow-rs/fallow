@@ -40,6 +40,7 @@ fn run_duplication_inner(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let start = Instant::now();
+    resolved.ensure_not_cancelled("config load and file discovery")?;
     let session = load_duplication_session(options, resolved)?;
     run_duplication_with_session(options, resolved, &session, None, start)
 }
@@ -51,6 +52,7 @@ pub(super) fn run_duplication_with_session(
     changed_files: Option<&FxHashSet<std::path::PathBuf>>,
     start: Instant,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
+    resolved.ensure_not_cancelled("duplication detection")?;
     let dupes_config = build_dupes_config(options, &session.config().duplicates);
     let resolved_changed_files = if changed_files.is_some() {
         None
@@ -69,6 +71,9 @@ pub(super) fn run_duplication_with_session(
             .report
     };
 
+    // Duplication detection cannot fail, so a token set while it ran has to be
+    // reported here rather than dressed up as a complete report.
+    resolved.ensure_not_cancelled("the duplication report")?;
     run_duplication_report_with_session(options, resolved, session, report, start)
 }
 
@@ -144,7 +149,10 @@ pub(super) fn load_duplication_session(
             .with_context("analysis.configPath")
     })?;
     let project_config = configure_project_for_duplication(project_config, options, resolved);
-    Ok(AnalysisSession::from_config(project_config))
+    Ok(super::dead_code::attach_cancellation(
+        AnalysisSession::from_config(project_config),
+        resolved,
+    ))
 }
 
 fn configure_project_for_duplication(

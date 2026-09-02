@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  compareCuratedSeeds,
+  curatedSeeds,
   escapeCell,
   firstSentence,
+  formatCuratedSeedDrift,
+  hasCuratedSeedDrift,
   hasSection,
   parseExistingTable,
+  readCuratedSeedRecord,
   regenerateCliReferenceMd,
   regenerateMcpReferenceMd,
   regenerateSkillMd,
@@ -664,17 +669,19 @@ test("--check exits 1 on drift, writes nothing, and exits 0 when in sync", async
   writeFileSync(join(referencesDir, "mcp.md"), DOC_MCP_REFERENCE);
 
   // DOC is stale relative to SCHEMA: --check must report drift without writing.
+  const seedRecord = join(dir, "seeds.json");
   const before = readFileSync(join(dir, "SKILL.md"), "utf8");
   const cliBefore = readFileSync(join(referencesDir, "cli-reference.md"), "utf8");
   const mcpBefore = readFileSync(join(referencesDir, "mcp.md"), "utf8");
-  assert.equal(main(["--schema", schemaPath, "--target", dir, "--check"]), 1);
+  const args = ["--schema", schemaPath, "--target", dir, "--seed-record", seedRecord];
+  assert.equal(main([...args, "--check"]), 1);
   assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), before);
   assert.equal(readFileSync(join(referencesDir, "cli-reference.md"), "utf8"), cliBefore);
   assert.equal(readFileSync(join(referencesDir, "mcp.md"), "utf8"), mcpBefore);
 
   // Regenerate for real, then --check must pass.
-  assert.equal(main(["--schema", schemaPath, "--target", dir]), 0);
-  assert.equal(main(["--schema", schemaPath, "--target", dir, "--check"]), 0);
+  assert.equal(main(args), 0);
+  assert.equal(main([...args, "--check"]), 0);
   // The mcp-tools table now lives in references/mcp.md, not SKILL.md.
   assert.ok(readFileSync(join(referencesDir, "mcp.md"), "utf8").includes("list_boundaries"));
   assert.ok(!readFileSync(join(dir, "SKILL.md"), "utf8").includes("generated:mcp-tools"));
@@ -699,7 +706,21 @@ test("--output-target stages regenerated docs without changing the source target
   writeFileSync(join(sourceReferences, "mcp.md"), DOC_MCP_REFERENCE);
 
   try {
-    assert.equal(main(["--schema", schemaPath, "--target", source, "--output-target", output]), 0);
+    assert.equal(
+      main([
+        "--schema",
+        schemaPath,
+        "--target",
+        source,
+        "--output-target",
+        output,
+        "--seed-record",
+        join(dir, "seeds.json"),
+        "--seed-record-output",
+        join(output, "seeds.json"),
+      ]),
+      0,
+    );
     assert.equal(readFileSync(join(source, "SKILL.md"), "utf8"), DOC);
     assert.notEqual(readFileSync(join(output, "SKILL.md"), "utf8"), DOC);
     assert.ok(
@@ -713,4 +734,178 @@ test("--output-target stages regenerated docs without changing the source target
   } finally {
     rmSync(dir, { recursive: true });
   }
+});
+
+const seedOf = (seeds, section, row, column) =>
+  seeds.find((cell) => cell.section === section && cell.row === row && cell.column === column)
+    ?.seed;
+
+test("curated seeds cover every curated column and carry the escaped manifest text", () => {
+  const seeds = curatedSeeds(SCHEMA, [
+    "commands",
+    "issue-types",
+    "mcp-tools",
+    "mcp-resources",
+    "flags:global",
+    "flags:dead-code-filters",
+  ]);
+
+  assert.equal(seedOf(seeds, "commands", "dupes", "Purpose"), "Find clones");
+  assert.equal(seedOf(seeds, "commands", "dupes", "Key Flags"), "`--mode`, `--trace`");
+  assert.equal(
+    seedOf(seeds, "issue-types", "type-only-dependency", "Description"),
+    "Dependency only used via import type; Only reported in --production mode",
+  );
+  assert.equal(
+    seedOf(seeds, "mcp-tools", "list_boundaries", "Description"),
+    "List architecture \\| boundary zones and access rules",
+  );
+  assert.equal(seedOf(seeds, "mcp-resources", "fallow://tools", "Description"), "Tool manifest");
+  assert.equal(seedOf(seeds, "flags:global", "--quiet", "Description"), "Suppress progress output");
+  assert.equal(
+    seedOf(seeds, "flags:dead-code-filters", "--unused-files", "Issue Type"),
+    "File is not reachable from any entry point",
+  );
+
+  // Only the requested sections are recorded, and rows without a curated
+  // column (task-matrix) contribute nothing.
+  assert.deepEqual([...new Set(seeds.map((cell) => cell.section))].toSorted(), [
+    "commands",
+    "flags:dead-code-filters",
+    "flags:global",
+    "issue-types",
+    "mcp-resources",
+    "mcp-tools",
+  ]);
+});
+
+test("seed comparison separates a moved seed from added and dropped cells", () => {
+  const recorded = curatedSeeds(SCHEMA, ["mcp-tools"]);
+  const moved = {
+    ...SCHEMA,
+    mcp_tools: {
+      tools: [
+        { ...SCHEMA.mcp_tools.tools[0], description: "Dead-code analysis with production scoping" },
+        { name: "trace_file", kind: "trace", license: "free", key_params: [], description: "New" },
+      ],
+    },
+  };
+  const comparison = compareCuratedSeeds(recorded, curatedSeeds(moved, ["mcp-tools"]));
+
+  assert.equal(hasCuratedSeedDrift(comparison), true);
+  assert.deepEqual(
+    comparison.changed.map((cell) => [cell.row, cell.recordedSeed, cell.seed]),
+    [["analyze", "Full dead-code analysis", "Dead-code analysis with production scoping"]],
+  );
+  assert.deepEqual(
+    comparison.added.map((cell) => cell.row),
+    ["trace_file"],
+  );
+  assert.deepEqual(
+    comparison.removed.map((cell) => cell.row),
+    ["list_boundaries"],
+  );
+
+  const report = formatCuratedSeedDrift(comparison, { recordPath: "record.json" });
+  assert.match(report, /CURATED SEED DRIFT: 3 curated agent-doc cell\(s\)/);
+  assert.match(report, /changed: mcp-tools \/ analyze \/ Description/);
+  assert.match(report, /recorded seed: Full dead-code analysis/);
+  assert.match(report, /current seed: {2}Dead-code analysis with production scoping/);
+  assert.match(report, /npm run generate:contracts/);
+});
+
+test("identity-only manifest changes leave every curated seed alone", () => {
+  const withExtraKeyParam = {
+    ...SCHEMA,
+    mcp_tools: {
+      tools: SCHEMA.mcp_tools.tools.map((tool) =>
+        tool.name === "analyze" ? { ...tool, key_params: [...tool.key_params, "workspace"] } : tool,
+      ),
+    },
+  };
+
+  assert.deepEqual(
+    curatedSeeds(withExtraKeyParam, ["mcp-tools"]),
+    curatedSeeds(SCHEMA, ["mcp-tools"]),
+  );
+});
+
+test("a moved seed fails --check by name while the published cell still looks in sync", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { main } = await import("./generate-agent-docs.mjs");
+
+  const dir = mkdtempSync(join(tmpdir(), "agent-docs-seed-gate-"));
+  const references = join(dir, "references");
+  const schemaPath = join(dir, "schema.json");
+  const seedRecord = join(dir, "seeds.json");
+  const args = ["--schema", schemaPath, "--target", dir, "--seed-record", seedRecord];
+  mkdirSync(references, { recursive: true });
+  writeFileSync(schemaPath, JSON.stringify(SCHEMA));
+  writeFileSync(join(dir, "SKILL.md"), DOC);
+  writeFileSync(join(references, "cli-reference.md"), DOC_CLI_REFERENCE);
+  writeFileSync(join(references, "mcp.md"), DOC_MCP_REFERENCE);
+
+  const errors = [];
+  const originalError = console.error;
+  console.error = (message) => errors.push(String(message));
+
+  try {
+    assert.equal(main(args), 0);
+    assert.equal(main([...args, "--check"]), 0);
+
+    // The tool description moves; the curated cell is preserved verbatim, so
+    // the published table alone gives no signal.
+    const moved = {
+      ...SCHEMA,
+      mcp_tools: {
+        tools: SCHEMA.mcp_tools.tools.map((tool) =>
+          tool.name === "analyze"
+            ? { ...tool, description: "Dead-code analysis, rewritten" }
+            : tool,
+        ),
+      },
+    };
+    writeFileSync(schemaPath, JSON.stringify(moved));
+    const publishedBefore = readFileSync(join(references, "mcp.md"), "utf8");
+
+    assert.equal(main([...args, "--check"]), 1);
+    assert.equal(readFileSync(join(references, "mcp.md"), "utf8"), publishedBefore);
+    const report = errors.join("\n");
+    assert.match(report, /changed: mcp-tools \/ analyze \/ Description/);
+    assert.match(report, /recorded seed: Full dead-code analysis/);
+    assert.match(report, /current seed: {2}Dead-code analysis, rewritten/);
+
+    // Re-accepting the seed is one plain run, and it rewrites nothing else.
+    assert.equal(main(args), 0);
+    assert.equal(main([...args, "--check"]), 0);
+    assert.equal(readFileSync(join(references, "mcp.md"), "utf8"), publishedBefore);
+    assert.equal(
+      readCuratedSeedRecord(seedRecord).find(
+        (cell) => cell.section === "mcp-tools" && cell.row === "analyze",
+      ).seed,
+      "Dead-code analysis, rewritten",
+    );
+  } finally {
+    console.error = originalError;
+    rmSync(dir, { recursive: true });
+  }
+});
+
+test("the committed seed record matches the committed capability manifest", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { CURATED_SEED_RECORD_PATH } = await import("./generate-agent-docs.mjs");
+
+  const schema = JSON.parse(readFileSync("npm/fallow/capabilities.json", "utf8"));
+  const comparison = compareCuratedSeeds(
+    readCuratedSeedRecord(CURATED_SEED_RECORD_PATH),
+    curatedSeeds(schema),
+  );
+
+  assert.equal(
+    hasCuratedSeedDrift(comparison),
+    false,
+    formatCuratedSeedDrift(comparison, { recordPath: CURATED_SEED_RECORD_PATH }),
+  );
 });

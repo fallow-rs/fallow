@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.22.0] - 2026-09-01
+
 ### Added
+
+- **In-process analysis can be asked to stop.** `AnalysisOptions` carries an
+  optional cancellation token, and the MCP Code Mode deadline now sets the one
+  it previously had to abandon: a host call that ran in this process was
+  answered on time while its analysis kept running inside a long-lived server.
+  The token reaches the dead-code pipeline's stage boundaries and the per-file
+  parse loop, which is the one place work stops per item rather than per stage,
+  and cancellation is always an error so a truncated module set cannot reach the
+  graph. The stop is cooperative and has no upper bound: duplication detection
+  and the dead-code detectors hold no check once entered, so `analyze`,
+  `find_dupes`, `check_health` and `audit` keep the killable subprocess, and
+  every description that touches this says which stops are promised and which
+  are not. Measured on a 520-file project: every in-process route now returns
+  `FALLOW_CANCELLED` in a fraction of its uncancelled time, where three of them
+  previously returned a completed analysis.
+
+- **A curated agent-doc cell whose source text moved is flagged.** The
+  generator prefers hand-written prose over its generated seed and preserves it
+  forever, which is the right default with one failure mode: when the manifest
+  text a cell was written from changes later, the published cell keeps
+  describing a surface that has changed and nothing says so. A new record beside
+  the generator holds the seed each curated cell was last accepted against, so
+  `npm run generate:contracts:check` fails naming the cell and both seeds, and
+  `npm run generate:contracts` re-records. A drifted seed is a prompt to review
+  the prose, not an automatic rewrite.
 
 - **`fallow viz` gains analysis lenses that say what they do not know**
   ([#2411](https://github.com/fallow-rs/fallow/pull/2411)). The map had four
@@ -90,6 +117,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invisible to the count
   ([#2503](https://github.com/fallow-rs/fallow/issues/2503)).
 
+- **React Native Storybook is recognized** (Closes
+  [#2505](https://github.com/fallow-rs/fallow/issues/2505)). React Native
+  Storybook keeps its configuration in `.rnstorybook`, and every config, entry,
+  always-used and used-export pattern was scoped to `.storybook`, so a
+  conventional setup sat outside the source graph: files under `.rnstorybook`
+  surfaced through the skipped hidden-directory diagnostic, and packages
+  referenced only through `deviceAddons` reported as unused dependencies. The
+  plugin now activates for `@storybook/react-native`, registers `.rnstorybook`
+  as a traversable directory, recognizes the main config, the swapped
+  application entry and the generated requires module, and credits the
+  documented `deviceAddons` string and object forms for React Native configs
+  only, so web Storybook projects are unchanged. Verified against a real React
+  Native Storybook example: the bundled entry connected the runtime, rendered a
+  story on an iOS simulator, and recorded an on-device action, with all three
+  expected dependency false positives cleared and no new finding. Thanks
+  [@PrinceD96](https://github.com/PrinceD96) for reporting the gap and
+  implementing it.
+
+- **The shipped skill reference no longer claims a stale version** (Closes
+  [#2486](https://github.com/fallow-rs/fallow/issues/2486)). The JSON examples
+  in the published skill were last refreshed at 3.16.0 and still claimed 3.16.0
+  at 3.21.0, so four releases each shipped an npm package whose examples named a
+  version that was not the one installed. Nothing could see it: the release
+  sweep was keyed to the previous version, which cannot detect a surface already
+  wrong for several releases, and the vendored-versus-canonical byte comparison
+  could not either, because both trees were wrong in the same way. A drift gate
+  now keys on the workspace version instead and covers both `version` and
+  `fallow_version`. The version sync also learned about `server.json`, whose two
+  version fields were bumped by nothing at all.
+
 ### Changed
 
 - **The complexity finding's refactor note no longer promises a reduction
@@ -123,6 +180,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and can be dropped. Thanks [@simmo](https://github.com/simmo) for the report.
 
 ### Fixed
+
+- **`fallow migrate` no longer drops config sections in silence** (Closes
+  [#2507](https://github.com/fallow-rs/fallow/issues/2507)). `fallow migrate`
+  reads a config written for another tool and maps it onto fallow's. Both
+  translation tables had drifted well behind their sources: the plugin table
+  named 73 of 184 config keys, so a `marko`, `pnpm` or `sveltekit` section
+  passed through the migration without a single word, and the duplication table
+  covered 22 of 36 options, so `gitignore`, `cache` and `hashFunction` vanished
+  the same way. A dropped section that says nothing is worse than one that says
+  it was dropped, because the reader has no way to notice. Both tables are now
+  complete, and plugin keys are split by what fallow can actually claim: a key a
+  built-in plugin covers is reported as auto-detected, and a key no plugin
+  covers is reported as having no equivalent rather than promising detection
+  that will not happen. Sixteen keys moved from the first group to the second on
+  that rule, among them `eleventy`, `oclif`, `vue` and `xo`, which fallow has no
+  plugin for and never did. Completeness is not the only guard: a key in neither
+  table, on either side, is now reported as unknown instead of being skipped, so
+  an option added upstream after this release surfaces on the first migration
+  that uses it rather than disappearing. `rules.cycles` migrates to
+  `circular-dependencies`, which fallow has, and the two issue types fallow
+  genuinely has no answer for, `namespaceMembers` and `catalogReferences`, are
+  named as such instead of reading like typos. A test pins the covered half of
+  the plugin table against fallow's built-in plugin roster, in both directions,
+  so renaming or removing a plugin fails the build instead of shipping a promise
+  of detection that no longer happens. The five keys whose upstream spelling
+  differs from fallow's (`next`, `nest`, `panda-css`, `webdriver-io`,
+  `electron-vite`) are declared as aliases, and a sixth has to be declared
+  before that test accepts it. `colors` is covered as well; it is not declared
+  in the upstream options interface but is read off the config object for the
+  matching flag. Marko itself still has no fallow plugin; only the migration
+  reporting is fixed here. Thanks
+  [@VariableVince](https://github.com/VariableVince) for the report.
 
 - **A type-aware pass that cannot finish no longer takes the whole run with it**
   (Closes [#2499](https://github.com/fallow-rs/fallow/issues/2499)). The
@@ -194,7 +283,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invisible and the generated job exited successfully without auditing. The
   job still prefers a global `fallow`, then resolves the project-local
   `node_modules/.bin` launcher or Yarn Plug'n'Play binary without installing
-  anything. The no-binary case continues to skip the audit.
+  anything. The no-binary case continues to skip the audit. Thanks
+  [@PrinceD96](https://github.com/PrinceD96) for the fix.
 
 - **A framework's own packages are no longer reported as dependencies to
   promote.** `dev-dependencies-in-production` reports a `devDependencies` entry
@@ -313,6 +403,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test, so no test mutates state another test is reading. A guard test walks the
   workspace and fails on a new mutation, naming the file and the pattern to use
   instead, because serializing such tests hides the race rather than removing it.
+
+- **`deno` is no longer missing from the built-in plugin roster.** The engine
+  kept a hand-written copy of core's plugin names rather than asking for them,
+  and nothing pinned the two together, so the copy drifted: core registered a
+  Deno plugin that the roster never listed. Any surface reading that roster was
+  one plugin short and could not see Deno at all. The roster now delegates to
+  the core registry, so the copy is gone rather than corrected, and a test
+  pins the two together. The published `capabilities.json` contract advertised
+  124 plugins and omitted `deno` with it, so an agent reading that contract
+  could not see the plugin at all; it now reports 125.
+
+- **A rooted path without a drive letter is redacted from the viz payload on
+  Windows.** The redaction that keeps paths outside the project out of the
+  generated HTML gated on whether a path was absolute. On Windows a path like
+  `\Users\private\secret.ts` is rooted but not absolute, because absolute
+  there means a drive letter or a UNC prefix, so it fell through the check and
+  was written into the payload in full instead of being reduced to its file
+  name. The same test decided whether to join a path onto the project root, so
+  such a path was also reinterpreted as project-relative, which exposed its
+  components a second way. All four sites now gate on whether the path is
+  rooted, which covers both forms. Paths carrying a drive letter were always
+  redacted correctly, and a value that is not under a path key, such as a route
+  specifier, is still left alone.
 
 ### Security
 
@@ -7559,7 +7672,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.21.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.22.0...HEAD
+[3.22.0]: https://github.com/fallow-rs/fallow/compare/v3.21.0...v3.22.0
 [3.21.0]: https://github.com/fallow-rs/fallow/compare/v3.20.0...v3.21.0
 [3.20.0]: https://github.com/fallow-rs/fallow/compare/v3.19.0...v3.20.0
 [3.19.0]: https://github.com/fallow-rs/fallow/compare/v3.18.0...v3.19.0

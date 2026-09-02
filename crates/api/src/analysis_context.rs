@@ -1,6 +1,8 @@
 //! Shared programmatic analysis context resolution.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use fallow_config::WorkspaceInfo;
 use fallow_engine::workspace_scope::{WorkspaceScopeError, WorkspaceScopeMode};
@@ -31,6 +33,7 @@ pub struct ProgrammaticAnalysisContext {
     pub(crate) changed_workspaces: Option<String>,
     pub(crate) workspace_roots: Option<Vec<PathBuf>>,
     pub(crate) explain: bool,
+    pub(crate) cancellation: Option<Arc<AtomicBool>>,
 }
 
 /// Resolve common programmatic analysis options once for a concrete runtime.
@@ -96,6 +99,7 @@ fn resolve_programmatic_analysis_context_inner(
         changed_workspaces: options.changed_workspaces.clone(),
         workspace_roots,
         explain: options.explain,
+        cancellation: options.cancellation.clone(),
     })
 }
 
@@ -222,6 +226,76 @@ impl ProgrammaticAnalysisContext {
     pub const fn explain_enabled(&self) -> bool {
         self.explain
     }
+
+    /// The caller's cancellation token for this analysis, if it supplied one.
+    #[must_use]
+    pub fn cancellation(&self) -> Option<&Arc<AtomicBool>> {
+        self.cancellation.as_ref()
+    }
+
+    /// Whether the caller has asked this analysis to stop.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation
+            .as_ref()
+            .is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
+    }
+
+    /// Stop the analysis at a stage boundary once the caller has cancelled it.
+    ///
+    /// `stage` names the work that has not been started, so the error says how
+    /// far the run got rather than only that it was stopped.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `FALLOW_CANCELLED` programmatic error when the caller's token
+    /// is set. Cancellation is always an error, never an empty success: an
+    /// empty report reads downstream as a clean project.
+    pub fn ensure_not_cancelled(&self, stage: &str) -> ProgrammaticResult<()> {
+        if self.is_cancelled() {
+            return Err(cancelled_error(stage));
+        }
+        Ok(())
+    }
+}
+
+/// Stop before any work starts when the caller's token is already set.
+///
+/// Runtimes that never build a [`ProgrammaticAnalysisContext`] read the token
+/// straight off the options with this.
+///
+/// # Errors
+///
+/// Returns a `FALLOW_CANCELLED` programmatic error when the token is set.
+pub fn ensure_options_not_cancelled(
+    options: &AnalysisOptions,
+    stage: &str,
+) -> ProgrammaticResult<()> {
+    if options
+        .cancellation
+        .as_ref()
+        .is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
+    {
+        return Err(cancelled_error(stage));
+    }
+    Ok(())
+}
+
+/// The single `FALLOW_CANCELLED` error shape for the programmatic API.
+///
+/// `stage` names the work the run never started, so the error says how far it
+/// got and not only that it stopped.
+#[must_use]
+pub fn cancelled_error(stage: &str) -> ProgrammaticError {
+    cancelled_error_message(&format!("analysis was cancelled before {stage}"))
+}
+
+/// A `FALLOW_CANCELLED` error carrying a message a lower layer already built.
+#[must_use]
+pub fn cancelled_error_message(message: &str) -> ProgrammaticError {
+    ProgrammaticError::new(message, 2)
+        .with_code("FALLOW_CANCELLED")
+        .with_context("analysis.cancellation")
 }
 
 fn default_threads() -> usize {

@@ -1,0 +1,12 @@
+{
+  "name": "issue-2505-rnstorybook-support",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "react-native": "latest"
+  },
+  "devDependencies": {
+    "@storybook/addon-ondevice-actions": "latest",
+    "@storybook/react-native": "latest"
+  }
+}

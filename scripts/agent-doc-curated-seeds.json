@@ -1,0 +1,2406 @@
+{
+  "schema_version": 1,
+  "source": "fallow schema, via scripts/generate-agent-docs.mjs",
+  "cells": [
+    {
+      "section": "commands",
+      "row": "agent",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "agent",
+      "column": "Purpose",
+      "seed": "Wire fallow into the coding-agent harnesses used by this project in one pass (AGENTS.md task map, skill, MCP server, commit/push gate), or show and remove what was installed."
+    },
+    {
+      "section": "commands",
+      "row": "audit",
+      "column": "Key Flags",
+      "seed": "`--production-dead-code`, `--production-health`, `--production-dupes`, `--dead-code-baseline`, `--health-baseline`, `--dupes-baseline`, `--max-crap`, `--coverage`"
+    },
+    {
+      "section": "commands",
+      "row": "audit",
+      "column": "Purpose",
+      "seed": "Audit changed files for dead code, complexity, duplication, and styling"
+    },
+    {
+      "section": "commands",
+      "row": "audit-cache",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "audit-cache",
+      "column": "Purpose",
+      "seed": "Maintain reusable audit base-snapshot caches"
+    },
+    {
+      "section": "commands",
+      "row": "ci",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "ci",
+      "column": "Purpose",
+      "seed": "CI helpers for PR/MR feedback envelopes"
+    },
+    {
+      "section": "commands",
+      "row": "ci-template",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "ci-template",
+      "column": "Purpose",
+      "seed": "Print or vendor CI integration templates"
+    },
+    {
+      "section": "commands",
+      "row": "config",
+      "column": "Key Flags",
+      "seed": "`--path`"
+    },
+    {
+      "section": "commands",
+      "row": "config",
+      "column": "Purpose",
+      "seed": "Show the resolved config and which config file was loaded"
+    },
+    {
+      "section": "commands",
+      "row": "config-schema",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "config-schema",
+      "column": "Purpose",
+      "seed": "Print the JSON Schema for fallow configuration files"
+    },
+    {
+      "section": "commands",
+      "row": "coverage",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "coverage",
+      "column": "Purpose",
+      "seed": "Runtime coverage workflow"
+    },
+    {
+      "section": "commands",
+      "row": "dead-code",
+      "column": "Key Flags",
+      "seed": "`--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--private-type-leaks`, `--unused-enum-members`, `--unused-class-members`, `--unused-store-members`"
+    },
+    {
+      "section": "commands",
+      "row": "dead-code",
+      "column": "Purpose",
+      "seed": "Analyze project for unused code and circular dependencies"
+    },
+    {
+      "section": "commands",
+      "row": "decision-surface",
+      "column": "Key Flags",
+      "seed": "`--max-decisions`"
+    },
+    {
+      "section": "commands",
+      "row": "decision-surface",
+      "column": "Purpose",
+      "seed": "Surface the consequential structural DECISIONS a change embeds (the apex of the review brief), each framed as a judgment question with the routed expert to ask"
+    },
+    {
+      "section": "commands",
+      "row": "dupes",
+      "column": "Key Flags",
+      "seed": "`--mode`, `--near`, `--min-tokens`, `--min-lines`, `--min-occurrences`, `--threshold`, `--skip-local`, `--cross-language`"
+    },
+    {
+      "section": "commands",
+      "row": "dupes",
+      "column": "Purpose",
+      "seed": "Find code duplication / clones across the project"
+    },
+    {
+      "section": "commands",
+      "row": "explain",
+      "column": "Key Flags",
+      "seed": "`issue_type`"
+    },
+    {
+      "section": "commands",
+      "row": "explain",
+      "column": "Purpose",
+      "seed": "Explain one fallow issue type without running an analysis"
+    },
+    {
+      "section": "commands",
+      "row": "fallow",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "fallow",
+      "column": "Purpose",
+      "seed": "Runs all analyses (check + dupes + health)."
+    },
+    {
+      "section": "commands",
+      "row": "fix",
+      "column": "Key Flags",
+      "seed": "`--dry-run`, `--yes`, `--no-create-config`"
+    },
+    {
+      "section": "commands",
+      "row": "fix",
+      "column": "Purpose",
+      "seed": "Auto-fix issues: remove unused exports, dependencies, and enum members; add duplicate-export rules to a fallow config file"
+    },
+    {
+      "section": "commands",
+      "row": "flags",
+      "column": "Key Flags",
+      "seed": "`--top`"
+    },
+    {
+      "section": "commands",
+      "row": "flags",
+      "column": "Purpose",
+      "seed": "Detect feature flag patterns in the codebase"
+    },
+    {
+      "section": "commands",
+      "row": "guard",
+      "column": "Key Flags",
+      "seed": "`files`"
+    },
+    {
+      "section": "commands",
+      "row": "guard",
+      "column": "Purpose",
+      "seed": "Show which architecture rules apply to files before changing them"
+    },
+    {
+      "section": "commands",
+      "row": "health",
+      "column": "Key Flags",
+      "seed": "`--max-cyclomatic`, `--max-cognitive`, `--max-crap`, `--top`, `--sort`, `--complexity`, `--complexity-breakdown`, `--file-scores`"
+    },
+    {
+      "section": "commands",
+      "row": "health",
+      "column": "Purpose",
+      "seed": "Analyze function complexity (cyclomatic + cognitive)"
+    },
+    {
+      "section": "commands",
+      "row": "hooks",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "hooks",
+      "column": "Purpose",
+      "seed": "Install or remove fallow-managed Git and agent hooks"
+    },
+    {
+      "section": "commands",
+      "row": "impact",
+      "column": "Key Flags",
+      "seed": "`--all`, `--sort`, `--limit`"
+    },
+    {
+      "section": "commands",
+      "row": "impact",
+      "column": "Purpose",
+      "seed": "Show what fallow has done for you: how many issues it is surfacing, the trend since the last recorded run, and how many commits it contained at the pre-commit gate"
+    },
+    {
+      "section": "commands",
+      "row": "init",
+      "column": "Key Flags",
+      "seed": "`--toml`, `--agents`, `--hooks`, `--branch`, `--decline`"
+    },
+    {
+      "section": "commands",
+      "row": "init",
+      "column": "Purpose",
+      "seed": "Initialize a .fallowrc.json configuration file, AGENTS.md guide, or git pre-commit hook."
+    },
+    {
+      "section": "commands",
+      "row": "inspect",
+      "column": "Key Flags",
+      "seed": "`--file`, `--symbol`, `--symbol-chain`, `--churn`"
+    },
+    {
+      "section": "commands",
+      "row": "inspect",
+      "column": "Purpose",
+      "seed": "Inspect one file or exported symbol as a bundled evidence query"
+    },
+    {
+      "section": "commands",
+      "row": "license",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "license",
+      "column": "Purpose",
+      "seed": "Manage the license for continuous/cloud runtime monitoring"
+    },
+    {
+      "section": "commands",
+      "row": "list",
+      "column": "Key Flags",
+      "seed": "`--entry-points`, `--files`, `--plugins`, `--boundaries`, `--workspaces`"
+    },
+    {
+      "section": "commands",
+      "row": "list",
+      "column": "Purpose",
+      "seed": "List discovered entry points, files, plugins, boundaries, and workspaces"
+    },
+    {
+      "section": "commands",
+      "row": "migrate",
+      "column": "Key Flags",
+      "seed": "`--toml`, `--jsonc`, `--dry-run`, `--from`"
+    },
+    {
+      "section": "commands",
+      "row": "migrate",
+      "column": "Purpose",
+      "seed": "Migrate configuration from knip, jscpd, or stylelint to fallow"
+    },
+    {
+      "section": "commands",
+      "row": "plugin-check",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "plugin-check",
+      "column": "Purpose",
+      "seed": "Dry-run external plugins: report what each activated and seeded"
+    },
+    {
+      "section": "commands",
+      "row": "plugin-schema",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "plugin-schema",
+      "column": "Purpose",
+      "seed": "Print the JSON Schema for external plugin files"
+    },
+    {
+      "section": "commands",
+      "row": "recommend",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "recommend",
+      "column": "Purpose",
+      "seed": "Recommend a project-tailored config for an agent to author"
+    },
+    {
+      "section": "commands",
+      "row": "report",
+      "column": "Key Flags",
+      "seed": "`--from`"
+    },
+    {
+      "section": "commands",
+      "row": "report",
+      "column": "Purpose",
+      "seed": "Render a saved `--format json` results file in another format without re-running analysis (analyze once, then render every CI surface from the same file)."
+    },
+    {
+      "section": "commands",
+      "row": "rule-pack",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "rule-pack",
+      "column": "Purpose",
+      "seed": "Manage declarative rule packs (policy-as-code)"
+    },
+    {
+      "section": "commands",
+      "row": "rule-pack-schema",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "rule-pack-schema",
+      "column": "Purpose",
+      "seed": "Print the JSON Schema for rule pack files"
+    },
+    {
+      "section": "commands",
+      "row": "schema",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "schema",
+      "column": "Purpose",
+      "seed": "Dump fallow's capability manifest (CLI commands and flags, issue types, MCP tools, framework plugins, env vars) as machine-readable JSON for agent introspection."
+    },
+    {
+      "section": "commands",
+      "row": "security",
+      "column": "Key Flags",
+      "seed": "`--runtime-coverage`, `--min-invocations-hot`, `--file`, `--gate`, `--surface`"
+    },
+    {
+      "section": "commands",
+      "row": "security",
+      "column": "Purpose",
+      "seed": "Surface local security candidates for downstream agent verification (opt-in)"
+    },
+    {
+      "section": "commands",
+      "row": "setup-hooks",
+      "column": "Key Flags",
+      "seed": "`--agent`, `--dry-run`, `--force`, `--user`, `--gitignore-claude`, `--uninstall`"
+    },
+    {
+      "section": "commands",
+      "row": "setup-hooks",
+      "column": "Purpose",
+      "seed": "Install or remove a Claude Code PreToolUse hook that gates `git commit` / `git push` on `fallow audit`, so the agent cleans findings before the command runs"
+    },
+    {
+      "section": "commands",
+      "row": "similar-code",
+      "column": "Key Flags",
+      "seed": "`--threshold`, `--min-lines`, `--top`, `--file`"
+    },
+    {
+      "section": "commands",
+      "row": "similar-code",
+      "column": "Purpose",
+      "seed": "Find semantically similar functions with a pinned local model (opt-in)"
+    },
+    {
+      "section": "commands",
+      "row": "suppressions",
+      "column": "Key Flags",
+      "seed": "`--file`"
+    },
+    {
+      "section": "commands",
+      "row": "suppressions",
+      "column": "Purpose",
+      "seed": "List active fallow-ignore suppression markers (read-only inventory)"
+    },
+    {
+      "section": "commands",
+      "row": "telemetry",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "telemetry",
+      "column": "Purpose",
+      "seed": "Manage opt-in product telemetry"
+    },
+    {
+      "section": "commands",
+      "row": "trace",
+      "column": "Key Flags",
+      "seed": "`symbol`, `--callers`, `--callees`, `--depth`"
+    },
+    {
+      "section": "commands",
+      "row": "trace",
+      "column": "Purpose",
+      "seed": "Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path)"
+    },
+    {
+      "section": "commands",
+      "row": "type-aware",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "type-aware",
+      "column": "Purpose",
+      "seed": "Inspect the optional TypeScript semantic companion"
+    },
+    {
+      "section": "commands",
+      "row": "viz",
+      "column": "Key Flags",
+      "seed": "`--out`, `--no-open`, `--viz-format`"
+    },
+    {
+      "section": "commands",
+      "row": "viz",
+      "column": "Purpose",
+      "seed": "Generate an interactive HTML map of the codebase"
+    },
+    {
+      "section": "commands",
+      "row": "watch",
+      "column": "Key Flags",
+      "seed": "`--no-clear`"
+    },
+    {
+      "section": "commands",
+      "row": "watch",
+      "column": "Purpose",
+      "seed": "Watch for changes and re-run analysis"
+    },
+    {
+      "section": "commands",
+      "row": "workspaces",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "workspaces",
+      "column": "Purpose",
+      "seed": "Show monorepo workspaces and any workspace-discovery diagnostics"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--brief",
+      "column": "Description",
+      "seed": "Render the deterministic review brief instead of the gating audit report. The brief answers \"where do I look?\" rather than \"will CI block this?\", runs the same analysis, and ALWAYS exits 0 (the verdict is carried informationally). Implied by `fallow review`. Orthogonal to `--format`"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--coverage",
+      "column": "Description",
+      "seed": "Path to Istanbul-format coverage data (coverage-final.json) for accurate per-function CRAP scores in the health sub-analysis. Also configurable via FALLOW_COVERAGE or health.coverage"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--coverage-root",
+      "column": "Description",
+      "seed": "Absolute prefix to strip from coverage data paths before CRAP matching. Use when coverage was generated under a different checkout root in CI or Docker. Also configurable via FALLOW_COVERAGE_ROOT or health.coverageRoot"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--css-deep",
+      "column": "Description",
+      "seed": "Enable deep CSS analysis for audit explicitly: project-wide styling reachability, narrowed back to changed anchors. Deep CSS is on by default; use this to override `audit.cssDeep = false`"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--dead-code-baseline",
+      "column": "Description",
+      "seed": "Compare dead-code issues against a saved baseline (produced by `fallow dead-code --save-baseline`)"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--dupes-baseline",
+      "column": "Description",
+      "seed": "Compare duplication clone groups against a saved baseline (produced by `fallow dupes --save-baseline`)"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--gate",
+      "column": "Description",
+      "seed": "Which findings affect the audit verdict"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--gate-marker",
+      "column": "Description",
+      "seed": "Internal marker identifying a gate run (e.g. `pre-commit`), set by the generated git hook so Fallow Impact can record a containment event when the gate blocks then clears. Hidden; never changes the verdict, exit code, or output"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--health-baseline",
+      "column": "Description",
+      "seed": "Compare health findings against a saved baseline (produced by `fallow health --save-baseline`)"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--mark-viewed",
+      "column": "Description",
+      "seed": "Record one or more changed files as VIEWED in the local walkthrough viewed-state ledger (`.fallow/walkthrough-state.json`), then render the tour. Files already viewed (and still current) collapse into the Cleared panel. Repeatable. Stale marks (the tree moved) are ignored on render but never deleted. Only consulted on the `--walkthrough` path"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--max-crap",
+      "column": "Description",
+      "seed": "Maximum CRAP score threshold (overrides config, default 30.0). Functions meeting or exceeding this score cause audit to fail. Pair with `--coverage` for accurate scoring"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--max-decisions",
+      "column": "Description",
+      "seed": "Cap on the number of consequential structural decisions surfaced in the review brief's decision surface (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1). Only consulted on the brief path"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--min-invocations-hot",
+      "column": "Description",
+      "seed": "Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--no-css",
+      "column": "Description",
+      "seed": "Disable styling analytics in audit"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--no-css-deep",
+      "column": "Description",
+      "seed": "Disable deep CSS analysis while keeping local styling analytics on"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--production-dead-code",
+      "column": "Description",
+      "seed": "Run dead-code analysis in production mode for this audit"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--production-dupes",
+      "column": "Description",
+      "seed": "Run duplication analysis in production mode for this audit"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--production-health",
+      "column": "Description",
+      "seed": "Run health analysis in production mode for this audit"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--runtime-coverage",
+      "column": "Description",
+      "seed": "Paid runtime-coverage sidecar input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. Spawns the `fallow-cov` sidecar as part of the audit pipeline so the `hot-path-touched` verdict surfaces alongside dead-code and complexity findings without requiring a second `fallow health` invocation in CI. License-gated; the verdict is informational (no exit code change) until a future `--gate hot-path-touched` knob lands"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--show-cleared",
+      "column": "Description",
+      "seed": "Expand the Cleared panel in the human/markdown walkthrough tour: list each de-prioritized and already-viewed file instead of the collapsed one-line summary. Only consulted on the `--walkthrough` path"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--show-deprioritized",
+      "column": "Description",
+      "seed": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is ALWAYS present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the brief path"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--walkthrough",
+      "column": "Description",
+      "seed": "Render the existing walkthrough guide as a staged HUMAN terminal tour (Stage 1 load-bearing / Stage 2 mechanical), or markdown with `--format markdown`. Implies the brief; always exits 0. `--format json --walkthrough` emits the same agent-contract JSON as `--walkthrough-guide`"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--walkthrough-file",
+      "column": "Description",
+      "seed": "Ingest an agent's judgment JSON and POST-VALIDATE it against the LIVE graph. Rejects any judgment whose `signal_id` fallow did not emit (anti-hallucination); refuses the whole payload as stale when the echoed graph-snapshot hash no longer matches (the tree moved); rejects an `action` outside `block`, `address`, `consider`, `fyi` (`invalid-action`). The verifier is the graph, not a second model. Implies the brief; always exits 0. The agent's free-text framing and action label are fenced as non-deterministic and never gate or auto-post"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--walkthrough-guide",
+      "column": "Description",
+      "seed": "Emit the agent-contract WALKTHROUGH GUIDE: the current digest (brief + decision surface), the review direction, the JSON schema the agent must return, and a deterministic graph-snapshot hash pinned into the digest. The digest is built from the graph only (PR prose is never folded in, so it is injection-resistant). Implies the brief; always exits 0. A thin agent skill calls this to fetch the current guide, produces judgment JSON, then reopens with `--walkthrough-file`"
+    },
+    {
+      "section": "flags:config",
+      "row": "--path",
+      "column": "Description",
+      "seed": "Print only the config file path (one line, no JSON)"
+    },
+    {
+      "section": "flags:dead-code",
+      "row": "--file",
+      "column": "Description",
+      "seed": "Only report issues in the specified file(s). Accepts multiple values. The full project graph is still built, but only issues in matching files are reported. Useful for lint-staged pre-commit hooks"
+    },
+    {
+      "section": "flags:dead-code",
+      "row": "--impact-closure",
+      "column": "Description",
+      "seed": "Compute the impact closure for a file (the transitive affected-but-not-in-diff set + coordination gap). Walks reverse-deps and re-export chains; powers the `inspect_target` MCP tool"
+    },
+    {
+      "section": "flags:dead-code",
+      "row": "--include-dupes",
+      "column": "Description",
+      "seed": "Also run duplication analysis and cross-reference with dead code"
+    },
+    {
+      "section": "flags:dead-code",
+      "row": "--symbol-impact",
+      "column": "Description",
+      "seed": "Compute exact-symbol consumers, affected files, and targeted tests"
+    },
+    {
+      "section": "flags:dead-code",
+      "row": "--top",
+      "column": "Description",
+      "seed": "Show only the top N items per category"
+    },
+    {
+      "section": "flags:dead-code",
+      "row": "--trace",
+      "column": "Description",
+      "seed": "Trace why an export is used/unused (format: `FILE:EXPORT_NAME`)"
+    },
+    {
+      "section": "flags:dead-code",
+      "row": "--trace-dependency",
+      "column": "Description",
+      "seed": "Trace where a dependency is used"
+    },
+    {
+      "section": "flags:dead-code",
+      "row": "--trace-file",
+      "column": "Description",
+      "seed": "Trace all edges for a file (imports, exports, importers)"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--boundary-violations",
+      "column": "Issue Type",
+      "seed": "Import crosses a configured architecture boundary; Source file matches no configured architecture boundary zone; Zoned file calls a callee its zone forbids"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--circular-deps",
+      "column": "Issue Type",
+      "seed": "Circular dependency chain detected"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--duplicate-exports",
+      "column": "Issue Type",
+      "seed": "Export name appears in multiple modules"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--empty-catalog-groups",
+      "column": "Issue Type",
+      "seed": "Named catalog group has no entries"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--misconfigured-dependency-overrides",
+      "column": "Issue Type",
+      "seed": "Package-manager override has an unparsable key or value"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--policy-violations",
+      "column": "Issue Type",
+      "seed": "Banned usage matched a rule-pack rule"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--private-type-leaks",
+      "column": "Issue Type",
+      "seed": "Exported signature references a private type"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--re-export-cycles",
+      "column": "Issue Type",
+      "seed": "Two or more barrel files re-export from each other in a loop"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--stale-suppressions",
+      "column": "Issue Type",
+      "seed": "Suppression comment or tag no longer matches any issue; Suppression comment omits a required reason"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unlisted-deps",
+      "column": "Issue Type",
+      "seed": "Dependency used but not in package.json"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unprovided-injects",
+      "column": "Issue Type",
+      "seed": "inject() / getContext() reads a key that no provide() / setContext() supplies"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unrendered-components",
+      "column": "Issue Type",
+      "seed": "A Vue / Svelte component is reachable through a barrel but rendered nowhere"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unresolved-catalog-references",
+      "column": "Issue Type",
+      "seed": "package.json references a catalog that does not declare the package"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unresolved-imports",
+      "column": "Issue Type",
+      "seed": "Import could not be resolved"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-catalog-entries",
+      "column": "Issue Type",
+      "seed": "Catalog entry not referenced by any workspace package"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-class-members",
+      "column": "Issue Type",
+      "seed": "Class member is never referenced"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-component-emits",
+      "column": "Issue Type",
+      "seed": "A Vue <script setup> defineEmits event is emitted nowhere in its own component"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-component-inputs",
+      "column": "Issue Type",
+      "seed": "An Angular @Input() / signal input() / model() input is read nowhere in its own component"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-component-outputs",
+      "column": "Issue Type",
+      "seed": "An Angular @Output() / signal output() output is emitted nowhere in its own component"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-component-props",
+      "column": "Issue Type",
+      "seed": "A Vue, Svelte, or React component prop is referenced nowhere in its own component"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-dependency-overrides",
+      "column": "Issue Type",
+      "seed": "Package-manager override target is not declared or resolved"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-deps",
+      "column": "Issue Type",
+      "seed": "Dependency listed but never imported; Dev dependency listed but never imported; Optional dependency listed but never imported; Production dependency only used via type-only imports; Production dependency only imported by test files; devDependency imported by production code with a runtime import"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-enum-members",
+      "column": "Issue Type",
+      "seed": "Enum member is never referenced"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-exports",
+      "column": "Issue Type",
+      "seed": "Export is never imported"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-files",
+      "column": "Issue Type",
+      "seed": "File is not reachable from any entry point"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-load-data-keys",
+      "column": "Issue Type",
+      "seed": "A SvelteKit load() return-object key is read by no consumer"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-server-actions",
+      "column": "Issue Type",
+      "seed": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-store-members",
+      "column": "Issue Type",
+      "seed": "Store member is never accessed by any consumer"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-svelte-events",
+      "column": "Issue Type",
+      "seed": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-types",
+      "column": "Issue Type",
+      "seed": "Type export is never imported"
+    },
+    {
+      "section": "flags:decision-surface",
+      "row": "--max-decisions",
+      "column": "Description",
+      "seed": "Cap on the number of surfaced decisions (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1)"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--cross-language",
+      "column": "Description",
+      "seed": "Enable cross-language detection (strip TS type annotations for TS↔JS matching)"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--ignore-imports",
+      "column": "Description",
+      "seed": "Exclude module wiring from clone detection (default; covers imports, re-exports, and top-level static require bindings). Pass `--no-ignore-imports` to count it again"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--min-lines",
+      "column": "Description",
+      "seed": "Minimum line count for a clone (defaults to the value in `.fallowrc.jsonc`, or `5` if unset)"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--min-occurrences",
+      "column": "Description",
+      "seed": "Minimum number of occurrences before a clone group is reported. Raise to focus on widespread copy-paste worth refactoring and skip pair-only clones. (defaults to the value in `.fallowrc.jsonc`, or `2` if unset)"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--min-tokens",
+      "column": "Description",
+      "seed": "Minimum token count for a clone (defaults to the value in `.fallowrc.jsonc`, or `50` if unset)"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--mode",
+      "column": "Description",
+      "seed": "Detection mode: strict, mild, weak, or semantic (defaults to the value in `.fallowrc.jsonc`, or `mild` if unset)"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--near",
+      "column": "Description",
+      "seed": "Enable function-scoped near-miss clone detection"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--no-ignore-imports",
+      "column": "Description",
+      "seed": "Count module wiring as clone candidates (opt out of the default exclusion)"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--skip-local",
+      "column": "Description",
+      "seed": "Only report cross-directory duplicates"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--threshold",
+      "column": "Description",
+      "seed": "Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in `.fallowrc.jsonc`, or `0` if unset)"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--top",
+      "column": "Description",
+      "seed": "Show only the N highest-ranked clone groups. Ranking combines clone size, occurrence count, and capped directory or line spread"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--trace",
+      "column": "Description",
+      "seed": "Trace all clones at a specific location (format: `FILE:LINE`)"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--coverage",
+      "column": "Description",
+      "seed": "Path to Istanbul coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--coverage-root",
+      "column": "Description",
+      "seed": "Absolute prefix to strip from Istanbul file paths in combined mode. Also settable via `FALLOW_COVERAGE_ROOT` or `health.coverageRoot`"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--dupes-cross-language",
+      "column": "Description",
+      "seed": "Enable cross-language duplicate detection in combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--dupes-ignore-imports",
+      "column": "Description",
+      "seed": "Exclude module wiring from duplicate detection in combined mode (default). Pass `--dupes-no-ignore-imports` to count it again"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--dupes-min-lines",
+      "column": "Description",
+      "seed": "Override the minimum line count for clones in combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--dupes-min-occurrences",
+      "column": "Description",
+      "seed": "Override the minimum clone occurrences in combined mode (must be >= 2)"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--dupes-min-tokens",
+      "column": "Description",
+      "seed": "Override the minimum token count for clones in combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--dupes-mode",
+      "column": "Description",
+      "seed": "Override duplication detection mode in combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--dupes-skip-local",
+      "column": "Description",
+      "seed": "Only report cross-directory duplicates in combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--dupes-threshold",
+      "column": "Description",
+      "seed": "Override duplication threshold in combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--no-production",
+      "column": "Description",
+      "seed": "Force production mode OFF for every analysis, overriding a project config's `production: true` (and `FALLOW_PRODUCTION`). Conflicts with `--production`"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--only",
+      "column": "Description",
+      "seed": "Run only specific analyses when no subcommand is given"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--production",
+      "column": "Description",
+      "seed": "Production mode: exclude test/story/dev files, only start/build scripts, report type-only dependencies"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--production-dead-code",
+      "column": "Description",
+      "seed": "Run dead-code analysis in production mode when using bare combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--production-dupes",
+      "column": "Description",
+      "seed": "Run duplication analysis in production mode when using bare combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--production-health",
+      "column": "Description",
+      "seed": "Run health analysis in production mode when using bare combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--save-snapshot",
+      "column": "Description",
+      "seed": "Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--score",
+      "column": "Description",
+      "seed": "Compute health score in combined mode"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--skip",
+      "column": "Description",
+      "seed": "Skip specific analyses when no subcommand is given"
+    },
+    {
+      "section": "flags:fallow-combined",
+      "row": "--trend",
+      "column": "Description",
+      "seed": "Compare current health metrics against the most recent saved snapshot"
+    },
+    {
+      "section": "flags:fix",
+      "row": "--dry-run",
+      "column": "Description",
+      "seed": "Dry run, show what would be changed without modifying files"
+    },
+    {
+      "section": "flags:fix",
+      "row": "--no-create-config",
+      "column": "Description",
+      "seed": "Refuse to create a new fallow config file when none exists. Use this from pre-commit hooks, CI bots, and `fallow watch` where silently materialising a new top-level config file would surprise the user. The duplicate-export config-add path is skipped with an explanatory message; source-file edits proceed normally"
+    },
+    {
+      "section": "flags:fix",
+      "row": "--yes",
+      "column": "Description",
+      "seed": "Skip confirmation prompt (required in non-TTY environments like CI or AI agents)"
+    },
+    {
+      "section": "flags:flags",
+      "row": "--top",
+      "column": "Description",
+      "seed": "Show only the top N flags"
+    },
+    {
+      "section": "flags:global",
+      "row": "--allow-remote-extends",
+      "column": "Description",
+      "seed": "Allow trusted config files to extend HTTPS URLs"
+    },
+    {
+      "section": "flags:global",
+      "row": "--baseline",
+      "column": "Description",
+      "seed": "Compare against a previously saved baseline file"
+    },
+    {
+      "section": "flags:global",
+      "row": "--baseline-mode",
+      "column": "Description",
+      "seed": "How `--baseline` matches health findings: per file and category (`count`, the default) or per function identity (`identity`, strict, and only against a baseline that was saved with `--baseline-mode identity`; such a baseline still reads in count mode)"
+    },
+    {
+      "section": "flags:global",
+      "row": "--changed-since",
+      "column": "Description",
+      "seed": "Only report issues in files changed since this git ref (e.g., main, HEAD~5)"
+    },
+    {
+      "section": "flags:global",
+      "row": "--changed-workspaces",
+      "column": "Description",
+      "seed": "Scope output to workspaces touched since the given git ref. Git is required. Mutually exclusive with `--workspace`"
+    },
+    {
+      "section": "flags:global",
+      "row": "--churn-file",
+      "column": "Description",
+      "seed": "Import change history from a `fallow-churn/v1` JSON file instead of `git log`, powering hotspots, ownership, and bus-factor on projects with no git repository (Yandex Arc, Mercurial, Perforce). A small wrapper translates your VCS log into the contract. Resolved relative to `--root`. Affects `health --hotspots` / `--ownership` / `--targets` only; `audit`, `impact`, and `--changed-since` still require git"
+    },
+    {
+      "section": "flags:global",
+      "row": "--ci",
+      "column": "Description",
+      "seed": "CI mode: equivalent to --format sarif --fail-on-issues --quiet"
+    },
+    {
+      "section": "flags:global",
+      "row": "--config",
+      "column": "Description",
+      "seed": "Path to config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml)"
+    },
+    {
+      "section": "flags:global",
+      "row": "--coverage",
+      "column": "Description",
+      "seed": "Path to Istanbul coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+    },
+    {
+      "section": "flags:global",
+      "row": "--coverage-root",
+      "column": "Description",
+      "seed": "Absolute prefix to strip from Istanbul file paths in combined mode. Also settable via `FALLOW_COVERAGE_ROOT` or `health.coverageRoot`"
+    },
+    {
+      "section": "flags:global",
+      "row": "--diff-file",
+      "column": "Description",
+      "seed": "Unified diff for line-level scoping. Use `-` to read from stdin. Project-level findings still bypass this filter. When both this and `--changed-since` are set, the diff filter wins for finding scope while `--changed-since` still drives file discovery"
+    },
+    {
+      "section": "flags:global",
+      "row": "--diff-stdin",
+      "column": "Description",
+      "seed": "Read the unified diff from stdin. Equivalent to `--diff-file -`"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-cross-language",
+      "column": "Description",
+      "seed": "Enable cross-language duplicate detection in combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-ignore-imports",
+      "column": "Description",
+      "seed": "Exclude module wiring from duplicate detection in combined mode (default). Pass `--dupes-no-ignore-imports` to count it again"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-min-lines",
+      "column": "Description",
+      "seed": "Override the minimum line count for clones in combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-min-occurrences",
+      "column": "Description",
+      "seed": "Override the minimum clone occurrences in combined mode (must be >= 2)"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-min-tokens",
+      "column": "Description",
+      "seed": "Override the minimum token count for clones in combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-mode",
+      "column": "Description",
+      "seed": "Override duplication detection mode in combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-near",
+      "column": "Description",
+      "seed": "Enable function-scoped near-miss clone detection in combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-no-ignore-imports",
+      "column": "Description",
+      "seed": "Count module wiring as clone candidates in combined mode (opt out of the default exclusion)"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-skip-local",
+      "column": "Description",
+      "seed": "Only report cross-directory duplicates in combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-threshold",
+      "column": "Description",
+      "seed": "Override duplication threshold in combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--explain",
+      "column": "Description",
+      "seed": "Include metric definitions and rule descriptions in output"
+    },
+    {
+      "section": "flags:global",
+      "row": "--explain-skipped",
+      "column": "Description",
+      "seed": "Show a per-pattern breakdown for default duplicate ignores"
+    },
+    {
+      "section": "flags:global",
+      "row": "--fail-on-issues",
+      "column": "Description",
+      "seed": "Exit with code 1 if issues are found"
+    },
+    {
+      "section": "flags:global",
+      "row": "--fail-on-regression",
+      "column": "Description",
+      "seed": "Fail if issue count increased beyond tolerance compared to a regression baseline"
+    },
+    {
+      "section": "flags:global",
+      "row": "--format",
+      "column": "Description",
+      "seed": "Output format (alias: --output)"
+    },
+    {
+      "section": "flags:global",
+      "row": "--group-by",
+      "column": "Description",
+      "seed": "Group output by owner or by directory"
+    },
+    {
+      "section": "flags:global",
+      "row": "--include-entry-exports",
+      "column": "Description",
+      "seed": "Report unused exports in entry files instead of auto-marking them as used"
+    },
+    {
+      "section": "flags:global",
+      "row": "--max-file-size",
+      "column": "Description",
+      "seed": "Skip source files larger than this many megabytes (default 5) instead of parsing them, guarding against the out-of-memory blowup a single multi-MB generated/vendored/bundled file causes on large repos. Use `0` for no limit. Declaration files (`.d.ts`) are always analyzed. Skipped files are reported and excluded from every analysis. Also settable via `FALLOW_MAX_FILE_SIZE`"
+    },
+    {
+      "section": "flags:global",
+      "row": "--no-cache",
+      "column": "Description",
+      "seed": "Disable incremental caching"
+    },
+    {
+      "section": "flags:global",
+      "row": "--no-production",
+      "column": "Description",
+      "seed": "Force production mode OFF for every analysis, overriding a project config's `production: true` (and `FALLOW_PRODUCTION`). Conflicts with `--production`"
+    },
+    {
+      "section": "flags:global",
+      "row": "--no-type-aware",
+      "column": "Description",
+      "seed": "Disable TypeScript semantic analysis even when `typeAware.enabled` or `FALLOW_TYPE_AWARE` opts in, keeping this run fully syntactic"
+    },
+    {
+      "section": "flags:global",
+      "row": "--only",
+      "column": "Description",
+      "seed": "Run only specific analyses when no subcommand is given"
+    },
+    {
+      "section": "flags:global",
+      "row": "--output-file",
+      "column": "Description",
+      "seed": "Write the report to a file instead of stdout, for any --format (no ANSI codes). Useful on large projects where the terminal scrollback truncates the top. Progress and the confirmation stay on stderr"
+    },
+    {
+      "section": "flags:global",
+      "row": "--parent-run",
+      "column": "Description",
+      "seed": "Correlate this run with a previous telemetry analysis run"
+    },
+    {
+      "section": "flags:global",
+      "row": "--performance",
+      "column": "Description",
+      "seed": "Show pipeline performance timing breakdown"
+    },
+    {
+      "section": "flags:global",
+      "row": "--pretty",
+      "column": "Description",
+      "seed": "Indent JSON output for manual inspection. Requires the final output format to be JSON"
+    },
+    {
+      "section": "flags:global",
+      "row": "--production",
+      "column": "Description",
+      "seed": "Production mode: exclude test/story/dev files, only start/build scripts, report type-only dependencies"
+    },
+    {
+      "section": "flags:global",
+      "row": "--production-dead-code",
+      "column": "Description",
+      "seed": "Run dead-code analysis in production mode when using bare combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--production-dupes",
+      "column": "Description",
+      "seed": "Run duplication analysis in production mode when using bare combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--production-health",
+      "column": "Description",
+      "seed": "Run health analysis in production mode when using bare combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--quiet",
+      "column": "Description",
+      "seed": "Suppress progress output"
+    },
+    {
+      "section": "flags:global",
+      "row": "--regression-baseline",
+      "column": "Description",
+      "seed": "Path to the regression baseline file"
+    },
+    {
+      "section": "flags:global",
+      "row": "--report-path-prefix",
+      "column": "Description",
+      "seed": "Prefix prepended to every path in the CI-facing formats (`github-annotations`, `github-summary`, `codeclimate`, `pr-comment-github`, `pr-comment-gitlab`, `review-github`, `review-gitlab`). CI platforms address files by repository-root-relative path, so when the analyzed project lives in a subdirectory (e.g. `packages/app/`), paths need that offset. fallow detects the offset via the git toplevel automatically; this flag overrides the detection. Pass an empty string to disable rebasing and emit paths relative to `--root`"
+    },
+    {
+      "section": "flags:global",
+      "row": "--root",
+      "column": "Description",
+      "seed": "Project root directory"
+    },
+    {
+      "section": "flags:global",
+      "row": "--sarif-file",
+      "column": "Description",
+      "seed": "Write SARIF output to a file (in addition to the primary --format output)"
+    },
+    {
+      "section": "flags:global",
+      "row": "--save-baseline",
+      "column": "Description",
+      "seed": "Save the current results as a baseline file"
+    },
+    {
+      "section": "flags:global",
+      "row": "--save-regression-baseline",
+      "column": "Description",
+      "seed": "Save the current issue counts as a regression baseline. Omit PATH to update regression.baseline in the discovered fallow config, or create .fallowrc.json when none exists. Provide PATH to write a standalone file"
+    },
+    {
+      "section": "flags:global",
+      "row": "--save-snapshot",
+      "column": "Description",
+      "seed": "Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location"
+    },
+    {
+      "section": "flags:global",
+      "row": "--score",
+      "column": "Description",
+      "seed": "Compute health score in combined mode"
+    },
+    {
+      "section": "flags:global",
+      "row": "--skip",
+      "column": "Description",
+      "seed": "Skip specific analyses when no subcommand is given"
+    },
+    {
+      "section": "flags:global",
+      "row": "--summary",
+      "column": "Description",
+      "seed": "Show only category counts without individual items"
+    },
+    {
+      "section": "flags:global",
+      "row": "--threads",
+      "column": "Description",
+      "seed": "Number of parser threads"
+    },
+    {
+      "section": "flags:global",
+      "row": "--tolerance",
+      "column": "Description",
+      "seed": "Allowed issue count increase before a regression is flagged"
+    },
+    {
+      "section": "flags:global",
+      "row": "--trend",
+      "column": "Description",
+      "seed": "Compare current health metrics against the most recent saved snapshot"
+    },
+    {
+      "section": "flags:global",
+      "row": "--type-aware",
+      "column": "Description",
+      "seed": "Opt in to TypeScript semantic analysis for project-wide symbol evidence. This does not emit compiler diagnostics or typed lint findings"
+    },
+    {
+      "section": "flags:global",
+      "row": "--type-aware-project",
+      "column": "Description",
+      "seed": "TypeScript project config to use for type-aware analysis (repeatable)"
+    },
+    {
+      "section": "flags:global",
+      "row": "--type-aware-require",
+      "column": "Description",
+      "seed": "Decide whether incomplete type-aware analysis is advisory or gating"
+    },
+    {
+      "section": "flags:global",
+      "row": "--workspace",
+      "column": "Description",
+      "seed": "Scope output to selected workspaces. Accepts exact names, glob patterns, and `!`-prefixed negations. Values can be comma-separated or repeated"
+    },
+    {
+      "section": "flags:health",
+      "row": "--complexity",
+      "column": "Description",
+      "seed": "Show only complexity findings (functions exceeding thresholds). By default all sections are shown; use this to select only complexity"
+    },
+    {
+      "section": "flags:health",
+      "row": "--complexity-breakdown",
+      "column": "Description",
+      "seed": "Include the per-decision-point complexity breakdown (`contributions[]`) on each complexity finding in `--format json` output. Each entry names the construct (if, else-if, loop, boolean operator, ...) and its cyclomatic/cognitive weight, so a consumer can explain WHY a function scored high. Used by the VS Code inline editor breakdown. Off by default to keep CI/default output lean"
+    },
+    {
+      "section": "flags:health",
+      "row": "--coverage",
+      "column": "Description",
+      "seed": "Path to coverage data (coverage-final.json) for exact per-function CRAP scores. Generate with `jest --coverage`, `vitest run --coverage --provider istanbul`, or any Istanbul-compatible tool. Requires Istanbul format (not v8/c8 native format). Accepts a single Istanbul coverage map JSON file or a directory containing coverage-final.json. Use --coverage-root when the file was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
+    },
+    {
+      "section": "flags:health",
+      "row": "--coverage-gaps",
+      "column": "Description",
+      "seed": "Show only static test coverage gaps: runtime files and exports with no dependency path from any discovered test root. Requires full analysis pipeline"
+    },
+    {
+      "section": "flags:health",
+      "row": "--coverage-root",
+      "column": "Description",
+      "seed": "Absolute prefix to strip from file paths in coverage data before prepending the project root. Use when coverage was generated in a different environment (CI runner, Docker). Example: if coverage paths start with /home/runner/work/myapp and the project root is ./, pass --coverage-root /home/runner/work/myapp"
+    },
+    {
+      "section": "flags:health",
+      "row": "--css",
+      "column": "Description",
+      "seed": "Add structural CSS analytics: specificity hotspots, !important density, over-complex selectors, deep nesting, and conservative cleanup candidates. Standard CSS is parsed structurally; preprocessor sources are scanned only where fallow can avoid expanding Sass/Less semantics"
+    },
+    {
+      "section": "flags:health",
+      "row": "--effort",
+      "column": "Description",
+      "seed": "Filter refactoring targets by effort level (low, medium, high). Implies --targets"
+    },
+    {
+      "section": "flags:health",
+      "row": "--file-scores",
+      "column": "Description",
+      "seed": "Show only per-file health scores (fan-in, fan-out, dead code ratio, maintainability index). Requires full analysis pipeline (graph + dead code detection). Sorted by risk-aware triage concern: lower MI and higher CRAP risk first. --sort and --baseline apply to complexity findings only, not file scores"
+    },
+    {
+      "section": "flags:health",
+      "row": "--hotspots",
+      "column": "Description",
+      "seed": "Show only hotspots: files that are both complex and frequently changing. Combines git churn history with complexity data. Requires a git repository"
+    },
+    {
+      "section": "flags:health",
+      "row": "--low-traffic-threshold",
+      "column": "Description",
+      "seed": "Fraction of total trace count below which an invoked function is classified as `low_traffic` rather than `active`. Expressed as a decimal (e.g. `0.001` for 0.1%). Omit to use the sidecar's spec default (0.001)"
+    },
+    {
+      "section": "flags:health",
+      "row": "--max-cognitive",
+      "column": "Description",
+      "seed": "Maximum cognitive complexity threshold (overrides config)"
+    },
+    {
+      "section": "flags:health",
+      "row": "--max-crap",
+      "column": "Description",
+      "seed": "Maximum CRAP score threshold (overrides config, default 30.0). Functions meeting or exceeding this score are reported alongside complexity findings. Pair with `--coverage` for accurate scoring"
+    },
+    {
+      "section": "flags:health",
+      "row": "--max-cyclomatic",
+      "column": "Description",
+      "seed": "Maximum cyclomatic complexity threshold (overrides config)"
+    },
+    {
+      "section": "flags:health",
+      "row": "--min-commits",
+      "column": "Description",
+      "seed": "Minimum number of commits for a file to be included in hotspot ranking (default: 3)"
+    },
+    {
+      "section": "flags:health",
+      "row": "--min-invocations-hot",
+      "column": "Description",
+      "seed": "Threshold for hot-path classification"
+    },
+    {
+      "section": "flags:health",
+      "row": "--min-observation-volume",
+      "column": "Description",
+      "seed": "Minimum total trace volume before the sidecar allows high-confidence `safe_to_delete` / `review_required` verdicts. Below this the sidecar caps confidence at `medium` to protect against overconfident verdicts on new or low-traffic services. Omit to use the sidecar's spec default (5000)"
+    },
+    {
+      "section": "flags:health",
+      "row": "--min-score",
+      "column": "Description",
+      "seed": "Fail if the health score is below this threshold (0-100). Implies --score. The authoritative CI quality gate: when set, complexity findings become informational and the exit code is driven solely by the score (so --min-score 0 always exits 0). Composes with --min-severity (fails if either gate trips). Plain `fallow health` (no gate flag) stays advisory and exits 1 on any finding; for a gate on newly-introduced complexity use `fallow audit --gate new-only`"
+    },
+    {
+      "section": "flags:health",
+      "row": "--min-severity",
+      "column": "Description",
+      "seed": "Only exit with error for findings at or above this severity. Use --min-severity critical to ignore moderate/high findings in CI. Composes with --min-score (the run fails if either gate trips)"
+    },
+    {
+      "section": "flags:health",
+      "row": "--ownership",
+      "column": "Description",
+      "seed": "Attach ownership signals to hotspot entries: bus factor, contributor count, declared CODEOWNERS owner, and ownership drift. Implies `--hotspots`. Requires a git repository"
+    },
+    {
+      "section": "flags:health",
+      "row": "--ownership-emails",
+      "column": "Description",
+      "seed": "Privacy mode for author emails emitted with `--ownership`. Defaults to `handle` (local-part only). Use `raw` for OSS repos where authors are public, or `anonymized` to emit non-reversible pseudonyms in regulated environments. Implies `--ownership`"
+    },
+    {
+      "section": "flags:health",
+      "row": "--report-only",
+      "column": "Description",
+      "seed": "Print the score and findings but never fail CI (always exit 0). Advisory mode for surfacing health in logs without blocking. Mutually exclusive with --min-score and --min-severity"
+    },
+    {
+      "section": "flags:health",
+      "row": "--runtime-coverage",
+      "column": "Description",
+      "seed": "File or directory containing runtime coverage input. Accepts a V8 coverage directory, a single V8 JSON file, or a single Istanbul coverage map JSON file (commonly coverage-final.json)"
+    },
+    {
+      "section": "flags:health",
+      "row": "--save-snapshot",
+      "column": "Description",
+      "seed": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given. Forces file-scores, hotspot, and score computation for complete metrics"
+    },
+    {
+      "section": "flags:health",
+      "row": "--score",
+      "column": "Description",
+      "seed": "Show only the project health score (0–100) with letter grade (A/B/C/D/F). The score is included by default when no section flags are set"
+    },
+    {
+      "section": "flags:health",
+      "row": "--since",
+      "column": "Description",
+      "seed": "Git history window for hotspot analysis (default: 6m). Accepts durations (6m, 90d, 1y, 2w) or ISO dates (2025-06-01)"
+    },
+    {
+      "section": "flags:health",
+      "row": "--sort",
+      "column": "Description",
+      "seed": "Sort by: cyclomatic (default), cognitive, lines, or severity"
+    },
+    {
+      "section": "flags:health",
+      "row": "--targets",
+      "column": "Description",
+      "seed": "Show only refactoring targets: ranked recommendations based on complexity, coupling, churn, and dead code signals. Requires full analysis pipeline"
+    },
+    {
+      "section": "flags:health",
+      "row": "--top",
+      "column": "Description",
+      "seed": "Show only the N most complex functions"
+    },
+    {
+      "section": "flags:health",
+      "row": "--trend",
+      "column": "Description",
+      "seed": "Compare current metrics against the most recent saved snapshot. Reads from `.fallow/snapshots/` and shows per-metric deltas with directional indicators. Implies --score"
+    },
+    {
+      "section": "flags:health",
+      "row": "--type-coupling",
+      "column": "Description",
+      "seed": "Show advisory project-local public-signature type coupling. Requires type-aware analysis and does not change the health score"
+    },
+    {
+      "section": "flags:init",
+      "row": "--agents",
+      "column": "Description",
+      "seed": "Scaffold a starter AGENTS.md guidance file for coding agents"
+    },
+    {
+      "section": "flags:init",
+      "row": "--branch",
+      "column": "Description",
+      "seed": "Fallback base branch/ref for the pre-commit hook when no upstream is set"
+    },
+    {
+      "section": "flags:init",
+      "row": "--decline",
+      "column": "Description",
+      "seed": "Record that this project deliberately stays unconfigured: persists a decline so the first-contact setup hint and the `setup` next-step stop appearing here. Writes no config file; idempotent"
+    },
+    {
+      "section": "flags:init",
+      "row": "--hooks",
+      "column": "Description",
+      "seed": "Scaffold a shell-level pre-commit git hook in `.git/hooks/` that runs fallow on changed files. Alias for `fallow hooks install --target git`"
+    },
+    {
+      "section": "flags:init",
+      "row": "--toml",
+      "column": "Description",
+      "seed": "Generate TOML instead of JSONC"
+    },
+    {
+      "section": "flags:list",
+      "row": "--boundaries",
+      "column": "Description",
+      "seed": "Show architecture boundary zones, rules, and per-zone file counts"
+    },
+    {
+      "section": "flags:list",
+      "row": "--entry-points",
+      "column": "Description",
+      "seed": "Show entry points"
+    },
+    {
+      "section": "flags:list",
+      "row": "--files",
+      "column": "Description",
+      "seed": "Show all discovered files"
+    },
+    {
+      "section": "flags:list",
+      "row": "--plugins",
+      "column": "Description",
+      "seed": "Show active plugins"
+    },
+    {
+      "section": "flags:list",
+      "row": "--workspaces",
+      "column": "Description",
+      "seed": "Show monorepo workspaces and any workspace-discovery diagnostics (malformed package.json, unreachable glob matches, missing tsconfig references)"
+    },
+    {
+      "section": "flags:migrate",
+      "row": "--dry-run",
+      "column": "Description",
+      "seed": "Only preview the generated config without writing"
+    },
+    {
+      "section": "flags:migrate",
+      "row": "--from",
+      "column": "Description",
+      "seed": "Path to source config file (auto-detect if not specified)"
+    },
+    {
+      "section": "flags:migrate",
+      "row": "--jsonc",
+      "column": "Description",
+      "seed": "Write JSONC content to `.fallowrc.jsonc` instead of `.fallowrc.json`. The generated content is the same JSONC (with `//` comments) either way; the `.jsonc` extension lets editors auto-detect JSON-with-comments syntax highlighting and silences linters that flag comments in `.json`. Without `--jsonc` or `--toml`, fallow auto-mirrors the source extension: a `knip.jsonc` migration writes `.fallowrc.jsonc`, a `knip.json` migration writes `.fallowrc.json`"
+    },
+    {
+      "section": "flags:migrate",
+      "row": "--toml",
+      "column": "Description",
+      "seed": "Generate `fallow.toml` instead of JSONC"
+    },
+    {
+      "section": "flags:security",
+      "row": "--file",
+      "column": "Description",
+      "seed": "Only report security candidates in or reachable from the specified files. The full project graph is still built, but output is scoped to matching finding anchors or trace hops. Accepts multiple values"
+    },
+    {
+      "section": "flags:security",
+      "row": "--gate",
+      "column": "Description",
+      "seed": "Opt-in regression gate: fail (exit 8) only when the change introduces a NEW security-sink candidate in the changed lines, not on the whole candidate backlog. Requires a diff source: `--changed-since <ref>`, `--diff-file <path>`, or `--diff-stdin`. There is deliberately no `all` mode (gating on the full backlog is the anti-feature this gate avoids)"
+    },
+    {
+      "section": "flags:security",
+      "row": "--min-invocations-hot",
+      "column": "Description",
+      "seed": "Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set"
+    },
+    {
+      "section": "flags:security",
+      "row": "--runtime-coverage",
+      "column": "Description",
+      "seed": "Paid runtime-coverage sidecar input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. When set, `fallow security` annotates tainted-sink candidates with production runtime state and uses that state as an additive ranking signal"
+    },
+    {
+      "section": "flags:security",
+      "row": "--surface",
+      "column": "Description",
+      "seed": "Include the agent-facing attack-surface inventory in JSON output"
+    },
+    {
+      "section": "flags:trace",
+      "row": "--callees",
+      "column": "Description",
+      "seed": "Walk DOWN to callees (the symbol's module's import-symbol edges plus unresolved call sites). When neither flag is set, both are walked"
+    },
+    {
+      "section": "flags:trace",
+      "row": "--callers",
+      "column": "Description",
+      "seed": "Walk UP to callers (modules that import the symbol). When neither `--callers` nor `--callees` is set, both directions are walked"
+    },
+    {
+      "section": "flags:trace",
+      "row": "--depth",
+      "column": "Description",
+      "seed": "Chain depth bound for both directions (default 2). Symbol-level is best-effort, so a shallow bound keeps the trace legible"
+    },
+    {
+      "section": "issue-types",
+      "row": "boundary-call-violation",
+      "column": "Description",
+      "seed": "Zoned file calls a callee its zone forbids; Requires boundaries.calls.forbidden patterns"
+    },
+    {
+      "section": "issue-types",
+      "row": "boundary-coverage",
+      "column": "Description",
+      "seed": "Source file matches no configured architecture boundary zone; Requires boundaries.coverage.requireAllFiles"
+    },
+    {
+      "section": "issue-types",
+      "row": "boundary-violation",
+      "column": "Description",
+      "seed": "Import crosses a configured architecture boundary; Requires configured boundary zones (boundaries config)"
+    },
+    {
+      "section": "issue-types",
+      "row": "circular-dependency",
+      "column": "Description",
+      "seed": "Circular dependency chain detected"
+    },
+    {
+      "section": "issue-types",
+      "row": "client-server-leak",
+      "column": "Description",
+      "seed": "Client-bound code reaches a non-public env read"
+    },
+    {
+      "section": "issue-types",
+      "row": "code-duplication",
+      "column": "Description",
+      "seed": "Duplicated code block; Reported by fallow dupes (and bare fallow / fallow audit)"
+    },
+    {
+      "section": "issue-types",
+      "row": "css-broken-reference",
+      "column": "Description",
+      "seed": "CSS or CSS-in-JS reference resolves to no stylesheet definition"
+    },
+    {
+      "section": "issue-types",
+      "row": "css-dead-surface",
+      "column": "Description",
+      "seed": "CSS or CSS-in-JS surface appears unused"
+    },
+    {
+      "section": "issue-types",
+      "row": "css-duplicate-block",
+      "column": "Description",
+      "seed": "CSS or CSS-in-JS declaration block is duplicated across rules"
+    },
+    {
+      "section": "issue-types",
+      "row": "css-selector-complexity",
+      "column": "Description",
+      "seed": "CSS selector, nesting, or important usage is structurally complex"
+    },
+    {
+      "section": "issue-types",
+      "row": "css-token-drift",
+      "column": "Description",
+      "seed": "CSS or CSS-in-JS hardcoded styling value bypasses the design token system"
+    },
+    {
+      "section": "issue-types",
+      "row": "dev-dependency-in-production",
+      "column": "Description",
+      "seed": "devDependency imported by production code with a runtime import"
+    },
+    {
+      "section": "issue-types",
+      "row": "duplicate-export",
+      "column": "Description",
+      "seed": "Export name appears in multiple modules; fallow fix can add an ignoreExports rule to the fallow config instead of editing source"
+    },
+    {
+      "section": "issue-types",
+      "row": "duplicate-prop-shape",
+      "column": "Description",
+      "seed": "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type); Opt-in: set rules.duplicate-prop-shape to warn or error to enable. Defaults to off."
+    },
+    {
+      "section": "issue-types",
+      "row": "dynamic-segment-name-conflict",
+      "column": "Description",
+      "seed": "Sibling Next.js dynamic route segments use different slug names at the same position"
+    },
+    {
+      "section": "issue-types",
+      "row": "empty-catalog-group",
+      "column": "Description",
+      "seed": "Named catalog group has no entries"
+    },
+    {
+      "section": "issue-types",
+      "row": "feature-flag",
+      "column": "Description",
+      "seed": "Detected feature flag pattern; Reported by fallow flags"
+    },
+    {
+      "section": "issue-types",
+      "row": "hardcoded-secret",
+      "column": "Description",
+      "seed": "Provider-prefixed or contextual secret literals require verification; Include-required category: enable via security.categories.include"
+    },
+    {
+      "section": "issue-types",
+      "row": "high-cognitive-complexity",
+      "column": "Description",
+      "seed": "Function has high cognitive complexity"
+    },
+    {
+      "section": "issue-types",
+      "row": "high-complexity",
+      "column": "Description",
+      "seed": "Function exceeds both complexity thresholds"
+    },
+    {
+      "section": "issue-types",
+      "row": "high-crap-score",
+      "column": "Description",
+      "seed": "Function has a high CRAP score (complexity combined with low coverage)"
+    },
+    {
+      "section": "issue-types",
+      "row": "high-cyclomatic-complexity",
+      "column": "Description",
+      "seed": "Function has high cyclomatic complexity"
+    },
+    {
+      "section": "issue-types",
+      "row": "invalid-client-export",
+      "column": "Description",
+      "seed": "\"use client\" file exports a server-only / route-config name; Requires the project to declare next"
+    },
+    {
+      "section": "issue-types",
+      "row": "misconfigured-dependency-override",
+      "column": "Description",
+      "seed": "Package-manager override has an unparsable key or value"
+    },
+    {
+      "section": "issue-types",
+      "row": "misplaced-directive",
+      "column": "Description",
+      "seed": "\"use client\" / \"use server\" directive is not in the leading position and is ignored; Requires the project to declare next"
+    },
+    {
+      "section": "issue-types",
+      "row": "missing-suppression-reason",
+      "column": "Description",
+      "seed": "Suppression comment omits a required reason"
+    },
+    {
+      "section": "issue-types",
+      "row": "mixed-client-server-barrel",
+      "column": "Description",
+      "seed": "Barrel re-exports both a \"use client\" module and a server-only module; Requires the project to declare next"
+    },
+    {
+      "section": "issue-types",
+      "row": "policy-violation",
+      "column": "Description",
+      "seed": "Banned usage matched a rule-pack rule; Requires a configured rule pack (rulePacks config)"
+    },
+    {
+      "section": "issue-types",
+      "row": "private-type-leak",
+      "column": "Description",
+      "seed": "Exported signature references a private type; Opt-in API hygiene check; the rule defaults to off"
+    },
+    {
+      "section": "issue-types",
+      "row": "prop-drilling",
+      "column": "Description",
+      "seed": "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer; Opt-in: set rules.prop-drilling to warn or error to enable. Defaults to off."
+    },
+    {
+      "section": "issue-types",
+      "row": "re-export-cycle",
+      "column": "Description",
+      "seed": "Two or more barrel files re-export from each other in a loop"
+    },
+    {
+      "section": "issue-types",
+      "row": "refactoring-target",
+      "column": "Description",
+      "seed": "File identified as a high-priority refactoring candidate"
+    },
+    {
+      "section": "issue-types",
+      "row": "route-collision",
+      "column": "Description",
+      "seed": "Two or more Next.js App Router route files resolve to the same URL"
+    },
+    {
+      "section": "issue-types",
+      "row": "stale-suppression",
+      "column": "Description",
+      "seed": "Suppression comment or tag no longer matches any issue; Fix by removing the stale suppression marker itself"
+    },
+    {
+      "section": "issue-types",
+      "row": "tainted-sink",
+      "column": "Description",
+      "seed": "Syntactic security sink candidates require verification"
+    },
+    {
+      "section": "issue-types",
+      "row": "test-only-dependency",
+      "column": "Description",
+      "seed": "Production dependency only imported by test files; Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds"
+    },
+    {
+      "section": "issue-types",
+      "row": "thin-wrapper",
+      "column": "Description",
+      "seed": "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining); Opt-in: set rules.thin-wrapper to warn or error to enable. Defaults to off."
+    },
+    {
+      "section": "issue-types",
+      "row": "type-only-dependency",
+      "column": "Description",
+      "seed": "Production dependency only used via type-only imports; Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds"
+    },
+    {
+      "section": "issue-types",
+      "row": "unlisted-dependency",
+      "column": "Description",
+      "seed": "Dependency used but not in package.json"
+    },
+    {
+      "section": "issue-types",
+      "row": "unprovided-inject",
+      "column": "Description",
+      "seed": "inject() / getContext() reads a key that no provide() / setContext() supplies"
+    },
+    {
+      "section": "issue-types",
+      "row": "unrendered-component",
+      "column": "Description",
+      "seed": "A Vue / Svelte component is reachable through a barrel but rendered nowhere"
+    },
+    {
+      "section": "issue-types",
+      "row": "unresolved-catalog-reference",
+      "column": "Description",
+      "seed": "package.json references a catalog that does not declare the package"
+    },
+    {
+      "section": "issue-types",
+      "row": "unresolved-import",
+      "column": "Description",
+      "seed": "Import could not be resolved"
+    },
+    {
+      "section": "issue-types",
+      "row": "untested-export",
+      "column": "Description",
+      "seed": "Runtime-reachable export has no test dependency path"
+    },
+    {
+      "section": "issue-types",
+      "row": "untested-file",
+      "column": "Description",
+      "seed": "Runtime-reachable file has no test dependency path"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-catalog-entry",
+      "column": "Description",
+      "seed": "Catalog entry not referenced by any workspace package"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-class-member",
+      "column": "Description",
+      "seed": "Class member is never referenced"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-component-emit",
+      "column": "Description",
+      "seed": "A Vue <script setup> defineEmits event is emitted nowhere in its own component"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-component-input",
+      "column": "Description",
+      "seed": "An Angular @Input() / signal input() / model() input is read nowhere in its own component"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-component-output",
+      "column": "Description",
+      "seed": "An Angular @Output() / signal output() output is emitted nowhere in its own component"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-component-prop",
+      "column": "Description",
+      "seed": "A Vue, Svelte, or React component prop is referenced nowhere in its own component"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-dependency",
+      "column": "Description",
+      "seed": "Dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-dependency-override",
+      "column": "Description",
+      "seed": "Package-manager override target is not declared or resolved"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-dev-dependency",
+      "column": "Description",
+      "seed": "Dev dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-enum-member",
+      "column": "Description",
+      "seed": "Enum member is never referenced"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-export",
+      "column": "Description",
+      "seed": "Export is never imported"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-file",
+      "column": "Description",
+      "seed": "File is not reachable from any entry point"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-load-data-key",
+      "column": "Description",
+      "seed": "A SvelteKit load() return-object key is read by no consumer"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-optional-dependency",
+      "column": "Description",
+      "seed": "Optional dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-server-action",
+      "column": "Description",
+      "seed": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-store-member",
+      "column": "Description",
+      "seed": "Store member is never accessed by any consumer"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-svelte-event",
+      "column": "Description",
+      "seed": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-type",
+      "column": "Description",
+      "seed": "Type export is never imported"
+    },
+    {
+      "section": "mcp-resources",
+      "row": "fallow://explain",
+      "column": "Description",
+      "seed": "Index of every explainable issue type with its one-line summary and the fallow://explain/{issue_type} URI to read"
+    },
+    {
+      "section": "mcp-resources",
+      "row": "fallow://explain/{issue_type}",
+      "column": "Description",
+      "seed": "Explain document for one issue type (same payload as fallow explain <issue-type> --format json): name, summary, rationale, example, fix guidance, docs URL. issue_type accepts the bare id (unused-export), the namespaced id (fallow/unused-export), or the CLI filter spelling; see fallow://explain for the index"
+    },
+    {
+      "section": "mcp-resources",
+      "row": "fallow://issue-types",
+      "column": "Description",
+      "seed": "Every issue type with its command, category, config key, zero-config default severity, opt-in flag, fixable flag, docs URL, and explain resource URI"
+    },
+    {
+      "section": "mcp-resources",
+      "row": "fallow://schema/config",
+      "column": "Description",
+      "seed": "JSON Schema of the fallow config file (same document as fallow config-schema)"
+    },
+    {
+      "section": "mcp-resources",
+      "row": "fallow://schema/plugin",
+      "column": "Description",
+      "seed": "JSON Schema of a user-authored external plugin (same document as fallow plugin-schema)"
+    },
+    {
+      "section": "mcp-resources",
+      "row": "fallow://schema/rule-pack",
+      "column": "Description",
+      "seed": "JSON Schema of a declarative rule pack (same document as fallow rule-pack-schema)"
+    },
+    {
+      "section": "mcp-resources",
+      "row": "fallow://task-matrix",
+      "column": "Description",
+      "seed": "Agent task-to-command matrix: which read-only fallow command to run before deleting, refactoring, committing, or scoping work"
+    },
+    {
+      "section": "mcp-resources",
+      "row": "fallow://tools",
+      "column": "Description",
+      "seed": "MCP tool manifest: name, kind, one-line description, nearest CLI fallback, key params, license, and read-only flag for every tool"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "analyze",
+      "column": "Description",
+      "seed": "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "audit",
+      "column": "Description",
+      "seed": "Combined dead-code, complexity, duplication, and styling audit for changed files with a pass/warn/fail verdict"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "check_changed",
+      "column": "Description",
+      "seed": "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "check_health",
+      "column": "Description",
+      "seed": "Complexity, styling health, hotspots, ownership, refactoring targets, coverage gaps, and CSS/CSS-in-JS candidates"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "check_runtime_coverage",
+      "column": "Description",
+      "seed": "Merge V8 or Istanbul runtime coverage into the health report (hot paths, cold paths, verdicts)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "code_execute",
+      "column": "Description",
+      "seed": "Run a bounded read-only JavaScript snippet that composes fallow's analysis tools inside a sandbox (Code Mode meta-tool, not a plain analysis call)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "decision_surface",
+      "column": "Description",
+      "seed": "Surface the few consequential structural decisions a change embeds (coupling, public API, dependency), each as a judgment question with the routed expert; ranked, capped, and signal_id-anchored"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "fallow_explain",
+      "column": "Description",
+      "seed": "Explain one issue type (rationale, examples, fix guidance) without running an analysis"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "feature_flags",
+      "column": "Description",
+      "seed": "Detect feature flag patterns (environment variables, SDK calls, config objects)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "find_dupes",
+      "column": "Description",
+      "seed": "Code duplication detection with clone groups and refactoring suggestions"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "find_similar_code",
+      "column": "Description",
+      "seed": "Find unverified semantically similar function candidates with the exact pinned local model"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "fix_apply",
+      "column": "Description",
+      "seed": "Apply auto-fixes: removes unused exports, dependencies, and enum members (mutates files)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "fix_preview",
+      "column": "Description",
+      "seed": "Dry-run auto-fix preview; shows what would change without modifying files"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "get_blast_radius",
+      "column": "Description",
+      "seed": "Blast-radius context (caller counts, risk bands) from runtime coverage; augments review only, never gates safe_to_delete (three-state tracking issues that verdict)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "get_cleanup_candidates",
+      "column": "Description",
+      "seed": "Cleanup candidates with safe_to_delete, review_required, and low_traffic verdicts from runtime coverage"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "get_hot_paths",
+      "column": "Description",
+      "seed": "Production hot paths from runtime coverage, sorted by invocation volume"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "get_importance",
+      "column": "Description",
+      "seed": "Production-importance scores (0-100) combining invocations, complexity, and ownership; augments review only, never gates safe_to_delete (three-state tracking issues that verdict)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "get_token_blast_radius",
+      "column": "Description",
+      "seed": "Design-token blast radius for Tailwind v4 @theme tokens AND CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (CSS-in-JS member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "guard",
+      "column": "Description",
+      "seed": "Report the architecture rules that apply to given files before editing them: boundary zone, allowed import zones, forbidden calls, and rule-pack policies"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "impact",
+      "column": "Description",
+      "seed": "Read the local Fallow Impact value-tracking report (per-project history in the user config dir, never in the repo; local-dev only)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "impact_all",
+      "column": "Description",
+      "seed": "Roll every tracked fallow project on this machine into one cross-repo value report (hashed keys plus basename labels, never paths; local-dev only)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "impact_closure",
+      "column": "Description",
+      "seed": "Trace the transitive affected-but-not-in-diff set and coordination gaps for one file"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "inspect_similar_code",
+      "column": "Description",
+      "seed": "Inspect one exact candidate snapshot without rerunning retrieval or global ranking"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "inspect_target",
+      "column": "Description",
+      "seed": "One evidence bundle for a file or exported symbol: trace, dead-code actions, duplication, complexity, and security candidates"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "list_boundaries",
+      "column": "Description",
+      "seed": "List architecture boundary zones and access rules"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "list_suppressions",
+      "column": "Description",
+      "seed": "List active fallow-ignore suppression markers grouped per file (line, kind, level, reason, and a stale cross-reference); a read-only governance inventory that always exits 0"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "project_info",
+      "column": "Description",
+      "seed": "Project metadata: active framework plugins, discovered files, entry points, and boundary zones"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "recommend",
+      "column": "Description",
+      "seed": "Recommend a project-tailored config from framework/workspace/tooling detection: a loader-validated proposed_config and three-valued auto/default/taste decisions for cold-start onboarding"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "security_candidates",
+      "column": "Description",
+      "seed": "Unverified local security candidates (tainted sinks) for downstream agent verification"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "symbol_impact",
+      "column": "Description",
+      "seed": "Return advisory exact-symbol consumers, affected files, and targeted tests for a TypeScript export or exported class method; select either export_name, or both class_name and member_name; not a substitute for tsc or Oxlint"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "trace_clone",
+      "column": "Description",
+      "seed": "Deep-dive a duplicate-code clone group by location or fingerprint"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "trace_dependency",
+      "column": "Description",
+      "seed": "Trace where a dependency is imported and whether scripts or CI use it"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "trace_export",
+      "column": "Description",
+      "seed": "Trace why an export is used or unused, including re-export chains and entry-point status"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "trace_file",
+      "column": "Description",
+      "seed": "Trace all module-graph edges for a file (imports, exports, importers, re-exports)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "trace_symbol",
+      "column": "Description",
+      "seed": "Trace an exact TypeScript symbol with checker-backed references, namespace identity, aliases, and re-export hops. Root trace fields preserve syntactic context; treat semantic.references, semantic.status, and semantic.identity as the authoritative exact evidence. The proof covers only the lane named by semantic.target.namespace, so a root trace that lists a reference the proof does not is wider evidence rather than stale. This is project-wide evidence for Fallow decisions, not a compiler-diagnostic or lint-rule surface."
+    }
+  ]
+}

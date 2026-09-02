@@ -21,14 +21,22 @@ pub struct FeatureFlagsAnalysis {
 }
 
 /// Run feature flag analysis with a reusable analysis session.
-#[must_use]
-pub fn analyze_feature_flags_with_session(session: &AnalysisSession) -> FeatureFlagsAnalysis {
-    let modules = session.shared_parsed_modules(false);
-    let flags = collect_flags_for_modules(session, session.files(), &modules);
-    FeatureFlagsAnalysis {
+///
+/// # Errors
+///
+/// Returns [`crate::EngineError::cancelled`] when the session's caller
+/// cancelled the run. The scan spends its time in the parse loop and in the
+/// dead-code correlation behind it, and both observe the token. A session
+/// without a cancellation token can never return this error.
+pub fn analyze_feature_flags_with_session(
+    session: &AnalysisSession,
+) -> crate::EngineResult<FeatureFlagsAnalysis> {
+    let modules = session.shared_parsed_modules_cancellable(false, "the feature-flag scan")?;
+    let flags = collect_flags_for_modules(session, session.files(), &modules)?;
+    Ok(FeatureFlagsAnalysis {
         flags,
         files_scanned: session.files().len(),
-    }
+    })
 }
 
 /// Run feature flag analysis while reusing dead-code results from the same
@@ -66,21 +74,26 @@ fn collect_flags_for_modules(
     session: &AnalysisSession,
     files: &[DiscoveredFile],
     modules: &Arc<[ModuleInfo]>,
-) -> Vec<FeatureFlag> {
+) -> crate::EngineResult<Vec<FeatureFlag>> {
     let mut flags = collect_flags_from_modules(session.config(), files, modules);
-    correlate_flags_with_dead_code(&mut flags, session, modules);
-    flags
+    correlate_flags_with_dead_code(&mut flags, session, modules)?;
+    Ok(flags)
 }
 
 fn correlate_flags_with_dead_code(
     flags: &mut [FeatureFlag],
     session: &AnalysisSession,
     modules: &Arc<[ModuleInfo]>,
-) {
-    if let Ok(analysis_output) = session.analyze_dead_code_with_shared_modules(Arc::clone(modules))
-    {
-        correlate_with_dead_code(flags, &analysis_output.results);
+) -> crate::EngineResult<()> {
+    match session.analyze_dead_code_with_shared_modules(Arc::clone(modules)) {
+        Ok(analysis_output) => correlate_with_dead_code(flags, &analysis_output.results),
+        // Correlation only enriches the flags, so a broken dead-code pass
+        // leaves them uncorrelated rather than failing the scan. A cancelled
+        // one is not a failure to enrich, it is the caller asking to stop.
+        Err(err) if err.is_cancelled() => return Err(err),
+        Err(_) => {}
     }
+    Ok(())
 }
 
 fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisResults) {
@@ -259,7 +272,8 @@ mod tests {
         )
         .expect("late source");
 
-        let session_flags = analyze_feature_flags_with_session(&session);
+        let session_flags =
+            analyze_feature_flags_with_session(&session).expect("session flag scan");
         let session_names: Vec<_> = session_flags
             .flags
             .iter()
@@ -267,7 +281,8 @@ mod tests {
             .collect();
         assert_eq!(session_names, vec!["FEATURE_EXISTING"]);
 
-        let second_session_flags = analyze_feature_flags_with_session(&session);
+        let second_session_flags =
+            analyze_feature_flags_with_session(&session).expect("second session flag scan");
         let second_session_names: Vec<_> = second_session_flags
             .flags
             .iter()

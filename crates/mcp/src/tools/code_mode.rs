@@ -6,7 +6,7 @@ use std::fs;
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -1017,12 +1017,13 @@ fn timed_dispatch(
 /// most `element_output_bytes`, the shared output budget's per-dispatch share.
 ///
 /// The split is not an optimization detail, it is what keeps the fan-out from
-/// stacking uncancellable work: `fallow-api` has no cancellation, so two
-/// in-process analyses running at once would be exactly the pile-up the
-/// abandoned-call accounting exists to prevent. Subprocess-backed calls are
-/// both the expensive ones and the only ones a deadline can actually kill, so
-/// they are what the workers overlap. Every worker reaches `fallow-api`'s
-/// decline path immediately, so no worker ever starts in-process work.
+/// stacking work that only stops cooperatively: two in-process analyses running
+/// at once would be exactly the pile-up the abandoned-call accounting exists to
+/// prevent, and the deadline can ask them to stop but not force them to.
+/// Subprocess-backed calls are both the expensive ones and the only ones a
+/// deadline can actually kill, so they are what the workers overlap. Every
+/// worker reaches `fallow-api`'s decline path immediately, so no worker ever
+/// starts in-process work.
 fn run_batch_dispatches(
     binary: &str,
     deadline: Instant,
@@ -1140,10 +1141,14 @@ fn run_api_tool_with_deadline(
 /// Run an in-process host call under the sandbox deadline, or decline it so the
 /// caller falls back to the killable subprocess.
 ///
-/// `fallow-api` cannot be cancelled, so a timed-out call returns while its
-/// analysis keeps running. `abandoned` bounds how much of that orphaned work a
-/// long-lived server can stack up: once the bound is reached, further host
-/// calls take the subprocess path until the abandoned analyses drain.
+/// The deadline sets the call's cancellation token, so the abandoned analysis
+/// stops at its next `fallow-api` stage boundary rather than always running to
+/// completion. That stop is cooperative and has no upper bound: a token set
+/// inside a long stage is not seen until the stage ends, and one route
+/// (`explain`) does not read it at all. `abandoned` is therefore still what
+/// bounds how much orphaned work a long-lived server can stack up: once the
+/// bound is reached, further host calls take the subprocess path until the
+/// abandoned analyses drain.
 fn run_api_tool_with_deadline_and_runner<F>(
     tool: CodeModeTool,
     params: serde_json::Value,
@@ -1152,7 +1157,11 @@ fn run_api_tool_with_deadline_and_runner<F>(
     abandoned: &'static AbandonedHostCalls,
 ) -> Result<Option<serde_json::Value>, String>
 where
-    F: FnOnce(CodeModeTool, serde_json::Value) -> Result<Option<serde_json::Value>, String>
+    F: FnOnce(
+            CodeModeTool,
+            serde_json::Value,
+            Option<Arc<AtomicBool>>,
+        ) -> Result<Option<serde_json::Value>, String>
         + Send
         + 'static,
 {
@@ -1170,11 +1179,13 @@ where
         state: Arc::clone(&state),
         abandoned,
     };
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let call_cancellation = Arc::clone(&cancellation);
     let (tx, rx) = mpsc::channel();
     thread::Builder::new()
         .name("fallow-code-mode-api".to_string())
         .spawn(move || {
-            let result = runner(tool, params);
+            let result = runner(tool, params, Some(call_cancellation));
             drop(completion);
             let _ = tx.send(result);
         })
@@ -1183,6 +1194,7 @@ where
     match rx.recv_timeout(remaining) {
         Ok(result) => result,
         Err(mpsc::RecvTimeoutError::Timeout) => {
+            cancellation.store(true, Ordering::SeqCst);
             abandoned.record(&state);
             Err("code mode execution timed out while running fallow".to_string())
         }
@@ -1192,7 +1204,7 @@ where
     }
 }
 
-/// In-process host calls that outlived their deadline and are still running.
+/// In-process host calls that outlived their deadline and are still unwinding.
 static ABANDONED_API_HOST_CALLS: AbandonedHostCalls = AbandonedHostCalls::new();
 
 const HOST_CALL_RUNNING: u8 = 0;
@@ -1201,8 +1213,8 @@ const HOST_CALL_ABANDONED: u8 = 2;
 
 /// How many abandoned in-process analyses Code Mode carries before it stops
 /// starting new ones. One is the whole point: the next host call takes the
-/// killable subprocess instead of stacking a second uncancellable analysis on
-/// top of work nobody can stop.
+/// killable subprocess instead of stacking a second analysis on top of one that
+/// is still winding down.
 const MAX_ABANDONED_API_HOST_CALLS: usize = 1;
 
 /// Running total of in-process host calls nobody is waiting for any more.
@@ -1773,7 +1785,7 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_millis(1),
-            |_tool, _params| {
+            |_tool, _params, _cancellation| {
                 std::thread::sleep(Duration::from_millis(50));
                 Ok(Some(serde_json::json!({"ok": true})))
             },
@@ -1784,8 +1796,79 @@ mod tests {
         assert_eq!(err, "code mode execution timed out while running fallow");
     }
 
-    /// A timed-out in-process call keeps running, so the next host call must
-    /// not stack a second uncancellable analysis on top of it.
+    /// The deadline is a stop signal, not only a response deadline: the work
+    /// the host abandons is told to cancel, and this asserts the abandoned
+    /// worker actually observed that and returned because of it.
+    #[test]
+    fn the_deadline_cancels_the_work_the_host_abandons() {
+        static ABANDONED: AbandonedHostCalls = AbandonedHostCalls::new();
+
+        let observed_cancellation = Arc::new(AtomicBool::new(false));
+        let worker_view = Arc::clone(&observed_cancellation);
+        let timed_out = run_api_tool_with_deadline_and_runner(
+            CodeModeTool::ProjectInfo,
+            serde_json::json!({}),
+            Instant::now() + Duration::from_millis(20),
+            move |_tool, _params, cancellation| {
+                let cancellation =
+                    cancellation.expect("the host must hand its in-process work a token");
+                // Stand in for an analysis that checks its token at a stage
+                // boundary. The bounded wait means a token that never flips
+                // fails the assertion below instead of hanging the suite.
+                let give_up_at = Instant::now() + Duration::from_secs(10);
+                while !cancellation.load(Ordering::SeqCst) && Instant::now() < give_up_at {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                worker_view.store(cancellation.load(Ordering::SeqCst), Ordering::SeqCst);
+                Ok(Some(serde_json::json!({"ok": true})))
+            },
+            &ABANDONED,
+        );
+        assert_eq!(
+            timed_out.expect_err("the slow host call must hit the deadline"),
+            "code mode execution timed out while running fallow"
+        );
+
+        let drained = Instant::now() + Duration::from_secs(10);
+        while ABANDONED.saturated() && Instant::now() < drained {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            observed_cancellation.load(Ordering::SeqCst),
+            "the abandoned work must have seen the deadline cancel it"
+        );
+        assert!(
+            !ABANDONED.saturated(),
+            "the cancelled worker must release its slot"
+        );
+    }
+
+    /// A host call that returns inside its deadline is never cancelled.
+    #[test]
+    fn an_in_time_host_call_is_left_alone() {
+        static ABANDONED: AbandonedHostCalls = AbandonedHostCalls::new();
+
+        let result = run_api_tool_with_deadline_and_runner(
+            CodeModeTool::ProjectInfo,
+            serde_json::json!({}),
+            Instant::now() + Duration::from_secs(30),
+            |_tool, _params, cancellation| {
+                let cancellation = cancellation.expect("the host always supplies a token");
+                Ok(Some(serde_json::json!({
+                    "cancelled": cancellation.load(Ordering::SeqCst)
+                })))
+            },
+            &ABANDONED,
+        );
+
+        assert_eq!(
+            result.expect("host call"),
+            Some(serde_json::json!({"cancelled": false}))
+        );
+    }
+
+    /// A timed-out in-process call is asked to stop but stops cooperatively, so
+    /// the next host call must not stack a second analysis on top of it.
     #[test]
     fn abandoned_in_process_work_pushes_later_host_calls_to_the_subprocess() {
         static ABANDONED: AbandonedHostCalls = AbandonedHostCalls::new();
@@ -1795,7 +1878,7 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_millis(1),
-            move |_tool, _params| {
+            move |_tool, _params, _cancellation| {
                 let _ = release_rx.recv();
                 Ok(Some(serde_json::json!({"ok": true})))
             },
@@ -1811,7 +1894,9 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_secs(30),
-            |_tool, _params| panic!("a saturated host must not start in-process work"),
+            |_tool, _params, _cancellation| {
+                panic!("a saturated host must not start in-process work")
+            },
             &ABANDONED,
         );
         assert_eq!(
@@ -1840,7 +1925,7 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_secs(30),
-            |_tool, _params| Ok(Some(serde_json::json!({"ok": true}))),
+            |_tool, _params, _cancellation| Ok(Some(serde_json::json!({"ok": true}))),
             &ABANDONED,
         );
 

@@ -44,7 +44,7 @@ harness = false
 [dev-dependencies]
 criterion = { workspace = true }
 fallow-api = { workspace = true }
-fallow-cli = { version = "3.21.0", path = "../cli" }
+fallow-cli = { version = "3.22.0", path = "../cli" }
 fallow-config = { workspace = true }
 fallow-engine = { workspace = true }
 fallow-extract = { workspace = true }

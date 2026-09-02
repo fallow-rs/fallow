@@ -23,6 +23,7 @@ use crate::{
 pub use fallow_core::plugins::manifest_entries::{
     CheckWarning, ManifestResult, RuleReport, WarningKind, check_manifest_entries,
 };
+pub use fallow_core::plugins::registry::builtin_plugin_names;
 pub use fallow_core::plugins::registry::is_external_plugin_active;
 
 // Discovery vocabulary owned by the surviving core walk, re-exported so the

@@ -2,7 +2,8 @@ use serde_json::Value;
 
 use super::knip_fields::{
     migrate_exclude, migrate_ignore, migrate_ignore_deps, migrate_ignore_exports_used_in_file,
-    migrate_include, migrate_rules, migrate_simple_field, warn_plugin_keys, warn_unmappable_fields,
+    migrate_include, migrate_rules, migrate_simple_field, warn_unhandled_root_keys,
+    warn_unmappable_fields,
 };
 #[cfg(test)]
 use super::knip_tables::KNIP_RULE_MAP;
@@ -59,7 +60,7 @@ pub(super) fn migrate_knip(
 
     warn_unmappable_fields(obj, warnings);
 
-    warn_plugin_keys(obj, warnings);
+    warn_unhandled_root_keys(obj, warnings);
 
     if let Some(workspaces) = obj.get("workspaces") {
         warn_workspace_configs(workspaces, warnings);
@@ -603,7 +604,8 @@ mod tests {
     fn migrate_knip_exclude_all_mappable_types() {
         let knip: serde_json::Value = serde_json::from_str(
             r#"{"exclude": ["files", "dependencies", "devDependencies", "exports",
-                "types", "enumMembers", "classMembers", "unlisted", "unresolved", "duplicates"]}"#,
+                "types", "enumMembers", "classMembers", "unlisted", "unresolved", "duplicates",
+                "cycles"]}"#,
         )
         .unwrap();
         let mut config = empty_config();

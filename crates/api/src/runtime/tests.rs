@@ -1331,7 +1331,7 @@ fn group(instances: Vec<CloneInstance>) -> fallow_types::duplicates::CloneGroup 
     }
 }
 
-fn dead_code_project() -> tempfile::TempDir {
+pub(super) fn dead_code_project() -> tempfile::TempDir {
     let project = tempfile::tempdir().expect("temp dir");
     let root = project.path();
     std::fs::create_dir(root.join("src")).expect("src dir");

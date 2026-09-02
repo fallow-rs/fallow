@@ -244,6 +244,7 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
             changed_workspaces: None,
             explain: true,
             type_aware: fallow_api::TypeAwareOptions::default(),
+            ..AnalysisOptions::default()
         },
         base: non_empty_string(params.base.as_deref()),
         production: params.production.unwrap_or(false),

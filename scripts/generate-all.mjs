@@ -28,6 +28,7 @@ const CAPABILITY_SCHEMA_PATH = "npm/fallow/capabilities.json";
 const ISSUE_REGISTRY_PATH = "npm/fallow/issue-registry.json";
 const OUTPUT_SCHEMA_PATH = "docs/output-schema.json";
 const AGENT_DOCS_TARGET = "npm/fallow/skills/fallow";
+const AGENT_DOCS_SEED_RECORD_PATH = "scripts/agent-doc-curated-seeds.json";
 const TYPE_AWARE_MANIFEST_PATH = "crates/api/type-aware-protocol.json";
 const TYPE_AWARE_MODULE_PATH = "tools/type-aware-sidecar/src/generated-protocol.mjs";
 const EXTENSION_CODEGEN_PATH = "editors/vscode/scripts/codegen-contracts.mjs";
@@ -135,6 +136,8 @@ const generateAgentDocs = (stagingRoot) => {
       AGENT_DOCS_TARGET,
       "--output-target",
       join(stagingRoot, AGENT_DOCS_TARGET),
+      "--seed-record-output",
+      join(stagingRoot, AGENT_DOCS_SEED_RECORD_PATH),
     ],
     { stdio: "inherit" },
   );

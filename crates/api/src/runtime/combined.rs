@@ -68,6 +68,7 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
     let start = Instant::now();
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
     resolved.install(|| {
+        resolved.ensure_not_cancelled("combined analysis")?;
         let production_modes = resolve_effective_production_modes(&resolved, None, None, None)?;
         let prepared = prepare_combined_options(options, production_modes);
         let changed_files = changed_files_for_run(&resolved)?;
@@ -146,6 +147,7 @@ fn run_combined_with_dead_code_session(
     share_health: bool,
     share_dupes: bool,
 ) -> ProgrammaticResult<CombinedSectionRun> {
+    resolved.ensure_not_cancelled("config load and file discovery")?;
     let session = super::dead_code::load_dead_code_session(&prepared.dead_code, resolved)?;
     if share_dupes {
         return run_combined_with_project_artifacts(CombinedProjectArtifactRun {
@@ -167,6 +169,7 @@ fn run_combined_with_dead_code_session(
     let (dead_code, dead_code_artifacts) =
         run_dead_code_with_optional_artifacts(&ctx, options.health && share_health)?;
     let duplication = run_combined_duplication(&ctx, share_dupes)?;
+    resolved.ensure_not_cancelled("the health section")?;
     let health = run_combined_health(&ctx, share_health, dead_code_artifacts, None)?;
     Ok(CombinedSectionRun {
         dead_code,
@@ -226,6 +229,7 @@ fn run_combined_with_project_artifacts(
         artifacts,
     } = dead_code;
     let dead_code_artifacts = retain_dead_code_artifacts.then_some(artifacts);
+    resolved.ensure_not_cancelled("the health section")?;
     let health = run_combined_health(
         &DeadCodeSessionRun {
             options,
@@ -300,9 +304,12 @@ fn analyze_project_artifacts_for_combined(
             },
         )
         .map_err(|err| {
-            ProgrammaticError::new(format!("combined analysis failed: {err}"), 2)
-                .with_code("FALLOW_COMBINED_FAILED")
-                .with_context("combined")
+            super::dead_code::map_engine_error(
+                &err,
+                "combined analysis failed",
+                "FALLOW_COMBINED_FAILED",
+                "combined",
+            )
         })
 }
 

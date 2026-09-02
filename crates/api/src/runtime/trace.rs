@@ -138,13 +138,18 @@ pub fn run_trace_clone(
     validate_trace_clone_target(&options.target)?;
     let resolved = resolve_programmatic_analysis_context(&options.duplication.analysis)?;
     resolved.install(|| {
+        resolved.ensure_not_cancelled("config load and file discovery")?;
         let session = duplication::load_duplication_session(&options.duplication, &resolved)?;
+        resolved.ensure_not_cancelled("duplication detection")?;
         let dupes_config =
             duplication::build_dupes_config(&options.duplication, &session.config().duplicates);
         let cache_dir = (!resolved.no_cache).then_some(session.config().cache_dir.as_path());
         let report = session
             .find_duplicates_with_defaults(&dupes_config, cache_dir)
             .report;
+        // Duplication detection is infallible, so the cancelled run has to be
+        // reported before the report is traced as a complete one.
+        resolved.ensure_not_cancelled("the clone trace")?;
         let (trace, not_found) = match &options.target {
             TraceCloneTarget::Location { file, line } => (
                 fallow_engine::trace::trace_clone(&report, session.root(), file, *line),
@@ -381,9 +386,12 @@ fn trace_artifacts(session: &AnalysisSession) -> ProgrammaticResult<TraceArtifac
     let artifacts = session
         .analyze_dead_code_with_session_artifacts(false, true, None)
         .map_err(|err| {
-            ProgrammaticError::new(format!("trace analysis failed: {err}"), 2)
-                .with_code("FALLOW_TRACE_FAILED")
-                .with_context("trace")
+            super::dead_code::map_engine_error(
+                &err,
+                "trace analysis failed",
+                "FALLOW_TRACE_FAILED",
+                "trace",
+            )
         })?;
     let graph = artifacts.analysis.graph.ok_or_else(|| {
         ProgrammaticError::new("trace requires a retained module graph", 2)

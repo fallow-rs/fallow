@@ -40,6 +40,15 @@
  * - Everything OUTSIDE the markers is hand-written and never touched. Markers
  *   live on their own lines, outside table rows.
  *
+ * Curated-cell staleness gate: preserving a curated cell forever hides the case
+ * where the manifest text it was written from later changes, leaving published
+ * prose that describes a surface that has moved. Every run records the seed of
+ * each curated cell in `scripts/agent-doc-curated-seeds.json` (outside the
+ * vendored skill tree, so the public skills surface is untouched). `--check`
+ * fails when a recorded seed no longer matches, naming the cell and printing
+ * both seeds; a plain run re-records them, so re-accepting a seed is one
+ * command.
+ *
  * Cell escaping contract: `|` becomes `\|`, newline/whitespace runs collapse
  * to one space, backticks and angle brackets pass through untouched (they
  * render fine inside table cells). Curated cells must keep pipes escaped as
@@ -50,11 +59,13 @@
  *     --target <skills-tree-dir> [--target <dir> ...] [--check] \
  *     [--expect-version <x.y.z>]
  *   node scripts/generate-agent-docs.mjs --schema <schema.json> --target <dir>
- *     [--output-target <staging-dir>]
+ *     --output-target <staging-dir> --seed-record-output <staging-record.json>
  *
  * `--check` renders in memory and exits 1 listing drifted sections, writing
  * nothing. `--expect-version` guards against a stale binary: the manifest's
- * `version` field must match exactly.
+ * `version` field must match exactly. `--seed-record` overrides the seed record
+ * read for comparison, and `--seed-record-output` sends the rewritten record to
+ * a staging path (required with `--output-target`).
  *
  * Run during /fallow-release (step 5c) against the canonical fallow-skills
  * tree before re-vendoring npm/fallow/skills. Zero dependencies; Node >= 18.
@@ -62,8 +73,15 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** Committed record of the seed every curated cell was last accepted against.
+ * It lives beside the generator, outside the vendored skill tree, so the
+ * staleness gate never touches the public skills surface. */
+export const CURATED_SEED_RECORD_PATH = "scripts/agent-doc-curated-seeds.json";
 
 const SKILL_SECTION_IDS = ["commands", "issue-types", "task-matrix"];
 // mcp-tools moved out of SKILL.md into references/mcp.md: the full 20+ tool
@@ -300,10 +318,16 @@ const renderTable = (headers, rows) => {
   return lines.join("\n");
 };
 
-/** Existing curated cell if present and non-empty, else the seed. */
+/** Existing curated cell if present and non-empty, else the seed.
+ *
+ * The seed is reported to `existing.record` when the caller supplied one (see
+ * `curatedSeeds`). A table parsed from a real file has no recorder, so normal
+ * regeneration is unaffected. */
 const curatedCell = (existing, key, header, seed) => {
+  const escaped = escapeCell(seed);
+  existing.record?.(key, header, escaped);
   const cell = existing.rows.get(key)?.get(header);
-  return cell !== undefined && cell !== "" ? cell : escapeCell(seed);
+  return cell !== undefined && cell !== "" ? cell : escaped;
 };
 
 const renderCommandsSection = (schema, existing) => {
@@ -595,6 +619,121 @@ const RENDERERS = {
   "flags:config": renderCommandFlagsSection("flags:config"),
 };
 
+/** Stable identity of one curated cell: section, row key, column header. */
+export const curatedSeedKey = (section, row, column) => `${section}\u0000${row}\u0000${column}`;
+
+/** A stand-in for a parsed table that owns no cells and reports every seed the
+ * renderer reaches for. Renderers treat it exactly like an empty table, so
+ * every curated column takes its seed path. */
+const seedCollector = (section, seeds) => ({
+  headers: [],
+  rows: new Map(),
+  record: (row, column, seed) => {
+    seeds.set(curatedSeedKey(section, row, column), { section, row, column, seed });
+  },
+});
+
+/** The seed text every curated cell in `sectionIds` would be born with, as a
+ * pure function of the manifest. Sorted so the committed record is stable. */
+export const curatedSeeds = (schema, sectionIds = SECTION_IDS) => {
+  const seeds = new Map();
+  for (const sectionId of sectionIds) {
+    RENDERERS[sectionId](schema, seedCollector(sectionId, seeds));
+  }
+  return [...seeds.values()].toSorted(
+    (left, right) =>
+      left.section.localeCompare(right.section) ||
+      left.row.localeCompare(right.row) ||
+      left.column.localeCompare(right.column),
+  );
+};
+
+export const renderCuratedSeedRecord = (seeds) =>
+  `${JSON.stringify(
+    {
+      schema_version: 1,
+      source: "fallow schema, via scripts/generate-agent-docs.mjs",
+      cells: seeds,
+    },
+    null,
+    2,
+  )}\n`;
+
+export const readCuratedSeedRecord = (path) => {
+  if (!existsSync(path)) {
+    return [];
+  }
+  const parsed = JSON.parse(readFileSync(path, "utf8"));
+  if (parsed.schema_version !== 1 || !Array.isArray(parsed.cells)) {
+    throw new Error(
+      `${path}: unsupported curated seed record (expected schema_version 1 and a cells array)`,
+    );
+  }
+  return parsed.cells;
+};
+
+/** Split the recorded and current seed sets into changed, added, and removed
+ * cells. A CHANGED cell is the staleness signal: hand-written prose is still
+ * published, but the manifest text it was written from has moved on. */
+export const compareCuratedSeeds = (recorded, current) => {
+  const before = new Map(
+    recorded.map((cell) => [curatedSeedKey(cell.section, cell.row, cell.column), cell]),
+  );
+  const after = new Map(
+    current.map((cell) => [curatedSeedKey(cell.section, cell.row, cell.column), cell]),
+  );
+  const changed = [];
+  const added = [];
+  for (const [key, cell] of after) {
+    const previous = before.get(key);
+    if (!previous) {
+      added.push(cell);
+    } else if (previous.seed !== cell.seed) {
+      changed.push({ ...cell, recordedSeed: previous.seed });
+    }
+  }
+  const removed = [...before].filter(([key]) => !after.has(key)).map(([, cell]) => cell);
+  return { added, changed, removed };
+};
+
+export const hasCuratedSeedDrift = ({ added, changed, removed }) =>
+  added.length + changed.length + removed.length > 0;
+
+const cellLabel = (cell) => `${cell.section} / ${cell.row} / ${cell.column}`;
+
+/** Report per-cell curated seed drift.
+ *
+ * `recording` is whether this run rewrites the committed record, not whether it
+ * is a `--check`. A staged run writes only into a temporary output tree, so
+ * announcing that it is recording, and naming that temporary path, would tell
+ * the reader to act on a file that will not survive the run. */
+export const formatCuratedSeedDrift = (comparison, { recording = false, recordPath } = {}) => {
+  const total = comparison.added.length + comparison.changed.length + comparison.removed.length;
+  const lines = [
+    recording
+      ? `curated agent-doc cell seeds moved (${total}); recording them in ${recordPath}`
+      : `CURATED SEED DRIFT: ${total} curated agent-doc cell(s) no longer match ${recordPath}`,
+  ];
+  for (const cell of comparison.changed) {
+    lines.push(`  changed: ${cellLabel(cell)}`);
+    lines.push(`    recorded seed: ${cell.recordedSeed}`);
+    lines.push(`    current seed:  ${cell.seed}`);
+  }
+  for (const cell of comparison.added) {
+    lines.push(`  new cell: ${cellLabel(cell)}`);
+    lines.push(`    current seed:  ${cell.seed}`);
+  }
+  for (const cell of comparison.removed) {
+    lines.push(`  dropped cell: ${cellLabel(cell)}`);
+  }
+  lines.push(
+    "A changed seed means the published cell was curated against manifest text that has since",
+    "moved. Rewrite the curated cell in the skill tree when its prose no longer matches;",
+    "`npm run generate:contracts` records the current seeds.",
+  );
+  return lines.join("\n");
+};
+
 /** True only when BOTH the start and end markers for a section are present.
  * A fully-absent pair means the target has not adopted this section, so the
  * orchestrator skips it; a half-present pair is malformed and still throws via
@@ -743,6 +882,10 @@ const parseArgs = (argv) => {
       opts.outputTargets.push(next());
     } else if (arg === "--expect-version") {
       opts.expectVersion = next();
+    } else if (arg === "--seed-record") {
+      opts.seedRecord = next();
+    } else if (arg === "--seed-record-output") {
+      opts.seedRecordOutput = next();
     } else if (arg === "--check") {
       opts.check = true;
     } else {
@@ -758,7 +901,64 @@ const parseArgs = (argv) => {
   if (opts.check && opts.outputTargets.length > 0) {
     throw new Error("--check cannot be combined with --output-target");
   }
+  if (opts.check && opts.seedRecordOutput) {
+    throw new Error("--check cannot be combined with --seed-record-output");
+  }
+  // Staging a run that still rewrote the committed seed record would leak
+  // generated state out of the transaction, so stage both or neither.
+  if (opts.outputTargets.length > 0 && !opts.seedRecordOutput) {
+    throw new Error("--output-target requires --seed-record-output <path>");
+  }
   return opts;
+};
+
+/** Compare the seeds the manifest produces now against the committed record,
+ * report per-cell drift, and (outside `--check`) re-record them. Returns 1 when
+ * `--check` found drift. */
+const processCuratedSeeds = ({ adoptedSections, opts, schema }) => {
+  const seeds = curatedSeeds(
+    schema,
+    SECTION_IDS.filter((sectionId) => adoptedSections.has(sectionId)),
+  );
+  const recordFile = opts.seedRecord ?? join(REPO_ROOT, CURATED_SEED_RECORD_PATH);
+  const outputFile = opts.seedRecordOutput ?? recordFile;
+  const inPlace = resolve(outputFile) === resolve(recordFile);
+  const comparison = compareCuratedSeeds(readCuratedSeedRecord(recordFile), seeds);
+  const drifted = hasCuratedSeedDrift(comparison);
+
+  if (opts.check) {
+    if (drifted) {
+      console.error(
+        formatCuratedSeedDrift(comparison, { recording: false, recordPath: recordFile }),
+      );
+      return 1;
+    }
+    console.log(`up to date: ${recordFile}`);
+    return 0;
+  }
+
+  if (drifted) {
+    // A staged run points at the committed record, because that is the file a
+    // reader can inspect and `npm run generate:contracts` re-records.
+    console.log(
+      formatCuratedSeedDrift(comparison, {
+        recording: inPlace,
+        recordPath: inPlace ? outputFile : recordFile,
+      }),
+    );
+  }
+  mkdirSync(dirname(outputFile), { recursive: true });
+  writeFileSync(outputFile, renderCuratedSeedRecord(seeds));
+  console.log(`${inPlace ? "recorded" : "staged"}: ${outputFile}`);
+  return 0;
+};
+
+const collectAdoptedSections = (text, sectionIds, adopted) => {
+  for (const sectionId of sectionIds) {
+    if (!sectionIsAbsent(text, sectionId)) {
+      adopted.add(sectionId);
+    }
+  }
 };
 
 export const main = (argv = process.argv.slice(2)) => {
@@ -766,10 +966,12 @@ export const main = (argv = process.argv.slice(2)) => {
   const schema = loadSchema(opts);
 
   let drifted = 0;
+  const adoptedSections = new Set();
   for (const [targetIndex, target] of opts.targets.entries()) {
     const outputTarget = opts.outputTargets[targetIndex] ?? target;
     const skillFile = join(target, "SKILL.md");
     const skillBefore = readFileSync(skillFile, "utf8");
+    collectAdoptedSections(skillBefore, SKILL_SECTION_IDS, adoptedSections);
     const skillAfter = regenerateSkillMd(skillBefore, schema, skillFile);
     if (
       processFile({
@@ -788,6 +990,7 @@ export const main = (argv = process.argv.slice(2)) => {
     const cliReferenceFile = join(target, "references", "cli-reference.md");
     if (existsSync(cliReferenceFile)) {
       const cliBefore = readFileSync(cliReferenceFile, "utf8");
+      collectAdoptedSections(cliBefore, CLI_REFERENCE_SECTION_IDS, adoptedSections);
       const cliAfter = regenerateCliReferenceMd(cliBefore, schema, cliReferenceFile);
       if (
         processFile({
@@ -807,6 +1010,7 @@ export const main = (argv = process.argv.slice(2)) => {
     const mcpReferenceFile = join(target, "references", "mcp.md");
     if (existsSync(mcpReferenceFile)) {
       const mcpBefore = readFileSync(mcpReferenceFile, "utf8");
+      collectAdoptedSections(mcpBefore, MCP_REFERENCE_SECTION_IDS, adoptedSections);
       const mcpAfter = regenerateMcpReferenceMd(mcpBefore, schema, mcpReferenceFile);
       if (
         processFile({
@@ -823,6 +1027,8 @@ export const main = (argv = process.argv.slice(2)) => {
       }
     }
   }
+
+  drifted += processCuratedSeeds({ adoptedSections, opts, schema });
   return drifted === 0 ? 0 : 1;
 };
 

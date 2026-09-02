@@ -1,5 +1,7 @@
 //! Source parsing contracts owned by the engine boundary.
 
+use std::sync::atomic::AtomicBool;
+
 use fallow_types::discover::DiscoveredFile;
 #[cfg(test)]
 pub use fallow_types::extract::{ExportName, MemberKind, VisibilityTag};
@@ -118,11 +120,16 @@ pub mod inventory {
 /// Keeping parsing behind the engine boundary lets sessions and future
 /// incremental runners choose cache policy without exposing the extract crate
 /// as the public orchestration layer.
+///
+/// `cancellation`, when set mid-parse, turns every remaining file into a no-op
+/// and truncates the returned modules; see
+/// [`fallow_extract::parse_all_files_cancellable`].
 #[must_use]
 pub(crate) fn parse_all_files(
     files: &[DiscoveredFile],
     cache: Option<&CacheStore>,
     need_complexity: bool,
+    cancellation: Option<&AtomicBool>,
 ) -> ParseResult {
-    fallow_extract::parse_all_files(files, cache, need_complexity)
+    fallow_extract::parse_all_files_cancellable(files, cache, need_complexity, cancellation)
 }

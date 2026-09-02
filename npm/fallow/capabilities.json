@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.21.0",
+  "version": "3.22.0",
   "manifest_version": "1",
   "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "global_flags": [
@@ -7105,7 +7105,7 @@
     ]
   },
   "plugins": {
-    "count": 124,
+    "count": 125,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -7231,7 +7231,8 @@
       "wuchale",
       "varlock",
       "pnpm",
-      "bun"
+      "bun",
+      "deno"
     ]
   },
   "task_matrix": [

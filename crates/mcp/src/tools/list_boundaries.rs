@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::params::ListBoundariesParams;
 
 use fallow_api::{
@@ -34,8 +37,11 @@ pub async fn run_list_boundaries(
 
 pub fn run_list_boundaries_api_value(
     params: &ListBoundariesParams,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let value = run_api_list_boundaries(&list_boundaries_options_from_params(params))
+    let mut options = list_boundaries_options_from_params(params);
+    options.analysis.cancellation = cancellation;
+    let value = run_api_list_boundaries(&options)
         .and_then(serialize_list_boundaries_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
 
@@ -79,6 +85,7 @@ fn list_boundaries_options_from_params(params: &ListBoundariesParams) -> ListBou
             changed_workspaces: None,
             explain: false,
             type_aware: fallow_api::TypeAwareOptions::default(),
+            ..AnalysisOptions::default()
         },
     }
 }

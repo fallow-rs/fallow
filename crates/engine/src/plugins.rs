@@ -16,133 +16,6 @@ pub use crate::core_backend::{
 pub mod registry {
     use crate::core_backend;
 
-    const BUILTIN_PLUGIN_NAMES: &[&str] = &[
-        "nextjs",
-        "nuxt",
-        "pinia",
-        "remix",
-        "astro",
-        "browser-extension",
-        "wxt",
-        "angular",
-        "react-router",
-        "redwoodsdk",
-        "tanstack-router",
-        "react-native",
-        "expo",
-        "expo-router",
-        "firebase",
-        "nestjs",
-        "adonis",
-        "docusaurus",
-        "gatsby",
-        "sveltekit",
-        "nitro",
-        "capacitor",
-        "ionic",
-        "sanity",
-        "supabase",
-        "vitepress",
-        "rspress",
-        "next-intl",
-        "relay",
-        "electron",
-        "i18next",
-        "qwik",
-        "convex",
-        "lit",
-        "lexical",
-        "obsidian",
-        "content-collections",
-        "contentlayer",
-        "fumadocs",
-        "mintlify",
-        "velite",
-        "ember",
-        "vite",
-        "vscode",
-        "webpack",
-        "rollup",
-        "rolldown",
-        "rspack",
-        "rsbuild",
-        "tsup",
-        "tsdown",
-        "pkg-utils",
-        "parcel",
-        "vitest",
-        "jest",
-        "playwright",
-        "cypress",
-        "mocha",
-        "ava",
-        "tap",
-        "tsd",
-        "k6",
-        "storybook",
-        "stryker",
-        "karma",
-        "cucumber",
-        "webdriverio",
-        "eslint",
-        "biome",
-        "stylelint",
-        "prettier",
-        "oxlint",
-        "markdownlint",
-        "cspell",
-        "remark",
-        "typescript",
-        "babel",
-        "swc",
-        "tailwind",
-        "postcss",
-        "unocss",
-        "pandacss",
-        "prisma",
-        "drizzle",
-        "knex",
-        "typeorm",
-        "kysely",
-        "turborepo",
-        "nx",
-        "changesets",
-        "syncpack",
-        "commitlint",
-        "commitizen",
-        "commit-and-tag-version",
-        "semantic-release",
-        "danger",
-        "hardhat",
-        "vercel",
-        "wrangler",
-        "opennext-cloudflare",
-        "sentry",
-        "husky",
-        "lint-staged",
-        "lefthook",
-        "simple-git-hooks",
-        "size-limit",
-        "svgo",
-        "svgr",
-        "graphql-codegen",
-        "typedoc",
-        "openapi-ts",
-        "plop",
-        "c8",
-        "nyc",
-        "msw",
-        "napi-rs",
-        "opencode",
-        "nodemon",
-        "pm2",
-        "dependency-cruiser",
-        "wuchale",
-        "varlock",
-        "pnpm",
-        "bun",
-    ];
-
     /// Invalid user-authored regex extracted from a plugin config file.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct PluginRegexValidationError {
@@ -158,9 +31,13 @@ pub mod registry {
     }
 
     /// Names of every built-in framework plugin in registry order.
+    ///
+    /// Delegates to the core registry rather than mirroring it. A hand-kept
+    /// copy drifted here once already, silently omitting `deno`, and nothing
+    /// pinned the two together.
     #[must_use]
     pub fn builtin_plugin_names() -> Vec<&'static str> {
-        BUILTIN_PLUGIN_NAMES.to_vec()
+        core_backend::builtin_plugin_names()
     }
 
     /// Format plugin regex validation errors for user-facing diagnostics.
@@ -277,5 +154,29 @@ mod tests {
         base.merge_active_plugins_from(&incoming);
 
         assert_eq!(base.active_plugins(), ["nextjs", "vitest"]);
+    }
+}
+
+#[cfg(test)]
+mod roster_tests {
+    /// The engine mirrored core's roster by hand and the copy drifted, omitting
+    /// `deno`. Delegation removes the copy, so there is nothing left to diverge;
+    /// this pins the name the drift lost and that the roster is really populated.
+    ///
+    /// The roster is read through `core_backend`, not from `fallow_core`
+    /// directly, because the boundary guard requires every crossing to go
+    /// through that adapter.
+    #[test]
+    fn roster_carries_every_registered_plugin() {
+        let names = super::registry::builtin_plugin_names();
+        assert!(
+            names.contains(&"deno"),
+            "deno is registered in core and must reach the roster"
+        );
+        assert!(
+            names.len() > 100,
+            "roster looks truncated: {} names",
+            names.len()
+        );
     }
 }
