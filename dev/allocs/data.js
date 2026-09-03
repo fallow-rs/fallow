@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788435498967,
+  "lastUpdate": 1788479006550,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "7e1e075d314031e000c552e8af2f5de26084d0a1",
-          "message": "chore(deps-dev): bump ovsx to 1.1.1 and rolldown to 1.2.3 (#2322)",
-          "timestamp": "2026-08-18T22:33:27Z",
-          "tree_id": "c80bf47d3b43378343eb88ec2a0df0d9c4b08206",
-          "url": "https://github.com/fallow-rs/fallow/commit/7e1e075d314031e000c552e8af2f5de26084d0a1"
-        },
-        "date": 1787092749047,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9745099,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49222,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1186637,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8405,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8404,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c9ecdc7c0897b746d560bc14714ef50b04c0cb91",
+          "message": "fix: recognize class members through object properties\n\n* chore: start issue 2546 implementation\n\n* fix: recognize class members through object properties\n\n* fix: keep object binding extraction MSRV compatible",
+          "timestamp": "2026-09-04T01:37:53+02:00",
+          "tree_id": "42abe1502f830b90b9904abe0ebe7a5c83a15f83",
+          "url": "https://github.com/fallow-rs/fallow/commit/c9ecdc7c0897b746d560bc14714ef50b04c0cb91"
+        },
+        "date": 1788479003377,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9788951,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50040,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1162328,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8357,
             "unit": "allocations"
           }
         ]
