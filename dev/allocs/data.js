@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788357409612,
+  "lastUpdate": 1788435498967,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "21b304caa4484b4395588e526df4663db8a1d7aa",
-          "message": "perf(core): cache discovery file type matchers",
-          "timestamp": "2026-08-18T22:20:39+02:00",
-          "tree_id": "d8ecea9f32a90f11c1f4b6fb18ae40000db1ba7e",
-          "url": "https://github.com/fallow-rs/fallow/commit/21b304caa4484b4395588e526df4663db8a1d7aa"
-        },
-        "date": 1787084757615,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9749387,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49223,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1190179,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8443,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8409,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "541e048480866080382f3401a899f3338b947f92",
+          "message": "feat: add project readiness doctor and Oxlint JS plugin compatibility\n\n* chore: start Ultracite doctor work\n\n* feat: add doctor and Ultracite Oxlint compatibility\n\n* fix: harden doctor readiness checks",
+          "timestamp": "2026-09-03T13:33:53+02:00",
+          "tree_id": "6e17fc4af40d2427dd581c18248718aefb76e33f",
+          "url": "https://github.com/fallow-rs/fallow/commit/541e048480866080382f3401a899f3338b947f92"
+        },
+        "date": 1788435495408,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9711665,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 49397,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1182631,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8404,
             "unit": "allocations"
           }
         ]
