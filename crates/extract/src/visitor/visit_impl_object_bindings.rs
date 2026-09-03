@@ -199,16 +199,15 @@ impl ModuleInfoExtractor {
         }
 
         match value {
-            Expression::NewExpression(new_expression)
-                if let Expression::Identifier(callee) = &new_expression.callee
-                    && !super::super::helpers::is_builtin_constructor(callee.name.as_str()) =>
-            {
-                self.record_direct_object_binding_target(
-                    root_name,
-                    binding_path.to_string(),
-                    callee.name.to_string(),
-                    DirectObjectBindingScope::BindingOwner,
-                );
+            Expression::NewExpression(new_expression) => {
+                if let Some(class_name) = direct_new_expression_class_name(new_expression) {
+                    self.record_direct_object_binding_target(
+                        root_name,
+                        binding_path.to_string(),
+                        class_name,
+                        DirectObjectBindingScope::BindingOwner,
+                    );
+                }
             }
             Expression::ObjectExpression(object) => {
                 self.record_direct_object_binding_targets_at_path(
@@ -400,16 +399,15 @@ impl ModuleInfoExtractor {
                 self.remove_direct_object_binding_targets_at_or_below(&binding_path, scope);
             }
             match &prop.value {
-                Expression::NewExpression(new_expr)
-                    if let Expression::Identifier(callee) = &new_expr.callee
-                        && !super::super::helpers::is_builtin_constructor(callee.name.as_str()) =>
-                {
-                    self.record_direct_object_binding_target(
-                        root_name,
-                        binding_path,
-                        callee.name.to_string(),
-                        scope,
-                    );
+                Expression::NewExpression(new_expr) => {
+                    if let Some(class_name) = direct_new_expression_class_name(new_expr) {
+                        self.record_direct_object_binding_target(
+                            root_name,
+                            binding_path,
+                            class_name,
+                            scope,
+                        );
+                    }
                 }
                 Expression::ObjectExpression(child) => {
                     self.record_direct_object_binding_targets_at_path(
@@ -558,6 +556,16 @@ fn direct_object_binding_expression_path(expression: &Expression<'_>) -> Option<
         }
         _ => None,
     }
+}
+
+fn direct_new_expression_class_name(expression: &NewExpression<'_>) -> Option<String> {
+    let Expression::Identifier(callee) = &expression.callee else {
+        return None;
+    };
+    if super::super::helpers::is_builtin_constructor(callee.name.as_str()) {
+        return None;
+    }
+    Some(callee.name.to_string())
 }
 
 #[cfg(all(test, not(miri)))]
