@@ -156,8 +156,9 @@ fn git_fixture() -> TempDir {
     tmp
 }
 
-/// Run `fallow <args> --root <root> --format json --quiet --no-cache`, parse
-/// stdout, and validate it against the schema branch for `expected_kind`.
+/// Run `fallow <args> --root <root> --format json --quiet`, parse stdout, and
+/// validate it against the schema branch for `expected_kind`. Analysis
+/// envelopes additionally receive `--no-cache`.
 fn run_and_validate(schema: &Value, root: &Path, args: &[&str], expected_kind: &str) {
     run_and_validate_with(schema, root, args, expected_kind, |_| {});
 }
@@ -179,8 +180,10 @@ fn run_and_validate_with(
         .arg(root)
         .arg("--format")
         .arg("json")
-        .arg("--quiet")
-        .arg("--no-cache");
+        .arg("--quiet");
+    if expected_kind != "doctor" {
+        cmd.arg("--no-cache");
+    }
     let output = cmd.output().expect("run fallow binary");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let value: Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
@@ -207,6 +210,7 @@ fn cli_json_documents_conform_to_output_schema() {
     run_and_validate(&schema, root, &[], "combined");
     run_and_validate(&schema, root, &["suppressions"], "suppression-inventory");
     run_and_validate(&schema, root, &["flags"], "feature-flags");
+    run_and_validate(&schema, root, &["doctor"], "doctor");
 
     // Git-/pipeline-dependent envelopes assembled from a full audit run.
     run_and_validate(&schema, root, &["audit", "--base", "HEAD"], "audit");

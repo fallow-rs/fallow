@@ -38,6 +38,7 @@ pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
 pub mod decision_surface;
 pub mod dependency_deltas;
+pub mod doctor;
 pub mod dupes_output;
 mod duplication_filters;
 pub mod editor;
@@ -112,6 +113,7 @@ pub use coverage::{
 };
 pub use dead_code_codeclimate::build_codeclimate;
 pub use dead_code_sarif::build_sarif;
+pub use doctor::{DoctorOptions, run_doctor};
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneDemotionReason,
     CloneFamilyFinding, CloneGroupFinding, DupesReportPayload, DuplicationGroup,

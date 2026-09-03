@@ -181,6 +181,7 @@ pub type FallowOutput = fallow_output::FallowOutput<
     fallow_output::StandardWalkthroughGuide,
     fallow_output::WalkthroughValidation,
     fallow_output::SuppressionInventoryOutput,
+    fallow_output::DoctorOutput,
     fallow_output::TypeAwareStatusOutput,
     SimilarCodeOutput,
     SimilarCodeInspectOutput,

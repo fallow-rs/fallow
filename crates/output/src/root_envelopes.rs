@@ -344,6 +344,7 @@ pub enum FallowOutput<
     WalkthroughGuide,
     WalkthroughValidation,
     SuppressionInventory,
+    Doctor,
     TypeAwareStatus,
     SimilarCode,
     SimilarCodeInspect,
@@ -432,6 +433,9 @@ pub enum FallowOutput<
     /// `fallow suppressions --format json`.
     #[serde(rename = "suppression-inventory")]
     SuppressionInventory(SuppressionInventory),
+    /// `fallow doctor --format json`.
+    #[serde(rename = "doctor")]
+    Doctor(Doctor),
     /// `fallow type-aware status --format json`.
     #[serde(rename = "type-aware-status")]
     TypeAwareStatus(TypeAwareStatus),

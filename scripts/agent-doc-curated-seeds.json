@@ -124,6 +124,18 @@
     },
     {
       "section": "commands",
+      "row": "doctor",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "doctor",
+      "column": "Purpose",
+      "seed": "Diagnose project readiness without analysis or mutation"
+    },
+    {
+      "section": "commands",
       "row": "dupes",
       "column": "Key Flags",
       "seed": "`--mode`, `--near`, `--min-tokens`, `--min-lines`, `--min-occurrences`, `--threshold`, `--skip-local`, `--cross-language`"

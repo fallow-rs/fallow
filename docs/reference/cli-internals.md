@@ -34,6 +34,8 @@ an exit code.
 - `crates/cli/src/agent_install/`: one-pass agent onboarding (`fallow agent`),
   composed over `setup_hooks.rs` and `init.rs`; `build.rs` embeds the shipped
   skill for installs without `node_modules/fallow`.
+- `crates/cli/src/doctor.rs`: human and JSON rendering plus exit semantics for
+  the read-only readiness report assembled by `crates/api/src/doctor.rs`.
 - `crates/cli/src/coverage/` and `license/`: runtime coverage and license
   command orchestration.
 - `crates/cli/src/viz.rs`: the self-contained HTML map, plus the DOT and
@@ -87,6 +89,9 @@ an exit code.
   confirmation.
 - `fallow impact statusline` stays path-free, read-only, plain text, and
   epilogue-free. Its trend compares only whole-project scans.
+- `fallow doctor` stays path-free, local, read-only, and epilogue-free. It may
+  discover a trusted optional companion, but must not start it. Required
+  readiness failures emit the complete report before exiting 2.
 - New output fields must move schemas, generated TypeScript contracts, MCP,
   LSP, VS Code, GitHub Action, and GitLab consumers together.
 - New-only duplication demotion (issues #2164, #2220): under `--gate new-only`

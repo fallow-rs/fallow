@@ -1,0 +1,14 @@
+{
+  "name": "ultracite-oxlint-js-plugins",
+  "private": true,
+  "scripts": {
+    "lint": "ultracite check"
+  },
+  "devDependencies": {
+    "eslint-plugin-github": "6.1.2",
+    "eslint-plugin-sonarjs": "4.2.0",
+    "eslint-plugin-unused-control": "1.0.0",
+    "oxlint": "1.0.0",
+    "ultracite": "7.10.7"
+  }
+}

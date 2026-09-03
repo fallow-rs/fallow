@@ -273,6 +273,17 @@ pub fn status(root: &Path) -> TypeAwareStatus {
     }
 }
 
+/// Check whether the trusted type-aware companion can be discovered without
+/// starting it or reading project source.
+///
+/// # Errors
+///
+/// Returns the same actionable discovery error used by [`status`] when no
+/// trusted companion file is available.
+pub fn discover_companion(root: &Path) -> Result<(), String> {
+    discover_type_aware_sidecar(root).map(|_| ())
+}
+
 /// Result of a completed type-aware pass.
 #[derive(Debug)]
 pub struct TypeAwareOutcome {

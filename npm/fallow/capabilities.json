@@ -907,6 +907,11 @@
       "flags": []
     },
     {
+      "name": "doctor",
+      "description": "Diagnose project readiness without analysis or mutation",
+      "flags": []
+    },
+    {
       "name": "similar-code",
       "description": "Find semantically similar functions with a pinned local model (opt-in)",
       "flags": [

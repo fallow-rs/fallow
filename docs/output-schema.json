@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -9252,6 +9252,26 @@
                 "kind": {
                   "type": "string",
                   "const": "suppression-inventory"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow doctor --format json`. Deterministic, read-only project readiness checks.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DoctorOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "doctor"
                 }
               },
               "required": [
@@ -24802,6 +24822,263 @@
         "peak_after"
       ],
       "description": "One file present on both revisions whose branching held while it gained\nfunctions and its largest function shrank.\n\nLocal by construction: nothing here depends on any other file, so unrelated\nwork in the changeset cannot make it more or less true. A set-level\nclassifier cannot make this claim, because a changeset contains arbitrary\nother work and an aggregate cannot attribute.\n\nIt is a description, not an inference. The three conditions are the\nsignature a split leaves, and they are also satisfiable without one: the\npeak is a file-level maximum (`FileBranching::peak_cyclomatic`), so it can\nfall because the largest function left the file while arriving helpers\nhappen to carry the branching it took with it. Both numbers are reported so\na reader can see that for themselves, and the rendered text states what was\nmeasured rather than concluding a refactor happened.\n\nFiles carrying synthetic template units are excluded, because those units\nare outside every count here, so the numbers would not describe the file a\nreader opens. Test paths are excluded too: their totals are reported in\n`BranchingScope` instead."
+    },
+    "DoctorSchemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema projection for the exact doctor envelope version."
+    },
+    "DoctorOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Independent doctor contract version.",
+          "$ref": "#/definitions/DoctorSchemaVersion"
+        },
+        "version": {
+          "description": "Fallow version that produced the report.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "root": {
+          "description": "Stable project-root identifier. Always `.` to avoid exposing host paths.",
+          "$ref": "#/definitions/DoctorProjectRoot"
+        },
+        "status": {
+          "description": "Aggregate readiness outcome.",
+          "$ref": "#/definitions/DoctorStatus"
+        },
+        "summary": {
+          "description": "Counts derived from `checks`.",
+          "$ref": "#/definitions/DoctorSummary"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DoctorCheck"
+          },
+          "description": "Checks in stable contract order."
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "root",
+        "status",
+        "summary",
+        "checks"
+      ],
+      "title": "fallow doctor --format json",
+      "description": "Versioned readiness envelope emitted by `fallow doctor --format json`."
+    },
+    "DoctorCheck": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Stable check identifier.",
+          "$ref": "#/definitions/DoctorCheckId"
+        },
+        "category": {
+          "description": "Readiness area this check covers.",
+          "$ref": "#/definitions/DoctorCheckCategory"
+        },
+        "status": {
+          "description": "Check outcome.",
+          "$ref": "#/definitions/DoctorCheckStatus"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether failure makes the project not ready."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable result with no host-specific absolute paths."
+        },
+        "remediation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DoctorRemediation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional actionable next command."
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "status",
+        "required",
+        "message"
+      ],
+      "description": "One deterministic doctor check result."
+    },
+    "DoctorCheckCategory": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "project",
+          "description": "Project filesystem readiness."
+        },
+        {
+          "type": "string",
+          "const": "configuration",
+          "description": "Fallow configuration readiness."
+        },
+        {
+          "type": "string",
+          "const": "workspace",
+          "description": "Workspace topology readiness."
+        },
+        {
+          "type": "string",
+          "const": "plugin",
+          "description": "Plugin readiness."
+        },
+        {
+          "type": "string",
+          "const": "companion",
+          "description": "Optional companion readiness."
+        }
+      ],
+      "description": "Stable category for a doctor check."
+    },
+    "DoctorCheckId": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "root",
+          "description": "Project root availability."
+        },
+        {
+          "type": "string",
+          "const": "config",
+          "description": "Fallow configuration resolution."
+        },
+        {
+          "type": "string",
+          "const": "workspaces",
+          "description": "Workspace declaration discovery."
+        },
+        {
+          "type": "string",
+          "const": "plugins",
+          "description": "External plugin configuration and activation."
+        },
+        {
+          "type": "string",
+          "const": "type-aware",
+          "description": "Optional type-aware companion discovery."
+        }
+      ],
+      "description": "Stable identifier for a doctor check. Declaration order is output order."
+    },
+    "DoctorCheckStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "pass",
+          "description": "The check completed successfully."
+        },
+        {
+          "type": "string",
+          "const": "warn",
+          "description": "The check completed with an advisory concern."
+        },
+        {
+          "type": "string",
+          "const": "fail",
+          "description": "The check found a blocking readiness problem."
+        },
+        {
+          "type": "string",
+          "const": "skipped",
+          "description": "The check does not apply or an earlier prerequisite failed."
+        }
+      ],
+      "description": "Per-check readiness outcome."
+    },
+    "DoctorRemediation": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command the user or agent can choose to run."
+        },
+        "cwd": {
+          "description": "Working directory for the command, relative to the diagnosed root.",
+          "$ref": "#/definitions/DoctorProjectRoot"
+        },
+        "mutating": {
+          "type": "boolean",
+          "description": "Whether running the command can modify project files or dependencies."
+        }
+      },
+      "required": [
+        "command",
+        "cwd",
+        "mutating"
+      ],
+      "description": "Actionable remediation attached to a doctor check."
+    },
+    "DoctorStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "pass",
+          "description": "Every applicable check passed."
+        },
+        {
+          "type": "string",
+          "const": "warn",
+          "description": "Readiness is usable, with one or more advisory warnings."
+        },
+        {
+          "type": "string",
+          "const": "fail",
+          "description": "At least one required readiness check failed."
+        }
+      ],
+      "description": "Aggregate readiness outcome."
+    },
+    "DoctorSummary": {
+      "type": "object",
+      "properties": {
+        "pass": {
+          "type": "integer",
+          "description": "Successful checks."
+        },
+        "warn": {
+          "type": "integer",
+          "description": "Advisory checks."
+        },
+        "fail": {
+          "type": "integer",
+          "description": "Failed checks."
+        },
+        "skipped": {
+          "type": "integer",
+          "description": "Inapplicable or prerequisite-blocked checks."
+        }
+      },
+      "required": [
+        "pass",
+        "warn",
+        "fail",
+        "skipped"
+      ],
+      "description": "Counts for every per-check status."
+    },
+    "DoctorRoot": {
+      "type": "string",
+      "description": "Schema projection for the privacy-safe project-root identifier.",
+      "const": "."
+    },
+    "DoctorProjectRoot": {
+      "type": "string",
+      "description": "Schema projection for `.` as the privacy-safe diagnosed project root.",
+      "const": "."
     }
   }
 }

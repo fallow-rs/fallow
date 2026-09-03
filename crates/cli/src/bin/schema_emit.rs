@@ -43,12 +43,14 @@ use fallow_output::{
     CoverageSetupSchemaVersion, CoverageSetupSnippet, CoverageTier, CrossRepoImpactReport,
     CrossRepoImpactSchemaVersion, CrossRepoProjectEntry, CrossRepoTotals, Decision, DecisionAction,
     DecisionActionType, DecisionCategory, DecisionSurface, DecisionSurfaceOutput,
-    DecisionSurfaceSchemaVersion, DecisionWithActions, DiffTriage, DirectionUnit, DupesOutput,
-    EnabledSource, ExceededThreshold, ExplainOutput, FileHealthScore, FindingSeverity, FocusLabel,
-    FocusMap, FocusScore, FocusUnit, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
-    GitLabReviewPosition, GitLabReviewPositionType, GraphFacts, GroupByMode, HealthActionsMeta,
-    HealthGroup, HealthOutput, HealthReport, HealthScore, HealthScorePenalties, HealthSummary,
-    HealthTrend, HotspotEntry, HotspotFinding, HotspotSummary, ImpactCounts, ImpactReport,
+    DecisionSurfaceSchemaVersion, DecisionWithActions, DiffTriage, DirectionUnit, DoctorCheck,
+    DoctorCheckCategory, DoctorCheckId, DoctorCheckStatus, DoctorOutput, DoctorRemediation,
+    DoctorStatus, DoctorSummary, DupesOutput, EnabledSource, ExceededThreshold, ExplainOutput,
+    FileHealthScore, FindingSeverity, FocusLabel, FocusMap, FocusScore, FocusUnit,
+    GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
+    GitLabReviewPositionType, GraphFacts, GroupByMode, HealthActionsMeta, HealthGroup,
+    HealthOutput, HealthReport, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend,
+    HotspotEntry, HotspotFinding, HotspotSummary, ImpactCounts, ImpactReport,
     ImpactReportSchemaVersion, ImpactTrendDirection, InspectEvidence, InspectEvidenceScope,
     InspectEvidenceSection, InspectFileIdentity, InspectIdentity, InspectOutput,
     InspectSectionStatus, InspectSymbolIdentity, InspectTargetDescriptor, LargeFunctionEntry,
@@ -346,6 +348,7 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "DupesSchemaVersion",
     "FeatureFlagsSchemaVersion",
     "HealthSchemaVersion",
+    "DoctorSchemaVersion",
     "TypeAwareStatusSchemaVersion",
     "ToolVersion",
     "RuntimeCoverageAction",
@@ -428,6 +431,14 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "ImpactOutput",
     "SemanticSymbolTrace",
     "SemanticSymbolImpact",
+    "DoctorOutput",
+    "DoctorCheck",
+    "DoctorCheckCategory",
+    "DoctorCheckId",
+    "DoctorCheckStatus",
+    "DoctorRemediation",
+    "DoctorStatus",
+    "DoctorSummary",
     "TypeAwareStatusOutput",
     "FallowOutput",
     "BoundariesListLogicalGroup",
@@ -956,6 +967,14 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<ImpactOutput>();
     let _ = generator.subschema_for::<SemanticSymbolTrace>();
     let _ = generator.subschema_for::<SemanticSymbolImpact>();
+    let _ = generator.subschema_for::<DoctorOutput>();
+    let _ = generator.subschema_for::<DoctorCheck>();
+    let _ = generator.subschema_for::<DoctorCheckCategory>();
+    let _ = generator.subschema_for::<DoctorCheckId>();
+    let _ = generator.subschema_for::<DoctorCheckStatus>();
+    let _ = generator.subschema_for::<DoctorRemediation>();
+    let _ = generator.subschema_for::<DoctorStatus>();
+    let _ = generator.subschema_for::<DoctorSummary>();
     let _ = generator.subschema_for::<TypeAwareStatusOutput>();
     let _ = generator.subschema_for::<fallow_types::trace_chain::ChainHop>();
     let _ = generator.subschema_for::<fallow_types::trace_chain::UnresolvedCallee>();
@@ -1233,6 +1252,11 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "suppression-inventory",
         &["SuppressionInventoryOutput"],
         "`fallow suppressions --format json`. Required `schema_version: \"1\"`\nsingleton plus `summary` and per-file `files` listings. Read-only\nsuppression inventory; always emitted with exit 0.",
+    ),
+    (
+        "doctor",
+        &["DoctorOutput"],
+        "`fallow doctor --format json`. Deterministic, read-only project readiness checks.",
     ),
     (
         "type-aware-status",
@@ -1591,6 +1615,7 @@ mod drift_tests {
                 fallow_output::FEATURE_FLAGS_SCHEMA_VERSION,
             ),
             ("HealthSchemaVersion", fallow_output::HEALTH_SCHEMA_VERSION),
+            ("DoctorSchemaVersion", fallow_output::DOCTOR_SCHEMA_VERSION),
             (
                 "ReviewBriefSchemaVersion",
                 fallow_output::REVIEW_BRIEF_SCHEMA_VERSION,
@@ -1650,6 +1675,7 @@ mod drift_tests {
             ("ReviewBriefWireOutput", "ReviewBriefSchemaVersion"),
             ("SecurityOutput", "SecuritySchemaVersion"),
             ("SecuritySummaryOutput", "SecuritySchemaVersion"),
+            ("DoctorOutput", "DoctorSchemaVersion"),
             ("TypeAwareStatusOutput", "TypeAwareStatusSchemaVersion"),
         ];
         for (envelope, version_type) in envelope_refs {
@@ -1703,6 +1729,7 @@ mod drift_tests {
             ("WalkthroughGuide", "WalkthroughGuide"),
             ("WalkthroughValidation", "WalkthroughValidation"),
             ("SuppressionInventory", "SuppressionInventoryOutput"),
+            ("Doctor", "DoctorOutput"),
             ("TypeAwareStatus", "TypeAwareStatusOutput"),
             ("SimilarCode", "SimilarCodeOutput"),
             ("SimilarCodeInspect", "SimilarCodeInspectOutput"),
@@ -1744,6 +1771,7 @@ mod drift_tests {
                 FallowOutput::WalkthroughGuide(_) => "WalkthroughGuide",
                 FallowOutput::WalkthroughValidation(_) => "WalkthroughValidation",
                 FallowOutput::SuppressionInventory(_) => "SuppressionInventory",
+                FallowOutput::Doctor(_) => "Doctor",
                 FallowOutput::TypeAwareStatus(_) => "TypeAwareStatus",
                 FallowOutput::SimilarCode(_) => "SimilarCode",
                 FallowOutput::SimilarCodeInspect(_) => "SimilarCodeInspect",

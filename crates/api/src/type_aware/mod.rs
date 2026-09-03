@@ -24,7 +24,7 @@ pub use client::{
 };
 pub use transport::{
     TypeAwareError, TypeAwareFileChanges, TypeAwareOutcome, TypeAwareSession, TypeAwareStatus,
-    shutdown_type_aware_sidecars, status, terminate_active_type_aware_sidecars,
+    discover_companion, shutdown_type_aware_sidecars, status, terminate_active_type_aware_sidecars,
 };
 
 /// Refine a programmatic dead-code result through the shared semantic client.

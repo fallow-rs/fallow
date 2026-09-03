@@ -50,6 +50,7 @@ pub use fallow_engine::codeowners;
 mod combined;
 mod config;
 mod coverage;
+mod doctor;
 mod dupes;
 mod exit_codes;
 pub mod explain;
@@ -191,6 +192,7 @@ Project inspection:
   viz               Generate an interactive HTML map of the codebase
 
 Setup and configuration:
+  doctor            Diagnose project readiness without changing anything
   init              Create a fallow config, optionally with a Git hook
   agent             Wire fallow into Claude Code, Codex, or Cursor in one pass
   audit-cache       Maintain reusable audit base-snapshot caches
@@ -818,6 +820,14 @@ enum Command {
         #[command(subcommand)]
         subcommand: TypeAwareCli,
     },
+
+    /// Diagnose project readiness without analysis or mutation.
+    ///
+    /// Checks the root, config resolution, workspace discovery, external
+    /// plugins, and the optional type-aware companion. Uses only local reads;
+    /// it performs no cache writes, telemetry, network requests, or third-party
+    /// execution. Supports human and JSON output.
+    Doctor,
 
     /// Find semantically similar functions with a pinned local model (opt-in).
     ///
@@ -2907,6 +2917,9 @@ pub fn run() -> ExitCode {
     if let Some(code) = run_telemetry_command_if_requested(&mut cli, fmt.output, fmt.json_style) {
         return code;
     }
+    if let Some(code) = run_doctor_command_if_requested(&cli, &fmt) {
+        return code;
+    }
     if is_impact_statusline(&cli) {
         let (root, _) = match validate_inputs(&cli, fmt.output, fmt.json_style) {
             Ok(validated) => validated,
@@ -3290,6 +3303,123 @@ fn run_telemetry_command_if_requested(
     None
 }
 
+/// Doctor deliberately bypasses the normal run epilogue: collecting readiness
+/// must not write telemetry, flush a spool, perform an update check, or create
+/// caches. Root validation stays inside the typed report so failures still
+/// return the complete doctor envelope.
+fn run_doctor_command_if_requested(cli: &Cli, format: &FormatConfig) -> Option<ExitCode> {
+    if !matches!(cli.command, Some(Command::Doctor)) {
+        return None;
+    }
+
+    if let Some(flag) = unsupported_doctor_option(cli) {
+        return Some(crate::error::emit_error_with_style(
+            &format!("{flag} is not valid with `fallow doctor`."),
+            2,
+            format.output,
+            format.json_style,
+        ));
+    }
+
+    let root = cli.root.clone().unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
+    let config_path = cli.config.as_ref().map(|path| {
+        if path_util::is_absolute_path_any_platform(path) {
+            path.clone()
+        } else {
+            root.join(path)
+        }
+    });
+    if let Some(path) = cli.output_file.as_deref()
+        && let Err(code) = redirect_report_to_file(path, format.output)
+    {
+        return Some(code);
+    }
+    let code = doctor::run_doctor(
+        &root,
+        config_path.as_deref(),
+        format.output,
+        format.json_style,
+    );
+    if let Some(path) = cli.output_file.as_deref()
+        && let Err(code) = finalize_report_file(path, format.quiet, format.output)
+    {
+        return Some(code);
+    }
+    Some(code)
+}
+
+/// Doctor accepts only project selection and presentation options. Rejecting
+/// analysis flags avoids implying that a readiness check ran an analysis or
+/// applied a gate that it deliberately bypasses.
+fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
+    [
+        (cli.allow_remote_extends, "--allow-remote-extends"),
+        (cli.no_cache, "--no-cache"),
+        (cli.threads.is_some(), "--threads"),
+        (cli.changed_since.is_some(), "--changed-since"),
+        (cli.diff_file.is_some(), "--diff-file"),
+        (cli.diff_stdin, "--diff-stdin"),
+        (cli.churn_file.is_some(), "--churn-file"),
+        (cli.max_file_size.is_some(), "--max-file-size"),
+        (cli.baseline.is_some(), "--baseline"),
+        (cli.baseline_mode.is_some(), "--baseline-mode"),
+        (cli.parent_run.is_some(), "--parent-run"),
+        (cli.save_baseline.is_some(), "--save-baseline"),
+        (cli.production, "--production"),
+        (cli.no_production, "--no-production"),
+        (cli.production_dead_code, "--production-dead-code"),
+        (cli.production_health, "--production-health"),
+        (cli.production_dupes, "--production-dupes"),
+        (cli.workspace.is_some(), "--workspace"),
+        (cli.changed_workspaces.is_some(), "--changed-workspaces"),
+        (cli.group_by.is_some(), "--group-by"),
+        (cli.performance, "--performance"),
+        (cli.explain, "--explain"),
+        (cli.explain_skipped, "--explain-skipped"),
+        (cli.summary, "--summary"),
+        (cli.ci, "--ci"),
+        (cli.fail_on_issues, "--fail-on-issues"),
+        (cli.sarif_file.is_some(), "--sarif-file"),
+        (cli.report_path_prefix.is_some(), "--report-path-prefix"),
+        (cli.fail_on_regression, "--fail-on-regression"),
+        (cli.tolerance != "0", "--tolerance"),
+        (cli.regression_baseline.is_some(), "--regression-baseline"),
+        (
+            cli.save_regression_baseline.is_some(),
+            "--save-regression-baseline",
+        ),
+        (!cli.only.is_empty(), "--only"),
+        (!cli.skip.is_empty(), "--skip"),
+        (cli.dupes_mode.is_some(), "--dupes-mode"),
+        (cli.dupes_near, "--dupes-near"),
+        (cli.dupes_threshold.is_some(), "--dupes-threshold"),
+        (cli.dupes_min_tokens.is_some(), "--dupes-min-tokens"),
+        (cli.dupes_min_lines.is_some(), "--dupes-min-lines"),
+        (
+            cli.dupes_min_occurrences.is_some(),
+            "--dupes-min-occurrences",
+        ),
+        (cli.dupes_skip_local, "--dupes-skip-local"),
+        (cli.dupes_cross_language, "--dupes-cross-language"),
+        (cli.dupes_ignore_imports, "--dupes-ignore-imports"),
+        (cli.dupes_no_ignore_imports, "--dupes-no-ignore-imports"),
+        (cli.score, "--score"),
+        (cli.trend, "--trend"),
+        (cli.save_snapshot.is_some(), "--save-snapshot"),
+        (cli.coverage.is_some(), "--coverage"),
+        (cli.coverage_root.is_some(), "--coverage-root"),
+        (cli.include_entry_exports, "--include-entry-exports"),
+        (cli.type_aware, "--type-aware"),
+        (cli.no_type_aware, "--no-type-aware"),
+        (!cli.type_aware_project.is_empty(), "--type-aware-project"),
+        (cli.type_aware_require.is_some(), "--type-aware-require"),
+    ]
+    .into_iter()
+    .find_map(|(used, flag)| used.then_some(flag))
+}
+
 fn run_schema_command_if_requested(
     cli: &Cli,
     json_style: json_style::JsonStyle,
@@ -3442,6 +3572,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         check @ Command::Check { .. } => dispatch_check_command(check, dispatch),
         Command::Watch { no_clear } => dispatch_watch(dispatch, no_clear),
         Command::TypeAware { subcommand } => dispatch_type_aware_command(dispatch, subcommand),
+        Command::Doctor => unreachable!("doctor bypasses the normal dispatch epilogue"),
         Command::SimilarCode {
             subcommand,
             threshold,

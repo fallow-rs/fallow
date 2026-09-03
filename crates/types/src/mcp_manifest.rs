@@ -921,6 +921,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
             "api-only: the bare `fallow` combined report (dead-code + dupes + health). No napi export and no MCP tool; agents compose the three primitives (analyze / find_dupes / check_health) instead.",
         ),
     },
+    CapabilityParityRow {
+        capability: "project readiness doctor",
+        api_runner: Some("run_doctor"),
+        napi_export: None,
+        mcp_tool: None,
+        omission_note: Some(
+            "Read-only project readiness is available through the CLI and Rust api. The initial contract has no napi export or dedicated MCP tool; agents can invoke `fallow doctor --format json --quiet` as a subprocess.",
+        ),
+    },
     // -- MCP-only tools that shell out to the CLI: no api runner, no napi
     //    export. --
     CapabilityParityRow {

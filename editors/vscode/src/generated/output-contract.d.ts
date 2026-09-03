@@ -24,7 +24,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | ErrorOutput)
 /**
@@ -96,6 +96,8 @@ kind: "review-walkthrough-guide"
 kind: "review-walkthrough-validation"
 }) | (SuppressionInventoryOutput & {
 kind: "suppression-inventory"
+}) | (DoctorOutput & {
+kind: "doctor"
 }) | (TypeAwareStatusOutput & {
 kind: "type-aware-status"
 }) | (SimilarCodeOutput & {
@@ -1059,6 +1061,30 @@ export type SuppressionInventoryLevel = ("file" | "line")
  * How a suppression in the inventory was authored.
  */
 export type SuppressionInventoryOrigin = "comment"
+/**
+ * Schema projection for the exact doctor envelope version.
+ */
+export type DoctorSchemaVersion = 1
+/**
+ * Schema projection for `.` as the privacy-safe diagnosed project root.
+ */
+export type DoctorProjectRoot = "."
+/**
+ * Aggregate readiness outcome.
+ */
+export type DoctorStatus = ("pass" | "warn" | "fail")
+/**
+ * Stable identifier for a doctor check. Declaration order is output order.
+ */
+export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware")
+/**
+ * Stable category for a doctor check.
+ */
+export type DoctorCheckCategory = ("project" | "configuration" | "workspace" | "plugin" | "companion")
+/**
+ * Per-check readiness outcome.
+ */
+export type DoctorCheckStatus = ("pass" | "warn" | "fail" | "skipped")
 /**
  * Schema projection for the type-aware status envelope's exact version.
  */
@@ -13515,6 +13541,75 @@ reason?: (string | null)
  * Whether a human-authored reason is present.
  */
 reason_present: boolean
+}
+/**
+ * Versioned readiness envelope emitted by `fallow doctor --format json`.
+ */
+export interface DoctorOutput {
+schema_version: DoctorSchemaVersion
+version: ToolVersion
+root: DoctorProjectRoot
+status: DoctorStatus
+summary: DoctorSummary
+/**
+ * Checks in stable contract order.
+ */
+checks: DoctorCheck[]
+}
+/**
+ * Counts for every per-check status.
+ */
+export interface DoctorSummary {
+/**
+ * Successful checks.
+ */
+pass: number
+/**
+ * Advisory checks.
+ */
+warn: number
+/**
+ * Failed checks.
+ */
+fail: number
+/**
+ * Inapplicable or prerequisite-blocked checks.
+ */
+skipped: number
+}
+/**
+ * One deterministic doctor check result.
+ */
+export interface DoctorCheck {
+id: DoctorCheckId
+category: DoctorCheckCategory
+status: DoctorCheckStatus
+/**
+ * Whether failure makes the project not ready.
+ */
+required: boolean
+/**
+ * Human-readable result with no host-specific absolute paths.
+ */
+message: string
+/**
+ * Optional actionable next command.
+ */
+remediation?: (DoctorRemediation | null)
+}
+/**
+ * Actionable remediation attached to a doctor check.
+ */
+export interface DoctorRemediation {
+/**
+ * Command the user or agent can choose to run.
+ */
+command: string
+cwd: DoctorProjectRoot
+/**
+ * Whether running the command can modify project files or dependencies.
+ */
+mutating: boolean
 }
 /**
  * Envelope emitted by `fallow type-aware status --format json`.

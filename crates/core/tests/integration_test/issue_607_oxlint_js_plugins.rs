@@ -70,3 +70,28 @@ fn oxlint_ts_config_credits_object_specifiers_and_local_plugins() {
         "local jsPlugins files should be treated as support entry files, got {unused_files:?}"
     );
 }
+
+#[test]
+fn ultracite_selected_js_plugins_credit_only_selected_dependencies() {
+    let root = fixture_path("ultracite-oxlint-js-plugins");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev_dependencies: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_dev_dependencies.contains(&"eslint-plugin-github"),
+        "eslint-plugin-github should be credited through Ultracite's selected jsPlugins, got {unused_dev_dependencies:?}"
+    );
+
+    for plugin in ["eslint-plugin-sonarjs", "eslint-plugin-unused-control"] {
+        assert!(
+            unused_dev_dependencies.contains(&plugin),
+            "unselected {plugin} should still be reported, got {unused_dev_dependencies:?}"
+        );
+    }
+}
