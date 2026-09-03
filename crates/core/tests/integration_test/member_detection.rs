@@ -41,6 +41,15 @@ fn enum_class_members_detects_unused_members() {
         unused_class_member_names.contains(&"name"),
         "name should be detected as unused class property, found: {unused_class_member_names:?}"
     );
+
+    assert!(
+        !unused_class_member_names.contains(&"usedThroughObject"),
+        "usedThroughObject should be credited through an object property, found: {unused_class_member_names:?}"
+    );
+    assert!(
+        unused_class_member_names.contains(&"unusedThroughObject"),
+        "unusedThroughObject should remain unused, found: {unused_class_member_names:?}"
+    );
 }
 
 #[test]

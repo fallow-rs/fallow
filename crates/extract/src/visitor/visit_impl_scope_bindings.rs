@@ -2,6 +2,8 @@
 
 #[allow(clippy::wildcard_imports, reason = "many scope helper AST types used")]
 use oxc_ast::ast::*;
+use oxc_ast_visit::Visit;
+use oxc_semantic::ScopeFlags;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{SanitizerScope, SinkLiteralValue};
@@ -10,12 +12,41 @@ use super::super::helpers::array_element_type_from_type;
 use super::super::{ModuleInfoExtractor, SecurityPathSinkBinding};
 use super::{sink_literal_value, static_sink_literal_to_string, unwrap_static_expr};
 
+#[derive(Default)]
+struct FunctionVarRootCollector {
+    roots: FxHashSet<String>,
+}
+
+impl<'a> Visit<'a> for FunctionVarRootCollector {
+    fn visit_variable_declaration(&mut self, declaration: &VariableDeclaration<'a>) {
+        if declaration.kind.is_var() {
+            self.roots.extend(
+                declaration
+                    .declarations
+                    .iter()
+                    .flat_map(|declarator| declarator.id.get_binding_identifiers())
+                    .map(|id| id.name.to_string()),
+            );
+        }
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _expression: &ArrowFunctionExpression<'a>) {}
+
+    fn visit_class(&mut self, _class: &Class<'a>) {}
+
+    fn visit_ts_module_declaration(&mut self, _declaration: &TSModuleDeclaration<'a>) {}
+
+    fn visit_ts_global_declaration(&mut self, _declaration: &TSGlobalDeclaration<'a>) {}
+}
+
 impl ModuleInfoExtractor {
     pub(super) fn is_module_scope(&self) -> bool {
         self.block_depth == 0 && self.function_depth == 0 && self.namespace_depth == 0
     }
 
-    pub(super) fn is_module_or_function_runtime_scope(&self) -> bool {
+    pub(in crate::visitor) fn is_module_or_function_runtime_scope(&self) -> bool {
         self.namespace_depth == 0
     }
 
@@ -270,6 +301,14 @@ impl ModuleInfoExtractor {
         scope.extend(declarations.into_iter().map(|id| id.name.to_string()));
     }
 
+    pub(super) fn var_binding_roots<'a>(
+        statements: &oxc_allocator::Vec<'a, Statement<'a>>,
+    ) -> FxHashSet<String> {
+        let mut collector = FunctionVarRootCollector::default();
+        collector.visit_statements(statements);
+        collector.roots
+    }
+
     pub(super) fn push_function_declaration_scope(&mut self, params: &FormalParameters<'_>) {
         if self.namespace_depth > 0 {
             return;
@@ -342,6 +381,36 @@ impl ModuleInfoExtractor {
             self.risky_regex_binding_stack.pop();
             self.path_sink_binding_stack.pop();
             self.path_relative_binding_stack.pop();
+        }
+    }
+
+    pub(super) fn push_direct_object_binding_scope(&mut self, roots: FxHashSet<String>) {
+        self.scoped_direct_object_binding_roots.push(roots);
+        self.scoped_direct_object_binding_targets
+            .push(FxHashMap::default());
+        self.scoped_direct_object_binding_generations
+            .push(FxHashMap::default());
+        self.scoped_direct_object_binding_paths_by_root
+            .push(FxHashMap::default());
+    }
+
+    pub(super) fn push_var_owner_direct_object_binding_scope(&mut self, roots: FxHashSet<String>) {
+        self.push_direct_object_binding_scope(roots);
+    }
+
+    pub(super) fn pop_direct_object_binding_scope(&mut self) {
+        self.scoped_direct_object_binding_roots.pop();
+        self.scoped_direct_object_binding_targets.pop();
+        self.scoped_direct_object_binding_generations.pop();
+        self.scoped_direct_object_binding_paths_by_root.pop();
+    }
+
+    pub(super) fn record_direct_object_binding_scope_roots(
+        &mut self,
+        roots: impl IntoIterator<Item = String>,
+    ) {
+        if let Some(scope) = self.scoped_direct_object_binding_roots.last_mut() {
+            scope.extend(roots);
         }
     }
 

@@ -34,6 +34,7 @@ use helpers::LitCustomElementDecorator;
 use helpers::array_element_type_from_type;
 
 pub(crate) const ROUTE_LOADER_DATA_OBJECT: &str = "$fallow.routeLoaderData";
+pub(crate) const MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES: usize = 8192;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum RouteLoadHarvestMode {
@@ -410,6 +411,26 @@ pub(crate) struct ModuleInfoExtractor {
     /// cached `ModuleInfo` field. See issue #1793.
     local_function_return_types: FxHashMap<String, String>,
     object_binding_candidates: Vec<ObjectBindingCandidate>,
+    /// Direct `new Class()` object-property target associations recorded during the AST
+    /// walk. Combined with `object_binding_candidates` to keep both object
+    /// binding channels under the same breadth cap.
+    direct_object_binding_target_count: usize,
+    /// Object-property paths whose value is a direct class instance. Module
+    /// targets remain available throughout the walk, while scoped targets are
+    /// pushed and popped with the matching declaration scopes.
+    module_direct_object_binding_targets: FxHashMap<String, FxHashSet<String>>,
+    module_direct_object_binding_generations: FxHashMap<String, u64>,
+    module_direct_object_binding_paths_by_root: FxHashMap<String, FxHashSet<String>>,
+    scoped_direct_object_binding_targets: Vec<FxHashMap<String, FxHashSet<String>>>,
+    scoped_direct_object_binding_generations: Vec<FxHashMap<String, u64>>,
+    scoped_direct_object_binding_paths_by_root: Vec<FxHashMap<String, FxHashSet<String>>>,
+    scoped_direct_object_binding_roots: Vec<FxHashSet<String>>,
+    direct_object_binding_member_accesses: FxHashSet<(String, String)>,
+    direct_object_binding_access_generations: FxHashMap<String, FxHashMap<String, u64>>,
+    direct_object_binding_generation: u64,
+    abstained_direct_object_binding_paths: FxHashSet<String>,
+    direct_object_binding_whole_object_uses: FxHashSet<String>,
+    deferred_function_var_binding_roots: Vec<FxHashSet<String>>,
     /// Working state for the object-binding fixed-point (issue #1843 follow-up):
     /// an ancestor-prefix index over `binding_target_names`, mapping every proper
     /// dotted prefix `P` of a key to the keys that start with `P.`. Built once per
@@ -1105,10 +1126,82 @@ impl ModuleInfoExtractor {
             .or_insert(BindingTarget::Class(target));
     }
 
+    fn direct_object_binding_targets(&self, object: &str) -> Option<(&FxHashSet<String>, u64)> {
+        let root = object.split_once('.').map_or(object, |(root, _)| root);
+        for index in (0..self.scoped_direct_object_binding_targets.len()).rev() {
+            if let Some(targets) = self.scoped_direct_object_binding_targets[index].get(object) {
+                let generation = self.scoped_direct_object_binding_generations[index]
+                    .get(object)
+                    .copied()
+                    .unwrap_or_default();
+                return Some((targets, generation));
+            }
+            if self.scoped_direct_object_binding_roots[index].contains(root) {
+                return None;
+            }
+        }
+        self.module_direct_object_binding_targets
+            .get(object)
+            .map(|targets| {
+                let generation = self
+                    .module_direct_object_binding_generations
+                    .get(object)
+                    .copied()
+                    .unwrap_or_default();
+                (targets, generation)
+            })
+    }
+
     /// Remember the class a receiver named at this point in the walk, so an
     /// access written in one scope survives the same name being rebound to a
     /// different class in a sibling scope.
-    fn record_walk_order_member_access(&mut self, object: &str, member: &str) {
+    fn record_walk_order_member_access(&mut self, object: &str, member: &str) -> bool {
+        if self.abstained_direct_object_binding_paths.contains(object)
+            && self.direct_object_binding_targets(object).is_some()
+        {
+            return true;
+        }
+        if let Some((classes, generation)) = self.direct_object_binding_targets(object) {
+            if self
+                .direct_object_binding_access_generations
+                .get(object)
+                .and_then(|members| members.get(member))
+                == Some(&generation)
+            {
+                return true;
+            }
+            if self.direct_object_binding_member_accesses.len()
+                >= MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES
+            {
+                self.abstain_direct_object_binding_path(object);
+                return true;
+            }
+            let mut classes = classes.iter().cloned().collect::<Vec<_>>();
+            classes.sort_unstable();
+            for class in classes {
+                if self.direct_object_binding_member_accesses.len()
+                    >= MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES
+                {
+                    self.abstain_direct_object_binding_path(object);
+                    return true;
+                }
+                let access = (class, member.to_string());
+                if self
+                    .direct_object_binding_member_accesses
+                    .insert(access.clone())
+                {
+                    self.member_accesses.push(MemberAccess {
+                        object: access.0,
+                        member: access.1,
+                    });
+                }
+            }
+            self.direct_object_binding_access_generations
+                .entry(object.to_string())
+                .or_default()
+                .insert(member.to_string(), generation);
+            return true;
+        }
         if let Some(class) = self.walk_order_class_bindings.get(object) {
             self.walk_order_member_accesses.push((
                 object.to_string(),
@@ -1116,6 +1209,29 @@ impl ModuleInfoExtractor {
                 member.to_string(),
             ));
         }
+        false
+    }
+
+    fn abstain_direct_object_binding_path(&mut self, object: &str) {
+        let mut classes = FxHashSet::default();
+        if let Some(module_classes) = self.module_direct_object_binding_targets.get(object) {
+            classes.extend(module_classes.iter().cloned());
+        }
+        for targets in &self.scoped_direct_object_binding_targets {
+            if let Some(scoped_classes) = targets.get(object) {
+                classes.extend(scoped_classes.iter().cloned());
+            }
+        }
+        for class in classes {
+            if self
+                .direct_object_binding_whole_object_uses
+                .insert(class.clone())
+            {
+                self.whole_object_uses.push(class);
+            }
+        }
+        self.abstained_direct_object_binding_paths
+            .insert(object.to_string());
     }
 
     /// Record member accesses for a JSX member-expression tag (`<SC.UsedStyle />`,
@@ -1130,11 +1246,12 @@ impl ModuleInfoExtractor {
                 && !self.namespace_like_binding_is_shadowed(&object_name)
             {
                 let object = self.qualify_this_scope(&object_name);
-                self.record_walk_order_member_access(&object, current.property.name.as_str());
-                self.member_accesses.push(MemberAccess {
-                    object,
-                    member: current.property.name.to_string(),
-                });
+                if !self.record_walk_order_member_access(&object, current.property.name.as_str()) {
+                    self.member_accesses.push(MemberAccess {
+                        object,
+                        member: current.property.name.to_string(),
+                    });
+                }
             }
             match &current.object {
                 JSXMemberExpressionObject::MemberExpression(inner) => current = inner,

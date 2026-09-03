@@ -2502,6 +2502,650 @@ fn instance_property_access_mapped_to_class() {
 }
 
 #[test]
+fn object_property_instance_access_mapped_to_class() {
+    let info = parse(
+        r"
+            import { Foo } from './foo';
+            const holder = { property: new Foo() };
+            console.log(holder.property.bar);
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Foo" && access.member == "bar"),
+        "holder.property.bar should be mapped to Foo.bar, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn builtin_object_property_instance_is_not_mapped_to_class() {
+    let info = parse(
+        r"
+            const holder = { property: new Map() };
+            holder.property.get('key');
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Map"),
+        "built-in object-property instances should not emit class accesses, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn nested_shadow_maps_each_object_property_binding_to_its_own_class() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const holder = { property: new Alpha() };
+
+            function nested() {
+                const holder = { property: new Beta() };
+                holder.property.betaOnly();
+            }
+
+            holder.property.alphaOnly();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the outer holder should remain mapped to Alpha, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the nested holder should be mapped to Beta, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn function_local_object_property_instance_access_mapped_to_class() {
+    let info = parse(
+        r"
+            import { Foo } from './foo';
+            function run() {
+                const holder = { property: new Foo() };
+                holder.property.bar();
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Foo" && access.member == "bar"),
+        "a function-local holder should be mapped to Foo, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn shadowed_parameter_does_not_credit_module_object_property_binding() {
+    let info = parse(
+        r"
+            import { Alpha } from './services';
+            const holder = { property: new Alpha() };
+
+            function inspect(holder: unknown) {
+                holder.property.unrelated();
+            }
+
+            holder.property.alphaOnly();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the module holder should remain mapped to Alpha, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "unrelated"),
+        "a shadowing parameter must not credit Alpha, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn forward_module_object_property_binding_survives_sibling_shadow() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+
+            function early() {
+                holder.property.alphaOnly();
+            }
+
+            function nested() {
+                const holder = { property: new Beta() };
+                holder.property.betaOnly();
+            }
+
+            const holder = { property: new Alpha() };
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the forward module access should map to Alpha, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the sibling local access should map to Beta, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn loop_initializer_object_property_binding_does_not_leak() {
+    let info = parse(
+        r"
+            import { Beta } from './services';
+
+            for (let holder = { property: new Beta() }; false;) {}
+
+            const holder = { property: { betaOnly() {} } };
+            holder.property.betaOnly();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the loop initializer target must not leak, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn switch_object_property_binding_does_not_leak_to_module_scope() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+
+            switch (value) {
+                case 1:
+                    const holder = { property: new Beta() };
+                    holder.property.betaOnly();
+                    break;
+            }
+
+            const holder = { property: new Alpha() };
+            holder.property.alphaOnly();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the module target should remain Alpha, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the switch-local target should map to Beta, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "alphaOnly"),
+        "the module access must not be credited to Beta, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn direct_and_identifier_object_property_bindings_do_not_cross_credit() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const holder = { property: new Alpha() };
+
+            function nested() {
+                const beta = new Beta();
+                const holder = { property: beta };
+                holder.property.betaOnly();
+            }
+
+            holder.property.alphaOnly();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the direct module target should map to Alpha, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the identifier-backed local target should map to Beta, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "alphaOnly"),
+        "the module access must not be credited to Beta, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn duplicate_object_property_uses_the_last_initializer() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const beta = new Beta();
+            const holder = {
+                property: new Alpha(),
+                property: beta,
+            };
+            holder.property.betaOnly();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the last property initializer should map to Beta, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "betaOnly"),
+        "the overwritten Alpha initializer must not receive the access, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn bare_identifier_assignment_replaces_direct_target() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            let holder = { property: new Alpha() };
+
+            holder.property.alphaOnly();
+            holder = { property: new Beta() };
+            holder.property.betaOnly();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the access before assignment should map to Alpha, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the replacement target should map to Beta, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn identifier_assignment_copies_nested_direct_targets() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const replacement = { property: new Beta() };
+            let holder = { property: new Alpha() };
+
+            holder = replacement;
+            holder.property.betaOnly();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the identifier assignment should copy replacement's nested target, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn function_assignment_adds_possible_module_target() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const holder = { property: new Alpha() };
+
+            function mutate() {
+                holder.property = new Beta();
+                holder.property.betaOnly();
+            }
+
+            holder.property.alphaOnly();
+            console.log(mutate);
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the module target should remain Alpha, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the function-local replacement should map to Beta, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn called_function_assignment_credits_possible_replacement() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const holder = { property: new Alpha() };
+
+            function mutate() {
+                holder.property = new Beta();
+            }
+
+            mutate();
+            holder.property.betaOnly();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the possible replacement should map the later access to Beta, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn static_block_assignment_credits_possible_replacement() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const holder = { property: new Alpha() };
+
+            class Example {
+                static {
+                    holder.property = new Beta();
+                }
+            }
+
+            holder.property.betaOnly();
+            console.log(Example);
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the static-block replacement should map the later access to Beta, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn namespace_assignment_credits_possible_replacement() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const holder = { property: new Alpha() };
+
+            namespace Example {
+                holder.property = new Beta();
+            }
+
+            holder.property.betaOnly();
+            console.log(Example);
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the namespace replacement should map the later access to Beta, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn function_var_non_class_binding_blocks_module_target_fallback() {
+    let info = parse(
+        r"
+            import { Alpha } from './services';
+            const holder = { property: new Alpha() };
+
+            function inspect() {
+                var holder = { property: { unrelated() {} } };
+                holder.property.unrelated();
+            }
+
+            holder.property.alphaOnly();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "unrelated"),
+        "a function var must block module target fallback, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn static_block_var_binding_blocks_module_target_fallback() {
+    let info = parse(
+        r"
+            import { Alpha } from './services';
+            const holder = { property: new Alpha() };
+
+            class Example {
+                static {
+                    var holder = { property: { unrelated() {} } };
+                    holder.property.unrelated();
+                }
+            }
+
+            holder.property.alphaOnly();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "unrelated"),
+        "a static-block var must block module target fallback, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn named_function_expression_binding_blocks_module_target_fallback() {
+    let info = parse(
+        r"
+            import { Alpha } from './services';
+            const holder = { property: new Alpha() };
+
+            const inspect = function holder() {
+                holder.property.unrelated();
+            };
+
+            holder.property.alphaOnly();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "unrelated"),
+        "a named function expression must block module fallback, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn named_class_expression_binding_blocks_module_target_fallback() {
+    let info = parse(
+        r"
+            import { Alpha } from './services';
+            const holder = { property: new Alpha() };
+
+            const Example = class holder {
+                static inspect() {
+                    holder.property.unrelated();
+                }
+            };
+
+            holder.property.alphaOnly();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "unrelated"),
+        "a named class expression must block module fallback, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn namespace_var_binding_does_not_escape_to_enclosing_function() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const holder = { property: new Alpha() };
+
+            function inspect() {
+                namespace Inner {
+                    var holder = { property: new Beta() };
+                    holder.property.betaOnly();
+                }
+                holder.property.alphaOnly();
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the namespace var must not replace the enclosing Alpha target, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "alphaOnly"),
+        "the namespace var must not escape into the enclosing function, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn namespace_can_use_unshadowed_module_object_property_target() {
+    let info = parse(
+        r"
+            import { Alpha } from './services';
+            const holder = { property: new Alpha() };
+
+            namespace Consumers {
+                export function use() {
+                    holder.property.alphaOnly();
+                }
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the unshadowed module target should remain visible in the namespace, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn function_default_parameter_resolves_before_body_var_scope() {
+    let info = parse(
+        r"
+            import { Alpha } from './services';
+            const holder = { property: new Alpha() };
+
+            function inspect(value = holder.property.alphaOnly()) {
+                var holder = { property: { unrelated() {} } };
+                console.log(value, holder);
+            }
+            inspect();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the default parameter should resolve the module target, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn arrow_default_parameter_resolves_before_body_var_scope() {
+    let info = parse(
+        r"
+            import { Alpha } from './services';
+            const holder = { property: new Alpha() };
+
+            const inspect = (value = holder.property.alphaOnly()) => {
+                var holder = { property: { unrelated() {} } };
+                console.log(value, holder);
+            };
+            inspect();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the arrow default should resolve the module target, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn injected_object_member_access_mapped_to_class() {
     let info = parse(
         r"

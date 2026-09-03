@@ -11,3 +11,9 @@ export class MyService {
 
     unusedMethod() { return 'unused'; }
 }
+
+export class ObjectPropertyService {
+    usedThroughObject = 'used';
+
+    unusedThroughObject = 'unused';
+}

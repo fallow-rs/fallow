@@ -1233,17 +1233,27 @@ impl ModuleInfoExtractor {
     fn record_nested_declaration(&mut self, decl: &Declaration<'_>) {
         match decl {
             Declaration::VariableDeclaration(var) => {
+                if var.kind.is_lexical() {
+                    self.record_direct_object_binding_scope_roots(
+                        var.declarations
+                            .iter()
+                            .flat_map(|declarator| declarator.id.get_binding_identifiers())
+                            .map(|id| id.name.to_string()),
+                    );
+                }
                 for declarator in &var.declarations {
                     self.record_nested_declaration_names(declarator.id.get_binding_identifiers());
                 }
             }
             Declaration::ClassDeclaration(class) => {
                 if let Some(id) = class.id.as_ref() {
+                    self.record_direct_object_binding_scope_roots([id.name.to_string()]);
                     self.record_nested_named_declaration(id);
                 }
             }
             Declaration::FunctionDeclaration(function) => {
                 if let Some(id) = function.id.as_ref() {
+                    self.record_direct_object_binding_scope_roots([id.name.to_string()]);
                     self.record_nested_named_declaration(id);
                 }
             }
@@ -1255,6 +1265,36 @@ impl ModuleInfoExtractor {
         for statement in statements {
             if let Some(declaration) = statement.as_declaration() {
                 self.record_nested_declaration(declaration);
+            }
+        }
+    }
+
+    fn preseed_direct_object_binding_scope_roots(&mut self, statements: &[Statement<'_>]) {
+        for statement in statements {
+            let Some(declaration) = statement.as_declaration() else {
+                continue;
+            };
+            match declaration {
+                Declaration::VariableDeclaration(variable) if variable.kind.is_lexical() => {
+                    self.record_direct_object_binding_scope_roots(
+                        variable
+                            .declarations
+                            .iter()
+                            .flat_map(|declarator| declarator.id.get_binding_identifiers())
+                            .map(|id| id.name.to_string()),
+                    );
+                }
+                Declaration::ClassDeclaration(class) => {
+                    if let Some(id) = class.id.as_ref() {
+                        self.record_direct_object_binding_scope_roots([id.name.to_string()]);
+                    }
+                }
+                Declaration::FunctionDeclaration(function) => {
+                    if let Some(id) = function.id.as_ref() {
+                        self.record_direct_object_binding_scope_roots([id.name.to_string()]);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -2605,6 +2645,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_program_prologue(program);
         self.record_program_sanitizer_functions(program);
         self.record_local_function_return_types(program);
+        self.preseed_direct_object_binding_targets(&program.body);
         walk::walk_program(self, program);
     }
 
@@ -2703,6 +2744,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.block_depth += 1;
         let type_alias_scope_pushed =
             self.namespace_depth == 0 && self.push_function_type_alias_scope(&stmt.body);
+        self.push_direct_object_binding_scope(FxHashSet::default());
+        self.preseed_direct_object_binding_scope_roots(&stmt.body);
+        self.preseed_direct_object_binding_targets(&stmt.body);
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
             self.scoped_namespace_binding_names
@@ -2736,6 +2780,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.path_sink_binding_stack.pop();
             self.path_relative_binding_stack.pop();
         }
+        self.pop_direct_object_binding_scope();
         self.block_depth -= 1;
     }
 
@@ -2750,13 +2795,41 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
     }
 
+    fn visit_switch_cases(&mut self, cases: &oxc_allocator::Vec<'a, SwitchCase<'a>>) {
+        self.push_direct_object_binding_scope(FxHashSet::default());
+        for case in cases {
+            self.preseed_direct_object_binding_scope_roots(&case.consequent);
+            self.preseed_direct_object_binding_targets(&case.consequent);
+        }
+        walk::walk_switch_cases(self, cases);
+        self.pop_direct_object_binding_scope();
+    }
+
     fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
         let type_alias_scope_pushed =
             self.namespace_depth == 0 && self.push_function_type_alias_scope(&block.body);
+        let var_roots = Self::var_binding_roots(&block.body);
+        self.push_var_owner_direct_object_binding_scope(var_roots);
+        self.preseed_direct_object_binding_scope_roots(&block.body);
+        self.preseed_direct_object_binding_targets(&block.body);
         walk::walk_static_block(self, block);
+        self.pop_direct_object_binding_scope();
         if type_alias_scope_pushed {
             self.pop_function_type_alias_scope();
         }
+    }
+
+    fn visit_catch_clause(&mut self, clause: &CatchClause<'a>) {
+        let roots = clause
+            .param
+            .as_ref()
+            .into_iter()
+            .flat_map(|param| param.pattern.get_binding_identifiers())
+            .map(|id| id.name.to_string())
+            .collect();
+        self.push_direct_object_binding_scope(roots);
+        walk::walk_catch_clause(self, clause);
+        self.pop_direct_object_binding_scope();
     }
 
     fn visit_declaration(&mut self, decl: &Declaration<'a>) {
@@ -2776,16 +2849,41 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .as_deref()
             .is_some_and(|params| self.push_function_type_parameter_scope(params));
         self.record_scoped_typed_parameter_accesses(&func.params, func.body.as_deref());
+        let var_roots = func
+            .body
+            .as_deref()
+            .map_or_else(FxHashSet::default, |body| {
+                Self::var_binding_roots(&body.statements)
+            });
+        let self_roots = func
+            .id
+            .as_ref()
+            .map(|id| FxHashSet::from_iter([id.name.to_string()]))
+            .unwrap_or_default();
+        let mut direct_roots = self_roots;
+        for param in &func.params.items {
+            direct_roots.extend(
+                param
+                    .pattern
+                    .get_binding_identifiers()
+                    .into_iter()
+                    .map(|id| id.name.to_string()),
+            );
+        }
+        self.push_var_owner_direct_object_binding_scope(direct_roots);
         self.push_function_declaration_scope(&func.params);
+        self.deferred_function_var_binding_roots.push(var_roots);
         self.function_depth += 1;
         let component_pushed = self.react_enter_function(func);
         walk::walk_function(self, func, flags);
         self.react_exit_component(component_pushed);
         self.function_depth -= 1;
+        self.deferred_function_var_binding_roots.pop();
         if type_parameter_scope_pushed {
             self.pop_function_type_alias_scope();
         }
         self.pop_function_declaration_scope();
+        self.pop_direct_object_binding_scope();
     }
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
@@ -2795,21 +2893,37 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .as_deref()
             .is_some_and(|params| self.push_function_type_parameter_scope(params));
         self.record_scoped_typed_parameter_accesses(&expr.params, Some(expr.body.as_ref()));
+        let var_roots = Self::var_binding_roots(&expr.body.statements);
+        let direct_roots = expr
+            .params
+            .items
+            .iter()
+            .flat_map(|param| param.pattern.get_binding_identifiers())
+            .map(|id| id.name.to_string())
+            .collect();
+        self.push_var_owner_direct_object_binding_scope(direct_roots);
         self.push_function_declaration_scope(&expr.params);
+        self.deferred_function_var_binding_roots.push(var_roots);
         self.function_depth += 1;
         let component_pushed = self.react_enter_arrow(expr);
         walk::walk_arrow_function_expression(self, expr);
         self.react_exit_component(component_pushed);
         self.function_depth -= 1;
+        self.deferred_function_var_binding_roots.pop();
         if type_parameter_scope_pushed {
             self.pop_function_type_alias_scope();
         }
         self.pop_function_declaration_scope();
+        self.pop_direct_object_binding_scope();
     }
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         let type_alias_scope_pushed =
             self.namespace_depth == 0 && self.push_function_type_alias_scope(&body.statements);
+        if let Some(var_roots) = self.deferred_function_var_binding_roots.last() {
+            self.record_direct_object_binding_scope_roots(var_roots.clone());
+        }
+        self.preseed_direct_object_binding_targets(&body.statements);
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
@@ -3077,7 +3191,22 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if is_local_namespace {
             self.local_namespace_depth += 1;
         }
+        let body_statements = match decl.body.as_ref() {
+            Some(TSModuleDeclarationBody::TSModuleBlock(block)) => Some(&block.body),
+            _ => None,
+        };
+        let mut direct_roots =
+            body_statements.map_or_else(FxHashSet::default, |body| Self::var_binding_roots(body));
+        if let TSModuleDeclarationName::Identifier(id) = &decl.id {
+            direct_roots.insert(id.name.to_string());
+        }
+        self.push_var_owner_direct_object_binding_scope(direct_roots);
+        if let Some(body) = body_statements {
+            self.preseed_direct_object_binding_scope_roots(body);
+            self.preseed_direct_object_binding_targets(body);
+        }
         walk::walk_ts_module_declaration(self, decl);
+        self.pop_direct_object_binding_scope();
         if is_local_namespace {
             self.local_namespace_depth -= 1;
         }
@@ -3320,19 +3449,60 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_call_expression(self, expr);
     }
 
+    fn visit_for_statement(&mut self, stmt: &ForStatement<'a>) {
+        let mut roots = FxHashSet::default();
+        if let Some(ForStatementInit::VariableDeclaration(declaration)) = &stmt.init
+            && declaration.kind.is_lexical()
+        {
+            roots.extend(
+                declaration
+                    .declarations
+                    .iter()
+                    .flat_map(|declarator| declarator.id.get_binding_identifiers())
+                    .map(|id| id.name.to_string()),
+            );
+        }
+        self.push_direct_object_binding_scope(roots);
+        if let Some(ForStatementInit::VariableDeclaration(declaration)) = &stmt.init {
+            self.preseed_direct_object_binding_declaration(declaration);
+        }
+        walk::walk_for_statement(self, stmt);
+        self.pop_direct_object_binding_scope();
+    }
+
     fn visit_for_of_statement(&mut self, stmt: &ForOfStatement<'a>) {
         self.bind_for_of_element(stmt);
 
-        if let Some((strings, objects)) = self.static_package_loop_bindings(stmt) {
+        let static_bindings = self.static_package_loop_bindings(stmt);
+        let has_static_bindings = static_bindings.is_some();
+        if let Some((strings, objects)) = static_bindings {
             self.loop_string_bindings.push(strings);
             self.loop_object_property_values.push(objects);
-            walk::walk_for_of_statement(self, stmt);
-            self.loop_object_property_values.pop();
-            self.loop_string_bindings.pop();
-            return;
         }
 
-        walk::walk_for_of_statement(self, stmt);
+        self.visit_for_statement_left(&stmt.left);
+        self.visit_expression(&stmt.right);
+
+        let mut roots = FxHashSet::default();
+        if let ForStatementLeft::VariableDeclaration(declaration) = &stmt.left
+            && declaration.kind.is_lexical()
+        {
+            roots.extend(
+                declaration
+                    .declarations
+                    .iter()
+                    .flat_map(|declarator| declarator.id.get_binding_identifiers())
+                    .map(|id| id.name.to_string()),
+            );
+        }
+        self.push_direct_object_binding_scope(roots);
+        self.visit_statement(&stmt.body);
+        self.pop_direct_object_binding_scope();
+
+        if has_static_bindings {
+            self.loop_object_property_values.pop();
+            self.loop_string_bindings.pop();
+        }
     }
 
     fn visit_template_literal(&mut self, tpl: &TemplateLiteral<'a>) {
@@ -3485,6 +3655,44 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         self.capture_member_assign_sink(expr);
         walk::walk_assignment_expression(self, expr);
+
+        let is_plain_assignment = matches!(expr.operator, AssignmentOperator::Assign);
+        match &expr.left {
+            AssignmentTarget::AssignmentTargetIdentifier(ident) => {
+                self.record_direct_object_binding_assignment(
+                    ident.name.as_str(),
+                    &expr.right,
+                    is_plain_assignment,
+                );
+            }
+            AssignmentTarget::StaticMemberExpression(member) => {
+                if let Some(object_name) = static_member_object_name(&member.object) {
+                    self.record_direct_object_binding_assignment(
+                        &format!("{object_name}.{}", member.property.name),
+                        &expr.right,
+                        is_plain_assignment,
+                    );
+                }
+            }
+            AssignmentTarget::ComputedMemberExpression(member) => {
+                if let Some(object_name) = static_member_object_name(&member.object) {
+                    if let Some(property_name) = member.static_property_name() {
+                        self.record_direct_object_binding_assignment(
+                            &format!("{object_name}.{property_name}"),
+                            &expr.right,
+                            is_plain_assignment,
+                        );
+                    } else {
+                        self.record_direct_object_binding_assignment(
+                            &object_name,
+                            &expr.right,
+                            false,
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn visit_update_expression(&mut self, expr: &UpdateExpression<'a>) {
@@ -3561,11 +3769,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             // any non-`this` receiver pass through unchanged.
             if !self.namespace_like_binding_is_shadowed(&object_name) {
                 let object = self.qualify_this_scope(&object_name);
-                self.record_walk_order_member_access(&object, expr.property.name.as_str());
-                self.member_accesses.push(MemberAccess {
-                    object,
-                    member: expr.property.name.to_string(),
-                });
+                if !self.record_walk_order_member_access(&object, expr.property.name.as_str()) {
+                    self.member_accesses.push(MemberAccess {
+                        object,
+                        member: expr.property.name.to_string(),
+                    });
+                }
             }
         }
         if matches!(expr.object, Expression::Super(_))
@@ -3667,7 +3876,24 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Expression::Identifier(ident) = &stmt.right {
             self.record_whole_object_identifier_use(ident.name.as_str());
         }
-        walk::walk_for_in_statement(self, stmt);
+        self.visit_for_statement_left(&stmt.left);
+        self.visit_expression(&stmt.right);
+
+        let mut roots = FxHashSet::default();
+        if let ForStatementLeft::VariableDeclaration(declaration) = &stmt.left
+            && declaration.kind.is_lexical()
+        {
+            roots.extend(
+                declaration
+                    .declarations
+                    .iter()
+                    .flat_map(|declarator| declarator.id.get_binding_identifiers())
+                    .map(|id| id.name.to_string()),
+            );
+        }
+        self.push_direct_object_binding_scope(roots);
+        self.visit_statement(&stmt.body);
+        self.pop_direct_object_binding_scope();
     }
 
     fn visit_if_statement(&mut self, stmt: &IfStatement<'a>) {
@@ -3726,7 +3952,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.class_scope_counter += 1;
         let class_scope_id = self.class_scope_counter;
         self.class_scope_stack.push(class_scope_id);
+        let direct_scope_roots = class
+            .id
+            .as_ref()
+            .map(|id| FxHashSet::from_iter([id.name.to_string()]))
+            .unwrap_or_default();
+        self.push_direct_object_binding_scope(direct_scope_roots);
         walk::walk_class(self, class);
+        self.pop_direct_object_binding_scope();
         self.record_class_this_facts(
             class,
             class_scope_id,

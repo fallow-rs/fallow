@@ -816,7 +816,7 @@ use crate::MemberKind;
 ///
 /// Bumped to 237 (issue #1843 follow-up): object-binding and factory-return
 /// candidate recording now cap the per-module set at
-/// `MAX_OBJECT_BINDING_CANDIDATES` / `MAX_FACTORY_RETURN_CANDIDATES` (4096),
+/// `MAX_OBJECT_BINDING_TARGETS` / `MAX_FACTORY_RETURN_CANDIDATES` (4096),
 /// bounding the object-binding resolution fixed-point the same way the taint cap
 /// bounds its accumulator. A file exceeding a cap now persists fewer candidates,
 /// so its resolved `member_accesses` can change; warm 236 caches can carry
@@ -1024,7 +1024,12 @@ use crate::MemberKind;
 /// file with a top-level guard, `??` / `||` default, or `?.` access. Warm 284
 /// caches lack the unit, so vital signs, file scores, and branching
 /// conservation would keep replaying the module-scope blind spot.
-pub(super) const CACHE_VERSION: u32 = 285;
+///
+/// Bumped to 286 for issue #2546: object-literal properties initialized with a
+/// class instance now credit member accesses through the property path. Warm
+/// 285 caches lack those remapped `member_accesses` and would retain the false
+/// unused-class-member finding.
+pub(super) const CACHE_VERSION: u32 = 286;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

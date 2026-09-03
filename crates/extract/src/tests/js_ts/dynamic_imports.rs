@@ -1237,6 +1237,18 @@ fn child_process_fork_named_import_credits_literal_runner() {
 }
 
 #[test]
+fn child_process_fork_inside_local_namespace_credits_literal_runner() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         namespace Workers {\n\
+           export function start() { fork('./worker.js'); }\n\
+         }",
+    );
+
+    assert!(sources.contains(&"./worker.js".to_string()));
+}
+
+#[test]
 fn child_process_fork_namespace_import_credits_literal_runner() {
     let sources = dynamic_sources(
         "import * as childProcess from 'child_process';\n\
