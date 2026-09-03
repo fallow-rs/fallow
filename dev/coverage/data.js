@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788357531859,
+  "lastUpdate": 1788435872460,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "aed49b4addf9549b6271997b0c0a2e38dfe14b08",
-          "message": "perf(benchmarks): cover warm coverage gaps",
-          "timestamp": "2026-08-19T20:03:53+02:00",
-          "tree_id": "b03c21c46732dd8858caa5eccf4f8258be7cd6ac",
-          "url": "https://github.com/fallow-rs/fallow/commit/aed49b4addf9549b6271997b0c0a2e38dfe14b08"
-        },
-        "date": 1787162959363,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2899,6 +2870,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "Code Coverage",
             "value": 92.3,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "541e048480866080382f3401a899f3338b947f92",
+          "message": "feat: add project readiness doctor and Oxlint JS plugin compatibility\n\n* chore: start Ultracite doctor work\n\n* feat: add doctor and Ultracite Oxlint compatibility\n\n* fix: harden doctor readiness checks",
+          "timestamp": "2026-09-03T13:33:53+02:00",
+          "tree_id": "6e17fc4af40d2427dd581c18248718aefb76e33f",
+          "url": "https://github.com/fallow-rs/fallow/commit/541e048480866080382f3401a899f3338b947f92"
+        },
+        "date": 1788435868749,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.2,
             "unit": "%"
           }
         ]
