@@ -1,90 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788344775830,
+  "lastUpdate": 1788431874379,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "id": "e32cc0a415dcfddc776e9ec032eed6de218e0135",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v2.80.0",
-          "timestamp": "2026-05-24T08:10:02Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/e32cc0a415dcfddc776e9ec032eed6de218e0135"
-        },
-        "date": 1779703115223,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Agreement Rate",
-            "value": 2,
-            "unit": "%"
-          },
-          {
-            "name": "Agreed Issues",
-            "value": 670,
-            "unit": "issues"
-          },
-          {
-            "name": "Fallow Total",
-            "value": 32010,
-            "unit": "issues"
-          },
-          {
-            "name": "Knip Total",
-            "value": 2030,
-            "unit": "issues"
-          },
-          {
-            "name": "fastify Agreement",
-            "value": 6.1,
-            "unit": "%"
-          },
-          {
-            "name": "next.js Agreement",
-            "value": 1.9,
-            "unit": "%"
-          },
-          {
-            "name": "preact Agreement",
-            "value": 3.6,
-            "unit": "%"
-          },
-          {
-            "name": "query Agreement",
-            "value": 0,
-            "unit": "%"
-          },
-          {
-            "name": "svelte Agreement",
-            "value": 0.3,
-            "unit": "%"
-          },
-          {
-            "name": "vite Agreement",
-            "value": 5.3,
-            "unit": "%"
-          },
-          {
-            "name": "vue-core Agreement",
-            "value": 22.7,
-            "unit": "%"
-          },
-          {
-            "name": "zod Agreement",
-            "value": 2.8,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -8139,6 +8057,88 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/885dee43a93584f51ebfb4a05ac7462dce976a2f"
         },
         "date": 1788344771865,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.8,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 567,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 30103,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 2003,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 4.9,
+            "unit": "%"
+          },
+          {
+            "name": "next.js Agreement",
+            "value": 1.7,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 4.4,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "vite Agreement",
+            "value": 5.9,
+            "unit": "%"
+          },
+          {
+            "name": "vue-core Agreement",
+            "value": 23.4,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 1.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "320786e34e688499abb39a7655623f1e5191c2cc",
+          "message": "chore(agents): clean up the agent-facing instruction surface after a prompt audit (#2544)\n\nCleanup of the agent-facing instruction surface after a prompt audit of the skill tree, reviewer definitions, and MCP descriptions.\n\n- Skill tree: rotted numbers removed (gate version floor, clippy thresholds, struct sizes), `--changed-since` described as a scope filter, the six-step Instructions block replaced by a client-neutral arguments line, phase labels and migration-relative wording dropped from the reviewers, the two orphaned incident logs deleted with their one live mechanic moved into `open-draft-pr`.\n- MCP: every tool parameter now carries a description taken from the CLI help, `guard` states its contract (empty rule set for unzoned paths, config-only, no analysis), and the server instructions route to `tools/list` and the resources instead of re-listing all tools. The two tests that asserted the old enumeration now assert routing and resource coverage.\n- Reviewer roster: the GitHub and GitLab reviewers are one `ci-integration-reviewer` that decides the provider from the touched paths.\n- `.claude/agents/*.md` are generated from `.agents/agents/*.md` by the adapter script, with drift check and tests; the diverged copies were reconciled with the richer version winning per file.\n- `.agents/skills/fallow` is a generator target next to the npm skill, wired into the contract surfaces and both CI path filters. The `gotchas`, `patterns`, and `cli-reference` references under `.agents` were left as-is and still lag the npm copies; that is a follow-up.\n\nVerification: `node --test scripts/*.test.mjs`, `cargo test -p fallow-mcp`, clippy, `lint:js`, `fmt:js:check`, `generate:contracts:check`, `check:agent-adapters` all pass; both drift checks fail on a deliberate one-character drift.",
+          "timestamp": "2026-09-02T13:52:44Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/320786e34e688499abb39a7655623f1e5191c2cc"
+        },
+        "date": 1788431870301,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
