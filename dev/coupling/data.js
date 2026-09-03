@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788435595040,
+  "lastUpdate": 1788479014758,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "65c0f80a2e29e607eda9eafb5f9457f92c3b3127",
-          "message": "perf(benchmarks): track circular dependency command",
-          "timestamp": "2026-08-19T01:42:41+02:00",
-          "tree_id": "ba73445056731c31c7ea2a97760c02a5aaef20b6",
-          "url": "https://github.com/fallow-rs/fallow/commit/65c0f80a2e29e607eda9eafb5f9457f92c3b3127"
-        },
-        "date": 1787096885544,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 455,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1230,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4899,6 +4850,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Edges",
             "value": 1281,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c9ecdc7c0897b746d560bc14714ef50b04c0cb91",
+          "message": "fix: recognize class members through object properties\n\n* chore: start issue 2546 implementation\n\n* fix: recognize class members through object properties\n\n* fix: keep object binding extraction MSRV compatible",
+          "timestamp": "2026-09-04T01:37:53+02:00",
+          "tree_id": "42abe1502f830b90b9904abe0ebe7a5c83a15f83",
+          "url": "https://github.com/fallow-rs/fallow/commit/c9ecdc7c0897b746d560bc14714ef50b04c0cb91"
+        },
+        "date": 1788479011395,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 52,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 470,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1282,
             "unit": "count"
           }
         ]
