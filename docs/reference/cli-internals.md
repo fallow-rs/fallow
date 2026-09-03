@@ -91,7 +91,9 @@ an exit code.
   epilogue-free. Its trend compares only whole-project scans.
 - `fallow doctor` stays path-free, local, read-only, and epilogue-free. It may
   discover a trusted optional companion, but must not start it. Required
-  readiness failures emit the complete report before exiting 2.
+  readiness failures emit the complete report before exiting 2. Reports go to
+  stdout; the command rejects `--output-file` so diagnostics cannot create or
+  replace a project input.
 - New output fields must move schemas, generated TypeScript contracts, MCP,
   LSP, VS Code, GitHub Action, and GitLab consumers together.
 - New-only duplication demotion (issues #2164, #2220): under `--gate new-only`

@@ -674,6 +674,158 @@ fn parse_plugin(content: &str, format: &PluginFormat, path: &Path) -> Option<Ext
     }
 }
 
+/// Why an explicitly configured external-plugin resource could not be loaded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConfiguredPluginDiagnosticKind {
+    /// The configured path does not exist.
+    Missing,
+    /// The configured path resolves outside the project root.
+    OutsideProjectRoot,
+    /// The configured file does not use a supported plugin extension.
+    UnsupportedFormat,
+    /// The configured file or directory could not be read.
+    Unreadable,
+    /// The configured plugin file could not be parsed into a usable definition.
+    InvalidDefinition,
+    /// The configured directory contains no supported plugin definitions.
+    NoPluginFiles,
+}
+
+/// Typed readiness diagnostic for an explicitly configured plugin resource.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ConfiguredPluginDiagnostic {
+    /// Failure classification suitable for programmatic branching.
+    pub kind: ConfiguredPluginDiagnosticKind,
+    /// Resolved path that was inspected. Callers must apply their own privacy policy.
+    pub path: PathBuf,
+}
+
+/// Inspect only paths named explicitly by the `plugins` config field.
+///
+/// Automatic plugin discovery deliberately retains its existing best-effort
+/// behavior. This API exists for readiness surfaces that must distinguish an
+/// absent plugin configuration from an explicitly configured resource that
+/// could not be loaded.
+#[must_use]
+pub fn diagnose_configured_external_plugins(
+    root: &Path,
+    config_plugin_paths: &[String],
+) -> Vec<ConfiguredPluginDiagnostic> {
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut diagnostics = Vec::new();
+
+    for path_str in config_plugin_paths {
+        let path = root.join(path_str);
+        let metadata = match std::fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                diagnostics.push(ConfiguredPluginDiagnostic {
+                    kind: if error.kind() == std::io::ErrorKind::NotFound {
+                        ConfiguredPluginDiagnosticKind::Missing
+                    } else {
+                        ConfiguredPluginDiagnosticKind::Unreadable
+                    },
+                    path,
+                });
+                continue;
+            }
+        };
+
+        if !is_within_root(&path, &canonical_root) {
+            diagnostics.push(ConfiguredPluginDiagnostic {
+                kind: ConfiguredPluginDiagnosticKind::OutsideProjectRoot,
+                path,
+            });
+            continue;
+        }
+
+        if metadata.is_dir() {
+            diagnose_configured_plugin_dir(&path, &canonical_root, &mut diagnostics);
+        } else if metadata.is_file() {
+            diagnose_configured_plugin_file(&path, &canonical_root, &mut diagnostics);
+        } else {
+            diagnostics.push(ConfiguredPluginDiagnostic {
+                kind: ConfiguredPluginDiagnosticKind::UnsupportedFormat,
+                path,
+            });
+        }
+    }
+
+    diagnostics
+}
+
+fn diagnose_configured_plugin_dir(
+    dir: &Path,
+    canonical_root: &Path,
+    diagnostics: &mut Vec<ConfiguredPluginDiagnostic>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        diagnostics.push(ConfiguredPluginDiagnostic {
+            kind: ConfiguredPluginDiagnosticKind::Unreadable,
+            path: dir.to_path_buf(),
+        });
+        return;
+    };
+    let mut plugin_files = Vec::new();
+    let mut entry_failed = false;
+    for entry in entries {
+        match entry {
+            Ok(entry) => {
+                let path = entry.path();
+                if path.is_file() && is_plugin_file(&path) {
+                    plugin_files.push(path);
+                }
+            }
+            Err(_) => {
+                entry_failed = true;
+                diagnostics.push(ConfiguredPluginDiagnostic {
+                    kind: ConfiguredPluginDiagnosticKind::Unreadable,
+                    path: dir.to_path_buf(),
+                });
+            }
+        }
+    }
+    if plugin_files.is_empty() && !entry_failed {
+        diagnostics.push(ConfiguredPluginDiagnostic {
+            kind: ConfiguredPluginDiagnosticKind::NoPluginFiles,
+            path: dir.to_path_buf(),
+        });
+        return;
+    }
+    plugin_files.sort();
+    for path in plugin_files {
+        diagnose_configured_plugin_file(&path, canonical_root, diagnostics);
+    }
+}
+
+fn diagnose_configured_plugin_file(
+    path: &Path,
+    canonical_root: &Path,
+    diagnostics: &mut Vec<ConfiguredPluginDiagnostic>,
+) {
+    let kind = if !is_within_root(path, canonical_root) {
+        Some(ConfiguredPluginDiagnosticKind::OutsideProjectRoot)
+    } else if let Some(format) = PluginFormat::from_path(path) {
+        match std::fs::read_to_string(path) {
+            Ok(content) => match parse_plugin(&content, &format, path) {
+                Some(plugin) if !plugin.name.is_empty() => None,
+                Some(_) | None => Some(ConfiguredPluginDiagnosticKind::InvalidDefinition),
+            },
+            Err(_) => Some(ConfiguredPluginDiagnosticKind::Unreadable),
+        }
+    } else {
+        Some(ConfiguredPluginDiagnosticKind::UnsupportedFormat)
+    };
+    if let Some(kind) = kind {
+        diagnostics.push(ConfiguredPluginDiagnostic {
+            kind,
+            path: path.to_path_buf(),
+        });
+    }
+}
+
 /// Discover and load external plugin definitions for a project.
 ///
 /// Discovery order (first occurrence of a plugin name wins):
@@ -1536,6 +1688,51 @@ enablers = ["single-pkg"]
         assert_eq!(plugins[0].name, "json-single");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn configured_plugin_diagnostics_report_missing_file() {
+        let dir = tempfile::tempdir().expect("temp root");
+
+        let diagnostics =
+            diagnose_configured_external_plugins(dir.path(), &["missing-plugin.json".to_string()]);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].kind, ConfiguredPluginDiagnosticKind::Missing);
+        assert_eq!(diagnostics[0].path, dir.path().join("missing-plugin.json"));
+    }
+
+    #[test]
+    fn configured_plugin_diagnostics_report_malformed_file() {
+        let dir = tempfile::tempdir().expect("temp root");
+        std::fs::write(dir.path().join("broken.json"), "{").expect("write plugin");
+
+        let diagnostics =
+            diagnose_configured_external_plugins(dir.path(), &["broken.json".to_string()]);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].kind,
+            ConfiguredPluginDiagnosticKind::InvalidDefinition
+        );
+    }
+
+    #[test]
+    fn configured_plugin_diagnostics_report_directory_without_plugin_files() {
+        let dir = tempfile::tempdir().expect("temp root");
+        let plugins_dir = dir.path().join("plugins");
+        std::fs::create_dir(&plugins_dir).expect("create plugin dir");
+        std::fs::write(plugins_dir.join("plugin.yaml"), "name: ignored")
+            .expect("write unsupported file");
+
+        let diagnostics =
+            diagnose_configured_external_plugins(dir.path(), &["plugins".to_string()]);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].kind,
+            ConfiguredPluginDiagnosticKind::NoPluginFiles
+        );
     }
 
     #[test]

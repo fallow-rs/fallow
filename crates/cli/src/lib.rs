@@ -827,6 +827,7 @@ enum Command {
     /// plugins, and the optional type-aware companion. Uses only local reads;
     /// it performs no cache writes, telemetry, network requests, or third-party
     /// execution. Supports human and JSON output.
+    #[command(override_help = doctor::HELP)]
     Doctor,
 
     /// Find semantically similar functions with a pinned local model (opt-in).
@@ -3313,12 +3314,20 @@ fn run_doctor_command_if_requested(cli: &Cli, format: &FormatConfig) -> Option<E
     }
 
     if let Some(flag) = unsupported_doctor_option(cli) {
+        let message = if flag == "--output-file" {
+            "--output-file is not valid with `fallow doctor`; doctor is read-only and writes its report to stdout".to_string()
+        } else {
+            format!("{flag} is not valid with `fallow doctor`.")
+        };
         return Some(crate::error::emit_error_with_style(
-            &format!("{flag} is not valid with `fallow doctor`."),
+            &message,
             2,
             format.output,
             format.json_style,
         ));
+    }
+    if let Err(code) = doctor::validate_output(format.output, format.json_style) {
+        return Some(code);
     }
 
     let root = cli.root.clone().unwrap_or_else(|| {
@@ -3331,23 +3340,12 @@ fn run_doctor_command_if_requested(cli: &Cli, format: &FormatConfig) -> Option<E
             root.join(path)
         }
     });
-    if let Some(path) = cli.output_file.as_deref()
-        && let Err(code) = redirect_report_to_file(path, format.output)
-    {
-        return Some(code);
-    }
-    let code = doctor::run_doctor(
-        &root,
-        config_path.as_deref(),
+    let report = doctor::collect_report(&root, config_path.as_deref());
+    Some(doctor::render_report(
+        &report,
         format.output,
         format.json_style,
-    );
-    if let Some(path) = cli.output_file.as_deref()
-        && let Err(code) = finalize_report_file(path, format.quiet, format.output)
-    {
-        return Some(code);
-    }
-    Some(code)
+    ))
 }
 
 /// Doctor accepts only project selection and presentation options. Rejecting
@@ -3382,6 +3380,7 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
         (cli.ci, "--ci"),
         (cli.fail_on_issues, "--fail-on-issues"),
         (cli.sarif_file.is_some(), "--sarif-file"),
+        (cli.output_file.is_some(), "--output-file"),
         (cli.report_path_prefix.is_some(), "--report-path-prefix"),
         (cli.fail_on_regression, "--fail-on-regression"),
         (cli.tolerance != "0", "--tolerance"),

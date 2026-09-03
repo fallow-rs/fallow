@@ -25070,11 +25070,6 @@
       ],
       "description": "Counts for every per-check status."
     },
-    "DoctorRoot": {
-      "type": "string",
-      "description": "Schema projection for the privacy-safe project-root identifier.",
-      "const": "."
-    },
     "DoctorProjectRoot": {
       "type": "string",
       "description": "Schema projection for `.` as the privacy-safe diagnosed project root.",

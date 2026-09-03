@@ -7,29 +7,52 @@ use fallow_config::OutputFormat;
 use fallow_output::{DoctorCheckStatus, DoctorOutput, DoctorStatus};
 
 use crate::json_style::JsonStyle;
-use crate::report::sink::outln;
+use crate::report::{HumanStatus, human_status_line, sink::outln};
 
-pub fn run_doctor(
-    root: &Path,
-    config_path: Option<&Path>,
+pub const HELP: &str = "\
+Diagnose project readiness without analysis or mutation.
+
+Checks the root, config resolution, workspace discovery, external plugins, and
+the optional type-aware companion. Uses only local reads and supports human and
+JSON output.
+
+Usage: fallow doctor [OPTIONS]
+
+Options:
+  -r, --root <ROOT>          Project root directory
+  -c, --config <CONFIG>      Path to the Fallow config file
+  -f, --format <FORMAT>      Output format: human or json [default: human] [alias: --output]
+      --pretty               Indent JSON output
+  -q, --quiet                Suppress progress output
+  -h, --help                 Print help
+";
+
+pub fn collect_report(root: &Path, config_path: Option<&Path>) -> DoctorOutput {
+    fallow_api::run_doctor(&fallow_api::DoctorOptions { root, config_path })
+}
+
+pub fn render_report(
+    report: &DoctorOutput,
     output: OutputFormat,
     json_style: JsonStyle,
 ) -> ExitCode {
-    if !matches!(output, OutputFormat::Human | OutputFormat::Json) {
-        return crate::error::emit_error_with_style(
-            "doctor supports human and json output",
-            2,
-            output,
-            json_style,
-        );
-    }
-
-    let report = fallow_api::run_doctor(&fallow_api::DoctorOptions { root, config_path });
     match output {
-        OutputFormat::Json => render_json(&report, json_style),
-        OutputFormat::Human => render_human(&report),
-        _ => unreachable!("unsupported doctor output rejected above"),
+        OutputFormat::Json => render_json(report, json_style),
+        OutputFormat::Human => render_human(report),
+        _ => unreachable!("unsupported doctor output rejected before inspection"),
     }
+}
+
+pub fn validate_output(output: OutputFormat, json_style: JsonStyle) -> Result<(), ExitCode> {
+    if matches!(output, OutputFormat::Human | OutputFormat::Json) {
+        return Ok(());
+    }
+    Err(crate::error::emit_error_with_style(
+        "doctor supports human and json output",
+        2,
+        output,
+        json_style,
+    ))
 }
 
 fn render_json(report: &DoctorOutput, json_style: JsonStyle) -> ExitCode {
@@ -58,19 +81,19 @@ fn render_json(report: &DoctorOutput, json_style: JsonStyle) -> ExitCode {
             );
         }
     }
-    doctor_exit(report)
+    report_exit(report)
 }
 
 fn render_human(report: &DoctorOutput) -> ExitCode {
     outln!("Fallow doctor ({})", report.root);
     for check in &report.checks {
-        let prefix = match check.status {
-            DoctorCheckStatus::Pass => "[OK]",
-            DoctorCheckStatus::Warn => "[W]",
-            DoctorCheckStatus::Fail => "[X]",
-            DoctorCheckStatus::Skipped => "[-]",
-        };
-        outln!("{prefix} {}: {}", check_id(check.id), check.message);
+        outln!(
+            "{}",
+            human_status_line(
+                check_human_status(check.status),
+                format_args!("{}: {}", check_id(check.id), check.message)
+            )
+        );
         if let Some(remediation) = &check.remediation {
             outln!("    Action (from project root): {}", remediation.command);
         }
@@ -83,7 +106,16 @@ fn render_human(report: &DoctorOutput) -> ExitCode {
             DoctorStatus::Fail => "not ready",
         }
     );
-    doctor_exit(report)
+    report_exit(report)
+}
+
+const fn check_human_status(status: DoctorCheckStatus) -> HumanStatus {
+    match status {
+        DoctorCheckStatus::Pass => HumanStatus::Ok,
+        DoctorCheckStatus::Warn => HumanStatus::Warning,
+        DoctorCheckStatus::Fail => HumanStatus::Failure,
+        DoctorCheckStatus::Skipped => HumanStatus::Inactive,
+    }
 }
 
 const fn check_id(id: fallow_output::DoctorCheckId) -> &'static str {
@@ -96,7 +128,7 @@ const fn check_id(id: fallow_output::DoctorCheckId) -> &'static str {
     }
 }
 
-fn doctor_exit(report: &DoctorOutput) -> ExitCode {
+fn report_exit(report: &DoctorOutput) -> ExitCode {
     if report.status == DoctorStatus::Fail {
         ExitCode::from(2)
     } else {
@@ -114,7 +146,7 @@ mod tests {
             root: Path::new("/definitely/missing/fallow-doctor-root"),
             config_path: None,
         });
-        assert_eq!(doctor_exit(&report), ExitCode::from(2));
+        assert_eq!(report_exit(&report), ExitCode::from(2));
         assert_eq!(report.checks.len(), 5);
     }
 }

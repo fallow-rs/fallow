@@ -10,6 +10,80 @@ mod common;
 use common::{parse_json, run_fallow_raw, run_fallow_raw_with_env};
 
 #[test]
+fn help_only_advertises_supported_options() {
+    for help_flag in ["-h", "--help"] {
+        let output = run_fallow_raw(&["doctor", help_flag]);
+
+        assert_eq!(output.code, 0, "doctor help failed: {}", output.stderr);
+        assert!(output.stderr.is_empty());
+        for supported in ["--root", "--config", "--format", "--pretty", "--quiet"] {
+            assert!(
+                output.stdout.contains(supported),
+                "doctor {help_flag} omitted supported option {supported}"
+            );
+        }
+        for unsupported in [
+            "--output-file",
+            "--allow-remote-extends",
+            "--changed-since",
+            "--workspace",
+            "--ci",
+            "--type-aware",
+            "sarif",
+            "compact",
+        ] {
+            assert!(
+                !output.stdout.contains(unsupported),
+                "doctor {help_flag} advertised unsupported option {unsupported}"
+            );
+        }
+    }
+}
+
+#[test]
+fn output_file_is_rejected_without_creating_or_modifying_a_target() {
+    let root = tempfile::tempdir().expect("temp root");
+    let output_path = root.path().join("doctor.json");
+    let root_text = root.path().to_string_lossy();
+    let output_text = output_path.to_string_lossy();
+    let output = run_fallow_raw(&[
+        "doctor",
+        "--root",
+        root_text.as_ref(),
+        "--format",
+        "json",
+        "--output-file",
+        output_text.as_ref(),
+        "--quiet",
+    ]);
+
+    assert_eq!(output.code, 2);
+    assert!(!output_path.exists());
+    assert!(output.stderr.is_empty());
+    let json = parse_json(&output);
+    assert_eq!(json["error"], true);
+    assert!(
+        json["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("writes its report to stdout"))
+    );
+
+    let original = b"important user content\n";
+    std::fs::write(&output_path, original).expect("write existing file");
+    let output = run_fallow_raw(&[
+        "doctor",
+        "--root",
+        root_text.as_ref(),
+        "--output-file",
+        output_text.as_ref(),
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 2);
+    assert_eq!(std::fs::read(&output_path).expect("read output"), original);
+    assert!(output.stderr.contains("writes its report to stdout"));
+}
+
+#[test]
 fn zero_config_json_is_stable_and_path_free() {
     let root = tempfile::tempdir().expect("temp root");
     let root_text = root.path().to_string_lossy();
@@ -77,6 +151,24 @@ fn human_report_is_readable_and_path_free() {
     assert!(output.stdout.contains("[OK] root:"));
     assert!(output.stdout.contains("Status: ready"));
     assert!(!output.stdout.contains(root_text.as_ref()));
+}
+
+#[test]
+fn invalid_root_uses_shared_failure_prefix_and_actionable_private_message() {
+    let root = tempfile::tempdir().expect("temp root");
+    let missing = root.path().join("missing");
+    let missing_text = missing.to_string_lossy();
+    let output = run_fallow_raw(&["doctor", "--root", missing_text.as_ref(), "--quiet"]);
+
+    assert_eq!(output.code, 2);
+    assert!(output.stderr.is_empty());
+    assert!(output.stdout.contains("[X] root:"));
+    assert!(
+        output
+            .stdout
+            .contains("Set --root to an existing, readable directory.")
+    );
+    assert!(!output.stdout.contains(missing_text.as_ref()));
 }
 
 #[test]

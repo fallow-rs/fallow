@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_engine::project_config::{
-    ProjectConfig, ProjectConfigOptions, config_for_project_analysis,
+    ProjectConfig, ProjectConfigOptions, config_for_project_readiness,
 };
 use fallow_output::{
     DOCTOR_SCHEMA_VERSION, DoctorCheck, DoctorCheckCategory, DoctorCheckId, DoctorCheckStatus,
@@ -49,7 +49,7 @@ where
                 DoctorCheckCategory::Project,
                 DoctorCheckStatus::Fail,
                 true,
-                "Project root is not an accessible directory.",
+                "Project root is not accessible. Set --root to an existing, readable directory.",
                 None,
             ));
             push_prerequisite_skips(&mut checks, "Project root readiness failed.");
@@ -57,7 +57,7 @@ where
         }
     };
 
-    let project = config_for_project_analysis(
+    let project = config_for_project_readiness(
         &root,
         options.config_path,
         ProjectConfigOptions {
@@ -72,7 +72,13 @@ where
     );
 
     match project {
-        Ok(project) => push_ready_project_checks(&mut checks, &root, &project, discover_companion),
+        Ok(readiness) => push_ready_project_checks(
+            &mut checks,
+            &root,
+            &readiness.project,
+            &readiness.configured_plugin_diagnostics,
+            discover_companion,
+        ),
         Err(error) => {
             push_project_failure_checks(&mut checks, error.message(), &root, options.config_path);
         }
@@ -85,17 +91,16 @@ fn push_ready_project_checks<F>(
     checks: &mut Vec<DoctorCheck>,
     root: &Path,
     project: &ProjectConfig,
+    configured_plugin_diagnostics: &[fallow_config::ConfiguredPluginDiagnostic],
     discover_companion: &F,
 ) where
     F: Fn(&Path) -> Result<(), String>,
 {
     let config_message = project.path.as_ref().map_or_else(
         || "Zero-config defaults resolved successfully.".to_string(),
-        |path| match relative_path(root, path) {
+        |path| match safe_config_argument(root, path) {
             Some(path) => format!("Configuration resolved from {path}."),
-            None => {
-                "The explicitly selected external configuration resolved successfully.".to_string()
-            }
+            None => "The explicitly selected configuration resolved successfully.".to_string(),
         },
     );
     checks.push(check(
@@ -151,7 +156,7 @@ fn push_ready_project_checks<F>(
             .flatten(),
     ));
 
-    checks.push(plugin_check(root, project));
+    checks.push(plugin_check(root, project, configured_plugin_diagnostics));
 
     checks.push(type_aware_check(
         root,
@@ -160,7 +165,36 @@ fn push_ready_project_checks<F>(
     ));
 }
 
-fn plugin_check(root: &Path, project: &ProjectConfig) -> DoctorCheck {
+fn plugin_check(
+    root: &Path,
+    project: &ProjectConfig,
+    configured_plugin_diagnostics: &[fallow_config::ConfiguredPluginDiagnostic],
+) -> DoctorCheck {
+    if !configured_plugin_diagnostics.is_empty() {
+        let diagnostic_count = configured_plugin_diagnostics.len();
+        let resource_noun = if diagnostic_count == 1 {
+            "resource"
+        } else {
+            "resources"
+        };
+        let mut message = format!(
+            "External plugin configuration contains {diagnostic_count} unresolved configured {resource_noun}."
+        );
+        append_external_config_note(&mut message, root, project.path.as_deref());
+        return check(
+            DoctorCheckId::Plugins,
+            DoctorCheckCategory::Plugin,
+            DoctorCheckStatus::Fail,
+            true,
+            message,
+            remediation_with_config(
+                "fallow plugin-check --format json --quiet",
+                root,
+                project.path.as_deref(),
+            ),
+        );
+    }
+
     let configured = &project.config.external_plugins;
     if configured.is_empty() {
         return check(
@@ -468,7 +502,7 @@ fn canonicalize_with_missing_suffix(path: &Path) -> Option<PathBuf> {
 
 fn append_external_config_note(message: &mut String, root: &Path, config_path: Option<&Path>) {
     if config_path.is_some_and(|path| safe_config_argument(root, path).is_none()) {
-        message.push_str(" Repeat this diagnostic with the same external --config value.");
+        message.push_str(" Repeat this diagnostic with the same explicit --config value.");
     }
 }
 
@@ -545,9 +579,14 @@ fn build_output(checks: Vec<DoctorCheck>) -> DoctorOutput {
 }
 
 fn relative_path(root: &Path, path: &Path) -> Option<String> {
-    path.strip_prefix(root)
-        .ok()
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
+    path.strip_prefix(root).ok().map(|path| {
+        let relative = path.to_string_lossy().replace('\\', "/");
+        if relative.is_empty() {
+            ".".to_string()
+        } else {
+            relative
+        }
+    })
 }
 
 #[cfg(test)]
@@ -673,6 +712,11 @@ mod tests {
 
         assert_eq!(output.status, DoctorStatus::Fail);
         assert_eq!(output.root, ".");
+        assert!(output.checks[0].message.contains("--root"));
+        assert_eq!(
+            output.checks[0].message,
+            "Project root is not accessible. Set --root to an existing, readable directory."
+        );
         assert!(
             output
                 .checks
@@ -696,13 +740,57 @@ mod tests {
         assert_eq!(output.status, DoctorStatus::Pass);
         assert_eq!(
             output.checks[1].message,
-            "The explicitly selected external configuration resolved successfully."
+            "The explicitly selected configuration resolved successfully."
         );
         assert!(
             !output.checks[1]
                 .message
                 .contains(&config_dir.path().display().to_string())
         );
+    }
+
+    #[test]
+    fn parent_relative_external_config_stays_private() {
+        let sandbox = tempfile::tempdir().expect("temp sandbox");
+        let root = sandbox.path().join("project");
+        std::fs::create_dir(&root).expect("create project root");
+        let config_path = root.join("../customer-secret.json");
+        std::fs::write(&config_path, "{}").expect("write config");
+
+        let output = run_doctor(&DoctorOptions {
+            root: &root,
+            config_path: Some(&config_path),
+        });
+
+        assert_eq!(output.status, DoctorStatus::Pass);
+        assert_eq!(
+            output.checks[1].message,
+            "The explicitly selected configuration resolved successfully."
+        );
+        assert!(!output.checks[1].message.contains("customer-secret"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn successful_config_below_external_symlink_stays_private() {
+        let root = tempfile::tempdir().expect("temp root");
+        let external = tempfile::tempdir().expect("external root");
+        std::fs::write(external.path().join("config.json"), "{}").expect("write config");
+        std::os::unix::fs::symlink(external.path(), root.path().join("external"))
+            .expect("create external symlink");
+        let config_path = root.path().join("external/config.json");
+
+        let output = run_doctor(&DoctorOptions {
+            root: root.path(),
+            config_path: Some(&config_path),
+        });
+
+        assert_eq!(output.status, DoctorStatus::Pass);
+        assert_eq!(
+            output.checks[1].message,
+            "The explicitly selected configuration resolved successfully."
+        );
+        assert!(!output.checks[1].message.contains("external/config.json"));
     }
 
     #[test]
@@ -747,7 +835,7 @@ mod tests {
         assert!(
             !output.checks[1]
                 .message
-                .contains("same external --config value")
+                .contains("same explicit --config value")
         );
     }
 
@@ -771,6 +859,23 @@ mod tests {
     }
 
     #[test]
+    fn config_path_equal_to_root_never_renders_an_empty_argument() {
+        let root = tempfile::tempdir().expect("temp root");
+
+        let output = run_doctor(&DoctorOptions {
+            root: root.path(),
+            config_path: Some(root.path()),
+        });
+
+        let command = output.checks[1]
+            .remediation
+            .as_ref()
+            .map(|remediation| remediation.command.as_str());
+        assert_eq!(command, Some("fallow config --config=."));
+        assert_ne!(command, Some("fallow config --config="));
+    }
+
+    #[test]
     fn missing_config_traversal_outside_root_stays_private() {
         let sandbox = tempfile::tempdir().expect("temp sandbox");
         let root = sandbox.path().join("project");
@@ -787,7 +892,7 @@ mod tests {
         assert!(
             output.checks[1]
                 .message
-                .contains("same external --config value")
+                .contains("same explicit --config value")
         );
         assert!(!output.checks[1].message.contains("missing.json"));
     }
@@ -811,7 +916,7 @@ mod tests {
         assert!(
             output.checks[1]
                 .message
-                .contains("same external --config value")
+                .contains("same explicit --config value")
         );
         assert!(!output.checks[1].message.contains("missing-dir"));
     }
@@ -833,12 +938,88 @@ mod tests {
         assert!(
             output.checks[1]
                 .message
-                .contains("same external --config value")
+                .contains("same explicit --config value")
         );
         assert!(
             !output.checks[1]
                 .message
                 .contains(&config_dir.path().display().to_string())
+        );
+    }
+
+    #[test]
+    fn missing_explicit_plugin_is_a_required_failure() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(
+            root.path().join(".fallowrc.json"),
+            r#"{"plugins":["missing-plugin.json"]}"#,
+        )
+        .expect("write config");
+
+        let output = run_doctor(&DoctorOptions {
+            root: root.path(),
+            config_path: None,
+        });
+
+        assert_eq!(output.status, DoctorStatus::Fail);
+        assert_eq!(output.checks[3].status, DoctorCheckStatus::Fail);
+        assert!(output.checks[3].required);
+        assert!(
+            output.checks[3]
+                .message
+                .contains("1 unresolved configured resource")
+        );
+        assert!(!output.checks[3].message.contains("missing-plugin.json"));
+    }
+
+    #[test]
+    fn malformed_explicit_plugin_is_a_required_failure() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(
+            root.path().join(".fallowrc.json"),
+            r#"{"plugins":["broken.json"]}"#,
+        )
+        .expect("write config");
+        std::fs::write(root.path().join("broken.json"), "{").expect("write plugin");
+
+        let output = run_doctor(&DoctorOptions {
+            root: root.path(),
+            config_path: None,
+        });
+
+        assert_eq!(output.status, DoctorStatus::Fail);
+        assert_eq!(output.checks[3].status, DoctorCheckStatus::Fail);
+        assert!(output.checks[3].required);
+        assert!(
+            output.checks[3]
+                .message
+                .contains("1 unresolved configured resource")
+        );
+        assert!(!output.checks[3].message.contains("broken.json"));
+    }
+
+    #[test]
+    fn explicit_plugin_directory_without_definitions_is_a_required_failure() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::create_dir(root.path().join("plugins")).expect("create plugin directory");
+        std::fs::write(
+            root.path().join(".fallowrc.json"),
+            r#"{"plugins":["plugins"]}"#,
+        )
+        .expect("write config");
+
+        let output = run_doctor(&DoctorOptions {
+            root: root.path(),
+            config_path: None,
+        });
+
+        assert_eq!(output.status, DoctorStatus::Fail);
+        assert_eq!(output.checks[3].status, DoctorCheckStatus::Fail);
+        assert!(output.checks[3].required);
+        assert!(
+            output.checks[3]
+                .message
+                .contains("1 unresolved configured resource")
         );
     }
 

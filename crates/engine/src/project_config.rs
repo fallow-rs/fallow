@@ -46,6 +46,16 @@ pub struct ProjectConfigOptions {
     pub allow_remote_extends: bool,
 }
 
+/// Resolved project configuration plus doctor-specific plugin diagnostics.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct ProjectConfigReadiness {
+    /// The same resolved configuration returned by [`config_for_project_analysis`].
+    pub project: ProjectConfig,
+    /// Unresolved resources named explicitly by the `plugins` config field.
+    pub configured_plugin_diagnostics: Vec<fallow_config::ConfiguredPluginDiagnostic>,
+}
+
 /// Resolve the analysis config for a project.
 ///
 /// # Errors
@@ -145,6 +155,35 @@ pub fn config_for_project_analysis(
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
 ) -> EngineResult<ProjectConfig> {
+    resolve_project_config_analysis(root, config_path, options).map(|(project, _)| project)
+}
+
+/// Resolve project configuration and collect typed readiness diagnostics for
+/// plugin resources named explicitly by the user configuration.
+///
+/// # Errors
+///
+/// Returns an engine error when config loading or validation fails.
+pub fn config_for_project_readiness(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ProjectConfigOptions,
+) -> EngineResult<ProjectConfigReadiness> {
+    let (project, configured_plugin_paths) =
+        resolve_project_config_analysis(root, config_path, options)?;
+    let configured_plugin_diagnostics =
+        fallow_config::diagnose_configured_external_plugins(root, &configured_plugin_paths);
+    Ok(ProjectConfigReadiness {
+        project,
+        configured_plugin_diagnostics,
+    })
+}
+
+fn resolve_project_config_analysis(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ProjectConfigOptions,
+) -> EngineResult<(ProjectConfig, Vec<String>)> {
     let user_config = load_user_config(
         root,
         config_path,
@@ -171,6 +210,7 @@ pub fn config_for_project_analysis(
         config.production = production.into();
     }
     validate_config(root, &config)?;
+    let configured_plugin_paths = config.plugins.clone();
     let mut resolved = config.resolve(
         root.to_path_buf(),
         options.output,
@@ -182,13 +222,16 @@ pub fn config_for_project_analysis(
     apply_max_file_size_env(&mut resolved);
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
-    Ok(ProjectConfig {
-        config: resolved,
-        path,
-        workspaces,
-        workspace_diagnostics,
-        workspace_discovery_ms: Some(workspace_discovery_ms),
-    })
+    Ok((
+        ProjectConfig {
+            config: resolved,
+            path,
+            workspaces,
+            workspace_diagnostics,
+            workspace_discovery_ms: Some(workspace_discovery_ms),
+        },
+        configured_plugin_paths,
+    ))
 }
 
 fn apply_max_file_size_env(config: &mut ResolvedConfig) {

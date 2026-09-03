@@ -5,6 +5,7 @@ use fallow_types::semantic::SemanticCompleteness;
 pub enum HumanStatus {
     Ok,
     Warning,
+    Failure,
     Inactive,
 }
 
@@ -13,6 +14,7 @@ impl HumanStatus {
         match self {
             Self::Ok => "[OK]",
             Self::Warning => "[W]",
+            Self::Failure => "[X]",
             Self::Inactive => "[-]",
         }
     }
@@ -67,6 +69,7 @@ mod tests {
     fn status_prefixes_are_stable_and_scannable() {
         assert_eq!(line(HumanStatus::Ok, "ready"), "[OK] ready");
         assert_eq!(line(HumanStatus::Warning, "partial"), "[W] partial");
+        assert_eq!(line(HumanStatus::Failure, "failed"), "[X] failed");
         assert_eq!(
             line(HumanStatus::Inactive, "unavailable"),
             "[-] unavailable"
