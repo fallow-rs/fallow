@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788437419531,
+  "lastUpdate": 1788524072291,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "e581961b5f8f1a63708017c4aeeb8beb299e855a",
-          "message": "docs(coverage): correct stable_id cross-surface framing\n\nA thorough end-to-end smoke (real published 0.3.0 sidecar) showed stable_id is NOT immune to a function moving lines: function_identity_id hashes start_line, so a moved function gets a new stable_id (verified: coldFn fallow:fn:de5223fd@2 -> fallow:fn:62a6be2a@5, and the finding resurfaced against a saved baseline).\n\nThe shipped #506 docs claimed stable_id 'survives line moves' and that baselines keyed on it 'keep suppressing after a function moves lines'. That is false. Correct the framing in CHANGELOG, the --explain text (explain.rs), the baseline.rs writer/reader comments, and the RuntimeCoverageFinding.stable_id doc to describe the ACTUAL property: stable_id is a cross-surface (one value across findings/hot-paths/blast-radius/importance; the per-finding id uses a per-surface salt) and cross-producer (V8/Istanbul/oxc agree, columns excluded) join key. Like id, it changes when file/name/start_line change.\n\nCode behavior is unchanged; this is a documentation accuracy fix. Schema + VS Code/npm TS contracts regenerated. Refs #506.",
-          "timestamp": "2026-05-27T10:24:58Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/e581961b5f8f1a63708017c4aeeb8beb299e855a"
-        },
-        "date": 1779879599520,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 179,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 157,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 254,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 233,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 145,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 133,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 459,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 375,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1302,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1265,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 960,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 925,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 828,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 749,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 8387,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7524,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9429,6 +9327,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1433,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98",
+          "message": "fix: follow class members through object containers\n\n* chore: start object property member follow-ups\n\n* fix: follow class members through object aliases",
+          "timestamp": "2026-09-04T08:20:10Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98"
+        },
+        "date": 1788524067775,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 207,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 307,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 616,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 409,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1645,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1326,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1225,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1023,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1427,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1326,
             "unit": "ms"
           }
         ]
