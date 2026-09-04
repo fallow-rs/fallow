@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788479006550,
+  "lastUpdate": 1788510284455,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "65c0f80a2e29e607eda9eafb5f9457f92c3b3127",
-          "message": "perf(benchmarks): track circular dependency command",
-          "timestamp": "2026-08-19T01:42:41+02:00",
-          "tree_id": "ba73445056731c31c7ea2a97760c02a5aaef20b6",
-          "url": "https://github.com/fallow-rs/fallow/commit/65c0f80a2e29e607eda9eafb5f9457f92c3b3127"
-        },
-        "date": 1787096828860,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9709571,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49211,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1191935,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8429,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8357,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98",
+          "message": "fix: follow class members through object containers\n\n* chore: start object property member follow-ups\n\n* fix: follow class members through object aliases",
+          "timestamp": "2026-09-04T10:20:10+02:00",
+          "tree_id": "e6107b0379260ebc141ab8acc71bfba4bdaee5f5",
+          "url": "https://github.com/fallow-rs/fallow/commit/3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98"
+        },
+        "date": 1788510281143,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9849599,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50827,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1179090,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8404,
             "unit": "allocations"
           }
         ]
