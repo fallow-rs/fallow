@@ -608,6 +608,13 @@ fn instance_export_bindings(resolved: &ResolvedModule) -> Vec<InstanceExportBind
     view.instance_export_bindings()
 }
 
+fn exported_object_instance_properties(
+    module: &ResolvedModule,
+) -> impl Iterator<Item = &fallow_types::extract::ExportedObjectInstancePropertyFact> {
+    SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+        .exported_object_instance_properties()
+}
+
 fn factory_call_member_accesses(resolved: &ResolvedModule) -> Vec<FactoryCallMemberAccessFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
     view.factory_call_member_accesses()
@@ -734,6 +741,7 @@ pub struct UnusedClassMemberCandidate {
 struct MemberPassIndexes<'a> {
     module_by_id: FxHashMap<FileId, &'a ResolvedModule>,
     local_keys_by_file: FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>>,
+    exported_object_classes_by_property: FxHashMap<(FileId, &'a str, &'a str), Vec<&'a str>>,
     empty: FxHashMap<&'a str, Vec<ExportKey>>,
 }
 
@@ -745,13 +753,25 @@ impl<'a> MemberPassIndexes<'a> {
         let mut module_by_id: FxHashMap<FileId, &'a ResolvedModule> = FxHashMap::default();
         let mut local_keys_by_file: FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>> =
             FxHashMap::default();
+        let mut exported_object_classes_by_property = FxHashMap::default();
         for module in resolved_modules {
             module_by_id.insert(module.file_id, module);
             local_keys_by_file.insert(module.file_id, build_local_to_export_keys(module));
+            for property in exported_object_instance_properties(module) {
+                exported_object_classes_by_property
+                    .entry((
+                        module.file_id,
+                        property.export_name.as_str(),
+                        property.property_path.as_str(),
+                    ))
+                    .or_insert_with(Vec::new)
+                    .push(property.class_local_name.as_str());
+            }
         }
         Self {
             module_by_id,
             local_keys_by_file,
+            exported_object_classes_by_property,
             empty: FxHashMap::default(),
         }
     }
@@ -1232,6 +1252,13 @@ fn propagate_common_member_accesses(
         indexes,
         accessed_members,
     );
+    propagate_exported_object_instance_accesses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
+        accessed_members,
+        whole_object_used_exports,
+    );
     propagate_typed_property_accesses(
         input.graph,
         input.resolved_modules,
@@ -1607,9 +1634,48 @@ fn collect_direct_member_accesses(
             }
         }
 
+        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .qualified_class_member_accesses()
+        {
+            for import in resolved.all_resolved_imports().filter(|import| {
+                import.info.local_name == access.namespace_local
+                    && matches!(
+                        import.info.imported_name,
+                        crate::extract::ImportedName::Namespace
+                    )
+            }) {
+                let Some(target_file_id) = import.target.internal_file_id() else {
+                    continue;
+                };
+                accessed_members
+                    .entry(ExportKey::new(
+                        target_file_id,
+                        access.class_export_name.clone(),
+                    ))
+                    .or_default()
+                    .insert(access.member.clone());
+            }
+        }
+
         for local_name in resolved.whole_object_uses.iter() {
             if let Some(export_keys) = local_to_export_keys.get(local_name.as_str()) {
                 whole_object_used_exports.extend(export_keys.iter().cloned());
+            }
+            if let Some((namespace_local, export_name)) = local_name.split_once('.')
+                && !export_name.contains('.')
+            {
+                for import in resolved.all_resolved_imports().filter(|import| {
+                    import.info.local_name == namespace_local
+                        && matches!(
+                            import.info.imported_name,
+                            crate::extract::ImportedName::Namespace
+                        )
+                }) {
+                    if let Some(target_file_id) = import.target.internal_file_id() {
+                        whole_object_used_exports
+                            .insert(ExportKey::new(target_file_id, export_name.to_string()));
+                    }
+                }
             }
             for import in resolved.all_resolved_imports().filter(|import| {
                 import.info.local_name == *local_name

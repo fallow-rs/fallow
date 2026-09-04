@@ -8,10 +8,10 @@ use crate::graph::ModuleGraph;
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 use fallow_types::extract::{
-    ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
-    FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
-    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    SemanticFact,
+    ClassHeritageInfo, ExportedObjectInstancePropertyFact, FactoryCallMemberAccessFact,
+    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, InstanceExportBindingFact,
+    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+    PlaywrightFixtureUseFact, SemanticFact,
 };
 use oxc_span::Span;
 use std::cell::OnceCell;
@@ -290,6 +290,41 @@ fn set_exports(graph: &mut TestGraphFixture, target: usize, exports: &[TestExpor
                 ));
         }
     }
+}
+
+const EXPORTED_OBJECT_INSTANCE_TEST_TARGETS: usize = 4096;
+
+fn build_exported_object_instance_cap_fixture() -> TestGraphFixture {
+    let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/container.ts", false)]);
+    let mut exports = Vec::with_capacity(EXPORTED_OBJECT_INSTANCE_TEST_TARGETS + 1);
+    let mut holder = make_export_with_members("holder", Vec::new(), Some(0));
+    holder.info.local_name = Some("holder".to_string());
+    exports.push(holder);
+    for index in 0..EXPORTED_OBJECT_INSTANCE_TEST_TARGETS {
+        let class_name = format!("Service{index}");
+        let mut class = make_export_with_members(
+            &class_name,
+            ["runA", "runB", "runC", "unused"]
+                .into_iter()
+                .map(|member| make_member(member, MemberKind::ClassMethod))
+                .collect(),
+            Some(0),
+        );
+        class.info.local_name = Some(class_name);
+        exports.push(class);
+    }
+    set_exports(&mut graph, 1, &exports);
+    graph.resolved_modules[1].semantic_facts = (0..EXPORTED_OBJECT_INSTANCE_TEST_TARGETS)
+        .map(|index| {
+            SemanticFact::ExportedObjectInstanceProperty(ExportedObjectInstancePropertyFact {
+                export_name: "holder".to_string(),
+                property_path: "service".to_string(),
+                class_local_name: format!("Service{index}"),
+            })
+        })
+        .collect::<Vec<_>>()
+        .into();
+    graph
 }
 
 /// Run the Playwright fixture pass over `resolved_modules` (no `ModuleInfo`
@@ -2479,6 +2514,112 @@ fn whole_object_use_via_aliased_import() {
     assert!(
         enum_members.is_empty(),
         "whole object use via alias should suppress all members"
+    );
+}
+
+#[test]
+fn whole_object_use_via_namespace_qualified_export() {
+    let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/service.ts", false)]);
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Service",
+            vec![make_member("run", MemberKind::ClassMethod)],
+            Some(0),
+        )],
+    );
+
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/src/entry.ts"),
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "./service".to_string(),
+                imported_name: ImportedName::Namespace,
+                local_name: "NS".to_string(),
+                is_type_only: false,
+                is_type_only_star: false,
+                from_style: false,
+                span: Span::new(0, 30),
+                source_span: Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(1)),
+        }],
+        whole_object_uses: vec!["NS.Service".to_string()].into(),
+        ..Default::default()
+    }];
+
+    let (_, class_members) = find_unused_members(
+        &graph,
+        &resolved_modules,
+        &[],
+        &SuppressionContext::empty(),
+        &FxHashMap::default(),
+        &[],
+        &[],
+    );
+    assert!(
+        class_members.is_empty(),
+        "a qualified whole-object use should suppress all members of that export"
+    );
+}
+
+#[test]
+fn exported_object_instance_join_deduplicates_and_abstains_at_cap() {
+    let mut repeated_graph = build_exported_object_instance_cap_fixture();
+    repeated_graph.resolved_modules[0].member_accesses = std::iter::repeat_with(|| MemberAccess {
+        object: "holder.service".to_string(),
+        member: "runA".to_string(),
+    })
+    .take(100)
+    .collect::<Vec<_>>()
+    .into();
+    let (_, repeated_findings) = find_unused_members(
+        &repeated_graph,
+        &repeated_graph.resolved_modules,
+        &[],
+        &SuppressionContext::empty(),
+        &FxHashMap::default(),
+        &[],
+        &[],
+    );
+    let service_zero_findings = repeated_findings
+        .iter()
+        .filter(|finding| finding.parent_name == "Service0")
+        .map(|finding| finding.member_name.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        service_zero_findings.contains(&"unused"),
+        "repeated identical accesses must not consume the association budget, found: {service_zero_findings:?}"
+    );
+    assert!(
+        !service_zero_findings.contains(&"runA"),
+        "the repeated accessed member must still be credited, found: {service_zero_findings:?}"
+    );
+
+    let mut overflowing_graph = build_exported_object_instance_cap_fixture();
+    overflowing_graph.resolved_modules[0].member_accesses = ["runA", "runB", "runC"]
+        .into_iter()
+        .map(|member| MemberAccess {
+            object: "holder.service".to_string(),
+            member: member.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .into();
+    let (_, overflowing_findings) = find_unused_members(
+        &overflowing_graph,
+        &overflowing_graph.resolved_modules,
+        &[],
+        &SuppressionContext::empty(),
+        &FxHashMap::default(),
+        &[],
+        &[],
+    );
+    assert!(
+        overflowing_findings.is_empty(),
+        "association overflow must conservatively credit every target class as a whole object"
     );
 }
 

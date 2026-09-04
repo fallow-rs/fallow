@@ -1256,6 +1256,16 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 export_name: "service".to_string(),
                 target_name: "Service".to_string(),
             }),
+            SemanticFact::ExportedObjectInstanceProperty(ExportedObjectInstancePropertyFact {
+                export_name: "services".to_string(),
+                property_path: "primary".to_string(),
+                class_local_name: "Service".to_string(),
+            }),
+            SemanticFact::QualifiedClassMemberAccess(QualifiedClassMemberAccessFact {
+                namespace_local: "Services".to_string(),
+                class_export_name: "Service".to_string(),
+                member: "run".to_string(),
+            }),
             SemanticFact::ClassThisMemberAccess(ClassThisMemberAccessFact {
                 class_local_name: "Service".to_string(),
                 object: "this.client".to_string(),
@@ -1410,6 +1420,16 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
                 export_name: "service".to_string(),
                 target_name: "Service".to_string(),
+            }),
+            SemanticFact::ExportedObjectInstanceProperty(ExportedObjectInstancePropertyFact {
+                export_name: "services".to_string(),
+                property_path: "primary".to_string(),
+                class_local_name: "Service".to_string(),
+            }),
+            SemanticFact::QualifiedClassMemberAccess(QualifiedClassMemberAccessFact {
+                namespace_local: "Services".to_string(),
+                class_export_name: "Service".to_string(),
+                member: "run".to_string(),
             }),
             SemanticFact::ClassThisMemberAccess(ClassThisMemberAccessFact {
                 class_local_name: "Service".to_string(),

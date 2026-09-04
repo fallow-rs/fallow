@@ -15,13 +15,13 @@ use crate::{
     AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
     ClassThisMemberAccessFact, ClassThisWholeObjectUseFact, ComputedEnumKeyUseFact,
     DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
-    ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
-    FactoryReturnObjectPropertyAccessFact, FluentChainMemberAccessFact,
-    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
-    MemberAccess, MemberInfo, MemberKind, ModuleInfo, PlaywrightFixtureAliasFact,
-    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
-    TypedPropertyMemberAccessFact, VisibilityTag,
+    ExportName, ExportedObjectInstancePropertyFact, FactoryCallMemberAccessFact,
+    FactoryFnMemberAccessFact, FactoryFnWholeObjectFact, FactoryReturnObjectPropertyAccessFact,
+    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
+    InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
+    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+    PlaywrightFixtureUseFact, QualifiedClassMemberAccessFact, ReExportInfo, RequireCallInfo,
+    SemanticFact, TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -427,6 +427,8 @@ pub(crate) struct ModuleInfoExtractor {
     scoped_direct_object_binding_roots: Vec<FxHashSet<String>>,
     direct_object_binding_member_accesses: FxHashSet<(String, String)>,
     direct_object_binding_access_generations: FxHashMap<String, FxHashMap<String, u64>>,
+    dynamic_direct_object_binding_access_generations: FxHashMap<(String, String), u64>,
+    dynamic_direct_object_binding_abstention_generations: FxHashMap<String, u64>,
     direct_object_binding_generation: u64,
     abstained_direct_object_binding_paths: FxHashSet<String>,
     direct_object_binding_whole_object_uses: FxHashSet<String>,
@@ -1190,10 +1192,21 @@ impl ModuleInfoExtractor {
                     .direct_object_binding_member_accesses
                     .insert(access.clone())
                 {
-                    self.member_accesses.push(MemberAccess {
-                        object: access.0,
-                        member: access.1,
-                    });
+                    if let Some((namespace_local, class_export_name)) = access.0.split_once('.') {
+                        self.semantic_facts
+                            .push(SemanticFact::QualifiedClassMemberAccess(
+                                QualifiedClassMemberAccessFact {
+                                    namespace_local: namespace_local.to_string(),
+                                    class_export_name: class_export_name.to_string(),
+                                    member: access.1,
+                                },
+                            ));
+                    } else {
+                        self.member_accesses.push(MemberAccess {
+                            object: access.0,
+                            member: access.1,
+                        });
+                    }
                 }
             }
             self.direct_object_binding_access_generations
@@ -1210,6 +1223,80 @@ impl ModuleInfoExtractor {
             ));
         }
         false
+    }
+
+    fn record_dynamic_direct_object_binding_member_access(
+        &mut self,
+        object: &str,
+        member: &str,
+    ) -> bool {
+        if self
+            .dynamic_direct_object_binding_abstention_generations
+            .get(object)
+            == Some(&self.direct_object_binding_generation)
+        {
+            return true;
+        }
+        let access_key = (object.to_string(), member.to_string());
+        if self
+            .dynamic_direct_object_binding_access_generations
+            .get(&access_key)
+            == Some(&self.direct_object_binding_generation)
+        {
+            return true;
+        }
+        let root = object.split_once('.').map_or(object, |(root, _)| root);
+        let prefix = format!("{object}.");
+        let mut paths = None;
+        for index in (0..self.scoped_direct_object_binding_targets.len()).rev() {
+            if let Some(root_paths) =
+                self.scoped_direct_object_binding_paths_by_root[index].get(root)
+            {
+                paths = Some(
+                    root_paths
+                        .iter()
+                        .filter(|path| path.starts_with(&prefix))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                );
+                break;
+            }
+            if self.scoped_direct_object_binding_roots[index].contains(root) {
+                return false;
+            }
+        }
+        let mut paths = paths.unwrap_or_else(|| {
+            self.module_direct_object_binding_paths_by_root
+                .get(root)
+                .into_iter()
+                .flatten()
+                .filter(|path| path.starts_with(&prefix))
+                .cloned()
+                .collect()
+        });
+        paths.sort_unstable();
+        if paths.is_empty() {
+            return false;
+        }
+        let mut recorded = false;
+        for path in &paths {
+            recorded |= self.record_walk_order_member_access(path, member);
+            if self.direct_object_binding_member_accesses.len()
+                >= MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES
+            {
+                for matching_path in &paths {
+                    self.abstain_direct_object_binding_path(matching_path);
+                }
+                self.dynamic_direct_object_binding_abstention_generations
+                    .insert(object.to_string(), self.direct_object_binding_generation);
+                break;
+            }
+        }
+        if recorded {
+            self.dynamic_direct_object_binding_access_generations
+                .insert(access_key, self.direct_object_binding_generation);
+        }
+        recorded
     }
 
     fn abstain_direct_object_binding_path(&mut self, object: &str) {
@@ -2835,6 +2922,7 @@ impl ModuleInfoExtractor {
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
         self.resolve_typed_react_props();
+        self.record_exported_direct_object_binding_facts();
         let namespace_object_aliases = self.collect_namespace_object_aliases();
         // Last: every resolution pass above relies on the per-class `this@<id>.`
         // keys, so the qualifier is stripped only once they have run, before any

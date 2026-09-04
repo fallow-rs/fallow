@@ -5,7 +5,10 @@
 use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 
-use super::super::{BindingTarget, ModuleInfoExtractor, ObjectBindingCandidate};
+use super::super::{
+    BindingTarget, ExportName, ExportedObjectInstancePropertyFact, ModuleInfoExtractor,
+    ObjectBindingCandidate, SemanticFact,
+};
 
 /// Per-module breadth cap on recorded object-binding targets (issue #1843
 /// follow-up): the companion to `MAX_TAINTED_BINDINGS_PER_MODULE` for the
@@ -17,6 +20,7 @@ use super::super::{BindingTarget, ModuleInfoExtractor, ObjectBindingCandidate};
 /// taint caps. Deliberately a constant, not a config knob: real hand-written
 /// modules stay far below it.
 const MAX_OBJECT_BINDING_TARGETS: usize = 4096;
+const MAX_EXPORTED_OBJECT_INSTANCE_PROPERTY_FACTS: usize = 8192;
 
 #[derive(Clone, Copy)]
 enum DirectObjectBindingScope {
@@ -25,6 +29,86 @@ enum DirectObjectBindingScope {
 }
 
 impl ModuleInfoExtractor {
+    pub(in crate::visitor) fn record_exported_direct_object_binding_facts(&mut self) {
+        let exported_roots = self
+            .exports
+            .iter()
+            .filter(|export| !export.is_type_only)
+            .filter_map(|export| {
+                let local_name = match (export.local_name.as_deref(), &export.name) {
+                    (Some(local_name), _) => local_name,
+                    (None, ExportName::Named(name)) => name.as_str(),
+                    (None, ExportName::Default) => return None,
+                };
+                Some((local_name.to_string(), export.name.to_string()))
+            })
+            .collect::<Vec<_>>();
+        let mut facts = Vec::new();
+        let mut seen = FxHashSet::default();
+        let mut overflowed = false;
+        'exports: for (root_name, export_name) in exported_roots {
+            let Some(paths) = self
+                .module_direct_object_binding_paths_by_root
+                .get(root_name.as_str())
+            else {
+                continue;
+            };
+            let prefix = format!("{root_name}.");
+            let mut paths = paths.iter().collect::<Vec<_>>();
+            paths.sort_unstable();
+            for path in paths {
+                let Some(property_path) = path.strip_prefix(&prefix) else {
+                    continue;
+                };
+                let Some(class_names) = self.module_direct_object_binding_targets.get(path) else {
+                    continue;
+                };
+                let mut class_names = class_names.iter().collect::<Vec<_>>();
+                class_names.sort_unstable();
+                for class_local_name in class_names {
+                    let fact = (
+                        export_name.clone(),
+                        property_path.to_string(),
+                        class_local_name.clone(),
+                    );
+                    if !seen.insert(fact.clone()) {
+                        continue;
+                    }
+                    if facts.len() >= MAX_EXPORTED_OBJECT_INSTANCE_PROPERTY_FACTS {
+                        overflowed = true;
+                        break 'exports;
+                    }
+                    facts.push(fact);
+                }
+            }
+        }
+        if overflowed {
+            let class_names = self
+                .module_direct_object_binding_targets
+                .values()
+                .flatten()
+                .cloned()
+                .collect::<FxHashSet<_>>();
+            for class_name in class_names {
+                if self
+                    .direct_object_binding_whole_object_uses
+                    .insert(class_name.clone())
+                {
+                    self.whole_object_uses.push(class_name);
+                }
+            }
+        }
+        self.semantic_facts.extend(facts.into_iter().map(
+            |(export_name, property_path, class_local_name)| {
+                SemanticFact::ExportedObjectInstanceProperty(ExportedObjectInstancePropertyFact {
+                    export_name,
+                    property_path,
+                    class_local_name,
+                })
+            },
+        ));
+    }
+
     pub(super) fn extract_angular_inject_target(
         &self,
         call: &CallExpression<'_>,
@@ -154,8 +238,11 @@ impl ModuleInfoExtractor {
 
     pub(super) fn preseed_direct_object_binding_targets(&mut self, statements: &[Statement<'_>]) {
         for statement in statements {
-            let Some(Declaration::VariableDeclaration(declaration)) = statement.as_declaration()
-            else {
+            let declaration = match statement {
+                Statement::ExportNamedDeclaration(export) => export.declaration.as_ref(),
+                _ => statement.as_declaration(),
+            };
+            let Some(Declaration::VariableDeclaration(declaration)) = declaration else {
                 continue;
             };
             self.preseed_direct_object_binding_declaration(declaration);
@@ -170,18 +257,142 @@ impl ModuleInfoExtractor {
             return;
         }
         for declarator in &declaration.declarations {
-            let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            let Some(init) = declarator.init.as_ref() else {
                 continue;
             };
-            let Some(Expression::ObjectExpression(object)) = declarator.init.as_ref() else {
+            match (&declarator.id, init) {
+                (BindingPattern::BindingIdentifier(id), Expression::ObjectExpression(object)) => {
+                    self.record_direct_object_binding_targets_at_path(
+                        id.name.as_str(),
+                        id.name.as_str(),
+                        object,
+                        DirectObjectBindingScope::Current,
+                    );
+                }
+                (BindingPattern::BindingIdentifier(id), _) => {
+                    if let Some(source_path) = direct_object_binding_expression_path(init) {
+                        self.copy_direct_object_binding_targets(&source_path, id.name.as_str());
+                    }
+                }
+                (BindingPattern::ObjectPattern(pattern), _) => {
+                    self.record_direct_object_binding_destructure(pattern, init);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn record_direct_object_binding_destructure(
+        &mut self,
+        pattern: &ObjectPattern<'_>,
+        init: &Expression<'_>,
+    ) {
+        let Some(source_path) = direct_object_binding_expression_path(init) else {
+            return;
+        };
+        self.record_direct_object_binding_object_pattern(pattern, &source_path);
+    }
+
+    fn record_direct_object_binding_object_pattern(
+        &mut self,
+        pattern: &ObjectPattern<'_>,
+        source_path: &str,
+    ) {
+        for property in &pattern.properties {
+            let Some(property_name) = property.key.static_name() else {
                 continue;
             };
-            self.record_direct_object_binding_targets_at_path(
-                id.name.as_str(),
-                id.name.as_str(),
-                object,
-                DirectObjectBindingScope::Current,
+            self.record_direct_object_binding_pattern(
+                &property.value,
+                &format!("{source_path}.{property_name}"),
             );
+        }
+    }
+
+    fn record_direct_object_binding_pattern(
+        &mut self,
+        pattern: &BindingPattern<'_>,
+        source_path: &str,
+    ) {
+        match pattern {
+            BindingPattern::BindingIdentifier(binding) => {
+                self.copy_direct_object_binding_targets(source_path, binding.name.as_str());
+            }
+            BindingPattern::ObjectPattern(pattern) => {
+                self.record_direct_object_binding_object_pattern(pattern, source_path);
+            }
+            BindingPattern::AssignmentPattern(assignment) => {
+                self.record_direct_object_binding_pattern(&assignment.left, source_path);
+                self.record_direct_object_binding_fallback(&assignment.left, &assignment.right);
+            }
+            BindingPattern::ArrayPattern(_) => {}
+        }
+    }
+
+    fn record_direct_object_binding_fallback(
+        &mut self,
+        pattern: &BindingPattern<'_>,
+        fallback: &Expression<'_>,
+    ) {
+        match pattern {
+            BindingPattern::BindingIdentifier(binding) => match fallback {
+                Expression::NewExpression(new_expression) => {
+                    if let Some(class_name) = self.direct_new_expression_class_name(new_expression)
+                    {
+                        self.record_direct_object_binding_target(
+                            binding.name.as_str(),
+                            binding.name.to_string(),
+                            class_name,
+                            DirectObjectBindingScope::BindingOwner,
+                        );
+                    }
+                }
+                Expression::ObjectExpression(object) => {
+                    self.record_direct_object_binding_targets_at_path(
+                        binding.name.as_str(),
+                        binding.name.as_str(),
+                        object,
+                        DirectObjectBindingScope::BindingOwner,
+                    );
+                }
+                fallback => {
+                    if let Some(fallback_path) = direct_object_binding_expression_path(fallback) {
+                        self.copy_direct_object_binding_targets(
+                            &fallback_path,
+                            binding.name.as_str(),
+                        );
+                    }
+                }
+            },
+            BindingPattern::ObjectPattern(pattern) => match fallback {
+                Expression::ObjectExpression(object) => {
+                    for property in &pattern.properties {
+                        let Some(property_name) = property.key.static_name() else {
+                            continue;
+                        };
+                        let Some(value) = object.properties.iter().rev().find_map(|candidate| {
+                            let ObjectPropertyKind::ObjectProperty(candidate) = candidate else {
+                                return None;
+                            };
+                            (candidate.key.static_name().as_deref() == Some(property_name.as_ref()))
+                                .then_some(&candidate.value)
+                        }) else {
+                            continue;
+                        };
+                        self.record_direct_object_binding_fallback(&property.value, value);
+                    }
+                }
+                fallback => {
+                    if let Some(fallback_path) = direct_object_binding_expression_path(fallback) {
+                        self.record_direct_object_binding_object_pattern(pattern, &fallback_path);
+                    }
+                }
+            },
+            BindingPattern::AssignmentPattern(assignment) => {
+                self.record_direct_object_binding_fallback(&assignment.left, fallback);
+                self.record_direct_object_binding_fallback(&assignment.left, &assignment.right);
+            }
+            BindingPattern::ArrayPattern(_) => {}
         }
     }
 
@@ -200,7 +411,7 @@ impl ModuleInfoExtractor {
 
         match value {
             Expression::NewExpression(new_expression) => {
-                if let Some(class_name) = direct_new_expression_class_name(new_expression) {
+                if let Some(class_name) = self.direct_new_expression_class_name(new_expression) {
                     self.record_direct_object_binding_target(
                         root_name,
                         binding_path.to_string(),
@@ -322,6 +533,13 @@ impl ModuleInfoExtractor {
             self.whole_object_uses.push(class_name.clone());
         }
         if is_new_target && self.object_binding_target_count() >= MAX_OBJECT_BINDING_TARGETS {
+            self.abstain_direct_object_binding_path(&binding_path);
+            if self
+                .direct_object_binding_whole_object_uses
+                .insert(class_name.clone())
+            {
+                self.whole_object_uses.push(class_name);
+            }
             return;
         }
         if is_new_target {
@@ -400,7 +618,7 @@ impl ModuleInfoExtractor {
             }
             match &prop.value {
                 Expression::NewExpression(new_expr) => {
-                    if let Some(class_name) = direct_new_expression_class_name(new_expr) {
+                    if let Some(class_name) = self.direct_new_expression_class_name(new_expr) {
                         self.record_direct_object_binding_target(
                             root_name,
                             binding_path,
@@ -444,6 +662,10 @@ impl ModuleInfoExtractor {
                 self.scoped_direct_object_binding_targets[index].remove(path);
                 self.scoped_direct_object_binding_generations[index].remove(path);
             }
+            if !removed.is_empty() {
+                self.direct_object_binding_generation =
+                    self.direct_object_binding_generation.saturating_add(1);
+            }
             if let Some(paths) =
                 self.scoped_direct_object_binding_paths_by_root[index].get_mut(root_name)
             {
@@ -467,6 +689,10 @@ impl ModuleInfoExtractor {
             for path in &removed {
                 self.module_direct_object_binding_targets.remove(path);
                 self.module_direct_object_binding_generations.remove(path);
+            }
+            if !removed.is_empty() {
+                self.direct_object_binding_generation =
+                    self.direct_object_binding_generation.saturating_add(1);
             }
             if let Some(paths) = self
                 .module_direct_object_binding_paths_by_root
@@ -524,6 +750,29 @@ impl ModuleInfoExtractor {
             }
         }
     }
+
+    fn direct_new_expression_class_name(&self, expression: &NewExpression<'_>) -> Option<String> {
+        match &expression.callee {
+            Expression::Identifier(callee) => {
+                if super::super::helpers::is_builtin_constructor(callee.name.as_str()) {
+                    return None;
+                }
+                Some(callee.name.to_string())
+            }
+            callee => {
+                let path = direct_object_binding_expression_path(callee)?;
+                let (namespace_local, export_name) = path.split_once('.')?;
+                (self.namespace_import_locals.contains(namespace_local)
+                    && !export_name.contains('.')
+                    && !self
+                        .scoped_direct_object_binding_roots
+                        .iter()
+                        .any(|roots| roots.contains(namespace_local))
+                    && !self.namespace_like_binding_is_shadowed(namespace_local))
+                .then_some(path)
+            }
+        }
+    }
 }
 
 fn direct_object_binding_expression_path(expression: &Expression<'_>) -> Option<String> {
@@ -558,19 +807,10 @@ fn direct_object_binding_expression_path(expression: &Expression<'_>) -> Option<
     }
 }
 
-fn direct_new_expression_class_name(expression: &NewExpression<'_>) -> Option<String> {
-    let Expression::Identifier(callee) = &expression.callee else {
-        return None;
-    };
-    if super::super::helpers::is_builtin_constructor(callee.name.as_str()) {
-        return None;
-    }
-    Some(callee.name.to_string())
-}
-
 #[cfg(all(test, not(miri)))]
 mod tests {
-    use super::MAX_OBJECT_BINDING_TARGETS;
+    use super::{MAX_EXPORTED_OBJECT_INSTANCE_PROPERTY_FACTS, MAX_OBJECT_BINDING_TARGETS};
+    use crate::SemanticFact;
     use crate::visitor::{MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES, ModuleInfoExtractor};
     use oxc_allocator::Allocator;
     use oxc_ast_visit::Visit;
@@ -613,6 +853,39 @@ mod tests {
             "object-binding candidate recording must stay bounded at the \
              per-module cap on dense source (got {})",
             extractor.object_binding_candidates.len()
+        );
+    }
+
+    #[test]
+    fn exported_object_instance_property_facts_are_bounded() {
+        use std::fmt::Write as _;
+
+        let mut exports = String::new();
+        for index in 0..=MAX_EXPORTED_OBJECT_INSTANCE_PROPERTY_FACTS {
+            let _ = writeln!(exports, "export {{ holder as alias{index} }};");
+        }
+        let source = format!(
+            "import * as NS from './services';\nconst holder = {{ service: new NS.Service() }};\n{exports}"
+        );
+
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, &source, SourceType::ts()).parse();
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.visit_program(&parser_return.program);
+        extractor.resolve_pending_local_export_specifiers();
+        extractor.record_exported_direct_object_binding_facts();
+
+        let fact_count = extractor
+            .semantic_facts
+            .iter()
+            .filter(|fact| matches!(fact, SemanticFact::ExportedObjectInstanceProperty(_)))
+            .count();
+        assert_eq!(fact_count, MAX_EXPORTED_OBJECT_INSTANCE_PROPERTY_FACTS);
+        assert!(
+            extractor
+                .direct_object_binding_whole_object_uses
+                .contains("NS.Service"),
+            "cap exhaustion must conservatively credit every possible qualified class"
         );
     }
 
@@ -670,9 +943,6 @@ mod tests {
             "a repeated path must not accumulate unbounded class targets"
         );
 
-        extractor
-            .abstained_direct_object_binding_paths
-            .insert("holder.property".to_string());
         extractor.record_direct_object_binding_target(
             "holder",
             "holder.property".to_string(),
@@ -683,7 +953,7 @@ mod tests {
             extractor
                 .direct_object_binding_whole_object_uses
                 .contains("ServiceAfterCap"),
-            "an over-cap target on an abstained path must receive whole-object credit"
+            "an over-cap target must receive conservative whole-object credit"
         );
     }
 
@@ -747,6 +1017,78 @@ mod tests {
                 .and_then(|members| members.get("run")),
             Some(&0),
             "the processed generation should be cached for constant-time repeats"
+        );
+    }
+
+    #[test]
+    fn repeated_dynamic_member_access_uses_generation_cache() {
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.module_direct_object_binding_paths_by_root.insert(
+            "holder".to_string(),
+            FxHashSet::from_iter(["holder.primary".to_string(), "holder.secondary".to_string()]),
+        );
+        extractor.module_direct_object_binding_targets.insert(
+            "holder.primary".to_string(),
+            FxHashSet::from_iter(["Primary".to_string()]),
+        );
+        extractor.module_direct_object_binding_targets.insert(
+            "holder.secondary".to_string(),
+            FxHashSet::from_iter(["Secondary".to_string()]),
+        );
+
+        for _ in 0..2048 {
+            assert!(extractor.record_dynamic_direct_object_binding_member_access("holder", "run"));
+        }
+
+        assert_eq!(extractor.member_accesses.len(), 2);
+        assert_eq!(
+            extractor
+                .dynamic_direct_object_binding_access_generations
+                .get(&("holder".to_string(), "run".to_string())),
+            Some(&0),
+            "the effective dynamic receiver generation should be cached"
+        );
+    }
+
+    #[test]
+    fn dynamic_member_cap_abstains_receiver_once() {
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.module_direct_object_binding_paths_by_root.insert(
+            "holder".to_string(),
+            FxHashSet::from_iter(["holder.primary".to_string(), "holder.secondary".to_string()]),
+        );
+        extractor.module_direct_object_binding_targets.insert(
+            "holder.primary".to_string(),
+            (0..MAX_DIRECT_OBJECT_BINDING_MEMBER_ACCESSES)
+                .map(|index| format!("Primary{index}"))
+                .collect(),
+        );
+        extractor.module_direct_object_binding_targets.insert(
+            "holder.secondary".to_string(),
+            FxHashSet::from_iter(["Secondary".to_string()]),
+        );
+
+        assert!(extractor.record_dynamic_direct_object_binding_member_access("holder", "run"));
+        assert_eq!(
+            extractor
+                .dynamic_direct_object_binding_abstention_generations
+                .get("holder"),
+            Some(&0),
+            "cap exhaustion should cache whole-receiver abstention"
+        );
+        assert!(
+            extractor
+                .direct_object_binding_whole_object_uses
+                .contains("Secondary"),
+            "every matching path must receive conservative whole-object credit"
+        );
+
+        let emitted = extractor.member_accesses.len();
+        assert!(extractor.record_dynamic_direct_object_binding_member_access("holder", "other"));
+        assert_eq!(
+            extractor.member_accesses.len(),
+            emitted,
+            "an unchanged abstained receiver should not be enumerated again"
         );
     }
 

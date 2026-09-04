@@ -2836,6 +2836,483 @@ fn identifier_assignment_copies_nested_direct_targets() {
 }
 
 #[test]
+fn property_declaration_alias_copies_direct_target() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            const holder = { service: new Service() };
+            const service = holder.service;
+            service.used();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Service" && access.member == "used"),
+        "the property alias should map to Service, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn object_declaration_alias_copies_nested_direct_targets() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            const source = { service: new Service() };
+            const holder = source;
+            holder.service.used();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Service" && access.member == "used"),
+        "the object alias should retain nested Service targets, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn object_destructure_alias_copies_direct_target() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            const holder = { service: new Service() };
+            const { service: renamed } = holder;
+            renamed.used();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Service" && access.member == "used"),
+        "the renamed destructure should map to Service, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn nested_object_destructure_copies_direct_target() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            const holder = { nested: { service: new Service() } };
+            const { nested: { service } } = holder;
+            service.used();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Service" && access.member == "used"),
+        "the nested destructure should map to Service, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn defaulted_object_destructure_retains_source_and_fallback_targets() {
+    let info = parse(
+        r"
+            import { Fallback, Service } from './services';
+            const holder = { service: new Service() };
+            const { service = new Fallback() } = holder;
+            service.used();
+            ",
+    );
+    for class_name in ["Fallback", "Service"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == class_name && access.member == "used"),
+            "the defaulted destructure should conservatively map to {class_name}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn nested_defaulted_destructure_retains_source_and_object_fallback_targets() {
+    let info = parse(
+        r"
+            import { Fallback, Service } from './services';
+            const holder = { nested: { service: new Service() } };
+            const { nested: { service } = { service: new Fallback() } } = holder;
+            service.used();
+            ",
+    );
+    for class_name in ["Fallback", "Service"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == class_name && access.member == "used"),
+            "the nested default should conservatively map to {class_name}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn object_default_bound_to_identifier_retains_nested_target() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            const holder = {};
+            const { nested = { service: new Service() } } = holder;
+            nested.service.used();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Service" && access.member == "used"),
+        "the object fallback should retain its nested Service target, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn static_computed_object_property_access_maps_to_class() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            const holder = { service: new Service() };
+            holder['service'].used();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Service" && access.member == "used"),
+        "the string-computed property should map to Service, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn dynamic_computed_object_property_access_maps_all_possible_targets() {
+    let info = parse(
+        r"
+            import { Primary, Secondary } from './services';
+            const holder = {
+                primary: new Primary(),
+                secondary: new Secondary(),
+            };
+            holder[key].used();
+            ",
+    );
+    for class_name in ["Primary", "Secondary"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == class_name && access.member == "used"),
+            "the dynamic key should conservatively map to {class_name}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn namespace_qualified_constructor_retains_export_path() {
+    let info = parse(
+        r"
+            import * as Services from './services';
+            const holder = { service: new Services.Service() };
+            holder.service.used();
+            ",
+    );
+    assert!(
+        info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::QualifiedClassMemberAccess(access)
+                if access.namespace_local == "Services"
+                    && access.class_export_name == "Service"
+                    && access.member == "used"
+        )),
+        "the qualified constructor should retain its namespace export path, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn function_local_binding_shadows_namespace_import_during_preseed() {
+    let info = parse(
+        r"
+            import * as Services from './external';
+            class LocalService { usedLocal() {} }
+            function inspect() {
+                const Services = { Service: LocalService };
+                const holder = { service: new Services.Service() };
+                holder.service.usedLocal();
+            }
+            inspect();
+            ",
+    );
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::QualifiedClassMemberAccess(access)
+                if access.namespace_local == "Services"
+        )),
+        "a function-local Services binding must shadow the namespace import, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn nested_block_binding_shadows_namespace_import_during_preseed() {
+    let info = parse(
+        r"
+            import * as Services from './external';
+            class LocalService { usedLocal() {} }
+            {
+                const Services = { Service: LocalService };
+                const holder = { service: new Services.Service() };
+                holder.service.usedLocal();
+            }
+            ",
+    );
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::QualifiedClassMemberAccess(access)
+                if access.namespace_local == "Services"
+        )),
+        "a block-local Services binding must shadow the namespace import, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn namespace_binding_shadows_namespace_import_during_preseed() {
+    let info = parse(
+        r"
+            import * as Services from './external';
+            class LocalService { usedLocal() {} }
+            namespace Local {
+                const Services = { Service: LocalService };
+                const holder = { service: new Services.Service() };
+                holder.service.usedLocal();
+            }
+            ",
+    );
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::QualifiedClassMemberAccess(access)
+                if access.namespace_local == "Services"
+        )),
+        "a namespace-local Services binding must shadow the import, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn static_block_binding_shadows_namespace_import_during_preseed() {
+    let info = parse(
+        r"
+            import * as Services from './external';
+            class LocalService { usedLocal() {} }
+            class Consumer {
+                static {
+                    const Services = { Service: LocalService };
+                    const holder = { service: new Services.Service() };
+                    holder.service.usedLocal();
+                }
+            }
+            ",
+    );
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::QualifiedClassMemberAccess(access)
+                if access.namespace_local == "Services"
+        )),
+        "a static-block Services binding must shadow the import, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn catch_binding_shadows_namespace_import_during_preseed() {
+    let info = parse(
+        r"
+            import * as Services from './external';
+            try {} catch (Services) {
+                const holder = { service: new Services.Service() };
+                holder.service.usedLocal();
+            }
+            ",
+    );
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::QualifiedClassMemberAccess(access)
+                if access.namespace_local == "Services"
+        )),
+        "a catch Services binding must shadow the import, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn loop_binding_shadows_namespace_import_during_preseed() {
+    let info = parse(
+        r"
+            import * as Services from './external';
+            class LocalService { usedLocal() {} }
+            for (const Services = { Service: LocalService }; condition; ) {
+                const holder = { service: new Services.Service() };
+                holder.service.usedLocal();
+            }
+            ",
+    );
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::QualifiedClassMemberAccess(access)
+                if access.namespace_local == "Services"
+        )),
+        "a loop-local Services binding must shadow the import, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn local_qualified_constructor_does_not_create_class_target() {
+    let info = parse(
+        r"
+            const Factories = { Service: Map };
+            const holder = { service: new Factories.Service() };
+            holder.service.get('key');
+            ",
+    );
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::QualifiedClassMemberAccess(access)
+                if access.namespace_local == "Factories"
+        )),
+        "a local qualified callee must not become a class target, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn shadowed_alias_and_dynamic_key_do_not_credit_module_target() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            const holder = { service: new Service() };
+
+            function inspect(holder: unknown, key: string) {
+                const service = holder.service;
+                service.unrelated();
+                holder[key].alsoUnrelated();
+            }
+
+            holder.service.used();
+            ",
+    );
+    for member in ["unrelated", "alsoUnrelated"] {
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Service" && access.member == member),
+            "a shadowed receiver must not credit Service.{member}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn forward_namespace_exported_holder_shadows_module_holder() {
+    let info = parse(
+        r"
+            import { Alpha, Beta } from './services';
+            const holder = { property: new Alpha() };
+
+            namespace Example {
+                export function useHolder() {
+                    holder.property.betaOnly();
+                }
+                export const holder = { property: new Beta() };
+            }
+
+            Example.useHolder();
+            holder.property.alphaOnly();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "alphaOnly"),
+        "the module holder should retain Alpha, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Beta" && access.member == "betaOnly"),
+        "the forward namespace holder should map to Beta, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Alpha" && access.member == "betaOnly"),
+        "the namespace access must not be credited to Alpha, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn exported_object_records_instance_property_fact() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            const holder = { service: new Service() };
+            export { holder as services };
+            ",
+    );
+    assert!(
+        info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::ExportedObjectInstanceProperty(property)
+                if property.export_name == "services"
+                    && property.property_path == "service"
+                    && property.class_local_name == "Service"
+        )),
+        "the exported container should persist its instance property, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn directly_exported_object_records_instance_property_fact() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            export const holder = { service: new Service() };
+            ",
+    );
+    assert!(
+        info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::ExportedObjectInstanceProperty(property)
+                if property.export_name == "holder"
+                    && property.property_path == "service"
+                    && property.class_local_name == "Service"
+        )),
+        "the directly exported container should persist its instance property, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn function_assignment_adds_possible_module_target() {
     let info = parse(
         r"

@@ -385,6 +385,8 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn push_direct_object_binding_scope(&mut self, roots: FxHashSet<String>) {
+        self.direct_object_binding_generation =
+            self.direct_object_binding_generation.saturating_add(1);
         self.scoped_direct_object_binding_roots.push(roots);
         self.scoped_direct_object_binding_targets
             .push(FxHashMap::default());
@@ -399,6 +401,8 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn pop_direct_object_binding_scope(&mut self) {
+        self.direct_object_binding_generation =
+            self.direct_object_binding_generation.saturating_add(1);
         self.scoped_direct_object_binding_roots.pop();
         self.scoped_direct_object_binding_targets.pop();
         self.scoped_direct_object_binding_generations.pop();
@@ -410,7 +414,12 @@ impl ModuleInfoExtractor {
         roots: impl IntoIterator<Item = String>,
     ) {
         if let Some(scope) = self.scoped_direct_object_binding_roots.last_mut() {
+            let previous_len = scope.len();
             scope.extend(roots);
+            if scope.len() != previous_len {
+                self.direct_object_binding_generation =
+                    self.direct_object_binding_generation.saturating_add(1);
+            }
         }
     }
 

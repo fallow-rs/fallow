@@ -64,6 +64,15 @@ error by suppressing a downstream detector.
 - Prefer conservative advisory output over noisy speculation.
 - Preserve entry points, re-export chains, workspace edges, type-only usage,
   framework conventions, and suppression behavior through the full pipeline.
+- Class instances stored in object literals retain their property-path identity
+  through lexical aliases, static computed access, and nested or defaulted
+  static destructuring.
+  Dynamic keys credit every proven target below the receiver, which can hide a
+  finding but cannot invent one. Namespace-qualified constructors require a
+  real namespace import and emit a typed access fact. Exported containers emit
+  a separate typed property fact that the member pass joins through named and
+  re-exported imports; ordinary dotted member accesses are not treated as
+  namespace constructors.
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
 - A name supplied by two different `export *` sources is not exported by the

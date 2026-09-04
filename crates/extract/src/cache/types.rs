@@ -1029,7 +1029,12 @@ use crate::MemberKind;
 /// class instance now credit member accesses through the property path. Warm
 /// 285 caches lack those remapped `member_accesses` and would retain the false
 /// unused-class-member finding.
-pub(super) const CACHE_VERSION: u32 = 286;
+///
+/// Bumped to 287 for the object-property follow-up: local aliases, computed
+/// accesses, qualified constructors, and exported object instance properties
+/// now produce additional member accesses or semantic facts. Warm 286 caches
+/// lack those facts and would retain the false unused-class-member findings.
+pub(super) const CACHE_VERSION: u32 = 287;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

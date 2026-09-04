@@ -1,5 +1,7 @@
 use super::common::{create_config, create_config_with_ignore_decorators, fixture_path};
 
+const DIRECT_OBJECT_TARGET_CAP: usize = 4096;
+
 #[test]
 fn enum_class_members_detects_unused_members() {
     let root = fixture_path("enum-class-members");
@@ -46,9 +48,64 @@ fn enum_class_members_detects_unused_members() {
         !unused_class_member_names.contains(&"usedThroughObject"),
         "usedThroughObject should be credited through an object property, found: {unused_class_member_names:?}"
     );
+    for used_member in [
+        "usedThroughPropertyAlias",
+        "usedThroughObjectAlias",
+        "usedThroughDestructure",
+        "usedThroughComputed",
+        "usedThroughDynamicKey",
+        "usedThroughQualifiedConstructor",
+        "usedThroughCrossModuleContainer",
+    ] {
+        assert!(
+            !unused_class_member_names.contains(&used_member),
+            "{used_member} should be credited through its object property access form, found: {unused_class_member_names:?}"
+        );
+    }
     assert!(
         unused_class_member_names.contains(&"unusedThroughObject"),
         "unusedThroughObject should remain unused, found: {unused_class_member_names:?}"
+    );
+}
+
+#[test]
+fn direct_object_target_cap_conservatively_credits_tail_class() {
+    use std::fmt::Write as _;
+
+    let project = tempfile::tempdir().expect("create project");
+    let source_dir = project.path().join("src");
+    std::fs::create_dir_all(&source_dir).expect("create source directory");
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"name":"direct-object-target-cap","main":"src/index.ts"}"#,
+    )
+    .expect("write package manifest");
+
+    let mut source = String::new();
+    for index in 0..DIRECT_OBJECT_TARGET_CAP {
+        let _ = writeln!(source, "class Service{index} {{}}");
+    }
+    source.push_str("export class Tail { live(): void {} unused(): void {} }\n");
+    source.push_str("const holder = {\n");
+    for index in 0..DIRECT_OBJECT_TARGET_CAP {
+        let _ = writeln!(source, "  service{index}: new Service{index}(),");
+    }
+    source.push_str("  tail: new Tail(),\n};\nholder.tail.live();\n");
+    std::fs::write(source_dir.join("index.ts"), source).expect("write source");
+
+    let config = create_config(project.path().to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert!(
+        !results
+            .unused_class_members
+            .iter()
+            .any(|finding| finding.member.parent_name == "Tail"),
+        "a class target discovered after the cap must receive whole-object credit, found: {:?}",
+        results
+            .unused_class_members
+            .iter()
+            .filter(|finding| finding.member.parent_name == "Tail")
+            .collect::<Vec<_>>()
     );
 }
 

@@ -1271,7 +1271,11 @@ impl ModuleInfoExtractor {
 
     fn preseed_direct_object_binding_scope_roots(&mut self, statements: &[Statement<'_>]) {
         for statement in statements {
-            let Some(declaration) = statement.as_declaration() else {
+            let declaration = match statement {
+                Statement::ExportNamedDeclaration(export) => export.declaration.as_ref(),
+                _ => statement.as_declaration(),
+            };
+            let Some(declaration) = declaration else {
                 continue;
             };
             match declaration {
@@ -2746,7 +2750,6 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.namespace_depth == 0 && self.push_function_type_alias_scope(&stmt.body);
         self.push_direct_object_binding_scope(FxHashSet::default());
         self.preseed_direct_object_binding_scope_roots(&stmt.body);
-        self.preseed_direct_object_binding_targets(&stmt.body);
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
             self.scoped_namespace_binding_names
@@ -2761,6 +2764,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.path_relative_binding_stack.push(FxHashMap::default());
             self.preseed_nested_declarations(&stmt.body);
         }
+        self.preseed_direct_object_binding_targets(&stmt.body);
         for statement in &stmt.body {
             self.visit_statement(statement);
             if self.namespace_depth == 0 {
@@ -2923,12 +2927,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Some(var_roots) = self.deferred_function_var_binding_roots.last() {
             self.record_direct_object_binding_scope_roots(var_roots.clone());
         }
-        self.preseed_direct_object_binding_targets(&body.statements);
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
             self.preseed_nested_declarations(&body.statements);
         }
+        self.preseed_direct_object_binding_targets(&body.statements);
         for statement in &body.statements {
             self.visit_statement(statement);
             if self.namespace_depth == 0 {
@@ -3325,6 +3329,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // the function-body walk (below) can push the component stack with the
         // binding name. Runs before the body is walked. No-op on non-JSX files.
         self.react_prescan_variable_declaration(decl);
+        // Export-wrapped declarations are not visible in the surrounding
+        // statement pre-scan, so seed their direct object targets here too.
+        // Ordinary declarations are idempotent because target sets deduplicate.
+        self.preseed_direct_object_binding_declaration(decl);
         for declarator in &decl.declarations {
             self.record_variable_declarator(decl, declarator);
         }
@@ -3776,6 +3784,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     });
                 }
             }
+        } else if let Expression::ComputedMemberExpression(receiver) = &expr.object
+            && receiver.static_property_name().is_none()
+            && let Some(object_name) = static_member_object_name(&receiver.object)
+        {
+            self.record_dynamic_direct_object_binding_member_access(
+                &object_name,
+                expr.property.name.as_str(),
+            );
         }
         if matches!(expr.object, Expression::Super(_))
             && let Some(Some(super_local)) = self.class_super_stack.last()
@@ -4740,6 +4756,11 @@ fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
             "{}.{}",
             static_member_object_name(&member.object)?,
             member.property.name
+        )),
+        Expression::ComputedMemberExpression(member) => Some(format!(
+            "{}.{}",
+            static_member_object_name(&member.object)?,
+            member.static_property_name()?
         )),
         // `#`-private field receiver (`this.#dep`): oxc's `PrivateIdentifier.name`
         // excludes the leading `#`, so spell the key `this.#dep` to match the

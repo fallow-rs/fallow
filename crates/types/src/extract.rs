@@ -1944,6 +1944,12 @@ pub enum SemanticFact {
     /// A default import binding was handed on as a whole object.
     /// Appended because bitcode encodes enum variants by ordinal.
     DefaultImportWholeObjectUse(DefaultImportWholeObjectUseFact),
+    /// A property of an exported object contains a local class instance.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    ExportedObjectInstanceProperty(ExportedObjectInstancePropertyFact),
+    /// A member read on an instance from a namespace-qualified constructor.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    QualifiedClassMemberAccess(QualifiedClassMemberAccessFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.
@@ -2076,6 +2082,20 @@ impl<'a> SemanticFactView<'a> {
             .collect()
     }
 
+    /// Iterate exported object properties that contain class instances.
+    pub fn exported_object_instance_properties(
+        self,
+    ) -> impl Iterator<Item = &'a ExportedObjectInstancePropertyFact> + 'a {
+        exported_object_instance_property_facts(self.semantic_facts)
+    }
+
+    /// Iterate proven namespace-qualified class instance member accesses.
+    pub fn qualified_class_member_accesses(
+        self,
+    ) -> impl Iterator<Item = &'a QualifiedClassMemberAccessFact> + 'a {
+        qualified_class_member_access_facts(self.semantic_facts)
+    }
+
     /// Collect static factory call member facts.
     pub fn factory_call_member_accesses(self) -> Vec<FactoryCallMemberAccessFact> {
         factory_call_member_access_facts(self.semantic_facts)
@@ -2193,6 +2213,30 @@ fn instance_export_binding_facts(
 ) -> impl Iterator<Item = &InstanceExportBindingFact> {
     semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::InstanceExportBinding(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn exported_object_instance_property_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &ExportedObjectInstancePropertyFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::ExportedObjectInstanceProperty(property) = fact {
+            Some(property)
+        } else {
+            None
+        }
+    })
+}
+
+fn qualified_class_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &QualifiedClassMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::QualifiedClassMemberAccess(access) = fact {
             Some(access)
         } else {
             None
@@ -2661,6 +2705,30 @@ pub struct InstanceExportBindingFact {
     pub export_name: String,
     /// Local class or interface symbol used as the instance target.
     pub target_name: String,
+}
+
+/// A property of an exported object whose value is an instance of a local class.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ExportedObjectInstancePropertyFact {
+    /// Public export name of the containing object.
+    pub export_name: String,
+    /// Dotted path from the exported object to the instance property.
+    pub property_path: String,
+    /// Local class symbol instantiated at that property.
+    pub class_local_name: String,
+}
+
+/// A member read on an instance created by a namespace-qualified constructor.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct QualifiedClassMemberAccessFact {
+    /// Local namespace-import binding.
+    pub namespace_local: String,
+    /// Class export selected from that namespace.
+    pub class_export_name: String,
+    /// Instance member accessed through the proven object path.
+    pub member: String,
 }
 
 /// Opaque marker for a dynamic custom-element render site.

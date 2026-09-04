@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_EXPORTED_OBJECT_INSTANCE_MEMBER_ASSOCIATIONS: usize = 8192;
+
 /// Credit member accesses produced by static-factory call bindings on the
 /// originating class export.
 pub(super) fn propagate_factory_call_accesses(
@@ -153,6 +155,115 @@ pub(super) fn propagate_factory_return_object_accesses(
     }
 }
 
+/// Credit a member reached through a class instance stored in an exported object.
+pub(super) fn propagate_exported_object_instance_accesses(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+    whole_object_used_exports: &mut FxHashSet<ExportKey>,
+) {
+    let mut origin_cache: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    let mut class_origins_by_property: FxHashMap<(FileId, String, String), Vec<ExportKey>> =
+        FxHashMap::default();
+    let mut processed_accesses: FxHashSet<(FileId, String, String, String)> = FxHashSet::default();
+    let mut abstained_properties: FxHashSet<(FileId, String, String)> = FxHashSet::default();
+    let mut emitted_associations = 0usize;
+    for consumer in resolved_modules {
+        let local_to_export_keys = indexes.local_keys(consumer.file_id);
+        for access in SemanticFactView::new(&consumer.semantic_facts, &consumer.member_accesses)
+            .ordinary_member_accesses()
+        {
+            let Some((container_local, property_path)) = access.object.split_once('.') else {
+                continue;
+            };
+            let Some(container_keys) = local_to_export_keys.get(container_local) else {
+                continue;
+            };
+            for container_key in container_keys {
+                let origins = origin_cache
+                    .entry(container_key.clone())
+                    .or_insert_with(|| {
+                        walk_re_export_origins(
+                            graph,
+                            container_key.file_id,
+                            container_key.export_name.as_str(),
+                        )
+                    });
+                for container_origin in origins {
+                    let property_key = (
+                        container_origin.file_id,
+                        container_origin.export_name.clone(),
+                        property_path.to_string(),
+                    );
+                    if abstained_properties.contains(&property_key) {
+                        continue;
+                    }
+                    let class_origins = class_origins_by_property
+                        .entry(property_key.clone())
+                        .or_insert_with(|| {
+                            let mut origins = indexes
+                                .exported_object_classes_by_property
+                                .get(&(
+                                    container_origin.file_id,
+                                    container_origin.export_name.as_str(),
+                                    property_path,
+                                ))
+                                .into_iter()
+                                .flatten()
+                                .flat_map(|class_local_name| {
+                                    factory_return_class_origins(
+                                        graph,
+                                        indexes,
+                                        container_origin.file_id,
+                                        class_local_name,
+                                    )
+                                })
+                                .collect::<FxHashSet<_>>()
+                                .into_iter()
+                                .collect::<Vec<_>>();
+                            origins.sort_unstable_by(|left, right| {
+                                left.file_id
+                                    .0
+                                    .cmp(&right.file_id.0)
+                                    .then_with(|| left.export_name.cmp(&right.export_name))
+                            });
+                            origins
+                        });
+                    if class_origins.is_empty() {
+                        continue;
+                    }
+                    let processed_key = (
+                        container_origin.file_id,
+                        container_origin.export_name.clone(),
+                        property_path.to_string(),
+                        access.member.clone(),
+                    );
+                    if processed_accesses.contains(&processed_key) {
+                        continue;
+                    }
+                    if emitted_associations >= MAX_EXPORTED_OBJECT_INSTANCE_MEMBER_ASSOCIATIONS
+                        || emitted_associations.saturating_add(class_origins.len())
+                            > MAX_EXPORTED_OBJECT_INSTANCE_MEMBER_ASSOCIATIONS
+                    {
+                        whole_object_used_exports.extend(class_origins.iter().cloned());
+                        abstained_properties.insert(property_key);
+                        continue;
+                    }
+                    processed_accesses.insert(processed_key);
+                    emitted_associations += class_origins.len();
+                    for class_origin in class_origins {
+                        accessed_members
+                            .entry(class_origin.clone())
+                            .or_default()
+                            .insert(access.member.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The `(factory-module, class-local-name)` pairs a callee's exported object-literal
 /// factory exposes at `property_path`, resolved across re-export barrels. Empty for
 /// any callee that is not an internal exported object-factory declaring that path.
@@ -196,9 +307,30 @@ fn factory_return_class_origins(
     class_local_name: &str,
 ) -> Vec<ExportKey> {
     let factory_local_keys = indexes.local_keys(factory_origin_file_id);
-    let Some(class_seed_keys) = factory_local_keys.get(class_local_name) else {
-        return Vec::new();
-    };
+    let mut class_seed_keys = factory_local_keys
+        .get(class_local_name)
+        .cloned()
+        .unwrap_or_default();
+    if class_seed_keys.is_empty()
+        && let Some((namespace_local, export_name)) = class_local_name.split_once('.')
+        && !export_name.contains('.')
+        && let Some(factory_module) = indexes.module_by_id.get(&factory_origin_file_id)
+    {
+        class_seed_keys.extend(factory_module.all_resolved_imports().filter_map(|import| {
+            if import.info.local_name != namespace_local
+                || !matches!(
+                    import.info.imported_name,
+                    crate::extract::ImportedName::Namespace
+                )
+            {
+                return None;
+            }
+            Some(ExportKey::new(
+                import.target.internal_file_id()?,
+                export_name,
+            ))
+        }));
+    }
     class_seed_keys
         .iter()
         .flat_map(|class_seed| export_key_with_origins(graph, class_seed))
