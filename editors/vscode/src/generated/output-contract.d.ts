@@ -14217,6 +14217,12 @@ severity: CodeClimateSeverity
 fingerprint: string
 location: CodeClimateLocation
 /**
+ * Other source locations that provide evidence for the finding. GitLab's
+ * Code Quality widget ignores this standard CodeClimate field, but Fallow
+ * preserves it for review-comment rendering.
+ */
+other_locations?: CodeClimateLocation[]
+/**
  * Optional owner attribution used by grouped dead-code output.
  */
 owner?: (string | null)
@@ -14237,13 +14243,17 @@ path: string
 lines: CodeClimateLines
 }
 /**
- * `lines.begin` for [`CodeClimateLocation`].
+ * Inclusive line range for [`CodeClimateLocation`].
  */
 export interface CodeClimateLines {
 /**
  * 1-based start line.
  */
 begin: number
+/**
+ * Inclusive 1-based end line. Omitted for point findings.
+ */
+end?: (number | null)
 }
 /**
  * Structured JSON error emitted on stdout when `--format json` is active and a

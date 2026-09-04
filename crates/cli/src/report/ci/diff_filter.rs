@@ -510,10 +510,7 @@ pub(crate) fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
         // A diff was resolved for this run (a placed base, or a parsed-but-empty
         // scope). Filter against it; an empty-scope index drops every
         // source-anchored issue, matching the finding filter.
-        Some(Some(loaded)) => issues
-            .into_iter()
-            .filter(|issue| diff_index_keeps_issue(&loaded.index, issue, mode, radius))
-            .collect(),
+        Some(Some(loaded)) => filter_issues_with_index(issues, &loaded.index, mode, radius),
         // `init_shared_diff` ran and deliberately discarded the diff (foreign or
         // ambiguous base): report at full scope, the same decision the finding
         // filter made. Re-reading FALLOW_DIFF_FILE here would contradict it.
@@ -610,10 +607,36 @@ fn filter_issues_from_path(
         return issues;
     };
     let index = DiffIndex::from_unified_diff(&diff);
-    issues
+    filter_issues_with_index(issues, &index, mode, radius)
+}
+
+fn filter_issues_with_index(
+    issues: Vec<CiIssue>,
+    index: &DiffIndex,
+    mode: DiffFilterMode,
+    radius: u64,
+) -> Vec<CiIssue> {
+    let mut kept = issues
         .into_iter()
-        .filter(|issue| diff_index_keeps_issue(&index, issue, mode, radius))
-        .collect()
+        .filter_map(|mut issue| {
+            if mode == DiffFilterMode::Added {
+                let key = index.key_for_root_relative(&issue.path);
+                let end = issue
+                    .end_line
+                    .filter(|end| *end >= issue.line)
+                    .unwrap_or(issue.line);
+                issue.line = index.first_added_line_in_range(&key, issue.line, end)?;
+                return Some(issue);
+            }
+            diff_index_keeps_issue(index, &issue, mode, radius).then_some(issue)
+        })
+        .collect::<Vec<_>>();
+    if mode == DiffFilterMode::Added {
+        kept.sort_by(|a, b| {
+            (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint))
+        });
+    }
+    kept
 }
 
 fn diff_index_keeps_issue(
@@ -715,6 +738,8 @@ mod tests {
             severity: "minor".into(),
             path: "src/a.ts".into(),
             line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "abc".into(),
         };
         let kept = filter_issues_from_path(vec![issue], &path, DiffFilterMode::Added, 3);
@@ -731,6 +756,8 @@ mod tests {
             severity: "minor".into(),
             path: "src/a.ts".into(),
             line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "abc".into(),
         };
         let kept = filter_issues_from_path(vec![issue], &path, DiffFilterMode::Added, 3);
@@ -766,6 +793,8 @@ mod tests {
             severity: "minor".into(),
             path: "package.json".into(),
             line: 42,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "override".into(),
         };
         let source_level_in_diff = CiIssue {
@@ -774,6 +803,8 @@ mod tests {
             severity: "minor".into(),
             path: "src/a.ts".into(),
             line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "in-diff".into(),
         };
         let source_level_outside_diff = CiIssue {
@@ -782,6 +813,8 @@ mod tests {
             severity: "minor".into(),
             path: "src/b.ts".into(),
             line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "out-diff".into(),
         };
         let kept = summary_filter_with_scope(
@@ -828,6 +861,8 @@ mod tests {
             severity: "minor".into(),
             path: "package.json".into(),
             line: 12,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "dep".into(),
         };
         let kept = summary_filter_with_scope(vec![project_level], SummaryScope::Diff, |src| {
@@ -860,6 +895,8 @@ mod tests {
             severity: "minor".into(),
             path: "package.json".into(),
             line: 12,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "dep".into(),
         };
         let kept = summary_filter_with_scope(vec![project_level], SummaryScope::Diff, |src| {
@@ -877,6 +914,8 @@ mod tests {
             severity: "minor".into(),
             path: "src/a.ts".into(),
             line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "a".into(),
         };
         let b = CiIssue {
@@ -885,6 +924,8 @@ mod tests {
             severity: "minor".into(),
             path: "package.json".into(),
             line: 5,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "b".into(),
         };
         let kept = summary_filter_with_scope(vec![a, b], SummaryScope::All, |issues| issues);
@@ -1085,6 +1126,8 @@ diff --git a/src/a.ts b/src/a.ts
             severity: "minor".into(),
             path: "src/a.ts".into(),
             line: 2,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "a".into(),
         };
         let drop = CiIssue {
@@ -1115,5 +1158,61 @@ diff --git a/src/a.ts b/src/a.ts
             DiffFilterMode::File,
             3
         ));
+    }
+
+    #[test]
+    fn added_mode_anchors_range_finding_to_lowest_added_line_inside_range() {
+        let diff = "\
+diff --git a/src/a.ts b/src/a.ts
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -3,3 +3,5 @@
+ context at three
++first added
+ context at five
++second added
+ context at seven
+";
+        let index = DiffIndex::from_unified_diff(diff);
+        let ranged = CiIssue {
+            rule_id: "fallow/code-duplication".into(),
+            description: "clone".into(),
+            severity: "minor".into(),
+            path: "src/a.ts".into(),
+            line: 3,
+            end_line: Some(7),
+            other_locations: Vec::new(),
+            fingerprint: "range".into(),
+        };
+        let outside = CiIssue {
+            line: 8,
+            end_line: Some(10),
+            fingerprint: "outside".into(),
+            ..ranged.clone()
+        };
+
+        let kept =
+            filter_issues_with_index(vec![outside, ranged], &index, DiffFilterMode::Added, 3);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].fingerprint, "range");
+        assert_eq!(kept[0].line, 4);
+        assert_eq!(kept[0].end_line, Some(7));
+
+        let comment = fallow_output::render_review_comment_for_group(
+            &fallow_output::ReviewCommentRenderInput {
+                provider: fallow_output::CiProvider::Gitlab,
+                group: &[&kept[0]],
+                gitlab_diff_refs: None,
+                diff_index: Some(&index),
+                path_prefix: "",
+                include_guidance: false,
+                suggestion_block: &|_, _| None,
+                guidance_block: &|_| None,
+            },
+        );
+        let fallow_output::ReviewComment::GitLab(comment) = comment else {
+            panic!("expected GitLab comment");
+        };
+        assert_eq!(comment.position.new_line, 4);
     }
 }

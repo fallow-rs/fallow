@@ -330,6 +330,8 @@ mod tests {
             severity: sev.into(),
             path: path.into(),
             line,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: fp.into(),
         }
     }
@@ -348,6 +350,8 @@ mod tests {
             severity: sev.into(),
             path: path.into(),
             line,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: fp.into(),
         }
     }
@@ -752,6 +756,8 @@ rename to src/new.ts
             severity: "minor".into(),
             path: "src/a.ts".into(),
             line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "abc1234567890def".into(),
         };
         let comment = comment_to_value(&render_merged_comment(
@@ -810,6 +816,8 @@ rename to src/new.ts
             severity: "minor".into(),
             path: "src/a.ts".into(),
             line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "abc1234567890def".into(),
         };
         let comment = comment_to_value(&render_merged_comment(

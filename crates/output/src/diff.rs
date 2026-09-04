@@ -181,14 +181,23 @@ impl DiffIndex {
     /// `start..=end` range.
     #[must_use]
     pub fn range_overlaps_added(&self, path: &str, start: u64, end: u64) -> bool {
+        self.first_added_line_in_range(path, start, end).is_some()
+    }
+
+    /// Lowest 1-based added line inside the inclusive `start..=end` range.
+    /// Returns `None` for an invalid range or when the diff adds no line in it.
+    #[must_use]
+    pub fn first_added_line_in_range(&self, path: &str, start: u64, end: u64) -> Option<u64> {
         if end < start {
-            return false;
+            return None;
         }
-        let Some(added) = self.added_lines.get(path) else {
-            return false;
-        };
+        let added = self.added_lines.get(path)?;
         let lo = start.max(1);
-        added.iter().any(|&line| line >= lo && line <= end)
+        added
+            .iter()
+            .copied()
+            .filter(|line| *line >= lo && *line <= end)
+            .min()
     }
 
     /// Whether the 1-based `line` in `path` was added by this diff.

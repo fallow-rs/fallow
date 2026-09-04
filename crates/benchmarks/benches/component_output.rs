@@ -35,6 +35,8 @@ fn create_ci_issues() -> Vec<CiIssue> {
             severity: if index % 5 == 0 { "major" } else { "minor" }.to_string(),
             path: format!("src/module-{}.ts", index % 40),
             line: u64::try_from(index + 1).unwrap(),
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: format!("fp-{index:04}"),
         })
         .collect()

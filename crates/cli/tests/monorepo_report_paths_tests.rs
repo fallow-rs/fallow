@@ -720,6 +720,47 @@ fn report_path_prefix_still_renders_on_review_paths() {
     }
 }
 
+#[test]
+fn duplication_review_peer_locations_use_repository_root_paths() {
+    let dir = monorepo();
+    let root = dir.path();
+    let duplicate = "export function sharedShape(value) {\n  const first = value + 1\n  const second = first * 2\n  const third = second - 3\n  const fourth = third / 4\n  return fourth\n}\n";
+    std::fs::write(root.join("packages/pkg/src/clone-a.js"), duplicate).expect("write clone a");
+    std::fs::write(root.join("packages/pkg/src/clone-b.js"), duplicate).expect("write clone b");
+
+    let out = run(
+        root,
+        &[
+            "dupes",
+            "--root",
+            "packages/pkg",
+            "--quiet",
+            "--min-lines",
+            "5",
+            "--min-tokens",
+            "1",
+            "--format",
+            "review-gitlab",
+        ],
+    );
+    let review = parse_json(&out);
+    let comments = review["comments"].as_array().expect("comments array");
+    assert!(
+        !comments.is_empty(),
+        "expected duplication comments: {}",
+        out.stdout
+    );
+    let bodies = comments
+        .iter()
+        .filter_map(|comment| comment["body"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(bodies.contains("Code clone dup:"), "{bodies}");
+    assert!(bodies.contains("Other locations:"), "{bodies}");
+    assert!(bodies.contains("packages/pkg/src/clone-a.js"), "{bodies}");
+    assert!(bodies.contains("packages/pkg/src/clone-b.js"), "{bodies}");
+}
+
 /// Renamed files: GitLab needs `old_path` to place a discussion, and the diff's
 /// rename pairs are keyed in the diff's namespace, not the rendered one. A
 /// rendered-path lookup misses and `old_path` silently falls back to `new_path`,

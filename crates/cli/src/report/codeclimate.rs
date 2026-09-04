@@ -36,6 +36,9 @@ pub fn rebase_codeclimate_paths(issues: &mut [CodeClimateIssue]) {
     }
     for issue in issues {
         issue.location.path = fallow_output::apply_path_prefix(prefix, &issue.location.path);
+        for location in &mut issue.other_locations {
+            location.path = fallow_output::apply_path_prefix(prefix, &location.path);
+        }
     }
 }
 
@@ -167,8 +170,12 @@ fn saved_annotation_codeclimate_issues(
                 fingerprint,
                 location: CodeClimateLocation {
                     path,
-                    lines: CodeClimateLines { begin: line },
+                    lines: CodeClimateLines {
+                        begin: line,
+                        end: None,
+                    },
                 },
+                other_locations: Vec::new(),
                 owner: None,
                 group: None,
             }
@@ -3537,12 +3544,18 @@ mod tests {
         assert_eq!(issues[0]["location"]["path"].as_str().unwrap(), "src/a.ts");
         assert_eq!(issues[1]["location"]["path"].as_str().unwrap(), "src/b.ts");
         assert_eq!(issues[0]["location"]["lines"]["begin"], 10);
+        assert_eq!(issues[0]["location"]["lines"]["end"], 20);
         assert_eq!(issues[1]["location"]["lines"]["begin"], 30);
+        assert_eq!(issues[1]["location"]["lines"]["end"], 40);
+        assert_eq!(issues[0]["other_locations"][0]["path"], "src/b.ts");
+        assert_eq!(issues[0]["other_locations"][0]["lines"]["begin"], 30);
+        assert_eq!(issues[0]["other_locations"][0]["lines"]["end"], 40);
+        assert_eq!(issues[1]["other_locations"][0]["path"], "src/a.ts");
         assert_eq!(issues[0]["categories"][0], "Duplication");
     }
 
     #[test]
-    fn duplication_codeclimate_description_includes_group_number_and_line_count() {
+    fn duplication_codeclimate_description_uses_stable_clone_handle_not_ordinal() {
         use fallow_types::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
@@ -3585,13 +3598,47 @@ mod tests {
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 2);
         let desc0 = issues[0]["description"].as_str().unwrap();
-        assert!(desc0.contains("group 1"), "first group: {desc0}");
+        assert!(desc0.starts_with("Code clone dup:"), "first group: {desc0}");
+        assert!(!desc0.contains("group 1"), "ordinal leaked: {desc0}");
         assert!(desc0.contains("8 lines"), "first group line count: {desc0}");
         let desc1 = issues[1]["description"].as_str().unwrap();
-        assert!(desc1.contains("group 2"), "second group: {desc1}");
+        assert!(
+            desc1.starts_with("Code clone dup:"),
+            "second group: {desc1}"
+        );
+        assert!(!desc1.contains("group 2"), "ordinal leaked: {desc1}");
         assert!(
             desc1.contains("6 lines"),
             "second group line count: {desc1}"
+        );
+
+        let mut reordered = report;
+        reordered.clone_groups.reverse();
+        let reordered_output =
+            codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&reordered, &root));
+        let descriptions_by_path = |issues: &serde_json::Value| {
+            issues
+                .as_array()
+                .expect("issues array")
+                .iter()
+                .map(|issue| {
+                    (
+                        issue["location"]["path"]
+                            .as_str()
+                            .expect("location path")
+                            .to_owned(),
+                        issue["description"]
+                            .as_str()
+                            .expect("description")
+                            .to_owned(),
+                    )
+                })
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        assert_eq!(
+            descriptions_by_path(&output),
+            descriptions_by_path(&reordered_output),
+            "clone handles must not depend on report order"
         );
     }
 

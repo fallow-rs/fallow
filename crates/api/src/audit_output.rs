@@ -539,8 +539,12 @@ mod tests {
             fingerprint: "abc".to_string(),
             location: fallow_output::CodeClimateLocation {
                 path: "src/a.ts".to_string(),
-                lines: fallow_output::CodeClimateLines { begin: 1 },
+                lines: fallow_output::CodeClimateLines {
+                    begin: 1,
+                    end: None,
+                },
             },
+            other_locations: Vec::new(),
             categories: vec!["Bug Risk".to_string()],
             owner: None,
             group: None,

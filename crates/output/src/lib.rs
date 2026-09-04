@@ -117,7 +117,7 @@ pub use check::{
     serialize_check_json_output,
 };
 pub use ci_output::{
-    CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
+    CiIssue, CiLocation, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
     MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, ReviewCommentRenderInput,
     ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation,
     ReviewGitlabDiffRefs, apply_path_prefix, cap_body_with_marker, command_title,

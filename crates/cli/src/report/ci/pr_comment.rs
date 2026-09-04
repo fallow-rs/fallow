@@ -467,8 +467,10 @@ mod tests {
                     path: format!("src/{index}.ts"),
                     lines: CodeClimateLines {
                         begin: u32::try_from(index + 1).expect("small fixture index"),
+                        end: None,
                     },
                 },
+                other_locations: Vec::new(),
                 owner: None,
                 group: None,
             })
@@ -622,6 +624,8 @@ mod tests {
         let issues = [CiIssue {
             path: "src/app.ts".to_owned(),
             line: 12,
+            end_line: None,
+            other_locations: Vec::new(),
             rule_id: "fallow/high-crap-score".to_owned(),
             description: "Function is hard to safely change.".to_owned(),
             severity: "minor".to_owned(),
