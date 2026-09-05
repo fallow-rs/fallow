@@ -43,6 +43,7 @@ use fallow_config::{
     parse_pnpm_catalog_data, record_workspace_diagnostics,
 };
 use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
+use fallow_types::suppress::IssueKind;
 use rustc_hash::FxHashSet;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
@@ -54,6 +55,7 @@ pub struct PnpmCatalogState {
     data: PnpmCatalogData,
     consumers: CatalogConsumers,
     source_path: PathBuf,
+    suppressed_entry_lines: FxHashSet<u32>,
 }
 
 /// Read catalog declarations and walk workspace `package.json` files to build
@@ -65,21 +67,23 @@ pub fn gather_pnpm_catalog_state(
     workspaces: &[WorkspaceInfo],
 ) -> Option<PnpmCatalogState> {
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
-    let (data, source_path) = if let Ok(yaml_source) = std::fs::read_to_string(&yaml_path) {
-        let data = parse_pnpm_catalog_data(&yaml_source).unwrap_or_else(|error| {
-            report_malformed_pnpm_workspace_yaml(&config.root, &yaml_path, error);
-            PnpmCatalogData::default()
-        });
-        (data, PathBuf::from(PNPM_WORKSPACE_FILE))
-    } else {
-        let package_json_path = config.root.join(PACKAGE_JSON_FILE);
-        let package_json_source = std::fs::read_to_string(&package_json_path).ok()?;
-        let data = parse_package_json_catalog_data(&package_json_source);
-        if data.catalogs.is_empty() && data.empty_named_catalog_groups.is_empty() {
-            return None;
-        }
-        (data, PathBuf::from(PACKAGE_JSON_FILE))
-    };
+    let (data, source_path, suppressed_entry_lines) =
+        if let Ok(yaml_source) = std::fs::read_to_string(&yaml_path) {
+            let data = parse_pnpm_catalog_data(&yaml_source).unwrap_or_else(|error| {
+                report_malformed_pnpm_workspace_yaml(&config.root, &yaml_path, error);
+                PnpmCatalogData::default()
+            });
+            let suppressed = suppressed_yaml_catalog_entries(&yaml_source, &data);
+            (data, PathBuf::from(PNPM_WORKSPACE_FILE), suppressed)
+        } else {
+            let package_json_path = config.root.join(PACKAGE_JSON_FILE);
+            let package_json_source = std::fs::read_to_string(&package_json_path).ok()?;
+            let data = parse_package_json_catalog_data(&package_json_source);
+            if data.catalogs.is_empty() && data.empty_named_catalog_groups.is_empty() {
+                return None;
+            }
+            (data, PathBuf::from(PACKAGE_JSON_FILE), FxHashSet::default())
+        };
     let consumer_pkg_paths = collect_consumer_pkg_paths(config, workspaces);
     let consumers = collect_catalog_consumers(&consumer_pkg_paths, &config.root);
 
@@ -87,7 +91,40 @@ pub fn gather_pnpm_catalog_state(
         data,
         consumers,
         source_path,
+        suppressed_entry_lines,
     })
+}
+
+fn suppressed_yaml_catalog_entries(source: &str, data: &PnpmCatalogData) -> FxHashSet<u32> {
+    let lines: Vec<&str> = source.lines().collect();
+    data.catalogs
+        .iter()
+        .flat_map(|catalog| &catalog.entries)
+        .filter_map(|entry| {
+            let entry_index = (entry.line as usize).checked_sub(1)?;
+            let previous_line = lines.get(entry_index.checked_sub(1)?)?;
+            let entry_line = lines.get(entry_index)?;
+            // A more deeply indented line can be content of a YAML block scalar.
+            if previous_line.len() - previous_line.trim_start().len()
+                > entry_line.len() - entry_line.trim_start().len()
+            {
+                return None;
+            }
+            let comment = previous_line.trim_start().strip_prefix('#')?;
+            // Reuse the shared rule-list, alias, and optional-reason grammar.
+            let parsed =
+                fallow_extract::suppress::parse_suppressions_from_source(&format!("//{comment}"));
+            parsed
+                .suppressions
+                .iter()
+                .any(|suppression| {
+                    suppression.line != 0
+                        && suppression
+                            .matches_issue_kind(suppression.line, IssueKind::PnpmCatalogEntry)
+                })
+                .then_some(entry.line)
+        })
+        .collect()
 }
 
 /// Record the degraded-continue diagnostic for a `pnpm-workspace.yaml` that
@@ -123,7 +160,9 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
                 package_name: entry.package_name.as_str(),
                 catalog_name: catalog.name.as_str(),
             };
-            if state.consumers.references.contains(&key.owned()) {
+            if state.suppressed_entry_lines.contains(&entry.line)
+                || state.consumers.references.contains(&key.owned())
+            {
                 continue;
             }
 
