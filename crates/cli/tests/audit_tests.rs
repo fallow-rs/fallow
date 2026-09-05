@@ -5113,6 +5113,69 @@ fn create_dependency_decision_fixture() -> TempDir {
 }
 
 #[test]
+fn review_brief_preserves_scoped_dependency_names() {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"scoped-deps","main":"src/index.ts","dependencies":{"@scope/bumped":"^1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/index.ts"), "import '@scope/bumped';\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"scoped-deps","main":"src/index.ts","dependencies":{"@scope/bumped":"^2.0.0","@scope/one":"^1.0.0","@scope/two":"^1.0.0","plain":"^1.0.0","other":"^1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import '@scope/bumped';\nimport '@scope/one';\nimport '@scope/two';\nimport 'plain';\nimport 'other';\n",
+    )
+    .unwrap();
+
+    let output = Command::new(fallow_bin())
+        .args(["review", "--brief", "--base", "HEAD"])
+        .current_dir(dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("review runs");
+    assert!(matches!(output.status.code(), Some(0 | 1)), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("new third-party dependencies: @scope/one, @scope/two, other, plain"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("major version bump: @scope/bumped ^1.0.0 to ^2.0.0"),
+        "{stderr}"
+    );
+
+    let output = Command::new(fallow_bin())
+        .args(["review", "--brief", "--base", "HEAD", "--format", "json"])
+        .current_dir(dir)
+        .output()
+        .expect("JSON review runs");
+    let brief: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("review brief JSON");
+    assert_eq!(
+        brief["deltas"]["dependency_added"],
+        serde_json::json!([
+            "package.json::@scope/one",
+            "package.json::@scope/two",
+            "package.json::other",
+            "package.json::plain"
+        ])
+    );
+    assert_eq!(
+        brief["deltas"]["dependency_major_bumped"],
+        serde_json::json!(["package.json::@scope/bumped@^1.0.0->^2.0.0"])
+    );
+}
+
+#[test]
 fn dependency_bump_and_addition_surface_as_batched_decisions() {
     let tmp = create_dependency_decision_fixture();
     let guide = run_walkthrough_guide(tmp.path());
