@@ -101,3 +101,37 @@ fn path_is_relative_pnpm_workspace_yaml() {
         assert!(entry.line > 0, "catalog entry line must be 1-based");
     }
 }
+
+#[test]
+fn yaml_catalog_next_line_suppressions_preserve_unrelated_entries() {
+    let root = fixture_path("issue-2548-catalog-suppression");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let actual: FxHashSet<(&str, &str)> = results
+        .unused_catalog_entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.entry.catalog_name.as_str(),
+                entry.entry.entry_name.as_str(),
+            )
+        })
+        .collect();
+    let expected = FxHashSet::from_iter([
+        ("default", "retained-neighbor"),
+        ("default", "wrong-rule"),
+        ("default", "separated"),
+        ("default", "directive-value"),
+        ("default", "after-value"),
+        ("default", "block-value"),
+        ("default", "after-block"),
+        ("default", "file-marker"),
+        ("default", "unknown-rule"),
+        ("future", "retained-neighbor"),
+        ("current", "@sveltejs/adapter-static"),
+    ]);
+    assert_eq!(
+        actual, expected,
+        "suppressions must target only their entry"
+    );
+}

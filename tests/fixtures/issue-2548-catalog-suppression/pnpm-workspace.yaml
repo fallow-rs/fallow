@@ -1,0 +1,35 @@
+packages:
+  - packages/*
+
+catalog:
+  # fallow-ignore-next-line unused-catalog-entry
+  '@sveltejs/adapter-static': 4.0.0-next.4
+  retained-neighbor: ^1.0.0
+  # fallow-ignore-next-line unused-catalog-entry -- Reserved for a scaffold archetype.
+  reserved: ^1.0.0
+  # fallow-ignore-next-line unused-dependency
+  wrong-rule: ^1.0.0
+  # fallow-ignore-next-line unused-catalog-entry
+
+  separated: ^1.0.0
+  directive-value: '# fallow-ignore-next-line unused-catalog-entry'
+  after-value: ^1.0.0
+  block-value: |
+    # fallow-ignore-next-line unused-catalog-entry
+  after-block: ^1.0.0
+  # fallow-ignore-file unused-catalog-entry
+  file-marker: ^1.0.0
+  # fallow-ignore-next-line unused-catalog-entri
+  unknown-rule: ^1.0.0
+  # fallow-ignore-next-line
+  blanket: ^1.0.0
+  # fallow-ignore-next-line unused-dependency, unused-catalog-entry -- Reserved.
+  multiple-rules: ^1.0.0
+
+catalogs:
+  future:
+    # fallow-ignore-next-line unused-catalog-entries -- Reserved for migration.
+    '@sveltejs/adapter-static': 4.0.0-next.4
+    retained-neighbor: ^1.0.0
+  current:
+    '@sveltejs/adapter-static': 4.0.0-next.4
