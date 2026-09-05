@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788636700726,
+  "lastUpdate": 1788637812533,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "69e4446d9494e464b304317ee9a9c6920f25150a",
-          "message": "perf(benchmarks): track trace symbol chains",
-          "timestamp": "2026-08-19T03:09:11+02:00",
-          "tree_id": "e573c4f84e583b25e1ccef0d6d964de61685d0f0",
-          "url": "https://github.com/fallow-rs/fallow/commit/69e4446d9494e464b304317ee9a9c6920f25150a"
-        },
-        "date": 1787102061324,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9741491,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49211,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1195708,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8447,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8458,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "02381b837dfa93df5c845b293359cb99d2a19c72",
+          "message": "fix: honor pnpm catalog next-line suppressions\n\nFixes #2548.",
+          "timestamp": "2026-09-05T21:45:59+02:00",
+          "tree_id": "b5836aff546faa0300fe76ee240f77a1face7047",
+          "url": "https://github.com/fallow-rs/fallow/commit/02381b837dfa93df5c845b293359cb99d2a19c72"
+        },
+        "date": 1788637809493,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9847301,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50750,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1177398,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8388,
             "unit": "allocations"
           }
         ]
