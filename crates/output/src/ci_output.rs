@@ -60,8 +60,23 @@ pub struct CiIssue {
     pub path: String,
     /// 1-based line of the finding.
     pub line: u64,
+    /// Inclusive 1-based end line for range findings.
+    pub end_line: Option<u64>,
+    /// Other source ranges that provide evidence for this finding.
+    pub other_locations: Vec<CiLocation>,
     /// Stable finding fingerprint used for comment identity.
     pub fingerprint: String,
+}
+
+/// Source range attached to a normalized CI finding as supporting evidence.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CiLocation {
+    /// File path relative to the analysed root.
+    pub path: String,
+    /// Inclusive 1-based start line.
+    pub line: u64,
+    /// Inclusive 1-based end line.
+    pub end_line: u64,
 }
 
 /// Inputs for rendering a sticky PR/MR summary comment.
@@ -177,6 +192,27 @@ fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
         .pointer("/location/lines/begin")
         .and_then(Value::as_u64)
         .unwrap_or(1);
+    let end_line = value.pointer("/location/lines/end").and_then(Value::as_u64);
+    let mut other_locations = value
+        .get("other_locations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|location| {
+            let line = location.pointer("/lines/begin")?.as_u64()?;
+            let end_line = location
+                .pointer("/lines/end")
+                .and_then(Value::as_u64)
+                .filter(|end| *end >= line)
+                .unwrap_or(line);
+            Some(CiLocation {
+                path: location.get("path")?.as_str()?.to_owned(),
+                line,
+                end_line,
+            })
+        })
+        .collect::<Vec<_>>();
+    other_locations.sort();
     Some(CiIssue {
         rule_id: value
             .get("check_name")
@@ -200,16 +236,36 @@ fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
             .to_string(),
         path,
         line,
+        end_line,
+        other_locations,
     })
 }
 
 fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
+    let mut other_locations = issue
+        .other_locations
+        .iter()
+        .map(|location| CiLocation {
+            path: location.path.clone(),
+            line: u64::from(location.lines.begin),
+            end_line: u64::from(
+                location
+                    .lines
+                    .end
+                    .filter(|end| *end >= location.lines.begin)
+                    .unwrap_or(location.lines.begin),
+            ),
+        })
+        .collect::<Vec<_>>();
+    other_locations.sort();
     CiIssue {
         rule_id: issue.check_name.clone(),
         description: issue.description.clone(),
         severity: codeclimate_severity_label(issue.severity).to_owned(),
         path: issue.location.path.clone(),
         line: u64::from(issue.location.lines.begin),
+        end_line: issue.location.lines.end.map(u64::from),
+        other_locations,
         fingerprint: issue.fingerprint.clone(),
     }
 }
@@ -712,6 +768,23 @@ fn build_merged_comment_content(input: &ReviewCommentRenderInput<'_, '_>) -> Str
             escape_md(&issue.description)
         )
         .expect("write to String is infallible");
+        if !issue.other_locations.is_empty() {
+            content.push_str("\n\nOther locations: ");
+            let locations = issue
+                .other_locations
+                .iter()
+                .map(|location| {
+                    markdown_code_span(&format!(
+                        "{}:{}-{}",
+                        apply_path_prefix(input.path_prefix, &location.path),
+                        location.line,
+                        location.end_line
+                    ))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            content.push_str(&locations);
+        }
         if let Some(suggestion) = (input.suggestion_block)(input.provider, issue) {
             content.push_str(&suggestion);
         }
@@ -975,8 +1048,16 @@ mod tests {
                     path: format!("src/{index}.ts"),
                     lines: CodeClimateLines {
                         begin: u32::try_from(index + 1).expect("small fixture index"),
+                        end: Some(u32::try_from(index + 3).expect("small fixture index")),
                     },
                 },
+                other_locations: vec![CodeClimateLocation {
+                    path: format!("src/peer-{index}.ts"),
+                    lines: CodeClimateLines {
+                        begin: 20,
+                        end: Some(24),
+                    },
+                }],
                 owner: None,
                 group: None,
             })
@@ -987,6 +1068,11 @@ mod tests {
             issues_from_codeclimate_issues(&typed),
             issues_from_codeclimate(&value)
         );
+        let normalized = issues_from_codeclimate_issues(&typed);
+        assert_eq!(normalized[0].end_line, Some(3));
+        assert_eq!(normalized[0].other_locations[0].path, "src/peer-0.ts");
+        assert_eq!(normalized[0].other_locations[0].line, 20);
+        assert_eq!(normalized[0].other_locations[0].end_line, 24);
         let typed_labels = issues_from_codeclimate_issues(&typed)
             .into_iter()
             .map(|issue| issue.severity)
@@ -996,6 +1082,44 @@ mod tests {
             .map(|(_, label)| (*label).to_owned())
             .collect::<Vec<_>>();
         assert_eq!(typed_labels, expected_labels);
+    }
+
+    #[test]
+    fn review_comment_renders_repository_prefixed_peer_ranges() {
+        let issue = CiIssue {
+            rule_id: "fallow/code-duplication".to_owned(),
+            description: "Code clone dup:abcd1234 (11 lines, 2 instances)".to_owned(),
+            severity: "minor".to_owned(),
+            path: "src/a.ts".to_owned(),
+            line: 5,
+            end_line: Some(15),
+            other_locations: vec![CiLocation {
+                path: "src/b.ts".to_owned(),
+                line: 30,
+                end_line: 40,
+            }],
+            fingerprint: "instance-fingerprint".to_owned(),
+        };
+        let comment = render_review_comment_for_group(&ReviewCommentRenderInput {
+            provider: CiProvider::Gitlab,
+            group: &[&issue],
+            gitlab_diff_refs: None,
+            diff_index: None,
+            path_prefix: "packages/app",
+            include_guidance: false,
+            suggestion_block: &|_, _| None,
+            guidance_block: &|_| None,
+        });
+        let ReviewComment::GitLab(comment) = comment else {
+            panic!("expected GitLab comment");
+        };
+
+        assert_eq!(comment.position.new_path, "packages/app/src/a.ts");
+        assert!(
+            comment
+                .body
+                .contains("Other locations: `packages/app/src/b.ts:30-40`")
+        );
     }
 
     #[test]

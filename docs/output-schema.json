@@ -5770,8 +5770,15 @@
           "description": "Stable finding fingerprint GitLab uses to track issues across pushes."
         },
         "location": {
-          "description": "File and begin-line location of the finding.",
+          "description": "File and inclusive line range of the finding.",
           "$ref": "#/definitions/CodeClimateLocation"
+        },
+        "other_locations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CodeClimateLocation"
+          },
+          "description": "Other source locations that provide evidence for the finding. GitLab's\nCode Quality widget ignores this standard CodeClimate field, but Fallow\npreserves it for review-comment rendering."
         },
         "owner": {
           "type": [
@@ -8094,7 +8101,7 @@
           "description": "File path relative to the analysed root."
         },
         "lines": {
-          "description": "Wrapper carrying the begin line so the schema lines up with\nCodeClimate's spec.",
+          "description": "Wrapper carrying the line range so the schema lines up with\nCodeClimate's spec.",
           "$ref": "#/definitions/CodeClimateLines"
         }
       },
@@ -8110,12 +8117,19 @@
         "begin": {
           "type": "integer",
           "description": "1-based start line."
+        },
+        "end": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Inclusive 1-based end line. Omitted for point findings."
         }
       },
       "required": [
         "begin"
       ],
-      "description": "`lines.begin` for [`CodeClimateLocation`]."
+      "description": "Inclusive line range for [`CodeClimateLocation`]."
     },
     "ReviewEnvelopeEvent": {
       "oneOf": [

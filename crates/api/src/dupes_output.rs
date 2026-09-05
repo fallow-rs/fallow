@@ -414,8 +414,10 @@ pub fn build_duplication_codeclimate(
     root: &Path,
 ) -> Vec<CodeClimateIssue> {
     let mut issues = Vec::new();
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
 
-    for (i, group) in report.clone_groups.iter().enumerate() {
+    for group in &report.clone_groups {
+        let clone_fingerprint = fingerprints.fingerprint_for_group(group);
         let token_str = group.token_count.to_string();
         let line_count_str = group.line_count.to_string();
         let fragment_prefix: String = group
@@ -424,7 +426,7 @@ pub fn build_duplication_codeclimate(
             .map(|inst| inst.fragment.chars().take(64).collect())
             .unwrap_or_default();
 
-        for instance in &group.instances {
+        for (instance_index, instance) in group.instances.iter().enumerate() {
             let path = codeclimate_path(&instance.file, root);
             let start_str = instance.start_line.to_string();
             let fp = codeclimate_fingerprint_hash(&[
@@ -435,22 +437,37 @@ pub fn build_duplication_codeclimate(
                 &line_count_str,
                 &fragment_prefix,
             ]);
-            issues.push(fallow_output::build_codeclimate_issue(
-                CodeClimateIssueInput {
-                    check_name: "fallow/code-duplication",
-                    description: &format!(
-                        "Code clone group {} ({} lines, {} instances)",
-                        i + 1,
-                        group.line_count,
-                        group.instances.len()
-                    ),
-                    severity: CodeClimateSeverity::Minor,
-                    category: "Duplication",
-                    path: &path,
-                    begin_line: Some(instance.start_line as u32),
-                    fingerprint: &fp,
-                },
-            ));
+            let mut issue = fallow_output::build_codeclimate_issue(CodeClimateIssueInput {
+                check_name: "fallow/code-duplication",
+                description: &format!(
+                    "Code clone {clone_fingerprint} ({} lines, {} instances)",
+                    group.line_count,
+                    group.instances.len()
+                ),
+                severity: CodeClimateSeverity::Minor,
+                category: "Duplication",
+                path: &path,
+                begin_line: Some(instance.start_line as u32),
+                fingerprint: &fp,
+            });
+            issue.location.lines.end = Some(instance.end_line as u32);
+            issue.other_locations = group
+                .instances
+                .iter()
+                .enumerate()
+                .filter(|(peer_index, _)| *peer_index != instance_index)
+                .map(|(_, peer)| fallow_output::CodeClimateLocation {
+                    path: codeclimate_path(&peer.file, root),
+                    lines: fallow_output::CodeClimateLines {
+                        begin: peer.start_line as u32,
+                        end: Some(peer.end_line as u32),
+                    },
+                })
+                .collect();
+            issue.other_locations.sort_by(|a, b| {
+                (&a.path, a.lines.begin, a.lines.end).cmp(&(&b.path, b.lines.begin, b.lines.end))
+            });
+            issues.push(issue);
         }
     }
 
@@ -714,6 +731,7 @@ mod tests {
         assert_eq!(issue.location.path, "app/%5Bid%5D/page.tsx");
         assert_eq!(issue.location.lines.begin, 4);
         assert_eq!(issue.categories, vec!["Duplication"]);
-        assert!(issue.description.contains("Code clone group 1"));
+        assert!(issue.description.starts_with("Code clone dup:"));
+        assert_eq!(issue.location.lines.end, Some(8));
     }
 }

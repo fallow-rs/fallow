@@ -6,7 +6,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone group 1 (11 lines, 2 instances)",
+    "description": "Code clone dup:bae149c7 (11 lines, 2 instances)",
     "categories": [
       "Duplication"
     ],
@@ -15,14 +15,24 @@ expression: json_str
     "location": {
       "path": "src/utils.ts",
       "lines": {
-        "begin": 10
+        "begin": 10,
+        "end": 20
       }
-    }
+    },
+    "other_locations": [
+      {
+        "path": "src/helpers.ts",
+        "lines": {
+          "begin": 5,
+          "end": 15
+        }
+      }
+    ]
   },
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone group 1 (11 lines, 2 instances)",
+    "description": "Code clone dup:bae149c7 (11 lines, 2 instances)",
     "categories": [
       "Duplication"
     ],
@@ -31,8 +41,18 @@ expression: json_str
     "location": {
       "path": "src/helpers.ts",
       "lines": {
-        "begin": 5
+        "begin": 5,
+        "end": 15
       }
-    }
+    },
+    "other_locations": [
+      {
+        "path": "src/utils.ts",
+        "lines": {
+          "begin": 10,
+          "end": 20
+        }
+      }
+    ]
   }
 ]

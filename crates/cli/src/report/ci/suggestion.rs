@@ -196,6 +196,8 @@ mod tests {
             severity: "minor".to_owned(),
             path: "src/a.ts".to_owned(),
             line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "abc".to_owned(),
         };
 
@@ -313,6 +315,8 @@ mod tests {
             severity: "major".to_owned(),
             path: "src/dead.ts".to_owned(),
             line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
             fingerprint: "abc".to_owned(),
         };
         let body = suggestion_block(Provider::Github, &issue).expect("hint");

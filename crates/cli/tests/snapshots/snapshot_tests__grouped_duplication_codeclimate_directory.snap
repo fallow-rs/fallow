@@ -6,7 +6,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone group 1 (11 lines, 3 instances)",
+    "description": "Code clone dup:77dc5951 (11 lines, 3 instances)",
     "categories": [
       "Duplication"
     ],
@@ -15,15 +15,32 @@ expression: json_str
     "location": {
       "path": "src/a.ts",
       "lines": {
-        "begin": 10
+        "begin": 10,
+        "end": 20
       }
     },
+    "other_locations": [
+      {
+        "path": "lib/c.ts",
+        "lines": {
+          "begin": 30,
+          "end": 40
+        }
+      },
+      {
+        "path": "src/b.ts",
+        "lines": {
+          "begin": 5,
+          "end": 15
+        }
+      }
+    ],
     "group": "src"
   },
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone group 1 (11 lines, 3 instances)",
+    "description": "Code clone dup:77dc5951 (11 lines, 3 instances)",
     "categories": [
       "Duplication"
     ],
@@ -32,15 +49,32 @@ expression: json_str
     "location": {
       "path": "src/b.ts",
       "lines": {
-        "begin": 5
+        "begin": 5,
+        "end": 15
       }
     },
+    "other_locations": [
+      {
+        "path": "lib/c.ts",
+        "lines": {
+          "begin": 30,
+          "end": 40
+        }
+      },
+      {
+        "path": "src/a.ts",
+        "lines": {
+          "begin": 10,
+          "end": 20
+        }
+      }
+    ],
     "group": "src"
   },
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone group 1 (11 lines, 3 instances)",
+    "description": "Code clone dup:77dc5951 (11 lines, 3 instances)",
     "categories": [
       "Duplication"
     ],
@@ -49,15 +83,32 @@ expression: json_str
     "location": {
       "path": "lib/c.ts",
       "lines": {
-        "begin": 30
+        "begin": 30,
+        "end": 40
       }
     },
+    "other_locations": [
+      {
+        "path": "src/a.ts",
+        "lines": {
+          "begin": 10,
+          "end": 20
+        }
+      },
+      {
+        "path": "src/b.ts",
+        "lines": {
+          "begin": 5,
+          "end": 15
+        }
+      }
+    ],
     "group": "src"
   },
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone group 2 (8 lines, 2 instances)",
+    "description": "Code clone dup:58a0b88d (8 lines, 2 instances)",
     "categories": [
       "Duplication"
     ],
@@ -66,15 +117,25 @@ expression: json_str
     "location": {
       "path": "lib/x.ts",
       "lines": {
-        "begin": 1
+        "begin": 1,
+        "end": 8
       }
     },
+    "other_locations": [
+      {
+        "path": "lib/y.ts",
+        "lines": {
+          "begin": 1,
+          "end": 8
+        }
+      }
+    ],
     "group": "lib"
   },
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone group 2 (8 lines, 2 instances)",
+    "description": "Code clone dup:58a0b88d (8 lines, 2 instances)",
     "categories": [
       "Duplication"
     ],
@@ -83,9 +144,19 @@ expression: json_str
     "location": {
       "path": "lib/y.ts",
       "lines": {
-        "begin": 1
+        "begin": 1,
+        "end": 8
       }
     },
+    "other_locations": [
+      {
+        "path": "lib/x.ts",
+        "lines": {
+          "begin": 1,
+          "end": 8
+        }
+      }
+    ],
     "group": "lib"
   }
 ]

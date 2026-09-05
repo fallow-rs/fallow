@@ -34,8 +34,13 @@ pub struct CodeClimateIssue {
     pub severity: CodeClimateSeverity,
     /// Stable finding fingerprint GitLab uses to track issues across pushes.
     pub fingerprint: String,
-    /// File and begin-line location of the finding.
+    /// File and inclusive line range of the finding.
     pub location: CodeClimateLocation,
+    /// Other source locations that provide evidence for the finding. GitLab's
+    /// Code Quality widget ignores this standard CodeClimate field, but Fallow
+    /// preserves it for review-comment rendering.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub other_locations: Vec<CodeClimateLocation>,
     /// Optional owner attribution used by grouped dead-code output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
@@ -89,17 +94,20 @@ pub enum CodeClimateSeverity {
 pub struct CodeClimateLocation {
     /// File path relative to the analysed root.
     pub path: String,
-    /// Wrapper carrying the begin line so the schema lines up with
+    /// Wrapper carrying the line range so the schema lines up with
     /// CodeClimate's spec.
     pub lines: CodeClimateLines,
 }
 
-/// `lines.begin` for [`CodeClimateLocation`].
+/// Inclusive line range for [`CodeClimateLocation`].
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CodeClimateLines {
     /// 1-based start line.
     pub begin: u32,
+    /// Inclusive 1-based end line. Omitted for point findings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<u32>,
 }
 
 /// Fields needed to build one CodeClimate issue.
@@ -166,8 +174,10 @@ pub fn build_codeclimate_issue(input: CodeClimateIssueInput<'_>) -> CodeClimateI
             path: input.path.to_string(),
             lines: CodeClimateLines {
                 begin: input.begin_line.unwrap_or(1),
+                end: None,
             },
         },
+        other_locations: Vec::new(),
         owner: None,
         group: None,
     }
@@ -224,6 +234,8 @@ mod tests {
         assert_eq!(value["type"], "issue");
         assert_eq!(value["severity"], "major");
         assert_eq!(value["location"]["lines"]["begin"], 7);
+        assert!(value["location"]["lines"].get("end").is_none());
+        assert!(value.get("other_locations").is_none());
     }
 
     #[test]
