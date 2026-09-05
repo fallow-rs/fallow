@@ -5,10 +5,11 @@
     "@arethetypeswrong/cli": "^0.18.2",
     "@j178/prek": "^0.2.0",
     "is-ci": "^4.0.0",
-    "publint": "^0.3.0"
+    "publint": "^0.3.0",
+    "varlock": "^1.18.0"
   },
   "scripts": {
     "lint": "publint --strict && attw --profile esm-only --pack .",
-    "prepare": "is-ci || bun --bun prek install"
+    "prepare": "ENVIRONMENT=development varlock run -p ./env/ -p ./env/.env.schema -- is-ci || bun --bun prek install"
   }
 }

@@ -31,4 +31,9 @@ fn divergent_binary_name_not_flagged_as_unused() {
         !unused_dev_dep_names.contains(&"is-ci"),
         "is-ci should be detected as used via scripts, unused dev deps: {unused_dev_dep_names:?}"
     );
+
+    assert!(
+        !unused_dev_dep_names.contains(&"varlock"),
+        "varlock should be detected as used via scripts, unused dev deps: {unused_dev_dep_names:?}"
+    );
 }

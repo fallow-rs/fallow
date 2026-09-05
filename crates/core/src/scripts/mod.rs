@@ -30,6 +30,20 @@ pub use resolve::{
 /// Environment variable wrapper commands to strip before the actual binary.
 const ENV_WRAPPERS: &[&str] = &["cross-env", "dotenv", "env"];
 
+struct CommandWrapperSpec {
+    binary: &'static str,
+    prefix: &'static [&'static str],
+    separator: &'static str,
+}
+
+/// Known wrappers; `--` alone does not imply that a CLI executes another command.
+const COMMAND_WRAPPERS: &[CommandWrapperSpec] = &[CommandWrapperSpec {
+    // `varlock run [options] -- <command>`: https://varlock.dev/reference/cli/load-and-run/
+    binary: "varlock",
+    prefix: &["run"],
+    separator: "--",
+}];
+
 /// Node.js runners whose first non-flag argument is a file path, not a binary name.
 const NODE_RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node", "bun"];
 
@@ -450,6 +464,7 @@ pub fn analyze_scripts(
         accumulate_command(script_value, root, bin_map, &mut result);
     }
 
+    result.dedupe_paths();
     result
 }
 
@@ -537,6 +552,7 @@ pub fn analyze_command(
 ) -> ScriptAnalysis {
     let mut result = ScriptAnalysis::default();
     accumulate_command(command, root, bin_map, &mut result);
+    result.dedupe_paths();
     result
 }
 
@@ -777,25 +793,26 @@ fn parse_script_internal(
         if segment.is_empty() {
             continue;
         }
-        match parse_command_segment(segment, advance_package_manager) {
-            Some(SegmentOutcome::Command(mut cmd)) => {
-                if !state.local_paths {
-                    cmd.config_args.clear();
-                    cmd.file_args.clear();
+        for outcome in parse_command_segment(segment, advance_package_manager) {
+            match outcome {
+                SegmentOutcome::Command(mut cmd) => {
+                    if !state.local_paths {
+                        cmd.config_args.clear();
+                        cmd.file_args.clear();
+                    }
+                    commands.push(cmd);
                 }
-                commands.push(cmd);
+                SegmentOutcome::ScriptCall { name, extra_args } => {
+                    resolve_script_call(
+                        &name,
+                        &extra_args,
+                        advance_package_manager,
+                        catalog,
+                        state,
+                        commands,
+                    );
+                }
             }
-            Some(SegmentOutcome::ScriptCall { name, extra_args }) => {
-                resolve_script_call(
-                    &name,
-                    &extra_args,
-                    advance_package_manager,
-                    catalog,
-                    state,
-                    commands,
-                );
-            }
-            None => {}
         }
     }
 }
@@ -1049,54 +1066,93 @@ enum SegmentOutcome {
     },
 }
 
+/// Return the first token of the child command for a known command wrapper.
+fn command_wrapper_child_index(tokens: &[&str], idx: usize) -> Option<usize> {
+    let wrapper = COMMAND_WRAPPERS.iter().find(|wrapper| {
+        tokens.get(idx) == Some(&wrapper.binary)
+            && tokens.get(idx + 1..idx + 1 + wrapper.prefix.len()) == Some(wrapper.prefix)
+    })?;
+    let args_start = idx + 1 + wrapper.prefix.len();
+    let separator = tokens[args_start..]
+        .iter()
+        .position(|token| *token == wrapper.separator)?;
+    let child_idx = args_start + separator + 1;
+
+    (child_idx < tokens.len()).then_some(child_idx)
+}
+
 /// Parse a single command segment (after splitting on shell operators).
 fn parse_command_segment(
     segment: &str,
     advance_package_manager: &impl Fn(&[&str], usize) -> Option<PackageManagerTarget>,
-) -> Option<SegmentOutcome> {
+) -> Vec<SegmentOutcome> {
+    let mut outcomes = Vec::new();
     let tokens: Vec<&str> = segment
         .split_whitespace()
         .map(strip_surrounding_quotes)
         .collect();
-    if tokens.is_empty() {
-        return None;
-    }
-
-    let idx = shell::skip_initial_wrappers(&tokens, 0)?;
-    let idx = match advance_package_manager(&tokens, idx)? {
-        PackageManagerTarget::Binary(idx) => idx,
-        PackageManagerTarget::Script {
-            name,
-            extra_args_from,
-        } => {
-            return Some(SegmentOutcome::ScriptCall {
-                name,
-                extra_args: forwarded_arguments(segment, extra_args_from),
-            });
-        }
+    let Some(mut idx) = shell::skip_initial_wrappers(&tokens, 0) else {
+        return outcomes;
     };
+    loop {
+        let Some(target) = advance_package_manager(&tokens, idx) else {
+            return outcomes;
+        };
+        idx = match target {
+            PackageManagerTarget::Binary(idx) => idx,
+            PackageManagerTarget::Script {
+                name,
+                extra_args_from,
+            } => {
+                outcomes.push(SegmentOutcome::ScriptCall {
+                    name,
+                    extra_args: forwarded_arguments(segment, extra_args_from),
+                });
+                return outcomes;
+            }
+        };
+
+        let Some(command_start) = command_wrapper_child_index(&tokens, idx) else {
+            break;
+        };
+        // Preserve entry references even when the child is an executable path
+        // or a package-manager form that does not resolve to a dependency.
+        let (file_args, config_args) = extract_args_for_binary(&tokens, command_start, false);
+        outcomes.push(SegmentOutcome::Command(ScriptCommand {
+            binary: tokens[idx].to_string(),
+            config_args,
+            file_args,
+            flag_packages: Vec::new(),
+        }));
+        let Some(next) = shell::skip_initial_wrappers(&tokens, command_start) else {
+            return outcomes;
+        };
+        idx = next;
+    }
 
     let binary = tokens[idx].to_string();
 
     if SCRIPT_MULTIPLEXERS.contains(&binary.as_str()) {
-        return Some(SegmentOutcome::Command(ScriptCommand {
+        outcomes.push(SegmentOutcome::Command(ScriptCommand {
             binary,
             config_args: Vec::new(),
             file_args: Vec::new(),
             flag_packages: Vec::new(),
         }));
+        return outcomes;
     }
 
     let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
     let (file_args, config_args) = extract_args_for_binary(&tokens, idx + 1, is_node_runner);
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
-    Some(SegmentOutcome::Command(ScriptCommand {
+    outcomes.push(SegmentOutcome::Command(ScriptCommand {
         binary,
         config_args,
         file_args,
         flag_packages,
-    }))
+    }));
+    outcomes
 }
 
 /// The raw tail of a segment, keeping quoting intact so the re-scanned script
@@ -1689,6 +1745,98 @@ mod tests {
             &package_set(&["envinfo"]),
         );
         assert!(result.used_packages.contains("envinfo"));
+    }
+
+    #[test]
+    fn analyze_scripts_with_dependencies_credits_varlock_run_binary() {
+        for command in [
+            "varlock run -- is-ci",
+            "varlock run -p ./env/ -p ./env/.env.schema -- is-ci",
+            "ENVIRONMENT=development varlock run -- is-ci",
+            "varlock run -- pnpm is-ci",
+            "pnpm exec varlock run -- is-ci",
+            "varlock run -- varlock run -- is-ci",
+        ] {
+            let scripts = HashMap::from([("ci".to_string(), command.to_string())]);
+            let result = analyze_scripts_with_dependencies(
+                &scripts,
+                Path::new("/nonexistent"),
+                &FxHashMap::default(),
+                &package_set(&["varlock", "is-ci"]),
+            );
+            assert_eq!(
+                result.used_packages,
+                package_set(&["varlock", "is-ci"]),
+                "{command}"
+            );
+            assert!(result.entry_files.is_empty(), "{command}");
+        }
+    }
+
+    #[test]
+    fn analyze_scripts_with_dependencies_varlock_preserves_pnpm_exclusions() {
+        for command in [
+            "varlock run -- pnpm build",
+            "varlock run -- pnpm install",
+            "varlock run -- pnpm audit",
+            "varlock run -- pnpm add lodash",
+            "varlock run -- pnpm start",
+            "varlock run -- pnpm test",
+        ] {
+            let scripts = HashMap::from([
+                ("build".to_string(), "echo build".to_string()),
+                ("check".to_string(), command.to_string()),
+            ]);
+            let result = analyze_scripts_with_dependencies(
+                &scripts,
+                Path::new("/nonexistent"),
+                &FxHashMap::default(),
+                &package_set(&[
+                    "varlock", "build", "install", "audit", "add", "lodash", "start", "test",
+                ]),
+            );
+            assert_eq!(result.used_packages, package_set(&["varlock"]), "{command}");
+        }
+    }
+
+    #[test]
+    fn analyze_scripts_with_dependencies_varlock_preserves_executable_file() {
+        for command in [
+            "varlock run -- './scripts/worker.js'",
+            "varlock run -- bun './scripts/worker.js'",
+            "varlock run -- node './scripts/worker.js'",
+        ] {
+            let scripts = HashMap::from([("start".to_string(), command.to_string())]);
+            let result = analyze_scripts_with_dependencies(
+                &scripts,
+                Path::new("/nonexistent"),
+                &FxHashMap::default(),
+                &package_set(&["varlock"]),
+            );
+            assert_eq!(result.entry_files, vec!["./scripts/worker.js"], "{command}");
+            let result = analyze_command(command, Path::new("/nonexistent"), &FxHashMap::default());
+            assert_eq!(result.entry_files, vec!["./scripts/worker.js"], "{command}");
+        }
+    }
+
+    #[test]
+    fn analyze_scripts_with_dependencies_varlock_requires_run_and_separator() {
+        for command in [
+            "varlock",
+            "varlock run",
+            "varlock run --",
+            "varlock run is-ci",
+            "varlock printenv -- is-ci",
+        ] {
+            let scripts = HashMap::from([("ci".to_string(), command.to_string())]);
+            let result = analyze_scripts_with_dependencies(
+                &scripts,
+                Path::new("/nonexistent"),
+                &FxHashMap::default(),
+                &package_set(&["varlock", "is-ci"]),
+            );
+            assert_eq!(result.used_packages, package_set(&["varlock"]), "{command}");
+        }
     }
 
     #[test]
