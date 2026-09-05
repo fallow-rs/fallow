@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788636672176,
+  "lastUpdate": 1788637625309,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d52e91244c091b25b097d15050635516cc3d0c28",
-          "message": "perf(benchmarks): track suppression inventory",
-          "timestamp": "2026-08-19T03:38:28+02:00",
-          "tree_id": "ae26aa0d130443e83e0b96cdc5d4280477f3f00f",
-          "url": "https://github.com/fallow-rs/fallow/commit/d52e91244c091b25b097d15050635516cc3d0c28"
-        },
-        "date": 1787103776391,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 455,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1230,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/802c7fe381daadb6190f46c9c856e96ba8dbdb27"
         },
         "date": 1788636668638,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 52,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.28,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 470,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1282,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "02381b837dfa93df5c845b293359cb99d2a19c72",
+          "message": "fix: honor pnpm catalog next-line suppressions\n\nFixes #2548.",
+          "timestamp": "2026-09-05T21:45:59+02:00",
+          "tree_id": "b5836aff546faa0300fe76ee240f77a1face7047",
+          "url": "https://github.com/fallow-rs/fallow/commit/02381b837dfa93df5c845b293359cb99d2a19c72"
+        },
+        "date": 1788637622388,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
