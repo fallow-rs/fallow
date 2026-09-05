@@ -2017,7 +2017,7 @@ fn analysis_stage_diagnostics_are_recorded_only_from_the_dead_code_analyze_pass(
         "crates/cli/src/architecture_boundaries.rs",
     ];
     let expected = [
-        "crates/core/src/analyze/unused_catalog.rs",
+        "crates/core/src/analyze/unused_catalog/mod.rs",
         "crates/core/src/analyze/unused_overrides.rs",
     ];
 

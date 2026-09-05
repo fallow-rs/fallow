@@ -127,6 +127,10 @@ fn yaml_catalog_next_line_suppressions_preserve_unrelated_entries() {
         ("default", "after-block"),
         ("default", "file-marker"),
         ("default", "unknown-rule"),
+        ("default", "multiline-double"),
+        ("default", "after-multiline-double"),
+        ("default", "multiline-single"),
+        ("default", "after-multiline-single"),
         ("future", "retained-neighbor"),
         ("current", "@sveltejs/adapter-static"),
     ]);

@@ -1,6 +1,29 @@
 use super::common::{create_config, fixture_path};
 
 #[test]
+fn quoted_wrapper_option_does_not_credit_a_dependency_named_inside_it() {
+    let config = create_config(fixture_path("varlock-quoted-args"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
+    assert!(
+        unused.contains(&"is-ci"),
+        "option content is not a child executable: {unused:?}"
+    );
+    assert!(
+        !unused.contains(&"publint"),
+        "the real child must be credited: {unused:?}"
+    );
+    assert!(
+        !unused.contains(&"varlock"),
+        "the wrapper must be credited: {unused:?}"
+    );
+}
+
+#[test]
 fn divergent_binary_name_not_flagged_as_unused() {
     let root = fixture_path("bin-script-deps");
     let config = create_config(root);

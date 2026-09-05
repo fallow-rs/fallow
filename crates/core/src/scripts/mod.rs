@@ -645,10 +645,8 @@ pub fn referenced_package_scripts(command: &str, catalog: &ScriptCatalog) -> FxH
     let mut names = FxHashSet::default();
 
     for segment in shell::split_shell_operators(command) {
-        let tokens: Vec<&str> = segment
-            .split_whitespace()
-            .map(strip_surrounding_quotes)
-            .collect();
+        let words = shell::split_words(segment);
+        let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
         let Some(idx) = shell::skip_initial_wrappers(&tokens, 0) else {
             continue;
         };
@@ -688,10 +686,8 @@ pub fn referenced_package_scripts(command: &str, catalog: &ScriptCatalog) -> FxH
 pub fn referenced_workspace_scripts(command: &str) -> Vec<(String, String)> {
     let mut references = Vec::new();
     for segment in shell::split_shell_operators(command) {
-        let tokens: Vec<&str> = segment
-            .split_whitespace()
-            .map(strip_surrounding_quotes)
-            .collect();
+        let words = shell::split_words(segment);
+        let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
         let Some(idx) = shell::skip_initial_wrappers(&tokens, 0) else {
             continue;
         };
@@ -1087,10 +1083,8 @@ fn parse_command_segment(
     advance_package_manager: &impl Fn(&[&str], usize) -> Option<PackageManagerTarget>,
 ) -> Vec<SegmentOutcome> {
     let mut outcomes = Vec::new();
-    let tokens: Vec<&str> = segment
-        .split_whitespace()
-        .map(strip_surrounding_quotes)
-        .collect();
+    let words = shell::split_words(segment);
+    let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
     let Some(mut idx) = shell::skip_initial_wrappers(&tokens, 0) else {
         return outcomes;
     };
@@ -1106,7 +1100,7 @@ fn parse_command_segment(
             } => {
                 outcomes.push(SegmentOutcome::ScriptCall {
                     name,
-                    extra_args: forwarded_arguments(segment, extra_args_from),
+                    extra_args: forwarded_arguments(segment, &words, extra_args_from),
                 });
                 return outcomes;
             }
@@ -1157,12 +1151,10 @@ fn parse_command_segment(
 
 /// The raw tail of a segment, keeping quoting intact so the re-scanned script
 /// body sees the arguments as the shell would pass them.
-fn forwarded_arguments(segment: &str, from_token: usize) -> String {
-    segment
-        .split_whitespace()
-        .skip(from_token)
-        .collect::<Vec<_>>()
-        .join(" ")
+fn forwarded_arguments(segment: &str, words: &[shell::ShellWord<'_>], from_token: usize) -> String {
+    words
+        .get(from_token)
+        .map_or_else(String::new, |word| segment[word.start..].to_string())
 }
 
 /// Extract a config file path from a `--config` or `-c` flag.
@@ -2881,19 +2873,84 @@ mod tests {
     }
 
     #[test]
-    fn token_with_internal_single_quote_unchanged() {
-        // A token whose quote is internal (not surrounding) must not be mangled.
-        // Use a file arg that contains an internal apostrophe but is not shell-quoted.
-        // We exercise strip_surrounding_quotes directly via a known non-file-path
-        // context: confirm parse_script does not mangle such a token.
-        assert_eq!(super::strip_surrounding_quotes("can't"), "can't");
-        assert_eq!(super::strip_surrounding_quotes("'quoted'"), "quoted");
-        assert_eq!(super::strip_surrounding_quotes("\"quoted\""), "quoted");
-        assert_eq!(
-            super::strip_surrounding_quotes("'mismatched\""),
-            "'mismatched\""
+    fn varlock_preserves_quoted_argument_boundaries() {
+        for command in [
+            r#"varlock run -p "./env -- is-ci ignored" -- publint"#,
+            "varlock run -p './env -- is-ci ignored' -- publint",
+            r"varlock run -p ./env\ --\ is-ci\ ignored -- publint",
+            r#"varlock run -p "./env \" -- is-ci ignored" -- publint"#,
+        ] {
+            let result = analyze_scripts_with_dependencies(
+                &HashMap::from([("check".to_string(), command.to_string())]),
+                Path::new("/nonexistent"),
+                &FxHashMap::default(),
+                &package_set(&["varlock", "is-ci", "publint"]),
+            );
+            assert_eq!(
+                result.used_packages,
+                package_set(&["varlock", "publint"]),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn varlock_forwards_quoted_arguments_to_package_scripts() {
+        let result = analyze_ci_command(
+            r#"varlock run -p "./env with spaces" -- npm run child -- -p "./env -- is-ci ignored" -- publint"#,
+            &[("child", "varlock run")],
+            &["varlock", "is-ci", "publint"],
         );
-        assert_eq!(super::strip_surrounding_quotes(""), "");
+        assert_eq!(result.used_packages, package_set(&["varlock", "publint"]));
+    }
+
+    #[test]
+    fn varlock_preserves_quoted_child_paths() {
+        let commands = parse_script(r#"varlock run -- node "./scripts/worker with spaces.js""#);
+        assert!(commands.iter().any(|command| {
+            command
+                .file_args
+                .contains(&"./scripts/worker with spaces.js".to_string())
+        }));
+    }
+
+    #[test]
+    fn varlock_does_not_guess_through_unbalanced_or_dynamic_words() {
+        for command in [
+            r#"varlock run -p "./env -- is-ci ignored -- publint"#,
+            "varlock run -p './env -- is-ci ignored -- publint",
+            "varlock run -p $(echo -- is-ci) -- publint",
+            "varlock run -p `echo -- is-ci` -- publint",
+        ] {
+            let commands = parse_script(command);
+            assert_eq!(
+                commands
+                    .iter()
+                    .map(|command| command.binary.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["varlock"],
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn varlock_keeps_known_child_before_dynamic_arguments() {
+        for command in [
+            "varlock run -- vite --host=$(hostname)",
+            "varlock run -- vite $(pwd)",
+            "varlock run -- vite `pwd`",
+        ] {
+            let commands = parse_script(command);
+            assert_eq!(
+                commands
+                    .iter()
+                    .map(|command| command.binary.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["varlock", "vite"],
+                "{command}"
+            );
+        }
     }
 
     mod proptests {
