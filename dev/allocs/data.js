@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788634615493,
+  "lastUpdate": 1788636700726,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d6e16368e9a9b04f1d232b2b35442021146945a4",
-          "message": "perf(benchmarks): track guard policy resolution",
-          "timestamp": "2026-08-19T02:40:52+02:00",
-          "tree_id": "c463c7ff2489653698a1ba698389908c45313317",
-          "url": "https://github.com/fallow-rs/fallow/commit/d6e16368e9a9b04f1d232b2b35442021146945a4"
-        },
-        "date": 1787100286553,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9685265,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49121,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1179974,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8403,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8443,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "802c7fe381daadb6190f46c9c856e96ba8dbdb27",
+          "message": "fix: preserve scoped package names in review brief\n\nFixes #2553.",
+          "timestamp": "2026-09-05T21:26:10+02:00",
+          "tree_id": "c114fbeaa525687e473f2746c407184d2bf9db73",
+          "url": "https://github.com/fallow-rs/fallow/commit/802c7fe381daadb6190f46c9c856e96ba8dbdb27"
+        },
+        "date": 1788636696852,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9873087,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50833,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1192540,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8458,
             "unit": "allocations"
           }
         ]
