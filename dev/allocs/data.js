@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788637812533,
+  "lastUpdate": 1788638902021,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d52e91244c091b25b097d15050635516cc3d0c28",
-          "message": "perf(benchmarks): track suppression inventory",
-          "timestamp": "2026-08-19T03:38:28+02:00",
-          "tree_id": "ae26aa0d130443e83e0b96cdc5d4280477f3f00f",
-          "url": "https://github.com/fallow-rs/fallow/commit/d52e91244c091b25b097d15050635516cc3d0c28"
-        },
-        "date": 1787103821048,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9731147,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49206,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1192260,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8450,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8388,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "jernej.barbaric@gmail.com",
+            "name": "Jerc92",
+            "username": "Jerc92"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f6dbe8cda5f898b7fe6913ede4748406a37a868d",
+          "message": "fix(ci): show clone evidence in inline reviews\n\nShow stable clone handles and repository-relative peer ranges in inline reviews.",
+          "timestamp": "2026-09-05T22:04:12+02:00",
+          "tree_id": "1c4979e1f75c77530e4d790d8db0ea8b1b86e89e",
+          "url": "https://github.com/fallow-rs/fallow/commit/f6dbe8cda5f898b7fe6913ede4748406a37a868d"
+        },
+        "date": 1788638898681,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9855191,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50811,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1186638,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8419,
             "unit": "allocations"
           }
         ]
