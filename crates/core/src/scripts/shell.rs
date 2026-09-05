@@ -1,6 +1,96 @@
 //! Shell tokenization: splitting on operators, skipping env wrappers and package managers.
 
 use super::ENV_WRAPPERS;
+use std::borrow::Cow;
+
+/// A literal shell argument with its original position for script forwarding.
+pub(super) struct ShellWord<'a> {
+    pub value: Cow<'a, str>,
+    pub start: usize,
+}
+
+/// Preserve the literal argument prefix without evaluating shell expansions.
+pub(super) fn split_words(source: &str) -> Vec<ShellWord<'_>> {
+    let mut words = Vec::new();
+    let mut rest = source.trim_start();
+    while !rest.is_empty() {
+        let Some(end) = shell_word_end(rest) else {
+            break;
+        };
+        words.push(ShellWord {
+            value: decode_shell_word(&rest[..end]),
+            start: source.len() - rest.len(),
+        });
+        rest = rest[end..].trim_start();
+    }
+    words
+}
+
+fn shell_word_end(source: &str) -> Option<usize> {
+    let mut quote = None;
+    let windows_path = starts_windows_path(source);
+    let mut chars = source.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        match ch {
+            '\\' if quote != Some('\'') && !windows_path => {
+                chars.next()?;
+            }
+            '\'' | '"' if quote.is_none() => quote = Some(ch),
+            ch if Some(ch) == quote => quote = None,
+            // Dynamic command substitutions can produce arbitrary argument boundaries.
+            '`' if quote != Some('\'') => return None,
+            '$' if quote != Some('\'') && chars.peek().is_some_and(|(_, ch)| *ch == '(') => {
+                return None;
+            }
+            ch if quote.is_none() && ch.is_whitespace() => return Some(index),
+            _ => {}
+        }
+    }
+    quote.is_none().then_some(source.len())
+}
+
+fn decode_shell_word(raw: &str) -> Cow<'_, str> {
+    // package.json scripts also run under cmd.exe, where these are path separators.
+    if starts_windows_path(raw) {
+        return Cow::Borrowed(
+            raw.strip_prefix('"')
+                .and_then(|path| path.strip_suffix('"'))
+                .unwrap_or(raw),
+        );
+    }
+    if !raw.contains(['\'', '"', '\\']) {
+        return Cow::Borrowed(raw);
+    }
+    let mut value = String::with_capacity(raw.len());
+    let mut quote = None;
+    let mut chars = raw.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' if quote != Some('\'') => {
+                if let Some(next) = chars.next() {
+                    if quote == Some('"') && !matches!(next, '"' | '\\' | '$' | '`' | '\n') {
+                        value.push('\\');
+                    }
+                    if next != '\n' {
+                        value.push(next);
+                    }
+                }
+            }
+            '\'' | '"' if quote.is_none() => quote = Some(ch),
+            ch if Some(ch) == quote => quote = None,
+            _ => value.push(ch),
+        }
+    }
+    Cow::Owned(value)
+}
+
+fn starts_windows_path(source: &str) -> bool {
+    let source = source.strip_prefix('"').unwrap_or(source);
+    source.starts_with(".\\")
+        || source.starts_with("..\\")
+        || source.starts_with("\\\\")
+        || matches!(source.as_bytes(), [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic())
+}
 
 /// Bun runtime boolean flags that may precede an executed file/binary
 /// (`bun --bun <bin>`, `bun --watch <file>`, `bun --hot run dev`). Bun documents
@@ -20,11 +110,17 @@ pub fn split_shell_operators(script: &str) -> Vec<&str> {
     let bytes = script.as_bytes();
     let len = bytes.len();
     let mut i = 0;
+    let mut word_start = 0;
     let mut in_single_quote = false;
     let mut in_double_quote = false;
 
     while i < len {
         let b = bytes[i];
+
+        if b == b'\\' && !in_single_quote && !starts_windows_path(&script[word_start..]) {
+            i = (i + 2).min(len);
+            continue;
+        }
 
         if b == b'\'' && !in_double_quote {
             in_single_quote = !in_single_quote;
@@ -46,9 +142,13 @@ pub fn split_shell_operators(script: &str) -> Vec<&str> {
             segments.push(&script[start..i]);
             i += op_len;
             start = i;
+            word_start = i;
             continue;
         }
 
+        if b.is_ascii_whitespace() {
+            word_start = i + 1;
+        }
         i += 1;
     }
 
@@ -163,6 +263,113 @@ pub fn advance_past_package_manager(tokens: &[&str], mut idx: usize) -> Option<u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_words_preserve_quoted_and_escaped_boundaries() {
+        for (source, expected) in [
+            (
+                r#"varlock run -p "./env -- is-ci ignored" -- publint"#,
+                vec![
+                    "varlock",
+                    "run",
+                    "-p",
+                    "./env -- is-ci ignored",
+                    "--",
+                    "publint",
+                ],
+            ),
+            (
+                r"varlock run -p ./env\ --\ is-ci\ ignored -- publint",
+                vec![
+                    "varlock",
+                    "run",
+                    "-p",
+                    "./env -- is-ci ignored",
+                    "--",
+                    "publint",
+                ],
+            ),
+            (
+                r#"va"r"lock run -- 'is-ci'"#,
+                vec!["varlock", "run", "--", "is-ci"],
+            ),
+            (r#"echo "one\q" """#, vec!["echo", r"one\q", ""]),
+            (
+                r#""C:\Program Files\tool.exe" arg"#,
+                vec![r"C:\Program Files\tool.exe", "arg"],
+            ),
+            (
+                r".\tools\runner.exe arg",
+                vec![r".\tools\runner.exe", "arg"],
+            ),
+            (
+                r"\\server\share\runner.exe arg",
+                vec![r"\\server\share\runner.exe", "arg"],
+            ),
+        ] {
+            let words = split_words(source);
+            assert_eq!(
+                words
+                    .iter()
+                    .map(|word| word.value.as_ref())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_words_keep_raw_offsets_for_forwarding() {
+        let source = r#" npm --prefix "./path with spaces" run task -- -p "./env -- ignored""#;
+        let words = split_words(source);
+        assert_eq!(&source[words[6].start..], r#"-p "./env -- ignored""#);
+    }
+
+    #[test]
+    fn literal_words_stop_at_opaque_argument_after_known_prefix() {
+        for source in [
+            "vite $(pwd) -- is-ci",
+            "vite `pwd` -- is-ci",
+            "vite 'unclosed",
+            "vite \\",
+        ] {
+            let words = split_words(source);
+            assert_eq!(
+                words
+                    .iter()
+                    .map(|word| word.value.as_ref())
+                    .collect::<Vec<_>>(),
+                vec!["vite"],
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn escaped_operators_remain_inside_the_argument() {
+        assert_eq!(
+            split_shell_operators(r"echo value\;tail && publint"),
+            vec![r"echo value\;tail ", " publint"]
+        );
+    }
+
+    #[test]
+    fn quoted_windows_path_retains_following_shell_command() {
+        let source = r#""C:\Program Files\" && publint"#;
+        assert_eq!(
+            split_shell_operators(source),
+            vec![r#""C:\Program Files\" "#, " publint"]
+        );
+        let commands = super::super::parse_script(source);
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| command.binary.as_str())
+                .collect::<Vec<_>>(),
+            vec!["C:\\Program Files\\", "publint"]
+        );
+    }
 
     #[test]
     fn operator_len_double_ampersand() {

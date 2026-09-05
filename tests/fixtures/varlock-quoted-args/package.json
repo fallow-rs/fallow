@@ -1,0 +1,13 @@
+{
+  "name": "varlock-quoted-args",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "check": "varlock run -p \"./env -- is-ci ignored\" -- publint"
+  },
+  "devDependencies": {
+    "is-ci": "4.1.0",
+    "publint": "0.3.12",
+    "varlock": "1.18.0"
+  }
+}

@@ -43,8 +43,11 @@ use fallow_config::{
     parse_pnpm_catalog_data, record_workspace_diagnostics,
 };
 use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
-use fallow_types::suppress::IssueKind;
 use rustc_hash::FxHashSet;
+
+mod suppressions;
+
+use suppressions::suppressed_yaml_catalog_entries;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 const PACKAGE_JSON_FILE: &str = "package.json";
@@ -93,38 +96,6 @@ pub fn gather_pnpm_catalog_state(
         source_path,
         suppressed_entry_lines,
     })
-}
-
-fn suppressed_yaml_catalog_entries(source: &str, data: &PnpmCatalogData) -> FxHashSet<u32> {
-    let lines: Vec<&str> = source.lines().collect();
-    data.catalogs
-        .iter()
-        .flat_map(|catalog| &catalog.entries)
-        .filter_map(|entry| {
-            let entry_index = (entry.line as usize).checked_sub(1)?;
-            let previous_line = lines.get(entry_index.checked_sub(1)?)?;
-            let entry_line = lines.get(entry_index)?;
-            // A more deeply indented line can be content of a YAML block scalar.
-            if previous_line.len() - previous_line.trim_start().len()
-                > entry_line.len() - entry_line.trim_start().len()
-            {
-                return None;
-            }
-            let comment = previous_line.trim_start().strip_prefix('#')?;
-            // Reuse the shared rule-list, alias, and optional-reason grammar.
-            let parsed =
-                fallow_extract::suppress::parse_suppressions_from_source(&format!("//{comment}"));
-            parsed
-                .suppressions
-                .iter()
-                .any(|suppression| {
-                    suppression.line != 0
-                        && suppression
-                            .matches_issue_kind(suppression.line, IssueKind::PnpmCatalogEntry)
-                })
-                .then_some(entry.line)
-        })
-        .collect()
 }
 
 /// Record the degraded-continue diagnostic for a `pnpm-workspace.yaml` that

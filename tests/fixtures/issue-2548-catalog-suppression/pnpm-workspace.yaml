@@ -26,6 +26,15 @@ catalog:
   # fallow-ignore-next-line unused-dependency, unused-catalog-entry -- Reserved.
   multiple-rules: ^1.0.0
 
+  multiline-double: "hello
+  # fallow-ignore-next-line unused-catalog-entry -- String content"
+  after-multiline-double: ^1.0.0
+  multiline-single: 'hello
+  # fallow-ignore-next-line unused-catalog-entry -- String content'
+  after-multiline-single: ^1.0.0
+    # fallow-ignore-next-line unused-catalog-entry -- Valid indented comment.
+  deeper-comment: ^1.0.0
+
 catalogs:
   future:
     # fallow-ignore-next-line unused-catalog-entries -- Reserved for migration.
