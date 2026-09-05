@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788638902021,
+  "lastUpdate": 1788644699058,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "3bf4a7f1f0b53e3c025ccca573ed82962c20c6a9",
-          "message": "perf(benchmarks): track fix dry runs",
-          "timestamp": "2026-08-19T04:56:33+02:00",
-          "tree_id": "1bc7a2047619aa006aeb8a9704bd05b8b83951dd",
-          "url": "https://github.com/fallow-rs/fallow/commit/3bf4a7f1f0b53e3c025ccca573ed82962c20c6a9"
-        },
-        "date": 1787108429468,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9741035,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49221,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1184690,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8391,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8419,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "23bb9a7eceb6467336422db710ee0f5d92258c30",
+          "message": "fix: preserve quoted content in catalog and script parsing\n\nPreserve quoted YAML scalar content and shell argument boundaries so suppression directives and wrapper commands are interpreted accurately.",
+          "timestamp": "2026-09-05T23:40:33+02:00",
+          "tree_id": "c3f57391b0aba6f41a239994898383c9f040c373",
+          "url": "https://github.com/fallow-rs/fallow/commit/23bb9a7eceb6467336422db710ee0f5d92258c30"
+        },
+        "date": 1788644695557,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9805533,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50729,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1170463,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8377,
             "unit": "allocations"
           }
         ]
