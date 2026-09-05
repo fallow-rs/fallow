@@ -832,9 +832,14 @@ fn dependency_key_names(keys: &[String]) -> String {
     keys.iter()
         .map(|key| {
             let (manifest, rest) = key.split_once("::").unwrap_or(("", key));
+            // A leading @ belongs to the scope; later @ signs may also occur
+            // inside npm alias ranges, so only split at the first non-leading one.
             let (name, range) = rest
-                .split_once('@')
-                .map_or((rest, None), |(name, range)| (name, range.split_once("->")));
+                .match_indices('@')
+                .find(|(index, _)| *index > 0)
+                .map_or((rest, None), |(index, _)| {
+                    (&rest[..index], rest[index + 1..].split_once("->"))
+                });
             let range_text = range
                 .map(|(from, to)| format!(" {from} to {to}"))
                 .unwrap_or_default();
@@ -1203,6 +1208,37 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
+
+    #[test]
+    fn dependency_names_preserve_scopes_and_manifest_labels() {
+        let keys = [
+            "package.json::@scope/one",
+            "package.json::@scope/two",
+            "package.json::other",
+            "package.json::plain",
+            "packages/app/package.json::@scope/workspace",
+            "@scope/unqualified",
+        ]
+        .map(str::to_string);
+        assert_eq!(
+            dependency_key_names(&keys),
+            "@scope/one, @scope/two, other, plain, @scope/workspace (packages/app/package.json), @scope/unqualified"
+        );
+    }
+
+    #[test]
+    fn dependency_names_preserve_scoped_bumps_and_alias_ranges() {
+        let keys = [
+            "package.json::@scope/bumped@^1.0.0->^2.0.0",
+            "packages/app/package.json::plain@^1.0.0->^2.0.0",
+            "package.json::@scope/alias@npm:@other/pkg@^1.0.0->npm:@other/pkg@^2.0.0",
+        ]
+        .map(str::to_string);
+        assert_eq!(
+            dependency_key_names(&keys),
+            "@scope/bumped ^1.0.0 to ^2.0.0, plain ^1.0.0 to ^2.0.0 (packages/app/package.json), @scope/alias npm:@other/pkg@^1.0.0 to npm:@other/pkg@^2.0.0"
+        );
+    }
 
     fn str_set(files: &[&str]) -> FxHashSet<String> {
         files.iter().map(|file| (*file).to_string()).collect()
