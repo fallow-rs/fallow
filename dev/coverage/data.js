@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788683941120,
+  "lastUpdate": 1788693233294,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "03b7e74802176f653ae5fcf6d92a1883335a8599",
-          "message": "chore(contracts): regenerate output contract types for bun.lock override resolution\n\nRegenerates the two TypeScript output-contract surfaces that went stale with the UnusedDependencyOverrideFinding doc update from #2350. No structural changes.",
-          "timestamp": "2026-08-21T22:17:00+02:00",
-          "tree_id": "6ef0e5bfe6700cb6adc0f6403be278175d520ae9",
-          "url": "https://github.com/fallow-rs/fallow/commit/03b7e74802176f653ae5fcf6d92a1883335a8599"
-        },
-        "date": 1787344902398,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d1b5d427aea98c17c5fe94e4753f0d3af864614a"
         },
         "date": 1788683937804,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.3,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1bc3eca3cd714ca2cef9f34ab7ae81835c7988fb",
+          "message": "fix: preserve Unicode framing and checkout-independent reports\n\nMoving an unchanged checkout could reorder tied health findings and assign a duplicate collision handle to a different group. Health now resolves metric ties by source location, and duplicate collision ordinals use canonical locations instead of absolute-path digests.\n\nCorrected full-hash collisions use `dup:<16hex>-rN`. Ordinary handles are unchanged. Legacy numeric collision keys remain valid input but cannot alias another group: affected suppressions and normalized baseline findings resurface for review. The config schema and migration documentation describe refreshing those keys and upgrading shared-config consumers.\n\nThe VS Code integration fixture now frames LSP messages by bytes. Its subprocess regressions and actual extension-host suite exercise Unicode workspace paths and navigation.\n\nValidation: failing-before/passing-after regressions; relocated pinned Fastify and SvelteKit reports across cache modes and parser threads; actual trace, suppression, baseline and saved-report format checks; original issue regressions (#2553, #2551 and #2548); real Fastify CLI/LSP editor-host smoke; full editor suite; `npm run verify:fast` and `npm run verify:full`. All passed.\n\nPublic documentation: https://github.com/fallow-rs/docs/pull/23.",
+          "timestamp": "2026-09-06T13:04:22+02:00",
+          "tree_id": "0e8fe7fa32b01c3afe389586aa6fbc926fab330d",
+          "url": "https://github.com/fallow-rs/fallow/commit/1bc3eca3cd714ca2cef9f34ab7ae81835c7988fb"
+        },
+        "date": 1788693229028,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
