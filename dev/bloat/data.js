@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788645233072,
+  "lastUpdate": 1788677747408,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "21b304caa4484b4395588e526df4663db8a1d7aa",
-          "message": "perf(core): cache discovery file type matchers",
-          "timestamp": "2026-08-18T22:20:39+02:00",
-          "tree_id": "d8ecea9f32a90f11c1f4b6fb18ae40000db1ba7e",
-          "url": "https://github.com/fallow-rs/fallow/commit/21b304caa4484b4395588e526df4663db8a1d7aa"
-        },
-        "date": 1787085296452,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 513836352,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20204896,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25602120,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38887048,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 42553912,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7e225b5d4061bbb16b5dcb4dad46c37dd9a95ca7",
+          "message": "refactor: remove redundant helpers and strengthen behavioral tests\n\nRemove redundant private helpers, duplicated tests and unused app scaffolding. Strengthen process cleanup and artifact-integrity tests against actual production paths. Full repository verification, public-project comparisons and pull-request CI pass.",
+          "timestamp": "2026-09-06T08:40:21+02:00",
+          "tree_id": "a1b5ffb5723ff7d7c87380982c6f4450a113bdf5",
+          "url": "https://github.com/fallow-rs/fallow/commit/7e225b5d4061bbb16b5dcb4dad46c37dd9a95ca7"
+        },
+        "date": 1788677744695,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 560906920,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21500872,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28215000,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 42553176,
             "unit": "bytes"
           }
         ]
