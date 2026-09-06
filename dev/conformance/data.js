@@ -1,90 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788602066379,
+  "lastUpdate": 1788689233265,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "id": "bcd212c555565601468535fb59a364a4f5bec638",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v2.83.0",
-          "timestamp": "2026-05-27T15:00:27Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/bcd212c555565601468535fb59a364a4f5bec638"
-        },
-        "date": 1779962172778,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Agreement Rate",
-            "value": 2.1,
-            "unit": "%"
-          },
-          {
-            "name": "Agreed Issues",
-            "value": 699,
-            "unit": "issues"
-          },
-          {
-            "name": "Fallow Total",
-            "value": 32024,
-            "unit": "issues"
-          },
-          {
-            "name": "Knip Total",
-            "value": 2030,
-            "unit": "issues"
-          },
-          {
-            "name": "fastify Agreement",
-            "value": 6.1,
-            "unit": "%"
-          },
-          {
-            "name": "next.js Agreement",
-            "value": 1.9,
-            "unit": "%"
-          },
-          {
-            "name": "preact Agreement",
-            "value": 3.6,
-            "unit": "%"
-          },
-          {
-            "name": "query Agreement",
-            "value": 0,
-            "unit": "%"
-          },
-          {
-            "name": "svelte Agreement",
-            "value": 0.3,
-            "unit": "%"
-          },
-          {
-            "name": "vite Agreement",
-            "value": 7.1,
-            "unit": "%"
-          },
-          {
-            "name": "vue-core Agreement",
-            "value": 24.2,
-            "unit": "%"
-          },
-          {
-            "name": "zod Agreement",
-            "value": 2.8,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -8149,6 +8067,88 @@ window.BENCHMARK_DATA = {
           {
             "name": "Fallow Total",
             "value": 30102,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 2003,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 4.9,
+            "unit": "%"
+          },
+          {
+            "name": "next.js Agreement",
+            "value": 1.7,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 4.4,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "vite Agreement",
+            "value": 5.9,
+            "unit": "%"
+          },
+          {
+            "name": "vue-core Agreement",
+            "value": 23.4,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 1.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "d1b5d427aea98c17c5fe94e4753f0d3af864614a",
+          "message": "refactor: remove redundant work and test runtime contracts\n\n## What\n\nRemove unused test implementations and forwarding code, reuse owned report data, and add a reusable slop-audit workflow with checked documentation routes.\n\nGit failures now reach the review app's error state instead of appearing as empty diffs. The signed setup launcher preserves termination status, and the sidecar cache always performs its required integrity check.\n\n## Why\n\nSome tests exercised a separate test-only implementation or failed before reaching the behavior they claimed to cover. They now exercise production parsing, graph queries, initialization, cleanup, command registration, and serialized reports. Report rendering also avoids unnecessary deep copies while retaining output and error compatibility.\n\n## Test plan\n\n- Canonical `npm run verify:full`, including workspace, wrapper, conformance, documentation, benchmark compilation, and native Node checks.\n- Affected editor, Electron, sidecar, and GitLab suites, including actual extension-host and review-app end-to-end behavior.\n- Fault injection confirms the old assertions accepted broken production behavior and the replacement assertions reject it.\n- Public Fastify and SvelteKit output parity, real MCP/LSP stdio, and the original scoped-package, varlock, and catalog-suppression regression matrices.\n- Matched allocation probes with identical dependencies and inputs; health JSON remains identical.",
+          "timestamp": "2026-09-06T08:28:31Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/d1b5d427aea98c17c5fe94e4753f0d3af864614a"
+        },
+        "date": 1788689229102,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.8,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 567,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 30107,
             "unit": "issues"
           },
           {
