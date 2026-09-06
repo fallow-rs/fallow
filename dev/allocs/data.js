@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788644699058,
+  "lastUpdate": 1788677094264,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "3f861d310a867a7381e62bf7547f887c8c1ab811",
-          "message": "perf(benchmarks): track security analysis",
-          "timestamp": "2026-08-19T05:45:09+02:00",
-          "tree_id": "893d9eefae1082c561cc69b29ec7e8d09708a6ef",
-          "url": "https://github.com/fallow-rs/fallow/commit/3f861d310a867a7381e62bf7547f887c8c1ab811"
-        },
-        "date": 1787111384805,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9709723,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49212,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1191168,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8421,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8377,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7e225b5d4061bbb16b5dcb4dad46c37dd9a95ca7",
+          "message": "refactor: remove redundant helpers and strengthen behavioral tests\n\nRemove redundant private helpers, duplicated tests and unused app scaffolding. Strengthen process cleanup and artifact-integrity tests against actual production paths. Full repository verification, public-project comparisons and pull-request CI pass.",
+          "timestamp": "2026-09-06T08:40:21+02:00",
+          "tree_id": "a1b5ffb5723ff7d7c87380982c6f4450a113bdf5",
+          "url": "https://github.com/fallow-rs/fallow/commit/7e225b5d4061bbb16b5dcb4dad46c37dd9a95ca7"
+        },
+        "date": 1788677091162,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9867102,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50801,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1197067,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8429,
             "unit": "allocations"
           }
         ]
