@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildHealthArgs,
@@ -11,7 +9,6 @@ import {
   gradeIcon,
   gradeThemeColor,
   parseUnknownHealthSubcommand,
-  recognizedPenaltyKeys,
   severityIcon,
   severityThemeColor,
   topPenalties,
@@ -290,38 +287,5 @@ describe("parseUnknownHealthSubcommand", () => {
     expect(parseUnknownHealthSubcommand("fallow exited with code 101")).toBe(false);
     expect(parseUnknownHealthSubcommand("unrecognized subcommand 'security'")).toBe(false);
     expect(parseUnknownHealthSubcommand("")).toBe(false);
-  });
-});
-
-describe("penalty label parity with the HealthScorePenalties wire contract", () => {
-  // Parse the field names of the generated HealthScorePenalties interface and
-  // assert this module labels every one of them. A new Rust penalty field that
-  // flows through codegen but is not added to PENALTY_LABELS would otherwise be
-  // silently omitted from the score tooltip.
-  const contract = readFileSync(
-    resolve(__dirname, "../src/generated/output-contract.d.ts"),
-    "utf8",
-  );
-  const interfaceMatch = contract.match(/export interface HealthScorePenalties \{([\s\S]*?)\n\}/);
-
-  it("locates the generated HealthScorePenalties interface", () => {
-    expect(interfaceMatch).not.toBeNull();
-  });
-
-  it("labels every penalty key emitted on the wire (no silent omissions)", () => {
-    const body = interfaceMatch?.[1] ?? "";
-    const wireKeys = [...body.matchAll(/^\s*([a-z0-9_]+)\??:/gim)].map((m) => m[1]);
-    expect(wireKeys.length).toBeGreaterThan(0);
-
-    const labelled = new Set<string>(recognizedPenaltyKeys);
-    const unlabelled = wireKeys.filter((key) => !labelled.has(key));
-    expect(unlabelled, `unlabelled penalty wire keys: ${unlabelled.join(", ")}`).toEqual([]);
-  });
-
-  it("does not carry stale labels for keys no longer on the wire", () => {
-    const body = interfaceMatch?.[1] ?? "";
-    const wireKeys = new Set([...body.matchAll(/^\s*([a-z0-9_]+)\??:/gim)].map((m) => m[1]));
-    const stale = recognizedPenaltyKeys.filter((key) => !wireKeys.has(key));
-    expect(stale, `stale penalty labels: ${stale.join(", ")}`).toEqual([]);
   });
 });

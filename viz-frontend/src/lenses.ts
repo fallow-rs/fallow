@@ -298,9 +298,6 @@ export const lensAvailabilityDetails = (state: AppState, lens: Lens): LensAvaila
   return { state: "unavailable", reason: "Invalid analysis availability", truncated: 0 };
 };
 
-export const lensAvailability = (state: AppState, lens: Lens): LensAvailability =>
-  lensAvailabilityDetails(state, lens).state;
-
 export const secondaryAvailabilityDetails = (
   state: AppState,
   analysis: SecondaryAnalysis,

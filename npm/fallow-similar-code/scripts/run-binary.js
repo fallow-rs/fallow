@@ -72,8 +72,6 @@ const resolveBinaryArtifact = (
   });
 };
 
-const resolveBinary = (...args) => resolveBinaryArtifact(...args).binaryPath;
-
 const setupTimeoutFor = (args) => (args[0] === "setup" ? SETUP_PROCESS_TIMEOUT_MS : null);
 
 const spawnNative = (binaryPath, args, spawnProcess = spawnSync) => {
@@ -191,7 +189,6 @@ module.exports = {
   SETUP_PROCESS_TIMEOUT_MS,
   SETUP_TIMEOUT_EXIT_CODE,
   SETUP_TIMEOUT_MESSAGE,
-  resolveBinary,
   resolveBinaryArtifact,
   resolvePlatformPackage,
   run,

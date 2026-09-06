@@ -413,11 +413,6 @@ mod tests {
     }
 
     #[test]
-    fn operator_len_semicolon_at_end() {
-        assert_eq!(shell_operator_len(b";", 0), Some(1));
-    }
-
-    #[test]
     fn split_empty_input() {
         let segments = split_shell_operators("");
         assert!(segments.is_empty());

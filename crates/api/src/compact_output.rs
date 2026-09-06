@@ -574,7 +574,7 @@ fn push_styling_findings_compact(
     root: &Path,
 ) {
     for finding in findings {
-        let relative = health_compact_path(Path::new(&finding.path), root);
+        let relative = compact_path(Path::new(&finding.path), root);
         let severity = match finding.effective_severity {
             fallow_output::StylingFindingSeverity::Error => "error",
             fallow_output::StylingFindingSeverity::Warn => "warn",
@@ -609,7 +609,7 @@ fn push_threshold_overrides_compact(
         };
         let target = entry.path.as_ref().map_or_else(
             || "no-match".to_string(),
-            |path| entry.target_label(&health_compact_path(path, root)),
+            |path| entry.target_label(&compact_path(path, root)),
         );
         let dimension = threshold_override_dimension_label(entry.dimension);
         let metrics = entry.metrics.map_or(String::new(), |metrics| {
@@ -689,10 +689,6 @@ fn push_vital_signs_compact(lines: &mut Vec<String>, report: &fallow_output::Hea
     }
 }
 
-fn health_compact_path(path: &Path, root: &Path) -> String {
-    normalize_uri(&relative_path(path, root).display().to_string())
-}
-
 /// Serde-name mirror of `ExceededThreshold` for the compact line grammar.
 fn exceeded_compact_label(exceeded: fallow_output::ExceededThreshold) -> &'static str {
     match exceeded {
@@ -712,7 +708,7 @@ fn push_health_findings_compact(
     root: &Path,
 ) {
     for finding in findings {
-        let relative = health_compact_path(&finding.path, root);
+        let relative = compact_path(&finding.path, root);
         let severity = match finding.severity {
             fallow_output::FindingSeverity::Critical => "critical",
             fallow_output::FindingSeverity::High => "high",
@@ -752,7 +748,7 @@ fn push_file_scores_compact(
     root: &Path,
 ) {
     for score in scores {
-        let relative = health_compact_path(&score.path, root);
+        let relative = compact_path(&score.path, root);
         lines.push(format!(
             "file-score:{}:mi={:.1},fan_in={},fan_out={},dead={:.2},density={:.2},crap_max={:.1},crap_above={}",
             relative,
@@ -782,14 +778,14 @@ fn push_coverage_gaps_compact(
             gaps.summary.untested_exports,
         ));
         for item in &gaps.files {
-            let relative = health_compact_path(&item.file.path, root);
+            let relative = compact_path(&item.file.path, root);
             lines.push(format!(
                 "untested-file:{}:value_exports={}",
                 relative, item.file.value_export_count,
             ));
         }
         for item in &gaps.exports {
-            let relative = health_compact_path(&item.export.path, root);
+            let relative = compact_path(&item.export.path, root);
             lines.push(format!(
                 "untested-export:{}:{}:{}",
                 relative, item.export.line, item.export.export_name,
@@ -848,7 +844,7 @@ fn push_hotspots_compact(
     root: &Path,
 ) {
     for entry in hotspots {
-        let relative = health_compact_path(&entry.path, root);
+        let relative = compact_path(&entry.path, root);
         let ownership_suffix = compact_ownership_suffix(entry.ownership.as_ref());
         lines.push(format!(
             "hotspot:{}:score={:.1},commits={},churn={},density={:.2},fan_in={},trend={}{}",
@@ -889,7 +885,7 @@ fn push_refactoring_targets_compact(
     root: &Path,
 ) {
     for target in targets {
-        let relative = health_compact_path(&target.path, root);
+        let relative = compact_path(&target.path, root);
         let category = target.category.compact_label();
         let effort = target.effort.label();
         let confidence = target.confidence.label();
@@ -922,7 +918,7 @@ fn build_runtime_coverage_compact_lines(
         production.summary.deployments_seen,
     )];
     for finding in &production.findings {
-        let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+        let relative = compact_path(&finding.path, root);
         let invocations = finding
             .invocations
             .map_or_else(|| "null".to_owned(), |hits| hits.to_string());
@@ -938,7 +934,7 @@ fn build_runtime_coverage_compact_lines(
         ));
     }
     for entry in &production.hot_paths {
-        let relative = normalize_uri(&relative_path(&entry.path, root).display().to_string());
+        let relative = compact_path(&entry.path, root);
         lines.push(format!(
             "production-hot-path:{}:{}:{}:id={},invocations={},percentile={}",
             relative, entry.line, entry.function, entry.id, entry.invocations, entry.percentile,
@@ -962,7 +958,7 @@ fn build_coverage_intelligence_compact_lines(
         intelligence.summary.skipped_ambiguous_matches,
     )];
     for finding in &intelligence.findings {
-        let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+        let relative = compact_path(&finding.path, root);
         let identity = finding.identity.as_deref().unwrap_or("-");
         let signals = finding
             .signals

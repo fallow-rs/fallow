@@ -599,7 +599,6 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
-    use std::process::ExitCode;
 
     use fallow_config::OutputFormat;
 
@@ -609,7 +608,6 @@ mod tests {
 
     use super::can_share_dupes_files_with_check;
     use super::orientation::is_test_path;
-    use super::output::exit_code_to_u8;
     use super::resolve_analyses;
 
     static TEST_CONFIG_PATH: Option<PathBuf> = None;
@@ -663,13 +661,6 @@ mod tests {
                 "{path} should be production-like"
             );
         }
-    }
-
-    #[test]
-    fn exit_code_to_u8_distinguishes_success_from_failure() {
-        assert_eq!(exit_code_to_u8(ExitCode::SUCCESS), 0);
-        assert_eq!(exit_code_to_u8(ExitCode::from(1)), 1);
-        assert_eq!(exit_code_to_u8(ExitCode::from(2)), 1);
     }
 
     fn test_combined_options() -> CombinedOptions<'static> {

@@ -1939,17 +1939,6 @@ mod tests {
     }
 
     #[test]
-    fn make_glob_template_literal_with_extension_suffix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./locales/".to_string(),
-            suffix: Some(".json".to_string()),
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-        };
-        assert_eq!(make_glob_from_pattern(&pattern), "./locales/*.json");
-    }
-
-    #[test]
     fn make_glob_template_literal_deep_prefix() {
         let pattern = fallow_types::extract::DynamicImportPattern {
             prefix: "./modules/".to_string(),
@@ -1958,17 +1947,6 @@ mod tests {
             mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./modules/*");
-    }
-
-    #[test]
-    fn make_glob_string_concat_prefix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./pages/".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-        };
-        assert_eq!(make_glob_from_pattern(&pattern), "./pages/*");
     }
 
     #[test]

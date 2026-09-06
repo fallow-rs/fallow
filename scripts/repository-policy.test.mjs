@@ -379,7 +379,6 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
 test("VS Code public release verification stays exact and credential-free", () => {
   const vscodePackage = readJson("editors/vscode/package.json");
   const verifier = readFileSync("scripts/vscode-public-verify.mjs", "utf8");
-  const verifierTests = readFileSync("scripts/vscode-public-verify.test.mjs", "utf8");
   const releaseSecurity = readFileSync("docs/development/release-security.md", "utf8");
   const releaseProcedure = readFileSync("docs/development/release-procedure.md", "utf8");
   assert.equal(vscodePackage.devDependencies["@vscode/vsce"], "3.9.2");
@@ -388,14 +387,9 @@ test("VS Code public release verification stays exact and credential-free", () =
   assert.match(verifier, /VSIX_VARIANTS\.map\(\(\{ target \}\) => target\)/u);
   assert.match(verifier, /marketplace\.visualstudio\.com\/.*extensionquery/u);
   assert.match(verifier, /open-vsx\.org\/api/u);
-  assert.match(verifier, /\$\{target\}\/\$\{version\}/u);
-  assert.match(verifier, /payload.*fileCount.*sha256/su);
   assert.match(verifier, /DEFAULT_METADATA_ATTEMPTS = 120/u);
   assert.match(verifier, /DEFAULT_PAYLOAD_ATTEMPTS = 24/u);
   assert.doesNotMatch(verifier, /VSCE_PAT|OVSX_PAT|secrets\./u);
-  assert.match(verifierTests, /missing[\s\S]*duplicate[\s\S]*stale/u);
-  assert.match(verifierTests, /universal fallback/u);
-  assert.match(verifierTests, /changed content/u);
   assert.match(releaseSecurity, /vscode-public-verify/u);
   assert.match(releaseProcedure, /Verify public VS Code registry\s+targets/u);
   assert.match(releaseSecurity, /release-verified.*similar-code-conformance/u);

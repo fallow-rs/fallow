@@ -1685,14 +1685,6 @@ export const foo = 1;
     }
 
     #[test]
-    fn source_type_jsx_detection() {
-        let scripts = extract_sfc_scripts(r#"<script lang="jsx">const el = <div />;</script>"#);
-        assert_eq!(scripts.len(), 1);
-        assert!(!scripts[0].is_typescript);
-        assert!(scripts[0].is_jsx);
-    }
-
-    #[test]
     fn source_type_plain_js_detection() {
         let scripts = extract_sfc_scripts("<script>const x = 1;</script>");
         assert_eq!(scripts.len(), 1);

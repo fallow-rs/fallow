@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   LENS_IDS,
   fitLensNavigation,
-  lensAvailability,
+  lensAvailabilityDetails,
   lensById,
   parseLens,
   parseSecondaryAnalysis,
@@ -66,12 +66,15 @@ describe("lens registry", () => {
   });
 
   it("distinguishes unavailable security from zero findings", () => {
-    expect(lensAvailability(state({ summary: {}, files: [] }), "security")).toBe("unavailable");
+    expect(lensAvailabilityDetails(state({ summary: {}, files: [] }), "security").state).toBe(
+      "unavailable",
+    );
     expect(
-      lensAvailability(state({ summary: { security_candidates: 0 }, files: [] }), "security"),
+      lensAvailabilityDetails(state({ summary: { security_candidates: 0 }, files: [] }), "security")
+        .state,
     ).toBe("complete");
     expect(
-      lensAvailability(
+      lensAvailabilityDetails(
         state({
           summary: {},
           files: [],
@@ -80,7 +83,7 @@ describe("lens registry", () => {
           },
         }),
         "security",
-      ),
+      ).state,
     ).toBe("disabled");
   });
 

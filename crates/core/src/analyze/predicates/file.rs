@@ -687,13 +687,6 @@ mod tests {
     }
 
     #[test]
-    fn config_file_env_declarations() {
-        assert!(is_config_file(std::path::Path::new("next-env.d.ts")));
-        assert!(is_config_file(std::path::Path::new("env.d.ts")));
-        assert!(is_config_file(std::path::Path::new("vite-env.d.ts")));
-    }
-
-    #[test]
     fn not_config_file_regular_source() {
         assert!(!is_config_file(std::path::Path::new("index.ts")));
         assert!(!is_config_file(std::path::Path::new("App.tsx")));

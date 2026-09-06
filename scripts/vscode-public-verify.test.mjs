@@ -205,8 +205,14 @@ test("semantic payload verification rejects a registry package with changed cont
     );
     const entry = entryFor("linux-x64");
     writeModeRecords(extension, entry);
+    const extensionScript = join(extension, "dist", "extension.js");
+    writeFileSync(extensionScript, "export {};\n");
     entry.payload = computePayload(root);
     verifyExtractedPayload(root, entry);
+
+    writeFileSync(extensionScript, "export const changed = true;\n");
+    assert.throws(() => verifyExtractedPayload(root, entry), /payload mismatch/u);
+    writeFileSync(extensionScript, "export {};\n");
 
     chmodSync(join(extension, entry.sidecar[0].path), 0o644);
     assert.throws(() => verifyExtractedPayload(root, entry), /archived mode mismatch/u);

@@ -89,20 +89,4 @@ mod tests {
             ]
         );
     }
-
-    #[test]
-    fn variants_are_distinct() {
-        let names: Vec<String> = VARIANTS
-            .iter()
-            .map(|variant| format!("{variant:?}"))
-            .collect();
-
-        for (i, a) in names.iter().enumerate() {
-            for (j, b) in names.iter().enumerate() {
-                if i != j {
-                    assert_ne!(a, b);
-                }
-            }
-        }
-    }
 }

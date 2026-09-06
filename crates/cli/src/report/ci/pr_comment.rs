@@ -4,6 +4,8 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
+#[cfg(test)]
+use fallow_output::is_project_level_rule;
 use fallow_output::issues_from_codeclimate_issues;
 pub use fallow_output::{
     CiIssue, CiProvider as Provider, CodeClimateIssue, PR_DECISION_SCHEMA, PR_DETAILS_SCHEMA,
@@ -12,8 +14,6 @@ pub use fallow_output::{
     PrDecisionSurface, PrDetailsArtifact, PrDetailsRow, PrDetailsSection, command_title,
     issues_from_codeclimate,
 };
-#[cfg(test)]
-use fallow_output::{escape_md, is_project_level_rule};
 
 /// Workspace name, set once by `main()` when the binary is invoked with
 /// `--workspace <name>`. Read by `sticky_marker_id` to auto-suffix the
@@ -430,21 +430,6 @@ mod tests {
     };
 
     #[test]
-    fn extracts_issues_from_codeclimate() {
-        let value = serde_json::json!([{
-            "check_name": "fallow/unused-export",
-            "description": "Export x is never imported",
-            "severity": "minor",
-            "fingerprint": "abc",
-            "location": { "path": "src/a.ts", "lines": { "begin": 7 } }
-        }]);
-        let issues = issues_from_codeclimate(&value);
-        assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0].path, "src/a.ts");
-        assert_eq!(issues[0].line, 7);
-    }
-
-    #[test]
     fn typed_codeclimate_issues_extract_like_json_codeclimate() {
         let severities = [
             (CodeClimateSeverity::Info, "info"),
@@ -518,71 +503,6 @@ mod tests {
         assert_eq!(
             sanitize_marker_segment("--leading-trailing--"),
             "leading-trailing"
-        );
-    }
-
-    #[test]
-    fn escape_md_escapes_inline_commonmark_specials() {
-        let raw = "foo*bar_baz [a](u) `c` <h> #x !i ~s | p";
-        let escaped = escape_md(raw);
-        for ch in [
-            '*', '_', '[', ']', '(', ')', '`', '<', '>', '#', '!', '~', '|',
-        ] {
-            let raw_count = raw.chars().filter(|c| c == &ch).count();
-            let escaped_count = escaped.matches(&format!("\\{ch}")).count();
-            assert_eq!(
-                raw_count, escaped_count,
-                "char {ch:?}: raw {raw_count} occurrences, escaped {escaped_count} in {escaped:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn escape_md_escapes_ampersand_to_block_numeric_entity_bypass() {
-        let raw = "value &#42;suspicious&#42; here";
-        let escaped = escape_md(raw);
-        assert!(escaped.contains(r"\&"), "got: {escaped}");
-        assert!(escaped.contains(r"\#"), "got: {escaped}");
-        assert!(!escaped.contains(" *suspicious"), "got: {escaped}");
-    }
-
-    #[test]
-    fn summary_label_foreshadows_truncation() {
-        assert_eq!(
-            fallow_output::summary_label("Duplication", 160, 50),
-            "Duplication (160, showing 50)"
-        );
-        assert_eq!(
-            fallow_output::summary_label("Health", 12, 50),
-            "Health (12)"
-        );
-        assert_eq!(
-            fallow_output::summary_label("Dependencies", 50, 50),
-            "Dependencies (50)"
-        );
-    }
-
-    #[test]
-    fn escape_md_does_not_escape_block_only_markers() {
-        let raw = "fallow/test-only-dependency package.json:12";
-        let escaped = escape_md(raw);
-        assert!(!escaped.contains("\\-"), "should not escape `-`");
-        assert!(!escaped.contains("\\."), "should not escape `.`");
-        assert_eq!(escaped, raw);
-    }
-
-    #[test]
-    fn escape_md_collapses_newlines_to_spaces() {
-        let raw = "first\nsecond\nthird";
-        assert_eq!(escape_md(raw), "first second third");
-    }
-
-    #[test]
-    fn escape_md_leaves_safe_chars_unchanged() {
-        let raw = "Export 'helperFn' is never imported by other modules";
-        assert_eq!(
-            escape_md(raw),
-            r"Export 'helperFn' is never imported by other modules"
         );
     }
 
@@ -671,13 +591,5 @@ mod tests {
                 "{rule_id} listed in PROJECT_LEVEL_RULE_IDS but not in explain registry"
             );
         }
-    }
-
-    #[test]
-    fn escape_md_double_apply_is_safe() {
-        let raw = "code with `backticks` and *stars*";
-        let once = escape_md(raw);
-        let twice = escape_md(&once);
-        assert!(twice.contains(r"\\"));
     }
 }

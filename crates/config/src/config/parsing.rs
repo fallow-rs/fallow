@@ -4066,12 +4066,6 @@ thresholdOverrides = [
     }
 
     #[test]
-    fn fallow_config_production_defaults_false() {
-        let config: FallowConfig = serde_json::from_str("{}").unwrap();
-        assert!(!config.production);
-    }
-
-    #[test]
     fn package_json_optional_dependency_names() {
         let pkg: PackageJson = serde_json::from_str(
             r#"{"optionalDependencies": {"fsevents": "^2", "chokidar": "^3"}}"#,

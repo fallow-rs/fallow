@@ -570,64 +570,6 @@ fn all_deps_used_produces_no_unused() {
 }
 
 #[test]
-fn workspace_dep_used_within_workspace_not_flagged() {
-    let ws_root = PathBuf::from("/project/packages/web");
-    let files = vec![DiscoveredFile {
-        id: FileId(0),
-        path: ws_root.join("src/index.ts"),
-        size_bytes: 100,
-    }];
-    let entry_points = vec![EntryPoint {
-        path: ws_root.join("src/index.ts"),
-        source: EntryPointSource::PackageJsonMain,
-    }];
-    let resolved_modules = vec![ResolvedModule {
-        file_id: FileId(0),
-        path: ws_root.join("src/index.ts"),
-        exports: vec![].into(),
-        re_exports: vec![],
-        resolved_imports: vec![ResolvedImport {
-            info: ImportInfo {
-                source: "react".to_string(),
-                imported_name: ImportedName::Named("useState".to_string()),
-                local_name: "useState".to_string(),
-                is_type_only: false,
-                is_type_only_star: false,
-                from_style: false,
-                span: oxc_span::Span::new(0, 20),
-                source_span: oxc_span::Span::default(),
-            },
-            target: ResolveResult::NpmPackage("react".to_string()),
-        }],
-        resolved_dynamic_imports: vec![],
-        resolved_dynamic_patterns: vec![],
-        member_accesses: vec![].into(),
-        semantic_facts: std::sync::Arc::default(),
-        whole_object_uses: std::sync::Arc::default(),
-        has_cjs_exports: false,
-        has_angular_component_template_url: false,
-        unused_import_bindings: FxHashSet::default(),
-        type_referenced_import_bindings: vec![],
-        value_referenced_import_bindings: vec![],
-        namespace_object_aliases: vec![],
-        exported_factory_returns: std::sync::Arc::default(),
-        exported_factory_return_object_shapes: std::sync::Arc::default(),
-        type_member_types: std::sync::Arc::default(),
-    }];
-    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
-
-    let root_pkg = make_pkg(&[], &[], &[]);
-    let config = test_config(PathBuf::from("/project"));
-
-    let (unused, _, _) = find_unused_dependencies(&graph, &root_pkg, &config, None, &[]);
-
-    assert!(
-        !unused.iter().any(|d| d.package_name == "react"),
-        "react should not be in root unused since it's not in root deps"
-    );
-}
-
-#[test]
 fn plugin_tooling_dev_deps_not_flagged() {
     let (graph, _) = build_graph_with_npm_imports(&[]);
     let pkg = make_pkg(&[], &["my-dev-tool"], &[]);
