@@ -85,6 +85,9 @@ an exit code.
 - Reported project paths remain relative unless an editor or protocol contract
   explicitly requires absolute paths.
 - Serialized lists and human output use deterministic ordering.
+- `--complexity-breakdown` is opt-in. Per-decision `contributions` are
+  omitted by default and cloned only when requested; CLI and MCP health
+  options forward the same choice to the engine findings builder.
 - `fix` remains preview-first. Non-interactive mutation requires explicit
   confirmation.
 - `fallow impact statusline` stays path-free, read-only, plain text, and

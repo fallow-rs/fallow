@@ -1190,7 +1190,6 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "gitlab_common.sh" "loads sha
 assert_contains "$GITLAB_COMMON" "curl_retry" "wraps GitLab API calls with retry"
 assert_not_contains "$GITLAB_COMMON" "source fallow-analysis-args" "legacy render fallback does not source workspace shell"
 assert_contains "$GITLAB_COMMON" "rate limit response; retrying" "retries GitLab rate-limit responses"
-assert_not_contains "$GITLAB_COMMON" "curl_paginate" "does not ship an unused pagination helper"
 
 TMP_CLEANUP_WORK=$(mktemp -d)
 TMP_CLEANUP_REGISTRY="$TMP_CLEANUP_WORK/registry"

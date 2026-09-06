@@ -123,7 +123,7 @@ pub fn install_with(
     artifacts: &[ArtifactSpec],
     downloader: &dyn ArtifactDownloader,
 ) -> Result<SetupResult, String> {
-    if artifacts == ARTIFACTS && inspect_cache(paths, true).ready {
+    if artifacts == ARTIFACTS && inspect_cache(paths).ready {
         return Ok(SetupResult { downloaded: false });
     }
 

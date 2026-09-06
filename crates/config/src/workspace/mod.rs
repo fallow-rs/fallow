@@ -603,7 +603,7 @@ fn collect_shallow_package_workspaces(
 
     for entry in top_entries.filter_map(Result::ok) {
         let path = entry.path();
-        if !path.is_dir() || should_skip_workspace_scan_dir(&entry.file_name().to_string_lossy()) {
+        if !path.is_dir() || is_skip_listed_dir(&entry.file_name().to_string_lossy()) {
             continue;
         }
 
@@ -625,9 +625,7 @@ fn collect_shallow_child_workspaces(
     };
     for child in child_entries.filter_map(Result::ok) {
         let child_path = child.path();
-        if !child_path.is_dir()
-            || should_skip_workspace_scan_dir(&child.file_name().to_string_lossy())
-        {
+        if !child_path.is_dir() || is_skip_listed_dir(&child.file_name().to_string_lossy()) {
             continue;
         }
 
@@ -665,10 +663,6 @@ fn collect_shallow_workspace_candidate(
         },
         dep_names,
     ));
-}
-
-fn should_skip_workspace_scan_dir(name: &str) -> bool {
-    is_skip_listed_dir(name)
 }
 
 /// Deduplicate workspaces by canonical path and mark internal dependencies.

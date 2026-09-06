@@ -7,7 +7,6 @@ use fallow_api::{
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
-use serde::Serialize;
 
 pub(super) async fn run_api_blocking<T, F>(
     tool: &'static str,
@@ -141,9 +140,8 @@ pub(super) fn workspace_patterns_from_param(value: Option<&str>) -> Option<Vec<S
     (!patterns.is_empty()).then_some(patterns)
 }
 
-pub(super) fn json_success(value: &impl Serialize) -> CallToolResult {
-    let text = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
-    CallToolResult::success(vec![ContentBlock::text(text)])
+pub(super) fn json_success(value: &serde_json::Value) -> CallToolResult {
+    CallToolResult::success(vec![ContentBlock::text(value.to_string())])
 }
 
 pub(super) fn programmatic_error_body(error: &ProgrammaticError) -> String {

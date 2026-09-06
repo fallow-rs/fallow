@@ -135,13 +135,14 @@ test("a promotion failure restores originals and removes newly created surfaces"
         runGenerationTransaction({
           repoRoot: current.repoRoot,
           stagingParent: current.stagingParent,
-          surfacePaths: ["one.txt", "two.txt"],
+          surfacePaths: ["one.txt", "two.txt", "z-last.txt"],
           generate: (stagingRoot) => {
             write(stagingRoot, "one.txt", "new one");
             write(stagingRoot, "two.txt", "new two");
+            write(stagingRoot, "z-last.txt", "new last");
           },
           beforePromote: (_path, index) => {
-            if (index === 1) {
+            if (index === 2) {
               throw new Error("promotion failed");
             }
           },
@@ -151,6 +152,7 @@ test("a promotion failure restores originals and removes newly created surfaces"
 
     assert.equal(read(current.repoRoot, "one.txt"), "old one");
     assert.throws(() => read(current.repoRoot, "two.txt"), /ENOENT/);
+    assert.throws(() => read(current.repoRoot, "z-last.txt"), /ENOENT/);
     assert.deepEqual(readdirSync(current.stagingParent), []);
   } finally {
     cleanFixture(current);

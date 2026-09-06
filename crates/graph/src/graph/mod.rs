@@ -376,30 +376,6 @@ impl TestReachabilityIndex {
         false
     }
 
-    #[cfg(test)]
-    fn covers_path<I>(&self, source: FileId, hops: &I) -> bool
-    where
-        I: Iterator<Item = (FileId, ModuleLoadMechanism)> + Clone,
-    {
-        let Some(source_profiles) = self.profiles_for(&self.reachable_profiles, source) else {
-            return false;
-        };
-        for (word_index, &source_word) in source_profiles.iter().enumerate() {
-            let mut active_profiles = source_word;
-            for (target, mechanism) in (*hops).clone() {
-                active_profiles =
-                    self.active_hop_profiles(target, mechanism, word_index, active_profiles);
-                if active_profiles == 0 {
-                    break;
-                }
-            }
-            if active_profiles != 0 {
-                return true;
-            }
-        }
-        false
-    }
-
     fn active_hop_profiles(
         &self,
         target: FileId,

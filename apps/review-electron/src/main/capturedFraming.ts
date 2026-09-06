@@ -46,8 +46,8 @@ const isCapturedLine = (value: unknown): value is CapturedLine => {
 
 /**
  * Read every captured line (oldest first). A missing file or a corrupt/malformed
- * line yields no item rather than throwing; the source is best-effort, exactly
- * like {@link readFeedItems} for the human feed.
+ * line yields no item rather than throwing; this best-effort source retains
+ * valid records surrounding malformed JSONL lines.
  */
 export const readCapturedLines = async (root: string): Promise<CapturedLine[]> => {
   let raw: string;
@@ -78,7 +78,12 @@ const toJudgment = (line: CapturedLine): Judgment => {
 
 /** Subset of the validation envelope this reader maps to inline framing. */
 type ValidatedAccepted = {
-  accepted?: { signal_id: string; agent_framing: string; concern?: string; action?: JudgmentAction }[];
+  accepted?: {
+    signal_id: string;
+    agent_framing: string;
+    concern?: string;
+    action?: JudgmentAction;
+  }[];
 };
 
 const toCapturedFraming = (envelope: ValidatedAccepted): InlineFraming[] =>

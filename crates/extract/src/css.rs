@@ -167,17 +167,6 @@ fn is_style_extension(ext: &str) -> bool {
         || ext.eq_ignore_ascii_case("less")
 }
 
-/// Strip comments from CSS/SCSS source to avoid matching directives inside comments.
-#[cfg(test)]
-fn strip_css_comments(source: &str, is_scss: bool) -> String {
-    let stripped = CSS_COMMENT_RE.replace_all(source, "");
-    if is_scss {
-        SCSS_LINE_COMMENT_RE.replace_all(&stripped, "").into_owned()
-    } else {
-        stripped.into_owned()
-    }
-}
-
 fn mask_css_comments(source: &str, is_scss: bool) -> String {
     let mut masked = mask_with_whitespace(source, &CSS_COMMENT_RE);
     if is_scss {
@@ -1266,23 +1255,27 @@ mod tests {
     }
 
     #[test]
-    fn strip_css_block_comment() {
-        let result = strip_css_comments("/* removed */ .kept { }", false);
+    fn mask_css_block_comment() {
+        let source = "/* removed */ .kept { }";
+        let result = mask_css_comments(source, false);
         assert!(!result.contains("removed"));
-        assert!(result.contains(".kept"));
+        assert_eq!(result.len(), source.len());
+        assert_eq!(result.find(".kept"), source.find(".kept"));
     }
 
     #[test]
-    fn strip_scss_line_comment() {
-        let result = strip_css_comments("// removed\n.kept { }", true);
+    fn mask_scss_line_comment() {
+        let source = "// removed\n.kept { }";
+        let result = mask_css_comments(source, true);
         assert!(!result.contains("removed"));
-        assert!(result.contains(".kept"));
+        assert_eq!(result.len(), source.len());
+        assert_eq!(result.find(".kept"), source.find(".kept"));
     }
 
     #[test]
-    fn strip_scss_preserves_css_outside_comments() {
+    fn mask_scss_preserves_css_outside_comments() {
         let source = "// line comment\n/* block comment */\n.visible { color: red; }";
-        let result = strip_css_comments(source, true);
+        let result = mask_css_comments(source, true);
         assert!(result.contains(".visible"));
     }
 
@@ -1488,15 +1481,15 @@ mod tests {
     }
 
     #[test]
-    fn strip_css_no_comments() {
+    fn mask_css_no_comments() {
         let source = ".foo { color: red; }";
-        assert_eq!(strip_css_comments(source, false), source);
+        assert_eq!(mask_css_comments(source, false), source);
     }
 
     #[test]
-    fn strip_css_multiple_block_comments() {
+    fn mask_css_multiple_block_comments() {
         let source = "/* comment-one */ .foo { } /* comment-two */ .bar { }";
-        let result = strip_css_comments(source, false);
+        let result = mask_css_comments(source, false);
         assert!(!result.contains("comment-one"));
         assert!(!result.contains("comment-two"));
         assert!(result.contains(".foo"));
@@ -1504,9 +1497,9 @@ mod tests {
     }
 
     #[test]
-    fn strip_scss_does_not_affect_non_scss() {
+    fn mask_scss_does_not_affect_non_scss() {
         let source = "// this stays\n.foo { }";
-        let result = strip_css_comments(source, false);
+        let result = mask_css_comments(source, false);
         assert!(result.contains("// this stays"));
     }
 

@@ -49,6 +49,21 @@ lifecycle behavior.
   Code contracts.
 - Shutdown must prevent late publication and clean up owned subprocess work.
 
+## Diagnostic metadata and document staleness
+
+`diagnostic_filter::attach_changed_since_data` adds `changedSince` only when
+the filter was applied. It merges into an existing object instead of erasing
+metadata such as `circularDependency: { cycleId, fileCount }`. Circular
+findings share a cycle identifier and use each import edge for their ranges;
+legacy results without edges retain the first-file fallback.
+
+`document_state::uri_is_stale` compares the captured disk-match state and
+version with the live document. A dirty initial buffer, a newer version, or a
+document closed during analysis prevents publication. A document opened during
+the run is publishable only if its current text matches disk. Files absent from
+both snapshots, including project manifests, remain valid cross-file targets.
+Keep these checks shared by publishing and cached diagnostic cleanup.
+
 ## Editor parity boundary
 
 The shared LSP owns diagnostics, hover, quick fixes, Code Lens, and their

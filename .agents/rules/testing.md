@@ -9,10 +9,10 @@ paths:
 # Testing conventions
 
 ## Integration tests
-- Each crate has a `tests/` directory with an `integration_test.rs` hub that includes sub-modules via `#[path]`
+- Inspect the affected crate's `Cargo.toml` and existing test entrypoints before adding a suite; hubs and standalone integration binaries both exist.
 - Helper utilities in `common.rs`: `fixture_path(name)` resolves `tests/fixtures/{name}/`, `create_config(root)` builds a minimal `ResolvedConfig`
 - Test fixtures at workspace root `tests/fixtures/` — each fixture is a minimal but complete project with `package.json`, `tsconfig.json`, and source files
-- Tests call `fallow_core::analyze(&config)` and assert on the structured `AnalysisResults`
+- Exercise the owning production API or CLI and assert on its structured output. Test-only helpers may build inputs, but must not duplicate the implementation under test.
 
 ## Snapshot tests (insta)
 - CLI output snapshots in `crates/cli/tests/snapshot_tests.rs` with snapshots stored in `crates/cli/tests/snapshots/*.snap`

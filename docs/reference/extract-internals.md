@@ -155,6 +155,31 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   rollup, the runtime-coverage static payload, and the editor code lens all
   exclude it.
 
+## Embedded-source and import regression boundaries
+
+Asset references in HTML, JSX and HTML tagged templates must come from literal
+markup with the required element or tag context. Remote URLs, unrelated
+components and unproven interpolated paths must not invent local graph edges.
+Keep comment and source-offset handling aligned across `html.rs`, the visitor
+and SFC extraction. CSS masking replaces excluded regions with equal-length
+whitespace; selector spans must still index the original source. Cascade-layer
+and import preludes are not class selectors, while real scope selectors remain
+visible.
+
+Vue setup bindings and Svelte instance-script bindings have different template
+visibility from ordinary Vue scripts and Svelte module scripts. External script
+and style references remain graph edges. SFC style imports carry their style
+context into resolution so a stylesheet cannot resolve to a same-named
+component through the JavaScript extension order. Preserve template-local
+bindings, whole-object credit and framework metadata when changing scanners.
+
+Import facts also come from JSDoc type references, import-then-export syntax,
+namespace destructuring and proven Node child-process entry calls. These paths
+must retain import provenance, type/value meaning and lexical binding identity.
+Do not replace their source tests with tests of a parallel scanner. Angular
+metadata and injection-token/interface bridging must stay provenance-gated;
+unknown framework behavior must not invent member-use evidence.
+
 ## Verification
 
 Add the smallest parser or visitor test for the syntax boundary. Add an

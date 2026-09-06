@@ -32,7 +32,7 @@ impl LocalModel {
         reason = "verified safetensors are memory-mapped through Candle's unsafe loader"
     )]
     pub fn load(paths: &ModelPaths) -> Result<Self, String> {
-        let status = inspect_cache(paths, true);
+        let status = inspect_cache(paths);
         if !status.ready {
             return Err(status.problem.unwrap_or_else(|| {
                 "the local model is unavailable; run `fallow similar-code setup --local`"

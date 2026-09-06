@@ -399,7 +399,9 @@ export const validateKnowledgeArchitecture = ({
     }
   }
   for (const path of currentVisibleFiles.filter(
-    (candidate) => candidate.startsWith(".claude/rules/") && candidate.endsWith(".md"),
+    (candidate) =>
+      (candidate.startsWith(".claude/rules/") || candidate.startsWith(".agents/rules/")) &&
+      candidate.endsWith(".md"),
   )) {
     if (!classifiedHostRules.has(path)) {
       errors.push(`host rule is not classified: ${path}`);

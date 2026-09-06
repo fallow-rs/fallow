@@ -122,7 +122,7 @@ describe("SecurityTreeProvider", () => {
     expect(item.label).toBe("dangerous-html (CWE-79)");
     expect(item.description).toBe("src/app.tsx:12");
     expect(item.iconPath?.id).toBe("shield");
-    expect(item.tooltip).toContain("UNVERIFIED CANDIDATE");
+    expect(item.tooltip).toContain("UNVERIFIED CANDIDATE - verify before acting");
     expect(item.tooltip).toContain("innerHTML reaches req.query.html");
     expect(selectionOf(item)).toMatchObject({ startLine: 11, startCharacter: 4 });
     // No trace -> not collapsible.

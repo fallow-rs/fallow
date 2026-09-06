@@ -144,11 +144,6 @@ use initialization::{
     LspDuplicationOptions, LspInitializationOptions, LspTypeAwareOptions,
     initialization_config_path, parse_initialization_options,
 };
-#[cfg(test)]
-use initialization::{
-    initialization_duplication_options, initialization_inline_complexity_enabled,
-    initialization_production_override,
-};
 use path_utils::canonicalize_for_lsp;
 #[cfg(test)]
 use protocol::analysis_complete_params_for_test;

@@ -9,6 +9,7 @@ published user documentation. Each fact has one authored source.
 |---|---|---|
 | Open-source maintainer knowledge | `fallow/docs/` | Humans, Codex, Claude |
 | Maintainer workflows | `fallow/.agents/skills/` | Codex directly, generated Claude adapters |
+| Shared reviewer constraints | `fallow/.agents/rules/` | Maintainer skills, with durable facts routed to `docs/` |
 | Claude runtime constraints | `fallow/.claude/rules/` | Claude, with durable facts routed to `docs/` |
 | Public CLI, config, MCP, and output contracts | Public Fallow source and generated schemas | Public docs, skills, integrations, private consumers |
 | Released Fallow skill contract | `fallow/npm/fallow/skills/fallow/` | npm package and portable skill packaging |

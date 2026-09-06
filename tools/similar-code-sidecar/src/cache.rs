@@ -103,7 +103,7 @@ pub fn cache_root() -> Result<PathBuf, String> {
     Err("cannot determine the user cache directory; set FALLOW_SIMILAR_CODE_CACHE_DIR".to_string())
 }
 
-pub fn inspect_cache(paths: &ModelPaths, verify_hashes: bool) -> CacheStatus {
+pub fn inspect_cache(paths: &ModelPaths) -> CacheStatus {
     let manifest = match read_manifest(&paths.manifest) {
         Ok(manifest) => manifest,
         Err(problem) => {
@@ -126,7 +126,7 @@ pub fn inspect_cache(paths: &ModelPaths, verify_hashes: bool) -> CacheStatus {
                 problem: Some("the protocol manifest contains an unsupported artifact".to_string()),
             };
         };
-        if let Err(problem) = verify_artifact(path, artifact.size, artifact.sha256, verify_hashes) {
+        if let Err(problem) = verify_artifact(path, artifact.size, artifact.sha256) {
             return CacheStatus {
                 ready: false,
                 problem: Some(problem),
@@ -231,7 +231,6 @@ fn verify_artifact(
     path: &Path,
     expected_size: u64,
     expected_sha256: &str,
-    verify_hash: bool,
 ) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|_| format!("model artifact `{}` is missing", file_label(path)))?;
@@ -247,7 +246,7 @@ fn verify_artifact(
             file_label(path)
         ));
     }
-    if verify_hash && sha256_file(path)? != expected_sha256 {
+    if sha256_file(path)? != expected_sha256 {
         return Err(format!(
             "model artifact `{}` failed SHA-256 verification",
             file_label(path)
@@ -321,9 +320,29 @@ mod tests {
     fn missing_cache_is_not_ready_without_creating_it() {
         let directory = tempfile::tempdir().expect("tempdir");
         let paths = ModelPaths::from_cache_root(directory.path());
-        let status = inspect_cache(&paths, true);
+        let status = inspect_cache(&paths);
         assert!(!status.ready);
         assert!(!paths.directory.exists());
+    }
+
+    #[test]
+    fn matching_manifest_and_sizes_do_not_make_corrupted_cache_ready() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = ModelPaths::from_cache_root(directory.path());
+        fs::create_dir_all(&paths.directory).expect("cache directory");
+        write_manifest(&paths.manifest).expect("matching manifest");
+        // Sparse zero-filled files preserve the real protocol sizes without
+        // downloading model data. Only content verification can reject them.
+        for artifact in ARTIFACTS {
+            File::create(paths.artifact(artifact.path).expect("artifact path"))
+                .expect("artifact file")
+                .set_len(artifact.size)
+                .expect("matching artifact size");
+        }
+
+        let status = inspect_cache(&paths);
+        assert!(!status.ready);
+        assert!(status.problem.expect("integrity error").contains("SHA-256 verification"));
     }
 
     #[test]

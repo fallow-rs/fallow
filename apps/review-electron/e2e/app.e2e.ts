@@ -105,6 +105,16 @@ test("opens a file diff from the walkthrough", async () => {
   await expect(win.getByText(/@@/).first()).toBeVisible({ timeout: 20_000 });
 });
 
+test("shows a diff failure when the checkout disappears after review loading", async () => {
+  const reviewRoot = createReviewRoot(true);
+  const win = await launchLoadedReview(reviewRoot);
+  await expect(win.getByTestId("diff-scroll")).toBeVisible();
+  rmSync(resolve(reviewRoot, ".git"), { recursive: true, force: true });
+  await win.getByRole("button", { name: "open App.tsx" }).click();
+  await expect(win.getByText("couldn't load the diff")).toBeVisible();
+  await expect(win.getByText("no changes to review", { exact: true })).toBeHidden();
+});
+
 test("inspector bridge pushes a grounded card to the UI", async () => {
   const win = await launchLoadedReview();
 

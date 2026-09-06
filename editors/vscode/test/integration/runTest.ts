@@ -11,7 +11,7 @@ const vscodeTestCachePath = path.resolve(
 );
 const fixtureWorkspacePath = path.resolve(
   extensionDevelopmentPath,
-  "test/integration/fixtures/workspace/package.json"
+  "test/integration/fixtures/workspace/package.json",
 );
 
 const writeExecutable = (filePath: string, contents: string): void => {
@@ -73,7 +73,7 @@ process.stdin.on("data", (chunk) => {
     handle(JSON.parse(payload));
   }
 });
-`
+`,
   );
   return lspPath;
 };
@@ -102,6 +102,27 @@ const logPath = ${JSON.stringify(logPath)};
 fs.appendFileSync(logPath, JSON.stringify({ command, args }) + "\\n");
 
 const outputs = {
+  "security": {
+    schema_version: "3",
+    version: "3.15.0",
+    elapsed_ms: 0,
+    config: { rules: {} },
+    security_findings: [{
+      kind: "tainted-sink",
+      category: "dangerous-html",
+      cwe: 79,
+      path: "src/index.ts",
+      line: 1,
+      col: 0,
+      severity: "low",
+      finding_id: "security:fixture",
+      evidence: "untrusted input reaches innerHTML",
+      trace: [],
+      actions: [],
+    }],
+    unresolved_edge_files: 0,
+    unresolved_callee_sites: 0,
+  },
   "combined": {
     schema_version: 3,
     version: "2.45.0",
@@ -227,7 +248,7 @@ if (!output) {
 }
 
 process.stdout.write(JSON.stringify(output));
-`
+`,
   );
 };
 
@@ -240,16 +261,10 @@ const createWorkspace = (): string => {
   fs.mkdirSync(vscodeDir, { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(srcDir, { recursive: true });
-  fs.copyFileSync(
-    fixtureWorkspacePath,
-    path.join(workspaceDir, "package.json")
-  );
+  fs.copyFileSync(fixtureWorkspacePath, path.join(workspaceDir, "package.json"));
   fs.writeFileSync(path.join(srcDir, "index.ts"), "export const unusedExport = 1;\n");
   fs.writeFileSync(path.join(srcDir, "first.ts"), "export const duplicateName = 1;\n");
-  fs.writeFileSync(
-    path.join(srcDir, "second.ts"),
-    "\n\n\n\n\n\nexport const duplicateName = 2;\n"
-  );
+  fs.writeFileSync(path.join(srcDir, "second.ts"), "\n\n\n\n\n\nexport const duplicateName = 2;\n");
   fs.writeFileSync(path.join(srcDir, "orphan.ts"), "export const orphan = true;\n");
 
   const lspPath = createFakeLsp(binDir);
@@ -263,9 +278,9 @@ const createWorkspace = (): string => {
         "fallow.lspPath": lspPath,
       },
       null,
-      2
+      2,
     ),
-    "utf8"
+    "utf8",
   );
 
   return workspaceDir;

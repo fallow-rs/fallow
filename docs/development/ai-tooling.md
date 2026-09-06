@@ -11,7 +11,9 @@ Fallow supports multiple agent hosts through one canonical knowledge model.
 - `.claude/skills/<name>/SKILL.md` is a generated Claude adapter.
 - `.agents/agents/<name>.md` contains the authored reviewer agent definitions.
 - `.claude/agents/<name>.md` is a generated Claude adapter.
+- `.agents/rules/` contains shared review constraints and routes loaded by skills.
 - `.claude/rules/` contains curated, short Claude constraints and routes.
+  Both rule trees are classified and checked by the knowledge manifest.
 - `docs/reference/` contains durable implementation detail extracted from
   runtime rules.
 - Nested `AGENTS.md` files add subsystem-specific instructions.

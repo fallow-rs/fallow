@@ -143,6 +143,7 @@ describe("Fallow VS Code extension", () => {
       .update("changedSince", "", vscode.ConfigurationTarget.Workspace);
     const config = vscode.workspace.getConfiguration("fallow");
     for (const key of [
+      "security.enabled",
       "duplication.mode",
       "duplication.near",
       "duplication.threshold",
@@ -169,6 +170,15 @@ describe("Fallow VS Code extension", () => {
     assert.ok(commands.includes("fallow.reloadAnalysis"));
     assert.ok(commands.includes("fallow.health.reload"));
     assert.ok(commands.includes("fallow.audit"));
+    assert.ok(commands.includes("fallow.analyzeSecurity"));
+    for (const command of [
+      "fallow.license.activate",
+      "fallow.license.status",
+      "fallow.license.refresh",
+      "fallow.license.deactivate",
+    ]) {
+      assert.ok(commands.includes(command), `${command} should be registered`);
+    }
     assert.ok(commands.includes("fallow.setBaselineAtHead"));
     assert.ok(commands.includes("fallow.fix"));
     assert.ok(commands.includes("fallow.fixDryRun"));
@@ -179,6 +189,24 @@ describe("Fallow VS Code extension", () => {
     // The "N references" Code Lens routes here; if it is unregistered, clicking a
     // lens throws "command 'fallow.showReferences' not found".
     assert.ok(commands.includes("fallow.showReferences"));
+  });
+
+  it("frames completed security scans as unverified candidates in the actual toast", async () => {
+    const messages: string[] = [];
+    windowApi.showInformationMessage = async (message: string) => {
+      messages.push(message);
+      return undefined;
+    };
+    await vscode.workspace
+      .getConfiguration("fallow")
+      .update("security.enabled", true, vscode.ConfigurationTarget.Workspace);
+    await vscode.commands.executeCommand("fallow.analyzeSecurity");
+
+    assert.ok(readCliLog().some((entry) => entry.command === "security"));
+    const toast = messages.find((message) => message.includes("Fallow: found"));
+    assert.ok(toast, "a completed scan with findings should show a toast");
+    assert.match(toast, /security candidate/i);
+    assert.match(toast, /NOT verified vulnerabilities; verify each before acting/);
   });
 
   it("runs analysis against the configured CLI and filters disabled issue types", async () => {

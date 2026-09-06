@@ -517,32 +517,26 @@ pub fn semantic_symbol_for_exact_class_method(
         .iter()
         .find(|module| path_matches(&module.path, root, file_path))
         .ok_or(SemanticClassMethodResolutionError::FileNotFound)?;
-    let owners = module
+    let mut owners = module
         .exports
         .iter()
-        .filter(|export| export.name.matches_str(owner_name))
-        .collect::<Vec<_>>();
-    if owners.len() != 1 {
-        return Err(if owners.is_empty() {
-            SemanticClassMethodResolutionError::SymbolNotFound
-        } else {
-            SemanticClassMethodResolutionError::AmbiguousSymbol
-        });
+        .filter(|export| export.name.matches_str(owner_name));
+    let owner = owners
+        .next()
+        .ok_or(SemanticClassMethodResolutionError::SymbolNotFound)?;
+    if owners.next().is_some() {
+        return Err(SemanticClassMethodResolutionError::AmbiguousSymbol);
     }
-    let owner = owners[0];
-    let members = owner
+    let mut members = owner
         .members
         .iter()
-        .filter(|member| member.name == member_name)
-        .collect::<Vec<_>>();
-    if members.len() != 1 {
-        return Err(if members.is_empty() {
-            SemanticClassMethodResolutionError::SymbolNotFound
-        } else {
-            SemanticClassMethodResolutionError::AmbiguousSymbol
-        });
+        .filter(|member| member.name == member_name);
+    let member = members
+        .next()
+        .ok_or(SemanticClassMethodResolutionError::SymbolNotFound)?;
+    if members.next().is_some() {
+        return Err(SemanticClassMethodResolutionError::AmbiguousSymbol);
     }
-    let member = members[0];
     if member.kind != MemberKind::ClassMethod {
         return Err(SemanticClassMethodResolutionError::UnsupportedSyntax);
     }
@@ -2141,8 +2135,7 @@ mod tests {
         assert!(trace_class_member(&graph, root, "src/controller.ts", "nope").is_none());
     }
 
-    #[test]
-    fn exact_class_method_resolution_rejects_overloads_without_guessing() {
+    fn exact_class_method_fixture() -> (tempfile::TempDir, ModuleGraph) {
         use fallow_types::extract::{MemberInfo, MemberKind};
 
         let temp = tempfile::tempdir().unwrap();
@@ -2190,7 +2183,13 @@ mod tests {
             ..Default::default()
         }];
         let graph = ModuleGraph::build(&resolved_modules, &[], &files);
+        (temp, graph)
+    }
 
+    #[test]
+    fn exact_class_method_resolution_rejects_overloads_without_guessing() {
+        let (temp, graph) = exact_class_method_fixture();
+        let root = temp.path();
         assert_eq!(
             semantic_symbol_for_exact_class_method(
                 &graph,
@@ -2221,6 +2220,73 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.owner.as_deref(), Some("Repository"));
         assert_eq!(resolved.local_name, "run");
+    }
+
+    #[test]
+    fn exact_class_method_resolution_preserves_error_precedence() {
+        use fallow_types::extract::MemberKind;
+
+        let (temp, mut graph) = exact_class_method_fixture();
+        let root = temp.path();
+        for (file, owner, member, expected) in [
+            (
+                "missing.ts",
+                "Repository",
+                "run",
+                SemanticClassMethodResolutionError::FileNotFound,
+            ),
+            (
+                "repository.ts",
+                "Repository",
+                "missing",
+                SemanticClassMethodResolutionError::SymbolNotFound,
+            ),
+        ] {
+            assert_eq!(
+                semantic_symbol_for_exact_class_method(&graph, root, file, owner, member),
+                Err(expected),
+            );
+        }
+        graph.modules[0].exports[0].members[2].kind = MemberKind::ClassProperty;
+        assert_eq!(
+            semantic_symbol_for_exact_class_method(
+                &graph,
+                root,
+                "repository.ts",
+                "Repository",
+                "run"
+            ),
+            Err(SemanticClassMethodResolutionError::UnsupportedSyntax),
+        );
+        graph.modules[0].exports[0].members[2].kind = MemberKind::ClassMethod;
+        std::fs::remove_file(&graph.modules[0].path).expect("remove fixture source");
+        assert_eq!(
+            semantic_symbol_for_exact_class_method(
+                &graph,
+                root,
+                "repository.ts",
+                "Repository",
+                "run"
+            ),
+            Err(SemanticClassMethodResolutionError::SymbolNotFound),
+        );
+        let (_other_temp, mut other_graph) = exact_class_method_fixture();
+        let duplicate = other_graph.modules[0]
+            .exports
+            .pop()
+            .expect("fixture declares an owner");
+        graph.modules[0].exports.push(duplicate);
+        assert_eq!(
+            semantic_symbol_for_exact_class_method(
+                &graph,
+                root,
+                "repository.ts",
+                "Repository",
+                "run"
+            ),
+            Err(SemanticClassMethodResolutionError::AmbiguousSymbol),
+            "owner ambiguity must be reported before reading source",
+        );
     }
 
     /// Build a graph where the controller declaring `Ctrl` is NOT imported by

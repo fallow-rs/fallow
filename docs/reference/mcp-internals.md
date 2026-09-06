@@ -218,6 +218,21 @@ Contract rules:
   Fallow-owned project questions. They do not expose compiler diagnostics or
   typed lint findings.
 
+## Execution and telemetry
+
+The standalone tools choose typed execution or an explicit CLI fallback; the
+server is not universally a subprocess wrapper. The Code Mode backing policy
+above is a separate timeout boundary. `FALLOW_BIN` selects the CLI for routes
+that need it, and `FALLOW_TIMEOUT_SECS` controls response deadlines. A typed
+blocking task can continue after its deadline response, as documented by the
+structured `FALLOW_MCP_API_TIMEOUT` error.
+
+CLI dispatch in `tools/mod.rs` tags the child with
+`FALLOW_INTEGRATION_SURFACE=mcp` and `FALLOW_MCP_TOOL`. The CLI owns any
+consented telemetry event. Typed routes do not spawn that child or emit a
+replacement event from the MCP server. Keep tool names synchronized with the
+manifest used to validate those tags.
+
 ## Verification
 
 ```bash

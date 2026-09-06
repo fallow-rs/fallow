@@ -19,17 +19,16 @@ fn compact_circular_dependency_line(
     cycle: &fallow_types::output_dead_code::CircularDependencyFinding,
     root: &Path,
 ) -> String {
-    let chain: Vec<String> = cycle
+    let mut display_chain: Vec<String> = cycle
         .cycle
         .files
         .iter()
         .map(|path| compact_path(path, root))
         .collect();
-    let mut display_chain = chain.clone();
-    if let Some(first) = chain.first() {
+    if let Some(first) = display_chain.first() {
         display_chain.push(first.clone());
     }
-    let first_file = chain.first().map_or_else(String::new, Clone::clone);
+    let first_file = display_chain.first().map_or("", String::as_str);
     let cross_pkg_tag = if cycle.cycle.is_cross_package {
         " (cross-package)"
     } else {
@@ -54,7 +53,7 @@ fn compact_re_export_cycle_line(
         .iter()
         .map(|path| compact_path(path, root))
         .collect();
-    let first_file = chain.first().map_or_else(String::new, Clone::clone);
+    let first_file = chain.first().map_or("", String::as_str);
     let kind_tag = match cycle.cycle.kind {
         fallow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
         fallow_types::results::ReExportCycleKind::MultiNode => "",
@@ -1014,6 +1013,65 @@ mod tests {
     use fallow_types::results::{AnalysisResults, UnusedFile};
 
     use super::*;
+
+    #[test]
+    fn compact_cycles_preserve_empty_self_loop_and_cross_package_output() {
+        use fallow_types::output_dead_code::{CircularDependencyFinding, ReExportCycleFinding};
+        use fallow_types::results::{CircularDependency, ReExportCycle, ReExportCycleKind};
+
+        let root = Path::new("/project");
+        for (files, cross_package, expected) in [
+            (vec![], false, "circular-dependency::7:"),
+            (
+                vec![root.join("src/a.ts")],
+                false,
+                "circular-dependency:src/a.ts:7:src/a.ts → src/a.ts",
+            ),
+            (
+                vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                true,
+                "circular-dependency:src/a.ts:7:src/a.ts → src/b.ts → src/a.ts (cross-package)",
+            ),
+        ] {
+            let mut results = AnalysisResults::default();
+            results
+                .circular_dependencies
+                .push(CircularDependencyFinding {
+                    cycle: CircularDependency {
+                        length: files.len(),
+                        files,
+                        line: 7,
+                        col: 0,
+                        edges: vec![],
+                        is_cross_package: cross_package,
+                    },
+                    actions: vec![],
+                    introduced: None,
+                });
+            assert_eq!(build_compact_lines(&results, root), vec![expected]);
+        }
+        for (files, kind, expected) in [
+            (vec![], ReExportCycleKind::MultiNode, "re-export-cycle::"),
+            (
+                vec![root.join("src/a.ts")],
+                ReExportCycleKind::SelfLoop,
+                "re-export-cycle:src/a.ts:src/a.ts (self-loop)",
+            ),
+            (
+                vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                ReExportCycleKind::MultiNode,
+                "re-export-cycle:src/a.ts:src/a.ts <-> src/b.ts",
+            ),
+        ] {
+            let mut results = AnalysisResults::default();
+            results.re_export_cycles.push(ReExportCycleFinding {
+                cycle: ReExportCycle { files, kind },
+                actions: vec![],
+                introduced: None,
+            });
+            assert_eq!(build_compact_lines(&results, root), vec![expected]);
+        }
+    }
 
     #[test]
     fn compact_unused_file_format_uses_relative_paths() {

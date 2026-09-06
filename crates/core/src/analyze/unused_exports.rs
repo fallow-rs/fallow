@@ -521,9 +521,12 @@ fn unused_export_for_module(
     match_ctx: UnusedExportMatchContext<'_>,
 ) -> Option<UnusedExport> {
     let mut match_ctx = match_ctx;
-    let export_str = export.name.to_string();
+    let export_str = match &export.name {
+        ExportName::Named(name) => name.as_str(),
+        ExportName::Default => "default",
+    };
 
-    if unused_export_candidate_is_skipped(module, export, ctx, &export_str, &mut match_ctx) {
+    if unused_export_candidate_is_skipped(module, export, ctx, export_str, &mut match_ctx) {
         return None;
     }
 
@@ -534,15 +537,18 @@ fn unused_export_for_module(
     } else {
         IssueKind::UnusedExport
     };
-    if unused_export_suppressed(ctx, module.file_id, line, issue_kind) {
+    if ctx
+        .suppressions
+        .is_suppressed(module.file_id, line, issue_kind)
+    {
         return None;
     }
 
-    let is_re_export = match_ctx.re_export_names.contains(export_str.as_str());
+    let is_re_export = match_ctx.re_export_names.contains(export_str);
     Some(build_unused_export(
         module,
         export,
-        export_str,
+        export_str.to_owned(),
         line,
         col,
         is_re_export,
@@ -603,15 +609,6 @@ fn unused_export_candidate_is_skipped(
     )
 }
 
-fn unused_export_suppressed(
-    ctx: &UnusedExportModuleContext<'_>,
-    file_id: FileId,
-    line: u32,
-    issue_kind: IssueKind,
-) -> bool {
-    ctx.suppressions.is_suppressed(file_id, line, issue_kind)
-}
-
 fn build_unused_export(
     module: &ModuleNode,
     export: &ExportSymbol,
@@ -638,24 +635,28 @@ pub fn suppress_signature_backing_types(
     graph: &ModuleGraph,
     modules: &[fallow_types::extract::ModuleInfo],
 ) {
+    if unused_types.is_empty() {
+        return;
+    }
+
     let path_by_id: FxHashMap<FileId, &std::path::Path> = graph
         .modules
         .iter()
         .map(|module| (module.file_id, module.path.as_path()))
         .collect();
-    let backing_types: FxHashSet<(std::path::PathBuf, String)> = modules
+    let backing_types: FxHashSet<(&std::path::Path, &str)> = modules
         .iter()
         .filter_map(|module| path_by_id.get(&module.file_id).map(|path| (module, *path)))
         .flat_map(|(module, path)| {
             module
                 .public_signature_type_references
                 .iter()
-                .map(move |reference| (path.to_path_buf(), reference.type_name.clone()))
+                .map(move |reference| (path, reference.type_name.as_str()))
         })
         .collect();
 
     unused_types.retain(|unused| {
-        !backing_types.contains(&(unused.path.clone(), unused.export_name.clone()))
+        !backing_types.contains(&(unused.path.as_path(), unused.export_name.as_str()))
     });
 }
 
@@ -819,14 +820,14 @@ fn collect_module_private_type_leaks(
         .map(|export| export.name.to_string())
         .collect();
 
-    let mut seen: FxHashSet<(String, String)> = FxHashSet::default();
+    let mut seen: FxHashSet<(&str, &str)> = FxHashSet::default();
     for reference in &module_info.public_signature_type_references {
         if !local_types.contains(reference.type_name.as_str())
             || exported_names.contains(&reference.type_name)
         {
             continue;
         }
-        if !seen.insert((reference.export_name.clone(), reference.type_name.clone())) {
+        if !seen.insert((reference.export_name.as_str(), reference.type_name.as_str())) {
             continue;
         }
         let (line, col) = byte_offset_to_line_col(
@@ -1637,6 +1638,50 @@ mod tests {
             true,
             None,
         )
+    }
+
+    #[test]
+    fn signature_backing_types_preserve_path_identity_and_unbacked_findings() {
+        use fallow_types::extract::{ModuleInfo, PublicSignatureTypeReference};
+
+        let graph = build_graph(&[("/project/a.ts", false), ("/project/b.ts", false)]);
+        let reference = |type_name: &str| PublicSignatureTypeReference {
+            export_name: "publicFunction".to_owned(),
+            type_name: type_name.to_owned(),
+            span: Span::new(0, 1),
+        };
+        let mut known = ModuleInfo::empty(FileId(0));
+        known.public_signature_type_references = vec![reference("Backed"), reference("Backed")];
+        let mut unknown = ModuleInfo::empty(FileId(99));
+        unknown.public_signature_type_references = vec![reference("Backed"), reference("Unbacked")];
+        let finding = |path: &str, name: &str| UnusedExport {
+            path: PathBuf::from(path),
+            export_name: name.to_owned(),
+            is_type_only: true,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        };
+        let mut findings = vec![
+            finding("/project/a.ts", "Backed"),
+            finding("/project/b.ts", "Backed"),
+            finding("/project/a.ts", "Unbacked"),
+        ];
+
+        suppress_signature_backing_types(&mut findings, &graph, &[known, unknown]);
+
+        let retained: Vec<_> = findings
+            .iter()
+            .map(|finding| (finding.path.as_path(), finding.export_name.as_str()))
+            .collect();
+        assert_eq!(
+            retained,
+            vec![
+                (std::path::Path::new("/project/b.ts"), "Backed"),
+                (std::path::Path::new("/project/a.ts"), "Unbacked"),
+            ]
+        );
     }
 
     fn make_export(name: &str, span_start: u32, span_end: u32) -> ExportSymbol {

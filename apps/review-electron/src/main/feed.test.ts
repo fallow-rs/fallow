@@ -1,33 +1,38 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendFeedItem, feedPath, readFeedItems } from "./feed";
+import type { FeedItem } from "../model/agent";
+import { appendFeedItem, feedPath } from "./feed";
 
-describe("readFeedItems", () => {
-  it("returns [] when the feed file does not exist (best-effort)", async () => {
-    const root = mkdtempSync(join(tmpdir(), "feed-missing-"));
-    expect(await readFeedItems(root)).toEqual([]);
-  });
+describe("appendFeedItem", () => {
+  it("creates the agent feed and appends complete ordered JSONL records", async () => {
+    const root = mkdtempSync(join(tmpdir(), "feed-append-"));
+    try {
+      const items: FeedItem[] = [
+        {
+          target: { kind: "file_line", value: "src/a.ts:10" },
+          note: 'is this coupling intended?\nConsider "isolation".',
+          at: "t1",
+        },
+        {
+          target: { kind: "signal_id", value: "sig:1" },
+          note: "looks fine",
+          at: "t2",
+        },
+      ];
+      for (const item of items) await appendFeedItem(root, item);
 
-  it("round-trips appended notes and skips corrupt lines without dropping valid ones", async () => {
-    const root = mkdtempSync(join(tmpdir(), "feed-roundtrip-"));
-    await appendFeedItem(root, {
-      target: { kind: "file_line", value: "src/a.ts:10" },
-      note: "is this coupling intended?",
-      at: "t1",
-    });
-    // A corrupt line must neither throw nor drop the surrounding valid items.
-    writeFileSync(feedPath(root), "not json\n", { flag: "a" });
-    await appendFeedItem(root, {
-      target: { kind: "signal_id", value: "sig:1" },
-      note: "looks fine",
-      at: "t2",
-    });
-
-    const items = await readFeedItems(root);
-    expect(items).toHaveLength(2);
-    expect(items[0]?.note).toBe("is this coupling intended?");
-    expect(items[1]?.target.value).toBe("sig:1");
+      const raw = readFileSync(feedPath(root), "utf8");
+      expect(raw.endsWith("\n")).toBe(true);
+      expect(
+        raw
+          .trimEnd()
+          .split("\n")
+          .map((line) => JSON.parse(line)),
+      ).toEqual(items);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

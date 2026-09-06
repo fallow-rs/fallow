@@ -181,11 +181,8 @@ fn compute_report_prelude(
     hotspot_summary: Option<fallow_output::HotspotSummary>,
     report_coverage_gaps: bool,
 ) -> ReportPrelude {
-    let coverage_gaps = build_report_coverage_gaps(report_coverage_gaps, score_output.as_ref());
-    let prop_drilling_chains = build_prop_drilling_chains(opts, score_output.as_ref());
     // Render fan-in is a descriptive blast-radius signal. Build the per-file
-    // top-component lookup BEFORE moving `score_output` into the file-scores
-    // builder, so the human hotspot/complexity drill-down can show `rendered in N
+    // top-component lookup before moving the owned report sections out, so the human hotspot/complexity drill-down can show `rendered in N
     // places` for the top component of a file. Empty on non-React runs. The
     // public surface stays the VitalSigns aggregate; this map is `#[serde(skip)]`.
     let render_fan_in_top = if opts.score_only_output {
@@ -193,7 +190,20 @@ fn compute_report_prelude(
     } else {
         build_render_fan_in_top(score_output.as_ref())
     };
-    let file_scores = build_report_file_scores(opts, score_output);
+    let (coverage_gaps, prop_drilling_chains, scores) = score_output.map_or_else(
+        || (None, Vec::new(), Vec::new()),
+        |output| {
+            let coverage_gaps =
+                (report_coverage_gaps && !opts.score_only_output).then_some(output.coverage.report);
+            let prop_drilling_chains = if opts.score_only_output {
+                Vec::new()
+            } else {
+                output.prop_drilling_chains
+            };
+            (coverage_gaps, prop_drilling_chains, output.scores)
+        },
+    );
+    let file_scores = build_report_file_scores(opts, scores);
     let (report_hotspots, report_hotspot_summary) =
         report_hotspot_data(opts, hotspots, hotspot_summary);
     ReportPrelude {
@@ -203,22 +213,6 @@ fn compute_report_prelude(
         file_scores,
         report_hotspots,
         report_hotspot_summary,
-    }
-}
-
-/// Prop-drilling chains ride on the whole-project score output. Surfaced in
-/// the report (unless score-only output) so `health --hotspots` and the JSON
-/// envelope carry the located records. Empty unless the opt-in rule is on.
-fn build_prop_drilling_chains(
-    opts: &HealthOptions<'_>,
-    score_output: Option<&super::scoring::FileScoreOutput>,
-) -> Vec<fallow_types::output_dead_code::PropDrillingChainFinding> {
-    if opts.score_only_output {
-        Vec::new()
-    } else {
-        score_output
-            .map(|o| o.prop_drilling_chains.clone())
-            .unwrap_or_default()
     }
 }
 
@@ -314,13 +308,6 @@ fn fill_coverage_intelligence(report: &mut HealthReport, opts: &HealthOptions<'_
                 || opts.use_shared_diff_index,
         },
     );
-}
-
-fn build_report_coverage_gaps(
-    report_coverage_gaps: bool,
-    score_output: Option<&super::scoring::FileScoreOutput>,
-) -> Option<fallow_output::CoverageGaps> {
-    report_coverage_gaps.then(|| score_output.map(|o| o.coverage.report.clone()))?
 }
 
 fn istanbul_counts_from_score_output(
@@ -503,13 +490,12 @@ fn build_report_threshold_overrides(
 
 fn build_report_file_scores(
     opts: &HealthOptions<'_>,
-    score_output: Option<super::scoring::FileScoreOutput>,
+    mut scores: Vec<fallow_output::FileHealthScore>,
 ) -> Vec<fallow_output::FileHealthScore> {
     if opts.score_only_output || !opts.file_scores {
         return Vec::new();
     }
 
-    let mut scores = score_output.map(|o| o.scores).unwrap_or_default();
     if let Some(top) = opts.top {
         scores.truncate(top);
     }

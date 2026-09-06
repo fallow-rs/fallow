@@ -130,58 +130,6 @@ pub fn parse_tsconfig_root_dir(root: &Path) -> Option<String> {
         })
 }
 
-/// Strip trailing commas before `]` and `}` in JSON-like content.
-///
-/// tsconfig.json commonly uses trailing commas which are valid JSONC but not valid JSON.
-/// This strips them so `serde_json` can parse the content.
-#[cfg(test)]
-pub(super) fn strip_trailing_commas(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let len = bytes.len();
-    let mut result = Vec::with_capacity(len);
-    let mut in_string = false;
-    let mut i = 0;
-
-    while i < len {
-        let b = bytes[i];
-
-        if in_string {
-            result.push(b);
-            if b == b'\\' && i + 1 < len {
-                i += 1;
-                result.push(bytes[i]);
-            } else if b == b'"' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if b == b'"' {
-            in_string = true;
-            result.push(b);
-            i += 1;
-            continue;
-        }
-
-        if b == b',' {
-            let mut j = i + 1;
-            while j < len && bytes[j].is_ascii_whitespace() {
-                j += 1;
-            }
-            if j < len && (bytes[j] == b']' || bytes[j] == b'}') {
-                i += 1;
-                continue;
-            }
-        }
-
-        result.push(b);
-        i += 1;
-    }
-
-    String::from_utf8(result).unwrap_or_else(|_| input.to_string())
-}
-
 /// Expand a workspace glob pattern to matching directories.
 ///
 /// Returns `(original_path, canonical_path)` tuples so callers can skip redundant
@@ -605,50 +553,6 @@ mod tests {
     }
 
     #[test]
-    fn strip_trailing_commas_basic() {
-        assert_eq!(
-            strip_trailing_commas(r#"{"a": 1, "b": 2,}"#),
-            r#"{"a": 1, "b": 2}"#
-        );
-    }
-
-    #[test]
-    fn strip_trailing_commas_array() {
-        assert_eq!(strip_trailing_commas(r"[1, 2, 3,]"), r"[1, 2, 3]");
-    }
-
-    #[test]
-    fn strip_trailing_commas_with_whitespace() {
-        assert_eq!(
-            strip_trailing_commas("{\n  \"a\": 1,\n}"),
-            "{\n  \"a\": 1\n}"
-        );
-    }
-
-    #[test]
-    fn strip_trailing_commas_preserves_strings() {
-        assert_eq!(
-            strip_trailing_commas(r#"{"a": "hello,}"}"#),
-            r#"{"a": "hello,}"}"#
-        );
-    }
-
-    #[test]
-    fn strip_trailing_commas_nested() {
-        let input = r#"{"refs": [{"path": "./a",}, {"path": "./b",},],}"#;
-        let expected = r#"{"refs": [{"path": "./a"}, {"path": "./b"}]}"#;
-        assert_eq!(strip_trailing_commas(input), expected);
-    }
-
-    #[test]
-    fn strip_trailing_commas_escaped_quotes() {
-        assert_eq!(
-            strip_trailing_commas(r#"{"a": "he\"llo,}",}"#),
-            r#"{"a": "he\"llo,}"}"#
-        );
-    }
-
-    #[test]
     fn tsconfig_references_from_dir() {
         let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -826,31 +730,6 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn strip_trailing_commas_no_commas() {
-        let input = r#"{"a": 1, "b": [2, 3]}"#;
-        assert_eq!(strip_trailing_commas(input), input);
-    }
-
-    #[test]
-    fn strip_trailing_commas_empty_input() {
-        assert_eq!(strip_trailing_commas(""), "");
-    }
-
-    #[test]
-    fn strip_trailing_commas_nested_objects() {
-        let input = "{\n  \"a\": {\n    \"b\": 1,\n    \"c\": 2,\n  },\n  \"d\": 3,\n}";
-        let expected = "{\n  \"a\": {\n    \"b\": 1,\n    \"c\": 2\n  },\n  \"d\": 3\n}";
-        assert_eq!(strip_trailing_commas(input), expected);
-    }
-
-    #[test]
-    fn strip_trailing_commas_array_of_objects() {
-        let input = r#"[{"a": 1,}, {"b": 2,},]"#;
-        let expected = r#"[{"a": 1}, {"b": 2}]"#;
-        assert_eq!(strip_trailing_commas(input), expected);
     }
 
     #[test]
@@ -1094,20 +973,6 @@ mod tests {
         let yaml = "packages:\n  - 'packages/*'\n  - '!packages/test-*'\n";
         let patterns = parse_pnpm_workspace_yaml(yaml);
         assert_eq!(patterns, vec!["packages/*", "!packages/test-*"]);
-    }
-
-    #[test]
-    fn strip_trailing_commas_string_with_closing_brackets() {
-        let input = r#"{"key": "value with ] and }",}"#;
-        let expected = r#"{"key": "value with ] and }"}"#;
-        assert_eq!(strip_trailing_commas(input), expected);
-    }
-
-    #[test]
-    fn strip_trailing_commas_multiple_levels() {
-        let input = r#"{"a": {"b": [1, 2,], "c": 3,},}"#;
-        let expected = r#"{"a": {"b": [1, 2], "c": 3}}"#;
-        assert_eq!(strip_trailing_commas(input), expected);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { WalkthroughDocument } from "../model/walkthrough";
-import type { FeedItem, Guide, InlineFraming } from "../model/agent";
+import type { FeedItem, InlineFraming } from "../model/agent";
 import type { Capture } from "../main/capture";
 import type { SaveAnnotation } from "../main/shots";
 import type { InspectorCard } from "../main/inspect";
@@ -14,7 +14,6 @@ import type { AppConfig } from "../main/config";
 const api = {
   getReview: (root?: string): Promise<WalkthroughDocument> =>
     ipcRenderer.invoke("review:get", root),
-  getGuide: (root?: string): Promise<Guide> => ipcRenderer.invoke("review:guide", root),
   appendFeed: (item: FeedItem): Promise<void> => ipcRenderer.invoke("feed:append", item),
   getCapturedFraming: (): Promise<InlineFraming[]> => ipcRenderer.invoke("framing:captured"),
   getTradeoffs: (): Promise<TradeOffEnvelope | null> => ipcRenderer.invoke("tradeoffs:get"),
