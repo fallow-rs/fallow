@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788683628295,
+  "lastUpdate": 1788692995597,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "43b0526540c84f669ea1f4a43bf23dbba0c596da",
-          "message": "perf(benchmarks): track viz rendering",
-          "timestamp": "2026-08-19T09:01:34+02:00",
-          "tree_id": "15e94a0e35a06b619a40ab796fbb2d25b45a0ef0",
-          "url": "https://github.com/fallow-rs/fallow/commit/43b0526540c84f669ea1f4a43bf23dbba0c596da"
-        },
-        "date": 1787123148422,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9686225,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49123,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1172126,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8367,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8400,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1bc3eca3cd714ca2cef9f34ab7ae81835c7988fb",
+          "message": "fix: preserve Unicode framing and checkout-independent reports\n\nMoving an unchanged checkout could reorder tied health findings and assign a duplicate collision handle to a different group. Health now resolves metric ties by source location, and duplicate collision ordinals use canonical locations instead of absolute-path digests.\n\nCorrected full-hash collisions use `dup:<16hex>-rN`. Ordinary handles are unchanged. Legacy numeric collision keys remain valid input but cannot alias another group: affected suppressions and normalized baseline findings resurface for review. The config schema and migration documentation describe refreshing those keys and upgrading shared-config consumers.\n\nThe VS Code integration fixture now frames LSP messages by bytes. Its subprocess regressions and actual extension-host suite exercise Unicode workspace paths and navigation.\n\nValidation: failing-before/passing-after regressions; relocated pinned Fastify and SvelteKit reports across cache modes and parser threads; actual trace, suppression, baseline and saved-report format checks; original issue regressions (#2553, #2551 and #2548); real Fastify CLI/LSP editor-host smoke; full editor suite; `npm run verify:fast` and `npm run verify:full`. All passed.\n\nPublic documentation: https://github.com/fallow-rs/docs/pull/23.",
+          "timestamp": "2026-09-06T13:04:22+02:00",
+          "tree_id": "0e8fe7fa32b01c3afe389586aa6fbc926fab330d",
+          "url": "https://github.com/fallow-rs/fallow/commit/1bc3eca3cd714ca2cef9f34ab7ae81835c7988fb"
+        },
+        "date": 1788692991133,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9860469,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50679,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1188000,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8429,
             "unit": "allocations"
           }
         ]
