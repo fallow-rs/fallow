@@ -21,60 +21,11 @@ const writeExecutable = (filePath: string, contents: string): void => {
 
 const createFakeLsp = (binDir: string): string => {
   const lspPath = path.join(binDir, "fallow-lsp");
-  writeExecutable(
-    lspPath,
-    `#!/usr/bin/env node
-process.stdin.setEncoding("utf8");
-let buffer = "";
-const send = (message) => {
-  const payload = JSON.stringify(message);
-  process.stdout.write(\`Content-Length: \${Buffer.byteLength(payload, "utf8")}\\r\\n\\r\\n\${payload}\`);
-};
-const handle = (message) => {
-  if (message.method === "initialize") {
-    send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
-    return;
-  }
-  if (message.method === "shutdown") {
-    send({ jsonrpc: "2.0", id: message.id, result: null });
-    return;
-  }
-  if (message.id !== undefined) {
-    send({
-      jsonrpc: "2.0",
-      id: message.id,
-      error: { code: -32601, message: "Method not found" },
-    });
-    return;
-  }
-  if (message.method === "exit") {
-    process.exit(0);
-  }
-};
-process.stdin.on("data", (chunk) => {
-  buffer += chunk;
-  while (true) {
-    const headerEnd = buffer.indexOf("\\r\\n\\r\\n");
-    if (headerEnd === -1) {
-      return;
-    }
-    const header = buffer.slice(0, headerEnd);
-    const match = header.match(/Content-Length: (\\d+)/i);
-    if (!match) {
-      process.exit(1);
-    }
-    const contentLength = Number(match[1]);
-    const messageStart = headerEnd + 4;
-    if (buffer.length < messageStart + contentLength) {
-      return;
-    }
-    const payload = buffer.slice(messageStart, messageStart + contentLength);
-    buffer = buffer.slice(messageStart + contentLength);
-    handle(JSON.parse(payload));
-  }
-});
-`,
+  const fixturePath = path.join(
+    extensionDevelopmentPath,
+    "test/integration/fixtures/fallow-lsp.cjs",
   );
+  writeExecutable(lspPath, fs.readFileSync(fixturePath, "utf8"));
   return lspPath;
 };
 
@@ -253,7 +204,7 @@ process.stdout.write(JSON.stringify(output));
 };
 
 const createWorkspace = (): string => {
-  const workspaceDir = fs.mkdtempSync("/tmp/fv-");
+  const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow vscode 漢字-"));
   const vscodeDir = path.join(workspaceDir, ".vscode");
   const binDir = path.join(workspaceDir, "bin");
   const srcDir = path.join(workspaceDir, "src");

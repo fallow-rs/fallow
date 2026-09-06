@@ -520,6 +520,51 @@ fn sort_findings_by_severity_surfaces_crap_before_single_metric_findings() {
 }
 
 #[test]
+fn sort_findings_breaks_metric_ties_by_source_location() {
+    let expected = ["worst", "alpha", "beta", "column", "line", "file"];
+    for root in ["/checkout/first", "/other/checkout with spaces"] {
+        for sort in [
+            HealthSort::Severity,
+            HealthSort::Cyclomatic,
+            HealthSort::Cognitive,
+            HealthSort::Lines,
+        ] {
+            let mut findings = [
+                ("file", "src/b.ts", 1, 1),
+                ("line", "src/a.ts", 20, 1),
+                ("column", "src/a.ts", 10, 3),
+                ("beta", "src/a.ts", 10, 2),
+                ("alpha", "src/a.ts", 10, 2),
+                ("worst", "src/z.ts", 1, 1),
+            ]
+            .map(|(name, path, line, col)| {
+                let mut finding = make_finding(name, ExceededThreshold::Cyclomatic);
+                finding.path = Path::new(root).join(path);
+                finding.line = line;
+                finding.col = col;
+                if name == "worst" {
+                    finding.severity = FindingSeverity::Critical;
+                    finding.cyclomatic += 1;
+                    finding.cognitive += 1;
+                    finding.line_count += 1;
+                }
+                finding
+            });
+            for shift in 0..findings.len() {
+                findings.rotate_left(shift);
+                findings.reverse();
+                sort_findings(&mut findings, sort);
+                assert_eq!(
+                    findings.each_ref().map(|finding| finding.name.as_str()),
+                    expected,
+                    "sort {sort:?} with root {root} and input rotation {shift}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn collect_findings_empty_modules() {
     let (findings, files, functions) = collect_findings(
         &[],
