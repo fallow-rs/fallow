@@ -266,17 +266,37 @@ test("checks canonical skills and generated adapters for private references", ()
   );
 });
 
-test("checks classified host rules for stale source paths", () => {
+test("rejects unclassified shared review rules", () => {
   const fixture = setup();
-  const changed = structuredClone(manifest);
-  changed.hostRules = [{ client: "claude", root: ".claude/rules", mode: "scoped-router" }];
-  write(fixture.root, "scripts/knowledge-surfaces.json", `${JSON.stringify(changed, null, 2)}\n`);
-  write(fixture.root, ".claude/rules/rust.md", "# Rust\n\nRead `crates/missing/src/lib.rs`.\n");
-  fixture.visibleFiles.push(".claude/rules/rust.md");
+  write(fixture.root, ".agents/rules/rust.md", "# Rust\n\nRead `crates/missing/src/lib.rs`.\n");
+  fixture.visibleFiles.push(".agents/rules/rust.md");
 
   const errors = validateKnowledgeArchitecture(fixture);
-  assert.ok(errors.some((error) => error.includes("missing repository path")));
+  assert.ok(
+    errors.some((error) => error.includes("host rule is not classified: .agents/rules/rust.md")),
+  );
 });
+
+for (const [client, root] of [
+  ["claude", ".claude/rules"],
+  ["shared", ".agents/rules"],
+]) {
+  test(`checks ${client} rules for stale source paths`, () => {
+    const fixture = setup();
+    const changed = structuredClone(manifest);
+    changed.hostRules.push({ client, root, mode: "scoped-router" });
+    write(fixture.root, "scripts/knowledge-surfaces.json", `${JSON.stringify(changed, null, 2)}\n`);
+    write(fixture.root, `${root}/rust.md`, "# Rust\n\nRead `crates/missing/src/lib.rs`.\n");
+    fixture.visibleFiles.push(`${root}/rust.md`);
+
+    const errors = validateKnowledgeArchitecture(fixture);
+    assert.ok(
+      errors.some(
+        (error) => error.includes(`${root}/rust.md`) && error.includes("missing repository path"),
+      ),
+    );
+  });
+}
 
 test("requires executable external source contracts", () => {
   const fixture = setup();

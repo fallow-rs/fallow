@@ -45,8 +45,8 @@ error by suppressing a downstream detector.
   `crates/engine/src/health/`.
 - Security candidates: `crates/core/src/analyze/security/` with matcher data
   owned by `crates/security/`.
-- Feature flags: extraction facts in `crates/extract/src/flags.rs`, detector
-  behavior in `crates/core/src/analyze/feature_flags.rs`, and orchestration in
+- Feature flags: extraction facts in `crates/extract/src/flags.rs`, project
+  analysis in `crates/engine/src/flags.rs`, and extraction helpers exposed by
   `crates/engine/src/feature_flags.rs`.
 
 ## Accuracy invariants
@@ -415,6 +415,69 @@ expanded for one command, because the cycle guard only rejects names on the
 current path and mutually calling scripts otherwise fan out per path. Both
 bounds are deliberate ceilings: a project that exceeds them loses crediting for
 the deepest calls rather than degrading analysis time.
+
+## Discovery and resolver fallback boundaries
+
+The discovery backend uses `ALLOWED_HIDDEN_DIRS` in
+`crates/core/src/discover/mod.rs` together with explicit script/plugin scopes;
+a blanket hidden-directory exclusion would lose tool configuration and assets.
+Default `build/**` exclusion is root-relative, so nested source directories
+named `build` remain eligible. Keep discovery ignore behavior separate from
+workspace-package candidate filtering.
+
+Resolver fallbacks in `crates/graph/src/resolve/` preserve tracked source
+identity when package exports point to ignored output, pnpm virtual-store paths
+or workspace self-references. Keep dependency-usage metadata when an npm
+specifier resolves back to workspace source. Package `imports` aliases are
+owned by the nearest package manifest; do not turn unmatched hash specifiers
+into global aliases. Per-file tsconfig failure may degrade to ordinary relative
+or package resolution, with diagnostics, without inventing missing path aliases.
+Web-root-relative asset resolution must preserve the importer/workspace context
+before considering the analysis root.
+
+Style resolution is distinct from JavaScript resolution. Preserve scoped npm
+specifier identity, SCSS partial and directory-index lookup, configured include
+paths and installed-package fallback. The `from_style` fact on SFC imports is
+part of that routing contract. React Native platform variants must remain
+reachable alongside standard source extensions.
+
+## Framework and analysis regression boundaries
+
+Framework activation needs explicit project evidence. Plugin entries and
+`used_exports` rules are separate: a generated-binding entry can require export
+credit even under entry-export checking. SvelteKit remote functions and layout
+reset routes, Electron renderer inputs, browser-extension manifest entries and
+WXT entrypoint helpers have deliberately different scopes. Their source tests
+must retain unrelated-file controls. Vite preprocessor data and Cypress config
+paths must pass through shared path/config parsing instead of local copies.
+See the [plugin reference](plugin-internals.md) for ownership and validation.
+
+Keep decorated/lifecycle member credit distinct from enum-member usage, and
+preserve typed instance/inheritance propagation without inventing unresolved
+types. Visibility markers and same-file export references have different
+semantics: local value use does not necessarily make an export surface public.
+An `expected-unused` marker becomes stale when reachable consumers adopt the
+export. Disabled-rule suppressions must not become stale merely because their
+detector did not run.
+
+Dependency credit must distinguish source, scripts, configuration, required
+installed peers, optional peers and runtime-provided built-ins. Dependency
+ignores suppress findings without fabricating resolution edges. Raw-specifier
+unresolved-import ignores are not filesystem globs. Static test coverage is
+reference reachability, not runtime line coverage; complexity suppression
+controls findings while aggregate metrics continue to describe the source.
+Security and feature-flag analysis retain their own opt-in contracts and cannot
+be silently folded into dead-code totals.
+
+## Verification must observe production behavior
+
+Test adapters may construct inputs or expose observations from the real
+implementation. They must not keep retired normalization, parsing or graph
+algorithms alive solely for their old tests. A differential reference algorithm
+is useful when tests compare its result with production across meaningful
+inputs. A test-only copy that is never compared with production is not such an
+oracle. Performance assertions must observe actual operations, rather than
+infer an operation count from a result enum or other derived label.
 
 ## Adding or changing an analyzer
 

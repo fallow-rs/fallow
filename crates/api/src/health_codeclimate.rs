@@ -506,4 +506,193 @@ mod tests {
             issues[0].description
         );
     }
+
+    #[test]
+    fn health_severities_reach_serialized_codeclimate_issues() {
+        for (severity, expected) in [
+            (FindingSeverity::Critical, "critical"),
+            (FindingSeverity::High, "major"),
+            (FindingSeverity::Moderate, "minor"),
+        ] {
+            let mut violation = crap_violation(None);
+            violation.severity = severity;
+            let report = HealthReport {
+                findings: vec![violation.into()],
+                ..HealthReport::default()
+            };
+            let issues = fallow_output::codeclimate_issues_to_value(&build_health_codeclimate(
+                &report,
+                Path::new("/root"),
+            ));
+            let issues = issues
+                .as_array()
+                .expect("CodeClimate output must be an array");
+            assert_eq!(issues.len(), 1);
+            assert_eq!(issues[0]["severity"], expected);
+            assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
+        }
+    }
+
+    #[test]
+    fn runtime_verdicts_reach_serialized_codeclimate_issues() {
+        use fallow_output::{
+            RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageReport,
+        };
+
+        for (verdict, check_name, severity) in [
+            (
+                RuntimeCoverageVerdict::SafeToDelete,
+                "fallow/runtime-safe-to-delete",
+                "critical",
+            ),
+            (
+                RuntimeCoverageVerdict::ReviewRequired,
+                "fallow/runtime-review-required",
+                "major",
+            ),
+            (
+                RuntimeCoverageVerdict::LowTraffic,
+                "fallow/runtime-low-traffic",
+                "minor",
+            ),
+            (
+                RuntimeCoverageVerdict::CoverageUnavailable,
+                "fallow/runtime-coverage-unavailable",
+                "minor",
+            ),
+            (
+                RuntimeCoverageVerdict::Active,
+                "fallow/runtime-coverage",
+                "minor",
+            ),
+            (
+                RuntimeCoverageVerdict::Unknown,
+                "fallow/runtime-coverage",
+                "minor",
+            ),
+        ] {
+            let report = HealthReport {
+                runtime_coverage: Some(RuntimeCoverageReport {
+                    findings: vec![RuntimeCoverageFinding {
+                        id: "runtime-fixture".to_string(),
+                        stable_id: None,
+                        source_hash: None,
+                        path: PathBuf::from("/root/src/legacy.ts"),
+                        function: "legacyHelper".to_string(),
+                        line: 12,
+                        verdict,
+                        invocations: Some(0),
+                        confidence: RuntimeCoverageConfidence::High,
+                        evidence: RuntimeCoverageEvidence {
+                            static_status: "unused".to_string(),
+                            test_coverage: "not_covered".to_string(),
+                            v8_tracking: "tracked".to_string(),
+                            untracked_reason: None,
+                            observation_days: 30,
+                            deployments_observed: 3,
+                        },
+                        actions: Vec::new(),
+                        discriminators: None,
+                    }],
+                    ..RuntimeCoverageReport::default()
+                }),
+                ..HealthReport::default()
+            };
+            let issues = fallow_output::codeclimate_issues_to_value(&build_health_codeclimate(
+                &report,
+                Path::new("/root"),
+            ));
+            let issues = issues
+                .as_array()
+                .expect("CodeClimate output must be an array");
+            assert_eq!(issues.len(), 1, "{verdict:?}");
+            assert_eq!(issues[0]["check_name"], check_name);
+            assert_eq!(issues[0]["severity"], severity);
+            assert_eq!(issues[0]["location"]["path"], "src/legacy.ts");
+            assert_eq!(issues[0]["location"]["lines"]["begin"], 12);
+        }
+    }
+
+    #[test]
+    fn coverage_intelligence_verdicts_and_recommendations_reach_serialized_issues() {
+        use fallow_output::{
+            CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
+            CoverageIntelligenceReport,
+        };
+
+        let recommendations = [
+            (
+                CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge,
+                "fallow/coverage-intelligence-risky-change",
+            ),
+            (
+                CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
+                "fallow/coverage-intelligence-delete",
+            ),
+            (
+                CoverageIntelligenceRecommendation::ReviewBeforeChanging,
+                "fallow/coverage-intelligence-review",
+            ),
+            (
+                CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior,
+                "fallow/coverage-intelligence-refactor",
+            ),
+        ];
+        for (verdict, severity) in [
+            (
+                CoverageIntelligenceVerdict::RiskyChangeDetected,
+                Some("major"),
+            ),
+            (
+                CoverageIntelligenceVerdict::HighConfidenceDelete,
+                Some("major"),
+            ),
+            (CoverageIntelligenceVerdict::ReviewRequired, Some("minor")),
+            (
+                CoverageIntelligenceVerdict::RefactorCarefully,
+                Some("minor"),
+            ),
+            (CoverageIntelligenceVerdict::Clean, None),
+            (CoverageIntelligenceVerdict::Unknown, None),
+        ] {
+            for (recommendation, check_name) in recommendations {
+                let report = HealthReport {
+                    coverage_intelligence: Some(CoverageIntelligenceReport {
+                        schema_version: fallow_output::CoverageIntelligenceSchemaVersion::default(),
+                        verdict,
+                        summary: fallow_output::CoverageIntelligenceSummary::default(),
+                        findings: vec![CoverageIntelligenceFinding {
+                            id: "coverage-fixture".to_string(),
+                            path: PathBuf::from("/root/src/legacy.ts"),
+                            identity: Some("legacyHelper".to_string()),
+                            line: 12,
+                            verdict,
+                            signals: Vec::new(),
+                            recommendation,
+                            confidence: CoverageIntelligenceConfidence::High,
+                            related_ids: Vec::new(),
+                            evidence: CoverageIntelligenceEvidence::default(),
+                            actions: Vec::new(),
+                        }],
+                    }),
+                    ..HealthReport::default()
+                };
+                let issues = fallow_output::codeclimate_issues_to_value(&build_health_codeclimate(
+                    &report,
+                    Path::new("/root"),
+                ));
+                let issues = issues
+                    .as_array()
+                    .expect("CodeClimate output must be an array");
+                if let Some(severity) = severity {
+                    assert_eq!(issues.len(), 1, "{verdict:?}");
+                    assert_eq!(issues[0]["check_name"], check_name);
+                    assert_eq!(issues[0]["severity"], severity);
+                    assert_eq!(issues[0]["location"]["path"], "src/legacy.ts");
+                } else {
+                    assert!(issues.is_empty(), "{verdict:?}");
+                }
+            }
+        }
+    }
 }

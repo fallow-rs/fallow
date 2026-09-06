@@ -8950,3 +8950,73 @@ fn health_snippet_units_move_vital_signs() {
     assert_eq!(mono["vital_signs"]["p90_cyclomatic"].as_u64(), Some(7));
     assert_eq!(snip["vital_signs"]["p90_cyclomatic"].as_u64(), Some(6));
 }
+
+#[test]
+fn health_owned_sections_survive_file_score_selection_and_top() {
+    let config_dir = tempdir().expect("config directory");
+    let config_path = config_dir.path().join("fallow.json");
+    write_file(
+        &config_path,
+        r#"{"rules":{"prop-drilling":"warn","coverage-gaps":"warn"}}"#,
+    );
+    let root = fixture_path("prop-drilling");
+    let run = |sections: &[&str]| {
+        let mut args = vec![
+            "--config",
+            config_path.to_str().expect("fixture config path is UTF-8"),
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ];
+        args.extend_from_slice(sections);
+        let output = run_fallow_in_root("health", &root, &args);
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        parse_json(&output)
+    };
+    let full = run(&["--coverage-gaps", "--file-scores"]);
+    assert!(
+        full["file_scores"]
+            .as_array()
+            .expect("requested file scores must be present")
+            .len()
+            > 1
+    );
+    assert!(
+        !full["prop_drilling_chains"]
+            .as_array()
+            .expect("prop drilling chains must be present")
+            .is_empty()
+    );
+    assert!(
+        !full["coverage_gaps"]["files"]
+            .as_array()
+            .expect("requested coverage files must be present")
+            .is_empty()
+    );
+    let limited = run(&["--coverage-gaps", "--file-scores", "--top", "1"]);
+    assert_eq!(
+        limited["file_scores"]
+            .as_array()
+            .expect("limited file scores must be present")
+            .len(),
+        1
+    );
+    assert_eq!(limited["file_scores"][0], full["file_scores"][0]);
+    assert_eq!(limited["coverage_gaps"], full["coverage_gaps"]);
+    assert_eq!(
+        limited["prop_drilling_chains"],
+        full["prop_drilling_chains"]
+    );
+    let gaps_only = run(&["--coverage-gaps"]);
+    assert!(gaps_only.get("file_scores").is_none());
+    assert_eq!(gaps_only["coverage_gaps"], full["coverage_gaps"]);
+    assert_eq!(
+        gaps_only["prop_drilling_chains"],
+        full["prop_drilling_chains"]
+    );
+    let score_only = run(&["--score"]);
+    assert!(score_only.get("file_scores").is_none());
+    assert!(score_only.get("coverage_gaps").is_none());
+    assert!(score_only.get("prop_drilling_chains").is_none());
+}

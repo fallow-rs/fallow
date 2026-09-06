@@ -18,19 +18,15 @@ export const sanitizeRef = (ref: string): string => (SAFE_REF.test(ref) ? ref : 
 /**
  * Unified `git diff <base> -- <file>` for a changed file (base = the review's
  * merge-base). New-since-base files show as all-additions; binary files are
- * flagged. Errors degrade to an empty patch (the UI shows "no textual diff").
+ * flagged. Git failures propagate so the UI distinguishes errors from empty diffs.
  */
 export const getFileDiff = async (root: string, base: string, file: string): Promise<FileDiff> => {
   const ref = sanitizeRef(base || "HEAD");
-  try {
-    const { stdout } = await run("git", ["diff", ref, "--", file], {
-      cwd: root,
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    return { patch: stdout, binary: /^Binary files /m.test(stdout) };
-  } catch {
-    return { patch: "", binary: false };
-  }
+  const { stdout } = await run("git", ["diff", ref, "--", file], {
+    cwd: root,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  return { patch: stdout, binary: /^Binary files /m.test(stdout) };
 };
 
 /**
@@ -40,13 +36,9 @@ export const getFileDiff = async (root: string, base: string, file: string): Pro
  */
 export const getAllDiffs = async (root: string, base: string): Promise<{ patch: string }> => {
   const ref = sanitizeRef(base || "HEAD");
-  try {
-    const { stdout } = await run("git", ["diff", ref], {
-      cwd: root,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    return { patch: stdout };
-  } catch {
-    return { patch: "" };
-  }
+  const { stdout } = await run("git", ["diff", ref], {
+    cwd: root,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return { patch: stdout };
 };

@@ -3,6 +3,12 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const path = require("node:path");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
+const { spawn } = require("node:child_process");
+const { once } = require("node:events");
+const { resolvePlatformPackage } = require("./run-binary");
 const ownManifest = require("../package.json");
 const {
   SETUP_PROCESS_TIMEOUT_MS,
@@ -162,3 +168,65 @@ test("spawns non-setup commands without a wrapper timeout", () => {
   assert.deepEqual(captured.args, ["status", "--json"]);
   assert.deepEqual(captured.options, { env: process.env, stdio: "inherit" });
 });
+
+test(
+  "the signed setup launcher preserves forwarded SIGTERM as exit 143",
+  { skip: process.platform === "win32", timeout: 10_000 },
+  async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-setup-signal-"));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const packageName = resolvePlatformPackage();
+    const packageDir = path.join(root, "node_modules", packageName);
+    fs.mkdirSync(packageDir, { recursive: true });
+    const binaryName = "fallow-similar-code";
+    const binaryPath = path.join(packageDir, binaryName);
+    const binary = Buffer.from(
+      "#!/usr/bin/env node\nprocess.on('SIGTERM', () => process.exit(0)); process.stdout.write('READY\\n'); setInterval(() => {}, 1000);\n",
+    );
+    const { privateKey, publicKey } = crypto.generateKeyPairSync("ed25519");
+    fs.writeFileSync(binaryPath, binary, { mode: 0o755 });
+    fs.writeFileSync(`${binaryPath}.sig`, crypto.sign(null, binary, privateKey));
+    fs.writeFileSync(
+      path.join(packageDir, "package.json"),
+      JSON.stringify({
+        name: packageName,
+        version: ownManifest.version,
+        fallowDigests: {
+          [binaryName]: `sha256:${crypto.createHash("sha256").update(binary).digest("hex")}`,
+        },
+      }),
+    );
+    // The real verifier checks a signed fixture using an ephemeral trust key.
+    // Package resolution, digest verification, spawning and signal forwarding all run.
+    const driver = `
+    const crypto = require("node:crypto");
+    const verifier = require(${JSON.stringify(require.resolve("./verify-binary"))});
+    const verify = verifier.verifyBinary;
+    const publicKey = crypto.createPublicKey(${JSON.stringify(publicKey.export({ type: "spki", format: "pem" }))});
+    verifier.verifyBinary = artifact => verify(artifact, { createPublicKey: () => publicKey });
+    require(${JSON.stringify(require.resolve("./run-binary"))}).run(["setup"]);
+  `;
+    const child = spawn(process.execPath, ["-e", driver], {
+      env: { ...process.env, NODE_PATH: path.join(root, "node_modules") },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    t.after(() => child.kill("SIGKILL"));
+    let ready = false;
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+      if (!ready && stdout.includes("READY")) {
+        ready = true;
+        child.kill("SIGTERM");
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    const [status, signal] = await once(child, "close");
+    assert.equal(ready, true, stderr);
+    assert.equal(signal, null);
+    assert.equal(status, 143, stderr);
+  },
+);

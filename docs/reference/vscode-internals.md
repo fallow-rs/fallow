@@ -50,6 +50,12 @@ Do not duplicate the full setting list in durable prose.
   one matching backend; the untargeted universal fallback contains all
   supported backends.
 - `dist/` is generated for packaging and remains untracked.
+- Release CI derives the extension version from the release tag. Do not manually
+  bump `editors/vscode/package.json` for a release.
+- `fallow/analysisComplete` notifications update editor status without requiring
+  another CLI analysis. Keep this notification contract synchronized with LSP.
+- CLI output buffers accommodate large monorepos; preserve the limits in
+  `commands.ts` when changing subprocess handling.
 
 ## Verification
 

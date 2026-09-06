@@ -2,6 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const { spawn, spawnSync } = require("node:child_process");
 const { once } = require("node:events");
 const { getPlatformPackage, isPlatformPackage } = require("./platform-package");
@@ -175,7 +176,8 @@ const run = async (args) => {
     }
     if (result.signal) {
       process.stderr.write(`fallow-similar-code terminated by signal ${result.signal}\n`);
-      process.exit(1);
+      const signalNumber = os.constants.signals[result.signal];
+      process.exit(result.status ?? (signalNumber ? 128 + signalNumber : 1));
     }
     process.exit(result.status ?? 1);
   } catch (error) {

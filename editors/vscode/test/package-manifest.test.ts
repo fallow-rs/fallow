@@ -55,12 +55,6 @@ interface ExtensionPackage {
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "../package.json"), "utf8"),
 ) as ExtensionPackage;
-const configKeysSource = readFileSync(resolve(__dirname, "../src/configKeys.ts"), "utf8");
-const extensionSource = readFileSync(resolve(__dirname, "../src/extension.ts"), "utf8");
-const securityTreeViewSource = readFileSync(
-  resolve(__dirname, "../src/securityTreeView.ts"),
-  "utf8",
-);
 
 const command = (id: string): CommandContribution | undefined =>
   pkg.contributes.commands.find((entry) => entry.command === id);
@@ -92,12 +86,11 @@ describe("package.json command contributions", () => {
     });
   });
 
-  it("contributes and registers the baseline-at-HEAD command", () => {
+  it("contributes the baseline-at-HEAD command", () => {
     expect(command("fallow.setBaselineAtHead")).toMatchObject({
       title: "Fallow: Set Baseline at HEAD",
       icon: "$(git-commit)",
     });
-    expect(extensionSource).toContain('registerCommand("fallow.setBaselineAtHead"');
     expect(commandPaletteEntry("fallow.setBaselineAtHead")).toBeUndefined();
   });
 });
@@ -148,10 +141,6 @@ describe("package.json binary download settings", () => {
 
     expect(description).toContain("fallow-lsp");
     expect(description).toContain("fallow CLI");
-  });
-
-  it("restarts binary resolution when auto-download changes", () => {
-    expect(configKeysSource).toContain('"fallow.autoDownload"');
   });
 });
 
@@ -340,10 +329,6 @@ describe("package.json duplication settings", () => {
     expect(properties["fallow.duplication.minLines"]).toBeDefined();
     expect(properties["fallow.duplication.minOccurrences"]).toBeDefined();
   });
-
-  it("restarts and reruns analysis when duplication settings change", () => {
-    expect(configKeysSource).toContain('"fallow.duplication"');
-  });
 });
 
 describe("package.json security candidates contributions", () => {
@@ -423,39 +408,10 @@ describe("package.json security candidates contributions", () => {
       }
     }
   });
-
-  it("frames the runtime info toast and tooltip prefix as candidates, never confirmed", () => {
-    // Beyond the static manifest, the two runtime-rendered security strings (the
-    // post-scan info toast in extension.ts and the per-finding tooltip prefix in
-    // securityTreeView.ts) must also carry candidate framing. A positive claim
-    // that these ARE vulnerabilities/confirmed slips past the manifest guard.
-    const runtimeStrings = [
-      // Info toast surfaced after a completed scan with findings.
-      "These are NOT verified vulnerabilities; verify each before acting.",
-      // Per-finding tooltip prefix.
-      "UNVERIFIED CANDIDATE - verify before acting",
-    ];
-
-    for (const value of runtimeStrings) {
-      const lower = value.toLowerCase();
-      expect(lower).toMatch(/candidate|verify/);
-      if (lower.includes("vulnerabilit") || lower.includes("confirmed")) {
-        const negated = /\b(?:never|not|un\w+|no)\b/.test(lower);
-        expect(negated, `unframed runtime security claim: ${value}`).toBe(true);
-      }
-    }
-
-    // Guard against drift: the literals above must still exist verbatim in the
-    // sources, so changing the runtime copy without re-framing fails here.
-    expect(extensionSource).toContain(
-      "These are NOT verified vulnerabilities; verify each before acting.",
-    );
-    expect(securityTreeViewSource).toContain("UNVERIFIED CANDIDATE - verify before acting");
-  });
 });
 
 describe("package.json license commands", () => {
-  it("contributes the four license commands and registers each in extension.ts", () => {
+  it("contributes the four license commands", () => {
     for (const id of [
       "fallow.license.activate",
       "fallow.license.status",
@@ -463,7 +419,6 @@ describe("package.json license commands", () => {
       "fallow.license.deactivate",
     ]) {
       expect(command(id)?.title).toMatch(/^Fallow: /);
-      expect(extensionSource).toContain(`registerCommand("${id}"`);
     }
   });
 

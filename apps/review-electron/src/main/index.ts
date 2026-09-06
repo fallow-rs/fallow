@@ -3,7 +3,7 @@ import { watch } from "node:fs";
 import { app, BrowserWindow, ipcMain, session, type WebContents } from "electron";
 import { electronApp, optimizer } from "@electron-toolkit/utils";
 import { loadConfig, configPath, type AppConfig } from "./config";
-import { runReview, runGuide, setConfiguredFallowBin } from "./review";
+import { runReview, setConfiguredFallowBin } from "./review";
 import { appendFeedItem } from "./feed";
 import { readCapturedFraming } from "./capturedFraming";
 import { captureUrl } from "./capture";
@@ -66,9 +66,6 @@ ipcMain.handle("review:get", async (_event, root: string | undefined) => {
   latestDoc = await runReview(root ?? reviewRoot());
   return latestDoc;
 });
-ipcMain.handle("review:guide", (_event, root: string | undefined) =>
-  runGuide(root ?? reviewRoot()),
-);
 ipcMain.handle("feed:append", (_event, item: FeedItem) => appendFeedItem(reviewRoot(), item));
 ipcMain.handle("framing:captured", () => readCapturedFraming(reviewRoot()));
 ipcMain.handle("shot:capture", (_event, url: string) => captureUrl(reviewRoot(), url, Date.now()));

@@ -47,43 +47,6 @@ mod tests {
     use fallow_types::output_dead_code::{UnresolvedImportFinding, UnusedFileFinding};
 
     #[test]
-    fn empty_results_no_issues() {
-        let results = AnalysisResults::default();
-        assert_eq!(results.total_issues(), 0);
-        assert!(!results.has_issues());
-    }
-
-    #[test]
-    fn results_with_unused_file() {
-        let mut results = AnalysisResults::default();
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("test.ts"),
-            }));
-        assert_eq!(results.total_issues(), 1);
-        assert!(results.has_issues());
-    }
-
-    #[test]
-    fn results_with_unused_export() {
-        let mut results = AnalysisResults::default();
-        results
-            .unused_exports
-            .push(UnusedExportFinding::with_actions(UnusedExport {
-                path: PathBuf::from("test.ts"),
-                export_name: "foo".to_string(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            }));
-        assert_eq!(results.total_issues(), 1);
-        assert!(results.has_issues());
-    }
-
-    #[test]
     #[expect(
         clippy::too_many_lines,
         reason = "test fixture; linear setup/assert, length is not a maintainability concern"

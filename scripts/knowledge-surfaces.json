@@ -211,6 +211,11 @@
   },
   "hostRules": [
     {
+      "client": "shared",
+      "root": ".agents/rules",
+      "mode": "scoped-router"
+    },
+    {
       "client": "claude",
       "root": ".claude/rules",
       "mode": "scoped-router"

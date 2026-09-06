@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 /// Per-document state tracked by the LSP: the `version` integer supplied by
 /// the client on every `did_open` / `did_change` plus the latest text. The
 /// version is the load-bearing piece for the staleness check in
-/// diagnostic publishing; see `.claude/rules/lsp-server.md` for the
+/// diagnostic publishing; see `docs/reference/lsp-internals.md` for the
 /// "diagnostic publish staleness" invariant.
 #[derive(Debug, Clone)]
 pub struct DocumentState {
@@ -27,10 +27,6 @@ pub fn document_matches_disk(uri: &Uri, text: &str) -> bool {
     uri.to_file_path()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .is_some_and(|disk_text| disk_text == text)
-}
-
-fn opened_mid_run_buffer_matches_disk(uri: &Uri, state: &DocumentState) -> bool {
-    document_matches_disk(uri, &state.text)
 }
 
 /// Decide whether a URI is stale relative to a captured version snapshot.
@@ -64,7 +60,7 @@ pub fn uri_is_stale(
             !snapshot_state.matches_disk || live_state.version > snapshot_state.version
         }
         (Some(_), None) => true,
-        (None, Some(live_state)) => !opened_mid_run_buffer_matches_disk(uri, live_state),
+        (None, Some(live_state)) => !document_matches_disk(uri, &live_state.text),
         (None, None) => false,
     }
 }

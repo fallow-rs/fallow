@@ -328,7 +328,7 @@ fn parse_saved_security<T: DeserializeOwned>(
     value: &serde_json::Value,
     label: &str,
 ) -> Result<T, String> {
-    serde_json::from_value(value.clone()).map_err(|error| {
+    T::deserialize(value).map_err(|error| {
         format!("saved security {label} is incompatible with this Fallow version: {error}")
     })
 }
@@ -924,5 +924,98 @@ mod tests {
         let error = validate_saved_security_envelope(&json!({"schema_version": "9"}))
             .expect_err("future security schema must fail closed");
         assert!(error.contains("unsupported saved security schema version 9"));
+    }
+
+    fn assert_saved_security_parse_parity<T: DeserializeOwned>(
+        value: &serde_json::Value,
+        label: &str,
+        valid: bool,
+    ) {
+        let owned = serde_json::from_value::<T>(value.clone())
+            .map(|_| ())
+            .map_err(|error| {
+                format!("saved security {label} is incompatible with this Fallow version: {error}")
+            });
+        let borrowed = parse_saved_security::<T>(value, label).map(|_| ());
+        assert_eq!(borrowed.is_ok(), valid, "{label}: {borrowed:?}");
+        assert_eq!(
+            borrowed, owned,
+            "{label} must retain exact validation errors"
+        );
+    }
+
+    #[test]
+    fn saved_security_parsing_preserves_owned_value_contract() {
+        let mut full = current_security_envelope();
+        full["security_findings"] = json!([{
+            "finding_id": "security-fixture",
+            "kind": "tainted-sink",
+            "path": "src/[route]/café.ts",
+            "line": 12,
+            "col": 3,
+            "evidence": "quoted \"value\" and unicode café",
+            "severity": "low",
+            "trace": [],
+            "actions": [],
+            "candidate": fallow_types::results::SecurityCandidate::default()
+        }]);
+        full["future_field"] = json!({"nested": ["ignored", {"value": null}]});
+        assert_saved_security_parse_parity::<SavedSecurityEnvelope>(&full, "envelope", true);
+        assert_saved_security_parse_parity::<SavedSecurityFullPayload>(&full, "full payload", true);
+        validate_saved_security_envelope(&full).expect("nonempty current payload remains valid");
+
+        for (field, invalid) in [
+            ("line", json!(-1)),
+            ("severity", json!("invalid")),
+            ("candidate", json!([])),
+        ] {
+            let mut malformed = full.clone();
+            malformed["security_findings"][0][field] = invalid;
+            assert_saved_security_parse_parity::<SavedSecurityFullPayload>(
+                &malformed,
+                "full payload",
+                false,
+            );
+            assert!(validate_saved_security_envelope(&malformed).is_err());
+        }
+        for malformed in [
+            serde_json::Value::Null,
+            json!({}),
+            json!({"security_findings": "not-an-array"}),
+        ] {
+            assert_saved_security_parse_parity::<SavedSecurityFullPayload>(
+                &malformed,
+                "full payload",
+                false,
+            );
+        }
+        let mut invalid_header = full.clone();
+        invalid_header["elapsed_ms"] = json!("invalid");
+        assert_saved_security_parse_parity::<SavedSecurityEnvelope>(
+            &invalid_header,
+            "envelope",
+            false,
+        );
+
+        let summary = json!({"summary": {
+            "security_findings": 1,
+            "by_severity": {"high": 0, "medium": 0, "low": 1},
+            "by_category": {"dangerous-html": 1},
+            "by_reachability": SecurityReachabilityCounts::default(),
+            "by_runtime_state": SecurityRuntimeStateCounts::default(),
+            "unresolved_edge_files": 0,
+            "unresolved_callee_sites": 0,
+            "attack_surface_entries": 0
+        }});
+        assert_saved_security_parse_parity::<SavedSecuritySummaryPayload>(
+            &summary,
+            "summary payload",
+            true,
+        );
+        assert_saved_security_parse_parity::<SavedSecuritySummaryPayload>(
+            &json!({"summary": false}),
+            "summary payload",
+            false,
+        );
     }
 }

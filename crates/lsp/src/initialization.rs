@@ -153,27 +153,3 @@ impl LspDuplicationOptions {
         }
     }
 }
-
-#[cfg(test)]
-pub fn initialization_duplication_options(
-    opts: &serde_json::Value,
-) -> Option<LspDuplicationOptions> {
-    parse_initialization_options(Some(opts)).duplication
-}
-
-/// Read the optional production-mode override from `initializationOptions`.
-/// `Some(true)`/`Some(false)` force production on/off; a missing or non-boolean
-/// `production` key yields `None`, deferring to the project config (issue
-/// #1055). VS Code omits the key for the `"auto"` setting state.
-#[cfg(test)]
-pub fn initialization_production_override(opts: &serde_json::Value) -> Option<bool> {
-    parse_initialization_options(Some(opts)).production
-}
-
-#[cfg(test)]
-pub fn initialization_inline_complexity_enabled(opts: &serde_json::Value) -> bool {
-    parse_initialization_options(Some(opts))
-        .health
-        .and_then(|health| health.inline_complexity)
-        .unwrap_or(false)
-}

@@ -1070,8 +1070,8 @@ jobs:
     needs: changes
     # PR-only and path-filtered to crates/{graph,extract,types,config}: catches contributor PRs
     # that add tempdir / fs-IO tests without inheriting #[cfg_attr(miri, ignore)] from sibling
-    # tests. Does not run on push events (the .githooks/pre-push hook covers that locally for
-    # maintainers who opt in via `git config core.hooksPath .githooks`).
+    # tests. Runs again for merge groups; push events rely on the protected PR checks.
+    # The local pre-push hook checks formatting and Clippy, not Miri.
     if: (needs.changes.outputs.miri == 'true' && github.event_name == 'pull_request') || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     # 60, not 45: the fallow-extract step shares this budget with types+graph and

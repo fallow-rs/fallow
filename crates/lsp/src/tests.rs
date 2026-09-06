@@ -1220,8 +1220,9 @@ fn initialization_duplication_options_reads_vscode_payload() {
         }
     });
 
-    let parsed =
-        initialization_duplication_options(&opts).expect("duplication options should parse");
+    let parsed = parse_initialization_options(Some(&opts))
+        .duplication
+        .expect("duplication options should parse");
 
     assert_eq!(parsed.mode, Some(DetectionMode::Semantic));
     assert_eq!(parsed.near, Some(true));
@@ -1278,31 +1279,13 @@ fn lsp_duplication_options_override_project_config() {
 }
 
 #[test]
-fn initialization_inline_complexity_defaults_off() {
-    let opts = serde_json::json!({});
-
-    assert!(!initialization_inline_complexity_enabled(&opts));
-}
-
-#[test]
-fn initialization_inline_complexity_reads_health_option() {
-    let opts = serde_json::json!({
-        "health": {
-            "inlineComplexity": true
-        }
-    });
-
-    assert!(initialization_inline_complexity_enabled(&opts));
-}
-
-#[test]
 fn initialization_production_override_reads_boolean() {
     assert_eq!(
-        initialization_production_override(&serde_json::json!({ "production": true })),
+        parse_initialization_options(Some(&serde_json::json!({ "production": true }))).production,
         Some(true)
     );
     assert_eq!(
-        initialization_production_override(&serde_json::json!({ "production": false })),
+        parse_initialization_options(Some(&serde_json::json!({ "production": false }))).production,
         Some(false)
     );
 }
@@ -1310,11 +1293,11 @@ fn initialization_production_override_reads_boolean() {
 #[test]
 fn initialization_production_override_defers_when_absent_or_non_boolean() {
     assert_eq!(
-        initialization_production_override(&serde_json::json!({})),
+        parse_initialization_options(Some(&serde_json::json!({}))).production,
         None
     );
     assert_eq!(
-        initialization_production_override(&serde_json::json!({ "production": "on" })),
+        parse_initialization_options(Some(&serde_json::json!({ "production": "on" }))).production,
         None
     );
 }
@@ -4293,7 +4276,9 @@ fn lsp_duplication_options_all_none_preserves_project_config() {
 fn initialization_duplication_options_returns_none_for_absent_key() {
     let opts = serde_json::json!({});
     assert!(
-        initialization_duplication_options(&opts).is_none(),
+        parse_initialization_options(Some(&opts))
+            .duplication
+            .is_none(),
         "missing 'duplication' key must yield None"
     );
 }
@@ -4301,7 +4286,8 @@ fn initialization_duplication_options_returns_none_for_absent_key() {
 #[test]
 fn initialization_duplication_options_returns_default_for_empty_object() {
     let opts = serde_json::json!({ "duplication": {} });
-    let parsed = initialization_duplication_options(&opts)
+    let parsed = parse_initialization_options(Some(&opts))
+        .duplication
         .expect("empty duplication object must deserialize to default LspDuplicationOptions");
     assert_eq!(parsed, LspDuplicationOptions::default());
 }
@@ -4309,7 +4295,8 @@ fn initialization_duplication_options_returns_default_for_empty_object() {
 #[test]
 fn initialization_duplication_options_partial_fields_are_none_when_absent() {
     let opts = serde_json::json!({ "duplication": { "minTokens": 32 } });
-    let parsed = initialization_duplication_options(&opts)
+    let parsed = parse_initialization_options(Some(&opts))
+        .duplication
         .expect("partial duplication object must deserialize");
     assert_eq!(parsed.min_tokens, Some(32));
     assert!(parsed.mode.is_none(), "unset 'mode' field must remain None");
@@ -4323,29 +4310,44 @@ fn initialization_duplication_options_partial_fields_are_none_when_absent() {
 // inline_complexity_enabled false path
 // -------------------------------------------------------------------------
 
-#[test]
-fn initialization_inline_complexity_false_explicitly() {
-    let opts = serde_json::json!({ "health": { "inlineComplexity": false } });
-    assert!(
-        !initialization_inline_complexity_enabled(&opts),
-        "explicit false must disable inline complexity"
-    );
-}
-
-#[test]
-fn initialization_inline_complexity_non_boolean_health_key() {
-    let opts = serde_json::json!({ "health": { "inlineComplexity": "yes" } });
-    assert!(
-        !initialization_inline_complexity_enabled(&opts),
-        "non-boolean inlineComplexity must default to false"
-    );
-}
-
-#[test]
-fn initialization_inline_complexity_missing_health_object() {
-    let opts = serde_json::json!({ "otherKey": true });
-    assert!(
-        !initialization_inline_complexity_enabled(&opts),
-        "absent health object must default inline complexity to false"
-    );
+#[tokio::test(flavor = "current_thread")]
+async fn initialize_applies_health_options_to_server_state() {
+    for (options, enabled) in [
+        (None, false),
+        (Some(json!({})), false),
+        (
+            Some(json!({ "health": { "inlineComplexity": true } })),
+            true,
+        ),
+        (
+            Some(json!({ "health": { "inlineComplexity": false } })),
+            false,
+        ),
+        (
+            Some(json!({ "health": { "inlineComplexity": "yes" } })),
+            false,
+        ),
+        (Some(json!({ "health": true })), false),
+        (Some(json!({ "otherKey": true })), false),
+    ] {
+        let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+        let request = Request::build("initialize")
+            .params(json!({ "capabilities": {}, "initializationOptions": options }))
+            .id(1)
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .expect("ready")
+            .call(request)
+            .await
+            .expect("initialize handled")
+            .expect("response");
+        assert!(response.is_ok(), "{options:?}");
+        assert_eq!(
+            *service.inner().inline_complexity_enabled.read().await,
+            enabled,
+            "{options:?}"
+        );
+    }
 }

@@ -31,7 +31,7 @@ CI runs on Linux, macOS, and Windows. Tests that assert on file paths MUST norma
 - Never hardcode `"src\\foo.ts"` or `"src/foo.ts"` without normalizing first
 
 ## Disallowed types
-`HashMap` and `HashSet` from `std::collections` are forbidden (configured in `.clippy.toml`). Use `FxHashMap` / `FxHashSet` from `rustc_hash` — faster hashing, deterministic iteration order for test stability. New proc-macro dependencies must be added to `[profile.dev.package.*]` with `opt-level = 1` (see existing entries for `serde_derive`, `clap_derive`).
+`HashMap` and `HashSet` from `std::collections` are forbidden (configured in `.clippy.toml`). Use `FxHashMap` / `FxHashSet` from `rustc_hash` for fast hashing. Hash-table iteration is not an output-ordering contract; sort externally visible results when determinism is required. New proc-macro dependencies must be added to `[profile.dev.package.*]` with `opt-level = 1` (see existing entries for `serde_derive`, `clap_derive`).
 
 ## Typo checking
 CI runs `typos` (configured in `_typos.toml`). All code, comments, and test strings must pass `typos` before committing. When tests need intentionally invalid identifiers, use clearly synthetic names (e.g. `nonexistent`, `invalid_zone`) rather than misspellings of real words.

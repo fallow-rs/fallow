@@ -20,6 +20,7 @@ the change reaches them.
 | Change Node bindings or packaged multicall | [Repository map](repo-map.md), [backwards compatibility](../backwards-compatibility.md), `scripts/contract-surfaces.mjs`, `scripts/check-contract-surfaces.mjs`, `crates/napi/`, `crates/multicall/` | Human CLI styling unless shared |
 | Change visualization | [Repository map](repo-map.md), `crates/engine/src/viz.rs`, `crates/cli/src/viz.rs`, `viz-frontend/src/`, `viz-frontend/package.json`, [review routing](review-routing.md) | Unrelated editor integrations |
 | Change GitHub Action or GitLab CI | [Review routing](review-routing.md), action or CI tests, matching integration review skill | Editor integrations |
+| Audit slop or unnecessary maintenance complexity | [Repository map](repo-map.md), `.agents/skills/slop-audit/SKILL.md`, [quality gates](quality-gates.md) | Unrequested metric targets or blanket test deletion |
 | Change docs, skills, or agent routing | [Knowledge architecture](knowledge-architecture.md), [AI tooling](ai-tooling.md), [quality gates](quality-gates.md) | Analyzer internals |
 | Prepare a release | [Release procedure](release-procedure.md), [quality gates](quality-gates.md), [release security](release-security.md), [backwards compatibility](../backwards-compatibility.md), changelog and companion-source contracts | Unchanged analyzer internals |
 | Prepare a commit or push | [Quality gates](quality-gates.md), active workflow skill | Unrelated reference catalogues |

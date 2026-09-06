@@ -136,7 +136,7 @@ fn run_command(command: Command) -> Result<(), String> {
 }
 
 fn status_output(paths: &ModelPaths, downloaded: Option<bool>) -> StatusOutput {
-    let status = inspect_cache(paths, true);
+    let status = inspect_cache(paths);
     StatusOutput {
         protocol_version: PROTOCOL_VERSION,
         embedding_semantics_version: EMBEDDING_SEMANTICS_VERSION,

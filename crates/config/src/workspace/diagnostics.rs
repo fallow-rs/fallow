@@ -599,8 +599,8 @@ pub fn registry_diagnostics_to_fold(root: &Path) -> Vec<WorkspaceDiagnostic> {
 
 /// Directories that are conventionally NOT workspace packages even when a
 /// glob like `packages/*` matches them. Mirrors pnpm/npm/yarn behavior of
-/// silently filtering these out, and extends fallow's existing
-/// `should_skip_workspace_scan_dir` list with build artifacts and tooling
+/// silently filtering these out. Shared by workspace discovery and glob
+/// diagnostics so both exclude hidden directories, build artifacts and tooling
 /// caches.
 #[must_use]
 pub(super) fn is_skip_listed_dir(name: &str) -> bool {

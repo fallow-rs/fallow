@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 
+use serde::Deserialize;
+
 #[cfg(test)]
 use fallow_config::Severity;
 use fallow_config::{FallowConfig, RulesConfig};
@@ -209,7 +211,7 @@ fn envelope_sarif_document_with_context(
         return sarif;
     }
     if kind == EnvelopeKind::Dupes
-        && let Ok(report) = serde_json::from_value::<DuplicationReport>(envelope.clone())
+        && let Ok(report) = DuplicationReport::deserialize(envelope)
     {
         let sarif = resolver.map_or_else(
             || fallow_api::build_duplication_sarif(&report, root, &sarif_rule),
@@ -255,9 +257,7 @@ fn envelope_sarif_document_with_context(
 }
 
 fn saved_security_sarif(envelope: &serde_json::Value) -> Option<serde_json::Value> {
-    let findings =
-        serde_json::from_value::<Vec<SecurityFinding>>(envelope.get("security_findings")?.clone())
-            .ok()?;
+    let findings = Vec::<SecurityFinding>::deserialize(envelope.get("security_findings")?).ok()?;
     Some(crate::security::build_security_sarif(
         &findings,
         envelope.get("gate"),
@@ -419,7 +419,7 @@ fn parse_optional_section<T: serde::de::DeserializeOwned>(
     let Some(value) = envelope.pointer(pointer) else {
         return Ok(None);
     };
-    serde_json::from_value(value.clone()).map(Some)
+    T::deserialize(value).map(Some)
 }
 
 fn extend_sarif_runs(runs: &mut Vec<serde_json::Value>, sarif: &serde_json::Value) {
@@ -500,7 +500,7 @@ fn saved_dead_code_results(
     if kind != EnvelopeKind::DeadCode {
         return None;
     }
-    let mut results = serde_json::from_value::<AnalysisResults>(envelope.clone()).ok()?;
+    let mut results = AnalysisResults::deserialize(envelope).ok()?;
     // Grouped saved envelopes are flattened in group order. Match the
     // analyzer's canonical ordering before rendering the typed SARIF path.
     results.sort();
@@ -978,5 +978,74 @@ mod tests {
 
         assert_eq!(region["startLine"], 1);
         assert_eq!(region["startColumn"], 1);
+    }
+
+    #[test]
+    fn saved_sarif_decode_preserves_malformed_fallbacks() {
+        let root = tempfile::tempdir().expect("root");
+        for (kind, envelope) in [
+            (
+                EnvelopeKind::DeadCode,
+                serde_json::json!({"unused_files": false}),
+            ),
+            (
+                EnvelopeKind::Dupes,
+                serde_json::json!({"clone_groups": false}),
+            ),
+            (
+                EnvelopeKind::Security,
+                serde_json::json!({"security_findings": false}),
+            ),
+            (EnvelopeKind::Security, serde_json::json!({})),
+            (EnvelopeKind::Audit, serde_json::json!({"dead_code": false})),
+            (
+                EnvelopeKind::Audit,
+                serde_json::json!({"duplication": false}),
+            ),
+            (EnvelopeKind::Combined, serde_json::json!({"check": false})),
+            (EnvelopeKind::Combined, serde_json::json!({"dupes": false})),
+        ] {
+            let expected = annotation_sarif_document(kind, &envelope, root.path(), None);
+            assert_eq!(
+                envelope_sarif_document(kind, &envelope, root.path()),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn saved_sarif_optional_section_preserves_absence_and_decode_errors() {
+        assert!(
+            parse_optional_section::<AnalysisResults>(&serde_json::json!({}), "/check")
+                .expect("missing section must deserialize as absence")
+                .is_none()
+        );
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!(false),
+            serde_json::json!({"unused_files": [{"path": 42}]}),
+        ] {
+            let expected = serde_json::from_value::<AnalysisResults>(value.clone())
+                .unwrap_err()
+                .to_string();
+            let actual = parse_optional_section::<AnalysisResults>(
+                &serde_json::json!({"check": value}),
+                "/check",
+            )
+            .unwrap_err()
+            .to_string();
+            assert_eq!(actual, expected);
+        }
+        for kind in [EnvelopeKind::Audit, EnvelopeKind::Combined] {
+            let root = tempfile::tempdir().expect("root");
+            let empty = envelope_sarif_document(kind, &serde_json::json!({}), root.path());
+            assert_eq!(empty["version"], "2.1.0");
+            assert!(
+                empty["runs"]
+                    .as_array()
+                    .expect("SARIF runs must be an array")
+                    .is_empty()
+            );
+        }
     }
 }

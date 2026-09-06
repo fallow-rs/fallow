@@ -140,14 +140,6 @@ impl TestReachability {
     }
 
     #[cfg(test)]
-    const fn traversal_count(&self) -> usize {
-        match self {
-            Self::NoRoots => 0,
-            Self::Legacy(_) | Self::Profiled { .. } => 1,
-        }
-    }
-
-    #[cfg(test)]
     const fn dirty_word_pop_count(&self) -> usize {
         match self {
             Self::Profiled {
@@ -316,6 +308,9 @@ impl ModuleGraph {
         entry_points: &FxHashSet<FileId>,
         total_capacity: usize,
     ) -> FixedBitSet {
+        #[cfg(test)]
+        tests::record_traversal();
+
         let mut visited = FixedBitSet::with_capacity(total_capacity);
         let mut queue = VecDeque::new();
 
@@ -348,6 +343,9 @@ impl ModuleGraph {
         profiles: &[TestReachabilityProfile],
         total_capacity: usize,
     ) -> (FixedBitSet, TestReachabilityIndex, usize) {
+        #[cfg(test)]
+        tests::record_traversal();
+
         ProfileWorklist::new(profiles, total_capacity).run(self)
     }
 
@@ -435,6 +433,21 @@ mod tests {
     use fallow_types::extract::{
         ExportName, ImportInfo, ImportedName, ModuleLoadMechanism, ReExportInfo, VisibilityTag,
     };
+
+    std::thread_local! {
+        static TRAVERSALS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    pub(super) fn record_traversal() {
+        TRAVERSALS.with(|count| count.set(count.get() + 1));
+    }
+
+    fn capture_traversals<T>(run: impl FnOnce() -> T) -> (T, usize) {
+        let before = TRAVERSALS.with(std::cell::Cell::get);
+        let result = run();
+        let traversals = TRAVERSALS.with(|count| count.get() - before);
+        (result, traversals)
+    }
 
     /// Build a graph with separate runtime and test entry point sets.
     ///
@@ -1250,14 +1263,16 @@ mod tests {
         assert!(graph.test_reachability_index.profile_reaches(FileId(2), 0));
         assert!(graph.test_reachability_index.profile_masks(FileId(2), 1));
         assert!(graph.test_reachability_index.profile_reaches(FileId(0), 1));
-        assert!(!graph.test_reachability_index.covers_path(
-            FileId(0),
-            &std::iter::once((FileId(2), ModuleLoadMechanism::EsModule)),
-        ));
-        assert!(graph.test_reachability_index.covers_path(
-            FileId(1),
-            &std::iter::once((FileId(2), ModuleLoadMechanism::EsModule)),
-        ));
+        let export = &graph.modules[2].exports[0];
+        let reference_from = |source| {
+            export
+                .references
+                .iter()
+                .position(|reference| reference.from_file == source)
+                .expect("both test roots reference the target export")
+        };
+        assert!(!graph.is_test_reference_covered(export, reference_from(FileId(0))));
+        assert!(graph.is_test_reference_covered(export, reference_from(FileId(1))));
     }
 
     #[test]
@@ -1479,9 +1494,17 @@ mod tests {
         let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
 
         let plan = TestReachabilityPlan::new(&root_set, &[], 512);
-        let reachability = graph.collect_test_reachable(plan, 512);
+        let (reachability, traversals) =
+            capture_traversals(|| graph.collect_test_reachable(plan, 512));
 
-        assert_eq!(reachability.traversal_count(), 1);
+        assert_eq!(traversals, 1);
+        let (reachable, _) = reachability.into_parts();
+        let reachable = reachable.expect("test roots have a reachability bitset");
+        assert!(
+            root_set
+                .iter()
+                .all(|root| reachable.contains(root.0 as usize))
+        );
     }
 
     #[test]
@@ -1508,9 +1531,10 @@ mod tests {
         let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
 
         let plan = TestReachabilityPlan::new(&root_set, &replacements, 129);
-        let reachability = graph.collect_test_reachable(plan, 129);
+        let (reachability, traversals) =
+            capture_traversals(|| graph.collect_test_reachable(plan, 129));
 
-        assert_eq!(reachability.traversal_count(), 1);
+        assert_eq!(traversals, 1);
         assert_eq!(reachability.dirty_word_pop_count(), 129);
     }
 
@@ -1538,9 +1562,10 @@ mod tests {
         let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
 
         let plan = TestReachabilityPlan::new(&root_set, &replacements, 131);
-        let reachability = graph.collect_test_reachable(plan, 131);
+        let (reachability, traversals) =
+            capture_traversals(|| graph.collect_test_reachable(plan, 131));
 
-        assert_eq!(reachability.traversal_count(), 1);
+        assert_eq!(traversals, 1);
         assert_eq!(reachability.dirty_word_pop_count(), 67);
         assert_eq!(graph.test_reachability_index.profile_count, 65);
         assert_eq!(graph.test_reachability_index.words_per_file, 2);
