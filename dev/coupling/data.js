@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788677167833,
+  "lastUpdate": 1788683648246,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "43b0526540c84f669ea1f4a43bf23dbba0c596da",
-          "message": "perf(benchmarks): track viz rendering",
-          "timestamp": "2026-08-19T09:01:34+02:00",
-          "tree_id": "15e94a0e35a06b619a40ab796fbb2d25b45a0ef0",
-          "url": "https://github.com/fallow-rs/fallow/commit/43b0526540c84f669ea1f4a43bf23dbba0c596da"
-        },
-        "date": 1787122957039,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 455,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1230,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/7e225b5d4061bbb16b5dcb4dad46c37dd9a95ca7"
         },
         "date": 1788677164119,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 52,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.27,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 472,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1284,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d1b5d427aea98c17c5fe94e4753f0d3af864614a",
+          "message": "refactor: remove redundant work and test runtime contracts\n\n## What\n\nRemove unused test implementations and forwarding code, reuse owned report data, and add a reusable slop-audit workflow with checked documentation routes.\n\nGit failures now reach the review app's error state instead of appearing as empty diffs. The signed setup launcher preserves termination status, and the sidecar cache always performs its required integrity check.\n\n## Why\n\nSome tests exercised a separate test-only implementation or failed before reaching the behavior they claimed to cover. They now exercise production parsing, graph queries, initialization, cleanup, command registration, and serialized reports. Report rendering also avoids unnecessary deep copies while retaining output and error compatibility.\n\n## Test plan\n\n- Canonical `npm run verify:full`, including workspace, wrapper, conformance, documentation, benchmark compilation, and native Node checks.\n- Affected editor, Electron, sidecar, and GitLab suites, including actual extension-host and review-app end-to-end behavior.\n- Fault injection confirms the old assertions accepted broken production behavior and the replacement assertions reject it.\n- Public Fastify and SvelteKit output parity, real MCP/LSP stdio, and the original scoped-package, varlock, and catalog-suppression regression matrices.\n- Matched allocation probes with identical dependencies and inputs; health JSON remains identical.",
+          "timestamp": "2026-09-06T10:28:31+02:00",
+          "tree_id": "e9659c188329beb6863c6de291a24c1bec9829da",
+          "url": "https://github.com/fallow-rs/fallow/commit/d1b5d427aea98c17c5fe94e4753f0d3af864614a"
+        },
+        "date": 1788683645149,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
