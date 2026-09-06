@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_output::codeclimate_fingerprint_hash;
 use fallow_types::results::{FeatureFlag, FlagKind};
 
 use crate::error::emit_error;
@@ -450,21 +451,6 @@ fn print_flags_compact(flags: &[FeatureFlag], config: &ResolvedConfig) {
     }
 }
 
-/// FNV-1a (64-bit) fingerprint for deterministic CodeClimate fingerprints.
-/// Matches the algorithm used in `report/codeclimate.rs`.
-fn fnv_fingerprint(parts: &[&str]) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for part in parts {
-        for byte in part.bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3);
-        }
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
-}
-
 /// Helper: get relative path string for a flag.
 fn relative_path(flag: &FeatureFlag, root: &std::path::Path) -> String {
     flag.path
@@ -621,8 +607,12 @@ fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
                     f.guarded_dead_exports.len()
                 );
             }
-            let fingerprint =
-                fnv_fingerprint(&["feature-flag", &path, &f.line.to_string(), &f.flag_name]);
+            let fingerprint = codeclimate_fingerprint_hash(&[
+                "feature-flag",
+                &path,
+                &f.line.to_string(),
+                &f.flag_name,
+            ]);
             serde_json::json!({
                 "type": "issue",
                 "check_name": "fallow/feature-flag",
@@ -727,17 +717,6 @@ mod tests {
             explain: false,
             top: None,
         }
-    }
-
-    #[test]
-    fn fnv_fingerprint_is_deterministic_16_hex() {
-        let a = fnv_fingerprint(&["src/index.ts", "FEATURE_X", "3"]);
-        let b = fnv_fingerprint(&["src/index.ts", "FEATURE_X", "3"]);
-        assert_eq!(a, b);
-        assert_eq!(a.len(), 16);
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
-        // Per-part separation means reordering parts changes the digest.
-        assert_ne!(a, fnv_fingerprint(&["FEATURE_X", "src/index.ts", "3"]));
     }
 
     #[test]

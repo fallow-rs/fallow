@@ -70,27 +70,6 @@ export const parseLicenseJson = (stdout: string): LicenseParseResult => {
   return { ok: true, data: record as unknown as LicenseStatusJson };
 };
 
-/** Short, human-facing label for a license state (status-bar text suffix). */
-export const licenseStateLabel = (state: LicenseState): string => {
-  switch (state) {
-    case "valid":
-      return "active";
-    case "expired_warning":
-    case "expired_watermark":
-    case "hard_fail":
-      return "expired";
-    case "missing":
-      return "no license";
-    default: {
-      // Exhaustiveness guard: adding a state to the union without a label
-      // here is a compile error, and the vitest test asserts a label exists
-      // for every member.
-      const never: never = state;
-      return never;
-    }
-  }
-};
-
 /** Presentation parts for the license status-bar item. */
 export interface LicenseStatusBarParts {
   /** Status-bar text, including a leading codicon. */

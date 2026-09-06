@@ -64,6 +64,14 @@ pub fn deregister(id: u64) {
         .remove(&id);
 }
 
+#[cfg(test)]
+pub fn is_registered(id: u64) -> bool {
+    registry()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .contains_key(&id)
+}
+
 /// Snapshot every registered PID and kill each. Polls for liveness
 /// with a bounded budget. Caller is the platform signal handler thread.
 ///
@@ -216,8 +224,11 @@ mod tests {
     fn register_deregister_roundtrip() {
         let id = register(42);
         assert!(id > 0);
+        assert!(is_registered(id));
         deregister(id);
+        assert!(!is_registered(id));
         deregister(id);
+        assert!(!is_registered(id));
     }
 
     #[cfg(unix)]

@@ -734,16 +734,6 @@ export const formatCuratedSeedDrift = (comparison, { recording = false, recordPa
   return lines.join("\n");
 };
 
-/** True only when BOTH the start and end markers for a section are present.
- * A fully-absent pair means the target has not adopted this section, so the
- * orchestrator skips it; a half-present pair is malformed and still throws via
- * `spliceSection`. */
-export const hasSection = (text, sectionId) => {
-  const start = `<!-- generated:${sectionId}:start -->`;
-  const end = `<!-- generated:${sectionId}:end -->`;
-  return text.includes(start) && text.includes(end);
-};
-
 /** True when NEITHER marker is present: the target has not adopted the section
  * at all, so the orchestrator skips it gracefully. A half-present pair (exactly
  * one marker) returns false here and is left to `spliceSection`, which throws on

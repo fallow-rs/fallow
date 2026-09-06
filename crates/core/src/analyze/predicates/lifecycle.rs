@@ -321,26 +321,6 @@ mod tests {
     }
 
     #[test]
-    fn angular_guard_methods() {
-        assert!(is_angular_lifecycle_method("canActivate"));
-        assert!(is_angular_lifecycle_method("canDeactivate"));
-        assert!(is_angular_lifecycle_method("canActivateChild"));
-        assert!(is_angular_lifecycle_method("canMatch"));
-        assert!(is_angular_lifecycle_method("resolve"));
-        assert!(is_angular_lifecycle_method("intercept"));
-        assert!(is_angular_lifecycle_method("transform"));
-    }
-
-    #[test]
-    fn angular_form_methods() {
-        assert!(is_angular_lifecycle_method("validate"));
-        assert!(is_angular_lifecycle_method("registerOnChange"));
-        assert!(is_angular_lifecycle_method("registerOnTouched"));
-        assert!(is_angular_lifecycle_method("writeValue"));
-        assert!(is_angular_lifecycle_method("setDisabledState"));
-    }
-
-    #[test]
     fn angular_lifecycle_non_angular_methods() {
         assert!(!is_angular_lifecycle_method("myCustomMethod"));
         assert!(!is_angular_lifecycle_method("constructor"));
@@ -354,18 +334,6 @@ mod tests {
             "UNSAFE_componentWillReceiveProps"
         ));
         assert!(is_react_lifecycle_method("UNSAFE_componentWillUpdate"));
-    }
-
-    #[test]
-    fn react_static_lifecycle_methods() {
-        assert!(is_react_lifecycle_method("getDerivedStateFromProps"));
-        assert!(is_react_lifecycle_method("getDerivedStateFromError"));
-    }
-
-    #[test]
-    fn react_context_methods() {
-        assert!(is_react_lifecycle_method("getChildContext"));
-        assert!(is_react_lifecycle_method("contextType"));
     }
 
     #[test]

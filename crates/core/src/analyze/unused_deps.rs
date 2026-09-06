@@ -924,35 +924,6 @@ fn collect_workspace_unused_categories(
     (prod, dev, optional)
 }
 
-/// Check if a dependency should be skipped during unused dependency analysis.
-///
-/// Shared guard conditions for both production and dev dependency loops:
-/// already flagged from root, used in scripts, referenced by plugins, in ignore list,
-/// is a workspace package, or used by files in the workspace.
-///
-/// Retained for test coverage of the individual guard logic.
-#[cfg(test)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "test-only guard helper; params are independent suppression sets, bundling would not aid readability"
-)]
-fn should_skip_dependency(
-    dep: &str,
-    root_flagged: &FxHashSet<String>,
-    script_used: &FxHashSet<&str>,
-    plugin_referenced: &FxHashSet<&str>,
-    ignore_deps: &FxHashSet<&str>,
-    workspace_names: &FxHashSet<&str>,
-    is_used_in_workspace: impl Fn(&str) -> bool,
-) -> bool {
-    root_flagged.contains(dep)
-        || script_used.contains(dep)
-        || plugin_referenced.contains(dep)
-        || ignore_deps.contains(dep)
-        || workspace_names.contains(dep)
-        || is_used_in_workspace(dep)
-}
-
 /// Find production dependencies that are only imported via type-only imports.
 ///
 /// In production mode, `import type { Foo } from 'pkg'` is erased at compile time,

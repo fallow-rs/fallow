@@ -29,8 +29,7 @@ pub(super) use super::super::{
     DepCategoryConfig, LineOffsetsMap, SharedDepSets, UnlistedDependencyInput,
     collect_unused_for_category, find_dev_dependencies_in_production, find_import_location,
     find_test_only_dependencies, find_type_only_dependencies, find_unresolved_imports,
-    find_unused_dependencies, is_package_listed_for_file, should_skip_dependency,
-    workspace_dependency_map,
+    find_unused_dependencies, is_package_listed_for_file, workspace_dependency_map,
 };
 
 #[expect(
@@ -169,25 +168,6 @@ pub(super) fn build_graph_with_npm_import_sources(
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     (graph, resolved_modules)
-}
-
-pub(super) type SkipDepSets = (
-    FxHashSet<String>,
-    FxHashSet<&'static str>,
-    FxHashSet<&'static str>,
-    FxHashSet<&'static str>,
-    FxHashSet<&'static str>,
-);
-
-/// Helper: build empty sets for should_skip_dependency args.
-pub(super) fn empty_sets() -> SkipDepSets {
-    (
-        FxHashSet::default(),
-        FxHashSet::default(),
-        FxHashSet::default(),
-        FxHashSet::default(),
-        FxHashSet::default(),
-    )
 }
 
 pub(super) type SharedSets = (

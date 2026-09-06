@@ -55,7 +55,7 @@ export type Judgment = {
  * required, `consider` is optional, `fyi` needs nothing. */
 export type JudgmentAction = "block" | "address" | "consider" | "fyi";
 
-export const JUDGMENT_ACTIONS: readonly JudgmentAction[] = ["block", "address", "consider", "fyi"];
+const JUDGMENT_ACTIONS: readonly JudgmentAction[] = ["block", "address", "consider", "fyi"];
 
 export const isJudgmentAction = (value: unknown): value is JudgmentAction =>
   typeof value === "string" && (JUDGMENT_ACTIONS as readonly string[]).includes(value);

@@ -8,7 +8,6 @@ import {
   firstSentence,
   formatCuratedSeedDrift,
   hasCuratedSeedDrift,
-  hasSection,
   parseExistingTable,
   readCuratedSeedRecord,
   regenerateCliReferenceMd,
@@ -545,7 +544,6 @@ test("task-matrix section regenerates from the manifest and is idempotent", () =
 
 test("a target without the task-matrix markers regenerates the other sections and is left intact", () => {
   assert.ok(sectionIsAbsent(DOC_WITHOUT_TASK_MATRIX, "task-matrix"));
-  assert.ok(!hasSection(DOC_WITHOUT_TASK_MATRIX, "task-matrix"));
   // Tolerance: regeneration must NOT throw on the absent section.
   const out = regenerateSkillMd(DOC_WITHOUT_TASK_MATRIX, SCHEMA);
   // The adopted sections still regenerate: new command + issue-type rows appear.

@@ -7,7 +7,7 @@
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY } from "d3-force";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity, type D3ZoomEvent } from "d3-zoom";
-import Graph from "graphology";
+import Graphology from "graphology";
 import louvain from "graphology-communities-louvain";
 import type { AppState } from "../state";
 import type { VizFile } from "../types";
@@ -141,7 +141,7 @@ const louvainCluster = (
   files: VizFile[],
   edges: [number, number, number][],
 ): Map<string, number[]> => {
-  const graph = new Graph({ type: "undirected" });
+  const graph = new Graphology({ type: "undirected" });
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) graph.addNode(String(fileIndex));
   const seen = new Set<string>();
   for (const [src, tgt] of edges) {

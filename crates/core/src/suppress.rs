@@ -24,16 +24,6 @@ pub fn kind_to_kebab(kind: IssueKind) -> &'static str {
     issue_kind_to_kebab(kind)
 }
 
-/// Map an `IssueKind` to its corresponding severity in `RulesConfig`.
-///
-/// Thin wrapper over `RulesConfig::severity_for_kind` (the single source of
-/// truth for the kind-to-severity table, which also backs the `fallow schema`
-/// manifest's per-rule `default_severity`). Kept here as a free helper only to
-/// preserve the `(rules, kind)` call shape at the local call sites.
-fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
-    rules.severity_for_kind(kind)
-}
-
 /// Issue kinds whose suppression is not checked via `SuppressionContext`
 /// in `find_dead_code_full`. Excludes CLI-side kinds (checked in health/flags
 /// commands) and dependency-level kinds (not file-scoped, suppression never
@@ -382,7 +372,7 @@ fn stale_entry_for_suppression(
     }
 
     if let Some(kind) = s.issue_kind_target()
-        && severity_for_kind(file_rules, kind) == Severity::Off
+        && file_rules.severity_for_kind(kind) == Severity::Off
     {
         return None;
     }
@@ -468,7 +458,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn severity_for_kind_maps_every_core_kind_to_its_field() {
+    fn severity_for_kind_maps_configured_fields_and_default() {
         let rules = RulesConfig {
             unused_exports: Severity::Warn,
             unused_types: Severity::Off,
@@ -478,23 +468,23 @@ mod tests {
         };
 
         assert_eq!(
-            severity_for_kind(&rules, IssueKind::UnusedExport),
+            rules.severity_for_kind(IssueKind::UnusedExport),
             Severity::Warn
         );
         assert_eq!(
-            severity_for_kind(&rules, IssueKind::UnusedType),
+            rules.severity_for_kind(IssueKind::UnusedType),
             Severity::Off
         );
         assert_eq!(
-            severity_for_kind(&rules, IssueKind::UnresolvedImport),
+            rules.severity_for_kind(IssueKind::UnresolvedImport),
             Severity::Error
         );
         assert_eq!(
-            severity_for_kind(&rules, IssueKind::BoundaryViolation),
+            rules.severity_for_kind(IssueKind::BoundaryViolation),
             Severity::Off
         );
         assert_eq!(
-            severity_for_kind(&rules, IssueKind::PrivateTypeLeak),
+            rules.severity_for_kind(IssueKind::PrivateTypeLeak),
             Severity::Off
         );
     }

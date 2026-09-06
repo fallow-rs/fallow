@@ -267,6 +267,20 @@ mod tests {
     }
 
     #[test]
+    fn codeclimate_fingerprint_hash_is_deterministic_16_hex() {
+        let a = codeclimate_fingerprint_hash(&["src/index.ts", "FEATURE_X", "3"]);
+        let b = codeclimate_fingerprint_hash(&["src/index.ts", "FEATURE_X", "3"]);
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 16);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        // Per-part separation means reordering parts changes the digest.
+        assert_ne!(
+            a,
+            codeclimate_fingerprint_hash(&["FEATURE_X", "src/index.ts", "3"])
+        );
+    }
+
+    #[test]
     fn codeclimate_fingerprint_parts_are_separated() {
         assert_ne!(
             codeclimate_fingerprint_hash(&["ab", "c"]),

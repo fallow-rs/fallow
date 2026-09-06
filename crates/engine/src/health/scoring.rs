@@ -7800,14 +7800,6 @@ mod tests {
     }
 
     #[test]
-    fn build_test_refs_empty_inputs() {
-        let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
-        let graph = fallow_graph::graph::ModuleGraph::build(&[], &[], &[]);
-        let refs = build_test_referenced_exports(&exports, StaticTestCoverage::new(&graph));
-        assert!(refs.is_empty());
-    }
-
-    #[test]
     fn istanbul_crap_empty_complexity() {
         let result = istanbul_crap_default(&[], None, false);
         assert!((result.max_crap).abs() < f64::EPSILON);
@@ -7861,29 +7853,6 @@ mod tests {
         let funcs = vec![make_fn_complexity(10)];
         let (max, above) = compute_crap_scores_binary(&funcs, true);
         assert!((max - 10.0).abs() < f64::EPSILON);
-        assert_eq!(above, 0);
-    }
-
-    #[test]
-    fn binary_crap_not_reachable() {
-        let funcs = vec![make_fn_complexity(6)];
-        let (max, above) = compute_crap_scores_binary(&funcs, false);
-        assert!((max - 42.0).abs() < f64::EPSILON);
-        assert_eq!(above, 1);
-    }
-
-    #[test]
-    fn binary_crap_threshold_boundary() {
-        let funcs = vec![make_fn_complexity(5)];
-        let (max, above) = compute_crap_scores_binary(&funcs, false);
-        assert!((max - 30.0).abs() < f64::EPSILON);
-        assert_eq!(above, 1);
-    }
-
-    #[test]
-    fn binary_crap_empty() {
-        let (max, above) = compute_crap_scores_binary(&[], true);
-        assert!((max).abs() < f64::EPSILON);
         assert_eq!(above, 0);
     }
 

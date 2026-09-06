@@ -8,7 +8,6 @@ const {
   SETUP_PROCESS_TIMEOUT_MS,
   SETUP_TIMEOUT_EXIT_CODE,
   SETUP_TIMEOUT_MESSAGE,
-  resolveBinary,
   resolveBinaryArtifact,
   setupTimeoutFor,
   spawnNative,
@@ -21,19 +20,19 @@ const manifest = (overrides = {}) =>
 
 test("resolves an exact-version regular native binary", () => {
   const manifestPath = path.join("/packages", "native", "package.json");
-  const resolved = resolveBinary(
+  const resolved = resolveBinaryArtifact(
     PACKAGE_NAME,
     () => manifestPath,
     () => manifest(),
     () => ({ isFile: () => true, isSymbolicLink: () => false }),
   );
-  assert.equal(resolved, path.join("/packages", "native", "fallow-similar-code"));
+  assert.equal(resolved.binaryPath, path.join("/packages", "native", "fallow-similar-code"));
 });
 
 test("rejects a platform package from another release", () => {
   assert.throws(
     () =>
-      resolveBinary(
+      resolveBinaryArtifact(
         PACKAGE_NAME,
         () => "/native/package.json",
         () => manifest({ version: "0.0.0" }),
@@ -46,7 +45,7 @@ test("rejects a platform package from another release", () => {
 test("rejects symlinked binaries", () => {
   assert.throws(
     () =>
-      resolveBinary(
+      resolveBinaryArtifact(
         PACKAGE_NAME,
         () => "/native/package.json",
         () => manifest(),

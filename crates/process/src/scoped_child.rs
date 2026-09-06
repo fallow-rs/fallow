@@ -261,20 +261,15 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
-    fn assert_deregistered(id: u64) {
-        registry::deregister(id);
-    }
-
     #[test]
     #[cfg(unix)]
     fn scoped_child_drop_deregisters() {
         let mut cmd = Command::new("true");
         let child = ScopedChild::spawn(&mut cmd).expect("spawn true");
         let id = child.id.expect("freshly spawned wrapper has an id");
-        assert!(id > 0);
+        assert!(registry::is_registered(id));
         drop(child);
-        assert_deregistered(id);
+        assert!(!registry::is_registered(id));
     }
 
     #[test]
@@ -299,9 +294,24 @@ mod tests {
         let mut cmd = Command::new("true");
         let child = ScopedChild::spawn(&mut cmd).expect("spawn true");
         let id = child.id.expect("freshly spawned wrapper has an id");
+        assert!(registry::is_registered(id));
         let status = child.wait().expect("wait true");
         assert!(status.success());
-        assert_deregistered(id);
+        assert!(!registry::is_registered(id));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn scoped_child_wait_with_output_deregisters_and_collects_stdout() {
+        let mut cmd = Command::new("echo");
+        cmd.arg("hello").stdout(Stdio::piped());
+        let child = ScopedChild::spawn(&mut cmd).expect("spawn echo");
+        let id = child.id.expect("freshly spawned wrapper has an id");
+        assert!(registry::is_registered(id));
+        let output = child.wait_with_output().expect("wait echo");
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"hello\n");
+        assert!(!registry::is_registered(id));
     }
 
     #[test]

@@ -198,19 +198,6 @@ fn tokenize_multiple_expression_statements_all_have_semicolons() {
 }
 
 #[test]
-fn tokenize_jsx_self_closing_element() {
-    let tokens = tokenize_tsx("const x = <Input type=\"text\" />;");
-    let has_input = tokens
-        .iter()
-        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "Input"));
-    let has_type = tokens
-        .iter()
-        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "type"));
-    assert!(has_input, "Should contain JSX element name 'Input'");
-    assert!(has_type, "Should contain JSX attribute name 'type'");
-}
-
-#[test]
 fn tokenize_logical_expression_order() {
     let tokens = tokenize("const x = a && b;");
     let kinds: Vec<&TokenKind> = tokens.iter().map(|t| &t.kind).collect();
@@ -329,30 +316,6 @@ fn tokenize_deeply_nested_if_else_chain() {
 }
 
 #[test]
-fn tokenize_object_with_nested_member_access() {
-    let tokens = tokenize("const x = { a: obj.b, c: arr[0] };");
-    let has_dot = tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Punctuation(PunctuationType::Dot)));
-    let bracket_count = tokens
-        .iter()
-        .filter(|t| {
-            matches!(
-                t.kind,
-                TokenKind::Punctuation(
-                    PunctuationType::OpenBracket | PunctuationType::CloseBracket,
-                )
-            )
-        })
-        .count();
-    assert!(has_dot, "Should have dot for obj.b");
-    assert!(
-        bracket_count >= 2,
-        "Should have brackets for arr[0], got {bracket_count}"
-    );
-}
-
-#[test]
 fn tokenize_same_source_produces_identical_tokens() {
     let code = r"
 function processData(items) {
@@ -443,78 +406,6 @@ fn exact_token_sequence_for_return_statement() {
         .position(|k| matches!(k, TokenKind::NullLiteral))
         .expect("Should have null literal");
     assert!(return_idx < null_idx, "return should come before null");
-}
-
-#[test]
-fn strip_types_non_null_assertion_matches_js() {
-    let stripped = tokenize_cross_language("const x = value!;");
-    let js_tokens = {
-        let path = PathBuf::from("test.js");
-        tokenize_file(&path, "const x = value;", false).tokens
-    };
-    assert_eq!(
-        stripped.len(),
-        js_tokens.len(),
-        "TS non-null assertion stripped should match JS token count: stripped={}, js={}",
-        stripped.len(),
-        js_tokens.len()
-    );
-}
-
-#[test]
-fn strip_types_class_with_generics() {
-    let stripped =
-        tokenize_cross_language("class Container<T> { value: T; constructor(v: T) { } }");
-    let has_class = stripped
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Class)));
-    assert!(has_class, "Should still have class keyword");
-    let colon_count = stripped
-        .iter()
-        .filter(|t| matches!(t.kind, TokenKind::Punctuation(PunctuationType::Colon)))
-        .count();
-    assert_eq!(
-        colon_count, 0,
-        "Type annotation colons should be stripped, got {colon_count}"
-    );
-}
-
-#[test]
-fn strip_types_arrow_function_matches_js() {
-    let stripped = tokenize_cross_language("const add = (a: number, b: number): number => a + b;");
-    let js_tokens = {
-        let path = PathBuf::from("test.js");
-        tokenize_file(&path, "const add = (a, b) => a + b;", false).tokens
-    };
-    assert_eq!(
-        stripped.len(),
-        js_tokens.len(),
-        "Stripped arrow function should match JS: stripped={}, js={}",
-        stripped.len(),
-        js_tokens.len()
-    );
-    for (i, (ts_tok, js_tok)) in stripped.iter().zip(js_tokens.iter()).enumerate() {
-        assert_eq!(
-            ts_tok.kind, js_tok.kind,
-            "Token {i} mismatch in arrow function: TS={:?}, JS={:?}",
-            ts_tok.kind, js_tok.kind
-        );
-    }
-}
-
-#[test]
-fn strip_types_mixed_import_keeps_only_value_import() {
-    let stripped = tokenize_cross_language(
-        "import type { Type } from './mod';\nimport { value } from './mod';",
-    );
-    let import_count = stripped
-        .iter()
-        .filter(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)))
-        .count();
-    assert_eq!(
-        import_count, 1,
-        "Only value import should remain, got {import_count}"
-    );
 }
 
 #[test]

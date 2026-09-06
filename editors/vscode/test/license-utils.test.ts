@@ -3,22 +3,13 @@ import {
   escapeMarkdown,
   hasLicenseMaterial,
   licensePlaceholderParts,
-  licenseStateLabel,
   licenseStatusBarParts,
   parseLicenseJson,
   validateEmail,
   validateJwtShape,
 } from "../src/license-utils.js";
 import { escapeMarkdownMultiline } from "../src/markdown-utils.js";
-import type { LicenseState, LicenseStatusJson } from "../src/license-types.js";
-
-const ALL_STATES: ReadonlyArray<LicenseState> = [
-  "valid",
-  "expired_warning",
-  "expired_watermark",
-  "hard_fail",
-  "missing",
-];
+import type { LicenseStatusJson } from "../src/license-types.js";
 
 const status = (overrides: Partial<LicenseStatusJson> = {}): LicenseStatusJson => ({
   kind: "license-status",
@@ -175,14 +166,6 @@ describe("licensePlaceholderParts", () => {
     const parts = licensePlaceholderParts();
     expect(parts.text).toBe("$(key) Fallow License");
     expect(parts.severity).toBeNull();
-  });
-});
-
-describe("licenseStateLabel", () => {
-  it("has a label for every state in the union (exhaustiveness guard)", () => {
-    for (const state of ALL_STATES) {
-      expect(licenseStateLabel(state).length).toBeGreaterThan(0);
-    }
   });
 });
 

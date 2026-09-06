@@ -462,7 +462,7 @@ fn collect_child_occurrences(
     let mut first_child: Option<(u32, Occurrence)> = None;
     let mut children: Option<FxHashMap<u32, SeedOccurrences>> = None;
     for &occurrence in occurrences {
-        let Some(token) = child_token_after_range(
+        let Some(token) = next_extension_token(
             ranked_files,
             boundary_prefixes,
             has_boundaries,
@@ -486,28 +486,6 @@ fn collect_child_occurrences(
     }
 
     children
-}
-
-fn child_token_after_range(
-    ranked_files: &[Vec<u32>],
-    boundary_prefixes: &[Option<Vec<u32>>],
-    has_boundaries: bool,
-    occurrence: Occurrence,
-    length: usize,
-) -> Option<u32> {
-    let tokens = &ranked_files[occurrence.file_id];
-    if occurrence.offset + length >= tokens.len()
-        || (has_boundaries
-            && range_contains_boundary(
-                boundary_prefixes[occurrence.file_id].as_ref(),
-                occurrence.offset,
-                length + 1,
-            ))
-    {
-        return None;
-    }
-
-    Some(tokens[occurrence.offset + length])
 }
 
 fn insert_child_occurrence(
