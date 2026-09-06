@@ -41,6 +41,32 @@ These interfaces are covered by semver , breaking changes only happen in major v
   Tagged root envelopes are now the only supported object-shaped JSON contract. The CLI `check` command is a legacy alias for `dead-code`; new JSON discriminators use the canonical `dead-code` name. `CodeClimateOutput` stays as a sibling root branch because the Code Climate / GitLab Code Quality spec requires a bare JSON array at the root; discriminate it by checking whether the document root is an array. Helper/spec JSON roots outside `FallowOutput`, such as `fix`, `fallow config`, non-boundary `fallow list` modes, SARIF, CodeClimate, telemetry, the `audit-cache remove` and `audit-cache prune` maintenance envelopes, and baseline/config files written by fallow, are not part of this envelope contract. The two audit-cache envelopes still carry their own `kind` and `schema_version` fields and follow the same additive-only evolution policy.
 - **Security survivor schema**: `security-survivors` uses schema version `2`; `summary.unverdicted` is required and reports candidates without matching verifier verdicts.
 
+#### Report ordering and colliding duplication handles
+
+Health complexity findings retain the requested descending metric priority.
+Ties use ascending project-relative path, line, column, then function name, so
+discovery order and checkout location do not change which tied finding `--top`
+selects.
+
+Ordinary `dup:<8hex>` handles and widened `dup:<16hex>` handles retain their
+content identity. Groups sharing the full content hash use report-scoped
+`dup:<16hex>-rN` handles. Their ordinal is assigned from canonical fragment,
+location and metric ordering, independent of the checkout's common path prefix.
+Changing the collision bucket can still change its report-scoped ordinals.
+
+Legacy numeric collision handles (`dup:<16hex>-N`) remain valid input syntax,
+but are not aliases for the corrected handles. Old collision suppressions and
+baseline keys therefore resurface their findings rather than silently selecting
+a different group. Regenerate the report, review the affected group, and refresh
+its `ignoredClones` key or baseline; obtain a current handle before tracing it.
+Unsuffixed handles are unaffected. Update all analyzer installations before
+storing `-rN` suppression keys, because older versions reject that config syntax.
+Use `minimumVersion` to pin a shared config's required released version.
+
+The report field types and envelope versions are unchanged. This corrects
+location-dependent ordering and introduces a distinguishable collision handle
+to prevent unsafe reuse of the previous ordinal assignment.
+
 #### Pinning the output JSON Schema
 
 The committed `docs/output-schema.json` carries a stable top-level `$id`:

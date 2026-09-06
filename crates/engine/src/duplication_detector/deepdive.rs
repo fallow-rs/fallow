@@ -25,8 +25,9 @@ pub const FINGERPRINT_PREFIX: &str = "dup:";
 /// Canonical identity for a clone group when assigning report-scoped handles.
 ///
 /// Compact digests of canonically sorted fragments and locations make report
-/// entries addressable and provide a report-order-independent collision-suffix
-/// order without retaining a second copy of every source fragment and path.
+/// entries addressable without retaining a second copy of every source fragment
+/// and path. Collision suffixes use lexical locations instead of these digests
+/// so a different checkout prefix cannot change their order.
 /// The separately hashed, sorted, deduplicated normalized instance sequences
 /// provide the public content identity.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -63,7 +64,9 @@ impl CloneFingerprintKey {
 /// Most reports retain the short `dup:<8hex>` handle. If two report entries
 /// collide on those low 32 bits, only the colliding entries widen to
 /// `dup:<16hex>`. If a full 64-bit collision ever occurs inside one report,
-/// every entry in that collision bucket receives a deterministic numeric suffix.
+/// every entry in that collision bucket receives a deterministic `-rN` suffix.
+/// Legacy `-N` suffixes deliberately do not resolve, since their assignment
+/// depended on the absolute checkout path and could address a different group.
 #[derive(Debug, Clone)]
 pub struct CloneFingerprintSet {
     by_key: FxHashMap<CloneFingerprintKey, String>,
@@ -76,11 +79,7 @@ impl CloneFingerprintSet {
     pub fn from_groups(groups: &[CloneGroup]) -> Self {
         let entries: Vec<_> = groups
             .iter()
-            .map(|group| {
-                let key = CloneFingerprintKey::from_group(group);
-                let hash = hash_instances(&group.instances);
-                (key, hash)
-            })
+            .map(|group| (group, hash_instances(&group.instances)))
             .collect();
         Self::from_hashed_entries(&entries)
     }
@@ -136,7 +135,7 @@ impl CloneFingerprintSet {
             .find(|group| CloneFingerprintKey::from_group(group) == *key)
     }
 
-    fn from_hashed_entries(entries: &[(CloneFingerprintKey, u64)]) -> Self {
+    fn from_hashed_entries(entries: &[(&CloneGroup, u64)]) -> Self {
         let mut short_counts: FxHashMap<u32, usize> = FxHashMap::default();
         let mut full_counts: FxHashMap<u64, usize> = FxHashMap::default();
         for (_, hash) in entries {
@@ -144,19 +143,38 @@ impl CloneFingerprintSet {
             *full_counts.entry(*hash).or_insert(0) += 1;
         }
 
-        let mut sorted_entries = entries.to_vec();
-        sorted_entries.sort_unstable_by(|(left_key, left_hash), (right_key, right_hash)| {
-            left_key
-                .cmp(right_key)
-                .then_with(|| left_hash.cmp(right_hash))
-        });
+        // Only full collisions need location ordering. Within one report, a
+        // shared checkout prefix cancels in lexical comparisons. Hashing that
+        // prefix instead would arbitrarily reorder groups after relocation.
+        let mut sorted_entries: Vec<_> = entries
+            .iter()
+            .map(|(group, hash)| {
+                let locations = if full_counts.get(hash).copied().unwrap_or(0) > 1 {
+                    sorted_locations(&group.instances)
+                } else {
+                    Vec::new()
+                };
+                (CloneFingerprintKey::from_group(group), *hash, locations)
+            })
+            .collect();
+        sorted_entries.sort_unstable_by(
+            |(left, left_hash, left_locations), (right, right_hash, right_locations)| {
+                left.fragments_digest
+                    .cmp(&right.fragments_digest)
+                    .then_with(|| left_locations.cmp(right_locations))
+                    .then_with(|| left.token_count.cmp(&right.token_count))
+                    .then_with(|| left.line_count.cmp(&right.line_count))
+                    .then_with(|| left.instance_count.cmp(&right.instance_count))
+                    .then_with(|| left_hash.cmp(right_hash))
+            },
+        );
 
         let mut full_ordinals: FxHashMap<u64, usize> = FxHashMap::default();
         let mut ambiguous_short_handles: FxHashSet<String> = FxHashSet::default();
         let mut by_key = FxHashMap::default();
         let mut key_by_fingerprint = FxHashMap::default();
 
-        for (key, hash) in &sorted_entries {
+        for (key, hash, _) in &sorted_entries {
             let short = *hash as u32;
             let short_handle = format!("{FINGERPRINT_PREFIX}{short:08x}");
             let fingerprint = if short_counts.get(&short).copied().unwrap_or(0) == 1 {
@@ -169,7 +187,7 @@ impl CloneFingerprintSet {
                 } else {
                     let ordinal = full_ordinals.entry(*hash).or_insert(0);
                     *ordinal += 1;
-                    format!("{full_handle}-{ordinal}")
+                    format!("{full_handle}-r{ordinal}")
                 }
             };
 
@@ -235,7 +253,7 @@ fn hash_distinct_fragments(instances: &[CloneInstance]) -> u128 {
     hasher.digest128()
 }
 
-fn hash_sorted_locations(instances: &[CloneInstance]) -> u128 {
+fn sorted_locations(instances: &[CloneInstance]) -> Vec<(&Path, usize, usize)> {
     let mut locations = instances
         .iter()
         .map(|instance| {
@@ -247,9 +265,12 @@ fn hash_sorted_locations(instances: &[CloneInstance]) -> u128 {
         })
         .collect::<Vec<_>>();
     locations.sort_unstable();
+    locations
+}
 
+fn hash_sorted_locations(instances: &[CloneInstance]) -> u128 {
     let mut hasher = Xxh3::new();
-    for (path, start_line, end_line) in locations {
+    for (path, start_line, end_line) in sorted_locations(instances) {
         update_hash_bytes(&mut hasher, path.as_os_str().as_encoded_bytes());
         hasher.update(&start_line.to_le_bytes());
         hasher.update(&end_line.to_le_bytes());
@@ -612,6 +633,126 @@ mod tests {
         }
     }
 
+    fn relocated_collision_groups(root: &Path) -> Vec<CloneGroup> {
+        ["src", "other"]
+            .into_iter()
+            .map(|directory| {
+                let mut clone = group(&["alpha()", "alpha()"], 2);
+                for (index, instance) in clone.instances.iter_mut().enumerate() {
+                    instance.file = root.join(directory).join(format!("file-{index}.ts"));
+                }
+                clone
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fingerprint_set_relocation_preserves_collision_identity() {
+        const RELOCATIONS: usize = 32;
+        let groups = relocated_collision_groups(Path::new("/original/checkout"));
+        let fingerprints = CloneFingerprintSet::from_groups(&groups);
+        let expected = fingerprints.fingerprint_for_group(&groups[0]);
+        for index in 0..RELOCATIONS {
+            let root = PathBuf::from(format!("/different/checkout-{index}/with spaces/café"));
+            let mut relocated = relocated_collision_groups(&root);
+            relocated.reverse();
+            for group in &mut relocated {
+                group.instances.reverse();
+            }
+            let actual = CloneFingerprintSet::from_groups(&relocated);
+            assert_eq!(
+                actual.fingerprint_for_group(&relocated[1]),
+                expected,
+                "{root:?}"
+            );
+            assert!(std::ptr::eq(
+                actual
+                    .find_group(&relocated, &expected)
+                    .expect("relocated trace handle resolves"),
+                &raw const relocated[1],
+            ));
+            assert_eq!(
+                actual.fingerprint_for_parts(
+                    &relocated[1].instances,
+                    relocated[1].token_count,
+                    relocated[1].line_count
+                ),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn corrected_collision_handles_do_not_alias_legacy_ordinals() {
+        let groups = relocated_collision_groups(Path::new("/project"));
+        let fingerprints = CloneFingerprintSet::from_groups(&groups);
+        for group in &groups {
+            let corrected = fingerprints.fingerprint_for_group(group);
+            assert!(corrected.contains("-r"));
+            let legacy = corrected.replacen("-r", "-", 1);
+            assert!(fingerprints.find_group(&groups, &legacy).is_none());
+            assert!(fingerprints.find_group(&groups, &corrected).is_some());
+        }
+    }
+
+    #[test]
+    fn relocated_collision_suppression_matches_only_corrected_handles() {
+        use super::super::types::DuplicationReport;
+        use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups};
+
+        let original = DuplicationReport {
+            clone_groups: relocated_collision_groups(Path::new("/original/checkout")),
+            ..Default::default()
+        };
+        let fingerprints = CloneFingerprintSet::from_groups(&original.clone_groups);
+        let reviewed = fingerprints.ignored_clone_key_for_group(&original.clone_groups[0]);
+        let baseline =
+            DuplicationBaselineData::from_report(&original, Path::new("/original/checkout"));
+        let root = Path::new("/relocated/with spaces/café");
+        let mut relocated = DuplicationReport {
+            clone_groups: relocated_collision_groups(root),
+            ..Default::default()
+        };
+        relocated.clone_groups.reverse();
+        for group in &mut relocated.clone_groups {
+            group.instances.reverse();
+        }
+        let remaining_location = relocated.clone_groups[0].instances[0].file.clone();
+
+        let mut ignored = relocated.clone();
+        super::super::apply_ignored_clones_filter(&mut ignored, std::slice::from_ref(&reviewed));
+        assert_eq!(ignored.clone_groups.len(), 1);
+        assert_eq!(
+            ignored.clone_groups[0].instances[0].file,
+            remaining_location
+        );
+        assert_eq!(ignored.stats.clone_groups_ignored, 1);
+
+        let mut partial_baseline =
+            DuplicationBaselineData::from_report(&original, Path::new("/original/checkout"));
+        partial_baseline.normalized_clone_fingerprints = vec![reviewed.clone()];
+        let filtered = filter_new_clone_groups(relocated.clone(), &partial_baseline, root);
+        assert_eq!(filtered.clone_groups.len(), 1);
+        assert_eq!(
+            filtered.clone_groups[0].instances[0].file,
+            remaining_location
+        );
+        assert!(
+            filter_new_clone_groups(relocated.clone(), &baseline, root)
+                .clone_groups
+                .is_empty()
+        );
+
+        let legacy = reviewed.replacen("-r", "-", 1);
+        super::super::apply_ignored_clones_filter(&mut relocated, std::slice::from_ref(&legacy));
+        assert_eq!(relocated.clone_groups.len(), original.clone_groups.len());
+        partial_baseline.normalized_clone_fingerprints = vec![legacy];
+        // Populated old raw/location fields must not turn a normalized-key miss
+        // into an ambiguous fallback suppression.
+        let filtered = filter_new_clone_groups(relocated, &partial_baseline, root);
+        assert_eq!(filtered.clone_groups.len(), original.clone_groups.len());
+    }
+
     #[test]
     fn fingerprint_is_stable_and_prefixed() {
         let g = group(&["foo(bar)", "foo(baz)"], 3);
@@ -728,18 +869,9 @@ mod tests {
         let b = group(&["beta()"], 2);
         let c = group(&["gamma()"], 2);
         let entries = vec![
-            (
-                CloneFingerprintKey::from_group(&a),
-                0x0000_0001_1234_5678_u64,
-            ),
-            (
-                CloneFingerprintKey::from_group(&b),
-                0x0000_0002_1234_5678_u64,
-            ),
-            (
-                CloneFingerprintKey::from_group(&c),
-                0x0000_0003_8765_4321_u64,
-            ),
+            (&a, 0x0000_0001_1234_5678_u64),
+            (&b, 0x0000_0002_1234_5678_u64),
+            (&c, 0x0000_0003_8765_4321_u64),
         ];
 
         let fingerprints = CloneFingerprintSet::from_hashed_entries(&entries);
@@ -772,14 +904,8 @@ mod tests {
         let a = group(&["alpha()"], 2);
         let b = group(&["beta()"], 2);
         let mut entries = vec![
-            (
-                CloneFingerprintKey::from_group(&a),
-                0x0000_0001_1234_5678_u64,
-            ),
-            (
-                CloneFingerprintKey::from_group(&b),
-                0x0000_0001_1234_5678_u64,
-            ),
+            (&a, 0x0000_0001_1234_5678_u64),
+            (&b, 0x0000_0001_1234_5678_u64),
         ];
 
         let fingerprints = CloneFingerprintSet::from_hashed_entries(&entries);
@@ -800,7 +926,7 @@ mod tests {
         assigned.sort_unstable();
         assert_eq!(
             assigned,
-            ["dup:0000000112345678-1", "dup:0000000112345678-2"]
+            ["dup:0000000112345678-r1", "dup:0000000112345678-r2"]
         );
         assert!(
             fingerprints

@@ -80,9 +80,11 @@ fn is_valid_ignored_clone_key(value: &str) -> bool {
     match suffix {
         None => true,
         Some(suffix) => {
+            let ordinal = suffix.strip_prefix('r').unwrap_or(suffix);
             hex.len() == 16
-                && !suffix.starts_with('0')
-                && suffix.parse::<usize>().is_ok_and(|ordinal| ordinal > 0)
+                && !ordinal.starts_with('0')
+                && ordinal.bytes().all(|byte| byte.is_ascii_digit())
+                && ordinal.parse::<usize>().is_ok_and(|ordinal| ordinal > 0)
         }
     }
 }
@@ -145,7 +147,7 @@ pub struct DuplicatesConfig {
     /// and makes the group reportable again.
     #[serde(default, deserialize_with = "deserialize_ignored_clones")]
     #[schemars(inner(regex(
-        pattern = r"^dup:(?:[0-9a-f]{8}|[0-9a-f]{16}(?:-[1-9][0-9]*)?):(?:[2-9]|[1-9][0-9]+)$"
+        pattern = r"^dup:(?:[0-9a-f]{8}|[0-9a-f]{16}(?:-r?[1-9][0-9]*)?):(?:[2-9]|[1-9][0-9]+)$"
     )))]
     pub ignored_clones: Vec<String>,
 
@@ -526,6 +528,16 @@ mod tests {
     }
 
     #[test]
+    fn ignored_clones_accepts_corrected_and_legacy_collision_handles() {
+        let keys = ["dup:0123456789abcdef-r1:2", "dup:0123456789abcdef-1:2"];
+        let config: DuplicatesConfig = serde_json::from_value(serde_json::json!({
+            "ignoredClones": keys
+        }))
+        .expect("both collision generations remain valid config input");
+        assert_eq!(config.ignored_clones, keys);
+    }
+
+    #[test]
     fn ignored_clones_rejects_malformed_keys() {
         for key in [
             "6f12ab34:2",
@@ -536,6 +548,13 @@ mod tests {
             "dup:0123456789abcdef-0:2",
             "dup:0123456789abcdef-01:2",
             "dup:0123456789abcdef-extra:2",
+            "dup:0123456789abcdef-r:2",
+            "dup:0123456789abcdef-r0:2",
+            "dup:0123456789abcdef-r01:2",
+            "dup:0123456789abcdef-r+1:2",
+            "dup:0123456789abcdef-+1:2",
+            "dup:0123456789abcdef-rr1:2",
+            "dup:6f12ab34-r1:2",
         ] {
             let json = serde_json::json!({ "ignoredClones": [key] });
             let error = serde_json::from_value::<DuplicatesConfig>(json).unwrap_err();

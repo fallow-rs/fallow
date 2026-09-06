@@ -47,6 +47,10 @@ an exit code.
 
 ## Invariants
 
+- Health tie ordering and duplication collision handles are owned by the engine.
+  Renderers, trace lookup, suppressions and baselines must use the same assigned
+  handles. Preserve the [collision migration contract](../backwards-compatibility.md#report-ordering-and-colliding-duplication-handles)
+  when changing report identity.
 - Resolve user-provided file inputs against the user's project root before an
   audit switches to a base worktree. Prefix values such as `--coverage-root`
   remain absolute prefixes and must not be reinterpreted as input files.
