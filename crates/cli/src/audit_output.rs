@@ -390,7 +390,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
 
     if !has_dupe_groups && let Some(ref dupes) = result.dupes {
         crate::dupes::print_default_ignore_note(dupes, quiet);
-        crate::dupes::print_min_occurrences_note(dupes, quiet);
+        crate::dupes::print_audit_min_occurrences_note(dupes, quiet);
     }
 
     if !quiet {
@@ -469,15 +469,15 @@ fn print_audit_duplication_section(
         show_headers,
         "── Duplication ────────────────────────────────────",
     );
-    crate::dupes::print_dupes_result(
-        dupes,
+    crate::dupes::print_audit_dupes_result(&crate::dupes::DupesRenderOptions {
+        result: dupes,
         quiet,
         explain,
-        false,
-        true,
-        false,
-        crate::json_style::JsonStyle::Compact,
-    );
+        summary: false,
+        summary_heading: true,
+        show_explain_tip: false,
+        json_style: crate::json_style::JsonStyle::Compact,
+    });
 }
 
 /// Per-group demotion detail under `--explain`: one line per introduced clone

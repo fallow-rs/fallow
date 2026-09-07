@@ -138,36 +138,97 @@ fn strip_leading_path(question: &str, anchor_file: &str) -> String {
         .map_or_else(|| question.to_string(), str::to_string)
 }
 
-/// Cap the FIRST parenthesized comma-list (the contract members) to
+/// Cap the first parenthesized comma-list (the contract members) to
 /// `max_members` names, replacing the overflow with "+N more". Text outside that
-/// first parenthetical (including the trailing question) is preserved verbatim.
+/// parenthetical (including the trailing question) is preserved verbatim.
+///
+/// The scan skips parentheticals that hold no `", "`, so a single-token one is
+/// passed over rather than ending the search. Route-group directory segments
+/// make this load-bearing: an anchor path like `app/(marketing)/lib/api.ts` puts
+/// `(marketing)` ahead of the member list in every question that still carries
+/// its path, and stopping there would leave the real list uncapped.
 ///
 /// Public because the human brief needs the cap WITHOUT the rest of
 /// [`clean_decision_fact`]: the brief prints no separate anchor path and the
 /// question is the judgment it exists to pose, so it has to keep both.
+///
+/// A member can carry its own parenthetical, for example a dependency marked
+/// `` `vitest` (dev) ``. The scan matches nested parentheses and splits the list
+/// only at its own depth, so such a marker neither ends the list early nor
+/// counts as a separate member.
 #[must_use]
 pub fn cap_member_list(text: &str, max_members: usize) -> String {
-    let Some(open) = text.find('(') else {
-        return text.to_string();
-    };
-    let Some(rel_close) = text[open..].find(')') else {
-        return text.to_string();
-    };
-    let close = open + rel_close;
-    let inner = &text[open + 1..close];
-    // Only collapse a genuine member list (comma-separated identifiers), never a
-    // prose parenthetical like "(env)" or "(the cache)".
-    let members: Vec<&str> = inner.split(", ").collect();
-    if members.len() <= max_members {
+    if max_members == 0 {
         return text.to_string();
     }
-    let shown = members[..max_members].join(", ");
-    let more = members.len() - max_members;
-    format!(
-        "{}({shown}, +{more} more){}",
-        &text[..open],
-        &text[close + 1..]
-    )
+    let mut from = 0usize;
+    while let Some(rel_open) = text[from..].find('(') {
+        let open = from + rel_open;
+        // An unclosed `(` (for example in an anchor path) is not the list.
+        // Skip it, so the list after it is still capped.
+        let Some(close) = matching_close_paren(text, open) else {
+            from = open + 1;
+            continue;
+        };
+        let inner = &text[open + 1..close];
+        let members = split_top_level_members(inner);
+        // Only collapse a genuine member list (comma-separated identifiers), never
+        // a prose parenthetical like "(env)", "(the cache)" or "(marketing)".
+        if members.len() < 2 {
+            from = open + 1;
+            continue;
+        }
+        if members.len() <= max_members {
+            return text.to_string();
+        }
+        let shown = members[..max_members].join(", ");
+        let more = members.len() - max_members;
+        return format!(
+            "{}({shown}, +{more} more){}",
+            &text[..open],
+            &text[close + 1..]
+        );
+    }
+    text.to_string()
+}
+
+/// The byte offset of the `)` that closes the `(` at `open`, or `None` when the
+/// text leaves it unclosed.
+fn matching_close_paren(text: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (offset, ch) in text[open..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open + offset);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split a parenthetical at each `", "` outside a nested parenthetical.
+fn split_top_level_members(inner: &str) -> Vec<&str> {
+    let mut members = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (offset, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 && inner[offset..].starts_with(", ") => {
+                members.push(&inner[start..offset]);
+                start = offset + 2;
+            }
+            _ => {}
+        }
+    }
+    members.push(&inner[start..]);
+    members
 }
 
 /// Drop a trailing decision question (a sentence ending in `?`) so a guided tour
@@ -436,6 +497,85 @@ mod tests {
         assert!(out.contains("(env)"), "single member kept: {out}");
         assert!(!out.contains('?'), "trailing question dropped: {out}");
         assert!(out.ends_with("outside this PR."), "observation kept: {out}");
+    }
+
+    #[test]
+    fn a_route_group_segment_is_not_mistaken_for_the_member_list() {
+        // Next.js and SvelteKit route groups are parenthesized directory segments,
+        // so a raw question that still carries its anchor path offers `(marketing)`
+        // as the first parenthetical. The brief caps without stripping that path,
+        // and the export list is what has to collapse.
+        let q = "`app/(marketing)/lib/api.ts` changes exports (a, b, c, d, e) imported by 9 files outside this PR.";
+        let out = cap_member_list(q, 3);
+        assert!(
+            out.starts_with("`app/(marketing)/lib/api.ts` "),
+            "the route group survives verbatim: {out}"
+        );
+        assert!(
+            out.contains("(a, b, c, +2 more)"),
+            "the export list is the parenthetical that collapses: {out}"
+        );
+    }
+
+    #[test]
+    fn a_route_group_anchor_caps_the_tour_fact_too() {
+        let q = "`src/routes/(app)/+page.server.ts` changes exports (load, actions, prerender, ssr) imported by 4 files outside this PR. Does this change break or alter what those callers expect?";
+        let out = clean_decision_fact(q, "src/routes/(app)/+page.server.ts", 2);
+        assert_eq!(
+            out,
+            "changes exports (load, actions, +2 more) imported by 4 files outside this PR."
+        );
+    }
+
+    #[test]
+    fn a_prose_parenthetical_before_the_members_does_not_end_the_scan() {
+        // "(env)" is a single token, so it is passed over rather than accepted as a
+        // one-member list that reports nothing to collapse.
+        let out = cap_member_list(
+            "changes exports (env) and (a, b, c, d) imported by 2 files outside this PR.",
+            2,
+        );
+        assert_eq!(
+            out,
+            "changes exports (env) and (a, b, +2 more) imported by 2 files outside this PR."
+        );
+    }
+
+    #[test]
+    fn a_dev_marker_inside_the_list_does_not_split_it() {
+        // Dependency questions mark a dev dependency with "(dev)" inside the
+        // member list. Before the nested match, the scan closed the list at the
+        // first "(dev)" and left five members uncapped.
+        let q = "`package.json` moves 5 dependencies across a major version (`a` 1 -> 2, \
+                 `b` (dev) 1 -> 2, `c` 1 -> 2, `d` (dev) 1 -> 2, `e` 1 -> 2), imported by \
+                 9 in-repo modules. Which changes reach those importers?";
+        assert_eq!(
+            cap_member_list(q, 3),
+            "`package.json` moves 5 dependencies across a major version (`a` 1 -> 2, \
+             `b` (dev) 1 -> 2, `c` 1 -> 2, +2 more), imported by 9 in-repo modules. \
+             Which changes reach those importers?"
+        );
+    }
+
+    #[test]
+    fn an_unclosed_parenthetical_leaves_the_text_unchanged() {
+        let q = "changes exports (a, b, c, d imported by 2 files";
+        assert_eq!(cap_member_list(q, 2), q);
+    }
+
+    #[test]
+    fn an_unclosed_parenthesis_in_the_path_does_not_stop_the_scan() {
+        let q = "`src/a(b.ts` changes exports (a, b, c, d, e) imported by 2 files";
+        assert_eq!(
+            cap_member_list(q, 3),
+            "`src/a(b.ts` changes exports (a, b, c, +2 more) imported by 2 files"
+        );
+    }
+
+    #[test]
+    fn a_cap_of_zero_leaves_the_text_unchanged() {
+        let q = "changes exports (a, b, c) imported by 2 files";
+        assert_eq!(cap_member_list(q, 0), q);
     }
 
     #[test]

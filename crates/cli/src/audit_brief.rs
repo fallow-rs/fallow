@@ -20,7 +20,7 @@ pub use fallow_output::{
     ReviewUnitFact, RiskClass,
 };
 use fallow_types::results::AnalysisResults;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::audit::AuditResult;
 use crate::report::sink::outln;
@@ -760,12 +760,18 @@ fn affected_lines(closure: &ImpactClosureFacts) -> Vec<String> {
     lines
 }
 
-/// How many coordination gaps the human brief spells out before it collapses
-/// the rest into a count. Each one costs two lines, as a branching split does,
-/// but a gap is Stage 3's headline signal rather than a supporting metric, so it
-/// gets one item more than `branching_human_lines` shows. The JSON carries every
-/// gap; this is the reading order, not the record.
-const MAX_HUMAN_COORDINATION_GAPS: usize = 3;
+/// How many consumers the human brief spells out before it collapses the rest
+/// into a count. Each one costs at least two lines, as a branching split does,
+/// but a coordination gap is Stage 3's headline signal rather than a supporting
+/// metric, so it gets one item more than `branching_human_lines` shows. The JSON
+/// carries every gap; this is the reading order, not the record.
+const MAX_HUMAN_COORDINATION_CONSUMERS: usize = 3;
+
+/// How many changed files one spelled-out consumer names before the rest
+/// collapse into a count. One source is the common case and two already
+/// establish that the consumer spans the diff, so a consumer importing from a
+/// dozen changed files cannot take the section over.
+const MAX_HUMAN_GAP_SOURCES: usize = 2;
 
 /// Join symbol names until they no longer fit `budget`, returning the rendered
 /// text and how many names it left out. A gap on a barrel file can consume two
@@ -813,19 +819,29 @@ fn elide_symbol(text: &str, budget: usize) -> String {
 }
 
 /// The coordination-gap lines: how many consumers sit outside the diff, then a
-/// capped walk through the widest of them, one consumer per pair of lines.
+/// capped walk through the widest of them, one consumer per group of lines.
 ///
 /// Split out from the printer so the wording and the width are testable, the
 /// way `affected_lines` and `branching_human_lines` are: every line has to hold
 /// under 80 columns. Two paths and a symbol list cannot share one line at that
-/// width, so the consumer gets its own line and the contract it consumes gets
-/// the continuation, matching how a branching split renders.
+/// width, so the consumer gets its own line and each contract it consumes gets
+/// a continuation, matching how a branching split renders.
 ///
-/// The walk is ordered by how many symbols the consumer takes, not by path.
-/// Unlike `affected_by_dir`, the JSON gap list is path-sorted and carries no
-/// ranking of its own, so an alphabetical prefix would spell out whichever
-/// consumers sort first and collapse a barrel consumer taking two dozen symbols
-/// behind the remainder. The header states the total either way.
+/// `collect_coordination_gaps` emits one fact per (changed file, consumer) pair,
+/// so a consumer importing from two changed files arrives as two facts. The walk
+/// groups by consumer: the header then counts the people who have to be
+/// coordinated with, which is what it has always claimed to count, and no
+/// consumer path is printed twice underneath it.
+///
+/// The walk is ordered by how many symbols the consumer takes across the whole
+/// diff, not by path. Unlike `affected_by_dir`, the JSON gap list is path-sorted
+/// and carries no ranking of its own, so an alphabetical prefix would spell out
+/// whichever consumers sort first and collapse a barrel consumer taking two
+/// dozen symbols behind the remainder. The header states the total either way.
+///
+/// The changed files underneath one consumer are ranked the same way, and for
+/// the same reason: an alphabetical prefix there collapses an eight-symbol
+/// contract behind two one-symbol imports that happen to sort earlier.
 ///
 /// The header claims only what `collect_coordination_gaps` establishes: the
 /// consumer uses an export of a file in the diff. It never verifies that the
@@ -834,50 +850,91 @@ fn coordination_gap_lines(gaps: &[CoordinationGapFact]) -> Vec<String> {
     if gaps.is_empty() {
         return Vec::new();
     }
+    let mut at: FxHashMap<&str, usize> = FxHashMap::default();
+    let mut consumers: Vec<(&str, Vec<&CoordinationGapFact>)> = Vec::new();
+    for gap in gaps {
+        match at.get(gap.consumer_file.as_str()) {
+            Some(&index) => consumers[index].1.push(gap),
+            None => {
+                at.insert(&gap.consumer_file, consumers.len());
+                consumers.push((&gap.consumer_file, vec![gap]));
+            }
+        }
+    }
     let mut lines = vec![format!(
         "  coordination gap: {} consumer{} outside the diff use{} exports of changed files",
-        gaps.len(),
-        crate::report::plural(gaps.len()),
-        if gaps.len() == 1 { "s" } else { "" },
+        consumers.len(),
+        crate::report::plural(consumers.len()),
+        if consumers.len() == 1 { "s" } else { "" },
     )];
-    let mut widest: Vec<&CoordinationGapFact> = gaps.iter().collect();
-    // One consumer can take exports from several changed files, so the consumer
-    // path alone does not break every tie; without the changed file the order
-    // would rest on `sort_by` stability plus the engine's upstream sort.
-    widest.sort_by(|a, b| {
-        b.consumed_symbols
-            .len()
-            .cmp(&a.consumed_symbols.len())
-            .then_with(|| a.consumer_file.cmp(&b.consumer_file))
-            .then_with(|| a.changed_file.cmp(&b.changed_file))
+    // The changed file is unique per consumer after grouping, so the tie-break
+    // keeps this order total without leaning on `sort_by` stability.
+    for (_, sources) in &mut consumers {
+        sources.sort_by(|a, b| {
+            b.consumed_symbols
+                .len()
+                .cmp(&a.consumed_symbols.len())
+                .then_with(|| a.changed_file.cmp(&b.changed_file))
+        });
+    }
+    // The consumer path is unique after grouping, so it is a total tie-break
+    // rather than one that leans on `sort_by` stability plus an upstream sort.
+    consumers.sort_by(|a, b| {
+        symbols_taken(&b.1)
+            .cmp(&symbols_taken(&a.1))
+            .then_with(|| a.0.cmp(b.0))
     });
 
     let mut symbols_omitted = 0usize;
-    for gap in widest.iter().take(MAX_HUMAN_COORDINATION_GAPS) {
-        debug_assert!(
-            !gap.consumed_symbols.is_empty(),
-            "a gap exists because a symbol is consumed, so the list is never empty"
-        );
-        let (symbols, omitted) = summarize_symbols(&gap.consumed_symbols, 24);
-        symbols_omitted += omitted;
-        lines.push(format!("         {}", elide_path(&gap.consumer_file, 71)));
-        lines.push(format!(
-            "           consumes {symbols} from {}",
-            elide_path(&gap.changed_file, 28),
-        ));
+    let mut sources_omitted = 0usize;
+    for (consumer, sources) in consumers.iter().take(MAX_HUMAN_COORDINATION_CONSUMERS) {
+        lines.push(format!("         {}", elide_path(consumer, 71)));
+        for gap in sources.iter().take(MAX_HUMAN_GAP_SOURCES) {
+            debug_assert!(
+                !gap.consumed_symbols.is_empty(),
+                "a gap exists because a symbol is consumed, so the list is never empty"
+            );
+            let (symbols, omitted) = summarize_symbols(&gap.consumed_symbols, 24);
+            symbols_omitted += omitted;
+            lines.push(format!(
+                "           consumes {symbols} from {}",
+                elide_path(&gap.changed_file, 28),
+            ));
+        }
+        let hidden = sources.len().saturating_sub(MAX_HUMAN_GAP_SOURCES);
+        if hidden > 0 {
+            sources_omitted += hidden;
+            lines.push(format!(
+                "           and {hidden} more changed file{}",
+                crate::report::plural(hidden),
+            ));
+        }
     }
 
-    let remaining = gaps.len().saturating_sub(MAX_HUMAN_COORDINATION_GAPS);
+    let remaining = consumers
+        .len()
+        .saturating_sub(MAX_HUMAN_COORDINATION_CONSUMERS);
     if remaining > 0 {
         lines.push(format!(
             "         and {remaining} more consumer{} (--format json for full list)",
             crate::report::plural(remaining),
         ));
-    } else if symbols_omitted > 0 {
+    } else if symbols_omitted > 0 || sources_omitted > 0 {
         // A `+N more` with no route on screen leaves the reader nowhere to go.
-        lines.push("         (--format json for every consumed symbol)".to_string());
+        let dropped = match (symbols_omitted > 0, sources_omitted > 0) {
+            (true, true) => "every consumed symbol and changed file",
+            (false, true) => "every changed file",
+            _ => "every consumed symbol",
+        };
+        lines.push(format!("         (--format json for {dropped})"));
     }
     lines
+}
+
+/// How many symbol references one consumer takes across the whole diff, the key
+/// the walk ranks by.
+fn symbols_taken(sources: &[&CoordinationGapFact]) -> usize {
+    sources.iter().map(|g| g.consumed_symbols.len()).sum()
 }
 
 /// Print the Stage 3 impact-closure summary on the human brief: the blast
@@ -1264,10 +1321,17 @@ fn print_ownership_human(ownership: Option<&fallow_output::OwnershipFacts>) {
 /// tour uses, because the two lines do not carry the same load: the tour drops
 /// the anchor path and the trailing question, while the brief keeps both (the
 /// path appears nowhere else, and the question IS the judgment the brief
-/// poses). Three names are what is left of the line once those are paid for,
-/// and they are enough to recognise the shape of a contract; the count carries
-/// its size and the JSON carries every name.
+/// poses). Three names are what fits beside them: a widened export question
+/// then reads in three lines, or four once the anchor path is deep enough to
+/// take a line of its own, instead of a screenful, and three names are enough
+/// to recognise the shape of a contract. The count carries the list's size and
+/// the JSON carries every name.
 const MAX_BRIEF_DECISION_MEMBERS: usize = 3;
+
+/// Where a reader goes when a member list collapsed. Named so the printer and
+/// the tests that locate it in the rendered block cannot drift apart; one test
+/// still pins the wording itself.
+const JSON_NAME_ROUTE: &str = "  (--format json for every collapsed name)";
 
 /// The decision-surface lines (the apex, 6.G): the ranked, capped set of
 /// consequential structural decisions, each as a framed judgment question with
@@ -1276,10 +1340,11 @@ const MAX_BRIEF_DECISION_MEMBERS: usize = 3;
 /// Split out from the printer so the wording and the width are testable, the
 /// way `affected_lines` and `branching_human_lines` are: every line has to hold
 /// under 80 columns. A question naming a widened export list runs to several
-/// hundred characters; its member list collapses to
-/// [`MAX_BRIEF_DECISION_MEMBERS`] names and the prose around it wraps under a
-/// hanging indent rather than being cut. The question IS the judgment the brief
-/// exists to pose, so the ask at the end of the sentence always survives.
+/// hundred characters, so a member list longer than
+/// [`MAX_BRIEF_DECISION_MEMBERS`] collapses to that many names and the prose
+/// around it wraps under a hanging indent rather than being cut. The question IS
+/// the judgment the brief exists to pose, so the ask at the end of the sentence
+/// always survives.
 fn decision_surface_lines(surface: &crate::audit_decision_surface::DecisionSurface) -> Vec<String> {
     if surface.decisions.is_empty() {
         return vec![
@@ -1360,9 +1425,15 @@ fn decision_surface_lines(surface: &crate::audit_decision_surface::DecisionSurfa
     }
     if names_collapsed {
         // A `+N more` with no route on screen leaves the reader nowhere to go. The
-        // route holds: a decision that renders here carries its full, uncapped
-        // question in the brief JSON.
-        lines.push("  (--format json for every collapsed name)".to_string());
+        // route holds for the names: a decision that renders here carries its full,
+        // uncapped question in the brief JSON.
+        //
+        // It stays with the questions it routes, ahead of the truncation note.
+        // Below the note it reads as routing the collapsed DECISIONS, and that
+        // claim is false: `build_decision_surface` truncates the ranked list
+        // before serialization, so the JSON carries the collapsed decisions only
+        // as ids in `emitted_signal_ids`, never their questions.
+        lines.push(JSON_NAME_ROUTE.to_string());
     }
     if let Some(note) = &surface.truncated {
         for (n, chunk) in wrap_prose(&note.reason, 72, 72, elide_path)
@@ -2057,6 +2128,12 @@ mod tests {
                 .any(|line| line.contains(".../") && line.chars().count() == 80),
             "the fixture must drive the consumer line to the 80-column ceiling: {lines:?}"
         );
+        assert_eq!(
+            lines[0].chars().count(),
+            80,
+            "a four-digit count drives the header to the ceiling too: {:?}",
+            lines[0]
+        );
         assert!(
             lines[0].contains("1234 consumers") && lines.last().is_some_and(|l| l.contains("1231")),
             "four-digit counts must render on both the header and the remainder: {lines:?}"
@@ -2071,14 +2148,25 @@ mod tests {
     }
 
     #[test]
-    fn gaps_sharing_a_consumer_are_ordered_by_their_changed_file() {
-        // One consumer taking exports from two changed files ties on both leading
-        // keys, so the comparator must decide the order itself rather than inherit
-        // whatever order the engine happened to hand it.
+    fn one_consumer_of_two_changed_files_is_counted_and_printed_once() {
+        // `collect_coordination_gaps` emits one fact per (changed file, consumer)
+        // pair, so this is ONE consumer arriving as two gaps. The header counts
+        // consumers, so it must say one, and the path must not repeat.
         let forward = coordination_gap_lines(&[
             gap("src/app.ts", "src/z-core.ts", &["parse"]),
             gap("src/app.ts", "src/a-core.ts", &["render"]),
         ]);
+        assert_eq!(
+            forward,
+            vec![
+                "  coordination gap: 1 consumer outside the diff uses exports of changed files"
+                    .to_string(),
+                "         src/app.ts".to_string(),
+                "           consumes render from src/a-core.ts".to_string(),
+                "           consumes parse from src/z-core.ts".to_string(),
+            ],
+            "the header counts consumers and the rows below it agree"
+        );
         let reversed = coordination_gap_lines(&[
             gap("src/app.ts", "src/a-core.ts", &["render"]),
             gap("src/app.ts", "src/z-core.ts", &["parse"]),
@@ -2087,11 +2175,88 @@ mod tests {
             forward, reversed,
             "the order must not depend on the order the gaps arrived in"
         );
-        let sources: Vec<&String> = forward.iter().filter(|l| l.contains(" from ")).collect();
+    }
+
+    #[test]
+    fn a_consumer_spanning_more_changed_files_than_fit_says_how_many_are_left() {
+        // The consumer path is the widest line this block renders, so a deep one
+        // is what gives the width loop below something that can actually fail.
+        let consumer = "packages/platform/features/checkout/pricing/discounts/\
+                        seasonal/regional/tiers/consumer0001.ts";
+        let sources: Vec<CoordinationGapFact> = (0..5)
+            .map(|i| gap(consumer, &format!("src/core{i}.ts"), &["parse"]))
+            .collect();
+        let lines = coordination_gap_lines(&sources);
+        assert_eq!(
+            lines.iter().filter(|l| l.contains(" consumes ")).count(),
+            2,
+            "one consumer cannot take the section over: {lines:?}"
+        );
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some("         (--format json for every changed file)"),
+            "the collapsed sources get a route that holds: {lines:?}"
+        );
         assert!(
-            sources[0].ends_with("from src/a-core.ts")
-                && sources[1].ends_with("from src/z-core.ts"),
-            "tied gaps read in changed-file order: {forward:?}"
+            lines
+                .iter()
+                .any(|l| l == "           and 3 more changed files"),
+            "the collapsed sources are counted, not dropped: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.chars().count() == 80),
+            "the fixture must drive the consumer line to the ceiling: {lines:?}"
+        );
+        for line in &lines {
+            assert!(
+                line.chars().count() <= 80,
+                "brief lines hold under 80 columns: {} chars in {line:?}",
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn the_widest_changed_files_are_the_ones_spelled_out_under_a_consumer() {
+        // The same principle one level down from `the_widest_consumers_...`: an
+        // alphabetical prefix spells out two one-symbol imports and collapses the
+        // eight-symbol contract, which is the thing that needs coordinating.
+        let gaps = vec![
+            gap("src/consumer.ts", "src/a-logger.ts", &["log"]),
+            gap("src/consumer.ts", "src/b-const.ts", &["VERSION"]),
+            gap(
+                "src/consumer.ts",
+                "src/z-contract.ts",
+                &[
+                    "createOrder",
+                    "cancelOrder",
+                    "priceCart",
+                    "applyTax",
+                    "quoteShipping",
+                    "capturePayment",
+                    "refund",
+                    "voidAuth",
+                ],
+            ),
+        ];
+        let lines = coordination_gap_lines(&gaps);
+        assert!(
+            lines[2].ends_with(" from src/z-contract.ts"),
+            "the changed file the consumer takes the most from leads: {lines:?}"
+        );
+        assert_eq!(
+            lines[3], "           consumes log from src/a-logger.ts",
+            "two one-symbol files tie, and the tie breaks on path: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains("b-const")),
+            "the file that loses the tie is the one that collapses: {lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "           and 1 more changed file"),
+            "the collapsed file is counted, not dropped: {lines:?}"
         );
     }
 
@@ -2128,8 +2293,8 @@ mod tests {
         );
         assert_eq!(
             lines.len(),
-            1 + MAX_HUMAN_COORDINATION_GAPS * 2 + 1,
-            "a header, two lines per shown gap, then the remainder: {lines:?}"
+            8,
+            "a header, two lines per shown consumer, then the remainder: {lines:?}"
         );
         assert!(
             lines
@@ -2361,6 +2526,20 @@ mod tests {
             !ask.contains("..."),
             "an owner identity that fits must not be shortened: {ask:?}"
         );
+        let route_at = lines
+            .iter()
+            .position(|l| l == JSON_NAME_ROUTE)
+            .unwrap_or_else(|| panic!("the collapsed names need a route: {lines:?}"));
+        let note_at = lines
+            .iter()
+            .position(|l| l.starts_with("  ... "))
+            .unwrap_or_else(|| panic!("the collapsed decisions need a note: {lines:?}"));
+        assert!(
+            route_at < note_at,
+            "the name route stays with the questions it routes: under the note it \
+             reads as routing the collapsed DECISIONS, and the JSON carries those \
+             only as ids: {lines:?}"
+        );
         for line in lines {
             assert!(
                 line.chars().count() <= 80,
@@ -2458,14 +2637,28 @@ mod tests {
             truncated: None,
             emitted_signal_ids: vec!["sig".to_string()],
         });
-        // Header, the question block, the JSON route, and the closing blank line.
-        let question_lines = &lines[1..lines.len() - 2];
+        // The tail is asserted, not encoded in an index: a new closing line then
+        // fails here instead of silently shifting the slice below.
+        let route_at = lines
+            .iter()
+            .position(|l| l == JSON_NAME_ROUTE)
+            .unwrap_or_else(|| panic!("the collapsed names need a route: {lines:?}"));
+        assert_eq!(
+            &lines[route_at + 1..],
+            [String::new()],
+            "the route closes the section, ahead of its blank line: {lines:?}"
+        );
+        let question_lines = &lines[1..route_at];
         assert_eq!(
             question_lines.len(),
             3,
             "a widened export list costs three lines, not a screenful: {lines:?}"
         );
         assert!(question_lines[0].starts_with(&head), "{lines:?}");
+        // The only test covering the question CONTINUATION budget. The fit-eighty
+        // fixture's word boundaries leave it four columns of slack, so widening
+        // that budget overruns 80 columns here first: this fixture's widest
+        // continuation is 77 of 73, and one word more puts it at 82.
         for line in &lines {
             assert!(
                 line.chars().count() <= 80,
@@ -2473,6 +2666,36 @@ mod tests {
                 line.chars().count()
             );
         }
+    }
+
+    #[test]
+    fn a_route_group_anchor_still_collapses_its_export_list() {
+        // Next.js and SvelteKit route groups are parenthesized directory segments.
+        // The brief caps the question WITHOUT stripping the anchor path first, so
+        // `(marketing)` is the first parenthetical the cap meets; treating it as
+        // the member list would leave two dozen export names rendering in full.
+        let question = zod_shaped_question().replace(
+            "packages/zod/src/v4/core/parse.ts",
+            "app/(marketing)/lib/api.ts",
+        );
+        let lines = decision_surface_lines(&crate::audit_decision_surface::DecisionSurface {
+            decisions: vec![decision(&question, "", &[])],
+            truncated: None,
+            emitted_signal_ids: vec!["sig".to_string()],
+        });
+        let rendered = lines.join(" ");
+        assert!(
+            rendered.contains("`app/(marketing)/lib/api.ts`"),
+            "the route group survives verbatim: {lines:?}"
+        );
+        assert!(
+            rendered.contains("+21 more") && !rendered.contains("safeEncodeAsync"),
+            "the export list is the parenthetical that collapses: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l == JSON_NAME_ROUTE),
+            "a collapsed list routes to the full one: {lines:?}"
+        );
     }
 
     #[test]

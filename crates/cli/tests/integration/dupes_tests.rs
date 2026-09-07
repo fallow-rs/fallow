@@ -5,9 +5,10 @@
 )]
 
 use crate::common::{
-    canonical_report_without_gate_outcomes, fixture_path, parse_json, redact_all, run_fallow,
-    run_fallow_combined, run_fallow_in_root,
+    CommandOutput, canonical_report_without_gate_outcomes, fallow_bin, fixture_path, parse_json,
+    redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
 };
+use std::path::Path;
 use tempfile::tempdir;
 
 fn init_git_index(root: &std::path::Path) {
@@ -202,9 +203,11 @@ fn dupes_config_ignored_clone_resurfaces_after_added_copy() {
         &["--min-tokens", "5", "--min-lines", "2", "--no-cache"],
     );
     assert!(
-        human
-            .stderr
-            .contains("hid 1 reviewed clone group from duplicates.ignoredClones")
+        human.stderr.contains(
+            "note: hid 1 reviewed clone group\n  (duplicates.ignoredClones: remove a key to review it again)"
+        ),
+        "the reviewed-clones note keeps the count and the config key together across its two lines. stderr: {}",
+        human.stderr
     );
     assert!(human.stderr.contains("No code duplication found"));
 
@@ -1809,4 +1812,321 @@ fn the_grouped_dupes_envelope_carries_baseline_staleness() {
     assert_eq!(staleness["baseline_entries"], 4);
     assert_eq!(staleness["gate_trips"], true);
     assert_eq!(staleness["moved_entries"], 0);
+}
+
+// --- scoped note routing ---------------------------------------------------
+//
+// The two scoped notes render from one shared printer, so each mode has to
+// carry in the control it honors. `--no-ignore-imports` and
+// `--min-occurrences` are declared on the `dupes` subcommand without `global`,
+// so bare `fallow` and `fallow audit` answer both with "unexpected argument";
+// bare `fallow` honors the `--dupes-` prefixed spellings; `fallow audit`
+// parses those and then rebuilds its `DupesOptions` from `DuplicatesConfig`,
+// so only the config keys move what audit reports. These tests run the built
+// binary because that relationship lives in clap and in audit's options
+// builder, not in the note renderer the unit tests reach.
+
+const WIRING_NOTE: &str = "note: module wiring excluded from clones";
+const GATE_NOTE: &str = "note: hid 1 clone group below minOccurrences";
+
+fn git(dir: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@test.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test.com")
+        .output()
+        .expect("git command should run");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Run bare `fallow` (combined mode) against an explicit root. The shared
+/// harness only offers a fixture-directory variant, and these tests build their
+/// project in a temp dir so the config can be rewritten between runs.
+fn run_combined_in_root(root: &Path, args: &[&str]) -> CommandOutput {
+    let mut cmd = std::process::Command::new(fallow_bin());
+    cmd.arg("--root")
+        .arg(root)
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1");
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let output = cmd.output().expect("failed to run fallow binary");
+    CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+/// A project whose duplication run carries both scoped notes at once: `a.ts` /
+/// `b.ts` are a pair the `minOccurrences` gate hides, `c.ts` / `d.ts` / `e.ts`
+/// are a reported trio so the module-wiring note fires, and `f.ts` / `g.ts` /
+/// `h.ts` share only their import block, so that group surfaces exactly when
+/// the wiring opt-out is honored.
+///
+/// Every knob comes from config rather than flags: audit drops the equivalent
+/// flags, so config is the one input all three modes read the same way. The
+/// sources stay untracked so audit's changed-file scope covers them.
+fn write_scoped_note_fixture(root: &Path, min_occurrences: usize, ignore_imports: bool) {
+    let config = serde_json::json!({
+        "duplicates": {
+            "minTokens": 5,
+            "minLines": 2,
+            "minOccurrences": min_occurrences,
+            "ignoreImports": ignore_imports,
+        }
+    });
+    std::fs::write(root.join(".fallowrc.json"), config.to_string()).expect("write config");
+    if root.join("package.json").exists() {
+        return;
+    }
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"scoped-notes","version":"1.0.0"}"#,
+    )
+    .expect("write manifest");
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"],
+    );
+
+    let pair = "export function shared(value: number): number {\n  const doubled = value * 2;\n  const shifted = doubled + 3;\n  return shifted * 4;\n}\n";
+    let trio = "export function trio(value: number): number {\n  const scaled = value * 7;\n  const nudged = scaled + 11;\n  return nudged * 13;\n}\n";
+    let wiring = "import { alpha } from \"./lib\";\nimport { beta } from \"./lib\";\nimport { gamma } from \"./lib\";\nimport { delta } from \"./lib\";\n";
+    for file in ["a.ts", "b.ts"] {
+        std::fs::write(root.join(file), pair).expect("write pair");
+    }
+    for file in ["c.ts", "d.ts", "e.ts"] {
+        std::fs::write(root.join(file), trio).expect("write trio");
+    }
+    std::fs::write(
+        root.join("lib.ts"),
+        "export const alpha = 1;\nexport const beta = 2;\nexport const gamma = 3;\nexport const delta = 4;\n",
+    )
+    .expect("write wiring target");
+    for (file, tail) in [
+        (
+            "f.ts",
+            "export const fSum = alpha + beta + gamma + delta;\n",
+        ),
+        (
+            "g.ts",
+            "export const gSum = alpha * beta * gamma * delta;\n",
+        ),
+        (
+            "h.ts",
+            "export const hSum = alpha - beta - gamma - delta;\n",
+        ),
+    ] {
+        std::fs::write(root.join(file), format!("{wiring}{tail}")).expect("write wiring");
+    }
+}
+
+/// Both opt-outs took effect: the wiring group and the gated pair are reported
+/// and neither note is printed any more.
+fn assert_opt_outs_took_effect(output: &CommandOutput) {
+    assert!(
+        !output.stderr.contains(WIRING_NOTE),
+        "the wiring note must stop once wiring is counted. stderr: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("below minOccurrences"),
+        "the gate note must stop once the gate is lowered. stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stdout.contains("f.ts"),
+        "counting module wiring must surface the wiring clone. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("a.ts"),
+        "lowering the gate must surface the pair. stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn dupes_subcommand_notes_route_to_the_subcommand_flags() {
+    let dir = tempdir().expect("temp dir");
+    write_scoped_note_fixture(dir.path(), 3, true);
+
+    let noted = run_fallow_in_root("dupes", dir.path(), &["--no-cache"]);
+    assert!(
+        noted.stderr.contains(&format!(
+            "{GATE_NOTE}\n  (lower --min-occurrences from 3 to see them)"
+        )),
+        "stderr: {}",
+        noted.stderr
+    );
+    assert!(
+        noted.stderr.contains(&format!(
+            "{WIRING_NOTE}\n  (--no-ignore-imports to include it)"
+        )),
+        "stderr: {}",
+        noted.stderr
+    );
+
+    assert_opt_outs_took_effect(&run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &[
+            "--no-cache",
+            "--no-ignore-imports",
+            "--min-occurrences",
+            "2",
+        ],
+    ));
+}
+
+#[test]
+fn combined_notes_route_to_the_dupes_prefixed_globals() {
+    let dir = tempdir().expect("temp dir");
+    write_scoped_note_fixture(dir.path(), 3, true);
+
+    let noted = run_combined_in_root(dir.path(), &["--no-cache", "--skip", "health"]);
+    assert!(
+        noted.stderr.contains(&format!(
+            "{GATE_NOTE}\n  (lower --dupes-min-occurrences from 3 to see them)"
+        )),
+        "stderr: {}",
+        noted.stderr
+    );
+    assert!(
+        noted.stderr.contains(&format!(
+            "{WIRING_NOTE}\n  (--dupes-no-ignore-imports to include it)"
+        )),
+        "stderr: {}",
+        noted.stderr
+    );
+
+    assert_opt_outs_took_effect(&run_combined_in_root(
+        dir.path(),
+        &[
+            "--no-cache",
+            "--skip",
+            "health",
+            "--dupes-no-ignore-imports",
+            "--dupes-min-occurrences",
+            "2",
+        ],
+    ));
+}
+
+/// A project whose only clone group is gated has NO reported groups, so the
+/// note takes the `!has_dupe_groups` branch and audit renders it through
+/// `print_audit_min_occurrences_note` rather than the grouping printer. That is
+/// the fourth scoped call site, and the only one the three sibling tests above
+/// cannot reach.
+#[test]
+fn audit_routes_the_gate_note_to_the_config_key_when_nothing_is_reported() {
+    let dir = tempdir().expect("temp dir");
+    write_gated_pair_only_fixture(dir.path(), 3);
+
+    let output = run_fallow_in_root("audit", dir.path(), &["--base", "HEAD", "--no-cache"]);
+    assert!(
+        output.stderr.contains(&format!(
+            "{GATE_NOTE}\n  (lower duplicates.minOccurrences from 3 to see them)"
+        )),
+        "audit names the key it honors, not a flag it ignores. stderr: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("--dupes-min-occurrences")
+            && !output.stderr.contains("--min-occurrences"),
+        "naming a flag here would route to a silent no-op. stderr: {}",
+        output.stderr
+    );
+}
+
+/// Only the gated pair, so nothing survives to be reported.
+fn write_gated_pair_only_fixture(root: &Path, min_occurrences: usize) {
+    let config = serde_json::json!({
+        "duplicates": {
+            "minTokens": 5,
+            "minLines": 2,
+            "minOccurrences": min_occurrences,
+        }
+    });
+    std::fs::write(root.join(".fallowrc.json"), config.to_string()).expect("write config");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"gated-only","version":"1.0.0"}"#,
+    )
+    .expect("write manifest");
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"],
+    );
+    let pair = "export function shared(value: number): number {\n  const doubled = value * 2;\n  const shifted = doubled + 3;\n  return shifted * 4;\n}\n";
+    for file in ["a.ts", "b.ts"] {
+        std::fs::write(root.join(file), pair).expect("write pair");
+    }
+}
+
+#[test]
+fn audit_notes_route_to_the_config_keys_audit_honors() {
+    let dir = tempdir().expect("temp dir");
+    write_scoped_note_fixture(dir.path(), 3, true);
+
+    let noted = run_fallow_in_root("audit", dir.path(), &["--base", "HEAD", "--no-cache"]);
+    assert!(
+        noted.stderr.contains(&format!(
+            "{GATE_NOTE}\n  (lower duplicates.minOccurrences from 3 to see them)"
+        )),
+        "stderr: {}",
+        noted.stderr
+    );
+    assert!(
+        noted.stderr.contains(&format!(
+            "{WIRING_NOTE}\n  (duplicates.ignoreImports: false to include it)"
+        )),
+        "stderr: {}",
+        noted.stderr
+    );
+
+    // Audit builds its `DupesOptions` from config alone, so the flags the other
+    // two modes honor parse here and change nothing. A note naming them would
+    // fail silently, which is why audit names the keys instead.
+    let flagged = run_fallow_in_root(
+        "audit",
+        dir.path(),
+        &[
+            "--base",
+            "HEAD",
+            "--no-cache",
+            "--dupes-no-ignore-imports",
+            "--dupes-min-occurrences",
+            "2",
+        ],
+    );
+    assert!(
+        flagged.stderr.contains(WIRING_NOTE) && flagged.stderr.contains(GATE_NOTE),
+        "the `--dupes-` globals must remain inert under audit. stderr: {}",
+        flagged.stderr
+    );
+
+    write_scoped_note_fixture(dir.path(), 2, false);
+    assert_opt_outs_took_effect(&run_fallow_in_root(
+        "audit",
+        dir.path(),
+        &["--base", "HEAD", "--no-cache"],
+    ));
 }

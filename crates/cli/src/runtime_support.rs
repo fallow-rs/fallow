@@ -476,12 +476,15 @@ fn report_workspace_diagnostics(
 /// Render the one-line stderr notice that workspace discovery produced
 /// diagnostics.
 ///
-/// Built by name so the wording and its eighty-column bound are unit testable
-/// rather than only observable through a subprocess. The notice names the
-/// dedicated `fallow workspaces` command rather than the equivalent
-/// `fallow list --workspaces`: both print the same per-entry block, and the
-/// shorter spelling is what keeps the line inside eighty columns once a
-/// monorepo drives the count to four digits.
+/// Built by name so the wording is unit testable rather than only observable
+/// through a subprocess. The notice names the dedicated `fallow workspaces`
+/// command rather than the equivalent `fallow list --workspaces`: both print
+/// the same per-entry block, and the dedicated command is the shorter, more
+/// direct spelling: at the four-digit count this treats as the realistic
+/// ceiling it leaves ten columns of the eighty-column terminal budget, against
+/// three for `fallow list --workspaces`. The pinning test measures the chosen
+/// spelling; the alternative's figure is stated here because nothing measures
+/// it.
 fn workspace_diagnostics_notice(count: usize) -> String {
     format!(
         "fallow: {count} workspace discovery diagnostic{}. Run `fallow workspaces`.",
@@ -594,6 +597,13 @@ mod tests {
     /// spellings: `fallow workspaces` prints the per-entry block this line
     /// summarises, and a rename of that command must fail here rather than
     /// leave the warning pointing at nothing.
+    ///
+    /// The count is the only part that grows, so these two strings are also
+    /// the narrowest and widest plausible renderings: 66 columns at one
+    /// diagnostic, 70 once a monorepo drives the count to four digits. That
+    /// leaves ten columns of headroom under the eighty-column terminal
+    /// budget, so pinning the strings byte for byte is the width guard as
+    /// well; a rewording that spends the headroom fails here.
     #[test]
     fn workspace_diagnostics_notice_pins_wording_and_route() {
         assert_eq!(
@@ -604,22 +614,6 @@ mod tests {
             workspace_diagnostics_notice(1234),
             "fallow: 1234 workspace discovery diagnostics. Run `fallow workspaces`."
         );
-    }
-
-    /// The count is the only part of the notice that grows, so a four-digit
-    /// monorepo is the widest line this warning renders. Walk the digit
-    /// widths up to that ceiling instead of asserting on the one-diagnostic
-    /// case, which fits with room to spare and would pass vacuously.
-    #[test]
-    fn workspace_diagnostics_notice_stays_within_eighty_columns() {
-        for count in [1_usize, 9, 99, 999, 9999] {
-            let line = workspace_diagnostics_notice(count);
-            assert!(
-                line.chars().count() <= 80,
-                "{count} diagnostics render at {} columns: {line}",
-                line.chars().count()
-            );
-        }
     }
 
     #[test]

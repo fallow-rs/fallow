@@ -5012,7 +5012,9 @@ mod tests {
                 })
                 .sum::<usize>();
         // Unelided, this line runs well past the ceiling it has to hold.
-        assert!(natural > DEP_LINE_WIDTH + 30, "{natural}");
+        // The bound is a literal: written as DEP_LINE_WIDTH + 30 it would
+        // travel with the constant under test and guard nothing.
+        assert!(natural > 110, "{natural}");
         let mut results = AnalysisResults::default();
         results
             .unused_dependencies
@@ -5030,11 +5032,11 @@ mod tests {
             .lines()
             .find(|line| line.contains(name))
             .expect("dependency line rendered");
-        assert!(
-            rendered.chars().count() <= DEP_LINE_WIDTH,
-            "{rendered} is {} columns",
-            rendered.chars().count()
-        );
+        // Eighty columns is the contract with the terminal, not a restatement
+        // of DEP_LINE_WIDTH, so it is asserted as a literal. The fixture is
+        // sized to land on the ceiling exactly, which is what makes widening
+        // the constant fail here instead of passing while the output overruns.
+        assert_eq!(rendered.chars().count(), 80, "{rendered}");
         // The declaring package survives the elision, and the workspaces the
         // clause could not seat are disclosed rather than dropped.
         assert!(rendered.contains("design-tokens/package.json"));
@@ -5123,14 +5125,33 @@ mod tests {
 
     #[test]
     fn dep_label_is_dropped_when_the_package_name_consumes_the_line() {
+        let manifest = "packages/platform/design-system/package.json";
+        let workspaces = ["packages/platform/web-application".to_string()];
+        // Sixteen columns is the width of a manifest elided to its file name,
+        // the narrowest label that still names something. Both budgets are
+        // literals: as MIN_LABEL_WIDTH +/- 1 they would follow the constant
+        // and leave the boundary it exists to express unpinned.
+        assert_eq!(dep_label(manifest, &workspaces, 15), None);
         assert_eq!(
-            dep_label(
-                "packages/platform/design-system/package.json",
-                &["packages/platform/web-application".to_string()],
-                MIN_LABEL_WIDTH - 1,
-            ),
-            None
+            dep_label(manifest, &workspaces, 16).as_deref(),
+            Some(".../package.json")
         );
+    }
+
+    #[test]
+    fn summarize_workspaces_reserves_room_for_the_more_suffix() {
+        let workspaces: Vec<String> = ["a/bb", "c/ddddddddddd", "e/ff", "g/hh", "i/jj"]
+            .iter()
+            .map(|path| (*path).to_string())
+            .collect();
+        let list = summarize_workspaces(&workspaces, 30);
+        // Seating a third path leaves no room for the `+N more` that the two
+        // it displaces still need, so the loop stops one earlier and every
+        // path it did seat renders whole. Drop the reservation and the joined
+        // list overruns, gets elided from the left, and silently loses entries
+        // the count is still promising are shown.
+        assert_eq!(list, "a/bb, c/ddddddddddd +3 more");
+        assert!(list.chars().count() <= 30, "{list}");
     }
 
     #[test]

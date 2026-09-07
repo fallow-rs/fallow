@@ -82,6 +82,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **More human output lines stay inside eighty columns, and the duplication
+  notes name controls that work.** Before, these lines were too wide:
+  - A decision question in the review brief used five of eight lines for an
+    export list. It now shows three names and a `+N more` count.
+  - Two duplication notes used 96 and 85 columns.
+  - An unused-dependency line used 85 columns. Its manifest path and its
+    workspace list had no limit.
+  - The workspace discovery warning used 84 columns.
+
+  The renderer caps or wraps these lines. The markdown decision list uses the
+  same three-name cap. The JSON output still has the full lists.
+
+  Two duplication notes also named flags that do not work where the notes
+  print. `--no-ignore-imports` and `--min-occurrences` are `fallow dupes`
+  flags. Bare `fallow` uses the `--dupes-` spellings. `fallow audit` reads its
+  duplication settings from the configuration and ignores the flags. Each note
+  now names the control that changes the result in its mode: the subcommand
+  flag, the `--dupes-` flag, or the `duplicates.*` configuration key.
+
+  The coordination-gap header in the review brief now counts consumers, not
+  gaps. One consumer that imports from two changed files shows one time.
+
 - **Boundary checks now cover files that no entry point reaches.** Import
   rules, `boundaries.calls.forbidden` and `boundaries.coverage.requireAllFiles`
   now check every analyzed file. Before, fallow skipped a zoned file that no

@@ -717,7 +717,26 @@ fn run_duplication_analysis_with_session(
     (analysis.report, analysis.default_ignore_skips)
 }
 
-/// Print duplication results and return appropriate exit code.
+/// The presentation choices a mode hands the duplication renderer.
+///
+/// Bundled so an entry point names them rather than passing a row of
+/// positional booleans; `print_dupes_result` keeps the flat signature combined
+/// mode calls.
+pub struct DupesRenderOptions<'a> {
+    pub result: &'a DupesResult,
+    pub quiet: bool,
+    pub explain: bool,
+    pub summary: bool,
+    pub summary_heading: bool,
+    pub show_explain_tip: bool,
+    pub json_style: crate::json_style::JsonStyle,
+}
+
+/// Print duplication results for bare `fallow` and return its exit code.
+///
+/// Combined mode honors the `--dupes-` prefixed globals, so notes printed
+/// from here route to those. `fallow audit` parses the same globals and then
+/// drops them, so it renders through [`print_audit_dupes_result`] instead.
 #[expect(
     clippy::too_many_arguments,
     reason = "duplication rendering carries independent report, grouping, and presentation options"
@@ -731,15 +750,43 @@ pub fn print_dupes_result(
     show_explain_tip: bool,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
+    print_scoped_dupes_result(
+        &DupesRenderOptions {
+            result,
+            quiet,
+            explain,
+            summary,
+            summary_heading,
+            show_explain_tip,
+            json_style,
+        },
+        DupesOptOutScope::Combined,
+    )
+}
+
+/// Print duplication results for `fallow audit` and return its exit code.
+///
+/// Audit builds its `DupesOptions` from `DuplicatesConfig` alone, so the
+/// `--dupes-` globals parse there and then change nothing; its notes route to
+/// the config keys, which are what actually move the outcome.
+pub fn print_audit_dupes_result(options: &DupesRenderOptions<'_>) -> ExitCode {
+    print_scoped_dupes_result(options, DupesOptOutScope::Audit)
+}
+
+fn print_scoped_dupes_result(
+    options: &DupesRenderOptions<'_>,
+    opt_out_scope: DupesOptOutScope,
+) -> ExitCode {
     print_dupes_result_with_grouping(DupesResultGroupingInput {
-        result,
-        quiet,
-        explain,
+        result: options.result,
+        quiet: options.quiet,
+        opt_out_scope,
+        explain: options.explain,
         group_by: None,
-        summary,
-        summary_heading,
-        show_explain_tip,
-        json_style,
+        summary: options.summary,
+        summary_heading: options.summary_heading,
+        show_explain_tip: options.show_explain_tip,
+        json_style: options.json_style,
     })
 }
 
@@ -770,6 +817,7 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
     print_dupes_result_with_grouping(DupesResultGroupingInput {
         result: &result,
         quiet: opts.quiet,
+        opt_out_scope: DupesOptOutScope::Subcommand,
         explain: opts.explain,
         group_by: resolver,
         summary: opts.summary,
@@ -838,6 +886,9 @@ fn print_dupes_performance(result: &DupesResult, output: OutputFormat) {
 struct DupesResultGroupingInput<'a> {
     result: &'a DupesResult,
     quiet: bool,
+    /// Which command surface is printing, so the scoped notes name a control
+    /// that mode actually honors.
+    opt_out_scope: DupesOptOutScope,
     explain: bool,
     group_by: Option<report::OwnershipResolver>,
     summary: bool,
@@ -883,10 +934,10 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         include_fragments: result.include_fragments,
     };
     print_default_ignore_note(result, input.quiet);
-    print_min_occurrences_note(result, input.quiet);
+    print_min_occurrences_note(result, input.quiet, input.opt_out_scope);
     print_reviewed_clones_note(result, input.quiet);
     print_near_candidates_skipped_note(result, input.quiet);
-    print_ignore_imports_note(result, input.quiet);
+    print_ignore_imports_note(result, input.quiet, input.opt_out_scope);
     let report_code = report::print_duplication_report(&result.report, &ctx, result.config.output);
     if report_code != ExitCode::SUCCESS {
         return report_code;
@@ -930,10 +981,11 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
 /// The default-ignore note lines: how many files the built-in duplicates
 /// ignores skipped, then either the per-pattern breakdown or the route to it.
 ///
-/// Split out from the printer so the wording and the width are testable the way
-/// `reviewed_clones_note` is: every line has to hold under 80 columns. The
+/// Split out from the printer so the wording and the width are testable the
+/// way the sibling notes are: every line has to hold under 80 columns. The
 /// route sits on its own line rather than closing the clause, which rendered at
-/// 96 columns inline and would otherwise widen with an unbounded skip count.
+/// 89 columns inline for a single skipped file and widens a column per digit of
+/// an unbounded skip count.
 fn default_ignore_note_lines(skips: &DefaultIgnoreSkips, explain: bool) -> Vec<String> {
     if skips.total == 0 {
         return Vec::new();
@@ -980,11 +1032,39 @@ pub fn print_default_ignore_note(result: &DupesResult, quiet: bool) {
     }
 }
 
+/// The `minOccurrences` note lines: how many clone groups the gate hid, then
+/// the control the printing mode honors for seeing them.
+///
+/// Both numbers are unbounded `usize`, so the threshold sits on the route line
+/// rather than closing the opening clause: inline the note rendered at 84
+/// columns for one hidden group at `minOccurrences=2` and widened further with
+/// either count. Split out from the printer so the wording and the width are
+/// testable the way `default_ignore_note_lines` is.
+fn min_occurrences_note_lines(hidden: usize, min: usize, scope: DupesOptOutScope) -> Vec<String> {
+    if hidden == 0 {
+        return Vec::new();
+    }
+    let noun = if hidden == 1 { "group" } else { "groups" };
+    vec![
+        format!("note: hid {hidden} clone {noun} below minOccurrences"),
+        format!(
+            "  (lower {} from {min} to see them)",
+            scope.min_occurrences_control()
+        ),
+    ]
+}
+
+/// Emit the `minOccurrences` note for `fallow audit`, whose clean-duplication
+/// path returns before the shared renderer that would otherwise print it.
+pub fn print_audit_min_occurrences_note(result: &DupesResult, quiet: bool) {
+    print_min_occurrences_note(result, quiet, DupesOptOutScope::Audit);
+}
+
 /// Emit a stderr note when `minOccurrences` hid clone groups. Human-format
 /// only, so machine readers (JSON, SARIF, CodeClimate) never see decorative
 /// stderr noise; consumers read `stats.cloneGroupsBelowMinOccurrences`
 /// directly from the JSON envelope instead.
-pub fn print_min_occurrences_note(result: &DupesResult, quiet: bool) {
+fn print_min_occurrences_note(result: &DupesResult, quiet: bool, scope: DupesOptOutScope) {
     if quiet
         || !matches!(
             result.config.output,
@@ -999,71 +1079,131 @@ pub fn print_min_occurrences_note(result: &DupesResult, quiet: bool) {
         return;
     }
 
-    let hidden = result.report.stats.clone_groups_below_min_occurrences;
-    if hidden == 0 {
-        return;
+    for line in min_occurrences_note_lines(
+        result.report.stats.clone_groups_below_min_occurrences,
+        result.min_occurrences,
+        scope,
+    ) {
+        eprintln!("{line}");
     }
-
-    let min = result.min_occurrences;
-    let noun = if hidden == 1 { "group" } else { "groups" };
-    eprintln!(
-        "note: hid {hidden} clone {noun} below minOccurrences={min} (lower --min-occurrences to see them)"
-    );
 }
 
-fn reviewed_clones_note(hidden: usize) -> Option<String> {
+/// The reviewed-clones note lines: how many groups `duplicates.ignoredClones`
+/// hid, then the config key and how to resurface one.
+///
+/// The key and its instruction moved onto their own line because the inline
+/// clause rendered at 96 columns for a single hidden group and grew with an
+/// unbounded hidden count.
+fn reviewed_clones_note_lines(hidden: usize) -> Vec<String> {
     if hidden == 0 {
-        return None;
+        return Vec::new();
     }
     let noun = if hidden == 1 { "group" } else { "groups" };
-    Some(format!(
-        "note: hid {hidden} reviewed clone {noun} from duplicates.ignoredClones (remove a key to review it again)"
-    ))
+    vec![
+        format!("note: hid {hidden} reviewed clone {noun}"),
+        "  (duplicates.ignoredClones: remove a key to review it again)".to_string(),
+    ]
 }
 
 fn print_reviewed_clones_note(result: &DupesResult, quiet: bool) {
     if quiet || !matches!(result.config.output, OutputFormat::Human) {
         return;
     }
-    if let Some(note) = reviewed_clones_note(result.report.stats.clone_groups_ignored) {
-        eprintln!("{note}");
+    for line in reviewed_clones_note_lines(result.report.stats.clone_groups_ignored) {
+        eprintln!("{line}");
     }
 }
 
-fn near_candidates_skipped_note(skipped: usize) -> Option<String> {
+/// The incomplete-near-miss warning lines: the caveat, what was dropped, then
+/// the narrowing route.
+///
+/// Three lines rather than one because the inline sentence rendered at 148
+/// columns for a single skipped comparison, the widest human line this module
+/// emitted, and the skipped count is unbounded.
+fn near_candidates_skipped_note_lines(skipped: usize) -> Vec<String> {
     if skipped == 0 {
-        return None;
+        return Vec::new();
     }
     let noun = if skipped == 1 {
         "comparison"
     } else {
         "comparisons"
     };
-    Some(format!(
-        "warning: near-miss results may be incomplete: skipped {skipped} candidate {noun} to stay within work limits (narrow with --workspace or --changed-since)"
-    ))
+    vec![
+        "warning: near-miss results may be incomplete".to_string(),
+        format!("  skipped {skipped} candidate {noun} to stay within work limits"),
+        "  (narrow with --workspace or --changed-since)".to_string(),
+    ]
 }
 
 fn print_near_candidates_skipped_note(result: &DupesResult, quiet: bool) {
     if quiet || !matches!(result.config.output, OutputFormat::Human) {
         return;
     }
-    if let Some(note) = near_candidates_skipped_note(result.report.stats.near_candidates_skipped) {
-        eprintln!("{note}");
+    for line in near_candidates_skipped_note_lines(result.report.stats.near_candidates_skipped) {
+        eprintln!("{line}");
     }
 }
 
-/// The module-wiring note. It says "clones" rather than "clone detection" so
-/// the clause and its opt-out share one line under 80 columns, the width the
-/// human notes hold to; the longer wording rendered at 85.
-const IGNORE_IMPORTS_NOTE: &str =
-    "note: module wiring excluded from clones (--no-ignore-imports to include it)";
+/// Which spelling of the duplication opt-outs the printing mode honors.
+///
+/// The three modes take three different answers, and one shared renderer prints
+/// the notes, so the mode has to carry its labels in. `--no-ignore-imports` and
+/// `--min-occurrences` are declared on the `dupes` subcommand without `global`,
+/// so bare `fallow` and `fallow audit` answer both with "unexpected argument"
+/// and need the `--dupes-` prefixed spellings. Bare `fallow` honors those
+/// prefixed flags; `fallow audit` parses them and then builds its
+/// `DupesOptions` from `DuplicatesConfig` alone, so only the config keys change
+/// what audit reports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DupesOptOutScope {
+    /// `fallow dupes`, where the opt-outs are subcommand-scoped flags.
+    Subcommand,
+    /// Bare `fallow`, where they are `--dupes-` prefixed globals.
+    Combined,
+    /// `fallow audit`, where the globals parse but only config moves the
+    /// outcome.
+    Audit,
+}
+
+impl DupesOptOutScope {
+    /// The module-wiring opt-out this mode honors.
+    const fn ignore_imports_opt_out(self) -> &'static str {
+        match self {
+            Self::Subcommand => "--no-ignore-imports",
+            Self::Combined => "--dupes-no-ignore-imports",
+            Self::Audit => "duplicates.ignoreImports: false",
+        }
+    }
+
+    /// The `minOccurrences` control this mode honors.
+    const fn min_occurrences_control(self) -> &'static str {
+        match self {
+            Self::Subcommand => "--min-occurrences",
+            Self::Combined => "--dupes-min-occurrences",
+            Self::Audit => "duplicates.minOccurrences",
+        }
+    }
+}
+
+/// The module-wiring note lines: what clone detection left out, then the
+/// opt-out the mode doing the printing honors.
+///
+/// The opt-out sits on its own line the way `default_ignore_note_lines` puts
+/// its route there: the combined spelling renders at 82 columns inline, so a
+/// single-line note would hold under 80 in one mode and not the other.
+fn ignore_imports_note_lines(scope: DupesOptOutScope) -> Vec<String> {
+    vec![
+        "note: module wiring excluded from clones".to_string(),
+        format!("  ({} to include it)", scope.ignore_imports_opt_out()),
+    ]
+}
 
 /// Emit a stderr note when module wiring was excluded from clone detection.
 /// Human-format only, so machine readers never see decorative stderr noise.
 /// Fires only when clone groups were reported, so a clean run stays quiet; it
 /// tells users the report excludes a category and how to opt back in.
-pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
+fn print_ignore_imports_note(result: &DupesResult, quiet: bool, scope: DupesOptOutScope) {
     if quiet
         || !result.ignore_imports
         || result.report.clone_groups.is_empty()
@@ -1080,7 +1220,9 @@ pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
         return;
     }
 
-    eprintln!("{IGNORE_IMPORTS_NOTE}");
+    for line in ignore_imports_note_lines(scope) {
+        eprintln!("{line}");
+    }
 }
 
 #[cfg(test)]
@@ -1246,21 +1388,47 @@ mod tests {
     #[test]
     fn reviewed_clones_note_pluralizes_and_explains_resurfacing() {
         assert_eq!(
-            reviewed_clones_note(1).as_deref(),
-            Some(
-                "note: hid 1 reviewed clone group from duplicates.ignoredClones (remove a key to review it again)"
-            )
+            reviewed_clones_note_lines(1),
+            vec![
+                "note: hid 1 reviewed clone group".to_string(),
+                "  (duplicates.ignoredClones: remove a key to review it again)".to_string(),
+            ]
         );
-        assert!(
-            reviewed_clones_note(2)
-                .unwrap()
-                .contains("2 reviewed clone groups")
+        assert_eq!(
+            reviewed_clones_note_lines(2)[0],
+            "note: hid 2 reviewed clone groups"
         );
-        assert!(reviewed_clones_note(0).is_none());
+        assert!(reviewed_clones_note_lines(0).is_empty());
     }
 
     #[test]
-    fn default_ignore_note_pins_its_wording_and_holds_at_any_count() {
+    fn min_occurrences_note_names_the_control_the_printing_mode_honors() {
+        assert_eq!(
+            min_occurrences_note_lines(3, 2, DupesOptOutScope::Subcommand),
+            vec![
+                "note: hid 3 clone groups below minOccurrences".to_string(),
+                "  (lower --min-occurrences from 2 to see them)".to_string(),
+            ]
+        );
+        assert_eq!(
+            min_occurrences_note_lines(3, 2, DupesOptOutScope::Combined)[1],
+            "  (lower --dupes-min-occurrences from 2 to see them)"
+        );
+        // Audit rebuilds its `DupesOptions` from `DuplicatesConfig`, so both
+        // flag spellings are inert there and the note has to name the key.
+        assert_eq!(
+            min_occurrences_note_lines(3, 2, DupesOptOutScope::Audit)[1],
+            "  (lower duplicates.minOccurrences from 2 to see them)"
+        );
+        assert_eq!(
+            min_occurrences_note_lines(1, 5, DupesOptOutScope::Subcommand)[0],
+            "note: hid 1 clone group below minOccurrences"
+        );
+        assert!(min_occurrences_note_lines(0, 2, DupesOptOutScope::Subcommand).is_empty());
+    }
+
+    #[test]
+    fn default_ignore_note_pins_its_wording_in_both_branches() {
         let skips = DefaultIgnoreSkips {
             total: 1234,
             by_pattern: vec![DefaultIgnoreSkipCount {
@@ -1285,32 +1453,6 @@ mod tests {
             "both branches open with the same clause, so only the tail differs"
         );
         assert_eq!(explained[1], "   1234  **/storybook-static/**");
-
-        // The count is the only unbounded part of the clause, so the widest
-        // line this note can render is the one an unreachable count produces.
-        let widest = DefaultIgnoreSkips {
-            total: usize::MAX,
-            by_pattern: Vec::new(),
-        };
-        let widest_lines = default_ignore_note_lines(&widest, true);
-        assert_eq!(
-            widest_lines[0].chars().count(),
-            77,
-            "the fixture must drive the clause near the 80-column ceiling: {:?}",
-            widest_lines[0]
-        );
-
-        for line in lines
-            .iter()
-            .chain(explained.iter())
-            .chain(widest_lines.iter())
-        {
-            assert!(
-                line.chars().count() <= 80,
-                "dupes notes hold under 80 columns: {} chars in {line:?}",
-                line.chars().count()
-            );
-        }
     }
 
     #[test]
@@ -1332,29 +1474,171 @@ mod tests {
     }
 
     #[test]
-    fn ignore_imports_note_names_the_opt_out_and_holds_under_80_columns() {
+    fn ignore_imports_note_names_the_opt_out_the_printing_mode_honors() {
         assert_eq!(
-            IGNORE_IMPORTS_NOTE,
-            "note: module wiring excluded from clones (--no-ignore-imports to include it)"
+            ignore_imports_note_lines(DupesOptOutScope::Subcommand),
+            vec![
+                "note: module wiring excluded from clones".to_string(),
+                "  (--no-ignore-imports to include it)".to_string(),
+            ]
+        );
+        assert_eq!(
+            ignore_imports_note_lines(DupesOptOutScope::Combined),
+            vec![
+                "note: module wiring excluded from clones".to_string(),
+                "  (--dupes-no-ignore-imports to include it)".to_string(),
+            ]
+        );
+        assert_eq!(
+            ignore_imports_note_lines(DupesOptOutScope::Audit),
+            vec![
+                "note: module wiring excluded from clones".to_string(),
+                "  (duplicates.ignoreImports: false to include it)".to_string(),
+            ]
+        );
+
+        // Combined mode's spelling is the subcommand flag under a `--dupes-`
+        // prefix: clap declares the subcommand one without `global`, so bare
+        // `fallow` answers it with "unexpected argument". Audit deliberately
+        // breaks that pattern, because the prefixed flag parses there and then
+        // changes nothing; `crates/cli/tests/dupes_tests.rs` pins both against
+        // the built binary.
+        assert_eq!(
+            DupesOptOutScope::Combined.ignore_imports_opt_out(),
+            format!(
+                "--dupes-{}",
+                DupesOptOutScope::Subcommand
+                    .ignore_imports_opt_out()
+                    .trim_start_matches("--")
+            )
         );
         assert!(
-            IGNORE_IMPORTS_NOTE.chars().count() <= 80,
-            "dupes notes hold under 80 columns: {} chars in {IGNORE_IMPORTS_NOTE:?}",
-            IGNORE_IMPORTS_NOTE.chars().count()
+            !DupesOptOutScope::Audit
+                .ignore_imports_opt_out()
+                .starts_with('-'),
+            "audit's opt-out is a config key, not a flag"
         );
+    }
+
+    const ALL_SCOPES: [DupesOptOutScope; 3] = [
+        DupesOptOutScope::Subcommand,
+        DupesOptOutScope::Combined,
+        DupesOptOutScope::Audit,
+    ];
+
+    /// Names a scope for the width table. Exhaustive, so a fourth mode cannot
+    /// reach the notes without being named here first.
+    const fn scope_label(scope: DupesOptOutScope) -> &'static str {
+        match scope {
+            DupesOptOutScope::Subcommand => "dupes",
+            DupesOptOutScope::Combined => "combined",
+            DupesOptOutScope::Audit => "audit",
+        }
+    }
+
+    /// Every dupes note rendered at its widest: unbounded counts pushed to
+    /// `usize::MAX`, plural nouns, both branches of the default-ignore note,
+    /// and every mode's spelling of the two scoped notes. A note missing from
+    /// this list is a note nothing measures.
+    fn widest_note_renderings() -> Vec<(String, Vec<String>)> {
+        // `DefaultIgnoreSkipCount::pattern` is `&'static str` because the
+        // breakdown only ever names the engine's built-in ignore list, whose
+        // longest entry is `**/storybook-static/**` (DUPES_DEFAULT_IGNORES).
+        let widest_skips = DefaultIgnoreSkips {
+            total: usize::MAX,
+            by_pattern: vec![DefaultIgnoreSkipCount {
+                pattern: "**/storybook-static/**",
+                count: usize::MAX,
+            }],
+        };
+        let mut renderings = vec![
+            (
+                "default-ignore-route".to_string(),
+                default_ignore_note_lines(&widest_skips, false),
+            ),
+            (
+                "default-ignore-breakdown".to_string(),
+                default_ignore_note_lines(&widest_skips, true),
+            ),
+            (
+                "reviewed-clones".to_string(),
+                reviewed_clones_note_lines(usize::MAX),
+            ),
+            (
+                "near-candidates".to_string(),
+                near_candidates_skipped_note_lines(usize::MAX),
+            ),
+        ];
+        for scope in ALL_SCOPES {
+            let label = scope_label(scope);
+            renderings.push((
+                format!("min-occurrences ({label})"),
+                min_occurrences_note_lines(usize::MAX, usize::MAX, scope),
+            ));
+            renderings.push((
+                format!("ignore-imports ({label})"),
+                ignore_imports_note_lines(scope),
+            ));
+        }
+        renderings
+    }
+
+    #[test]
+    fn every_dupes_note_holds_under_eighty_columns_at_its_widest() {
+        let widths: Vec<(String, Vec<usize>)> = widest_note_renderings()
+            .into_iter()
+            .map(|(name, lines)| {
+                let columns = lines.iter().map(|line| line.chars().count()).collect();
+                (name, columns)
+            })
+            .collect();
+
+        // Pinned per line rather than bounded by one shared number: a line that
+        // gains four columns has to fail here even when the 80-column assertion
+        // below still passes because that line started narrow. The fixtures put
+        // every unbounded count at its maximum, so these are the real ceilings.
+        assert_eq!(
+            widths,
+            vec![
+                ("default-ignore-route".to_string(), vec![76, 34]),
+                ("default-ignore-breakdown".to_string(), vec![77, 46]),
+                ("reviewed-clones".to_string(), vec![52, 61]),
+                ("near-candidates".to_string(), vec![44, 79, 46]),
+                ("min-occurrences (dupes)".to_string(), vec![64, 65]),
+                ("ignore-imports (dupes)".to_string(), vec![40, 37]),
+                ("min-occurrences (combined)".to_string(), vec![64, 71]),
+                ("ignore-imports (combined)".to_string(), vec![40, 43]),
+                ("min-occurrences (audit)".to_string(), vec![64, 73]),
+                ("ignore-imports (audit)".to_string(), vec![40, 49]),
+            ]
+        );
+
+        for (name, lines) in widest_note_renderings() {
+            for line in lines {
+                assert!(
+                    line.chars().count() <= 80,
+                    "the {name} note must hold under 80 columns: {} chars in {line:?}",
+                    line.chars().count()
+                );
+            }
+        }
     }
 
     #[test]
     fn near_candidates_skipped_note_pluralizes_and_gives_next_step() {
-        assert!(
-            near_candidates_skipped_note(1)
-                .unwrap()
-                .contains("skipped 1 candidate comparison")
+        assert_eq!(
+            near_candidates_skipped_note_lines(1),
+            vec![
+                "warning: near-miss results may be incomplete".to_string(),
+                "  skipped 1 candidate comparison to stay within work limits".to_string(),
+                "  (narrow with --workspace or --changed-since)".to_string(),
+            ]
         );
-        let plural = near_candidates_skipped_note(2).unwrap();
-        assert!(plural.contains("skipped 2 candidate comparisons"));
-        assert!(plural.contains("--workspace or --changed-since"));
-        assert!(near_candidates_skipped_note(0).is_none());
+        assert_eq!(
+            near_candidates_skipped_note_lines(2)[1],
+            "  skipped 2 candidate comparisons to stay within work limits"
+        );
+        assert!(near_candidates_skipped_note_lines(0).is_empty());
     }
 
     #[test]
