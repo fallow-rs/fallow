@@ -841,11 +841,15 @@ fn coordination_gap_lines(gaps: &[CoordinationGapFact]) -> Vec<String> {
         if gaps.len() == 1 { "s" } else { "" },
     )];
     let mut widest: Vec<&CoordinationGapFact> = gaps.iter().collect();
+    // One consumer can take exports from several changed files, so the consumer
+    // path alone does not break every tie; without the changed file the order
+    // would rest on `sort_by` stability plus the engine's upstream sort.
     widest.sort_by(|a, b| {
         b.consumed_symbols
             .len()
             .cmp(&a.consumed_symbols.len())
             .then_with(|| a.consumer_file.cmp(&b.consumer_file))
+            .then_with(|| a.changed_file.cmp(&b.changed_file))
     });
 
     let mut symbols_omitted = 0usize;
@@ -1253,6 +1257,18 @@ fn print_ownership_human(ownership: Option<&fallow_output::OwnershipFacts>) {
     }
 }
 
+/// How many contract members a decision question names inline on the human
+/// brief before the rest collapse into "+N more".
+///
+/// Lower than [`fallow_output::MAX_CONTRACT_MEMBERS`], which the walkthrough
+/// tour uses, because the two lines do not carry the same load: the tour drops
+/// the anchor path and the trailing question, while the brief keeps both (the
+/// path appears nowhere else, and the question IS the judgment the brief
+/// poses). Three names are what is left of the line once those are paid for,
+/// and they are enough to recognise the shape of a contract; the count carries
+/// its size and the JSON carries every name.
+const MAX_BRIEF_DECISION_MEMBERS: usize = 3;
+
 /// The decision-surface lines (the apex, 6.G): the ranked, capped set of
 /// consequential structural decisions, each as a framed judgment question with
 /// its routed expert. Leads the brief.
@@ -1260,9 +1276,10 @@ fn print_ownership_human(ownership: Option<&fallow_output::OwnershipFacts>) {
 /// Split out from the printer so the wording and the width are testable, the
 /// way `affected_lines` and `branching_human_lines` are: every line has to hold
 /// under 80 columns. A question naming a widened export list runs to several
-/// hundred characters, so it wraps under a hanging indent rather than being
-/// cut: the question IS the judgment the brief exists to pose, and truncating
-/// it would drop the ask at the end of the sentence.
+/// hundred characters; its member list collapses to
+/// [`MAX_BRIEF_DECISION_MEMBERS`] names and the prose around it wraps under a
+/// hanging indent rather than being cut. The question IS the judgment the brief
+/// exists to pose, so the ask at the end of the sentence always survives.
 fn decision_surface_lines(surface: &crate::audit_decision_surface::DecisionSurface) -> Vec<String> {
     if surface.decisions.is_empty() {
         return vec![
@@ -1271,6 +1288,7 @@ fn decision_surface_lines(surface: &crate::audit_decision_surface::DecisionSurfa
         ];
     }
     let mut lines = vec![format!("Decisions to make ({}):", surface.decisions.len())];
+    let mut names_collapsed = false;
     for (i, decision) in surface.decisions.iter().enumerate() {
         // Taste ownership: the question first (never an answer), then the honest
         // graph fact, then the named trade-off. The human reads reversibility from
@@ -1279,7 +1297,12 @@ fn decision_surface_lines(surface: &crate::audit_decision_surface::DecisionSurfa
         let head_width = head.chars().count();
         // Continuations sit past column 5 so that column stays the key column
         // `trade-off:` and `ask:` own, giving the block a 2 / 5 / 7 hierarchy.
-        let question = wrap_prose(&decision.question, 80 - head_width, 73, elide_path);
+        // A widened export list spends most of the question's lines on names, which
+        // pushes the ask itself off the first screenful; the members identify the
+        // contract, they are not the thing being asked about.
+        let asked = fallow_output::cap_member_list(&decision.question, MAX_BRIEF_DECISION_MEMBERS);
+        names_collapsed |= asked != decision.question;
+        let question = wrap_prose(&asked, 80 - head_width, 73, elide_path);
         if question.is_empty() {
             lines.push(head.trim_end().to_string());
         }
@@ -1334,6 +1357,12 @@ fn decision_surface_lines(surface: &crate::audit_decision_surface::DecisionSurfa
                 last.push_str(bus);
             }
         }
+    }
+    if names_collapsed {
+        // A `+N more` with no route on screen leaves the reader nowhere to go. The
+        // route holds: a decision that renders here carries its full, uncapped
+        // question in the brief JSON.
+        lines.push("  (--format json for every collapsed name)".to_string());
     }
     if let Some(note) = &surface.truncated {
         for (n, chunk) in wrap_prose(&note.reason, 72, 72, elide_path)
@@ -2042,6 +2071,31 @@ mod tests {
     }
 
     #[test]
+    fn gaps_sharing_a_consumer_are_ordered_by_their_changed_file() {
+        // One consumer taking exports from two changed files ties on both leading
+        // keys, so the comparator must decide the order itself rather than inherit
+        // whatever order the engine happened to hand it.
+        let forward = coordination_gap_lines(&[
+            gap("src/app.ts", "src/z-core.ts", &["parse"]),
+            gap("src/app.ts", "src/a-core.ts", &["render"]),
+        ]);
+        let reversed = coordination_gap_lines(&[
+            gap("src/app.ts", "src/a-core.ts", &["render"]),
+            gap("src/app.ts", "src/z-core.ts", &["parse"]),
+        ]);
+        assert_eq!(
+            forward, reversed,
+            "the order must not depend on the order the gaps arrived in"
+        );
+        let sources: Vec<&String> = forward.iter().filter(|l| l.contains(" from ")).collect();
+        assert!(
+            sources[0].ends_with("from src/a-core.ts")
+                && sources[1].ends_with("from src/z-core.ts"),
+            "tied gaps read in changed-file order: {forward:?}"
+        );
+    }
+
+    #[test]
     fn the_widest_consumers_are_the_ones_spelled_out() {
         // The JSON gap list is path-sorted with no ranking, so an alphabetical
         // prefix would collapse the barrel consumer behind the remainder.
@@ -2314,6 +2368,129 @@ mod tests {
                 line.chars().count()
             );
         }
+    }
+
+    /// The public-API question a real monorepo entry point produces: one changed
+    /// file, two dozen re-exported names, and the ask at the very end.
+    fn zod_shaped_question() -> String {
+        let exports = [
+            "_decode",
+            "_decodeAsync",
+            "_encode",
+            "_encodeAsync",
+            "_parse",
+            "_parseAsync",
+            "_safeDecode",
+            "_safeDecodeAsync",
+            "_safeEncode",
+            "_safeEncodeAsync",
+            "_safeParse",
+            "_safeParseAsync",
+            "decode",
+            "decodeAsync",
+            "encode",
+            "encodeAsync",
+            "parse",
+            "parseAsync",
+            "safeDecode",
+            "safeDecodeAsync",
+            "safeEncode",
+            "safeEncodeAsync",
+            "validate",
+            "validateAsync",
+        ]
+        .join(", ");
+        format!(
+            "`packages/zod/src/v4/core/parse.ts` changes exports ({exports}) imported by 6 \
+             files outside this PR. Does this change break or alter what those callers \
+             expect?"
+        )
+    }
+
+    #[test]
+    fn a_capped_member_list_keeps_the_path_and_the_ask() {
+        let question = zod_shaped_question();
+        let lines = decision_surface_lines(&crate::audit_decision_surface::DecisionSurface {
+            decisions: vec![decision(&question, "", &[])],
+            truncated: None,
+            emitted_signal_ids: vec!["sig".to_string()],
+        });
+        let rendered = lines.join(" ");
+        assert!(
+            rendered.contains("+21 more"),
+            "the collapsed names are counted, not dropped: {lines:?}"
+        );
+        assert!(
+            !rendered.contains("safeEncodeAsync"),
+            "a name past the cap must not still render: {lines:?}"
+        );
+        assert!(
+            rendered.contains("`packages/zod/src/v4/core/parse.ts`"),
+            "the anchor path appears nowhere else on the brief: {lines:?}"
+        );
+        assert!(
+            rendered.contains("Does this change break or alter what those callers expect?"),
+            "the ask is the judgment the brief poses and survives the cap: {lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "  (--format json for every collapsed name)"),
+            "collapsed names get a route that holds: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn a_zod_shaped_question_reads_in_three_lines() {
+        let question = zod_shaped_question();
+        // Without the cap this same question wraps past a first screenful, so the
+        // count below measures the cap rather than a short fixture.
+        let head = format!(
+            "  1. [{}] ",
+            crate::audit_decision_surface::DecisionCategory::PublicApiContract.tag()
+        );
+        assert!(
+            wrap_prose(&question, 80 - head.chars().count(), 73, elide_path).len() > 5,
+            "the fixture must be one the cap actually shortens: {question}"
+        );
+        let lines = decision_surface_lines(&crate::audit_decision_surface::DecisionSurface {
+            decisions: vec![decision(&question, "", &[])],
+            truncated: None,
+            emitted_signal_ids: vec!["sig".to_string()],
+        });
+        // Header, the question block, the JSON route, and the closing blank line.
+        let question_lines = &lines[1..lines.len() - 2];
+        assert_eq!(
+            question_lines.len(),
+            3,
+            "a widened export list costs three lines, not a screenful: {lines:?}"
+        );
+        assert!(question_lines[0].starts_with(&head), "{lines:?}");
+        for line in &lines {
+            assert!(
+                line.chars().count() <= 80,
+                "brief lines hold under 80 columns: {} chars in {line:?}",
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn an_uncapped_question_is_promised_no_route_it_does_not_need() {
+        let lines = decision_surface_lines(&crate::audit_decision_surface::DecisionSurface {
+            decisions: vec![decision(
+                "`src/core.ts` changes exports (parse, decode) imported by 3 files outside \
+                 this PR. Does this change break or alter what those callers expect?",
+                "",
+                &[],
+            )],
+            truncated: None,
+            emitted_signal_ids: vec!["sig".to_string()],
+        });
+        assert!(
+            !lines.iter().any(|l| l.contains("collapsed name")),
+            "nothing collapsed, so nothing to route to: {lines:?}"
+        );
     }
 
     #[test]

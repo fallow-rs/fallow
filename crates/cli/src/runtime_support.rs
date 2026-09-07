@@ -465,17 +465,28 @@ fn report_workspace_diagnostics(
                 && matches!(options.output, OutputFormat::Human)
                 && !options.quiet
             {
-                eprintln!(
-                    "fallow: {} workspace discovery diagnostic{}. \
-                     Run `fallow list --workspaces` for detail.",
-                    diagnostics.len(),
-                    if diagnostics.len() == 1 { "" } else { "s" }
-                );
+                eprintln!("{}", workspace_diagnostics_notice(diagnostics.len()));
             }
             Ok(())
         }
         Err(err) => Err(crate::error::emit_error(err.message(), 2, options.output)),
     }
+}
+
+/// Render the one-line stderr notice that workspace discovery produced
+/// diagnostics.
+///
+/// Built by name so the wording and its eighty-column bound are unit testable
+/// rather than only observable through a subprocess. The notice names the
+/// dedicated `fallow workspaces` command rather than the equivalent
+/// `fallow list --workspaces`: both print the same per-entry block, and the
+/// shorter spelling is what keeps the line inside eighty columns once a
+/// monorepo drives the count to four digits.
+fn workspace_diagnostics_notice(count: usize) -> String {
+    format!(
+        "fallow: {count} workspace discovery diagnostic{}. Run `fallow workspaces`.",
+        crate::report::plural(count)
+    )
 }
 
 fn config_shape_for(
@@ -577,6 +588,38 @@ mod tests {
             ..fallow_config::SecurityConfig::default()
         };
         assert!(find_unknown_security_categories(&security).is_empty());
+    }
+
+    /// The notice promises a route, so pin the exact sentence in both
+    /// spellings: `fallow workspaces` prints the per-entry block this line
+    /// summarises, and a rename of that command must fail here rather than
+    /// leave the warning pointing at nothing.
+    #[test]
+    fn workspace_diagnostics_notice_pins_wording_and_route() {
+        assert_eq!(
+            workspace_diagnostics_notice(1),
+            "fallow: 1 workspace discovery diagnostic. Run `fallow workspaces`."
+        );
+        assert_eq!(
+            workspace_diagnostics_notice(1234),
+            "fallow: 1234 workspace discovery diagnostics. Run `fallow workspaces`."
+        );
+    }
+
+    /// The count is the only part of the notice that grows, so a four-digit
+    /// monorepo is the widest line this warning renders. Walk the digit
+    /// widths up to that ceiling instead of asserting on the one-diagnostic
+    /// case, which fits with room to spare and would pass vacuously.
+    #[test]
+    fn workspace_diagnostics_notice_stays_within_eighty_columns() {
+        for count in [1_usize, 9, 99, 999, 9999] {
+            let line = workspace_diagnostics_notice(count);
+            assert!(
+                line.chars().count() <= 80,
+                "{count} diagnostics render at {} columns: {line}",
+                line.chars().count()
+            );
+        }
     }
 
     #[test]

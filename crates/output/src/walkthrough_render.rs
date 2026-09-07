@@ -141,7 +141,12 @@ fn strip_leading_path(question: &str, anchor_file: &str) -> String {
 /// Cap the FIRST parenthesized comma-list (the contract members) to
 /// `max_members` names, replacing the overflow with "+N more". Text outside that
 /// first parenthetical (including the trailing question) is preserved verbatim.
-fn cap_member_list(text: &str, max_members: usize) -> String {
+///
+/// Public because the human brief needs the cap WITHOUT the rest of
+/// [`clean_decision_fact`]: the brief prints no separate anchor path and the
+/// question is the judgment it exists to pose, so it has to keep both.
+#[must_use]
+pub fn cap_member_list(text: &str, max_members: usize) -> String {
     let Some(open) = text.find('(') else {
         return text.to_string();
     };

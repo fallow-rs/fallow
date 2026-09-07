@@ -927,6 +927,39 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     ])
 }
 
+/// The default-ignore note lines: how many files the built-in duplicates
+/// ignores skipped, then either the per-pattern breakdown or the route to it.
+///
+/// Split out from the printer so the wording and the width are testable the way
+/// `reviewed_clones_note` is: every line has to hold under 80 columns. The
+/// route sits on its own line rather than closing the clause, which rendered at
+/// 96 columns inline and would otherwise widen with an unbounded skip count.
+fn default_ignore_note_lines(skips: &DefaultIgnoreSkips, explain: bool) -> Vec<String> {
+    if skips.total == 0 {
+        return Vec::new();
+    }
+
+    let total = skips.total;
+    let noun = if total == 1 { "file" } else { "files" };
+    if !explain {
+        return vec![
+            format!("note: skipped {total} {noun} matching default duplicates ignores"),
+            "  (--explain-skipped for the list)".to_string(),
+        ];
+    }
+
+    let mut lines = vec![format!(
+        "note: skipped {total} {noun} matching default duplicates ignores:"
+    )];
+    lines.extend(
+        skips
+            .by_pattern
+            .iter()
+            .map(|entry| format!("  {:>5}  {}", entry.count, entry.pattern)),
+    );
+    lines
+}
+
 pub fn print_default_ignore_note(result: &DupesResult, quiet: bool) {
     if quiet
         || !matches!(
@@ -942,25 +975,8 @@ pub fn print_default_ignore_note(result: &DupesResult, quiet: bool) {
         return;
     }
 
-    let skips = &result.default_ignore_skips;
-    if skips.total == 0 {
-        return;
-    }
-
-    let noun = if skips.total == 1 { "file" } else { "files" };
-    if result.explain_skipped {
-        eprintln!(
-            "note: skipped {} {noun} matching default duplicates ignores:",
-            skips.total
-        );
-        for entry in &skips.by_pattern {
-            eprintln!("  {:>5}  {}", entry.count, entry.pattern);
-        }
-    } else {
-        eprintln!(
-            "note: skipped {} {noun} matching default duplicates ignores (use --explain-skipped for the list)",
-            skips.total
-        );
+    for line in default_ignore_note_lines(&result.default_ignore_skips, result.explain_skipped) {
+        eprintln!("{line}");
     }
 }
 
@@ -1037,6 +1053,12 @@ fn print_near_candidates_skipped_note(result: &DupesResult, quiet: bool) {
     }
 }
 
+/// The module-wiring note. It says "clones" rather than "clone detection" so
+/// the clause and its opt-out share one line under 80 columns, the width the
+/// human notes hold to; the longer wording rendered at 85.
+const IGNORE_IMPORTS_NOTE: &str =
+    "note: module wiring excluded from clones (--no-ignore-imports to include it)";
+
 /// Emit a stderr note when module wiring was excluded from clone detection.
 /// Human-format only, so machine readers never see decorative stderr noise.
 /// Fires only when clone groups were reported, so a clean run stays quiet; it
@@ -1058,9 +1080,7 @@ pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
         return;
     }
 
-    eprintln!(
-        "note: module wiring excluded from clone detection (--no-ignore-imports to include it)"
-    );
+    eprintln!("{IGNORE_IMPORTS_NOTE}");
 }
 
 #[cfg(test)]
@@ -1072,7 +1092,7 @@ mod tests {
     use fallow_engine::diff_scope::filter_duplication_by_diff as filter_by_diff;
     use fallow_engine::duplicates::filter_to_workspaces as filter_by_workspaces;
     use fallow_types::duplicates::{
-        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
+        CloneGroup, CloneInstance, DefaultIgnoreSkipCount, DuplicationReport, DuplicationStats,
     };
     use std::path::{Path, PathBuf};
 
@@ -1237,6 +1257,91 @@ mod tests {
                 .contains("2 reviewed clone groups")
         );
         assert!(reviewed_clones_note(0).is_none());
+    }
+
+    #[test]
+    fn default_ignore_note_pins_its_wording_and_holds_at_any_count() {
+        let skips = DefaultIgnoreSkips {
+            total: 1234,
+            by_pattern: vec![DefaultIgnoreSkipCount {
+                pattern: "**/storybook-static/**",
+                count: 1234,
+            }],
+        };
+
+        let lines = default_ignore_note_lines(&skips, false);
+        assert_eq!(
+            lines,
+            vec![
+                "note: skipped 1234 files matching default duplicates ignores".to_string(),
+                "  (--explain-skipped for the list)".to_string(),
+            ]
+        );
+
+        let explained = default_ignore_note_lines(&skips, true);
+        assert_eq!(
+            explained[0],
+            format!("{}:", lines[0]),
+            "both branches open with the same clause, so only the tail differs"
+        );
+        assert_eq!(explained[1], "   1234  **/storybook-static/**");
+
+        // The count is the only unbounded part of the clause, so the widest
+        // line this note can render is the one an unreachable count produces.
+        let widest = DefaultIgnoreSkips {
+            total: usize::MAX,
+            by_pattern: Vec::new(),
+        };
+        let widest_lines = default_ignore_note_lines(&widest, true);
+        assert_eq!(
+            widest_lines[0].chars().count(),
+            77,
+            "the fixture must drive the clause near the 80-column ceiling: {:?}",
+            widest_lines[0]
+        );
+
+        for line in lines
+            .iter()
+            .chain(explained.iter())
+            .chain(widest_lines.iter())
+        {
+            assert!(
+                line.chars().count() <= 80,
+                "dupes notes hold under 80 columns: {} chars in {line:?}",
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn default_ignore_note_is_singular_for_one_file_and_silent_for_none() {
+        assert!(default_ignore_note_lines(&DefaultIgnoreSkips::default(), false).is_empty());
+        assert!(default_ignore_note_lines(&DefaultIgnoreSkips::default(), true).is_empty());
+
+        let one = DefaultIgnoreSkips {
+            total: 1,
+            by_pattern: vec![DefaultIgnoreSkipCount {
+                pattern: "**/*.test.*",
+                count: 1,
+            }],
+        };
+        assert_eq!(
+            default_ignore_note_lines(&one, false)[0],
+            "note: skipped 1 file matching default duplicates ignores"
+        );
+    }
+
+    #[test]
+    fn ignore_imports_note_names_the_opt_out_and_holds_under_80_columns() {
+        assert_eq!(
+            IGNORE_IMPORTS_NOTE,
+            "note: module wiring excluded from clones (--no-ignore-imports to include it)"
+        );
+        assert!(
+            IGNORE_IMPORTS_NOTE.chars().count() <= 80,
+            "dupes notes hold under 80 columns: {} chars in {IGNORE_IMPORTS_NOTE:?}",
+            IGNORE_IMPORTS_NOTE.chars().count()
+        );
     }
 
     #[test]

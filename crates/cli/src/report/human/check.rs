@@ -538,32 +538,176 @@ fn format_unused_member(m: &UnusedMember, caveats: &[ReachabilityCaveat]) -> Str
     )
 }
 
+/// Width a dependency line renders within, including the two-space indent that
+/// `push_human_pkg_dep_section` prepends.
+const DEP_LINE_WIDTH: usize = 80;
+
+/// Fixed cost of `  {name} ({label})`: the indent, the separating space, and
+/// the parentheses. What is left after the package name is the label budget.
+const DEP_LINE_DECORATION: usize = 5;
+
+/// Manifest path of the workspace root. It says nothing beyond "the root", so
+/// the label drops it and keeps only the cross-workspace clause.
+const ROOT_MANIFEST: &str = "package.json";
+
+/// Clause introducing the workspaces that import the package.
+const IMPORTED_IN: &str = "imported in ";
+
+/// Marker for a path shortened from the left.
+const PATH_ELLIPSIS: &str = ".../";
+
+/// Narrowest label worth rendering, the width of a manifest path elided to its
+/// file name. Below it the parenthetical carries nothing, so the package
+/// renders bare.
+const MIN_LABEL_WIDTH: usize = 16;
+
+/// Narrowest workspace clause worth rendering: one elided path plus a
+/// `+N more`.
+const MIN_WORKSPACE_LIST_WIDTH: usize = 18;
+
+/// Shorten a path from the left so a deep manifest or workspace path cannot
+/// push a dependency line past `DEP_LINE_WIDTH`. A path is identified by its
+/// innermost segments, so the head goes first; whole segments are kept wherever
+/// they fit, because a half-eaten directory name reads as a different
+/// directory. Callers keep the budget wider than the marker.
+fn elide_path(path: &str, budget: usize) -> String {
+    if path.chars().count() <= budget {
+        return path.to_string();
+    }
+    let tail_budget = budget.saturating_sub(PATH_ELLIPSIS.chars().count());
+    let tail = path
+        .match_indices('/')
+        .map(|(offset, _)| &path[offset + 1..])
+        .find(|tail| tail.chars().count() <= tail_budget)
+        .map_or_else(
+            // One segment wider than the budget: its tail is where a generated
+            // or numbered name differs.
+            || {
+                let skip = path.chars().count().saturating_sub(tail_budget);
+                path.chars().skip(skip).collect()
+            },
+            str::to_string,
+        );
+    format!("{PATH_ELLIPSIS}{tail}")
+}
+
+/// Whether an elided manifest path still names the directory that declares the
+/// dependency, instead of collapsing onto the `package.json` tail every
+/// manifest shares.
+fn names_owning_directory(manifest: &str) -> bool {
+    manifest
+        .strip_prefix(PATH_ELLIPSIS)
+        .unwrap_or(manifest)
+        .contains('/')
+}
+
+/// Join the importing workspaces under `budget`, collapsing the tail into
+/// `+N more`.
+///
+/// The collapse promises no route. `used_in_workspaces` is uncapped in JSON, so
+/// a `--format json for full list` pointer would hold, but it costs more width
+/// than the whole clause has, and the package name is already on the line for a
+/// reader to query with. This is how the review brief caps an inline list.
+fn summarize_workspaces(workspaces: &[String], budget: usize) -> String {
+    let mut shown = 0usize;
+    let mut width = 0usize;
+    for workspace in workspaces {
+        let separator = usize::from(shown > 0) * ", ".len();
+        let omitted = workspaces.len() - shown - 1;
+        // Keep room for the suffix the omitted workspaces will need.
+        let suffix = if omitted == 0 {
+            0
+        } else {
+            format!(" +{omitted} more").chars().count()
+        };
+        let next = width + separator + workspace.chars().count();
+        if shown > 0 && next + suffix > budget {
+            break;
+        }
+        width = next;
+        shown += 1;
+    }
+    // The first workspace always renders, elided if it alone overruns.
+    let shown = shown.max(1).min(workspaces.len());
+    let joined = workspaces[..shown].join(", ");
+    let omitted = workspaces.len() - shown;
+    if omitted == 0 {
+        return elide_path(&joined, budget);
+    }
+    let suffix = format!(" +{omitted} more");
+    let head = elide_path(&joined, budget.saturating_sub(suffix.chars().count()));
+    format!("{head}{suffix}")
+}
+
+/// Build the parenthetical for a dependency line: where the package is declared
+/// and which workspaces import it, both bounded so the label holds within
+/// `budget`. `None` means there is nothing to say (a root manifest with no
+/// cross-workspace consumers) and the caller renders the name alone.
+///
+/// The manifest path outranks the workspace clause. Once seating a clause has
+/// eroded the path down to `.../package.json`, the label no longer names a
+/// package, and a reader cannot edit a manifest they cannot identify, so the
+/// path takes the whole label and the clause goes.
+///
+/// Split out from the printer so the wording and the width are testable.
+fn dep_label(pkg_label: &str, workspaces: &[String], budget: usize) -> Option<String> {
+    // A package name wide enough to leave no usable budget renders bare. The
+    // name is never shortened: it is the identity a reader looks up and passes
+    // to `fallow fix`, and a truncated one is unusable.
+    if budget < MIN_LABEL_WIDTH {
+        return None;
+    }
+    let manifest = (pkg_label != ROOT_MANIFEST).then_some(pkg_label);
+    if workspaces.is_empty() {
+        return manifest.map(|path| elide_path(path, budget));
+    }
+    let separator = if manifest.is_some() { "; " } else { "" };
+    let clause = separator.chars().count() + IMPORTED_IN.chars().count();
+    let head = match manifest {
+        Some(path) => {
+            let head = elide_path(
+                path,
+                budget.saturating_sub(clause + MIN_WORKSPACE_LIST_WIDTH),
+            );
+            if !names_owning_directory(&head) {
+                return Some(elide_path(path, budget));
+            }
+            head
+        }
+        None => String::new(),
+    };
+    let Some(list_budget) = budget
+        .checked_sub(head.chars().count() + clause)
+        .filter(|width| *width >= MIN_WORKSPACE_LIST_WIDTH)
+    else {
+        return (!head.is_empty()).then_some(head);
+    };
+    let list = summarize_workspaces(workspaces, list_budget);
+    Some(format!("{head}{separator}{IMPORTED_IN}{list}"))
+}
+
+/// Render `name` plus its bounded label. `reserved` is the width of the text
+/// the caller appends to the line, for example a caveat parenthetical, so the
+/// label leaves room for it inside `DEP_LINE_WIDTH`.
 fn format_dep_with_pkg(
     name: &str,
     pkg_path: &Path,
     used_in_workspaces: &[PathBuf],
     root: &Path,
+    reserved: usize,
 ) -> String {
+    // Normalized separators: the label's elision snaps to path segments, and a
+    // Windows-shaped path would otherwise present as one unbreakable segment.
     let pkg_label = format_display_path(pkg_path, root);
-    let workspace_context = if used_in_workspaces.is_empty() {
-        String::new()
-    } else {
-        let workspaces = used_in_workspaces
-            .iter()
-            .map(|path| format_display_path(path, root))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("; imported in {workspaces}")
-    };
-    if pkg_label == "package.json" && workspace_context.is_empty() {
-        format!("{}", name.bold())
-    } else {
-        let label = if pkg_label == "package.json" {
-            workspace_context.trim_start_matches("; ").to_string()
-        } else {
-            format!("{pkg_label}{workspace_context}")
-        };
-        format!("{} ({})", name.bold(), label.dimmed())
+    let workspaces: Vec<String> = used_in_workspaces
+        .iter()
+        .map(|path| format_display_path(path, root))
+        .collect();
+    let budget =
+        DEP_LINE_WIDTH.saturating_sub(name.chars().count() + DEP_LINE_DECORATION + reserved);
+    match dep_label(&pkg_label, &workspaces, budget) {
+        Some(label) => format!("{} ({})", name.bold(), label.dimmed()),
+        None => name.bold().to_string(),
     }
 }
 
@@ -707,13 +851,15 @@ fn push_human_pkg_dep_section<T: NamedPkgDep>(input: &mut HumanPkgDepSectionInpu
             total_issues: input.total_issues,
         },
         |dep| {
+            let caveat_width = caveat_suffix(dep.caveats()).map_or(0, |text| text.chars().count());
             vec![format!(
                 "  {}{}",
                 format_dep_with_pkg(
                     dep.pkg_name(),
                     dep.pkg_path(),
                     dep.used_in_workspaces(),
-                    input.root
+                    input.root,
+                    caveat_width,
                 ),
                 dimmed_caveat_suffix(dep.caveats()),
             )]
@@ -4834,6 +4980,167 @@ mod tests {
         assert!(text.contains("lodash-es"));
         assert!(text.contains("(imported in packages/consumer)"));
         assert!(!text.contains("(package.json; imported in packages/consumer)"));
+    }
+
+    #[test]
+    fn unused_dep_with_many_workspaces_holds_80_columns() {
+        let root = PathBuf::from("/project");
+        let manifest = root.join("packages/design-tokens/package.json");
+        let workspaces = vec![
+            root.join("packages/web-application"),
+            root.join("packages/mobile-application"),
+            root.join("packages/documentation-site"),
+        ];
+        let name = "@acme/tokens";
+        let natural: usize = name.chars().count()
+            + DEP_LINE_DECORATION
+            + relative_path(&manifest, &root)
+                .display()
+                .to_string()
+                .chars()
+                .count()
+            + IMPORTED_IN.chars().count()
+            + workspaces
+                .iter()
+                .map(|path| {
+                    relative_path(path, &root)
+                        .display()
+                        .to_string()
+                        .chars()
+                        .count()
+                        + 2
+                })
+                .sum::<usize>();
+        // Unelided, this line runs well past the ceiling it has to hold.
+        assert!(natural > DEP_LINE_WIDTH + 30, "{natural}");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: name.to_string(),
+                location: DependencyLocation::Dependencies,
+                path: manifest,
+                line: 8,
+                used_in_workspaces: workspaces,
+            }));
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules, None);
+        let text = plain(&lines);
+        let rendered = text
+            .lines()
+            .find(|line| line.contains(name))
+            .expect("dependency line rendered");
+        assert!(
+            rendered.chars().count() <= DEP_LINE_WIDTH,
+            "{rendered} is {} columns",
+            rendered.chars().count()
+        );
+        // The declaring package survives the elision, and the workspaces the
+        // clause could not seat are disclosed rather than dropped.
+        assert!(rendered.contains("design-tokens/package.json"));
+        assert!(rendered.contains("imported in"));
+        assert!(rendered.contains("+2 more"));
+    }
+
+    #[test]
+    fn a_caveated_dep_line_keeps_its_caveat_inside_80_columns() {
+        let root = PathBuf::from("/project");
+        let name = "react-native-gzip";
+        let mut dep = UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: name.to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/mobile-application/package.json"),
+            line: 8,
+            used_in_workspaces: Vec::new(),
+        });
+        dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(dep);
+        let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
+        let text = plain(&lines);
+        let rendered = text
+            .lines()
+            .find(|line| line.contains(name))
+            .expect("dependency line rendered");
+        // The caveat is appended after the label, so the label budget has to
+        // leave room for it. Unreserved, this line renders at 95 columns.
+        assert!(
+            rendered.chars().count() <= 80,
+            "{} columns: {rendered}",
+            rendered.chars().count()
+        );
+        assert!(
+            rendered.ends_with("(caveat: incomplete import graph)"),
+            "the caveat is never cut: {rendered}"
+        );
+        assert!(
+            rendered.contains("package.json"),
+            "the manifest still renders: {rendered}"
+        );
+    }
+
+    #[test]
+    fn dep_label_caps_the_workspace_list_and_keeps_whole_paths() {
+        let label = dep_label(
+            "packages/tsc/package.json",
+            &[
+                "packages/bench".to_string(),
+                "packages/treeshake".to_string(),
+            ],
+            DEP_LINE_WIDTH - "valibot".len() - DEP_LINE_DECORATION,
+        )
+        .expect("label rendered");
+        assert_eq!(
+            label,
+            "packages/tsc/package.json; imported in packages/bench +1 more"
+        );
+    }
+
+    #[test]
+    fn dep_label_elides_a_deep_manifest_on_segment_boundaries() {
+        let label = dep_label(
+            "packages/platform/internal/tooling/generators/package.json",
+            &[],
+            40,
+        )
+        .expect("label rendered");
+        assert!(label.chars().count() <= 40, "{label}");
+        assert_eq!(label, ".../tooling/generators/package.json");
+    }
+
+    #[test]
+    fn dep_label_drops_the_clause_that_would_erode_the_manifest_path() {
+        let label = dep_label(
+            "packages/platform/design-system/package.json",
+            &["packages/platform/web-application".to_string()],
+            DEP_LINE_WIDTH - "@internal/design-system-tokens".len() - DEP_LINE_DECORATION,
+        )
+        .expect("label rendered");
+        // Seating the clause would leave `.../package.json`, which names no
+        // package, so the path takes the label instead.
+        assert_eq!(label, "packages/platform/design-system/package.json");
+    }
+
+    #[test]
+    fn dep_label_is_dropped_when_the_package_name_consumes_the_line() {
+        assert_eq!(
+            dep_label(
+                "packages/platform/design-system/package.json",
+                &["packages/platform/web-application".to_string()],
+                MIN_LABEL_WIDTH - 1,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn summarize_workspaces_elides_a_single_overlong_path() {
+        let list = summarize_workspaces(
+            &["packages/platform/internal/generators".to_string()],
+            MIN_WORKSPACE_LIST_WIDTH,
+        );
+        assert!(list.chars().count() <= MIN_WORKSPACE_LIST_WIDTH, "{list}");
+        assert_eq!(list, ".../generators");
     }
 
     #[test]

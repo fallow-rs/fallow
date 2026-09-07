@@ -378,6 +378,6 @@ pub use type_aware_envelopes::{
     serialize_type_aware_status_json_output,
 };
 pub use walkthrough_render::{
-    MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_names, clean_decision_fact,
+    MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_member_list, cap_names, clean_decision_fact,
     decisions_outside_units, visible_stage_units,
 };
