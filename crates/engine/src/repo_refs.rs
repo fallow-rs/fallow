@@ -648,12 +648,166 @@ struct TreeEntry {
     path: PathBuf,
 }
 
+/// Which committed-tree paths a base worktree actually needs on disk.
+///
+/// The raw object materialization deliberately bypasses git's checkout
+/// pipeline (no hooks, smudge filters, or line-ending conversion). Before
+/// that change the worktree checkout honored the host's sparse-checkout cone
+/// and, for a subdirectory analysis root, only the cone was ever read. The
+/// unscoped materialization reads EVERY blob in the commit instead: on a
+/// blobless partial clone (`actions/checkout` sets `--filter=blob:none`
+/// whenever `sparse-checkout` is set) each out-of-cone blob triggers a lazy
+/// promisor fetch via `git-remote-https`. For a large monorepo checked out
+/// sparsely to one subdirectory that turns a seconds-long snapshot into a
+/// fetch of the whole monorepo, which presents as `fallow audit` hanging to
+/// the CI timeout with `git` / `git-remote-https` orphans (issue #2615).
+///
+/// The scope restores the old working set without reintroducing checkout:
+/// - a subdirectory analysis root materializes only that subtree (plus
+///   top-level files and ancestor ignore files, so gitignore parity holds),
+/// - a repository-root run on a sparse checkout materializes the sparse cone
+///   (top-level files plus the listed cone directories),
+/// - otherwise everything is materialized as before.
+///
+/// Both probes fail open to full materialization: a probe error is at worst a
+/// slower snapshot, never a missing-file misattribution.
+#[derive(Debug, Clone, Default)]
+struct MaterializationScope {
+    /// Forward-slash repo-relative analysis subdir (e.g. `apps/web`), or
+    /// `None` when the requested root is the repository top level.
+    subdir_prefix: Option<String>,
+    /// Cone-mode sparse directories (forward-slash, no trailing slash), or
+    /// `None` when sparse-checkout is off, non-cone, or unreadable.
+    sparse_dirs: Option<Vec<String>>,
+}
+
+impl MaterializationScope {
+    fn should_materialize(&self, path: &Path) -> bool {
+        let Some(relative) = forward_slash_path(path) else {
+            return true;
+        };
+        if let Some(prefix) = self.subdir_prefix.as_deref() {
+            if relative == prefix || relative.starts_with(&format!("{prefix}/")) {
+                return true;
+            }
+            // Top-level files and ancestor ignore files shape discovery of the
+            // subtree (root `.gitignore` applies hierarchically). They are few
+            // and already present in a sparse checkout, so keeping them is
+            // free and preserves ignore parity with a full snapshot.
+            if !relative.contains('/') {
+                return true;
+            }
+            return is_ancestor_ignore_file(&relative, prefix);
+        }
+        if let Some(dirs) = self.sparse_dirs.as_deref() {
+            if !relative.contains('/') {
+                return true;
+            }
+            return dirs
+                .iter()
+                .any(|dir| relative == *dir || relative.starts_with(&format!("{dir}/")));
+        }
+        true
+    }
+}
+
+/// Forward-slash repo-relative path for scope matching, or `None` when the
+/// path is not valid UTF-8. Non-UTF-8 tree paths are rare; failing open keeps
+/// them materialized rather than risking a misattributed base snapshot.
+fn forward_slash_path(path: &Path) -> Option<String> {
+    let raw = path.to_str()?;
+    Some(raw.replace('\\', "/"))
+}
+
+/// True for an ignore/attributes file that governs `prefix` from an ancestor
+/// directory (including the repository root), e.g. `.gitignore` or
+/// `apps/.gitignore` for prefix `apps/web`.
+fn is_ancestor_ignore_file(relative: &str, prefix: &str) -> bool {
+    const IGNORE_FILES: &[&str] = &[".gitignore", ".gitattributes"];
+    let Some(file_name) = relative.rsplit('/').next() else {
+        return false;
+    };
+    if !IGNORE_FILES.contains(&file_name) {
+        return false;
+    }
+    let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
+    parent.is_empty() || prefix == parent || prefix.starts_with(&format!("{parent}/"))
+}
+
+fn materialization_scope(repo_root: &Path) -> MaterializationScope {
+    MaterializationScope {
+        subdir_prefix: analysis_subdir_prefix(repo_root),
+        sparse_dirs: sparse_cone_dirs(repo_root),
+    }
+}
+
+/// Repo-relative forward-slash subdir of the requested analysis root, or
+/// `None` when it is the repository top level (or the top level cannot be
+/// resolved, which fails open to full materialization).
+fn analysis_subdir_prefix(repo_root: &Path) -> Option<String> {
+    let toplevel = run_git(repo_root, &["rev-parse", "--show-toplevel"])?;
+    let toplevel = PathBuf::from(toplevel.trim());
+    let canonical_toplevel = dunce::canonicalize(&toplevel).unwrap_or(toplevel);
+    let canonical_root = dunce::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    let relative = canonical_root.strip_prefix(&canonical_toplevel).ok()?;
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+    let prefix = forward_slash_path(relative)?;
+    if prefix.is_empty() {
+        return None;
+    }
+    Some(prefix)
+}
+
+/// Cone-mode sparse-checkout directories of the host checkout, or `None` when
+/// sparse-checkout is off, non-cone, or unreadable (fail open to full).
+///
+/// `git sparse-checkout list` exits non-zero on a non-sparse worktree, which
+/// is the common full-clone case. Non-cone mode uses glob patterns that this
+/// matcher does not implement, so it also falls back to full materialization.
+fn sparse_cone_dirs(repo_root: &Path) -> Option<Vec<String>> {
+    if run_git(repo_root, &["config", "--get", "core.sparseCheckout"])?.trim() != "true" {
+        return None;
+    }
+    if run_git(repo_root, &["config", "--get", "core.sparseCheckoutCone"])?.trim() != "true" {
+        return None;
+    }
+    let output = git_command(repo_root)
+        .args(["sparse-checkout", "list"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let list = String::from_utf8(output.stdout).ok()?;
+    let mut dirs = Vec::new();
+    for line in list.lines() {
+        let pattern = line.trim().trim_matches('/');
+        if pattern.is_empty() {
+            continue;
+        }
+        // Cone mode lists directories; a stray glob (non-cone residue) cannot
+        // be matched exactly, so fail open rather than under-materialize.
+        if pattern.contains(['*', '?', '[', '!']) {
+            return None;
+        }
+        dirs.push(pattern.replace('\\', "/"));
+    }
+    Some(dirs)
+}
+
 fn materialize_committed_tree(
     repo_root: &Path,
     destination: &Path,
     commit: &str,
 ) -> EngineResult<()> {
     let entries = committed_tree_entries(repo_root, commit)?;
+    let scope = materialization_scope(repo_root);
+    let entries: Vec<TreeEntry> = entries
+        .into_iter()
+        .filter(|entry| scope.should_materialize(&entry.path))
+        .collect();
     let mut blobs = BatchBlobReader::spawn(repo_root)?;
     let mut symlinks = Vec::new();
 
@@ -1329,6 +1483,111 @@ mod tests {
             .and_then(|rest| rest.split('-').next())
             .expect("pid segment should be present");
         assert_eq!(pid, std::process::id().to_string());
+    }
+
+    /// A subdirectory analysis root only materializes its own subtree (plus
+    /// top-level files). Without this, a sparse checkout of one subdirectory
+    /// of a large monorepo materializes the whole monorepo, and on a blobless
+    /// partial clone each out-of-cone blob triggers a lazy promisor fetch that
+    /// presents as `fallow audit` hanging to the CI timeout (issue #2615).
+    #[test]
+    fn detached_worktree_from_a_subdir_skips_sibling_subtrees() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        fs::create_dir_all(repo.join("sub")).expect("create sub dir");
+        fs::create_dir_all(repo.join("big")).expect("create big dir");
+        fs::write(repo.join("sub/a.ts"), "export const a = 1;\n").expect("write sub file");
+        fs::write(repo.join("big/b.ts"), "export const b = 1;\n").expect("write big file");
+        fs::write(repo.join("top.ts"), "export const top = 1;\n").expect("write top file");
+        commit_all(&repo, "initial");
+
+        let destination = temp.path().join("base");
+        create_detached_base_worktree(&repo.join("sub"), &destination, "HEAD")
+            .expect("base worktree should be created");
+
+        assert!(
+            destination.join("sub/a.ts").is_file(),
+            "the requested subtree must be materialized"
+        );
+        assert!(
+            destination.join("top.ts").is_file(),
+            "top-level files shape subdir discovery and stay materialized"
+        );
+        assert!(
+            !destination.join("big/b.ts").exists(),
+            "sibling subtrees must not be materialized: {}",
+            destination.join("big/b.ts").display()
+        );
+
+        remove_registered_worktree(&repo, &destination);
+        let _ = fs::remove_dir_all(&destination);
+    }
+
+    /// A repository-root run on a sparse checkout materializes the cone, not
+    /// the whole monorepo. This is the `actions/checkout` sparse-checkout
+    /// shape from issue #2615: cone mode lists the sparse directory, and the
+    /// blobless partial clone has no out-of-cone blobs locally.
+    #[test]
+    fn detached_worktree_at_the_root_respects_the_sparse_cone() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        fs::create_dir_all(repo.join("sub")).expect("create sub dir");
+        fs::create_dir_all(repo.join("big")).expect("create big dir");
+        fs::write(repo.join("sub/a.ts"), "export const a = 1;\n").expect("write sub file");
+        fs::write(repo.join("big/b.ts"), "export const b = 1;\n").expect("write big file");
+        commit_all(&repo, "initial");
+        git(&repo, &["sparse-checkout", "init", "--cone"]);
+        git(&repo, &["sparse-checkout", "set", "sub"]);
+
+        let destination = temp.path().join("base");
+        create_detached_base_worktree(&repo, &destination, "HEAD")
+            .expect("base worktree should be created");
+
+        assert!(
+            destination.join("sub/a.ts").is_file(),
+            "the sparse cone must be materialized"
+        );
+        assert!(
+            !destination.join("big/b.ts").exists(),
+            "paths outside the sparse cone must not be materialized: {}",
+            destination.join("big/b.ts").display()
+        );
+
+        remove_registered_worktree(&repo, &destination);
+        let _ = fs::remove_dir_all(&destination);
+    }
+
+    /// Pure scope unit coverage: subdir runs keep their subtree plus top-level
+    /// and ancestor ignore files; root sparse runs keep the cone; full clones
+    /// keep everything.
+    #[test]
+    fn materialization_scope_filters_to_the_needed_working_set() {
+        let subdir = MaterializationScope {
+            subdir_prefix: Some("apps/web".to_string()),
+            sparse_dirs: None,
+        };
+        assert!(subdir.should_materialize(Path::new("apps/web/a.ts")));
+        assert!(subdir.should_materialize(Path::new("top.ts")));
+        assert!(subdir.should_materialize(Path::new(".gitignore")));
+        assert!(subdir.should_materialize(Path::new("apps/.gitignore")));
+        assert!(!subdir.should_materialize(Path::new("apps/other/b.ts")));
+        assert!(!subdir.should_materialize(Path::new("apps/.gitignore.bak")));
+
+        let sparse = MaterializationScope {
+            subdir_prefix: None,
+            sparse_dirs: Some(vec!["apps/web".to_string()]),
+        };
+        assert!(sparse.should_materialize(Path::new("apps/web/a.ts")));
+        assert!(sparse.should_materialize(Path::new("top.ts")));
+        assert!(!sparse.should_materialize(Path::new("apps/other/b.ts")));
+
+        let full = MaterializationScope {
+            subdir_prefix: None,
+            sparse_dirs: None,
+        };
+        assert!(full.should_materialize(Path::new("apps/other/b.ts")));
     }
 
     #[test]
