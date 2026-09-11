@@ -12,7 +12,7 @@ import { checkRepositorySigningKeyParity } from "./signing-key-parity.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 /** The published release this branch evolves from. */
-const RELEASED_TAG = "v3.24.1";
+const RELEASED_TAG = "v3.25.0";
 
 const markdownFilesUnder = (root) =>
   readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
