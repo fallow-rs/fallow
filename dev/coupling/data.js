@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789110739796,
+  "lastUpdate": 1789117296379,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "536f96da2ec0b83aa5ee676fd2a2cdd56c124139",
-          "message": "chore: release v3.18.0",
-          "timestamp": "2026-08-25T00:00:27+02:00",
-          "tree_id": "a7c5e143f1b082b6655fc9afc2c4031b47a825e0",
-          "url": "https://github.com/fallow-rs/fallow/commit/536f96da2ec0b83aa5ee676fd2a2cdd56c124139"
-        },
-        "date": 1787608899156,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 456,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1244,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/30167b42257ded3bef683f6c91b4aa4017a1ff59"
         },
         "date": 1789110736316,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 476,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1303,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a",
+          "message": "chore: advance the schema policy baseline to v3.25.0",
+          "timestamp": "2026-09-11T10:55:09+02:00",
+          "tree_id": "e72ba4e1cece94196473dee09cb72bb686e081b5",
+          "url": "https://github.com/fallow-rs/fallow/commit/bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a"
+        },
+        "date": 1789117291657,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
