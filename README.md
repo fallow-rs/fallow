@@ -106,6 +106,7 @@ Adopting on an existing codebase? `fallow audit` fails only on findings a change
 | Command | What it does |
 |---|---|
 | `npx fallow` | Full pipeline: dead code, duplication, health |
+| `npx fallow src/components` | Scope any file command to a path: the whole-project graph is still built, only the reported findings narrow |
 | [`npx fallow audit`](https://docs.fallow.tools/cli/audit) | Changed-file gate over dead code, complexity, duplication, and styling drift: verdict pass/warn/fail against a base ref. Fails only on findings the change introduced (`--gate all` widens) |
 | [`npx fallow dead-code`](https://docs.fallow.tools/cli/dead-code) | Unused code and circular dependencies (alias: `check`) |
 | `npx fallow dead-code --trace src/file.ts:symbol` | Prove a symbol is unused before deleting it |
@@ -313,7 +314,7 @@ GitLab:
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.24.1/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.25.0/ci/gitlab-ci.yml'
 
 fallow:
   extends: .fallow

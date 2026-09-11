@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.25.0] - 2026-09-11
+
 ### Added
+
+- **An optional positional `[PATH]` scopes reported findings on the file
+  commands.** Bare `fallow`, `check`, `dupes`, `health`, `audit`, `security`,
+  `fix`, `list` and `similar-code` now accept a file or directory as their first
+  positional argument. The full project graph is still built, so every
+  cross-file fact stays sound; only the reported items are narrowed, and `fix`
+  plans and applies only the fixes that touch scoped files. Resolution is
+  root-first for a bare relative path, `./` and `../` are honoured as
+  current-directory claims, and a missing or outside-root path is rejected with
+  an actionable exit-2 error instead of silently analysing the whole project.
+  The scope composes with `--workspace` as one more workspace root and
+  intersects with `--changed-since` and `--diff-file`. `audit` narrows its
+  changed-file universe so verdict and base attribution stay coherent, while its
+  base pass stays unscoped because it runs in another worktree.
 
 - **`fallow coverage upload-inventory --with-callers` reports its own size
   guard.** The importer-edge map has always been capped per callee so a
@@ -8622,7 +8638,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.24.1...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.25.0...HEAD
+[3.25.0]: https://github.com/fallow-rs/fallow/compare/v3.24.1...v3.25.0
 [3.24.1]: https://github.com/fallow-rs/fallow/compare/v3.24.0...v3.24.1
 [3.24.0]: https://github.com/fallow-rs/fallow/compare/v3.23.0...v3.24.0
 [3.23.0]: https://github.com/fallow-rs/fallow/compare/v3.22.0...v3.23.0
