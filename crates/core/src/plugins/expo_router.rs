@@ -10,6 +10,7 @@ use super::{PathRule, Plugin, PluginResult, UsedExportRule, config_parser};
 const ROUTE_FILE_EXPORTS: &[&str] = &[
     "default",
     "ErrorBoundary",
+    "SuspenseFallback",
     "loader",
     "generateStaticParams",
     "unstable_settings",
