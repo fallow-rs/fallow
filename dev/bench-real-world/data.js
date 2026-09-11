@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789042378300,
+  "lastUpdate": 1789128586041,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "a45deb010be1b521c33ab78f8e3be4106658c183",
-          "message": "fix: credit bare pnpm script binaries\n\nCredit dependency usage for package scripts, workspace scripts, and CI run blocks that invoke a declared package binary through bare `pnpm <binary>`. The parser keeps its syntax-only public path conservative, while the analysis path now receives dependency and script-name context before crediting pnpm implicit execution.\n\nKeep pnpm script delegation and built-in commands out of dependency credit, including local script names that were filtered out of production-mode analysis. This avoids trading the envinfo false positive for new false negatives around `pnpm build`, `pnpm lint`, `pnpm test`, `pnpm start`, `pnpm install`, `pnpm audit`, and `pnpm add`.\n\nFixes #914.",
-          "timestamp": "2026-06-03T10:59:58Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/a45deb010be1b521c33ab78f8e3be4106658c183"
-        },
-        "date": 1780488007511,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 144,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 141,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 277,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 234,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 149,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 131,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 437,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 404,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1324,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1084,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 931,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 955,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 861,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 773,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7611,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 6824,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9359,6 +9257,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1327,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "id": "bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a",
+          "message": "chore: advance the schema policy baseline to v3.25.0",
+          "timestamp": "2026-09-11T08:55:09Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a"
+        },
+        "date": 1789128569681,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 506,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 304,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1216,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 912,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1016,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 810,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 914,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 812,
             "unit": "ms"
           }
         ]
