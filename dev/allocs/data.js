@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789153703658,
+  "lastUpdate": 1789157386624,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "536f96da2ec0b83aa5ee676fd2a2cdd56c124139",
-          "message": "chore: release v3.18.0",
-          "timestamp": "2026-08-25T00:00:27+02:00",
-          "tree_id": "a7c5e143f1b082b6655fc9afc2c4031b47a825e0",
-          "url": "https://github.com/fallow-rs/fallow/commit/536f96da2ec0b83aa5ee676fd2a2cdd56c124139"
-        },
-        "date": 1787609079254,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9777405,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49385,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1175572,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8091,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8438,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1ee9062b92e2b4a002844bf4f778917433901e1b",
+          "message": "feat(plugins): add built-in Oxfmt plugin\n\nBuilt-in Oxfmt plugin mirroring the Oxlint plugin: oxfmt.config.ts (and siblings) are marked always-used and static imports from TS configs are credited. Knip migration reports oxfmt sections as auto-detected.\n\nFixes #2614.",
+          "timestamp": "2026-09-11T22:03:57+02:00",
+          "tree_id": "b098fc0afebc4b7f9dabc7650fde84b911c42308",
+          "url": "https://github.com/fallow-rs/fallow/commit/1ee9062b92e2b4a002844bf4f778917433901e1b"
+        },
+        "date": 1789157381765,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9920492,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51232,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1200402,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8476,
             "unit": "allocations"
           }
         ]
