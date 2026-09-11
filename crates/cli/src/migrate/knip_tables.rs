@@ -154,6 +154,7 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "nx",
     "nyc",
     "openapi-ts",
+    "oxfmt",
     "oxlint",
     "panda-css",
     "parcel",
@@ -252,7 +253,6 @@ pub(super) const KNIP_UNSUPPORTED_PLUGIN_KEYS: &[&str] = &[
     "oclif",
     "openclaw",
     "orval",
-    "oxfmt",
     "payload",
     "pino",
     "playwright-ct",
@@ -616,6 +616,7 @@ mod tests {
         let expected = [
             "bun",
             "electron-vite",
+            "oxfmt",
             "oxlint",
             "panda-css",
             "pnpm",

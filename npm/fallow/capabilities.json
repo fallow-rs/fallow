@@ -7252,7 +7252,7 @@
     ]
   },
   "plugins": {
-    "count": 125,
+    "count": 126,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -7326,6 +7326,7 @@
       "biome",
       "stylelint",
       "prettier",
+      "oxfmt",
       "oxlint",
       "markdownlint",
       "cspell",
