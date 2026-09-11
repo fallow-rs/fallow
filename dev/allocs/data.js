@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789110719252,
+  "lastUpdate": 1789117299044,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "4330a637d8a19aa094386828fa530acf1ddcde31",
-          "message": "Merge pull request #2402 from fallow-rs/feat/contract-doc-drift\n\nfix: align generated contracts and agent guidance",
-          "timestamp": "2026-08-24T19:33:32+02:00",
-          "tree_id": "7653d731cf7c44d9d58302b23b97b8adeb427e8f",
-          "url": "https://github.com/fallow-rs/fallow/commit/4330a637d8a19aa094386828fa530acf1ddcde31"
-        },
-        "date": 1787593124085,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9739787,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49282,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1171504,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8338,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8438,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a",
+          "message": "chore: advance the schema policy baseline to v3.25.0",
+          "timestamp": "2026-09-11T10:55:09+02:00",
+          "tree_id": "e72ba4e1cece94196473dee09cb72bb686e081b5",
+          "url": "https://github.com/fallow-rs/fallow/commit/bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a"
+        },
+        "date": 1789117292153,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9823476,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50651,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1179112,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8384,
             "unit": "allocations"
           }
         ]
