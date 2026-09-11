@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789117299044,
+  "lastUpdate": 1789153703658,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "2262b4b6321374ae91ae6c4ae8df046035a83210",
-          "message": "fix(engine): detach Git probes from MCP stdin\n\n* test(mcp): serialize env route servers\n\n* test(mcp): allow nested env route work\n\n* fix(mcp): isolate typed analysis workers\n\n* test(mcp): preserve default threads in env routes\n\n* test(mcp): isolate type-aware sidecar fixture\n\n* fix(ci): isolate Windows MCP test suite\n\n* style: format workflow policy test\n\n* test(mcp): trace Windows typed worker phases\n\n* test(ci): run MCP diagnostics first\n\n* test(ci): build CLI before MCP diagnostics\n\n* test(mcp): compare debug and release worker entry\n\n* fix(ci): order Windows MCP process suites\n\n* fix(api): prepare discovery outside analysis pools\n\n* test(api): diagnose Windows analysis pool stall\n\n* test(api): isolate Windows output assembly stall\n\n* fix(engine): detach Git probes from protocol stdin",
-          "timestamp": "2026-08-24T22:58:11+02:00",
-          "tree_id": "92426dbdfcd76bfeaa7bf4c6de4da080769c1e75",
-          "url": "https://github.com/fallow-rs/fallow/commit/2262b4b6321374ae91ae6c4ae8df046035a83210"
-        },
-        "date": 1787605404694,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9756245,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49377,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1173500,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8090,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8384,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5c1add6b22533b9d580932edbd728dded915643e",
+          "message": "fix(audit): scope base snapshot to sparse cone and analysis subdir\n\nfallow audit hung to the CI timeout on GitHub Actions runners for sparse checkouts of large monorepos. The raw object materialization introduced in 3.4.2 reads every blob in the base commit, so on a blobless partial clone each out-of-cone blob triggers a lazy promisor fetch.\n\nmaterialize_committed_tree now filters the committed tree through a MaterializationScope before touching blobs. Verified against a local blobless partial clone: the old binary fetched all 300 out-of-cone blobs, the fixed binary only in-cone blobs, with identical audit output apart from the telemetry id. verify:fast green, rust-review APPROVE.\n\nFixes #2615.",
+          "timestamp": "2026-09-11T21:03:09+02:00",
+          "tree_id": "47abbcb18e5c6ecfe0b2ca98a45a1f1b60441e8d",
+          "url": "https://github.com/fallow-rs/fallow/commit/5c1add6b22533b9d580932edbd728dded915643e"
+        },
+        "date": 1789153699610,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9857358,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50711,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1196740,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8438,
             "unit": "allocations"
           }
         ]
