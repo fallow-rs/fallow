@@ -1289,6 +1289,7 @@ mod obsidian;
 mod openapi_ts;
 mod opencode;
 mod opennext_cloudflare;
+mod oxfmt;
 mod oxlint;
 mod pandacss;
 mod parcel;
