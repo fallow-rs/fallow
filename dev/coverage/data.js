@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789111128661,
+  "lastUpdate": 1789117386998,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "3b903dd29cd111d0b7648bebf5d75624572be6d6",
-          "message": "chore: publish Fallow in the official MCP Registry\n\n* chore: prepare MCP registry publication\n\n* chore: prepare MCP registry publication\n\n* chore: add official MCP Registry metadata",
-          "timestamp": "2026-08-26T13:13:09+02:00",
-          "tree_id": "806df6784320815475e74d24a06667ef014241b0",
-          "url": "https://github.com/fallow-rs/fallow/commit/3b903dd29cd111d0b7648bebf5d75624572be6d6"
-        },
-        "date": 1787743376730,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.1,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/30167b42257ded3bef683f6c91b4aa4017a1ff59"
         },
         "date": 1789111124561,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a",
+          "message": "chore: advance the schema policy baseline to v3.25.0",
+          "timestamp": "2026-09-11T10:55:09+02:00",
+          "tree_id": "e72ba4e1cece94196473dee09cb72bb686e081b5",
+          "url": "https://github.com/fallow-rs/fallow/commit/bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a"
+        },
+        "date": 1789117382868,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
