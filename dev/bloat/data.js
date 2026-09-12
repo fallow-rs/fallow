@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789157972124,
+  "lastUpdate": 1789204551876,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "edf720b9b43955058fdcbab71089ee589d7f9c4c",
-          "message": "fix: close remaining analysis consistency gaps\n\n* chore: start correctness sweep\n\n* fix(extract): align Convex and MDX statement discovery\n\n* fix(graph): align export crediting across spellings\n\n* fix(trace): align syntactic and type-aware evidence\n\n* fix(workspace): align diagnostics and override analysis\n\n* docs: document correctness sweep contracts\n\n* fix: resolve correctness review findings\n\n* fix(type-aware): remove stale project binding\n\n* style(type-aware): format barrel regressions\n\n* fix: close final review edge cases\n\n* fix(extract): close shadow and mutation gaps\n\n* fix(extract): close wrapped CommonJS mutations\n\n* test(type-aware): satisfy cancellation lint\n\n* fix(extract): preserve scoped namespace owners\n\n* fix(extract): register namespace binding owners",
-          "timestamp": "2026-08-24T12:20:11Z",
-          "tree_id": "526a9cd87dc8684c7beae3ce63f9142890fc9970",
-          "url": "https://github.com/fallow-rs/fallow/commit/edf720b9b43955058fdcbab71089ee589d7f9c4c"
-        },
-        "date": 1787574855625,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 517567384,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20316928,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25760056,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 39107544,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/1ee9062b92e2b4a002844bf4f778917433901e1b"
         },
         "date": 1789157968722,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 571612760,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21542168,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28500936,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43258536,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8622017e6effcad51ddff304032914e08366de27",
+          "message": "chore(audit): drop unused derives on MaterializationScope\n\nSlop-audit follow-up to the sparse base-snapshot change: the private scope struct is only borrowed, so Debug, Clone, and Default have no users.",
+          "timestamp": "2026-09-12T11:02:14+02:00",
+          "tree_id": "d54e94b9a600e1b58a89a66a6514e25c5da7be53",
+          "url": "https://github.com/fallow-rs/fallow/commit/8622017e6effcad51ddff304032914e08366de27"
+        },
+        "date": 1789204547424,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
