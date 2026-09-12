@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789157406964,
+  "lastUpdate": 1789204122951,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "94d5f7ad28fd921c6709bf4939c2d5fe0b76a273",
-          "message": "ci(release): build the similar-code provider with matrix.target on Windows\n\nThe provider build step passed the target through a FALLOW_TARGET env var and read it back as \"$FALLOW_TARGET\". The Windows matrix entries run under pwsh, where that expands to an empty string and cargo aborts with \"target was empty\", so both Windows release builds failed before staging any asset. Interpolate matrix.target directly, as every sibling build step already does.",
-          "timestamp": "2026-08-26T18:50:34+02:00",
-          "tree_id": "67d009bc27baf1f1cb94d91abca394bc8aa69afa",
-          "url": "https://github.com/fallow-rs/fallow/commit/94d5f7ad28fd921c6709bf4939c2d5fe0b76a273"
-        },
-        "date": 1787764767756,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/1ee9062b92e2b4a002844bf4f778917433901e1b"
         },
         "date": 1789157403611,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8622017e6effcad51ddff304032914e08366de27",
+          "message": "chore(audit): drop unused derives on MaterializationScope\n\nSlop-audit follow-up to the sparse base-snapshot change: the private scope struct is only borrowed, so Debug, Clone, and Default have no users.",
+          "timestamp": "2026-09-12T11:02:14+02:00",
+          "tree_id": "d54e94b9a600e1b58a89a66a6514e25c5da7be53",
+          "url": "https://github.com/fallow-rs/fallow/commit/8622017e6effcad51ddff304032914e08366de27"
+        },
+        "date": 1789204119192,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
