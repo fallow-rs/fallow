@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789213075232,
+  "lastUpdate": 1789303068477,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "3fa9bc58bde716adda65d24bd66cdfb4af886d23",
-          "message": "fix(mcp): gate unix-only test helpers",
-          "timestamp": "2026-06-05T10:24:48Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/3fa9bc58bde716adda65d24bd66cdfb4af886d23"
-        },
-        "date": 1780656636338,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 141,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 132,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 272,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 231,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 148,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 135,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 424,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 368,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1297,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1126,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 914,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 954,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 839,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 773,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7469,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7199,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9339,6 +9237,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1331,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "8622017e6effcad51ddff304032914e08366de27",
+          "message": "chore(audit): drop unused derives on MaterializationScope\n\nSlop-audit follow-up to the sparse base-snapshot change: the private scope struct is only borrowed, so Debug, Clone, and Default have no users.",
+          "timestamp": "2026-09-12T09:02:14Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/8622017e6effcad51ddff304032914e08366de27"
+        },
+        "date": 1789303063388,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 102,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 102,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 102,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 407,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 306,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1221,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 916,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 917,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 711,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 915,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 814,
             "unit": "ms"
           }
         ]
