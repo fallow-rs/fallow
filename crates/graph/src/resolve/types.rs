@@ -257,7 +257,7 @@ pub struct ResolvedModule {
     pub resolved_imports: Vec<ResolvedImport>,
     /// All dynamic imports with resolved targets.
     pub resolved_dynamic_imports: Vec<ResolvedImport>,
-    /// Dynamic import patterns matched against discovered files.
+    /// Dynamic import patterns and their matched target files.
     pub resolved_dynamic_patterns: Vec<(fallow_types::extract::DynamicImportPattern, Vec<FileId>)>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Arc<[fallow_types::extract::MemberAccess]>,
