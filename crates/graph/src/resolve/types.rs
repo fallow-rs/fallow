@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use dashmap::DashMap;
+use globset::GlobSet;
 use oxc_resolver::Resolver;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use serde_json::Value;
@@ -439,6 +440,13 @@ impl CanonicalizeCache {
 pub(super) struct TsconfigCache {
     json: DashMap<PathBuf, Option<Arc<Value>>, FxBuildHasher>,
     chains: DashMap<PathBuf, Arc<[PathBuf]>, FxBuildHasher>,
+    glob_sets: DashMap<(PathBuf, TsconfigGlobSetKind), Option<Arc<GlobSet>>, FxBuildHasher>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) enum TsconfigGlobSetKind {
+    Include,
+    Exclude,
 }
 
 impl TsconfigCache {
@@ -470,6 +478,27 @@ impl TsconfigCache {
     /// Store the computed tsconfig chain for a source file.
     pub fn store_chain(&self, from_file: &Path, chain: Arc<[PathBuf]>) {
         self.chains.insert(from_file.to_path_buf(), chain);
+    }
+
+    /// Return a cached compiled `include` or `exclude` glob set.
+    ///
+    /// Failed compilations are cached as `None`, matching the JSON cache's
+    /// treatment of unreadable files and avoiding repeated work for malformed
+    /// patterns.
+    pub fn glob_set(
+        &self,
+        tsconfig_path: &Path,
+        kind: TsconfigGlobSetKind,
+        build: impl FnOnce() -> Option<GlobSet>,
+    ) -> Option<Arc<GlobSet>> {
+        let key = (tsconfig_path.to_path_buf(), kind);
+        if let Some(value) = self.glob_sets.get(&key) {
+            return value.clone();
+        }
+
+        let value = build().map(Arc::new);
+        self.glob_sets.insert(key, value.clone());
+        value
     }
 }
 
@@ -628,6 +657,50 @@ mod tests {
         cache.store_chain(from_file, Arc::clone(&chain));
 
         assert!(Arc::ptr_eq(&cache.chain(from_file).unwrap(), &chain));
+    }
+
+    #[test]
+    fn tsconfig_cache_compiles_each_glob_set_once() {
+        let cache = TsconfigCache::default();
+        let path = Path::new("/project/tsconfig.json");
+        let builds = std::sync::atomic::AtomicUsize::new(0);
+        let build = || {
+            builds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Some(GlobSet::empty())
+        };
+
+        let first = cache
+            .glob_set(path, TsconfigGlobSetKind::Include, build)
+            .unwrap();
+        let second = cache
+            .glob_set(path, TsconfigGlobSetKind::Include, build)
+            .unwrap();
+
+        assert_eq!(builds.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn tsconfig_cache_caches_failed_glob_compilation() {
+        let cache = TsconfigCache::default();
+        let path = Path::new("/project/tsconfig.json");
+        let builds = std::sync::atomic::AtomicUsize::new(0);
+        let build = || {
+            builds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            None
+        };
+
+        assert!(
+            cache
+                .glob_set(path, TsconfigGlobSetKind::Exclude, build)
+                .is_none()
+        );
+        assert!(
+            cache
+                .glob_set(path, TsconfigGlobSetKind::Exclude, build)
+                .is_none()
+        );
+        assert_eq!(builds.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     /// Both caches are read concurrently by rayon workers during resolution.

@@ -22,7 +22,7 @@ use super::path_info::{
     normalize_npm_specifier,
 };
 use super::react_native::{build_condition_names, build_extensions};
-use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
+use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult, TsconfigGlobSetKind};
 
 /// Create an `oxc_resolver` instance with standard configuration.
 ///
@@ -430,7 +430,14 @@ fn tsconfig_applies_to_file(
     }
 
     let include_matches = match json.get("include").and_then(Value::as_array) {
-        Some(include) => glob_values_match(tsconfig_dir, include, from_file),
+        Some(include) => tsconfig_glob_values_match(
+            ctx,
+            tsconfig_path,
+            TsconfigGlobSetKind::Include,
+            tsconfig_dir,
+            include,
+            from_file,
+        ),
         None => from_file.starts_with(tsconfig_dir),
     };
     if !include_matches {
@@ -440,10 +447,19 @@ fn tsconfig_applies_to_file(
     !json
         .get("exclude")
         .and_then(Value::as_array)
-        .is_some_and(|exclude| glob_values_match(tsconfig_dir, exclude, from_file))
+        .is_some_and(|exclude| {
+            tsconfig_glob_values_match(
+                ctx,
+                tsconfig_path,
+                TsconfigGlobSetKind::Exclude,
+                tsconfig_dir,
+                exclude,
+                from_file,
+            )
+        })
 }
 
-fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
+fn build_glob_set(base_dir: &Path, values: &[Value]) -> Option<globset::GlobSet> {
     let mut builder = GlobSetBuilder::new();
     let mut has_patterns = false;
     for value in values.iter().filter_map(Value::as_str) {
@@ -460,7 +476,25 @@ fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
         builder.add(glob);
         has_patterns = true;
     }
-    has_patterns && builder.build().is_ok_and(|set| set.is_match(path))
+    has_patterns.then(|| builder.build().ok()).flatten()
+}
+
+#[cfg(test)]
+fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
+    build_glob_set(base_dir, values).is_some_and(|set| set.is_match(path))
+}
+
+fn tsconfig_glob_values_match(
+    ctx: &ResolveContext<'_>,
+    tsconfig_path: &Path,
+    kind: TsconfigGlobSetKind,
+    base_dir: &Path,
+    values: &[Value],
+    path: &Path,
+) -> bool {
+    ctx.tsconfig_cache
+        .glob_set(tsconfig_path, kind, || build_glob_set(base_dir, values))
+        .is_some_and(|set| set.is_match(path))
 }
 
 fn has_glob_meta(value: &str) -> bool {
