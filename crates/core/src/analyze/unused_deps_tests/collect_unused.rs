@@ -260,6 +260,21 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
     assert_eq!(result[0].package_name, "my-runtime");
 }
 
+fn is_package_listed_for_file(
+    file_path: &Path,
+    package_name: &str,
+    root_deps: &FxHashSet<String>,
+    ws_dep_map: &[(PathBuf, FxHashSet<String>)],
+) -> bool {
+    let (mut graph, _) = build_graph_with_npm_imports(&[(package_name, false)]);
+    graph.modules[0].path = file_path.to_path_buf();
+    let roots: Vec<&Path> = ws_dep_map.iter().map(|(root, _)| root.as_path()).collect();
+    let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
+    super::super::owning_workspace_deps_for_file_id(FileId(0), ws_dep_map, &ownership)
+        .unwrap_or(root_deps)
+        .contains(package_name)
+}
+
 #[test]
 fn listed_in_root_deps() {
     let mut root_deps = FxHashSet::default();
@@ -354,6 +369,26 @@ fn nested_workspace_uses_most_specific_manifest() {
         &root_deps,
         &ws_dep_map,
     ));
+}
+
+#[test]
+fn workspace_ownership_uses_most_specific_ancestor() {
+    let roots = [
+        Path::new("/project/packages/app"),
+        Path::new("/project/packages/app/plugins/widget"),
+    ];
+    let (mut graph, _) = build_graph_with_npm_imports(&[]);
+    for (path, expected) in [
+        ("/project/packages/app/plugins/widget/src/index.ts", Some(1)),
+        ("/project/packages/app/src/index.ts", Some(0)),
+        ("/project/packages/application/src/index.ts", None),
+        ("/project/src/index.ts", None),
+    ] {
+        graph.modules[0].path = PathBuf::from(path);
+        let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
+        assert_eq!(ownership.workspace_index_for_file(FileId(0)), expected);
+        assert_eq!(ownership.workspace_index_for_file(FileId(1)), None);
+    }
 }
 
 #[test]

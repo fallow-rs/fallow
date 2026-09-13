@@ -152,12 +152,49 @@ fn node_modules_package_json(base: &Path, package_name: &str) -> PathBuf {
     path.join("package.json")
 }
 
-fn deepest_matching_workspace<'a>(path: &Path, workspace_roots: &[&'a Path]) -> Option<&'a Path> {
-    workspace_roots
-        .iter()
-        .copied()
-        .filter(|root| path.starts_with(root))
-        .max_by_key(|root| root.components().count())
+/// Map graph files to their deepest matching workspace once per analysis.
+///
+/// Dependency detectors repeatedly need to answer which workspace owns a file.
+/// Keeping the existing deepest-match semantics in one per-run index avoids
+/// scanning every workspace for every package-usage entry or import site.
+struct WorkspaceOwnershipIndex {
+    workspace_by_file: Vec<Option<usize>>,
+}
+
+impl WorkspaceOwnershipIndex {
+    fn new(graph: &ModuleGraph, workspace_roots: &[&Path]) -> Self {
+        use rayon::prelude::*;
+
+        let by_root: FxHashMap<&Path, usize> = workspace_roots
+            .iter()
+            .enumerate()
+            .map(|(index, root)| (*root, index))
+            .collect();
+        let workspace_by_file = graph
+            .modules
+            .par_iter()
+            .map(|module| {
+                module
+                    .path
+                    .ancestors()
+                    .find_map(|ancestor| by_root.get(ancestor).copied())
+            })
+            .collect();
+
+        Self { workspace_by_file }
+    }
+
+    fn workspace_index_for_file(&self, file_id: FileId) -> Option<usize> {
+        self.workspace_by_file
+            .get(file_id.0 as usize)
+            .copied()
+            .flatten()
+    }
+
+    fn root_for_file<'a>(&self, file_id: FileId, workspace_roots: &[&'a Path]) -> Option<&'a Path> {
+        self.workspace_index_for_file(file_id)
+            .and_then(|index| workspace_roots.get(index).copied())
+    }
 }
 
 /// One workspace manifest, read once for the whole unused-dependency pass.
@@ -326,22 +363,17 @@ fn bundled_packages_for<'a>(
 fn collect_workspace_used_packages<'a>(
     graph: &'a ModuleGraph,
     workspace_roots: &[&'a Path],
+    ownership: &WorkspaceOwnershipIndex,
 ) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
-    use rayon::prelude::*;
-    let module_workspaces: Vec<Option<&Path>> = graph
-        .modules
-        .par_iter()
-        .map(|module| deepest_matching_workspace(&module.path, workspace_roots))
-        .collect();
     let mut by_ws: FxHashMap<&Path, FxHashSet<&str>> = workspace_roots
         .iter()
         .map(|root| (*root, FxHashSet::default()))
         .collect();
     for (package_name, file_ids) in &graph.package_usage {
         for id in file_ids {
-            if let Some(Some(ws_path)) = module_workspaces.get(id.0 as usize) {
+            if let Some(ws_path) = ownership.root_for_file(*id, workspace_roots) {
                 by_ws
-                    .entry(*ws_path)
+                    .entry(ws_path)
                     .or_default()
                     .insert(package_name.as_str());
             }
@@ -422,15 +454,13 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
 fn collect_package_workspace_usage(
     graph: &ModuleGraph,
     workspace_roots: &[&Path],
+    ownership: &WorkspaceOwnershipIndex,
 ) -> FxHashMap<String, Vec<PathBuf>> {
     let mut usage: FxHashMap<String, Vec<PathBuf>> = FxHashMap::default();
 
     for (package_name, file_ids) in &graph.package_usage {
         for id in file_ids {
-            let Some(module) = graph.modules.get(id.0 as usize) else {
-                continue;
-            };
-            let Some(ws_root) = deepest_matching_workspace(&module.path, workspace_roots) else {
+            let Some(ws_root) = ownership.root_for_file(*id, workspace_roots) else {
                 continue;
             };
             usage
@@ -681,11 +711,17 @@ fn collect_dependency_usage_indices<'a>(
         .peer_dependency_closure(&config.root, used_packages.iter().copied());
     let manifests = read_workspace_manifests(workspaces, config);
     let workspace_roots = dependency_owning_workspace_roots(&manifests);
-    let workspace_used_packages = collect_workspace_used_packages(graph, &workspace_roots);
+    let ownership = WorkspaceOwnershipIndex::new(graph, &workspace_roots);
+    let workspace_used_packages =
+        collect_workspace_used_packages(graph, &workspace_roots, &ownership);
     let bundled_workspace_usage =
         collect_bundled_workspace_usage(&manifests, &workspace_used_packages);
     DependencyUsageIndices {
-        package_workspace_usage: collect_package_workspace_usage(graph, &workspace_roots),
+        package_workspace_usage: collect_package_workspace_usage(
+            graph,
+            &workspace_roots,
+            &ownership,
+        ),
         workspace_used_packages,
         bundled_workspace_usage,
         used_packages,
@@ -1242,31 +1278,6 @@ pub fn find_dev_dependencies_in_production(
     findings
 }
 
-/// Check whether a package is listed in root deps or in the workspace that owns `file_path`.
-pub fn is_package_listed_for_file(
-    file_path: &Path,
-    package_name: &str,
-    root_deps: &FxHashSet<String>,
-    ws_dep_map: &[(PathBuf, FxHashSet<String>)],
-) -> bool {
-    if let Some(ws_deps) = owning_workspace_deps(file_path, ws_dep_map) {
-        return ws_deps.contains(package_name);
-    }
-
-    root_deps.contains(package_name)
-}
-
-fn owning_workspace_deps<'a>(
-    file_path: &Path,
-    ws_dep_map: &'a [(PathBuf, FxHashSet<String>)],
-) -> Option<&'a FxHashSet<String>> {
-    ws_dep_map
-        .iter()
-        .filter(|(ws_root, _)| file_path.starts_with(ws_root))
-        .max_by_key(|(ws_root, _)| ws_root.components().count())
-        .map(|(_, ws_deps)| ws_deps)
-}
-
 /// Check if a corresponding `@types/<package>` is listed in dependencies.
 ///
 /// When `@types/X` is installed but `X` itself is not, the dependency is used for types
@@ -1282,14 +1293,14 @@ fn types_package_name(package_name: &str) -> String {
     )
 }
 
-fn has_types_package_for_file(
-    file_path: &Path,
-    package_name: &str,
-    root_deps: &FxHashSet<String>,
-    ws_dep_map: &[(PathBuf, FxHashSet<String>)],
-) -> bool {
-    let types_name = types_package_name(package_name);
-    is_package_listed_for_file(file_path, &types_name, root_deps, ws_dep_map)
+fn owning_workspace_deps_for_file_id<'a>(
+    file_id: FileId,
+    ws_dep_map: &'a [(PathBuf, FxHashSet<String>)],
+    ownership: &WorkspaceOwnershipIndex,
+) -> Option<&'a FxHashSet<String>> {
+    ownership
+        .workspace_index_for_file(file_id)
+        .and_then(|index| ws_dep_map.get(index).map(|(_, deps)| deps))
 }
 
 /// Look up the import location (line, col) for a given package in a given file.
@@ -1504,6 +1515,12 @@ pub struct UnlistedDependencyInput<'a> {
 /// Find dependencies used in imports but not listed in package.json.
 pub fn find_unlisted_dependencies(input: UnlistedDependencyInput<'_>) -> Vec<UnlistedDependency> {
     let parts = build_unlisted_dependency_context_parts(&input);
+    let workspace_roots: Vec<&Path> = parts
+        .ws_dep_map
+        .iter()
+        .map(|(root, _)| root.as_path())
+        .collect();
+    let workspace_ownership = WorkspaceOwnershipIndex::new(input.graph, &workspace_roots);
     let ctx = UnlistedDependencyContext {
         graph: input.graph,
         config: input.config,
@@ -1517,6 +1534,7 @@ pub fn find_unlisted_dependencies(input: UnlistedDependencyInput<'_>) -> Vec<Unl
         import_spans_by_file: &parts.import_spans_by_file,
         ignore_deps: &parts.ignore_deps,
         line_offsets_by_file: input.line_offsets_by_file,
+        workspace_ownership: &workspace_ownership,
     };
 
     collect_unlisted_dependencies(&ctx)
@@ -1664,6 +1682,7 @@ struct UnlistedDependencyContext<'a> {
     import_spans_by_file: &'a FxHashMap<FileId, Vec<(&'a str, &'a str, u32)>>,
     ignore_deps: &'a FxHashSet<&'a str>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    workspace_ownership: &'a WorkspaceOwnershipIndex,
 }
 
 fn should_skip_unlisted_package(package_name: &str, ctx: &UnlistedDependencyContext<'_>) -> bool {
@@ -1707,10 +1726,9 @@ fn collect_unlisted_import_site(
     if package_imports_are_all_npm_scheme(ctx.import_spans_by_file, id, package_name) {
         return None;
     }
-    if is_package_listed_for_file(&module.path, package_name, ctx.all_deps, ctx.ws_dep_map) {
-        return None;
-    }
-    if has_types_package_for_file(&module.path, package_name, ctx.all_deps, ctx.ws_dep_map) {
+    let deps = owning_workspace_deps_for_file_id(id, ctx.ws_dep_map, ctx.workspace_ownership)
+        .unwrap_or(ctx.all_deps);
+    if deps.contains(package_name) || deps.contains(&types_package_name(package_name)) {
         return None;
     }
     let relative_path = relative_module_path(&module.path, &ctx.config.root);
