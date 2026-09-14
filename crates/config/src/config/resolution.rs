@@ -1489,12 +1489,16 @@ mod tests {
         assert!(!resolved.ignore_patterns.is_match("src/prebuild/a.ts"));
     }
 
-    /// A workspace package directory named `build` keeps being discovered, but
-    /// its manifest is filtered out of dependency analysis: the same globset is
-    /// the manifest filter in `crates/core/src/analyze/unused_deps.rs`. Pinned
-    /// here so the consequence stays a deliberate choice.
+    /// A workspace package directory named `build` keeps its entry in workspace
+    /// discovery, because a declared member holding a manifest survives
+    /// `ignorePatterns`, but everything inside it is filtered out: the source
+    /// files never reach the walker in `crates/core/src/discover/walk.rs`, and
+    /// the manifest never reaches the dependency filter in
+    /// `crates/core/src/analyze/unused_deps.rs`. Both consumers read this one
+    /// globset, so pin both paths here and keep the consequence a deliberate
+    /// choice rather than a documentation guess.
     #[test]
-    fn resolve_default_ignores_cover_a_manifest_inside_build() {
+    fn resolve_default_ignores_cover_a_workspace_package_named_build() {
         let resolved = make_config(false).resolve(
             PathBuf::from("/project"),
             OutputFormat::Human,
@@ -1506,7 +1510,41 @@ mod tests {
         assert!(
             resolved
                 .ignore_patterns
-                .is_match("packages/build/package.json")
+                .is_match("packages/build/package.json"),
+            "the manifest stops contributing unused-dependency findings"
+        );
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("packages/build/src/index.ts"),
+            "the package's source stops being analyzed entirely"
+        );
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("packages/build/src/nested/deep.ts"),
+            "including source below the package's own subdirectories"
+        );
+    }
+
+    /// A framework config inside a nested `build/` directory is filtered out of
+    /// discovery with everything else under the segment, so the path aliases it
+    /// declares are lost and imports through them are reported as unlisted
+    /// dependencies. Pinned so that consequence is a recorded choice.
+    #[test]
+    fn resolve_default_ignores_cover_a_framework_config_inside_build() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("app/build/webpack.config.js")
         );
     }
 

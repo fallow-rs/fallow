@@ -430,6 +430,16 @@ compiled globset has no negation, so a hand-written source directory named
 analyzed from its own root. Keep discovery ignore behavior separate from
 workspace-package candidate filtering.
 
+The ignore filter in `crates/core/src/discover/walk.rs` runs before the walker
+splits a path into the source set and the config-candidate channel, so an
+excluded path reaches neither. A framework config under an ignored segment,
+such as `app/build/webpack.config.js`, is therefore invisible to Phase 3a in
+`crates/core/src/plugins/registry/helpers.rs`, which deliberately leaves
+source-extension root patterns to the discovered source set, and the path
+aliases that config declares are lost. Widening a default ignore pattern
+widens that loss, so weigh the config-candidate channel alongside the source
+set when changing the defaults.
+
 Resolver fallbacks in `crates/graph/src/resolve/` preserve tracked source
 identity when package exports point to ignored output, pnpm virtual-store paths
 or workspace self-references. Keep dependency-usage metadata when an npm
