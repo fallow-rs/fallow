@@ -417,7 +417,7 @@ fn compile_ignore_patterns(ignore_patterns: &[String]) -> GlobSet {
     let default_ignores = [
         "**/node_modules/**",
         "**/dist/**",
-        "build/**",
+        "**/build/**",
         "**/.git/**",
         "**/coverage/**",
         "**/*.min.js",
@@ -1448,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_default_ignores_root_build_only() {
+    fn resolve_default_ignores_build_at_any_depth() {
         let resolved = make_config(false).resolve(
             PathBuf::from("/project"),
             OutputFormat::Human,
@@ -1462,8 +1462,51 @@ mod tests {
             "root build/ should be ignored"
         );
         assert!(
-            !resolved.ignore_patterns.is_match("src/build/helper.ts"),
-            "nested build/ should NOT be ignored by default"
+            resolved.ignore_patterns.is_match("src/build/helper.ts"),
+            "nested build/ should be ignored, like dist/ and coverage/"
+        );
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("projects/app/build/index.js"),
+            "build/ inside a workspace package should be ignored"
+        );
+    }
+
+    #[test]
+    fn resolve_default_ignores_match_build_only_as_a_whole_segment() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert!(!resolved.ignore_patterns.is_match("src/build.ts"));
+        assert!(!resolved.ignore_patterns.is_match("src/rebuild/helper.ts"));
+        assert!(!resolved.ignore_patterns.is_match("src/buildings/a.ts"));
+        assert!(!resolved.ignore_patterns.is_match("src/prebuild/a.ts"));
+    }
+
+    /// A workspace package directory named `build` keeps being discovered, but
+    /// its manifest is filtered out of dependency analysis: the same globset is
+    /// the manifest filter in `crates/core/src/analyze/unused_deps.rs`. Pinned
+    /// here so the consequence stays a deliberate choice.
+    #[test]
+    fn resolve_default_ignores_cover_a_manifest_inside_build() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("packages/build/package.json")
         );
     }
 

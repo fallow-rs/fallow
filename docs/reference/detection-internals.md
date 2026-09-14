@@ -421,8 +421,13 @@ the deepest calls rather than degrading analysis time.
 The discovery backend uses `ALLOWED_HIDDEN_DIRS` in
 `crates/core/src/discover/mod.rs` together with explicit script/plugin scopes;
 a blanket hidden-directory exclusion would lose tool configuration and assets.
-Default `build/**` exclusion is root-relative, so nested source directories
-named `build` remain eligible. Keep discovery ignore behavior separate from
+The default `**/build/**` exclusion matches a `build` path segment at any
+depth, so per-package output in a monorepo is skipped the same way `**/dist/**`
+and `**/coverage/**` are, and the same way `is_skip_listed_dir` in
+`crates/config/src/workspace/diagnostics.rs` already treats the name. The
+compiled globset has no negation, so a hand-written source directory named
+`build` cannot be re-included through `ignorePatterns`; it has to be renamed or
+analyzed from its own root. Keep discovery ignore behavior separate from
 workspace-package candidate filtering.
 
 Resolver fallbacks in `crates/graph/src/resolve/` preserve tracked source

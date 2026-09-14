@@ -2228,7 +2228,7 @@ mod tests {
         }
 
         #[test]
-        fn includes_nested_build_directory() {
+        fn excludes_nested_build_directory() {
             let dir = tempfile::tempdir().expect("create temp dir");
 
             let nested_build = dir.path().join("src").join("build");
@@ -2240,8 +2240,8 @@ mod tests {
             let names = file_names(&files, dir.path());
 
             assert!(
-                names.contains(&"src/build/helper.ts".to_string()),
-                "nested build/ directories should be included"
+                !names.contains(&"src/build/helper.ts".to_string()),
+                "build/ is treated as generated output at any depth: {names:?}"
             );
         }
 
@@ -2484,7 +2484,7 @@ mod tests {
         }
 
         #[test]
-        fn default_ignore_patterns_exclude_root_build() {
+        fn default_ignore_patterns_exclude_build_at_any_depth() {
             let dir = tempfile::tempdir().expect("create temp dir");
 
             let build = dir.path().join("build");
@@ -2502,13 +2502,59 @@ mod tests {
             let files = discover_files(&config);
             let names = file_names(&files, dir.path());
 
+            assert_eq!(names, vec!["src/index.ts".to_string()]);
+        }
+
+        /// A monorepo keeps its generated output inside each package, so the
+        /// built-in exclusion has to survive the workspace prefix.
+        #[test]
+        fn default_ignore_patterns_exclude_nested_build() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+
+            let build = dir.path().join("build");
+            std::fs::create_dir_all(&build).unwrap();
+            std::fs::write(build.join("output.js"), "// built").unwrap();
+
+            let package_build = dir.path().join("projects").join("app").join("build");
+            std::fs::create_dir_all(&package_build).unwrap();
+            std::fs::write(package_build.join("index.js"), "// built").unwrap();
+
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("index.ts"), "export const x = 1;").unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert_eq!(names, vec!["src/index.ts".to_string()]);
+        }
+
+        /// `build` only counts as output when it is a whole path segment.
+        #[test]
+        fn default_ignore_patterns_keep_paths_that_merely_contain_build() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(src.join("rebuild")).unwrap();
+            std::fs::create_dir_all(src.join("buildings")).unwrap();
+            std::fs::write(src.join("build.ts"), "export const a = 1;").unwrap();
+            std::fs::write(src.join("rebuild").join("helper.ts"), "export const b = 1;").unwrap();
+            std::fs::write(src.join("buildings").join("a.ts"), "export const c = 1;").unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let files = discover_files(&config);
+            let mut names = file_names(&files, dir.path());
+            names.sort();
+
             assert_eq!(
-                names.len(),
-                2,
-                "root build/ excluded, nested kept: {names:?}"
+                names,
+                vec![
+                    "src/build.ts".to_string(),
+                    "src/buildings/a.ts".to_string(),
+                    "src/rebuild/helper.ts".to_string(),
+                ]
             );
-            assert!(names.contains(&"src/index.ts".to_string()));
-            assert!(names.contains(&"src/build/helper.ts".to_string()));
         }
 
         /// Resolve a config then override the per-file size limit in bytes.

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The built-in `build` exclusion now matches at any depth.** The default
+  discovery ignore list carried `build/**`, which is anchored at the project
+  root, while every neighboring generated-output default (`**/dist/**`,
+  `**/coverage/**`, `**/node_modules/**`) is recursive. A monorepo that keeps
+  per-package output in `projects/*/apps/web/build/` therefore had that output
+  walked, parsed, graphed and reported, producing unused files, unused exports,
+  duplication and health findings for generated code. The default is now
+  `**/build/**`, so a `build` path segment is treated as generated output
+  wherever it appears, which also matches how workspace discovery has always
+  classified the name. Paths that merely contain the word, such as
+  `src/build.ts` or `src/rebuild/helper.ts`, are unaffected, and a root-level
+  `build/` stays excluded as before.
+
+  Two consequences are worth stating plainly. A directory named `build` that
+  holds hand-written source is now skipped, and `ignorePatterns` cannot bring it
+  back: the field has no negation, so a `!`-prefixed entry is compiled as a
+  literal glob, and a positional path only narrows what is reported from the
+  files discovery already kept. The remedies are to rename or move the
+  directory, or to analyze it as its own project with
+  `fallow --root <that directory>`. Separately, a workspace package literally
+  named `build` is still discovered and its source still analyzed, but its
+  `package.json` no longer contributes unused-dependency findings, because the
+  manifest filter shares this globset (#2622).
+
 ## [3.25.0] - 2026-09-11
 
 ### Added

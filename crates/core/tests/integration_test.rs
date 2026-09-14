@@ -297,6 +297,8 @@ mod issue_2395_css_module_credit;
 mod issue_2397_default_export_credit;
 #[path = "integration_test/issue_2505_rnstorybook_support.rs"]
 mod issue_2505_rnstorybook_support;
+#[path = "integration_test/issue_2622_nested_build_ignored.rs"]
+mod issue_2622_nested_build_ignored;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]

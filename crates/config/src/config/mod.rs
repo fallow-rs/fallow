@@ -269,7 +269,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub entry: Vec<String>,
 
-    /// An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `["generated/**"]`) to drop generated or vendored trees from every detector; patterns are validated at load.
+    /// An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, **/build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `["generated/**"]`) to drop generated or vendored trees from every detector; patterns are validated at load.
     #[serde(default)]
     pub ignore_patterns: Vec<String>,
 
