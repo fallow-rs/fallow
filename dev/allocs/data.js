@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789415513826,
+  "lastUpdate": 1789428021231,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "7a28a05378a747cb78c3bd5e95fd59618eabb1e4",
-          "message": "fix(dead-code): collapse React Native platform families in duplicate-exports (#2416)\n\nWith the react-native or expo plugin active, an import of ./UserMenu credits every Metro platform-extension member, so UserMenu.tsx and UserMenu.ios.tsx shared an importer and surfaced as a duplicate pair. Each family now folds into one representative (the base file, otherwise the lowest path) before the importer partition. A genuine duplicate in an unrelated file is still reported against that representative. Without those plugins the output is unchanged.\n\nCloses #2407",
-          "timestamp": "2026-08-25T14:06:16+02:00",
-          "tree_id": "d72f29057e2625beedc7a9b33edc6364b35e7cbf",
-          "url": "https://github.com/fallow-rs/fallow/commit/7a28a05378a747cb78c3bd5e95fd59618eabb1e4"
-        },
-        "date": 1787659925277,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9706675,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49278,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1171130,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8382,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8496,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "maritz.hans@gmail.com",
+            "name": "Hans-Albert Maritz",
+            "username": "Freakazo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "08bcec083b24159ad948f90c666744c39d76b120",
+          "message": "perf(core): reuse workspace ownership for dependency checks (#2624)\n\nResolve each graph file's deepest owning workspace once per analysis into a dense FileId-indexed lookup, and reuse it for both the unused-dependency and unlisted-dependency checks instead of walking the workspace list for every package-usage entry and import site.\n\nNested-workspace resolution and the root-dependency fallback are preserved, and the duplicated path-based lookup helper is removed.\n\nMaintainer validation: findings are byte-identical to main on five real workspace monorepos, and the analyze phase is measurably faster across repeated runs. fmt, clippy, the full workspace test suite, bench check and rustdoc are green locally.",
+          "timestamp": "2026-09-15T01:15:28+02:00",
+          "tree_id": "2ebfb9e3b05763943167bbc1c85e42c66c29e257",
+          "url": "https://github.com/fallow-rs/fallow/commit/08bcec083b24159ad948f90c666744c39d76b120"
+        },
+        "date": 1789428017815,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9935012,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51260,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1192120,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8398,
             "unit": "allocations"
           }
         ]
