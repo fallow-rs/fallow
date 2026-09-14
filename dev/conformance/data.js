@@ -1,90 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789297304414,
+  "lastUpdate": 1789385350812,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "76ca098b6ec76019f7a1039d2255f82a026a1c39",
-          "message": "fix(tanstack): skip route contract duplicate exports\n\nTanStack Router route modules are allowed to repeat framework contract exports such as Route. The duplicate-export detector now applies TanStack route used-export rules to duplicate grouping, and also recognizes Route exports imported by generated routeTree.gen files from nested route directories.\n\nOrdinary duplicate Route exports outside TanStack route files still report. Regression coverage includes the OpenWaggle-shaped generated route tree plus configured route directories, lazy routes, ignore prefixes, and virtual route config.\n\nFixes #947.",
-          "timestamp": "2026-06-05T09:39:40Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/76ca098b6ec76019f7a1039d2255f82a026a1c39"
-        },
-        "date": 1780652524759,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Agreement Rate",
-            "value": 2,
-            "unit": "%"
-          },
-          {
-            "name": "Agreed Issues",
-            "value": 630,
-            "unit": "issues"
-          },
-          {
-            "name": "Fallow Total",
-            "value": 30402,
-            "unit": "issues"
-          },
-          {
-            "name": "Knip Total",
-            "value": 2028,
-            "unit": "issues"
-          },
-          {
-            "name": "fastify Agreement",
-            "value": 6.1,
-            "unit": "%"
-          },
-          {
-            "name": "next.js Agreement",
-            "value": 1.8,
-            "unit": "%"
-          },
-          {
-            "name": "preact Agreement",
-            "value": 4.2,
-            "unit": "%"
-          },
-          {
-            "name": "query Agreement",
-            "value": 0,
-            "unit": "%"
-          },
-          {
-            "name": "svelte Agreement",
-            "value": 0.3,
-            "unit": "%"
-          },
-          {
-            "name": "vite Agreement",
-            "value": 6.9,
-            "unit": "%"
-          },
-          {
-            "name": "vue-core Agreement",
-            "value": 24.3,
-            "unit": "%"
-          },
-          {
-            "name": "zod Agreement",
-            "value": 2.8,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -8134,6 +8052,88 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/8622017e6effcad51ddff304032914e08366de27"
         },
         "date": 1789297300716,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.8,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 567,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 30107,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 2003,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 4.9,
+            "unit": "%"
+          },
+          {
+            "name": "next.js Agreement",
+            "value": 1.7,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 4.4,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "vite Agreement",
+            "value": 5.9,
+            "unit": "%"
+          },
+          {
+            "name": "vue-core Agreement",
+            "value": 23.4,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 1.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "8622017e6effcad51ddff304032914e08366de27",
+          "message": "chore(audit): drop unused derives on MaterializationScope\n\nSlop-audit follow-up to the sparse base-snapshot change: the private scope struct is only borrowed, so Debug, Clone, and Default have no users.",
+          "timestamp": "2026-09-12T09:02:14Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/8622017e6effcad51ddff304032914e08366de27"
+        },
+        "date": 1789385346404,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
