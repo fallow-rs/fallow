@@ -1923,6 +1923,33 @@ unknown_field = true
         assert!(obj.contains_key("properties"));
     }
 
+    /// Both `.fallowrc.json` and `.fallowrc.jsonc` are loaded through
+    /// [`crate::jsonc::parse_options`], so the published schema has to declare
+    /// the same dialect. Editors built on the JSON language service read
+    /// `allowComments` and `allowTrailingCommas` off the root schema object and
+    /// otherwise report syntax fallow accepts. Asserting against the parser's
+    /// own options makes the schema and the loader fail together if either one
+    /// moves.
+    #[test]
+    fn json_schema_advertises_the_jsonc_dialect_it_parses() {
+        let options = crate::jsonc::parse_options();
+        let schema = FallowConfig::json_schema();
+        let root = schema.as_object().expect("schema should be an object");
+
+        assert_eq!(
+            root.get("allowTrailingCommas")
+                .and_then(serde_json::Value::as_bool),
+            Some(options.allow_trailing_commas),
+            "schema should advertise the parser's trailing-comma support"
+        );
+        assert_eq!(
+            root.get("allowComments")
+                .and_then(serde_json::Value::as_bool),
+            Some(options.allow_comments),
+            "schema should advertise the parser's comment support"
+        );
+    }
+
     #[test]
     fn config_format_detection() {
         assert!(matches!(

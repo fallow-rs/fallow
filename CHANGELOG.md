@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The config JSON Schema now advertises the JSONC dialect fallow parses.**
+  `.fallowrc.json` and `.fallowrc.jsonc` have always accepted comments and
+  trailing commas, but editors validating those files against the published
+  schema reported `Trailing comma` anyway, because the schema said nothing
+  about the dialect. The schema now carries `allowComments` and
+  `allowTrailingCommas`, so JSON language service clients such as VS Code and
+  Zed stop flagging syntax the loader accepts. The keywords are annotations for
+  editors; analysis behaviour is unchanged
+  (Closes [#2623](https://github.com/fallow-rs/fallow/issues/2623)).
+
 ## [3.25.0] - 2026-09-11
 
 ### Added

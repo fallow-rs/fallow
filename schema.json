@@ -373,6 +373,8 @@
     }
   },
   "additionalProperties": false,
+  "allowComments": true,
+  "allowTrailingCommas": true,
   "$defs": {
     "ExternalPluginDef": {
       "description": "A declarative plugin definition loaded from a standalone file or inline config.\n\nExternal plugins provide the same static pattern capabilities as built-in\nplugins (entry points, always-used files, used exports, tooling dependencies),\nbut are defined in standalone files or inline in the fallow config rather than\ncompiled Rust code.\n\nThey cannot do AST-based config parsing (`resolve_config()`), but cover the\nvast majority of framework integration use cases.\n\nSupports JSONC, JSON, and TOML formats. All use camelCase field names.\n\n```json\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json\",\n  \"name\": \"my-framework\",\n  \"enablers\": [\"my-framework\", \"@my-framework/core\"],\n  \"entryPoints\": [\"src/routes/**/*.{ts,tsx}\"],\n  \"configPatterns\": [\"my-framework.config.{ts,js}\"],\n  \"alwaysUsed\": [\"src/setup.ts\"],\n  \"toolingDependencies\": [\"my-framework-cli\"],\n  \"usedExports\": [\n    { \"pattern\": \"src/routes/**/*.{ts,tsx}\", \"exports\": [\"default\", \"loader\", \"action\"] }\n  ]\n}\n```",

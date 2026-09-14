@@ -252,6 +252,12 @@ impl TypeAwareConfig {
 /// Unknown keys are rejected at load so typos fail loud.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+// Both `.fallowrc.json` and `.fallowrc.jsonc` are read with the JSONC dialect
+// from `crate::jsonc::parse_options`, so the schema declares the same dialect.
+// JSON language service clients (VS Code, Zed) read these two keywords off the
+// root object and otherwise flag syntax the loader accepts. They are
+// annotations only: nothing in fallow reads them back.
+#[schemars(extend("allowComments" = true, "allowTrailingCommas" = true))]
 pub struct FallowConfig {
     /// A string pointing at fallow's JSON Schema URL, used only by editors for autocomplete and validation of the config file; it has no effect on analysis and is stripped before serialization (serde skip_serializing, writeOnly in the schema). Set it to `./node_modules/fallow/schema.json` for npm installs (version-aligned, offline, avoids VS Code's untrusted-remote-schema prompt), or `https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json` for non-npm installs; any other value is ignored by fallow.
     #[serde(rename = "$schema", default, skip_serializing)]

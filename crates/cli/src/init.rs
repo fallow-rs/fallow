@@ -2402,4 +2402,27 @@ mod config_schema_drift {
              use ./node_modules/fallow/schema.json or the raw.githubusercontent.com fallback"
         );
     }
+
+    /// Issue #2623: editors fetch these committed bytes, not the derived
+    /// value, so the JSONC dialect keywords are pinned on the published file
+    /// as well as on the generator.
+    #[test]
+    fn schema_json_advertises_the_jsonc_dialect() {
+        let committed: serde_json::Value =
+            serde_json::from_str(COMMITTED).expect("committed schema.json must parse as JSON");
+        let root = committed
+            .as_object()
+            .expect("committed schema.json must be an object");
+
+        assert_eq!(
+            root.get("allowTrailingCommas"),
+            Some(&serde_json::Value::Bool(true)),
+            "schema.json must tell JSON language service clients that trailing commas are accepted"
+        );
+        assert_eq!(
+            root.get("allowComments"),
+            Some(&serde_json::Value::Bool(true)),
+            "schema.json must tell JSON language service clients that comments are accepted"
+        );
+    }
 }

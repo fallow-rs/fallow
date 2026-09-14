@@ -896,6 +896,24 @@ fn config_schema_is_json_schema() {
     );
 }
 
+/// The command an editor build step calls has to emit the dialect keywords,
+/// not just the in-process generator (#2623).
+#[test]
+fn config_schema_advertises_jsonc_dialect() {
+    let output = run_fallow_raw(&["config-schema"]);
+    let json = parse_json(&output);
+    assert_eq!(
+        json.get("allowTrailingCommas").and_then(|v| v.as_bool()),
+        Some(true),
+        "config-schema should advertise trailing-comma support"
+    );
+    assert_eq!(
+        json.get("allowComments").and_then(|v| v.as_bool()),
+        Some(true),
+        "config-schema should advertise comment support"
+    );
+}
+
 #[test]
 fn plugin_schema_outputs_valid_json() {
     let output = run_fallow_raw(&["plugin-schema"]);
