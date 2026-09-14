@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789203961804,
+  "lastUpdate": 1789415513826,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1edd39e794b2c16dbc64fedda368c3df1ff903bc",
-          "message": "fix(impact): name a newer store in the statusline\n\nAn older fallow reading an Impact store written by a newer release printed the generic data-unavailable line, which read as lost history. The statusline now prints data from newer fallow with an upgrade hint for that case; corrupt or unreadable stores keep the data-unavailable line.",
-          "timestamp": "2026-08-25T11:29:38+02:00",
-          "tree_id": "5ac3f059ffa9b0ec43bd3637213d3dbdff380b0b",
-          "url": "https://github.com/fallow-rs/fallow/commit/1edd39e794b2c16dbc64fedda368c3df1ff903bc"
-        },
-        "date": 1787650564546,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9766677,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49371,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1175572,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8091,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8545,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a013bc4285df07f9e706b1357de421222e9ebb4e",
+          "message": "chore(deps): update rustls to 0.23.45 for RUSTSEC-2026-0285 (#2630)\n\nrustls 0.23.37 is affected by RUSTSEC-2026-0285: TLS 1.3 handshake messages are accepted across encryption level boundaries. Lockfile-only bump to 0.23.45, pulling rustls-webpki 0.103.13 to 0.103.15; both arrive transitively through ureq and neither is pinned.\n\nCargo Deny and Security Audit are required checks that only run on Rust paths, so this failed every open pull request touching a Rust file while main stayed green.",
+          "timestamp": "2026-09-14T21:47:13+02:00",
+          "tree_id": "7257b3005d74f4838d53fbaca6906f003d2f1c3a",
+          "url": "https://github.com/fallow-rs/fallow/commit/a013bc4285df07f9e706b1357de421222e9ebb4e"
+        },
+        "date": 1789415509302,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9883220,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51226,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1205478,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8496,
             "unit": "allocations"
           }
         ]
