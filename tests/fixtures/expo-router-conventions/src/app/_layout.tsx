@@ -14,4 +14,12 @@ export const unstable_settings = {
     initialRouteName: "index",
 };
 
+export function getNavOptions() {
+    return {};
+}
+
+export async function generateMetadata() {
+    return { title: "root" };
+}
+
 export const unusedLayoutHelper = "unused";

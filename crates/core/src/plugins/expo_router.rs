@@ -13,6 +13,8 @@ const ROUTE_FILE_EXPORTS: &[&str] = &[
     "SuspenseFallback",
     "loader",
     "generateStaticParams",
+    "generateMetadata",
+    "getNavOptions",
     "unstable_settings",
 ];
 const API_ROUTE_EXPORTS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
