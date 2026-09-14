@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789303068477,
+  "lastUpdate": 1789393327884,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "e665f88427a70751a7c0b7cecc8f7379d00d3da4",
-          "message": "fix(cli): name canonical `fallow dead-code` in user-facing messages (#1011)\n\nSeveral user-facing messages still told users to run the deprecated `fallow check` alias (which already prints a deprecation warning). The fix skip notes, migrate caveat, regression-baseline hint, and fix MCP tool descriptions now reference `fallow dead-code`. Internal doc comments updated to match; the `check` alias keeps working.",
-          "timestamp": "2026-06-06T09:14:42Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/e665f88427a70751a7c0b7cecc8f7379d00d3da4"
-        },
-        "date": 1780738160202,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 152,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 143,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 292,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 253,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 163,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 143,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 487,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 393,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1320,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1142,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 959,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 939,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 889,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 800,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7565,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7451,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9329,6 +9227,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 814,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "8622017e6effcad51ddff304032914e08366de27",
+          "message": "chore(audit): drop unused derives on MaterializationScope\n\nSlop-audit follow-up to the sparse base-snapshot change: the private scope struct is only borrowed, so Debug, Clone, and Default have no users.",
+          "timestamp": "2026-09-12T09:02:14Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/8622017e6effcad51ddff304032914e08366de27"
+        },
+        "date": 1789393317132,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 102,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 102,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 407,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 305,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1124,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 914,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 913,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 710,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 813,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 910,
             "unit": "ms"
           }
         ]
