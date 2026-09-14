@@ -6,7 +6,7 @@ use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::AnalysisResults;
 
-use crate::baseline::{BaselineData, filter_new_issues};
+use crate::baseline::{BaselineData, filter_new_issues, stale_share_warrants_warning};
 use crate::error::emit_error;
 use crate::load_config_for_analysis;
 use crate::regression::{self, RegressionOpts, RegressionOutcome};
@@ -1136,12 +1136,15 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     let baseline_matched = handle_baseline(
         &mut data.results,
-        opts.save_baseline,
-        opts.baseline,
-        &config.root,
-        opts.quiet,
-        opts.output,
-        &analysis_identity,
+        &BaselineIo {
+            save_path: opts.save_baseline,
+            load_path: opts.baseline,
+            root: &config.root,
+            quiet: opts.quiet,
+            output: opts.output,
+            analysis_identity: &analysis_identity,
+            change_scoped: baseline_scope_is_narrowed(opts),
+        },
     )?;
 
     let regression_outcome =
@@ -1580,45 +1583,56 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     exit
 }
 
-/// Save baseline and/or compare against an existing baseline.
-///
-/// Returns `Some(ExitCode)` on fatal errors (serialization/IO failure),
-/// `Ok(None)` when no baseline was loaded, `Ok(Some((entries, matched)))` when
-/// a baseline was loaded, or `Err(ExitCode)` on fatal errors.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "baseline I/O keeps scope, output, and semantic compatibility inputs explicit"
-)]
-fn handle_baseline(
-    results: &mut fallow_types::results::AnalysisResults,
-    save_path: Option<&std::path::Path>,
-    load_path: Option<&std::path::Path>,
-    root: &std::path::Path,
+/// Scope, output, and semantic compatibility inputs for baseline I/O.
+struct BaselineIo<'a> {
+    save_path: Option<&'a std::path::Path>,
+    load_path: Option<&'a std::path::Path>,
+    root: &'a std::path::Path,
     quiet: bool,
     output: OutputFormat,
-    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+    analysis_identity: &'a fallow_types::semantic::SemanticAnalysisIdentity,
+    /// True when this run analyzed only part of the project, so a
+    /// whole-project baseline matches less of it for reasons that are not rot.
+    change_scoped: bool,
+}
+
+/// True when scope or issue-type narrowing ran before the baseline comparison,
+/// so the current results cover less than the baseline ever described.
+///
+/// Mirrors the health side's `is_change_scoped` and adds the dead-code-only
+/// filter channel, because `--unused-*` flags drop whole baseline categories.
+/// The diff channel is resolved exactly as `apply_scope_filters` resolves it:
+/// on these commands `--diff-file` and `--diff-stdin` never reach
+/// `opts.diff_index` and arrive through the shared index instead, so reading
+/// the field alone would miss every diff-scoped run.
+fn baseline_scope_is_narrowed(opts: &CheckOptions<'_>) -> bool {
+    let diff_scoped = opts.diff_index.is_some()
+        || (opts.use_shared_diff_index
+            && crate::report::ci::diff_filter::shared_diff_index().is_some());
+    diff_scoped
+        || opts.changed_since.is_some()
+        || opts.workspace.is_some()
+        || opts.changed_workspaces.is_some()
+        || opts.scope.is_some()
+        || !opts.file.is_empty()
+        || opts.filters.any_active()
+}
+
+/// Save baseline and/or compare against an existing baseline.
+///
+/// Returns `Ok(None)` when no baseline was loaded, `Ok(Some((entries,
+/// matched)))` when a baseline was loaded, or `Err(ExitCode)` on fatal errors
+/// (serialization or IO failure).
+fn handle_baseline(
+    results: &mut fallow_types::results::AnalysisResults,
+    io: &BaselineIo<'_>,
 ) -> Result<Option<(usize, usize)>, ExitCode> {
-    if let Some(baseline_path) = save_path {
-        save_baseline_file(
-            results,
-            baseline_path,
-            root,
-            quiet,
-            output,
-            analysis_identity,
-        )?;
+    if let Some(baseline_path) = io.save_path {
+        save_baseline_file(results, baseline_path, io)?;
     }
 
-    if let Some(baseline_path) = load_path {
-        return load_and_compare_baseline(
-            results,
-            baseline_path,
-            root,
-            quiet,
-            output,
-            analysis_identity,
-        )
-        .map(Some);
+    if let Some(baseline_path) = io.load_path {
+        return load_and_compare_baseline(results, baseline_path, io).map(Some);
     }
 
     Ok(None)
@@ -1628,15 +1642,12 @@ fn handle_baseline(
 fn save_baseline_file(
     results: &fallow_types::results::AnalysisResults,
     baseline_path: &std::path::Path,
-    root: &std::path::Path,
-    quiet: bool,
-    output: OutputFormat,
-    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+    io: &BaselineIo<'_>,
 ) -> Result<(), ExitCode> {
     let baseline_data =
-        BaselineData::from_results_with_identity(results, root, analysis_identity.clone());
+        BaselineData::from_results_with_identity(results, io.root, io.analysis_identity.clone());
     let mut json = serde_json::to_string_pretty(&baseline_data)
-        .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, output))?;
+        .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, io.output))?;
     json.push('\n');
     if let Some(parent) = baseline_path.parent()
         && !parent.as_os_str().is_empty()
@@ -1645,17 +1656,17 @@ fn save_baseline_file(
         return Err(emit_error(
             &format!("failed to create baseline directory: {e}"),
             2,
-            output,
+            io.output,
         ));
     }
     if let Err(e) = std::fs::write(baseline_path, json) {
         return Err(emit_error(
             &format!("failed to save baseline: {e}"),
             2,
-            output,
+            io.output,
         ));
     }
-    if !quiet {
+    if !io.quiet {
         eprintln!("Baseline saved to {}", baseline_path.display());
     }
     Ok(())
@@ -1666,21 +1677,18 @@ fn save_baseline_file(
 fn load_and_compare_baseline(
     results: &mut fallow_types::results::AnalysisResults,
     baseline_path: &std::path::Path,
-    root: &std::path::Path,
-    quiet: bool,
-    output: OutputFormat,
-    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+    io: &BaselineIo<'_>,
 ) -> Result<(usize, usize), ExitCode> {
     let content = std::fs::read_to_string(baseline_path)
-        .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, output))?;
+        .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, io.output))?;
     let baseline_data = serde_json::from_str::<BaselineData>(&content)
-        .map_err(|e| emit_error(&format!("failed to parse baseline: {e}"), 2, output))?;
+        .map_err(|e| emit_error(&format!("failed to parse baseline: {e}"), 2, io.output))?;
     let incompatible = baseline_data
         .analysis_identity()
-        .incompatible_fields(analysis_identity);
+        .incompatible_fields(io.analysis_identity);
     if !incompatible.is_empty() {
         let type_aware_flag = if matches!(
-            analysis_identity.mode,
+            io.analysis_identity.mode,
             fallow_types::semantic::SemanticAnalysisMode::TypeAware
         ) {
             " --type-aware"
@@ -1694,17 +1702,38 @@ fn load_and_compare_baseline(
                 baseline_path.display(),
             ),
             2,
-            output,
+            io.output,
         ));
     }
     let baseline_entries = baseline_data.total_entries();
     let before = results.total_issues();
-    *results = filter_new_issues(std::mem::take(results), &baseline_data, root);
+    *results = filter_new_issues(std::mem::take(results), &baseline_data, io.root);
     let matched = before.saturating_sub(results.total_issues());
-    if !quiet {
+    if !io.quiet {
         eprintln!("Comparing against baseline: {}", baseline_path.display());
+        warn_on_baseline_staleness(baseline_entries, matched, io.change_scoped, baseline_path);
     }
-    if baseline_entries > 0 && matched == 0 && !quiet {
+    Ok((baseline_entries, matched))
+}
+
+/// Warn when a loaded baseline no longer describes the current project: either
+/// nothing in it matched, or a large enough share of it matched nothing.
+///
+/// Silent for a run narrowed to part of the project, because such a run
+/// legitimately sees only a slice of a whole-project baseline. Re-saving from
+/// one would drop every entry the run never looked at, so advising it there
+/// would gut the gate rather than refresh it.
+fn warn_on_baseline_staleness(
+    baseline_entries: usize,
+    matched: usize,
+    change_scoped: bool,
+    baseline_path: &std::path::Path,
+) {
+    if baseline_entries == 0 || change_scoped {
+        return;
+    }
+    let stale_entries = baseline_entries.saturating_sub(matched);
+    if matched == 0 {
         eprintln!(
             "Warning: baseline has {baseline_entries} entries but matched \
              0 current issues. Your paths may have changed, or the baseline \
@@ -1712,8 +1741,15 @@ fn load_and_compare_baseline(
              --save-baseline {}",
             baseline_path.display(),
         );
+    } else if stale_share_warrants_warning(baseline_entries, stale_entries) {
+        eprintln!(
+            "Warning: baseline is partially stale: {stale_entries} of \
+             {baseline_entries} entries matched no current issue, so the \
+             gate protects less than what was saved. Re-save with: \
+             --save-baseline {}",
+            baseline_path.display(),
+        );
     }
-    Ok((baseline_entries, matched))
 }
 
 #[cfg(test)]
@@ -2062,12 +2098,15 @@ mod tests {
 
         handle_baseline(
             &mut results,
-            Some(&baseline_path),
-            None,
-            std::path::Path::new("/project"),
-            true,
-            OutputFormat::Json,
-            &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            &BaselineIo {
+                save_path: Some(&baseline_path),
+                load_path: None,
+                root: std::path::Path::new("/project"),
+                quiet: true,
+                output: OutputFormat::Json,
+                analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+                change_scoped: false,
+            },
         )
         .expect("baseline save succeeds");
 

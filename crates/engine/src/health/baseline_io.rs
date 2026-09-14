@@ -108,14 +108,6 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
     }
 }
 
-/// Stale fraction (in percent) at which the partial-staleness warning fires.
-///
-/// A little drift is the normal state of a living baseline, so warning on any
-/// stale entry would train people to ignore the note. A quarter of the
-/// baseline matching nothing means the gate protects meaningfully less than
-/// what was saved.
-const STALE_WARN_PERCENT: usize = 25;
-
 pub(super) struct LoadedHealthBaseline {
     pub(super) data: HealthBaselineData,
     pub(super) staleness: fallow_output::HealthBaselineStaleness,
@@ -244,8 +236,10 @@ fn staleness_from_counts(counts: &StalenessCounts) -> fallow_output::HealthBasel
         change_scoped: counts.change_scoped,
         stale: !counts.change_scoped
             && counts.current_findings > 0
-            && stale_entries > 0
-            && stale_entries * 100 >= counts.baseline_entries * STALE_WARN_PERCENT,
+            && crate::baseline::stale_share_warrants_warning(
+                counts.baseline_entries,
+                stale_entries,
+            ),
     }
 }
 

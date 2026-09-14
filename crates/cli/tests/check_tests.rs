@@ -2306,3 +2306,224 @@ fn combined_json_root_keeps_both_overlapping_glob_diagnostics() {
         standalone["workspace_diagnostics"], combined["workspace_diagnostics"]
     );
 }
+
+/// Rewrite the helper module so it exports `used` plus `unused_count` exports
+/// that nothing consumes.
+fn write_unused_exports(root: &std::path::Path, unused_count: u64) {
+    let source: String = std::iter::once("export const used = () => 1;\n".to_owned())
+        .chain((0..unused_count).map(|index| format!("export const unused{index} = () => 1;\n")))
+        .collect();
+    std::fs::write(root.join("src/helpers.ts"), source).expect("write helper module");
+}
+
+/// The fixture from issue #2627: a project whose dead-code baseline is saved
+/// while `saved` exports are unused, and whose sources then keep only
+/// `remaining` of them, so `saved - remaining` baseline entries match nothing
+/// on the next run.
+fn rotted_baseline_project(saved: u64, remaining: u64) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create source directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"baseline-staleness-repro","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { used } from \"./helpers\";\nexport const main = () => used();\n",
+    )
+    .expect("write entry point");
+    write_unused_exports(root, saved);
+    let save = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root.to_str().expect("temp path is UTF-8"),
+        "--no-cache",
+        "--quiet",
+        "--format",
+        "json",
+        "--save-baseline",
+        root.join("baseline.json")
+            .to_str()
+            .expect("temp path is UTF-8"),
+    ]);
+    let saved_entries = parse_json(&save)["total_issues"].as_u64().unwrap_or(0);
+    assert_eq!(
+        saved_entries, saved,
+        "the saved baseline must hold exactly {saved} entries: {}",
+        save.stdout
+    );
+    write_unused_exports(root, remaining);
+    dir
+}
+
+/// Run `dead-code --baseline` against a prepared fixture with extra arguments.
+fn run_with_baseline(root: &std::path::Path, extra: &[&str]) -> common::CommandOutput {
+    let baseline = root.join("baseline.json");
+    let mut args = vec![
+        "dead-code",
+        "--root",
+        root.to_str().expect("temp path is UTF-8"),
+        "--no-cache",
+        "--baseline",
+        baseline.to_str().expect("temp path is UTF-8"),
+    ];
+    args.extend_from_slice(extra);
+    run_fallow_raw(&args)
+}
+
+#[test]
+fn partially_stale_dead_code_baseline_warns_on_human_output() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &[]);
+    assert!(
+        output.stderr.contains(
+            "Warning: baseline is partially stale: 2 of 4 entries matched no current issue"
+        ),
+        "a half-rotten baseline must say so on stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("--save-baseline"),
+        "the warning must point at the re-save command: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "the warning must not change the exit code: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn partially_stale_baseline_is_silent_below_threshold() {
+    let project = rotted_baseline_project(5, 4);
+    let output = run_with_baseline(project.path(), &[]);
+    assert!(
+        output.stderr.contains("Comparing against baseline"),
+        "the baseline still loads: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "one stale entry out of five is below the warning threshold: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn fully_stale_baseline_keeps_the_zero_overlap_warning() {
+    let project = rotted_baseline_project(4, 0);
+    let output = run_with_baseline(project.path(), &[]);
+    assert!(
+        output
+            .stderr
+            .contains("Warning: baseline has 4 entries but matched 0 current issues"),
+        "the zero-overlap wording is unchanged: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "the two branches are mutually exclusive: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn scoped_run_does_not_warn_about_baseline_staleness() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &["--file", "src/index.ts"]);
+    assert!(
+        output.stderr.contains("Comparing against baseline"),
+        "the baseline still loads under a file scope: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "a narrowed run cannot judge a whole-project baseline: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("matched 0 current issues"),
+        "re-saving from a narrowed run would gut the baseline, so do not advise it: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn diff_scoped_run_does_not_warn_about_baseline_staleness() {
+    let project = rotted_baseline_project(4, 2);
+    let diff = project.path().join("scope.patch");
+    std::fs::write(
+        &diff,
+        "diff --git a/src/index.ts b/src/index.ts\n\
+         index 1111111..2222222 100644\n\
+         --- a/src/index.ts\n\
+         +++ b/src/index.ts\n\
+         @@ -1,2 +1,2 @@\n\
+          import { used } from \"./helpers\";\n\
+         -export const main = () => used();\n\
+         +export const main = () => used() + 0;\n",
+    )
+    .expect("write diff");
+    let output = run_with_baseline(
+        project.path(),
+        &["--diff-file", diff.to_str().expect("temp path is UTF-8")],
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "a diff-scoped run sees only the changed slice of the baseline: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("matched 0 current issues"),
+        "a diff-scoped run must not advise a re-save that would gut the baseline: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn filtered_run_does_not_warn_about_baseline_staleness() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &["--circular-deps"]);
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "a run restricted to one issue type drops whole baseline categories: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("matched 0 current issues"),
+        "a filtered run must not advise a re-save either: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn quiet_suppresses_the_partial_staleness_warning() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &["--quiet"]);
+    assert!(
+        !output.stderr.contains("Comparing against baseline"),
+        "--quiet suppresses the baseline notice: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "--quiet suppresses the staleness warning too: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn partially_stale_baseline_leaves_json_output_unchanged() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    let json = parse_json(&output);
+    assert_eq!(
+        json["baseline"],
+        serde_json::json!({ "entries": 4, "matched": 2 }),
+        "the envelope keeps exactly the two counts it always carried: {}",
+        json["baseline"]
+    );
+}

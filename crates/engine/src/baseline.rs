@@ -50,6 +50,26 @@ fn retain_new_by_keys<T>(
     });
 }
 
+/// Stale fraction (in percent) at which a partial-staleness warning fires.
+///
+/// A little drift is the normal state of a living baseline, so warning on any
+/// stale entry would train people to ignore the note. A quarter of the
+/// baseline matching nothing means the gate protects meaningfully less than
+/// what was saved. Shared by the dead-code and health baselines so the two
+/// warnings cannot drift apart.
+const STALE_WARN_PERCENT: usize = 25;
+
+/// True when `stale_entries` out of `baseline_entries` is a large enough share
+/// to be worth warning about.
+///
+/// Callers own the surrounding guards: whether the run was narrowed to part of
+/// the project, and whether the baseline overlapped the current findings at
+/// all.
+#[must_use]
+pub const fn stale_share_warrants_warning(baseline_entries: usize, stale_entries: usize) -> bool {
+    stale_entries > 0 && stale_entries * 100 >= baseline_entries * STALE_WARN_PERCENT
+}
+
 /// Baseline data for comparison.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct BaselineData {
@@ -2345,6 +2365,7 @@ pub struct BaselineDeltas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
     use crate::results::{
         AnalysisResults, BoundaryViolationFinding, CircularDependencyFinding, DependencyLocation,
@@ -2355,6 +2376,24 @@ mod tests {
         UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
     };
     use std::path::PathBuf;
+
+    #[test]
+    fn stale_share_threshold_matches_the_documented_quarter() {
+        for (baseline_entries, stale_entries, expected) in [
+            (100, 24, false),
+            (100, 25, true),
+            (4, 2, true),
+            (29, 2, false),
+            (5, 1, false),
+            (0, 0, false),
+        ] {
+            assert_eq!(
+                stale_share_warrants_warning(baseline_entries, stale_entries),
+                expected,
+                "{stale_entries} of {baseline_entries} entries"
+            );
+        }
+    }
 
     fn make_results() -> AnalysisResults {
         AnalysisResults {

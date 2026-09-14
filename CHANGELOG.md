@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`dead-code --baseline` warns when the saved baseline has gone stale.** A
+  dead-code baseline is only as good as the findings it still describes, but
+  until now a baseline could rot for months and every run stayed green and
+  silent, so a later `--save-baseline` refresh mixed cleanup of long-fixed
+  entries with newly suppressed problems in one unreviewable diff. When a
+  quarter or more of the saved entries match no current issue, the run now says
+  so on stderr and points at the re-save command, in the same wording
+  `health --baseline` has used since 3.12.0. Below that share nothing is
+  printed, `--quiet` suppresses the line, machine-readable output is unchanged,
+  and exit codes are untouched: the warning is advisory, and
+  `baseline.entries` / `baseline.matched` in the JSON envelope keep their
+  meaning for anyone gating on them
+  (Closes [#2627](https://github.com/fallow-rs/fallow/issues/2627)).
+
+### Fixed
+
+- **A narrowed `dead-code --baseline` run no longer advises a re-save that
+  would gut the baseline.** Scope and issue-type narrowing (`--file`,
+  `--changed-since`, `--diff-file`, `--workspace`, `--changed-workspaces`, a
+  positional path, or an `--unused-*` filter) runs before the baseline
+  comparison, so such a run legitimately matches only the slice of the baseline
+  it looked at. The existing zero-overlap warning fired there anyway and told
+  the user to re-save, which would have dropped every entry outside the scope.
+  Both staleness warnings now stay silent for a narrowed run, matching the
+  guard `health --baseline` already applies
+  ([#2627](https://github.com/fallow-rs/fallow/issues/2627)).
+
 ## [3.25.0] - 2026-09-11
 
 ### Added
