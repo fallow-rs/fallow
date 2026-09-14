@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Expo Router's `SuspenseFallback` route export is recognized.** SDK 56 added
+  a customizable Suspense fallback, declared on `LoadedRoute` alongside
+  `ErrorBoundary` and `unstable_settings`. A layout file exporting
+  `SuspenseFallback` was reported as an unused export until now.
+
+### Changed
+
+- **Unused- and unlisted-dependency checks are faster on large workspace
+  monorepos.** Each file's owning workspace is now resolved once per analysis
+  into a flat, file-indexed lookup instead of walking the whole workspace list
+  for every package-usage entry and import site. On a repository with about
+  18,000 files and 800 workspaces the check went from roughly 30 seconds to
+  6 seconds, and findings are unchanged.
+
+### Fixed
+
+- **The graph cache is reused again on projects where a dynamic-import pattern
+  matches no files.** A pattern built from a runtime expression, such as
+  ``import(`./locales/${lang}.json`)``, that matched zero discovered files or
+  whose glob failed to compile was dropped from the cached row list, leaving
+  fewer rows than patterns. Cache restoration detected the mismatch and
+  rejected the whole project's resolver output on every run, so imports were
+  re-resolved from scratch each time. Every pattern now keeps one row, empty or
+  not, and an empty row still contributes no graph edges.
+
 ## [3.25.0] - 2026-09-11
 
 ### Added
