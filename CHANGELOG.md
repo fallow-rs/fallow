@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Istanbul statement coverage no longer charges a nested function body to
+  the function that contains it.** Every statement in a `statementMap` is now
+  assigned to the innermost `fnMap` record whose body range encloses it, so a
+  function that executed every statement it owns is scored on its own body
+  rather than on the closures it returns or declares. This moves `coverage_pct`,
+  `coverage_tier` and `crap` for functions that lexically contain another
+  function, in either direction: a function whose own body ran while its
+  closures did not now scores higher, and one whose closures ran while its own
+  body did not no longer borrows their credit. Functions with no nested
+  functions are unaffected, and a health snapshot taken before this change
+  compares against a later one with a delta on units that nest. (#2620)
+
 ## [3.25.0] - 2026-09-11
 
 ### Added

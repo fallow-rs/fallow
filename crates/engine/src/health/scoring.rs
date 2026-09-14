@@ -1645,9 +1645,14 @@ pub(super) fn load_istanbul_coverage_for_sources(
             .as_deref()
             .map(|source| IstanbulSourceIndex::new(source, &canonical));
 
+        let statement_owners = tally_statements_by_owner(file_cov);
         let mut functions = Vec::with_capacity(file_cov.fn_map.len());
         for (fn_id, fn_entry) in &file_cov.fn_map {
-            let coverage_pct = compute_function_statement_coverage(file_cov, fn_id, fn_entry);
+            let coverage_pct = compute_function_statement_coverage(
+                file_cov,
+                fn_id,
+                statement_owners.get(fn_id.as_str()),
+            );
             if let Some(function) =
                 istanbul_function_coverage(fn_entry, coverage_pct, source_index.as_ref())
             {
@@ -2078,44 +2083,108 @@ fn effective_istanbul_fn_line(fn_entry: &oxc_coverage_instrument::FnEntry) -> u3
     }
 }
 
-/// Compute statement-level coverage percentage for a single function.
-///
-/// Maps statements from `statementMap` to the function's body range (`loc`)
-/// and computes the fraction with non-zero hit counts. When no statements
-/// fall within the function body (e.g., one-liner arrow functions, getters),
-/// falls back to the function hit count as a binary signal.
-fn compute_function_statement_coverage(
-    file_cov: &oxc_coverage_instrument::FileCoverage,
-    fn_id: &str,
-    fn_entry: &oxc_coverage_instrument::FnEntry,
-) -> f64 {
-    let fn_start_line = fn_entry.loc.start.line;
-    let fn_start_col = fn_entry.loc.start.column;
-    let fn_end_line = fn_entry.loc.end.line;
-    let fn_end_col = fn_entry.loc.end.column;
+/// Statements owned by a single `fnMap` record.
+#[derive(Default)]
+struct StatementTally {
+    covered: u32,
+    total: u32,
+}
 
-    let mut total = 0u32;
-    let mut covered = 0u32;
+/// Whether `outer` encloses `inner`, with both bounds inclusive.
+///
+/// These are the bounds the per-function statement scan has always used, so
+/// which statements a function can claim is unchanged; only how a contested
+/// statement is awarded moved.
+fn istanbul_range_contains(
+    outer: &oxc_coverage_instrument::Location,
+    inner: &oxc_coverage_instrument::Location,
+) -> bool {
+    let after_start = inner.start.line > outer.start.line
+        || (inner.start.line == outer.start.line && inner.start.column >= outer.start.column);
+    let before_end = inner.end.line < outer.end.line
+        || (inner.end.line == outer.end.line && inner.end.column <= outer.end.column);
+    after_start && before_end
+}
+
+/// Assign every statement to the innermost `fnMap` record that encloses it.
+///
+/// A nested function body lies inside the enclosing function's `loc`, so a
+/// bare containment test charges a closure's statements to the function that
+/// returns it as well, and an outer function that ran every statement of its
+/// own is scored down for code it does not own. Ownership here is exclusive:
+/// a statement counts for exactly one record, or for none at all when no
+/// record encloses it, which keeps module-scope statements out of every
+/// function as before.
+///
+/// Innermost is the record with the greatest `loc` start. A tie breaks on the
+/// smallest `loc` end, and a remaining tie between two byte-identical ranges
+/// keeps the first record in `fnMap` key order, which is stable because the
+/// map is a `BTreeMap`. Identical ranges are pathological and any winner is
+/// arbitrary, so determinism is the property that matters.
+///
+/// Computed once per file for the same reason as
+/// [`mark_headers_holding_other_fns`]: every record needs the answer, and the
+/// alternative rescans the whole statement map once per record.
+fn tally_statements_by_owner(
+    file_cov: &oxc_coverage_instrument::FileCoverage,
+) -> rustc_hash::FxHashMap<&str, StatementTally> {
+    let mut owners: rustc_hash::FxHashMap<&str, StatementTally> = rustc_hash::FxHashMap::default();
 
     for (stmt_id, stmt_loc) in &file_cov.statement_map {
-        let after_start = stmt_loc.start.line > fn_start_line
-            || (stmt_loc.start.line == fn_start_line && stmt_loc.start.column >= fn_start_col);
-        let before_end = stmt_loc.end.line < fn_end_line
-            || (stmt_loc.end.line == fn_end_line && stmt_loc.end.column <= fn_end_col);
+        let mut owner: Option<(&str, &oxc_coverage_instrument::Location)> = None;
 
-        if after_start && before_end {
-            total += 1;
-            if file_cov.s.get(stmt_id).copied().unwrap_or(0) > 0 {
-                covered += 1;
+        for (fn_id, fn_entry) in &file_cov.fn_map {
+            if !istanbul_range_contains(&fn_entry.loc, stmt_loc) {
+                continue;
             }
+            let inner_than_current = owner.is_none_or(|(_, best)| {
+                let candidate = (
+                    (fn_entry.loc.start.line, fn_entry.loc.start.column),
+                    std::cmp::Reverse((fn_entry.loc.end.line, fn_entry.loc.end.column)),
+                );
+                let incumbent = (
+                    (best.start.line, best.start.column),
+                    std::cmp::Reverse((best.end.line, best.end.column)),
+                );
+                candidate > incumbent
+            });
+            if inner_than_current {
+                owner = Some((fn_id.as_str(), &fn_entry.loc));
+            }
+        }
+
+        let Some((fn_id, _)) = owner else {
+            continue;
+        };
+        let tally = owners.entry(fn_id).or_default();
+        tally.total += 1;
+        if file_cov.s.get(stmt_id).copied().unwrap_or(0) > 0 {
+            tally.covered += 1;
         }
     }
 
-    if total == 0 {
-        let hit = file_cov.f.get(fn_id).copied().unwrap_or(0);
-        if hit > 0 { 100.0 } else { 0.0 }
-    } else {
-        f64::from(covered) / f64::from(total) * 100.0
+    owners
+}
+
+/// Compute statement-level coverage percentage for a single function.
+///
+/// Takes the fraction of the statements the function owns that have non-zero
+/// hit counts, where ownership comes from [`tally_statements_by_owner`] and a
+/// statement belongs only to the innermost function that encloses it. When the
+/// function owns no statements (a one-liner arrow, a getter, an outer function
+/// whose whole body is a nested declaration, or a producer that emits an empty
+/// `statementMap`), falls back to the function hit count as a binary signal.
+fn compute_function_statement_coverage(
+    file_cov: &oxc_coverage_instrument::FileCoverage,
+    fn_id: &str,
+    owned: Option<&StatementTally>,
+) -> f64 {
+    match owned {
+        Some(tally) if tally.total > 0 => f64::from(tally.covered) / f64::from(tally.total) * 100.0,
+        _ => {
+            let hit = file_cov.f.get(fn_id).copied().unwrap_or(0);
+            if hit > 0 { 100.0 } else { 0.0 }
+        }
     }
 }
 
@@ -5820,15 +5889,33 @@ mod tests {
         fn_map: &serde_json::Value,
         function_hits: &serde_json::Value,
     ) {
+        write_single_file_istanbul_fixture_with_statements(
+            coverage_path,
+            source_path,
+            fn_map,
+            function_hits,
+            &serde_json::json!({}),
+            &serde_json::json!({}),
+        );
+    }
+
+    fn write_single_file_istanbul_fixture_with_statements(
+        coverage_path: &std::path::Path,
+        source_path: &std::path::Path,
+        fn_map: &serde_json::Value,
+        function_hits: &serde_json::Value,
+        statement_map: &serde_json::Value,
+        statement_hits: &serde_json::Value,
+    ) {
         let mut root = serde_json::Map::new();
         root.insert(
             source_path.to_string_lossy().into_owned(),
             serde_json::json!({
                 "path": source_path.to_string_lossy().into_owned(),
-                "statementMap": {},
+                "statementMap": statement_map,
                 "fnMap": fn_map,
                 "branchMap": {},
-                "s": {},
+                "s": statement_hits,
                 "f": function_hits,
                 "b": {}
             }),
@@ -7060,6 +7147,367 @@ mod tests {
 
         assert_eq!(file_coverage.lookup("nested", 1, 22), Some(100.0));
         assert_eq!(file_coverage.lookup("<arrow>", 1, 28), Some(0.0));
+    }
+
+    /// A nested function body sits inside its enclosing function's `loc`, so
+    /// counting every contained statement charged the inner body's misses to
+    /// the outer record as well.
+    ///
+    /// Geometry recorded verbatim from istanbul-lib-instrument 6.0.3 for:
+    ///
+    /// ```js
+    /// function outer() {
+    ///   return function inner(flag) {
+    ///     if (flag) return "yes";
+    ///     return "no";
+    ///   };
+    /// }
+    ///
+    /// module.exports = { outer };
+    /// ```
+    ///
+    /// with `outer()` called once and `inner` never called. Statement 0 is
+    /// the outer return and is hit, statements 1 to 3 are the inner body and
+    /// are not, statement 4 is the module-scope export.
+    #[test]
+    fn nested_function_statements_do_not_lower_the_outer_function() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/nested.js");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture_with_statements(
+            &coverage_path,
+            &source_path,
+            &nested_return_fn_map(),
+            &serde_json::json!({ "0": 1, "1": 0 }),
+            &nested_return_statement_map(),
+            &serde_json::json!({ "0": 1, "1": 0, "2": 0, "3": 0, "4": 1 }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        assert_eq!(file_coverage.lookup("outer", 1, 9), Some(100.0));
+        assert_eq!(file_coverage.lookup("inner", 2, 18), Some(0.0));
+    }
+
+    /// A statement outside every `fnMap` record belongs to no function. The
+    /// module-scope export in the fixture above is hit, and flipping it to
+    /// unhit must not move either function.
+    #[test]
+    fn module_scope_statements_belong_to_no_function() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/nested.js");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture_with_statements(
+            &coverage_path,
+            &source_path,
+            &nested_return_fn_map(),
+            &serde_json::json!({ "0": 1, "1": 0 }),
+            &nested_return_statement_map(),
+            &serde_json::json!({ "0": 1, "1": 0, "2": 0, "3": 0, "4": 0 }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        assert_eq!(file_coverage.lookup("outer", 1, 9), Some(100.0));
+        assert_eq!(file_coverage.lookup("inner", 2, 18), Some(0.0));
+    }
+
+    /// Ownership can leave a record with no statements of its own, and that
+    /// record still has to fall back to the function hit count. Geometry
+    /// recorded verbatim from istanbul-lib-instrument 6.0.3 for:
+    ///
+    /// ```js
+    /// function outer() {
+    ///   function inner(flag) {
+    ///     if (flag) return "yes";
+    ///     return "no";
+    ///   }
+    /// }
+    ///
+    /// module.exports = { outer };
+    /// ```
+    ///
+    /// with `outer()` called once. A hoisted declaration is not a statement,
+    /// so every statement inside `outer` belongs to `inner`.
+    #[test]
+    fn an_outer_function_with_only_a_nested_body_falls_back_to_the_hit_count() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/decl-nested.js");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture_with_statements(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "outer",
+                    "line": 1,
+                    "decl": {
+                        "start": { "line": 1, "column": 9 },
+                        "end": { "line": 1, "column": 14 }
+                    },
+                    "loc": {
+                        "start": { "line": 1, "column": 17 },
+                        "end": { "line": 6, "column": 1 }
+                    }
+                },
+                "1": {
+                    "name": "inner",
+                    "line": 2,
+                    "decl": {
+                        "start": { "line": 2, "column": 11 },
+                        "end": { "line": 2, "column": 16 }
+                    },
+                    "loc": {
+                        "start": { "line": 2, "column": 23 },
+                        "end": { "line": 5, "column": 3 }
+                    }
+                }
+            }),
+            &serde_json::json!({ "0": 1, "1": 0 }),
+            &serde_json::json!({
+                "0": {
+                    "start": { "line": 3, "column": 4 },
+                    "end": { "line": 3, "column": 27 }
+                },
+                "1": {
+                    "start": { "line": 3, "column": 14 },
+                    "end": { "line": 3, "column": 27 }
+                },
+                "2": {
+                    "start": { "line": 4, "column": 4 },
+                    "end": { "line": 4, "column": 16 }
+                },
+                "3": {
+                    "start": { "line": 8, "column": 0 },
+                    "end": { "line": 8, "column": 27 }
+                }
+            }),
+            &serde_json::json!({ "0": 0, "1": 0, "2": 0, "3": 1 }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        assert_eq!(file_coverage.lookup("outer", 1, 9), Some(100.0));
+        assert_eq!(file_coverage.lookup("inner", 2, 11), Some(0.0));
+    }
+
+    /// Two functions at module scope never contain each other, so ownership
+    /// must leave them exactly where they were. Geometry recorded verbatim
+    /// from istanbul-lib-instrument 6.0.3 for the same source with `inner`
+    /// hoisted out of `outer`.
+    #[test]
+    fn sibling_functions_keep_independent_statement_coverage() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/sibling.js");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture_with_statements(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "inner",
+                    "line": 1,
+                    "decl": {
+                        "start": { "line": 1, "column": 9 },
+                        "end": { "line": 1, "column": 14 }
+                    },
+                    "loc": {
+                        "start": { "line": 1, "column": 21 },
+                        "end": { "line": 4, "column": 1 }
+                    }
+                },
+                "1": {
+                    "name": "outer",
+                    "line": 6,
+                    "decl": {
+                        "start": { "line": 6, "column": 9 },
+                        "end": { "line": 6, "column": 14 }
+                    },
+                    "loc": {
+                        "start": { "line": 6, "column": 17 },
+                        "end": { "line": 8, "column": 1 }
+                    }
+                }
+            }),
+            &serde_json::json!({ "0": 0, "1": 1 }),
+            &serde_json::json!({
+                "0": {
+                    "start": { "line": 2, "column": 2 },
+                    "end": { "line": 2, "column": 25 }
+                },
+                "1": {
+                    "start": { "line": 2, "column": 12 },
+                    "end": { "line": 2, "column": 25 }
+                },
+                "2": {
+                    "start": { "line": 3, "column": 2 },
+                    "end": { "line": 3, "column": 14 }
+                },
+                "3": {
+                    "start": { "line": 7, "column": 2 },
+                    "end": { "line": 7, "column": 15 }
+                },
+                "4": {
+                    "start": { "line": 10, "column": 0 },
+                    "end": { "line": 10, "column": 27 }
+                }
+            }),
+            &serde_json::json!({ "0": 0, "1": 0, "2": 0, "3": 1, "4": 1 }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        assert_eq!(file_coverage.lookup("outer", 6, 9), Some(100.0));
+        assert_eq!(file_coverage.lookup("inner", 1, 9), Some(0.0));
+    }
+
+    /// Curried arrows share their closing position, so the inner body is
+    /// distinguished only by its later start. Geometry recorded verbatim from
+    /// istanbul-lib-instrument 6.0.3 for `const add = (a) => (b) => a + b;`
+    /// with `add(1)` called once, so the outer arrow ran and the inner did
+    /// not. Statement 1 is the outer expression body, statement 2 the inner.
+    #[test]
+    fn curried_arrow_statements_belong_to_the_innermost_arrow() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/curried.js");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture_with_statements(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "(anonymous_0)",
+                    "line": 1,
+                    "decl": {
+                        "start": { "line": 1, "column": 12 },
+                        "end": { "line": 1, "column": 13 }
+                    },
+                    "loc": {
+                        "start": { "line": 1, "column": 19 },
+                        "end": { "line": 1, "column": 31 }
+                    }
+                },
+                "1": {
+                    "name": "(anonymous_1)",
+                    "line": 1,
+                    "decl": {
+                        "start": { "line": 1, "column": 19 },
+                        "end": { "line": 1, "column": 20 }
+                    },
+                    "loc": {
+                        "start": { "line": 1, "column": 26 },
+                        "end": { "line": 1, "column": 31 }
+                    }
+                }
+            }),
+            &serde_json::json!({ "0": 1, "1": 0 }),
+            &serde_json::json!({
+                "0": {
+                    "start": { "line": 1, "column": 12 },
+                    "end": { "line": 1, "column": 31 }
+                },
+                "1": {
+                    "start": { "line": 1, "column": 19 },
+                    "end": { "line": 1, "column": 31 }
+                },
+                "2": {
+                    "start": { "line": 1, "column": 26 },
+                    "end": { "line": 1, "column": 31 }
+                },
+                "3": {
+                    "start": { "line": 3, "column": 0 },
+                    "end": { "line": 3, "column": 25 }
+                }
+            }),
+            &serde_json::json!({ "0": 1, "1": 1, "2": 0, "3": 1 }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        assert_eq!(file_coverage.lookup("add", 1, 12), Some(100.0));
+        assert_eq!(file_coverage.lookup("<arrow>", 1, 19), Some(0.0));
+    }
+
+    /// The `fnMap` and `statementMap` istanbul-lib-instrument 6.0.3 records
+    /// for the nested-return source, shared by the two tests that pin
+    /// statement ownership against it.
+    fn nested_return_fn_map() -> serde_json::Value {
+        serde_json::json!({
+            "0": {
+                "name": "outer",
+                "line": 1,
+                "decl": {
+                    "start": { "line": 1, "column": 9 },
+                    "end": { "line": 1, "column": 14 }
+                },
+                "loc": {
+                    "start": { "line": 1, "column": 17 },
+                    "end": { "line": 6, "column": 1 }
+                }
+            },
+            "1": {
+                "name": "inner",
+                "line": 2,
+                "decl": {
+                    "start": { "line": 2, "column": 18 },
+                    "end": { "line": 2, "column": 23 }
+                },
+                "loc": {
+                    "start": { "line": 2, "column": 30 },
+                    "end": { "line": 5, "column": 3 }
+                }
+            }
+        })
+    }
+
+    fn nested_return_statement_map() -> serde_json::Value {
+        serde_json::json!({
+            "0": {
+                "start": { "line": 2, "column": 2 },
+                "end": { "line": 5, "column": 4 }
+            },
+            "1": {
+                "start": { "line": 3, "column": 4 },
+                "end": { "line": 3, "column": 27 }
+            },
+            "2": {
+                "start": { "line": 3, "column": 14 },
+                "end": { "line": 3, "column": 27 }
+            },
+            "3": {
+                "start": { "line": 4, "column": 4 },
+                "end": { "line": 4, "column": 16 }
+            },
+            "4": {
+                "start": { "line": 8, "column": 0 },
+                "end": { "line": 8, "column": 27 }
+            }
+        })
     }
 
     /// istanbul-lib-instrument geometry for a multi-line higher-order

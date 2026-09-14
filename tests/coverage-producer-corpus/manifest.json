@@ -44,6 +44,11 @@
       "mechanism": "A record spelled `get area` / `set area` answers to the bare property name Fallow extracts."
     },
     {
+      "id": "tally_statements_by_owner",
+      "rust_fn": "crates/engine/src/health/scoring.rs::tally_statements_by_owner",
+      "mechanism": "A statement counts for the innermost fnMap record that encloses it, so a nested function body is never charged to the function that contains it as well."
+    },
+    {
       "id": "clamp_negative_positions",
       "rust_fn": "crates/engine/src/health/scoring.rs::parse_coverage_map_tolerantly",
       "mechanism": "A producer that records a negative coordinate for a position it could not place must not reject the whole map, which would silently drop every unit in the file to its static estimate."

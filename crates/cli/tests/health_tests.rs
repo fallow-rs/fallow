@@ -435,6 +435,143 @@ export const elementsFrom = async (
     assert_eq!(finding["crap"].as_f64(), Some(7.0));
 }
 
+/// Writes the reproduction from the report: a function that returns a closure
+/// it never calls, plus the `fnMap`, `statementMap` and hit counts recorded
+/// verbatim from istanbul-lib-instrument 6.0.3 after calling `outer()` once.
+fn write_nested_closure_coverage_fixture(root: &Path) {
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"issue-2620-nested-coverage"}"#,
+    );
+    let source_path = root.join("src/nested.js");
+    write_file(
+        &source_path,
+        r#"function outer() {
+  return function inner(flag) {
+    if (flag) return "yes";
+    return "no";
+  };
+}
+
+module.exports = { outer };
+"#,
+    );
+
+    let mut coverage = serde_json::Map::new();
+    coverage.insert(
+        source_path.to_string_lossy().into_owned(),
+        serde_json::json!({
+            "path": source_path.to_string_lossy().into_owned(),
+            "statementMap": {
+                "0": {
+                    "start": { "line": 2, "column": 2 },
+                    "end": { "line": 5, "column": 4 }
+                },
+                "1": {
+                    "start": { "line": 3, "column": 4 },
+                    "end": { "line": 3, "column": 27 }
+                },
+                "2": {
+                    "start": { "line": 3, "column": 14 },
+                    "end": { "line": 3, "column": 27 }
+                },
+                "3": {
+                    "start": { "line": 4, "column": 4 },
+                    "end": { "line": 4, "column": 16 }
+                },
+                "4": {
+                    "start": { "line": 8, "column": 0 },
+                    "end": { "line": 8, "column": 27 }
+                }
+            },
+            "fnMap": {
+                "0": {
+                    "name": "outer",
+                    "line": 1,
+                    "decl": {
+                        "start": { "line": 1, "column": 9 },
+                        "end": { "line": 1, "column": 14 }
+                    },
+                    "loc": {
+                        "start": { "line": 1, "column": 17 },
+                        "end": { "line": 6, "column": 1 }
+                    }
+                },
+                "1": {
+                    "name": "inner",
+                    "line": 2,
+                    "decl": {
+                        "start": { "line": 2, "column": 18 },
+                        "end": { "line": 2, "column": 23 }
+                    },
+                    "loc": {
+                        "start": { "line": 2, "column": 30 },
+                        "end": { "line": 5, "column": 3 }
+                    }
+                }
+            },
+            "branchMap": {},
+            "s": { "0": 1, "1": 0, "2": 0, "3": 0, "4": 1 },
+            "f": { "0": 1, "1": 0 },
+            "b": {}
+        }),
+    );
+    write_file(
+        &root.join("coverage/coverage-final.json"),
+        &serde_json::to_string(&coverage).expect("serialize coverage"),
+    );
+}
+
+/// A nested function body lies inside the enclosing function's `loc`, so the
+/// statements of a closure must not be charged to the function that returns
+/// it. `outer` executes the only statement it owns and `inner` never runs.
+#[test]
+fn health_istanbul_excludes_nested_function_statements_from_the_outer_function() {
+    let dir = tempdir().unwrap();
+    write_nested_closure_coverage_fixture(dir.path());
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--coverage",
+            "coverage/coverage-final.json",
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+
+    let outer = findings
+        .iter()
+        .find(|finding| finding["name"] == "outer")
+        .unwrap_or_else(|| panic!("expected outer finding, got: {findings:#?}"));
+    assert_eq!(outer["coverage_source"].as_str(), Some("istanbul"));
+    assert_eq!(
+        outer["coverage_pct"].as_f64(),
+        Some(100.0),
+        "outer executed the only statement it owns"
+    );
+    assert_eq!(outer["crap"].as_f64(), Some(1.0));
+
+    let inner = findings
+        .iter()
+        .find(|finding| finding["name"] == "inner")
+        .unwrap_or_else(|| panic!("expected inner finding, got: {findings:#?}"));
+    assert_eq!(inner["coverage_source"].as_str(), Some("istanbul"));
+    assert_eq!(
+        inner["coverage_pct"].as_f64(),
+        Some(0.0),
+        "inner never ran, so it keeps every statement of its own body"
+    );
+    assert_eq!(inner["crap"].as_f64(), Some(6.0));
+}
+
 #[test]
 fn health_json_has_findings() {
     let output = run_fallow(
