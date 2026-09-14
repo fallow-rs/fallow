@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789428021231,
+  "lastUpdate": 1789429076166,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "80812c0fa5ce43fe950653fe67e9a5dc44f140bf",
-          "message": "Merge pull request #2408 from fallow-rs/feat/semantic-clone-conformance\n\nfeat: add local similar code intelligence",
-          "timestamp": "2026-08-25T17:32:47+02:00",
-          "tree_id": "159932b59cc074669c41d52e5fc239af8286fdde",
-          "url": "https://github.com/fallow-rs/fallow/commit/80812c0fa5ce43fe950653fe67e9a5dc44f140bf"
-        },
-        "date": 1787672281350,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9769809,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49375,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1182275,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8417,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8398,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "randall@bleeds.info",
+            "name": "Randall Leeds",
+            "username": "tilgovi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "851eadf906da389cc32d0dc0864b4e446ffdf16c",
+          "message": "feat(plugins): recognize the Expo Router SuspenseFallback export (#2618)\n\nAdd SuspenseFallback to the Expo Router plugin's route-file exports, so a route file exporting it is no longer reported as an unused export.\n\nExpo Router SDK 56 added a customizable Suspense fallback; LoadedRoute declares SuspenseFallback alongside the exports the plugin already knew, such as ErrorBoundary and unstable_settings.\n\nMaintainer validation: the fixture integration test fails without the plugin change and passes with it, and fmt, clippy, the full workspace test suite, bench check and rustdoc are green locally.",
+          "timestamp": "2026-09-15T01:29:15+02:00",
+          "tree_id": "7b26f36723396e9fdfe4e188318965a6b95c9fae",
+          "url": "https://github.com/fallow-rs/fallow/commit/851eadf906da389cc32d0dc0864b4e446ffdf16c"
+        },
+        "date": 1789429072465,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9924700,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51235,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1195361,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8423,
             "unit": "allocations"
           }
         ]
