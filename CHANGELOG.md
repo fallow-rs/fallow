@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Expo Router's `SuspenseFallback` route export is recognized.** SDK 56 added
-  a customizable Suspense fallback, declared on `LoadedRoute` alongside
-  `ErrorBoundary` and `unstable_settings`. A layout file exporting
-  `SuspenseFallback` was reported as an unused export until now.
+- **Expo Router's `SuspenseFallback`, `getNavOptions` and `generateMetadata`
+  route exports are recognized.** All three are declared on Expo Router's
+  `LoadedRoute` type alongside `ErrorBoundary` and `unstable_settings`, and
+  `SuspenseFallback` is the customizable Suspense fallback added in SDK 56. A
+  route file exporting any of them was reported as an unused export until now.
 
 ### Changed
 
