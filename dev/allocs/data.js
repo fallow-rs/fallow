@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789429076166,
+  "lastUpdate": 1789429802503,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "da6a0486f88623d045799b47ad9b13faed04c362",
-          "message": "Merge pull request #2434 from fallow-rs/fix/similar-code-review-findings\n\nfix: harden similar-code evidence and companion verification",
-          "timestamp": "2026-08-26T00:15:40+02:00",
-          "tree_id": "bfcc1155f6e6bf8b0e5beff461f27b9f680d7d9d",
-          "url": "https://github.com/fallow-rs/fallow/commit/da6a0486f88623d045799b47ad9b13faed04c362"
-        },
-        "date": 1787696468884,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9754317,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49354,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1190974,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8451,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8423,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "maritz.hans@gmail.com",
+            "name": "Hans-Albert Maritz",
+            "username": "Freakazo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "75ac87337420156a40bd622c43f4245a4f2ba1d4",
+          "message": "fix(graph): preserve empty dynamic pattern cache rows (#2626)\n\nPreserve one resolver-cache target row per dynamic-import pattern, including patterns that match no files and patterns whose glob fails to compile. Empty rows still contribute no graph edges, and the graph cache version stays at 50 because legacy sparse rows take the existing safe cache-miss path.\n\nBefore this change a project with a single zero-match pattern never reused its graph cache: the cached row list was shorter than the pattern list, restoration reported a changed file set on every run, and imports were re-resolved from scratch each time.\n\nMaintainer validation: on a real Next.js project carrying a zero-match template-literal import, the old binary rejected its own cache on every warm run while the fixed binary reuses it. A cache written by the fixed binary is accepted by the old one, and a cache written by the old binary is refused by the fixed one through the length check, so both crossing directions are safe. Cold-run output is otherwise identical.",
+          "timestamp": "2026-09-15T01:43:25+02:00",
+          "tree_id": "3eff75c806035985055dd50874d635c0c2248762",
+          "url": "https://github.com/fallow-rs/fallow/commit/75ac87337420156a40bd622c43f4245a4f2ba1d4"
+        },
+        "date": 1789429797893,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9924284,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51238,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1205069,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8455,
             "unit": "allocations"
           }
         ]
