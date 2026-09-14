@@ -66,6 +66,15 @@ Keep these checks shared by publishing and cached diagnostic cleanup.
 
 ## Editor parity boundary
 
+Editor analysis resolves configured rule severities through the same engine pass
+as the CLI. `EditorAnalysisSession` applies
+`fallow_engine::dead_code::apply_rule_severities` to every project slice it
+analyzes, and again after type-aware refinement because reconciliation can add
+findings. Per-path `overrides[].rules` therefore reach inline diagnostics, the
+CLI, and the sidebar identically, and each project root is filtered with its own
+config before a multi-root session merges the outputs. Do not reintroduce rule
+filtering in `crates/lsp`; the session hands back an already-resolved result set.
+
 The shared LSP owns diagnostics, hover, quick fixes, Code Lens, and their
 initialization contract. Host-specific sidebars, status items, full Health
 reports, and full Security reports are outside that protocol. Editors without

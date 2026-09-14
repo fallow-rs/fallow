@@ -4511,3 +4511,108 @@ async fn initialize_applies_health_options_to_server_state() {
         );
     }
 }
+
+/// Write a project whose `.fallowrc.json` turns `unused-exports` and
+/// `private-type-leaks` off for `src/ui/**` while both rules stay on
+/// everywhere else. Both leaf modules are reachable from the entry point, so
+/// each one carries an unused export plus a private type leak before rule
+/// severities are applied.
+fn write_override_rules_project(root: &Path) {
+    std::fs::create_dir_all(root.join("src/ui")).expect("create ui dir");
+    std::fs::create_dir_all(root.join("src/lib")).expect("create lib dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"lsp-override-rules","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+  "rules": { "unused-exports": "warn", "private-type-leaks": "warn" },
+  "overrides": [
+    {
+      "files": ["src/ui/**"],
+      "rules": { "unused-exports": "off", "private-type-leaks": "off" }
+    }
+  ]
+}"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { kitUsed } from './ui/kit';\nimport { libUsed } from './lib/util';\n\nexport const app = `${kitUsed}${libUsed}`;\n",
+    )
+    .expect("write index");
+    std::fs::write(
+        root.join("src/ui/kit.ts"),
+        "type Props = { label: string };\n\nexport const kitUsed = 'kit';\n\nexport const Unused = (props: Props) => props.label;\n",
+    )
+    .expect("write kit");
+    std::fs::write(
+        root.join("src/lib/util.ts"),
+        "type Internal = { id: string };\n\nexport const libUsed = 'lib';\n\nexport const alsoUnused = (value: Internal) => value.id;\n",
+    )
+    .expect("write util");
+}
+
+#[test]
+fn analyze_project_root_honors_per_path_rule_overrides() {
+    // Inline diagnostics must agree with `fallow dead-code` on per-path rule
+    // severity: a file matching `overrides[].files` with a rule set to "off"
+    // gets no squiggle for that rule, while files outside the override keep
+    // theirs (issue #2621).
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write_override_rules_project(root);
+
+    let mut results = AnalysisResults::default();
+    let mut duplication = DuplicationReport::default();
+    let mut inline_complexity = Vec::new();
+    let mut messages = Vec::new();
+    analyze_project_root_for_test(
+        root,
+        None,
+        None,
+        None,
+        false,
+        &mut results,
+        &mut duplication,
+        &mut inline_complexity,
+        &mut messages,
+    );
+
+    let diagnostics = crate::diagnostics::build_diagnostics(
+        crate::diagnostics::DiagnosticInput::new(&results, &duplication, root),
+    );
+    let codes_for = |suffix: &str| -> Vec<String> {
+        let mut codes = diagnostics
+            .iter()
+            .filter(|(uri, _)| uri.to_string().ends_with(suffix))
+            .flat_map(|(_, published)| published.iter())
+            .filter_map(|diagnostic| match diagnostic.code.as_ref() {
+                Some(NumberOrString::String(code)) => Some(code.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        codes.sort();
+        codes
+    };
+
+    let overridden = codes_for("/src/ui/kit.ts");
+    assert!(
+        !overridden
+            .iter()
+            .any(|code| code == "unused-export" || code == "private-type-leak"),
+        "an overridden path must not publish rules the project config turns off: {overridden:?}"
+    );
+
+    let unaffected = codes_for("/src/lib/util.ts");
+    assert!(
+        unaffected.iter().any(|code| code == "unused-export"),
+        "paths outside the override keep their unused-export diagnostic: {unaffected:?}"
+    );
+    assert!(
+        unaffected.iter().any(|code| code == "private-type-leak"),
+        "paths outside the override keep their private-type-leak diagnostic: {unaffected:?}"
+    );
+}

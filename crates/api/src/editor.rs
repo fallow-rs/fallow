@@ -485,12 +485,17 @@ impl EditorAnalysisSession {
         filters: &crate::DeadCodeFilters,
         output: &mut EditorDeadCodeAnalysisOutput,
     ) -> Result<Option<fallow_types::envelope::TypeAwareMeta>, crate::ProgrammaticError> {
-        crate::type_aware::refine_programmatic_dead_code(
+        let meta = crate::type_aware::refine_programmatic_dead_code(
             options,
             filters,
             &self.inner,
             &mut output.results,
-        )
+        )?;
+        // Reconciliation can add findings, so rule severities are resolved
+        // again over the refined set. The pass only removes findings, so
+        // repeating it is idempotent.
+        fallow_engine::dead_code::apply_rule_severities(&mut output.results, self.inner.config());
+        Ok(meta)
     }
 
     /// Refine editor findings through a root-bound persistent semantic session.
@@ -502,14 +507,16 @@ impl EditorAnalysisSession {
         filters: &crate::DeadCodeFilters,
         output: &mut EditorDeadCodeAnalysisOutput,
     ) -> Result<Option<fallow_types::envelope::TypeAwareMeta>, crate::ProgrammaticError> {
-        crate::type_aware::refine_programmatic_dead_code_in_session(
+        let meta = crate::type_aware::refine_programmatic_dead_code_in_session(
             semantic_session,
             changes,
             options,
             filters,
             &self.inner,
             &mut output.results,
-        )
+        )?;
+        fallow_engine::dead_code::apply_rule_severities(&mut output.results, self.inner.config());
+        Ok(meta)
     }
 
     /// Run dead-code and duplication analysis for this editor session.
@@ -525,6 +532,7 @@ impl EditorAnalysisSession {
         self.inner
             .analyze_project_with(duplicates_config, retain_complexity_artifacts)
             .map(EditorProjectAnalysisOutput::from_engine)
+            .map(|output| self.with_resolved_rule_severities(output))
     }
 
     /// Run dead-code and duplication analysis, optionally focusing duplication
@@ -553,6 +561,24 @@ impl EditorAnalysisSession {
             )
             .map(fallow_engine::project_analysis::ProjectAnalysisArtifacts::into_output)
             .map(EditorProjectAnalysisOutput::from_engine)
+            .map(|output| self.with_resolved_rule_severities(output))
+    }
+
+    /// Resolve configured rule severities, including per-path
+    /// `overrides[].rules`, against a freshly analyzed project slice.
+    ///
+    /// Each project root is filtered with its own config before a multi-root
+    /// editor session merges the outputs, so an override only ever applies to
+    /// the project that declares it.
+    fn with_resolved_rule_severities(
+        &self,
+        mut output: EditorProjectAnalysisOutput,
+    ) -> EditorProjectAnalysisOutput {
+        fallow_engine::dead_code::apply_rule_severities(
+            &mut output.dead_code.results,
+            self.inner.config(),
+        );
+        output
     }
 
     const fn from_engine(inner: fallow_engine::session::AnalysisSession) -> Self {
@@ -942,6 +968,100 @@ mod tests {
             findings.len(),
             2,
             "all findings in the changed set must be retained"
+        );
+    }
+
+    #[test]
+    fn editor_session_applies_per_path_rule_overrides() {
+        // The editor analysis path must resolve `overrides[].rules` the same
+        // way the CLI does, so inline diagnostics and `fallow dead-code` agree
+        // on which findings a project has turned off (issue #2621).
+        let temp = tempfile::tempdir().expect("temp project");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("src/ui")).expect("ui dir");
+        std::fs::create_dir_all(root.join("src/lib")).expect("lib dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"editor-override-rules","private":true,"main":"src/index.ts"}"#,
+        )
+        .expect("package.json");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{
+  "rules": { "unused-exports": "warn", "private-type-leaks": "warn" },
+  "overrides": [
+    {
+      "files": ["src/ui/**"],
+      "rules": { "unused-exports": "off", "private-type-leaks": "off" }
+    }
+  ]
+}"#,
+        )
+        .expect("config");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import { kitUsed } from './ui/kit';\nimport { libUsed } from './lib/util';\n\nexport const app = `${kitUsed}${libUsed}`;\n",
+        )
+        .expect("index");
+        std::fs::write(
+            root.join("src/ui/kit.ts"),
+            "type Props = { label: string };\n\nexport const kitUsed = 'kit';\n\nexport const Unused = (props: Props) => props.label;\n",
+        )
+        .expect("kit");
+        std::fs::write(
+            root.join("src/lib/util.ts"),
+            "type Internal = { id: string };\n\nexport const libUsed = 'lib';\n\nexport const alsoUnused = (value: Internal) => value.id;\n",
+        )
+        .expect("util");
+
+        let session = EditorAnalysisSession::load(root, None).expect("session loads");
+        let output = session
+            .analyze_project_with_changed_files(
+                &fallow_config::DuplicatesConfig::default(),
+                false,
+                None,
+            )
+            .expect("analysis runs");
+        let results = &output.dead_code.results;
+
+        let unused_export_paths = || {
+            results
+                .unused_exports
+                .iter()
+                .map(|finding| finding.export.path.clone())
+                .collect::<Vec<_>>()
+        };
+        let leak_paths = || {
+            results
+                .private_type_leaks
+                .iter()
+                .map(|finding| finding.leak.path.clone())
+                .collect::<Vec<_>>()
+        };
+
+        assert!(
+            !unused_export_paths()
+                .iter()
+                .any(|path| path.ends_with("kit.ts")),
+            "the override turns unused-exports off for src/ui/**: {:?}",
+            unused_export_paths()
+        );
+        assert!(
+            !leak_paths().iter().any(|path| path.ends_with("kit.ts")),
+            "the override turns private-type-leaks off for src/ui/**: {:?}",
+            leak_paths()
+        );
+        assert!(
+            unused_export_paths()
+                .iter()
+                .any(|path| path.ends_with("util.ts")),
+            "paths outside the override keep their unused export: {:?}",
+            unused_export_paths()
+        );
+        assert!(
+            leak_paths().iter().any(|path| path.ends_with("util.ts")),
+            "paths outside the override keep their private type leak: {:?}",
+            leak_paths()
         );
     }
 }
