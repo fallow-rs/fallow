@@ -671,7 +671,6 @@ struct TreeEntry {
 ///
 /// Both probes fail open to full materialization: a probe error is at worst a
 /// slower snapshot, never a missing-file misattribution.
-#[derive(Debug, Clone, Default)]
 struct MaterializationScope {
     /// Forward-slash repo-relative analysis subdir (e.g. `apps/web`), or
     /// `None` when the requested root is the repository top level.
