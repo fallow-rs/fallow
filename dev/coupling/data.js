@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789429267097,
+  "lastUpdate": 1789429772531,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "dfa135e5a59103dab969e063789ff8ebd5533be9",
-          "message": "Merge pull request #2439 from fallow-rs/feat/stylex-theme-styling\n\nfeat: complete StyleX theme styling support",
-          "timestamp": "2026-08-26T12:26:06+02:00",
-          "tree_id": "ead5dcae2432185db584b5bfe74b6a93afe024a6",
-          "url": "https://github.com/fallow-rs/fallow/commit/dfa135e5a59103dab969e063789ff8ebd5533be9"
-        },
-        "date": 1787740302766,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 48,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.3,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 461,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1256,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/851eadf906da389cc32d0dc0864b4e446ffdf16c"
         },
         "date": 1789429263159,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 477,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1306,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "maritz.hans@gmail.com",
+            "name": "Hans-Albert Maritz",
+            "username": "Freakazo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "75ac87337420156a40bd622c43f4245a4f2ba1d4",
+          "message": "fix(graph): preserve empty dynamic pattern cache rows (#2626)\n\nPreserve one resolver-cache target row per dynamic-import pattern, including patterns that match no files and patterns whose glob fails to compile. Empty rows still contribute no graph edges, and the graph cache version stays at 50 because legacy sparse rows take the existing safe cache-miss path.\n\nBefore this change a project with a single zero-match pattern never reused its graph cache: the cached row list was shorter than the pattern list, restoration reported a changed file set on every run, and imports were re-resolved from scratch each time.\n\nMaintainer validation: on a real Next.js project carrying a zero-match template-literal import, the old binary rejected its own cache on every warm run while the fixed binary reuses it. A cache written by the fixed binary is accepted by the old one, and a cache written by the old binary is refused by the fixed one through the length check, so both crossing directions are safe. Cold-run output is otherwise identical.",
+          "timestamp": "2026-09-15T01:43:25+02:00",
+          "tree_id": "3eff75c806035985055dd50874d635c0c2248762",
+          "url": "https://github.com/fallow-rs/fallow/commit/75ac87337420156a40bd622c43f4245a4f2ba1d4"
+        },
+        "date": 1789429767959,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
