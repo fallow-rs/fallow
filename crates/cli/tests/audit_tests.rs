@@ -5261,6 +5261,104 @@ fn typed_decision_surface_route_surfaces_dependency_decisions() {
     }
 }
 
+/// The boundary fixture, optionally carrying a per-path `overrides` entry that
+/// turns `boundary-violation` off for the zone the new cross-zone edge starts
+/// in. `overrides` is spliced in as a trailing config key, empty for the
+/// control run.
+fn create_boundary_override_fixture(overrides: &str) -> TempDir {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src/ui")).unwrap();
+    fs::create_dir_all(dir.join("src/db")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "boundary-override-test", "main": "src/ui/page.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        format!(
+            r#"{{
+  "entry": ["src/ui/page.ts"],
+  "boundaries": {{
+    "zones": [
+      {{ "name": "ui", "patterns": ["src/ui/**"] }},
+      {{ "name": "db", "patterns": ["src/db/**"] }}
+    ],
+    "rules": [{{ "from": "ui", "allow": [] }}]
+  }}{overrides}
+}}
+"#
+        ),
+    )
+    .unwrap();
+    fs::write(dir.join("src/db/conn.ts"), "export const conn = () => 1;\n").unwrap();
+    fs::write(
+        dir.join("src/ui/page.ts"),
+        "export const render = () => 'hi';\n",
+    )
+    .unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(
+        dir.join("src/ui/page.ts"),
+        "import { conn } from '../db/conn';\nexport const render = () => conn();\n",
+    )
+    .unwrap();
+    commit_all(dir, "ui imports db");
+
+    tmp
+}
+
+fn typed_decision_categories(root: &Path) -> Vec<fallow_output::DecisionCategory> {
+    let output = fallow_api::run_decision_surface(&fallow_api::DecisionSurfaceOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            ..Default::default()
+        },
+        base: Some("main~1".to_string()),
+        max_decisions: None,
+    })
+    .expect("typed decision surface runs");
+    output
+        .surface
+        .decisions
+        .iter()
+        .map(|decision| decision.category)
+        .collect()
+}
+
+/// The typed runtime is the route the `decision_surface` MCP tool takes, with no
+/// CLI fallback, so it resolves rule severity like every other surface that
+/// reports findings: a per-path override that turns `boundary-violation` off
+/// removes the decision framed from that violation.
+#[test]
+fn typed_decision_surface_route_honors_per_path_rule_overrides() {
+    let rule_on = create_boundary_override_fixture("");
+    let categories = typed_decision_categories(rule_on.path());
+    assert!(
+        categories.contains(&fallow_output::DecisionCategory::CouplingBoundary),
+        "control: while the rule is on, the new cross-zone edge frames a coupling decision: {categories:?}"
+    );
+
+    let rule_off = create_boundary_override_fixture(
+        r#",
+  "overrides": [
+    {
+      "files": ["src/ui/**"],
+      "rules": { "boundary-violation": "off" }
+    }
+  ]"#,
+    );
+    let categories = typed_decision_categories(rule_off.path());
+    assert!(
+        !categories.contains(&fallow_output::DecisionCategory::CouplingBoundary),
+        "an override that turns boundary-violation off for the zone removes the decision: {categories:?}"
+    );
+}
+
 /// A dependency-only change has no graph module to stage, so the human tour
 /// must still show the decision instead of "0 files".
 #[test]

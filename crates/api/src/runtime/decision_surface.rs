@@ -155,6 +155,11 @@ fn run_decision_analysis(
     } = artifacts;
     let changed_files = changed_files.as_ref();
 
+    // Rule severity is resolved before anything is framed as a decision, so a
+    // rule or a per-path override that turns a finding off also removes the
+    // decision built from it. The CLI reaches the same state through `check`.
+    fallow_engine::dead_code::apply_rule_severities(&mut output.results, session.config());
+
     let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
     filter_decision_results(
         &mut output.results,

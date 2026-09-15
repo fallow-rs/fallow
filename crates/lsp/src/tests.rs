@@ -4678,6 +4678,9 @@ async fn wait_for_unused_export_diagnostic(
 
 #[tokio::test(flavor = "current_thread")]
 async fn config_change_through_watched_files_republishes_diagnostics() {
+    use futures::{SinkExt, StreamExt};
+    use tower_lsp_server::jsonrpc::Response;
+
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path().canonicalize().expect("canonical root");
     std::fs::create_dir_all(root.join("src/ui")).expect("create src dir");
@@ -4703,10 +4706,13 @@ async fn config_change_through_watched_files_republishes_diagnostics() {
     let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
     // Diagnostics only reach the client after the initialize handshake; log
     // messages do not, so a server set up by hand looks alive while every
-    // publish is dropped.
+    // publish is dropped. The client declares dynamic watched-file
+    // registration, the capability an editor-agnostic client relies on.
     let initialize = Request::build("initialize")
         .params(json!({
-            "capabilities": {},
+            "capabilities": {
+                "workspace": { "didChangeWatchedFiles": { "dynamicRegistration": true } }
+            },
             "rootUri": Uri::from_file_path(&root).expect("root URI").to_string(),
         }))
         .id(1)
@@ -4720,6 +4726,50 @@ async fn config_change_through_watched_files_republishes_diagnostics() {
         .expect("initialize call")
         .expect("initialize response");
     let backend = service.inner();
+
+    // A client that registers no watcher of its own only reports the files this
+    // registration names, so the patterns are read off the wire instead of from
+    // the helper that builds them.
+    let registered = async {
+        loop {
+            let request = tokio::time::timeout(Duration::from_secs(20), socket.next())
+                .await
+                .expect("the watched-file registration must arrive within timeout")
+                .expect("ClientSocket stream ended before client/registerCapability");
+            if request.method() != "client/registerCapability" {
+                continue;
+            }
+            let id = request
+                .id()
+                .expect("registerCapability is a request")
+                .clone();
+            let params = request.params().cloned().unwrap_or_default();
+            socket
+                .send(Response::from_ok(id, json!(null)))
+                .await
+                .expect("registration response should send");
+            break params;
+        }
+    };
+    let ((), registration_params) =
+        tokio::join!(backend.initialized(InitializedParams {}), registered);
+
+    let registered_globs: Vec<String> = registration_params["registrations"]
+        .as_array()
+        .expect("registration params carry registrations")
+        .iter()
+        .filter(|registration| registration["method"] == json!("workspace/didChangeWatchedFiles"))
+        .filter_map(|registration| registration["registerOptions"]["watchers"].as_array())
+        .flatten()
+        .filter_map(|watcher| watcher["globPattern"].as_str().map(str::to_string))
+        .collect();
+    for name in fallow_config::CONFIG_FILE_NAMES {
+        let expected = format!("**/{name}");
+        assert!(
+            registered_globs.contains(&expected),
+            "{name} is a config file the loader reads, so the client must be asked to watch {expected}: {registered_globs:?}"
+        );
+    }
 
     backend
         .did_save(DidSaveTextDocumentParams {

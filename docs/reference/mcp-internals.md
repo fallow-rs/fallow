@@ -112,9 +112,11 @@ Contract rules:
 - Preserve project-relative paths in analysis results.
 - Rule severity, including per-path `overrides[].rules`, is resolved by the
   programmatic runtime through `fallow_engine::dead_code::apply_rule_severities`
-  before results reach a tool. MCP tools receive an already-resolved result set
-  and must not filter by rule themselves; that would put project policy in a
-  protocol adapter and let the two implementations drift.
+  before results reach a tool, on the dead-code route and on the decision
+  surface alike, so a decision is never framed from a finding a rule turns off.
+  MCP tools receive an already-resolved result set and must not filter by rule
+  themselves; that would put project policy in a protocol adapter and let the
+  two implementations drift.
 - Mutation tools expose preview and explicit confirmation semantics.
 - Apply bounded timeouts and clean up the complete owned process tree on
   completion, cancellation, or timeout.

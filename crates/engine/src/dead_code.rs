@@ -251,11 +251,14 @@ fn filter_workspace_policy_findings(
 
 /// Remove findings whose effective severity is `Off` from an analysis result.
 ///
-/// The check command and the editor analysis path both run this pass, so the
-/// CLI, the editor sidebar and inline editor diagnostics resolve rule severity
-/// the same way. The programmatic runtime behind the MCP tools does not run it
-/// yet. The pass only removes findings, so running it again after a stage that
-/// can append findings (such as type-aware reconciliation) is safe.
+/// Every surface that reports findings runs this pass: the `check` command
+/// (which also serves `dead-code` and the CLI audit), the editor analysis path
+/// behind inline diagnostics and the sidebar, and the programmatic runtime
+/// behind the MCP tools, the decision surface and the Node bindings. Each of
+/// them runs it at the same two points, once over the freshly analyzed set and
+/// once after type-aware reconciliation, because reconciliation can append
+/// findings. The pass only removes findings, so the second run is idempotent
+/// when nothing was appended.
 ///
 /// When overrides are configured, per-file rule resolution is used for
 /// file-scoped issue types. Circular dependencies resolve against every file in
