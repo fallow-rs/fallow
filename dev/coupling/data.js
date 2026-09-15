@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789429772531,
+  "lastUpdate": 1789431160278,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f9cb3758ec1e69d9b6def5e0ef6da87a208ab994",
-          "message": "feat(cli): add fallow agent install for one-pass harness onboarding\n\n`fallow agent install` wires the coding-agent harnesses a project uses in one pass, with `agent status` and `agent uninstall` covering the same surfaces. It detects Claude Code, Codex, and Cursor from project files, the home directory, and session variables (or takes `--harness`), then writes what each reads: an AGENTS.md task map plus a CLAUDE.md import, the fallow skill (a pointer to node_modules/fallow when present, otherwise the tree gzip-embedded at build time), the MCP registration in .mcp.json, .codex/config.toml, or .cursor/mcp.json, and the commit/push gate. Nothing is fabricated when no harness is detected.\n\nEvery write carries a versioned fallow:agent-install marker and re-runs are byte-stable. MCP entries are owned by shape (a hand-written `fallow` entry is refused and never removed without --force), --force on an unparsable config file saves the old bytes as <file>.fallow-bak first, JSON edits keep the file's indentation, uninstall deletes config files it emptied, and authored AGENTS.md or CLAUDE.md files are deleted only while they still hash to what fallow wrote. Claude MCP pre-approval stays opt-in through --approve (it also clears an earlier rejection) and is refused when .claude/settings.local.json is tracked. The JSON envelope carries kind, schema_version, fallow_version, evidence, steps with a closed reason set, and next_actions with a mutating flag.\n\n`init --agents` and `hooks install --target agent` are unchanged and remain the single-piece commands underneath; `setup-hooks` is deprecated with a stderr warning and is removed in the next major.",
-          "timestamp": "2026-08-26T12:54:23+02:00",
-          "tree_id": "b64e7ab718c21664d57bbe469e24989aacce1ef8",
-          "url": "https://github.com/fallow-rs/fallow/commit/f9cb3758ec1e69d9b6def5e0ef6da87a208ab994"
-        },
-        "date": 1787741959521,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/75ac87337420156a40bd622c43f4245a4f2ba1d4"
         },
         "date": 1789429767959,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 477,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1306,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f89a4d571e1a092e2b4b08dcb01489a1540e5f37",
+          "message": "feat(plugins): recognize the Expo getNavOptions and generateMetadata exports (#2629)\n\nCompletes the Expo Router route-export list against the framework's own LoadedRoute type, following #2618 which added SuspenseFallback.\n\nExpo Router declares eight members on LoadedRoute. Six were recognized; getNavOptions and generateMetadata were not, so a route file exporting either was reported as an unused export. The author of #2618 flagged both and kept that change to a single export.\n\nRemoving the two plugin entries makes the fixture integration test fail on src/app/_layout.tsx:getNavOptions, so the added assertions are load-bearing. No interaction with the Next.js invalid-client-export rule, which also knows generateMetadata: that detector is gated on the project declaring next as a dependency, and the Expo fixture declares only expo and expo-router.",
+          "timestamp": "2026-09-15T02:11:23+02:00",
+          "tree_id": "f500de20b0ee63b6404728bbf56bfc04800b9411",
+          "url": "https://github.com/fallow-rs/fallow/commit/f89a4d571e1a092e2b4b08dcb01489a1540e5f37"
+        },
+        "date": 1789431156900,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
