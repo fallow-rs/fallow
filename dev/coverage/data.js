@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789496692455,
+  "lastUpdate": 1789498293624,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "85d490ce31ada36388dd59f7860716b261b48694",
-          "message": "ci(release): initialize the pnpm store before caching on Windows\n\nThe Windows VS Code host job leaves the pnpm store directory absent, so\nactions/setup-node's cache-save post-step fails path validation and marks\nan otherwise green job as failed, which skips every publish job behind it.\nrelease-validation.yml already carries this step; release.yml did not.",
-          "timestamp": "2026-08-28T03:44:42+02:00",
-          "tree_id": "184f90c3e4b47c813cffba2016d7f00e652a9ddd",
-          "url": "https://github.com/fallow-rs/fallow/commit/85d490ce31ada36388dd59f7860716b261b48694"
-        },
-        "date": 1787882010663,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/2e878e711b42b9a56f5b92c72bb97d92375182d1"
         },
         "date": 1789496689279,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "80ea4e5198b68bd42ef527d2e638dad44081374a",
+          "message": "test(lsp): canonicalize the watched-config test root through the Windows-safe helper\n\nstd::fs::canonicalize yields a verbatim path on Windows, so the file URI the test waited on never matched the URI the server publishes and the Windows job failed on the first diagnostic. The test now uses the same helper as the other LSP tests.",
+          "timestamp": "2026-09-15T20:43:15+02:00",
+          "tree_id": "f56f96766246835fd2bb79ec57975d23410251d5",
+          "url": "https://github.com/fallow-rs/fallow/commit/80ea4e5198b68bd42ef527d2e638dad44081374a"
+        },
+        "date": 1789498290161,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
