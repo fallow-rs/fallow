@@ -238,11 +238,14 @@ fn flags_json_carries_the_analysis_stage_diagnostics_its_scan_records() {
 #[test]
 fn fail_on_stale_baseline_is_a_global_flag() {
     for subcommand in ["dead-code", "check", "dupes", "health", "audit"] {
-        let out = run_fallow(
-            subcommand,
-            "basic-project",
-            &["--no-cache", "--quiet", "--fail-on-stale-baseline"],
-        );
+        let mut args = vec!["--no-cache", "--quiet", "--fail-on-stale-baseline"];
+        if subcommand == "audit" {
+            // The fixture lives inside this repository, and a detached CI
+            // checkout has no detectable base branch; HEAD keeps this an
+            // acceptance check rather than a base-detection check.
+            args.extend(["--base", "HEAD"]);
+        }
+        let out = run_fallow(subcommand, "basic-project", &args);
         assert_ne!(
             out.code, 2,
             "{subcommand} must accept --fail-on-stale-baseline: {}",
