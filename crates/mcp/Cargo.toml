@@ -22,7 +22,7 @@ path = "src/main.rs"
 
 [dependencies]
 rmcp = { version = "3.1", features = ["transport-io"] }
-rquickjs = "0.12"
+rquickjs = "0.13"
 fallow-api = { workspace = true, features = ["schema"] }
 fallow-process = { workspace = true, features = ["tokio"] }
 fallow-types.workspace = true
