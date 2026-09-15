@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789454083256,
+  "lastUpdate": 1789454680485,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f9cb3758ec1e69d9b6def5e0ef6da87a208ab994",
-          "message": "feat(cli): add fallow agent install for one-pass harness onboarding\n\n`fallow agent install` wires the coding-agent harnesses a project uses in one pass, with `agent status` and `agent uninstall` covering the same surfaces. It detects Claude Code, Codex, and Cursor from project files, the home directory, and session variables (or takes `--harness`), then writes what each reads: an AGENTS.md task map plus a CLAUDE.md import, the fallow skill (a pointer to node_modules/fallow when present, otherwise the tree gzip-embedded at build time), the MCP registration in .mcp.json, .codex/config.toml, or .cursor/mcp.json, and the commit/push gate. Nothing is fabricated when no harness is detected.\n\nEvery write carries a versioned fallow:agent-install marker and re-runs are byte-stable. MCP entries are owned by shape (a hand-written `fallow` entry is refused and never removed without --force), --force on an unparsable config file saves the old bytes as <file>.fallow-bak first, JSON edits keep the file's indentation, uninstall deletes config files it emptied, and authored AGENTS.md or CLAUDE.md files are deleted only while they still hash to what fallow wrote. Claude MCP pre-approval stays opt-in through --approve (it also clears an earlier rejection) and is refused when .claude/settings.local.json is tracked. The JSON envelope carries kind, schema_version, fallow_version, evidence, steps with a closed reason set, and next_actions with a mutating flag.\n\n`init --agents` and `hooks install --target agent` are unchanged and remain the single-piece commands underneath; `setup-hooks` is deprecated with a stderr warning and is removed in the next major.",
-          "timestamp": "2026-08-26T12:54:23+02:00",
-          "tree_id": "b64e7ab718c21664d57bbe469e24989aacce1ef8",
-          "url": "https://github.com/fallow-rs/fallow/commit/f9cb3758ec1e69d9b6def5e0ef6da87a208ab994"
-        },
-        "date": 1787741967017,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9755484,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49333,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1191797,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8440,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8491,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9dabdbd75f746848fdbe891e7217077774f62c06",
+          "message": "fix(config): exclude build directories at any depth by default (#2632)\n\nThe built-in discovery ignore list anchored `build/**` at the project root\nwhile every neighboring generated-output default is recursive, so a monorepo\nthat keeps per-package output under `projects/*/apps/web/build/` had that\noutput walked, graphed and reported as unused files, unused exports,\nduplication and health findings. The default is now `**/build/**`, which also\nmatches how workspace discovery has always classified the directory name.\n\nEverything under a `build` segment now leaves analysis and `ignorePatterns`\ncannot bring it back, since the field has no negation. Hand-written source in\na nested `build/` directory is skipped; a workspace package literally named\n`build` keeps its workspace entry but none of its files are analyzed; a\nframework config under a nested `build/` directory is no longer read, so the\npath aliases it declares are lost; and an entry point that resolves into a\nnested `build/` directory stops seeding reachability. Tests pin each of these\nconsequences so they are recorded choices rather than surprises.\n\nFixes #2622",
+          "timestamp": "2026-09-15T08:40:20+02:00",
+          "tree_id": "ed405b4eb67ad91ceb0c87619cbe3a299ec1f42c",
+          "url": "https://github.com/fallow-rs/fallow/commit/9dabdbd75f746848fdbe891e7217077774f62c06"
+        },
+        "date": 1789454676918,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9909459,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51184,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1197237,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8405,
             "unit": "allocations"
           }
         ]
