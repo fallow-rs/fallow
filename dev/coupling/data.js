@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789496089412,
+  "lastUpdate": 1789496394383,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "bcf333d8f9fe0753be4df17bf1a8a20be4fbdb53",
-          "message": "feat(review): author actions, test adjacency, slices, and dependency decisions (#2446)\n\nReview-brief schema 7 -> 8, all additive.\n\n- Judgments carry an author-action label (block, address, consider, fyi) validated on reentry (invalid-action with invalid_value, checked after the anchor) and echoed fenced; the guide publishes action_vocabulary and concern_vocabulary.\n- Direction units carry test_adjacency (none, untouched, changed); both tours badge NO-DIRECT-TEST; root-level test/ and tests/ count as test paths; a project with no tests gets no claims.\n- The partition reports independent_slices (connected components of the inter-unit graph) when there are two or more.\n- The dependency decision arm fires on both the CLI and the typed/MCP route: added entries and major bumps per changed package.json, batched per manifest per kind, weighted by in-repo importers (union, value and type-only), section-tagged, rename-aware, npm: aliases read at their range; a major bump ranks with a public-API change; no comment-based suppress action on a manifest anchor.\n- The human and markdown tours show decisions whose anchor is not a staged unit, so a dependency-only change never renders as \"0 files\".\n- Review app: action on judgments and feed items, invalid_value, schema pin as a floor.\n\nVerified with unit and e2e tests on the real binary, real-project runs (fallow's vscode extension bump commit, a monorepo worktree with major bumps), verify:fast, and the contract drift gate. Companion PRs fallow-skills #42/#43 and fallow-docs #21 land with the release that ships schema 8.",
-          "timestamp": "2026-08-27T14:11:13+02:00",
-          "tree_id": "f0fafc776f5a2ca0062607ff01b7d6baaa008884",
-          "url": "https://github.com/fallow-rs/fallow/commit/bcf333d8f9fe0753be4df17bf1a8a20be4fbdb53"
-        },
-        "date": 1787833106370,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4899,6 +4850,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Edges",
             "value": 1306,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "39e13ca491388e3e67a372af0fd86d97319cdf15",
+          "message": "feat(cli): add --fail-on-stale-baseline and align baseline staleness across commands (#2642)\n\nAdds the global --fail-on-stale-baseline flag: when a loaded baseline has any entry that matched nothing this run, the run exits 1 with one stderr line naming the stale count, the baseline path and the re-save command, in every output format and on dead-code, check, the bare run, dupes and health. A run that cannot judge the baseline (a narrowed scope, health --report-only, audit's changed-code slice, decision-surface's brief) stands down and says so on stderr. dupes --baseline gets the same partial-staleness warning and change-scope guard as dead-code and health through the shared predicate, no baseline warning fires on a project with no findings left to compare, and health's scope guard includes production mode so a fresh baseline is never called stale on an unchanged production run. JSON envelopes are unchanged.\n\nFixes #2637",
+          "timestamp": "2026-09-15T20:16:22+02:00",
+          "tree_id": "51819a833be59c4e7029f65ba08d67b73b6d99ca",
+          "url": "https://github.com/fallow-rs/fallow/commit/39e13ca491388e3e67a372af0fd86d97319cdf15"
+        },
+        "date": 1789496390775,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 478,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1307,
             "unit": "count"
           }
         ]
