@@ -7,20 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **Inline editor diagnostics honour per-path `overrides[].rules`.** The
-  language server loaded the project config but resolved rule severity from the
-  base `rules` block only, so a file matching an `overrides[].files` glob that
-  turns a rule off still got squiggles for it while `fallow dead-code` and the
-  VS Code Unused Code sidebar reported nothing there. Per-path rule resolution
-  now lives in the analysis engine and runs on the editor analysis path as well
-  as the CLI, so the three surfaces report one result set. Each project root
-  resolves its own overrides before a multi-root session merges results, and the
-  pass runs again after type-aware reconciliation so a finding added there is
-  filtered too. CLI output is unchanged
-  ([#2621](https://github.com/fallow-rs/fallow/issues/2621)).
-
 ## [3.25.0] - 2026-09-11
 
 ### Added
