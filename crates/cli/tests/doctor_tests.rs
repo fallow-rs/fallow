@@ -322,3 +322,18 @@ fn type_aware_environment_requirement_controls_readiness() {
     assert_eq!(json["checks"][4]["remediation"]["cwd"], ".");
     assert_eq!(json["checks"][4]["remediation"]["mutating"], true);
 }
+
+#[test]
+fn doctor_rejects_fail_on_stale_baseline() {
+    let output = run_fallow_raw(&["doctor", "--fail-on-stale-baseline"]);
+    assert_eq!(
+        output.code, 2,
+        "doctor must reject analysis flags: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("--fail-on-stale-baseline"),
+        "the refusal must name the flag: {}",
+        output.stderr
+    );
+}

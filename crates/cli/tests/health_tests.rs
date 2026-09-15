@@ -2457,6 +2457,127 @@ fn run_health_with_baseline(root: &Path, extra: &[&str]) -> common::CommandOutpu
     run_fallow_in_root("health", root, &args)
 }
 
+/// A project with `count` complexity findings whose health baseline was saved
+/// while all of them existed, and whose source then keeps only `remaining` of
+/// them, so `count - remaining` baseline entries match nothing on the next run.
+fn rotted_health_baseline_project(count: usize, remaining: usize) -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"health-baseline-staleness","version":"1.0.0"}"#,
+    );
+    let sources = |n: usize| -> String {
+        (0..n)
+            .map(|index| hotspot_source(&format!("hotspot{index}")))
+            .collect()
+    };
+    write_file(&dir.path().join("src/index.ts"), &sources(count));
+    let baseline_path = dir.path().join("health-baseline.json");
+    let saved = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+    assert_eq!(
+        parse_json(&saved)["findings"]
+            .as_array()
+            .map_or(0, Vec::len),
+        count,
+        "the saved baseline must hold exactly {count} findings: {}",
+        redact_all(&saved.stdout, dir.path())
+    );
+    write_file(&dir.path().join("src/index.ts"), &sources(remaining));
+    dir
+}
+
+/// Run `health --baseline` on a prepared fixture with human output, so the
+/// advisory staleness warning is visible on stderr.
+fn run_health_baseline_human(root: &Path, extra: &[&str]) -> common::CommandOutput {
+    let baseline_path = root.join("health-baseline.json");
+    let mut args = vec![
+        "--complexity",
+        "--max-cyclomatic",
+        "3",
+        "--max-crap",
+        "10000",
+        "--baseline",
+        baseline_path.to_str().unwrap(),
+        "--baseline-mode",
+        "identity",
+    ];
+    args.extend_from_slice(extra);
+    run_fallow_in_root("health", root, &args)
+}
+
+#[test]
+fn fail_on_stale_baseline_exits_one_on_a_stale_health_baseline() {
+    let project = rotted_health_baseline_project(5, 4);
+    let output = run_health_baseline_human(project.path(), &["--fail-on-stale-baseline"]);
+    assert!(
+        output
+            .stderr
+            .contains("Baseline gate failed: 1 of 5 entries"),
+        "the gate names the stale share: {}",
+        redact_all(&output.stderr, project.path())
+    );
+    assert!(
+        output.stderr.contains("matched no current finding"),
+        "the gate uses the health noun: {}",
+        redact_all(&output.stderr, project.path())
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "one stale entry out of five stays below the advisory threshold: {}",
+        redact_all(&output.stderr, project.path())
+    );
+    assert_eq!(
+        output.code,
+        1,
+        "the opt-in gate fails the run: {}",
+        redact_all(&output.stderr, project.path())
+    );
+}
+
+/// `--report-only` short-circuits every health gate, and the stale-baseline
+/// gate is not an exception to that one rule.
+#[test]
+fn health_stale_baseline_gate_respects_report_only() {
+    let project = rotted_health_baseline_project(5, 4);
+    let output = run_health_baseline_human(
+        project.path(),
+        &["--fail-on-stale-baseline", "--report-only"],
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "--report-only always exits 0: {}",
+        redact_all(&output.stderr, project.path())
+    );
+}
+
+/// The advisory wording health has always printed is untouched by the gate.
+#[test]
+fn health_stale_baseline_warning_is_unchanged() {
+    let project = rotted_health_baseline_project(4, 2);
+    let output = run_health_baseline_human(project.path(), &[]);
+    assert!(
+        output.stderr.contains(
+            "Warning: health baseline is partially stale: 2 of 4 entries matched no current finding"
+        ),
+        "the partial wording is unchanged: {}",
+        redact_all(&output.stderr, project.path())
+    );
+    assert!(
+        !output.stderr.contains("Baseline gate failed"),
+        "the gate stays off unless it is asked for: {}",
+        redact_all(&output.stderr, project.path())
+    );
+}
+
 /// A hotspot that replaces another hotspot in the same file and category is
 /// invisible to the count baseline but reported in identity mode (#2010).
 #[test]

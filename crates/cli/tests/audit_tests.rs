@@ -2902,6 +2902,82 @@ fn audit_dependency_location_change_is_introduced() {
     );
 }
 
+/// `audit` always analyzes a changed-code slice, so a whole-project baseline
+/// legitimately matches less of it. The opt-in stale-baseline gate inherits
+/// that guard instead of failing every review run.
+#[test]
+fn audit_stale_baseline_gate_is_inert_on_a_change_scoped_run() {
+    let tmp = create_audit_baseline_fixture();
+    let dir = tmp.path();
+    let baseline_path = dir.join(".fallow-dead-code-baseline.json");
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+    git(&["checkout", "main"]);
+    run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        dir.to_str().unwrap(),
+        "--save-baseline",
+        baseline_path.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert!(
+        baseline_path.exists(),
+        "baseline file should have been written"
+    );
+    git(&["checkout", "feature"]);
+    // Drop most of what the baseline described, so a whole-project comparison
+    // would call it stale.
+    fs::write(
+        dir.join("src/legacy.ts"),
+        "export const used = 1;\nexport const unusedA = 'a';\n",
+    )
+    .unwrap();
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "prune legacy"]);
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--dead-code-baseline",
+        baseline_path.to_str().unwrap(),
+        "--fail-on-stale-baseline",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        !output.stderr.contains("Baseline gate failed"),
+        "a changed-code run cannot judge a whole-project baseline: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "the gate must stay usable in review jobs: {}\n{}",
+        output.stdout, output.stderr
+    );
+}
+
 #[test]
 fn audit_with_dead_code_baseline_filters_preexisting_issues() {
     let tmp = create_audit_baseline_fixture();

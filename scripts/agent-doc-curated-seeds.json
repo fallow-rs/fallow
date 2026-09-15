@@ -1282,6 +1282,12 @@
     },
     {
       "section": "flags:global",
+      "row": "--fail-on-stale-baseline",
+      "column": "Description",
+      "seed": "Exit with code 1 if a loaded --baseline has entries that match nothing in this run"
+    },
+    {
+      "section": "flags:global",
       "row": "--format",
       "column": "Description",
       "seed": "Output format (alias: --output)"

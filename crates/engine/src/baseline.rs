@@ -62,12 +62,97 @@ const STALE_WARN_PERCENT: usize = 25;
 /// True when `stale_entries` out of `baseline_entries` is a large enough share
 /// to be worth warning about.
 ///
-/// Callers own the surrounding guards: whether the run was narrowed to part of
-/// the project, and whether the baseline overlapped the current findings at
-/// all.
+/// The threshold alone; [`BaselineStaleness::warning`] owns the surrounding
+/// guards and is what commands call.
 #[must_use]
 pub const fn stale_share_warrants_warning(baseline_entries: usize, stale_entries: usize) -> bool {
     stale_entries > 0 && stale_entries * 100 >= baseline_entries * STALE_WARN_PERCENT
+}
+
+/// One run's view of a loaded baseline: everything needed to decide whether the
+/// baseline still describes the project.
+///
+/// Every command that accepts `--baseline` builds one of these and asks it the
+/// same two questions, so `dead-code`, `dupes` and `health` cannot answer
+/// "is this baseline stale enough to say something" three different ways.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BaselineStaleness {
+    /// Entries saved in the baseline file.
+    pub entries: usize,
+    /// Baseline entries that matched something in this run.
+    pub matched: usize,
+    /// Findings this run produced before the baseline filtered them. Zero means
+    /// there was nothing to compare, either because the project is clean or the
+    /// scope was empty, so staleness cannot be judged.
+    pub current_findings: usize,
+    /// True when this run analyzed only part of the project, so a
+    /// whole-project baseline matches less of it for reasons that are not rot.
+    pub change_scoped: bool,
+}
+
+/// Which advisory warning a loaded baseline earns, if any.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BaselineStalenessWarning {
+    /// Say nothing: the baseline is fresh enough, or this run cannot judge it.
+    None,
+    /// Nothing in the baseline matched, and there were findings to match.
+    ZeroOverlap,
+    /// A large enough share of the baseline matched nothing.
+    Partial,
+}
+
+impl BaselineStaleness {
+    /// Entries that matched no current finding on this run.
+    #[must_use]
+    pub const fn stale_entries(&self) -> usize {
+        self.entries.saturating_sub(self.matched)
+    }
+
+    /// The advisory warning this run prints on stderr by default.
+    ///
+    /// Silent for a run narrowed to part of the project, because such a run
+    /// legitimately sees only a slice of a whole-project baseline and re-saving
+    /// from it would drop every entry the run never looked at. Silent as well
+    /// when the run produced no findings: a cleaned project and a rotted
+    /// baseline look identical from here, and the re-save advice is wrong when
+    /// the right move is deleting the file.
+    #[must_use]
+    pub const fn warning(&self) -> BaselineStalenessWarning {
+        if self.change_scoped || self.entries == 0 || self.current_findings == 0 {
+            return BaselineStalenessWarning::None;
+        }
+        if self.matched == 0 {
+            return BaselineStalenessWarning::ZeroOverlap;
+        }
+        if stale_share_warrants_warning(self.entries, self.stale_entries()) {
+            return BaselineStalenessWarning::Partial;
+        }
+        BaselineStalenessWarning::None
+    }
+
+    /// Whether the opt-in `--fail-on-stale-baseline` gate fires.
+    ///
+    /// Deliberately stricter than [`Self::warning`]: any stale entry counts.
+    /// The quarter threshold exists to keep an unasked-for line from training
+    /// people to ignore it, and the empty-run silence exists because an
+    /// advisory cannot tell rot from success; a repository that passes the flag
+    /// has asked for both. Change-scope stays the one shared suppression,
+    /// because a narrowed run still cannot judge a whole-project baseline.
+    #[must_use]
+    pub const fn trips_gate(&self) -> bool {
+        stale_baseline_gate_trips(self.entries, self.matched, self.change_scoped)
+    }
+}
+
+/// [`BaselineStaleness::trips_gate`] over the three counts it reads, for
+/// callers that carry the numbers in their own output type.
+#[must_use]
+pub const fn stale_baseline_gate_trips(
+    entries: usize,
+    matched: usize,
+    change_scoped: bool,
+) -> bool {
+    !change_scoped && entries > 0 && matched < entries
 }
 
 /// Baseline data for comparison.
@@ -2393,6 +2478,88 @@ mod tests {
                 "{stale_entries} of {baseline_entries} entries"
             );
         }
+    }
+
+    const fn staleness(
+        entries: usize,
+        matched: usize,
+        current_findings: usize,
+    ) -> BaselineStaleness {
+        BaselineStaleness {
+            entries,
+            matched,
+            current_findings,
+            change_scoped: false,
+        }
+    }
+
+    #[test]
+    fn warning_is_silent_when_the_run_found_nothing() {
+        let staleness = staleness(4, 0, 0);
+        assert_eq!(staleness.stale_entries(), 4);
+        assert_eq!(staleness.warning(), BaselineStalenessWarning::None);
+    }
+
+    #[test]
+    fn zero_overlap_warns_when_the_run_has_findings() {
+        assert_eq!(
+            staleness(4, 0, 4).warning(),
+            BaselineStalenessWarning::ZeroOverlap
+        );
+    }
+
+    #[test]
+    fn partial_warning_needs_the_documented_quarter() {
+        assert_eq!(
+            staleness(100, 76, 100).warning(),
+            BaselineStalenessWarning::None
+        );
+        assert_eq!(
+            staleness(100, 75, 100).warning(),
+            BaselineStalenessWarning::Partial
+        );
+    }
+
+    #[test]
+    fn empty_baseline_never_warns() {
+        assert_eq!(staleness(0, 0, 3).warning(), BaselineStalenessWarning::None);
+    }
+
+    #[test]
+    fn change_scoped_run_never_warns_and_never_trips_the_gate() {
+        let scoped = BaselineStaleness {
+            change_scoped: true,
+            ..staleness(8, 2, 8)
+        };
+        assert_eq!(scoped.warning(), BaselineStalenessWarning::None);
+        assert!(!scoped.trips_gate());
+    }
+
+    /// The whole point of the opt-in gate: it fires where the advisory
+    /// warning deliberately stays quiet, because the repository asked for
+    /// strictness rather than calibration.
+    #[test]
+    fn gate_trips_on_one_stale_entry_the_warning_ignores() {
+        let staleness = staleness(20, 19, 19);
+        assert_eq!(staleness.warning(), BaselineStalenessWarning::None);
+        assert!(staleness.trips_gate());
+    }
+
+    #[test]
+    fn gate_trips_on_a_cleaned_project_the_warning_stays_silent_about() {
+        let staleness = staleness(4, 0, 0);
+        assert_eq!(staleness.warning(), BaselineStalenessWarning::None);
+        assert!(staleness.trips_gate());
+    }
+
+    #[test]
+    fn gate_is_inert_on_an_empty_baseline() {
+        assert!(!staleness(0, 0, 0).trips_gate());
+    }
+
+    #[test]
+    fn gate_is_inert_when_every_entry_matched() {
+        assert!(!staleness(4, 4, 4).trips_gate());
     }
 
     fn make_results() -> AnalysisResults {

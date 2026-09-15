@@ -2412,10 +2412,50 @@ fn partially_stale_baseline_is_silent_below_threshold() {
     );
 }
 
+/// A project that cleaned up everything the baseline described has nothing to
+/// compare, so staleness cannot be judged and the advisory warning stays
+/// silent, exactly as `health --baseline` already behaved.
 #[test]
-fn fully_stale_baseline_keeps_the_zero_overlap_warning() {
+fn cleaned_project_does_not_warn_about_a_fully_stale_baseline() {
     let project = rotted_baseline_project(4, 0);
     let output = run_with_baseline(project.path(), &[]);
+    assert!(
+        output.stderr.contains("Comparing against baseline"),
+        "the baseline still loads: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("matched 0 current issues"),
+        "a run with no findings cannot tell rot from success: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "neither staleness branch fires without findings to compare: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "a clean project stays green: {}",
+        output.stderr
+    );
+}
+
+/// The guard against over-suppressing: a run that produced findings and
+/// matched none of the baseline still gets the zero-overlap advice, because
+/// there the mismatch really is rot.
+#[test]
+fn zero_overlap_still_warns_when_the_run_has_findings() {
+    let project = rotted_baseline_project(4, 4);
+    let root = project.path();
+    std::fs::rename(root.join("src/helpers.ts"), root.join("src/renamed.ts"))
+        .expect("move the helper module");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { used } from \"./renamed\";\nexport const main = () => used();\n",
+    )
+    .expect("repoint the import");
+    let output = run_with_baseline(root, &[]);
     assert!(
         output
             .stderr
@@ -2428,6 +2468,165 @@ fn fully_stale_baseline_keeps_the_zero_overlap_warning() {
         "the two branches are mutually exclusive: {}",
         output.stderr
     );
+    assert_eq!(
+        output.code, 1,
+        "the four unmatched findings fail the run, the warning does not: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn fail_on_stale_baseline_exits_one_on_a_partially_stale_baseline() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &["--fail-on-stale-baseline"]);
+    assert!(
+        output
+            .stderr
+            .contains("Baseline gate failed: 2 of 4 entries"),
+        "the gate names the stale share: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 1,
+        "the opt-in gate fails the run: {}",
+        output.stderr
+    );
+}
+
+/// The reason the flag exists: a handful of stale entries the advisory
+/// threshold deliberately ignores still fails an opted-in build.
+#[test]
+fn fail_on_stale_baseline_exits_one_below_the_warning_threshold() {
+    let project = rotted_baseline_project(5, 4);
+    let output = run_with_baseline(project.path(), &["--fail-on-stale-baseline"]);
+    assert!(
+        output
+            .stderr
+            .contains("Baseline gate failed: 1 of 5 entries"),
+        "one stale entry is enough for the opt-in gate: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "the advisory warning keeps its quarter threshold: {}",
+        output.stderr
+    );
+    assert_eq!(output.code, 1, "the gate fails the run: {}", output.stderr);
+}
+
+#[test]
+fn fail_on_stale_baseline_exits_one_on_a_cleaned_project() {
+    let project = rotted_baseline_project(4, 0);
+    let output = run_with_baseline(project.path(), &["--fail-on-stale-baseline"]);
+    assert!(
+        output
+            .stderr
+            .contains("Baseline gate failed: 4 of 4 entries"),
+        "a dead baseline file is exactly the hygiene case the gate exists for: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("matched 0 current issues"),
+        "the advisory warning stays silent on a cleaned project: {}",
+        output.stderr
+    );
+    assert_eq!(output.code, 1, "the gate fails the run: {}", output.stderr);
+}
+
+#[test]
+fn fail_on_stale_baseline_is_green_on_a_fresh_baseline() {
+    let project = rotted_baseline_project(4, 4);
+    let output = run_with_baseline(project.path(), &["--fail-on-stale-baseline"]);
+    assert!(
+        !output.stderr.contains("Baseline gate failed"),
+        "every entry still matches: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "a fresh baseline is green: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn fail_on_stale_baseline_is_inert_on_a_scoped_run() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(
+        project.path(),
+        &["--file", "src/index.ts", "--fail-on-stale-baseline"],
+    );
+    assert!(
+        !output.stderr.contains("Baseline gate failed"),
+        "a narrowed run cannot judge a whole-project baseline: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "the gate must stay usable in changed-file CI jobs: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn fail_on_stale_baseline_is_inert_without_a_baseline() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        project.path().to_str().expect("temp path is UTF-8"),
+        "--no-cache",
+        "--fail-on-stale-baseline",
+    ]);
+    assert!(
+        !output.stderr.contains("Baseline gate failed"),
+        "there is no baseline to judge: {}",
+        output.stderr
+    );
+    assert_ne!(
+        output.code, 2,
+        "the flag is accepted without a baseline: {}",
+        output.stderr
+    );
+}
+
+/// Unlike the score and findings gates, a stale baseline appears nowhere else
+/// in the output, so a bare exit 1 under `--quiet` or `--ci` would be
+/// unexplained.
+#[test]
+fn fail_on_stale_baseline_explains_itself_under_quiet() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &["--quiet", "--fail-on-stale-baseline"]);
+    assert!(
+        output
+            .stderr
+            .contains("Baseline gate failed: 2 of 4 entries"),
+        "the gate line survives --quiet: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "--quiet still suppresses the advisory warning: {}",
+        output.stderr
+    );
+    assert_eq!(output.code, 1, "the gate fails the run: {}", output.stderr);
+}
+
+#[test]
+fn fail_on_stale_baseline_leaves_json_output_unchanged() {
+    let project = rotted_baseline_project(4, 2);
+    let without = run_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    let with = run_with_baseline(
+        project.path(),
+        &["--format", "json", "--quiet", "--fail-on-stale-baseline"],
+    );
+    assert_eq!(
+        canonical_report(&without),
+        canonical_report(&with),
+        "the gate changes the exit code and stderr, never the JSON envelope"
+    );
+    assert_eq!(without.code, 0, "the run is green without the flag");
+    assert_eq!(with.code, 1, "the run fails with the flag");
 }
 
 #[test]

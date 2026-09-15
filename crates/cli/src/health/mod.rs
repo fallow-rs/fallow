@@ -451,6 +451,7 @@ pub fn run_health(
             quiet: opts.quiet,
             explain: opts.explain,
             gates: opts.gates,
+            baseline_path: opts.baseline,
             summary: opts.summary,
             summary_heading: true,
             show_explain_tip: true,
@@ -548,10 +549,14 @@ pub type HealthResult =
 /// cannot evaluate, so a direct API caller that requests a score gate without
 /// computing the score would get a permissive `ExitCode::SUCCESS`.
 #[derive(Clone, Copy)]
-pub struct HealthPrintOptions {
+pub struct HealthPrintOptions<'a> {
     pub quiet: bool,
     pub explain: bool,
     pub gates: HealthGateOptions,
+    /// Loaded `--baseline` path, so the stale-baseline gate can name the file
+    /// to re-save. `None` when no baseline was loaded, which makes the gate
+    /// inert.
+    pub baseline_path: Option<&'a std::path::Path>,
     pub summary: bool,
     pub summary_heading: bool,
     pub show_explain_tip: bool,
@@ -564,7 +569,7 @@ pub struct HealthPrintOptions {
     pub json_style: crate::json_style::JsonStyle,
 }
 
-pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -> ExitCode {
+pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions<'_>) -> ExitCode {
     let ctx = health_report_context(result, options);
     let report_code = report::print_health_report(
         &result.report,
@@ -592,10 +597,10 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -
     ExitCode::SUCCESS
 }
 
-fn health_report_context(
-    result: &HealthResult,
-    options: HealthPrintOptions,
-) -> report::ReportContext<'_> {
+fn health_report_context<'a>(
+    result: &'a HealthResult,
+    options: HealthPrintOptions<'a>,
+) -> report::ReportContext<'a> {
     report::ReportContext {
         root: &result.config.root,
         rules: &result.config.rules,
@@ -619,13 +624,30 @@ fn health_report_context(
     }
 }
 
-fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
+fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
     score_gate_failed(result, options)
         || findings_gate_failed(result, options)
         || has_failing_runtime_coverage(result)
+        || stale_baseline_gate_failed(result, options)
 }
 
-fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
+/// The opt-in `--fail-on-stale-baseline` gate. Reads the staleness the engine
+/// already put in the report, so no extra plumbing crosses the engine boundary.
+fn stale_baseline_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
+    let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
+        return false;
+    };
+    crate::baseline_gate::gate_failed_from_counts(
+        staleness.baseline_entries,
+        staleness.matched_entries,
+        staleness.change_scoped,
+        options.baseline_path,
+        options.gates.fail_on_stale_baseline,
+        crate::baseline_gate::HEALTH_NOUN,
+    )
+}
+
+fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
     let Some(threshold) = options.gates.min_score else {
         return false;
     };
@@ -645,7 +667,7 @@ fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool
     true
 }
 
-fn findings_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
+fn findings_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
     if let Some(min_sev) = options.gates.min_severity {
         result.report.findings.iter().any(|f| f.severity >= min_sev)
     } else if options.gates.min_score.is_none() {
@@ -672,7 +694,7 @@ fn is_failing_runtime_coverage(finding: &fallow_output::RuntimeCoverageFinding) 
     )
 }
 
-fn maybe_print_score_gate_note(result: &HealthResult, options: HealthPrintOptions) {
+fn maybe_print_score_gate_note(result: &HealthResult, options: HealthPrintOptions<'_>) {
     if options.gates.min_score.is_none()
         || options.gates.min_severity.is_some()
         || options.quiet
@@ -867,7 +889,9 @@ mod tests {
                     min_score,
                     min_severity,
                     report_only,
+                    fail_on_stale_baseline: false,
                 },
+                baseline_path: None,
                 summary: false,
                 summary_heading: true,
                 show_explain_tip: true,
@@ -1042,6 +1066,7 @@ mod tests {
                     quiet: true,
                     explain: false,
                     gates: HealthGateOptions::default(),
+                    baseline_path: None,
                     summary: false,
                     summary_heading: true,
                     show_explain_tip: true,

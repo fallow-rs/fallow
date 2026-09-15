@@ -37,6 +37,9 @@ pub struct CombinedOptions<'a> {
     pub churn_file: Option<&'a std::path::Path>,
     pub baseline: Option<&'a std::path::Path>,
     pub save_baseline: Option<&'a std::path::Path>,
+    /// Fail the run when a loaded `baseline` has entries that match nothing.
+    /// Only the dead-code sub-pass receives a baseline in combined mode.
+    pub fail_on_stale_baseline: bool,
     pub production: bool,
     pub production_dead_code: Option<bool>,
     pub production_health: Option<bool>,
@@ -162,6 +165,7 @@ fn build_combined_check_options<'a>(
         use_shared_diff_index: true,
         baseline: opts.baseline,
         save_baseline: opts.save_baseline,
+        fail_on_stale_baseline: opts.fail_on_stale_baseline,
         sarif_file: opts.sarif_file,
         production: opts.production_dead_code.unwrap_or(opts.production),
         production_override: opts.production_dead_code,
@@ -505,6 +509,7 @@ fn build_combined_dupes_options<'a>(
         top: None,
         baseline_path: None,
         save_baseline_path: None,
+        fail_on_stale_baseline: false,
         production: opts.production_dupes.unwrap_or(opts.production),
         production_override: opts.production_dupes,
         trace: None,
@@ -687,6 +692,7 @@ mod tests {
             churn_file: None,
             baseline: None,
             save_baseline: None,
+            fail_on_stale_baseline: false,
             production: false,
             production_dead_code: None,
             production_health: None,

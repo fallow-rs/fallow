@@ -7,6 +7,7 @@ use crate::Cli;
 pub const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
     "baseline",
     "save-baseline",
+    "fail-on-stale-baseline",
     "production",
     "no-production",
     "group-by",

@@ -321,6 +321,16 @@
       ]
     },
     {
+      "name": "--fail-on-stale-baseline",
+      "type": "bool",
+      "required": false,
+      "description": "Exit with code 1 if a loaded --baseline has entries that match nothing in this run",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
       "name": "--tolerance",
       "type": "string",
       "required": false,

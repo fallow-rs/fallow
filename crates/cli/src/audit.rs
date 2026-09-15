@@ -137,6 +137,11 @@ pub struct AuditOptions<'a> {
     pub dupes_baseline: Option<&'a std::path::Path>,
     /// How the health baseline is matched against current findings.
     pub health_baseline_mode: fallow_engine::baseline::HealthBaselineMode,
+    /// Fail the run when a loaded baseline has entries that match nothing.
+    /// Evaluated once here rather than in the sub-passes, because every audit
+    /// output mode renders through this command and only some of them run the
+    /// sub-pass renderers.
+    pub fail_on_stale_baseline: bool,
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
     pub max_crap: Option<f64>,
@@ -604,6 +609,7 @@ fn build_base_audit_options<'a>(
         health_baseline: None,
         dupes_baseline: None,
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+        fail_on_stale_baseline: false,
         max_crap: opts.max_crap,
         coverage: base_coverage.coverage.as_deref(),
         coverage_root: base_coverage.coverage_root.as_deref(),
@@ -1752,6 +1758,7 @@ fn audit_review_benchmark_options<'a>(
         health_baseline: None,
         dupes_baseline: None,
         health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+        fail_on_stale_baseline: false,
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -2911,6 +2918,7 @@ fn run_audit_check<'a>(
         use_shared_diff_index: true,
         baseline: opts.dead_code_baseline,
         save_baseline: None,
+        fail_on_stale_baseline: false,
         sarif_file: None,
         production: opts.production_dead_code.unwrap_or(opts.production),
         production_override: opts.production_dead_code,
@@ -3024,6 +3032,7 @@ fn build_audit_dupes_options<'a>(
         top: None,
         baseline_path: opts.dupes_baseline,
         save_baseline_path: None,
+        fail_on_stale_baseline: false,
         production: opts.production_dupes.unwrap_or(opts.production),
         production_override: opts.production_dupes,
         trace: None,
@@ -3189,7 +3198,10 @@ pub fn run_audit_with_type_aware(
         Ok(result) => {
             let _ = record_audit_impact(opts, gate_marker, &result);
             let report_exit = print_audit_command_result(opts, &result, opts.json_style);
-            if report_exit == ExitCode::SUCCESS && audit_type_aware_completeness_failed(&result) {
+            let stale_baseline = audit_stale_baseline_gate_failed(opts, &result);
+            if report_exit == ExitCode::SUCCESS
+                && (audit_type_aware_completeness_failed(&result) || stale_baseline)
+            {
                 ExitCode::from(1)
             } else {
                 report_exit
@@ -3197,6 +3209,43 @@ pub fn run_audit_with_type_aware(
         }
         Err(code) => code,
     }
+}
+
+/// The opt-in `--fail-on-stale-baseline` gate across the three baselines
+/// `audit` can load. Each sub-pass carries its own scope guard, so an audit
+/// narrowed to changed code never trips it.
+fn audit_stale_baseline_gate_failed(opts: &AuditOptions<'_>, result: &AuditResult) -> bool {
+    let dead_code = crate::baseline_gate::gate_failed(
+        result
+            .check
+            .as_ref()
+            .and_then(|check| check.baseline_staleness.as_ref()),
+        opts.fail_on_stale_baseline,
+        crate::baseline_gate::DEAD_CODE_NOUN,
+    );
+    let dupes = crate::baseline_gate::gate_failed(
+        result
+            .dupes
+            .as_ref()
+            .and_then(|dupes| dupes.baseline_staleness.as_ref()),
+        opts.fail_on_stale_baseline,
+        crate::baseline_gate::DUPES_NOUN,
+    );
+    let health = result
+        .health
+        .as_ref()
+        .and_then(|health| health.report.summary.baseline_staleness.as_ref())
+        .is_some_and(|staleness| {
+            crate::baseline_gate::gate_failed_from_counts(
+                staleness.baseline_entries,
+                staleness.matched_entries,
+                staleness.change_scoped,
+                opts.health_baseline,
+                opts.fail_on_stale_baseline,
+                crate::baseline_gate::HEALTH_NOUN,
+            )
+        });
+    dead_code || dupes || health
 }
 
 fn audit_type_aware_completeness_failed(result: &AuditResult) -> bool {

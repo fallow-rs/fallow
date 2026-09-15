@@ -6,7 +6,10 @@ use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::AnalysisResults;
 
-use crate::baseline::{BaselineData, filter_new_issues, stale_share_warrants_warning};
+use crate::baseline::{
+    BaselineData, BaselineStaleness, BaselineStalenessWarning, filter_new_issues,
+};
+use crate::baseline_gate::LoadedBaselineStaleness;
 use crate::error::emit_error;
 use crate::load_config_for_analysis;
 use crate::regression::{self, RegressionOpts, RegressionOutcome};
@@ -327,6 +330,8 @@ pub struct CheckOptions<'a> {
     pub use_shared_diff_index: bool,
     pub baseline: Option<&'a std::path::Path>,
     pub save_baseline: Option<&'a std::path::Path>,
+    /// Fail the run when a loaded `baseline` has entries that match nothing.
+    pub fail_on_stale_baseline: bool,
     pub sarif_file: Option<&'a std::path::Path>,
     pub production: bool,
     pub production_override: Option<bool>,
@@ -385,6 +390,11 @@ pub struct CheckResult {
     pub baseline_deltas: Option<crate::baseline::BaselineDeltas>,
     /// When a baseline was loaded: (total entries in baseline, entries that matched current issues).
     pub baseline_matched: Option<(usize, usize)>,
+    /// When a baseline was loaded: this run's full view of it, for the opt-in
+    /// stale-baseline gate. `baseline_matched` is derived from the same values.
+    pub baseline_staleness: Option<LoadedBaselineStaleness>,
+    /// Whether `--fail-on-stale-baseline` was requested.
+    pub fail_on_stale_baseline: bool,
     pub timings: Option<fallow_types::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
     pub shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
@@ -895,7 +905,7 @@ struct CheckCompletionInput<'a> {
     data: CheckAnalysisData,
     elapsed: Duration,
     regression_outcome: Option<RegressionOutcome>,
-    baseline_matched: Option<(usize, usize)>,
+    baseline_staleness: Option<LoadedBaselineStaleness>,
     type_aware: Option<fallow_api::TypeAwareOutcome>,
     type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
     syntactic_dead_code_keys: Option<rustc_hash::FxHashSet<String>>,
@@ -908,11 +918,14 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         data,
         elapsed,
         regression_outcome,
-        baseline_matched,
+        baseline_staleness,
         type_aware,
         type_coupling,
         syntactic_dead_code_keys,
     } = input;
+    let baseline_matched = baseline_staleness
+        .as_ref()
+        .map(|loaded| (loaded.staleness.entries, loaded.staleness.matched));
     let CheckAnalysisData {
         results,
         trace_graph,
@@ -975,6 +988,8 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         regression: regression_outcome,
         baseline_deltas: None,
         baseline_matched,
+        baseline_staleness,
+        fail_on_stale_baseline: opts.fail_on_stale_baseline,
         timings: trace_timings,
         shared_parse,
         type_aware_meta,
@@ -1134,7 +1149,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         .and_then(|outcome| outcome.meta.identity.clone())
         .unwrap_or_default();
 
-    let baseline_matched = handle_baseline(
+    let baseline_staleness = handle_baseline(
         &mut data.results,
         &BaselineIo {
             save_path: opts.save_baseline,
@@ -1156,7 +1171,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         data,
         elapsed,
         regression_outcome,
-        baseline_matched,
+        baseline_staleness,
         type_aware,
         type_coupling,
         syntactic_dead_code_keys,
@@ -1193,6 +1208,7 @@ pub fn benchmark_dead_code_json(
         use_shared_diff_index: true,
         baseline: None,
         save_baseline: None,
+        fail_on_stale_baseline: false,
         sarif_file: None,
         production: false,
         production_override: Some(false),
@@ -1357,6 +1373,15 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     print_load_data_key_abstain_note(result, prepared.quiet);
     print_unused_component_props_exempted_note(result, prepared.quiet);
     print_unmatched_ignore_findings_note(result, prepared.quiet);
+
+    if crate::baseline_gate::gate_failed(
+        result.baseline_staleness.as_ref(),
+        result.fail_on_stale_baseline,
+        crate::baseline_gate::DEAD_CODE_NOUN,
+    ) {
+        return ExitCode::from(1);
+    }
+
     issue_severity_exit_code(result, &prepared.effective_rules)
 }
 
@@ -1624,13 +1649,13 @@ fn baseline_scope_is_narrowed(opts: &CheckOptions<'_>, production: bool) -> bool
 
 /// Save baseline and/or compare against an existing baseline.
 ///
-/// Returns `Ok(None)` when no baseline was loaded, `Ok(Some((entries,
-/// matched)))` when a baseline was loaded, or `Err(ExitCode)` on fatal errors
+/// Returns `Ok(None)` when no baseline was loaded, `Ok(Some(_))` with this
+/// run's view of the loaded baseline, or `Err(ExitCode)` on fatal errors
 /// (serialization or IO failure).
 fn handle_baseline(
     results: &mut fallow_types::results::AnalysisResults,
     io: &BaselineIo<'_>,
-) -> Result<Option<(usize, usize)>, ExitCode> {
+) -> Result<Option<LoadedBaselineStaleness>, ExitCode> {
     if let Some(baseline_path) = io.save_path {
         save_baseline_file(results, baseline_path, io)?;
     }
@@ -1676,13 +1701,13 @@ fn save_baseline_file(
     Ok(())
 }
 
-/// Load a baseline file, filter out matched issues, and return
-/// `(baseline_entries, matched)`.
+/// Load a baseline file, filter out matched issues, and return this run's view
+/// of the loaded baseline.
 fn load_and_compare_baseline(
     results: &mut fallow_types::results::AnalysisResults,
     baseline_path: &std::path::Path,
     io: &BaselineIo<'_>,
-) -> Result<(usize, usize), ExitCode> {
+) -> Result<LoadedBaselineStaleness, ExitCode> {
     let content = std::fs::read_to_string(baseline_path)
         .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, io.output))?;
     let baseline_data = serde_json::from_str::<BaselineData>(&content)
@@ -1713,46 +1738,49 @@ fn load_and_compare_baseline(
     let before = results.total_issues();
     *results = filter_new_issues(std::mem::take(results), &baseline_data, io.root);
     let matched = before.saturating_sub(results.total_issues());
+    let staleness = BaselineStaleness {
+        entries: baseline_entries,
+        matched,
+        current_findings: before,
+        change_scoped: io.change_scoped,
+    };
     if !io.quiet {
         eprintln!("Comparing against baseline: {}", baseline_path.display());
-        warn_on_baseline_staleness(baseline_entries, matched, io.change_scoped, baseline_path);
+        warn_on_baseline_staleness(staleness, baseline_path);
     }
-    Ok((baseline_entries, matched))
+    Ok(LoadedBaselineStaleness {
+        staleness,
+        path: baseline_path.to_path_buf(),
+    })
 }
 
 /// Warn when a loaded baseline no longer describes the current project: either
 /// nothing in it matched, or a large enough share of it matched nothing.
 ///
-/// Silent for a run narrowed to part of the project, because such a run
-/// legitimately sees only a slice of a whole-project baseline. Re-saving from
-/// one would drop every entry the run never looked at, so advising it there
-/// would gut the gate rather than refresh it.
-fn warn_on_baseline_staleness(
-    baseline_entries: usize,
-    matched: usize,
-    change_scoped: bool,
-    baseline_path: &std::path::Path,
-) {
-    if baseline_entries == 0 || change_scoped {
-        return;
-    }
-    let stale_entries = baseline_entries.saturating_sub(matched);
-    if matched == 0 {
-        eprintln!(
+/// Every guard lives in the shared decision, so `dead-code`, `dupes` and
+/// `health` are silent in the same situations: a run narrowed to part of the
+/// project (re-saving from one would drop every entry the run never looked at)
+/// and a run that produced no findings at all (where a cleaned project and a
+/// rotted baseline are indistinguishable from here).
+fn warn_on_baseline_staleness(staleness: BaselineStaleness, baseline_path: &std::path::Path) {
+    let baseline_entries = staleness.entries;
+    let stale_entries = staleness.stale_entries();
+    match staleness.warning() {
+        BaselineStalenessWarning::None => {}
+        BaselineStalenessWarning::ZeroOverlap => eprintln!(
             "Warning: baseline has {baseline_entries} entries but matched \
              0 current issues. Your paths may have changed, or the baseline \
              was saved on a different machine. Re-save with: \
              --save-baseline {}",
             baseline_path.display(),
-        );
-    } else if stale_share_warrants_warning(baseline_entries, stale_entries) {
-        eprintln!(
+        ),
+        BaselineStalenessWarning::Partial => eprintln!(
             "Warning: baseline is partially stale: {stale_entries} of \
              {baseline_entries} entries matched no current issue, so the \
              gate protects less than what was saved. Re-save with: \
              --save-baseline {}",
             baseline_path.display(),
-        );
+        ),
     }
 }
 

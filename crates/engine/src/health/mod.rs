@@ -313,6 +313,8 @@ pub struct HealthGateOptions {
     pub min_severity: Option<FindingSeverity>,
     /// Render the score and findings but never fail CI on a health gate.
     pub report_only: bool,
+    /// Fail the run when a loaded `--baseline` has entries that match nothing.
+    pub fail_on_stale_baseline: bool,
 }
 
 /// Input for deriving effective health sections from command-neutral flags.
@@ -859,6 +861,7 @@ mod tests {
                 min_score: Some(80.0),
                 min_severity: None,
                 report_only: false,
+                fail_on_stale_baseline: false,
             },
             since: Some("30d"),
             min_commits: Some(2),

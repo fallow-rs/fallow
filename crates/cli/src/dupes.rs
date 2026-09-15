@@ -68,6 +68,9 @@ pub struct DupesOptions<'a> {
     pub top: Option<usize>,
     pub baseline_path: Option<&'a std::path::Path>,
     pub save_baseline_path: Option<&'a std::path::Path>,
+    /// Fail the run when a loaded `baseline_path` has entries that match
+    /// nothing.
+    pub fail_on_stale_baseline: bool,
     pub production: bool,
     pub production_override: Option<bool>,
     pub trace: Option<&'a str>,
@@ -278,6 +281,11 @@ pub struct DupesResult {
     /// Whether `--format json` carries the verbatim source text per clone
     /// instance. Mirrors `DupesOptions::include_fragments`.
     pub include_fragments: bool,
+    /// When a baseline was loaded: this run's view of it, for the opt-in
+    /// stale-baseline gate.
+    pub baseline_staleness: Option<crate::baseline_gate::LoadedBaselineStaleness>,
+    /// Whether `--fail-on-stale-baseline` was requested.
+    pub fail_on_stale_baseline: bool,
 }
 
 /// Run duplication analysis, filtering, and baseline handling. Returns results without printing.
@@ -456,7 +464,8 @@ fn execute_dupes_inner(
     }
 
     save_duplication_baseline(&report, &config, opts)?;
-    apply_duplication_baseline(&mut report, &config, opts)?;
+    let baseline_staleness =
+        apply_duplication_baseline(&mut report, &config, opts, effective_changed_files)?;
     filter_dupes_report(&mut report, opts, &config, effective_changed_files)?;
 
     let elapsed = start.elapsed();
@@ -478,6 +487,8 @@ fn execute_dupes_inner(
         explain_skipped: opts.explain_skipped,
         workspace_diagnostics,
         include_fragments: opts.include_fragments,
+        baseline_staleness,
+        fail_on_stale_baseline: opts.fail_on_stale_baseline,
     })
 }
 
@@ -544,9 +555,10 @@ fn apply_duplication_baseline(
     report: &mut DuplicationReport,
     config: &ResolvedConfig,
     opts: &DupesOptions<'_>,
-) -> Result<(), ExitCode> {
+    effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+) -> Result<Option<crate::baseline_gate::LoadedBaselineStaleness>, ExitCode> {
     let Some(path) = opts.baseline_path else {
-        return Ok(());
+        return Ok(None);
     };
 
     let baseline_data = read_duplication_baseline(path, opts.output)?;
@@ -554,12 +566,39 @@ fn apply_duplication_baseline(
     let before = report.clone_groups.len();
     *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
     let matched = before.saturating_sub(report.clone_groups.len());
+    let staleness = fallow_engine::baseline::BaselineStaleness {
+        entries: baseline_entries,
+        matched,
+        current_findings: before,
+        change_scoped: duplication_comparison_is_narrowed(config, effective_changed_files),
+    };
     if !opts.quiet {
         eprintln!("Comparing against duplication baseline: {}", path.display());
+        warn_on_duplication_baseline_staleness(staleness, path);
     }
-    warn_unmatched_duplication_baseline(path, baseline_entries, matched, opts.quiet);
 
-    Ok(())
+    Ok(Some(crate::baseline_gate::LoadedBaselineStaleness {
+        staleness,
+        path: path.to_path_buf(),
+    }))
+}
+
+/// True when the duplication baseline was compared against less than the whole
+/// project.
+///
+/// Deliberately narrower than the dead-code equivalent. `dupes` saves and
+/// compares the baseline BEFORE `filter_dupes_report` runs, so `--workspace`,
+/// `--changed-workspaces`, `--diff-file` and the positional `[PATH]` scope
+/// narrow only the rendered report: the comparison, and a re-save, still cover
+/// the whole project and their staleness reading is honest. Only the two
+/// channels that narrow the analysis itself count here: a resolved changed-file
+/// set, which selects the focused analysis, and production mode, which drops
+/// test, story and dev files at discovery.
+fn duplication_comparison_is_narrowed(
+    config: &ResolvedConfig,
+    effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+) -> bool {
+    effective_changed_files.is_some() || config.production
 }
 
 fn read_duplication_baseline(
@@ -582,20 +621,30 @@ fn read_duplication_baseline(
     })
 }
 
-fn warn_unmatched_duplication_baseline(
+/// Warn when a loaded duplication baseline no longer describes the current
+/// project, using the same decision as `dead-code` and `health`.
+fn warn_on_duplication_baseline_staleness(
+    staleness: fallow_engine::baseline::BaselineStaleness,
     path: &std::path::Path,
-    baseline_entries: usize,
-    matched: usize,
-    quiet: bool,
 ) {
-    if baseline_entries > 0 && matched == 0 && !quiet {
-        eprintln!(
+    let baseline_entries = staleness.entries;
+    let stale_entries = staleness.stale_entries();
+    match staleness.warning() {
+        fallow_engine::baseline::BaselineStalenessWarning::None => {}
+        fallow_engine::baseline::BaselineStalenessWarning::ZeroOverlap => eprintln!(
             "Warning: duplication baseline has {baseline_entries} entries but \
              matched 0 current clone groups. Your paths may have changed, or \
              the baseline was saved on a different machine. Re-save with: \
              --save-baseline {}",
             path.display(),
-        );
+        ),
+        fallow_engine::baseline::BaselineStalenessWarning::Partial => eprintln!(
+            "Warning: duplication baseline is partially stale: {stale_entries} \
+             of {baseline_entries} entries matched no current clone group, so \
+             the gate protects less than what was saved. Re-save with: \
+             --save-baseline {}",
+            path.display(),
+        ),
     }
 }
 
@@ -846,6 +895,14 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         return ExitCode::from(1);
     }
 
+    if crate::baseline_gate::gate_failed(
+        result.baseline_staleness.as_ref(),
+        result.fail_on_stale_baseline,
+        crate::baseline_gate::DUPES_NOUN,
+    ) {
+        return ExitCode::from(1);
+    }
+
     ExitCode::SUCCESS
 }
 
@@ -1072,6 +1129,7 @@ mod tests {
             top: None,
             baseline_path: None,
             save_baseline_path: None,
+            fail_on_stale_baseline: false,
             production: false,
             production_override: None,
             trace: None,

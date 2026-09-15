@@ -5,7 +5,9 @@
     reason = "health baseline save/load preserves existing human stderr notes"
 )]
 
-use crate::baseline::{HealthBaselineData, HealthBaselineMode, filter_new_health_findings};
+use crate::baseline::{
+    BaselineStalenessWarning, HealthBaselineData, HealthBaselineMode, filter_new_health_findings,
+};
 
 use super::HealthError;
 
@@ -154,15 +156,16 @@ pub(super) fn load_health_baseline(
             baseline_path.display()
         );
     }
-    let staleness = staleness_from_counts(&StalenessCounts {
+    let counts = StalenessCounts {
         baseline_entries,
         matched_entries: overlap.matched_entries,
         moved_entries: overlap.moved_entries,
         current_findings: before,
         change_scoped,
-    });
+    };
+    let staleness = staleness_from_counts(&counts);
     if !quiet {
-        warn_on_staleness(&staleness, baseline_path);
+        warn_on_staleness(&counts, baseline_path);
         if staleness.moved_entries > 0 {
             eprintln!(
                 "Note: {} baseline entr{} matched through a followed file move.",
@@ -181,33 +184,37 @@ pub(super) fn load_health_baseline(
     })
 }
 
-/// Warn when the loaded baseline went stale, mirroring the `stale` bool
-/// exactly: a warning prints if and only if `stale` is true.
-fn warn_on_staleness(
-    staleness: &fallow_output::HealthBaselineStaleness,
-    baseline_path: &std::path::Path,
-) {
-    if !staleness.stale {
-        return;
-    }
-    let baseline_entries = staleness.baseline_entries;
-    let stale_entries = staleness.stale_entries;
-    if staleness.matched_entries == 0 {
-        eprintln!(
+/// Warn when the loaded baseline went stale, branching on the shared decision
+/// in [`crate::baseline::BaselineStaleness`] rather than re-deriving it.
+fn warn_on_staleness(counts: &StalenessCounts, baseline_path: &std::path::Path) {
+    let baseline_entries = counts.baseline_entries;
+    let stale_entries = baseline_entries.saturating_sub(counts.matched_entries);
+    match staleness_decision(counts).warning() {
+        BaselineStalenessWarning::None => {}
+        BaselineStalenessWarning::ZeroOverlap => eprintln!(
             "Warning: health baseline has {baseline_entries} entries but matched \
              0 current findings. Your paths may have changed, or the baseline \
              was saved on a different machine. Re-save with: \
              --save-baseline {}",
             baseline_path.display(),
-        );
-    } else {
-        eprintln!(
+        ),
+        BaselineStalenessWarning::Partial => eprintln!(
             "Warning: health baseline is partially stale: {stale_entries} of \
              {baseline_entries} entries matched no current finding, so the \
              gate protects less than what was saved. Re-save with: \
              --save-baseline {}",
             baseline_path.display(),
-        );
+        ),
+    }
+}
+
+/// The shared staleness decision for this run's counts.
+const fn staleness_decision(counts: &StalenessCounts) -> crate::baseline::BaselineStaleness {
+    crate::baseline::BaselineStaleness {
+        entries: counts.baseline_entries,
+        matched: counts.matched_entries,
+        current_findings: counts.current_findings,
+        change_scoped: counts.change_scoped,
     }
 }
 
@@ -234,12 +241,7 @@ fn staleness_from_counts(counts: &StalenessCounts) -> fallow_output::HealthBasel
         stale_entries,
         moved_entries: counts.moved_entries,
         change_scoped: counts.change_scoped,
-        stale: !counts.change_scoped
-            && counts.current_findings > 0
-            && crate::baseline::stale_share_warrants_warning(
-                counts.baseline_entries,
-                stale_entries,
-            ),
+        stale: staleness_decision(counts).warning() != BaselineStalenessWarning::None,
     }
 }
 

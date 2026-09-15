@@ -621,6 +621,7 @@ fn print_health_section(
             quiet: opts.quiet,
             explain: opts.explain,
             gates: fallow_engine::health::HealthGateOptions::default(),
+            baseline_path: None,
             summary: opts.summary,
             summary_heading: !show_headers,
             show_explain_tip: false,

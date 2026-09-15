@@ -35,6 +35,7 @@ pub use base_worktree::canonical_root_hash;
 mod walkthrough_state;
 use fallow_engine::baseline;
 mod agent_install;
+mod baseline_gate;
 mod cache_notice;
 mod check;
 mod ci;
@@ -502,6 +503,15 @@ struct Cli {
     /// Fail if issue count increased beyond tolerance compared to a regression baseline.
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_regression: bool,
+
+    /// Exit with code 1 if a loaded --baseline has entries that match nothing in this run.
+    ///
+    /// Stricter than the default advisory warning: any stale entry fails, not
+    /// just a quarter of the baseline. Inert when no baseline is loaded and on
+    /// runs narrowed to part of the project, which cannot judge a whole-project
+    /// baseline.
+    #[arg(hide_short_help = true, long, global = true)]
+    fail_on_stale_baseline: bool,
 
     /// Allowed issue count increase before a regression is flagged.
     #[arg(
@@ -2808,6 +2818,8 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--baseline")
     } else if cli.save_baseline.is_some() {
         Some("--save-baseline")
+    } else if cli.fail_on_stale_baseline {
+        Some("--fail-on-stale-baseline")
     } else if cli.production {
         Some("--production")
     } else if cli.no_production {
@@ -3518,6 +3530,7 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
         (cli.output_file.is_some(), "--output-file"),
         (cli.report_path_prefix.is_some(), "--report-path-prefix"),
         (cli.fail_on_regression, "--fail-on-regression"),
+        (cli.fail_on_stale_baseline, "--fail-on-stale-baseline"),
         (cli.tolerance != "0", "--tolerance"),
         (cli.regression_baseline.is_some(), "--regression-baseline"),
         (
@@ -3659,6 +3672,7 @@ fn run_bare_combined(
         churn_file: cli.churn_file.as_deref(),
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
+        fail_on_stale_baseline: cli.fail_on_stale_baseline,
         production: cli.production,
         production_dead_code: Some(production.dead_code),
         production_health: Some(production.health),
@@ -4773,6 +4787,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         min_commits,
         save_snapshot: save_snapshot.as_ref(),
         trend,
+        fail_on_stale_baseline: dispatch.cli.fail_on_stale_baseline,
         coverage: coverage.as_deref(),
         coverage_root: coverage_root.as_deref(),
         runtime_coverage: runtime_coverage.as_deref(),
@@ -5574,6 +5589,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         use_shared_diff_index: true,
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
+        fail_on_stale_baseline: cli.fail_on_stale_baseline,
         sarif_file: cli.sarif_file.as_deref(),
         production,
         production_override: Some(production),
@@ -5733,6 +5749,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         top: args.top,
         baseline_path: cli.baseline.as_deref(),
         save_baseline_path: cli.save_baseline.as_deref(),
+        fail_on_stale_baseline: cli.fail_on_stale_baseline,
         production,
         production_override: Some(production),
         trace: args.trace.as_deref(),
@@ -5926,6 +5943,7 @@ fn run_resolved_audit(
             health_baseline: inputs.health_baseline.as_deref(),
             dupes_baseline: inputs.dupes_baseline.as_deref(),
             health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
+            fail_on_stale_baseline: false,
             max_crap: args.max_crap,
             coverage: inputs.coverage.as_deref(),
             coverage_root: inputs.coverage_root.as_deref(),
@@ -6035,6 +6053,7 @@ fn decision_surface_audit_options<'a>(
         health_baseline: inputs.health_baseline.as_deref(),
         dupes_baseline: inputs.dupes_baseline.as_deref(),
         health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
+        fail_on_stale_baseline: false,
         max_crap: None,
         coverage: None,
         coverage_root: None,
@@ -6078,6 +6097,7 @@ struct HealthDispatchArgs<'a> {
     min_score: Option<f64>,
     min_severity: Option<fallow_output::FindingSeverity>,
     report_only: bool,
+    fail_on_stale_baseline: bool,
     since: Option<&'a str>,
     min_commits: Option<u32>,
     save_snapshot: Option<&'a Option<String>>,
@@ -6296,6 +6316,7 @@ fn health_gate_options(args: &HealthDispatchArgs<'_>) -> fallow_engine::health::
         min_score: args.min_score,
         min_severity: args.min_severity,
         report_only: args.report_only,
+        fail_on_stale_baseline: args.fail_on_stale_baseline,
     }
 }
 
@@ -6791,6 +6812,10 @@ mod tests {
             (
                 vec!["fallow", "security", "--baseline", "base.json"],
                 "--baseline",
+            ),
+            (
+                vec!["fallow", "security", "--fail-on-stale-baseline"],
+                "--fail-on-stale-baseline",
             ),
             (
                 vec!["fallow", "security", "--dupes-mode", "weak"],

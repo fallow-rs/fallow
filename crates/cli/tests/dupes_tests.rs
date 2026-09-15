@@ -8,7 +8,8 @@
 mod common;
 
 use common::{
-    fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
+    canonical_report, fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined,
+    run_fallow_in_root,
 };
 use tempfile::tempdir;
 
@@ -1187,6 +1188,313 @@ fn dupes_baseline_survives_line_shift_and_reports_extra_copy() {
         copied.stdout,
         copied.stderr
     );
+}
+
+/// Structurally distinct clone bodies, one per pair, so each duplicated pair
+/// forms its own clone group instead of collapsing into a shared family.
+const CLONE_BODIES: [&str; 8] = [
+    "export function alpha(value) {\n  if (value > 1) {\n    return value * 2;\n  }\n  return value + 1;\n}\n",
+    "export function beta(items) {\n  let total = 0;\n  for (const item of items) {\n    total += item.size;\n  }\n  return total;\n}\n",
+    "export function gamma(kind) {\n  switch (kind) {\n    case \"a\":\n      return 1;\n    case \"b\":\n      return 2;\n    default:\n      return 0;\n  }\n}\n",
+    "export function delta(run) {\n  try {\n    return run();\n  } catch (error) {\n    console.error(error);\n    return null;\n  }\n}\n",
+    "export function epsilon(queue) {\n  let seen = 0;\n  while (queue.length > 0) {\n    queue.pop();\n    seen += 1;\n  }\n  return seen;\n}\n",
+    "export function zeta(name, size) {\n  const record = {\n    name,\n    size,\n    label: name + size,\n  };\n  return record;\n}\n",
+    "export function eta(rows) {\n  return rows\n    .filter((row) => row.active)\n    .map((row) => row.id)\n    .join(\", \");\n}\n",
+    "export function theta(mode, fallback) {\n  const chosen = mode === \"wide\" ? \"w\" : mode === \"tall\" ? \"t\" : fallback;\n  const suffix = chosen.length > 1 ? \"!\" : \"?\";\n  return `${chosen}${suffix}`;\n}\n",
+];
+
+/// Thresholds small enough that every fixture body registers as a clone.
+const DUPES_THRESHOLDS: [&str; 4] = ["--min-tokens", "10", "--min-lines", "2"];
+
+/// Write one duplicated pair. Each file ends with a line the other copy does
+/// not share, so the detected clone fragment stops at a statement boundary and
+/// stays parsable: a fragment truncated mid-construct tokenizes to nothing and
+/// every such group would then share one content fingerprint.
+fn write_clone_pair(root: &std::path::Path, index: usize, body: &str) {
+    let dir = root.join(format!("src/pair{index}"));
+    std::fs::create_dir_all(&dir).expect("create pair directory");
+    std::fs::write(
+        dir.join("a.ts"),
+        format!("{body}export const tailA{index} = {index};\n"),
+    )
+    .expect("write first copy");
+    std::fs::write(
+        dir.join("b.ts"),
+        format!("{body}export const tailB{index} = {};\n", index + 100),
+    )
+    .expect("write second copy");
+}
+
+fn dupes_baseline_args<'a>(baseline: &'a str, flag: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
+    let mut args = vec![flag, baseline];
+    args.extend(DUPES_THRESHOLDS);
+    args.extend(["--no-cache"]);
+    args.extend_from_slice(extra);
+    args
+}
+
+/// A project whose duplication baseline is saved while `saved` duplicated
+/// pairs exist, and whose sources then keep only `remaining` of them, so
+/// `saved - remaining` baseline entries match nothing on the next run.
+fn rotted_dupes_project(saved: usize, remaining: usize) -> tempfile::TempDir {
+    let dir = tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"dupes-baseline-staleness","version":"1.0.0","private":true}"#,
+    )
+    .expect("write package");
+    for (index, body) in CLONE_BODIES.iter().enumerate().take(saved) {
+        write_clone_pair(root, index, body);
+    }
+    let baseline = root.join("dupes-baseline.json");
+    let baseline_path = baseline.to_str().expect("temp path is UTF-8").to_owned();
+    let save = run_fallow_in_root(
+        "dupes",
+        root,
+        &dupes_baseline_args(
+            &baseline_path,
+            "--save-baseline",
+            &["--format", "json", "--quiet"],
+        ),
+    );
+    let groups = parse_json(&save)["clone_groups"]
+        .as_array()
+        .map_or(0, Vec::len);
+    assert_eq!(
+        groups, saved,
+        "the saved baseline must hold exactly {saved} clone groups: {} {}",
+        save.stdout, save.stderr
+    );
+    for index in remaining..saved {
+        std::fs::remove_dir_all(root.join(format!("src/pair{index}"))).expect("drop a pair");
+    }
+    dir
+}
+
+/// Run `dupes --baseline` against a prepared fixture with extra arguments.
+fn run_dupes_with_baseline(root: &std::path::Path, extra: &[&str]) -> common::CommandOutput {
+    let baseline = root.join("dupes-baseline.json");
+    let baseline_path = baseline.to_str().expect("temp path is UTF-8").to_owned();
+    run_fallow_in_root(
+        "dupes",
+        root,
+        &dupes_baseline_args(&baseline_path, "--baseline", extra),
+    )
+}
+
+#[test]
+fn partially_stale_dupes_baseline_warns_on_human_output() {
+    let project = rotted_dupes_project(4, 1);
+    let output = run_dupes_with_baseline(project.path(), &[]);
+    assert!(
+        output.stderr.contains(
+            "Warning: duplication baseline is partially stale: 3 of 4 entries matched no current clone group"
+        ),
+        "a mostly rotten duplication baseline must say so on stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("--save-baseline"),
+        "the warning must point at the re-save command: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "the warning must not change the exit code: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn dupes_baseline_staleness_is_silent_below_threshold() {
+    let project = rotted_dupes_project(5, 4);
+    let output = run_dupes_with_baseline(project.path(), &[]);
+    assert!(
+        output
+            .stderr
+            .contains("Comparing against duplication baseline"),
+        "the baseline still loads: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "one stale entry out of five is below the warning threshold: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn cleaned_dupes_project_does_not_warn_about_a_fully_stale_baseline() {
+    let project = rotted_dupes_project(4, 0);
+    let output = run_dupes_with_baseline(project.path(), &[]);
+    assert!(
+        !output.stderr.contains("matched 0 current clone groups"),
+        "a run with no clone groups cannot tell rot from success: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "neither staleness branch fires without clone groups to compare: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn dupes_zero_overlap_still_warns_when_the_run_has_clone_groups() {
+    let project = rotted_dupes_project(4, 4);
+    for (index, body) in CLONE_BODIES.iter().enumerate().skip(4) {
+        write_clone_pair(project.path(), index - 4, body);
+    }
+    let output = run_dupes_with_baseline(project.path(), &[]);
+    assert!(
+        output.stderr.contains(
+            "Warning: duplication baseline has 4 entries but matched 0 current clone groups"
+        ),
+        "the zero-overlap wording is unchanged: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "the two branches are mutually exclusive: {}",
+        output.stderr
+    );
+}
+
+/// Production mode drops story files before analysis, so the comparison sees a
+/// narrowed project and cannot judge a whole-project baseline.
+#[test]
+fn production_scoped_dupes_run_does_not_warn_about_baseline_staleness() {
+    let dir = tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"dupes-production-baseline","version":"1.0.0","private":true}"#,
+    )
+    .expect("write package");
+    for (index, body) in CLONE_BODIES.iter().enumerate().take(2) {
+        write_clone_pair(root, index, body);
+    }
+    for (index, body) in CLONE_BODIES.iter().enumerate().take(4).skip(2) {
+        let pair = root.join(format!("src/pair{index}"));
+        std::fs::create_dir_all(&pair).expect("create pair directory");
+        std::fs::write(
+            pair.join("a.ts"),
+            format!("{body}export const tailA{index} = {index};\n"),
+        )
+        .expect("write source copy");
+        std::fs::write(
+            pair.join("a.stories.ts"),
+            format!("{body}export const tailB{index} = {};\n", index + 100),
+        )
+        .expect("write story copy");
+    }
+    let baseline = root.join("dupes-baseline.json");
+    let baseline_path = baseline.to_str().expect("temp path is UTF-8").to_owned();
+    let save = run_fallow_in_root(
+        "dupes",
+        root,
+        &dupes_baseline_args(
+            &baseline_path,
+            "--save-baseline",
+            &["--format", "json", "--quiet"],
+        ),
+    );
+    assert_eq!(
+        parse_json(&save)["clone_groups"]
+            .as_array()
+            .map_or(0, Vec::len),
+        4,
+        "the fixture must save four clone groups: {} {}",
+        save.stdout,
+        save.stderr
+    );
+
+    let output = run_dupes_with_baseline(root, &["--production"]);
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "production mode drops the story copies, so it cannot judge a whole-project baseline: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("matched 0 current clone groups"),
+        "a production run must not advise a re-save either: {}",
+        output.stderr
+    );
+}
+
+/// The channel-accurate guard: `dupes` compares and re-saves the baseline
+/// before the workspace, diff and positional scope filters run, so those runs
+/// still judge the whole project honestly.
+#[test]
+fn path_scoped_dupes_run_still_judges_the_baseline() {
+    let project = rotted_dupes_project(4, 1);
+    let output = run_dupes_with_baseline(project.path(), &["src/pair0"]);
+    assert!(
+        output.stderr.contains(
+            "Warning: duplication baseline is partially stale: 3 of 4 entries matched no current clone group"
+        ),
+        "the comparison ran on the whole project, so the warning is honest: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn quiet_suppresses_the_dupes_partial_staleness_warning() {
+    let project = rotted_dupes_project(4, 1);
+    let output = run_dupes_with_baseline(project.path(), &["--quiet"]);
+    assert!(
+        !output
+            .stderr
+            .contains("Comparing against duplication baseline"),
+        "--quiet suppresses the baseline notice: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "--quiet suppresses the staleness warning too: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn fail_on_stale_baseline_exits_one_on_a_stale_dupes_baseline() {
+    let project = rotted_dupes_project(4, 1);
+    let output = run_dupes_with_baseline(project.path(), &["--fail-on-stale-baseline"]);
+    assert!(
+        output
+            .stderr
+            .contains("Baseline gate failed: 3 of 4 entries"),
+        "the gate names the stale share: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("matched no current clone group"),
+        "the gate uses the duplication noun: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 1,
+        "the opt-in gate fails the run: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn dupes_stale_baseline_gate_leaves_json_output_unchanged() {
+    let project = rotted_dupes_project(4, 1);
+    let without = run_dupes_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    let with = run_dupes_with_baseline(
+        project.path(),
+        &["--format", "json", "--quiet", "--fail-on-stale-baseline"],
+    );
+    assert_eq!(
+        canonical_report(&without),
+        canonical_report(&with),
+        "the gate changes the exit code and stderr, never the JSON envelope"
+    );
+    assert_eq!(without.code, 0, "the run is green without the flag");
+    assert_eq!(with.code, 1, "the run fails with the flag");
 }
 
 #[test]

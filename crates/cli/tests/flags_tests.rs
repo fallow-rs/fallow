@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{run_fallow, run_fallow_in_root};
+use common::{run_fallow, run_fallow_combined, run_fallow_in_root};
 
 #[test]
 fn feature_flag_suppression_next_line() {
@@ -230,5 +230,32 @@ fn flags_json_carries_the_analysis_stage_diagnostics_its_scan_records() {
         kinds.contains(&"boundaries-not-configured")
             && kinds.contains(&"rule-packs-not-configured"),
         "the flag scan runs the dead-code pass, so its diagnostics belong here, kinds were {kinds:?}"
+    );
+}
+
+/// `--fail-on-stale-baseline` is global: every command that accepts
+/// `--baseline` accepts it, and it is inert when no baseline is loaded.
+#[test]
+fn fail_on_stale_baseline_is_a_global_flag() {
+    for subcommand in ["dead-code", "check", "dupes", "health", "audit"] {
+        let out = run_fallow(
+            subcommand,
+            "basic-project",
+            &["--no-cache", "--quiet", "--fail-on-stale-baseline"],
+        );
+        assert_ne!(
+            out.code, 2,
+            "{subcommand} must accept --fail-on-stale-baseline: {}",
+            out.stderr
+        );
+    }
+    let bare = run_fallow_combined(
+        "basic-project",
+        &["--no-cache", "--quiet", "--fail-on-stale-baseline"],
+    );
+    assert_ne!(
+        bare.code, 2,
+        "the bare run must accept --fail-on-stale-baseline: {}",
+        bare.stderr
     );
 }
