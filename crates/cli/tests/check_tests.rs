@@ -2452,6 +2452,27 @@ fn scoped_run_does_not_warn_about_baseline_staleness() {
 }
 
 #[test]
+fn production_run_does_not_warn_about_baseline_staleness() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &["--production"]);
+    assert!(
+        output.stderr.contains("Comparing against baseline"),
+        "the baseline still loads in production mode: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("partially stale"),
+        "production mode drops test and dev files, so it cannot judge a whole-project baseline: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("matched 0 current issues"),
+        "re-saving from a production run would drop every non-production entry: {}",
+        output.stderr
+    );
+}
+
+#[test]
 fn diff_scoped_run_does_not_warn_about_baseline_staleness() {
     let project = rotted_baseline_project(4, 2);
     let diff = project.path().join("scope.patch");

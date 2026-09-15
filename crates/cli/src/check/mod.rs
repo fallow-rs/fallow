@@ -1143,7 +1143,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             quiet: opts.quiet,
             output: opts.output,
             analysis_identity: &analysis_identity,
-            change_scoped: baseline_scope_is_narrowed(opts),
+            change_scoped: baseline_scope_is_narrowed(opts, config.production),
         },
     )?;
 
@@ -1604,8 +1604,11 @@ struct BaselineIo<'a> {
 /// The diff channel is resolved exactly as `apply_scope_filters` resolves it:
 /// on these commands `--diff-file` and `--diff-stdin` never reach
 /// `opts.diff_index` and arrive through the shared index instead, so reading
-/// the field alone would miss every diff-scoped run.
-fn baseline_scope_is_narrowed(opts: &CheckOptions<'_>) -> bool {
+/// the field alone would miss every diff-scoped run. Production mode counts
+/// as narrowing too: it drops test, story and dev files before analysis, and
+/// the resolved config carries the effective flag whether it came from the CLI
+/// or from the project config.
+fn baseline_scope_is_narrowed(opts: &CheckOptions<'_>, production: bool) -> bool {
     let diff_scoped = opts.diff_index.is_some()
         || (opts.use_shared_diff_index
             && crate::report::ci::diff_filter::shared_diff_index().is_some());
@@ -1616,6 +1619,7 @@ fn baseline_scope_is_narrowed(opts: &CheckOptions<'_>) -> bool {
         || opts.scope.is_some()
         || !opts.file.is_empty()
         || opts.filters.any_active()
+        || production
 }
 
 /// Save baseline and/or compare against an existing baseline.
