@@ -54,7 +54,10 @@ fn expo_router_special_files_and_exports_are_covered() {
     for (path, export) in [
         ("src/app/_layout.tsx", "default"),
         ("src/app/_layout.tsx", "ErrorBoundary"),
+        ("src/app/_layout.tsx", "SuspenseFallback"),
         ("src/app/_layout.tsx", "unstable_settings"),
+        ("src/app/_layout.tsx", "getNavOptions"),
+        ("src/app/_layout.tsx", "generateMetadata"),
         ("src/app/index.tsx", "default"),
         ("src/app/index.tsx", "ErrorBoundary"),
         ("src/app/index.tsx", "loader"),

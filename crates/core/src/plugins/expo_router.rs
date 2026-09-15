@@ -10,8 +10,11 @@ use super::{PathRule, Plugin, PluginResult, UsedExportRule, config_parser};
 const ROUTE_FILE_EXPORTS: &[&str] = &[
     "default",
     "ErrorBoundary",
+    "SuspenseFallback",
     "loader",
     "generateStaticParams",
+    "generateMetadata",
+    "getNavOptions",
     "unstable_settings",
 ];
 const API_ROUTE_EXPORTS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];

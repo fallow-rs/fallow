@@ -1070,6 +1070,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use fallow_types::discover::FileId;
+    use fallow_types::extract::{DynamicImportPattern, ModuleInfo, ModuleLoadMechanism};
     use rustc_hash::FxHashMap;
 
     use super::*;
@@ -1270,6 +1271,62 @@ mod tests {
         let cached = cache_resolved_project(Path::new("/project"), &files, &project);
 
         assert!(cached.is_none());
+    }
+
+    #[test]
+    fn cached_dynamic_pattern_targets_preserve_empty_rows() {
+        let files = vec![file(0, "/project/src/app.ts")];
+        let pattern = DynamicImportPattern {
+            prefix: "./missing/".into(),
+            suffix: Some(".ts".into()),
+            span: Span::new(0, 1),
+            mechanism: ModuleLoadMechanism::EsModule,
+        };
+        let module = ModuleInfo {
+            dynamic_import_patterns: vec![pattern.clone()],
+            ..ModuleInfo::empty(FileId(0))
+        };
+        let resolved = ResolvedProject {
+            modules: vec![ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/app.ts"),
+                resolved_dynamic_patterns: vec![(pattern, Vec::new())],
+                ..ResolvedModule::default()
+            }],
+            replaced_module_targets: Vec::new(),
+        };
+
+        let cached = cache_resolved_project(Path::new("/project"), &files, &resolved)
+            .expect("all dynamic pattern targets should have stable keys");
+        let restored = restore_resolved_project(
+            Path::new("/project"),
+            std::slice::from_ref(&module),
+            &files,
+            &cached,
+        )
+        .expect("cached dynamic pattern rows should align with extracted patterns");
+
+        assert_eq!(restored.modules[0].resolved_dynamic_patterns.len(), 1);
+        assert!(
+            restored.modules[0].resolved_dynamic_patterns[0]
+                .1
+                .is_empty()
+        );
+
+        let mut sparse_cached = cached;
+        sparse_cached.modules[0]
+            .resolved_dynamic_pattern_targets
+            .clear();
+        assert!(
+            restore_resolved_project(
+                Path::new("/project"),
+                std::slice::from_ref(&module),
+                &files,
+                &sparse_cached,
+            )
+            .is_none(),
+            "version-50 sparse rows must take the safe cache-miss path"
+        );
     }
 
     #[test]

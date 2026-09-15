@@ -1110,14 +1110,22 @@ fn dynamic_patterns_matches_files_in_dir() {
 }
 
 #[test]
-fn dynamic_patterns_no_matches_returns_empty() {
+fn dynamic_patterns_no_matches_preserves_empty_target_row() {
     let from_dir = Path::new("/project/src");
-    let patterns = vec![DynamicImportPattern {
-        prefix: "./locales/".into(),
-        suffix: Some(".json".into()),
-        span: dummy_span(),
-        mechanism: ModuleLoadMechanism::EsModule,
-    }];
+    let patterns = vec![
+        DynamicImportPattern {
+            prefix: "./locales/".into(),
+            suffix: Some(".json".into()),
+            span: dummy_span(),
+            mechanism: ModuleLoadMechanism::EsModule,
+        },
+        DynamicImportPattern {
+            prefix: "./[".into(),
+            suffix: None,
+            span: dummy_span(),
+            mechanism: ModuleLoadMechanism::EsModule,
+        },
+    ];
     let canonical_paths = vec![PathBuf::from("/project/src/utils.ts")];
     let files = vec![DiscoveredFile {
         id: FileId(0),
@@ -1133,7 +1141,9 @@ fn dynamic_patterns_no_matches_returns_empty() {
         &files,
     );
 
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 2);
+    assert!(result[0].1.is_empty());
+    assert!(result[1].1.is_empty());
 }
 
 #[test]
@@ -1423,7 +1433,8 @@ fn dynamic_patterns_empty_canonical_paths() {
 
     let result =
         resolve_dynamic_patterns(&GlobMatcherCache::default(), from_dir, &patterns, &[], &[]);
-    assert!(result.is_empty());
+    assert_eq!(result.len(), 1);
+    assert!(result[0].1.is_empty());
 }
 
 #[test]

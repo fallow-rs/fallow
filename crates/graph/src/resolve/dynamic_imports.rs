@@ -215,6 +215,8 @@ impl GlobMatcherCache {
 /// Resolve dynamic import patterns via glob matching against discovered files.
 /// When canonical paths are available, uses those for matching. Otherwise falls
 /// back to raw file paths from `files` (avoids allocating a separate PathBuf vec).
+/// Every input pattern retains one output row, including empty matches, so the
+/// rows stay positional for resolver-cache restoration.
 pub(super) fn resolve_dynamic_patterns(
     glob_cache: &GlobMatcherCache,
     from_dir: &Path,
@@ -224,13 +226,16 @@ pub(super) fn resolve_dynamic_patterns(
 ) -> Vec<(DynamicImportPattern, Vec<FileId>)> {
     patterns
         .iter()
-        .filter_map(|pattern| {
+        .map(|pattern| {
             let glob_str = make_glob_from_pattern(pattern);
             // Candidates are the paths relative to `from_dir`, which carry no
             // leading "./". Stripping the prefix from the glob once lets each
             // candidate be matched as-is instead of allocating a "./"-prefixed
             // String per file per pattern.
-            let matcher = glob_cache.get(glob_str.strip_prefix("./").unwrap_or(&glob_str))?;
+            let Some(matcher) = glob_cache.get(glob_str.strip_prefix("./").unwrap_or(&glob_str))
+            else {
+                return (pattern.clone(), Vec::new());
+            };
             let matched: Vec<FileId> = if canonical_paths.is_empty() {
                 files
                     .iter()
@@ -253,11 +258,7 @@ pub(super) fn resolve_dynamic_patterns(
                     .map(|(idx, _)| files[idx].id)
                     .collect()
             };
-            if matched.is_empty() {
-                None
-            } else {
-                Some((pattern.clone(), matched))
-            }
+            (pattern.clone(), matched)
         })
         .collect()
 }
