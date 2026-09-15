@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789496489023,
+  "lastUpdate": 1789498169490,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "bf98a4270ab5ce6fb9aca1e5c92a51da6dde2023",
-          "message": "chore(docker): pin Dockerfile to v3.19.0",
-          "timestamp": "2026-08-27T11:55:55+02:00",
-          "tree_id": "55c52365376ec9d37614cbefdb1f12aac052f1eb",
-          "url": "https://github.com/fallow-rs/fallow/commit/bf98a4270ab5ce6fb9aca1e5c92a51da6dde2023"
-        },
-        "date": 1787824924010,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9748781,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49349,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1190764,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8455,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8114,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "80ea4e5198b68bd42ef527d2e638dad44081374a",
+          "message": "test(lsp): canonicalize the watched-config test root through the Windows-safe helper\n\nstd::fs::canonicalize yields a verbatim path on Windows, so the file URI the test waited on never matched the URI the server publishes and the Windows job failed on the first diagnostic. The test now uses the same helper as the other LSP tests.",
+          "timestamp": "2026-09-15T20:43:15+02:00",
+          "tree_id": "f56f96766246835fd2bb79ec57975d23410251d5",
+          "url": "https://github.com/fallow-rs/fallow/commit/80ea4e5198b68bd42ef527d2e638dad44081374a"
+        },
+        "date": 1789498165074,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9924380,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51229,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1193193,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8435,
             "unit": "allocations"
           }
         ]
