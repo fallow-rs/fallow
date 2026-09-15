@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789498083138,
+  "lastUpdate": 1789501364217,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "Patrick.Leong.Shaw@gmail.com",
-            "name": "Patrick Shaw",
-            "username": "PatrickShaw"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8c3c5b7d9a26ff5e0a6c7393edcde3aaeab1397f",
-          "message": "perf(graph): cut tsconfig cache lock contention on large monorepos (#2437)\n\nImport resolution on large project-reference monorepos is faster: the per-run tsconfig and canonicalize caches no longer serialize every lookup behind a single lock or deep-copy the parsed document on every hit. Cached entries are handed back as Arc values, so a hit costs a refcount bump instead of cloning the whole parsed tsconfig on each hop of a chain that is walked several times per import specifier.\n\nThanks to @PatrickShaw for the contribution.",
-          "timestamp": "2026-08-27T21:49:35+02:00",
-          "tree_id": "c0afb4d8d82e1cf3503e5d52ea9af25403799106",
-          "url": "https://github.com/fallow-rs/fallow/commit/8c3c5b7d9a26ff5e0a6c7393edcde3aaeab1397f"
-        },
-        "date": 1787860512832,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/80ea4e5198b68bd42ef527d2e638dad44081374a"
         },
         "date": 1789498079909,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 478,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1307,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "8102e22e0afcc70fb518cd26ea1a2f18f5d710ff",
+          "message": "chore: release v3.26.0",
+          "timestamp": "2026-09-15T21:40:27+02:00",
+          "tree_id": "6e3085f55cd4967cfb8184193c170c651b79f792",
+          "url": "https://github.com/fallow-rs/fallow/commit/8102e22e0afcc70fb518cd26ea1a2f18f5d710ff"
+        },
+        "date": 1789501359949,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
