@@ -1,90 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789385350812,
+  "lastUpdate": 1789469771880,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "id": "65e53f7f3a21226a1a36f2289d3c2be080b5037f",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v2.89.0",
-          "timestamp": "2026-06-05T17:03:16Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/65e53f7f3a21226a1a36f2289d3c2be080b5037f"
-        },
-        "date": 1780734812508,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Agreement Rate",
-            "value": 1.9,
-            "unit": "%"
-          },
-          {
-            "name": "Agreed Issues",
-            "value": 593,
-            "unit": "issues"
-          },
-          {
-            "name": "Fallow Total",
-            "value": 30362,
-            "unit": "issues"
-          },
-          {
-            "name": "Knip Total",
-            "value": 2028,
-            "unit": "issues"
-          },
-          {
-            "name": "fastify Agreement",
-            "value": 6.1,
-            "unit": "%"
-          },
-          {
-            "name": "next.js Agreement",
-            "value": 1.7,
-            "unit": "%"
-          },
-          {
-            "name": "preact Agreement",
-            "value": 4.2,
-            "unit": "%"
-          },
-          {
-            "name": "query Agreement",
-            "value": 0,
-            "unit": "%"
-          },
-          {
-            "name": "svelte Agreement",
-            "value": 0.3,
-            "unit": "%"
-          },
-          {
-            "name": "vite Agreement",
-            "value": 6.9,
-            "unit": "%"
-          },
-          {
-            "name": "vue-core Agreement",
-            "value": 24.3,
-            "unit": "%"
-          },
-          {
-            "name": "zod Agreement",
-            "value": 2.8,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -8164,6 +8082,88 @@ window.BENCHMARK_DATA = {
           {
             "name": "next.js Agreement",
             "value": 1.7,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 4.4,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "vite Agreement",
+            "value": 5.9,
+            "unit": "%"
+          },
+          {
+            "name": "vue-core Agreement",
+            "value": 23.4,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 1.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "2c58e501eb11aaae5749310e6c8c2608b7992603",
+          "message": "docs(changelog): record the five external-issue fixes awaiting release (#2639)\n\nEntries for the JSONC schema hint (#2623), the recursive build ignore\n(#2622), the dead-code baseline staleness warning and its scope guard\n(#2627), the istanbul nested-function ownership fix (#2620) and the editor\nrule-override fix (#2621). Kept out of the fix branches so they do not\nconflict with each other on this file.",
+          "timestamp": "2026-09-15T06:40:29Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/2c58e501eb11aaae5749310e6c8c2608b7992603"
+        },
+        "date": 1789469761259,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.5,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 484,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 29724,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 2003,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 4.9,
+            "unit": "%"
+          },
+          {
+            "name": "next.js Agreement",
+            "value": 1.4,
             "unit": "%"
           },
           {
