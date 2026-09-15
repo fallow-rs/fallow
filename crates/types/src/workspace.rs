@@ -211,9 +211,13 @@ pub enum WorkspaceDiagnosticKind {
     /// grows by at most the number of built-in patterns on a project of any
     /// size. `path` anchors at the directory holding the most excluded files
     /// for that pattern, ties broken by the lexicographically first path, so
-    /// two runs on one tree report the same location. `file_count` still spans
-    /// every directory the pattern matched, so it can exceed what that one
-    /// directory holds.
+    /// two runs on one tree report the same location. That directory is the
+    /// largest group and not a majority: a flat monorepo can spread ten
+    /// excluded files over ten sibling `dist/` directories and every one of
+    /// them is then "the largest". `file_count` spans all of them, and
+    /// `directory_count` says how many there were, so a reader can tell a
+    /// single tree from a scattered one without a directory list in the
+    /// payload.
     ///
     /// Two properties of the population are load-bearing and easy to misread:
     ///
@@ -227,8 +231,15 @@ pub enum WorkspaceDiagnosticKind {
     ///   ignore set is the union of `ignorePatterns` and the built-ins, so a
     ///   file both matched was an explicit project choice and is attributed to
     ///   no pattern here. The union also only ever adds: `ignorePatterns`
-    ///   cannot negate a built-in, so the message advertises `fallow --root`
-    ///   against the excluded directory rather than a config edit.
+    ///   cannot negate a built-in, so a config edit is never the remedy.
+    /// - **The remedy depends on the pattern's shape.** A directory-shaped
+    ///   built-in (`**/dist/**`) is matched against the path relative to the
+    ///   run root, so re-rooting inside the matched directory removes the
+    ///   matched segment and the files become visible: the message advertises
+    ///   `fallow --root <dir>`. A file-shaped built-in (`**/*.min.js` and the
+    ///   three other bundle globs) matches on the file name and keeps matching
+    ///   at any root, so the message says so and points at renaming instead of
+    ///   handing out a command that provably does nothing.
     ///
     /// Deliberately NOT one of the [`Self::source_never_analyzed`] kinds. These
     /// exclusions are the product's designed behavior on generated output, not
@@ -244,6 +255,10 @@ pub enum WorkspaceDiagnosticKind {
         /// every directory it matched, not just the one `path` anchors at.
         /// Exact: the walk counts each excluded candidate once.
         file_count: u32,
+        /// Distinct directories those files sat in, `path` included. Exact,
+        /// and `1` whenever the exclusion is one contained tree. Anything
+        /// higher says `path` names a fraction of the excluded source.
+        directory_count: u32,
     },
 }
 
@@ -704,6 +719,27 @@ fn display_relative(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+/// The first segment of a glob that contains no glob metacharacter, so it
+/// names a real directory rather than a wildcard.
+///
+/// Source discovery uses it to decide which directory a built-in ignore
+/// pattern excluded a file "at"; [`render_message`] uses it to decide which
+/// remedy is true for that pattern. The two have to agree, so the function
+/// lives here rather than once per crate: a pattern with such a segment
+/// (`**/dist/**`) is lifted by re-rooting inside the matched directory,
+/// because the glob is matched against the path relative to the run root. A
+/// pattern without one (`**/*.min.js`) matches on the file name and keeps
+/// matching at every root.
+#[must_use]
+pub fn glob_first_literal_segment(pattern: &str) -> Option<&str> {
+    pattern.split('/').find(|segment| {
+        !segment.is_empty()
+            && !segment.contains(['*', '?', '[', ']', '{', '}'])
+            && *segment != "."
+            && *segment != ".."
+    })
+}
+
 fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> String {
     let display = display_relative(root, path);
     match kind {
@@ -813,29 +849,55 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
             pattern,
             file_count,
+            directory_count,
         } => {
+            // `path` is a location, and an empty string is not one: a built-in
+            // that matched a file sitting directly at the analysis root
+            // anchors at the root itself.
+            let display = if display.is_empty() {
+                ".".to_owned()
+            } else {
+                display
+            };
             // The payload carries no directory list, so the message names the
-            // one directory `path` anchors at. With more than one excluded
-            // directory it is the largest group, which is the location worth
-            // acting on first and the one the `--root` remedy applies to.
-            let (location, subject) = if *file_count == 1 {
-                (
-                    format!("Skipped 1 source file under '{display}'"),
-                    "it matches",
+            // one directory `path` anchors at. With several excluded
+            // directories that is the largest group and NOT a majority, so the
+            // sentence says which claim it is making and how many directories
+            // it is leaving unnamed.
+            let location = if *directory_count > 1 {
+                format!(
+                    "Skipped {file_count} source files across {directory_count} directories, \
+                     the largest group under '{display}'"
+                )
+            } else if *file_count == 1 {
+                format!("Skipped 1 source file under '{display}'")
+            } else {
+                format!("Skipped {file_count} source files under '{display}'")
+            };
+            let singular = *file_count == 1 && *directory_count <= 1;
+            let (subject, effect) = if singular {
+                ("it matches", "it imports, exports, or defines")
+            } else {
+                ("they match", "they import, export, or define")
+            };
+            // Only a directory-shaped built-in is lifted by re-rooting. Telling
+            // a user with a `vendor/lib.min.js` to run `fallow --root vendor`
+            // hands them a command that excludes the same file again.
+            let remedy = if glob_first_literal_segment(pattern).is_some() {
+                format!(
+                    "Move first-party source out of the matched directory, or analyze that \
+                     directory on its own with fallow --root {display}."
                 )
             } else {
-                (
-                    format!(
-                        "Skipped {file_count} source files, the most of them under '{display}'"
-                    ),
-                    "they match",
-                )
+                "This pattern matches a file name rather than a directory, so re-running under \
+                 a different --root excludes the same files again. Rename first-party source \
+                 that only looks generated, dropping the '.min' or '.bundle' infix."
+                    .to_owned()
             };
             format!(
                 "{location}: {subject} fallow's built-in ignore pattern '{pattern}', so nothing \
-                 they import, export, or define is visible to this run. Built-in ignores cannot \
-                 be switched off through ignorePatterns. Move first-party source out of the \
-                 matched directory, or analyze it on its own with fallow --root {display}."
+                 {effect} is visible to this run. Built-in ignores cannot be switched off \
+                 through ignorePatterns. {remedy}"
             )
         }
     }
@@ -1420,6 +1482,7 @@ mod tests {
         let kind = WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
             pattern: "**/build/**".to_owned(),
             file_count: 3,
+            directory_count: 1,
         };
         assert!(!kind.source_never_analyzed());
     }
@@ -1433,6 +1496,7 @@ mod tests {
         let kind = WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
             pattern: "**/build/**".to_owned(),
             file_count: 3,
+            directory_count: 1,
         };
         assert!(!kind.warns_on_stderr());
     }
@@ -1446,6 +1510,7 @@ mod tests {
         let kind = WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
             pattern: "**/build/**".to_owned(),
             file_count: 3,
+            directory_count: 1,
         };
         assert!(kind.is_source_discovery());
         assert!(kind.is_source_walk_recorded());
@@ -1466,6 +1531,7 @@ mod tests {
             WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
                 pattern: "**/build/**".to_owned(),
                 file_count: 4,
+                directory_count: 1,
             },
         );
         assert!(diag.message.contains("**/build/**"), "{}", diag.message);
@@ -1497,6 +1563,7 @@ mod tests {
             WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
                 pattern: "**/dist/**".to_owned(),
                 file_count: 1,
+                directory_count: 1,
             },
         );
         assert!(
@@ -1506,6 +1573,105 @@ mod tests {
             diag.message
         );
         assert!(diag.message.contains("it matches"), "{}", diag.message);
+        assert!(
+            diag.message
+                .contains("nothing it imports, exports, or defines"),
+            "the whole sentence agrees in number, not just its first clause: {}",
+            diag.message
+        );
+    }
+
+    /// The anchor directory is the largest group, never a majority: ten
+    /// packages each holding one excluded file make every one of them "the
+    /// largest", and a message claiming otherwise is false on exactly the flat
+    /// monorepo shape issue #2638 is about.
+    #[test]
+    fn a_scattered_exclusion_names_the_largest_group_and_counts_the_directories() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join("packages/a/dist"),
+            WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+                pattern: "**/dist/**".to_owned(),
+                file_count: 10,
+                directory_count: 10,
+            },
+        );
+        assert!(
+            diag.message.starts_with(
+                "Skipped 10 source files across 10 directories, the largest group under \
+                 'packages/a/dist'"
+            ),
+            "{}",
+            diag.message
+        );
+        assert!(
+            !diag.message.contains("the most of them"),
+            "a max-of-group is not a majority: {}",
+            diag.message
+        );
+    }
+
+    /// A file-shaped built-in matches on the file name, so the `--root` remedy
+    /// the directory-shaped patterns get would re-exclude the same file. The
+    /// message must not print a command that provably does nothing.
+    #[test]
+    fn a_file_shaped_pattern_does_not_advertise_the_root_remedy() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join("vendor"),
+            WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+                pattern: "**/*.min.js".to_owned(),
+                file_count: 2,
+                directory_count: 1,
+            },
+        );
+        assert!(
+            !diag.message.contains("fallow --root"),
+            "the message explains why re-rooting fails, it does not prescribe it: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("matches a file name"),
+            "the message says why: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("Rename"),
+            "and names the remedy that does work: {}",
+            diag.message
+        );
+    }
+
+    /// A built-in that matched a file sitting directly at the analysis root
+    /// anchors at the root, and an empty string is not a location.
+    #[test]
+    fn a_root_anchored_exclusion_renders_its_location_as_dot() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.to_path_buf(),
+            WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+                pattern: "**/*.min.js".to_owned(),
+                file_count: 1,
+                directory_count: 1,
+            },
+        );
+        assert!(
+            diag.message.starts_with("Skipped 1 source file under '.'"),
+            "{}",
+            diag.message
+        );
+    }
+
+    #[test]
+    fn glob_first_literal_segment_skips_wildcards_and_dot_components() {
+        assert_eq!(glob_first_literal_segment("**/build/**"), Some("build"));
+        assert_eq!(glob_first_literal_segment("./dist/**"), Some("dist"));
+        assert_eq!(glob_first_literal_segment("**/*.min.js"), None);
+        assert_eq!(glob_first_literal_segment("**/*.bundle.js"), None);
+        assert_eq!(glob_first_literal_segment("**/{a,b}/**"), None);
     }
 
     #[test]

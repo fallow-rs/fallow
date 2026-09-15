@@ -405,6 +405,11 @@ pub struct CheckResult {
     /// same combined run re-walks the project and clears the source-discovery
     /// entries this walk recorded (issue #2366).
     pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    /// Source files this run's walk discovered. Zero plus a non-empty
+    /// `excluded-by-default-ignore` tally is the one shape that earns a
+    /// default stderr line: the run analyzed nothing and a built-in ignore
+    /// pattern is the reason (issue #2638).
+    pub discovered_file_count: usize,
     /// Pre-refinement dead-code audit keys captured immediately before the
     /// type-aware pass mutated `results`. `None` when type-aware analysis was
     /// not enabled. The audit gate uses this identity-independent set to fall
@@ -475,6 +480,7 @@ struct CheckAnalysisData {
     retained_files: Option<Vec<DiscoveredFile>>,
     workspaces: Vec<WorkspaceInfo>,
     workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    discovered_file_count: usize,
     script_used_packages: rustc_hash::FxHashSet<String>,
 }
 
@@ -490,6 +496,7 @@ fn check_data_from_artifacts(
         retained_files: output.files,
         workspaces: session.workspaces().to_vec(),
         workspace_diagnostics: session.current_workspace_diagnostics(),
+        discovered_file_count: session.files().len(),
         script_used_packages: output.script_used_packages,
     }
 }
@@ -506,6 +513,7 @@ fn check_data_from_plain_artifacts(
         retained_files: None,
         workspaces: session.workspaces().to_vec(),
         workspace_diagnostics: session.current_workspace_diagnostics(),
+        discovered_file_count: session.files().len(),
         script_used_packages: output.script_used_packages,
     }
 }
@@ -930,6 +938,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         mut retained_files,
         workspaces,
         workspace_diagnostics,
+        discovered_file_count,
         script_used_packages,
     } = data;
 
@@ -990,6 +999,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         type_coupling,
         type_aware_warnings,
         workspace_diagnostics,
+        discovered_file_count,
         explain_skipped: opts.explain_skipped,
         syntactic_dead_code_keys,
         impact_closure: None,
@@ -1554,6 +1564,13 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     if !opts.quiet && matches!(opts.output, OutputFormat::Human) {
         crate::combined::print_entry_point_summary(&result.results);
     }
+    crate::discovery_note::print_all_source_excluded_warning(
+        &result.workspace_diagnostics,
+        result.discovered_file_count,
+        result.explain_skipped,
+        opts.quiet,
+        opts.output,
+    );
     crate::discovery_note::print_default_ignore_exclusion_note(
         opts.root,
         &result.workspace_diagnostics,

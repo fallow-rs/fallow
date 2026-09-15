@@ -198,6 +198,19 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
         eprintln!("{scope}");
     }
 
+    // Preamble, not epilogue: check and the combined run both print this note
+    // before their findings, and wedged between audit's two result lines it was
+    // the same note in the least scannable place on the page.
+    if let Some(ref check) = result.check {
+        crate::discovery_note::print_default_ignore_exclusion_note(
+            &check.config.root,
+            &check.workspace_diagnostics,
+            check.explain_skipped,
+            quiet,
+            check.config.output,
+        );
+    }
+
     let has_check_issues = result.summary.dead_code_issues > 0;
     let has_health_findings = result.summary.complexity_findings > 0;
     let has_dupe_groups = result.summary.duplication_clone_groups > 0;
@@ -219,16 +232,6 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
     if !has_dupe_groups && let Some(ref dupes) = result.dupes {
         crate::dupes::print_default_ignore_note(dupes, quiet);
         crate::dupes::print_min_occurrences_note(dupes, quiet);
-    }
-
-    if let Some(ref check) = result.check {
-        crate::discovery_note::print_default_ignore_exclusion_note(
-            &check.config.root,
-            &check.workspace_diagnostics,
-            check.explain_skipped,
-            quiet,
-            check.config.output,
-        );
     }
 
     if !quiet {

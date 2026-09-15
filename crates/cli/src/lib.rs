@@ -456,7 +456,8 @@ struct Cli {
     #[arg(hide_short_help = true, long, global = true)]
     explain: bool,
 
-    /// Show per-pattern counts for files skipped by built-in ignores (duplicates and discovery).
+    /// Show per-pattern counts for skipped files: default duplicate ignores on dupes
+    /// and audit, built-in discovery ignores on check, dead-code, audit and the default run.
     #[arg(hide_short_help = true, long, global = true)]
     explain_skipped: bool,
 

@@ -701,6 +701,7 @@ mod tests {
             WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
                 pattern: "**/build/**".to_owned(),
                 file_count: 12,
+                directory_count: 1,
             },
         )];
 

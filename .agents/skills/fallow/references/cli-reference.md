@@ -213,7 +213,7 @@ By default, `fallow dupes` skips generated framework output matching `**/.next/*
 | `--skip-local` | bool | `false` | Only report cross-directory duplicates |
 | `--cross-language` | bool | `false` | Strip type annotations for TS↔JS matching |
 | `--ignore-imports` | bool | `false` | Exclude import declarations from clone detection |
-| `--explain-skipped` | bool | `false` | Human/markdown only: show per-pattern counts for files skipped by built-in ignores, both the default duplicates ignores and the built-in discovery ignores that removed source files from the walk |
+| `--explain-skipped` | bool | `false` | Human/markdown only: show per-pattern counts for files skipped by the default duplicates ignores. The same flag reports source files removed by the built-in discovery ignores, on `check`, `dead-code`, `audit` and the default run |
 | `--no-fragments` | bool | `false` | JSON only: omit `clone_groups[].instances[].fragment`, the verbatim source text. `file` plus the line and column range address the same code. The MCP `find_dupes` tool suppresses it by default; pass `include_fragments: true` there to get it back. |
 | `--trace` | `FILE:LINE` \| `dup:<fp>` | — | Deep-dive clones. `FILE:LINE` traces all clones at a location; `dup:<id>` traces a clone group by the stable fingerprint shown in the listing and on `clone_groups[].fingerprint` in JSON. Fingerprints are usually `dup:<8hex>` and widen only on rare report collisions. Trace output adds an extract-function suggestion, estimated savings, and a best-effort proposed name per group |
 | `--changed-since` | string | — | Only report duplication in files changed since a git ref |

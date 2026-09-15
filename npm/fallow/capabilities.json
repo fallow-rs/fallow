@@ -255,7 +255,7 @@
       "name": "--explain-skipped",
       "type": "bool",
       "required": false,
-      "description": "Show per-pattern counts for files skipped by built-in ignores (duplicates and discovery)",
+      "description": "Show per-pattern counts for skipped files: default duplicate ignores on dupes and audit, built-in discovery ignores on check, dead-code, audit and the default run",
       "possible_values": [
         "true",
         "false"

@@ -2589,18 +2589,120 @@ fn explain_skipped_names_the_built_in_pattern_that_excluded_source_files() {
     ]);
 
     assert!(
+        output
+            .stderr
+            .contains("note: skipped 2 source files matching fallow's built-in discovery ignores:"),
+        "the note header carries the total: {}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains("    2  **/build/**  packages/web/build"),
+        "the row carries the count, the pattern, and the directory: {}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains("analyze that directory on its own: fallow --root <dir>"),
+        "a directory-shaped pattern gets the remedy that works: {}",
+        output.stderr
+    );
+}
+
+/// Issue #2638: the `--root` remedy is true for a directory-shaped built-in
+/// only. A file-name glob matches at every root, so the note must not hand the
+/// reader a command that re-excludes the same file.
+#[test]
+fn a_file_shaped_built_in_pattern_is_not_offered_the_root_remedy() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2638-file-shaped","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::create_dir_all(dir.path().join("vendor")).expect("create vendor");
+    std::fs::write(dir.path().join("vendor/lib.min.js"), "var a=1;\n").expect("write bundle");
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--no-cache",
+        "--explain-skipped",
+    ]);
+    assert!(
+        output.stderr.contains("**/*.min.js"),
+        "the note still names the pattern: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("fallow --root <dir>"),
+        "re-rooting re-excludes the same file: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("rename first-party source"),
+        "the note names the remedy that does work: {}",
+        output.stderr
+    );
+}
+
+/// Issue #2638, the headline case: the whole source tree sat under a matched
+/// directory, so the run analyzed nothing. That run says why on stderr without
+/// any flag, because a green "No issues found" is the misleading answer.
+#[test]
+fn a_run_whose_whole_source_tree_was_excluded_says_so_by_default() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2638-all-excluded","private":true}"#,
+    )
+    .expect("write package.json");
+    std::fs::create_dir_all(dir.path().join("build/src")).expect("create excluded tree");
+    for name in ["a.ts", "b.ts", "c.ts"] {
+        std::fs::write(
+            dir.path().join("build/src").join(name),
+            "export const excluded = 1;\n",
+        )
+        .expect("write excluded source");
+    }
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+
+    let output = run_fallow_raw(&["dead-code", "--root", root, "--no-cache"]);
+    assert!(
+        output.stderr.contains("No source files were analyzed"),
+        "the default run names the outcome: {}",
+        output.stderr
+    );
+    assert!(
         output.stderr.contains("**/build/**"),
-        "the note names the pattern: {}",
+        "and the pattern responsible: {}",
         output.stderr
     );
     assert!(
-        output.stderr.contains("packages/web/build"),
-        "the note names the directory: {}",
+        output.stderr.contains("--explain-skipped"),
+        "and where the breakdown lives: {}",
         output.stderr
     );
+}
+
+/// The guard that keeps the line above off every healthy project: a run that
+/// discovered even one source file goes back to saying nothing by default.
+#[test]
+fn a_run_that_discovered_source_stays_silent_about_exclusions_by_default() {
+    let dir = default_ignore_exclusion_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let output = run_fallow_raw(&["dead-code", "--root", root, "--no-cache"]);
+
     assert!(
-        output.stderr.contains('2'),
-        "the note carries the count: {}",
+        !output.stderr.contains("No source files were analyzed"),
+        "one discovered file is enough to have something to report: {}",
         output.stderr
     );
 }
@@ -2674,8 +2776,54 @@ fn dead_code_json_carries_the_excluded_by_default_ignore_diagnostic() {
         );
         assert_eq!(reported[0]["pattern"], "**/build/**");
         assert_eq!(reported[0]["file_count"], 2);
+        assert_eq!(reported[0]["directory_count"], 1);
         assert_eq!(reported[0]["path"], "packages/web/build");
     }
+}
+
+/// Issue #2638: a built-in that matched a file sitting directly at the analysis
+/// root anchors at the root, and `root.join("")` is the root itself. The
+/// analysis envelopes' post-serialisation strip only removes a
+/// `root + separator` prefix, so an absolute host path would reach JSON here.
+#[test]
+fn a_root_anchored_exclusion_reports_a_relative_path_and_a_real_location() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2638-root-anchored","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::write(dir.path().join("app.min.js"), "var a=1;\n").expect("write bundle");
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+
+    let json = parse_json(&run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+    let reported = combined_root_diagnostics_of_kind(&json, "excluded-by-default-ignore");
+    assert_eq!(reported.len(), 1, "{}", json["workspace_diagnostics"]);
+    assert_eq!(
+        reported[0]["path"], ".",
+        "the contract is project-root-relative: {}",
+        reported[0]
+    );
+    let message = reported[0]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.starts_with("Skipped 1 source file under '.'"),
+        "an empty string is not a location: {message}"
+    );
+    assert!(
+        !message.contains(root),
+        "no host path reaches the message either: {message}"
+    );
 }
 
 /// Issue #2638 (AC6): combined mode's per-analysis config reloads must not wipe

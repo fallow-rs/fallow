@@ -6,6 +6,7 @@ use fallow_config::{
     DEFAULT_IGNORE_PATTERNS, ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
 };
 use fallow_types::discover::{DiscoveredFile, FileId};
+use fallow_types::workspace::glob_first_literal_segment;
 use ignore::WalkBuilder;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -42,15 +43,17 @@ type SkippedDotdirSink = Arc<Mutex<Vec<PathBuf>>>;
 ///
 /// The scope map is deliberately uncapped, and its size is not the risk it
 /// looks like. For a directory-shaped pattern every file under one matched
-/// directory collapses to a single key (`**/node_modules/**` contributes one
-/// entry per `node_modules` root, not one per vendored package), and only the
-/// file-shaped patterns (`**/*.min.js` and friends) key on a file's parent, on
-/// files that are rare by construction. The map is therefore strictly smaller
-/// than the file list the same walk already holds. A ceiling would buy nothing
-/// and would cost determinism: the parallel walk fills per-thread maps in
+/// directory collapses to a single key, the one built-in that could span a
+/// whole dependency tree is never tallied at all (see
+/// [`UNREPORTED_DEFAULT_IGNORES`]), and only the file-shaped patterns
+/// (`**/*.min.js` and friends) key on a file's parent, on files that are rare
+/// by construction. The map is therefore strictly smaller than the file list
+/// the same walk already holds. A ceiling would buy nothing and would cost
+/// both determinism and honesty: the parallel walk fills per-thread maps in
 /// nondeterministic order, so "the first N directories" is not a stable set,
-/// and the anchor directory picked from a truncated set would differ between
-/// runs of the same command.
+/// the anchor picked from a truncated set would differ between runs of the
+/// same command, and `directory_count` would become a floor rather than a
+/// count.
 #[derive(Default)]
 struct ExcludedByPattern {
     /// Candidate source files this pattern excluded. Exact.
@@ -70,6 +73,13 @@ impl ExcludedByPattern {
         for (scope, count) in other.scopes {
             *self.scopes.entry(scope).or_insert(0) += count;
         }
+    }
+
+    /// Distinct directories this pattern excluded files from. Exact, and the
+    /// number the message needs to say whether [`Self::anchor`] names the
+    /// whole exclusion or one group of many.
+    fn directory_count(&self) -> u32 {
+        u32::try_from(self.scopes.len()).unwrap_or(u32::MAX)
     }
 
     /// The directory this pattern excluded the most files from, ties broken by
@@ -92,6 +102,18 @@ impl ExcludedByPattern {
 /// [`DEFAULT_IGNORE_PATTERNS`].
 type ExclusionTally = FxHashMap<usize, ExcludedByPattern>;
 
+/// Built-in ignore patterns whose exclusions are never reported (issue #2638).
+///
+/// The diagnostic exists to say "first-party source of yours was dropped".
+/// `**/node_modules/**` drops installed dependencies, which are nobody's
+/// first-party source: on a project whose `node_modules` is not gitignored it
+/// would report a five-figure count whose only honest remedy is "that is your
+/// dependency tree", and it would be the one built-in able to dominate the
+/// walk's memory with per-package scope directories. `**/.git/**` cannot fire
+/// at all, because hidden directories are not traversed; it is listed so the
+/// two exclusions read as one policy rather than as an accident.
+const UNREPORTED_DEFAULT_IGNORES: &[&str] = &["**/node_modules/**", "**/.git/**"];
+
 /// The directory a built-in pattern excluded a file "at": the shortest prefix
 /// of the file's project-relative path ending in the pattern's first literal
 /// segment, or the file's parent when the pattern has no literal segment.
@@ -103,7 +125,7 @@ type ExclusionTally = FxHashMap<usize, ExcludedByPattern>;
 /// path, which the diagnostic renders as the root itself.
 fn exclusion_scope(relative: &Path, pattern: &str) -> PathBuf {
     let parent = || relative.parent().map(Path::to_path_buf).unwrap_or_default();
-    let Some(literal) = first_literal_segment(pattern) else {
+    let Some(literal) = glob_first_literal_segment(pattern) else {
         return parent();
     };
     let mut scope = PathBuf::new();
@@ -114,17 +136,6 @@ fn exclusion_scope(relative: &Path, pattern: &str) -> PathBuf {
         }
     }
     parent()
-}
-
-/// The first path segment of a glob that contains no glob metacharacters, so
-/// it names a real directory rather than a wildcard.
-fn first_literal_segment(pattern: &str) -> Option<&str> {
-    pattern.split('/').find(|segment| {
-        !segment.is_empty()
-            && !segment.contains(['*', '?', '[', ']', '{', '}'])
-            && *segment != "."
-            && *segment != ".."
-    })
 }
 
 /// Number of example file paths named in the aggregated skipped-large-file and
@@ -644,14 +655,24 @@ fn report_default_ignore_exclusions(
         .filter_map(|index| {
             let excluded = tally.get(&index)?;
             let pattern = DEFAULT_IGNORE_PATTERNS.get(index)?;
-            Some(WorkspaceDiagnostic::new(
-                &config.root,
-                config.root.join(excluded.anchor()),
-                WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
-                    pattern: (*pattern).to_owned(),
-                    file_count: excluded.file_count,
-                },
-            ))
+            Some(
+                WorkspaceDiagnostic::new(
+                    &config.root,
+                    config.root.join(excluded.anchor()),
+                    WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+                        pattern: (*pattern).to_owned(),
+                        file_count: excluded.file_count,
+                        directory_count: excluded.directory_count(),
+                    },
+                )
+                // A file-shaped built-in that matched a file directly at the
+                // analysis root anchors at the root, and `root.join("")` is the
+                // root itself. The analysis envelopes' post-serialisation strip
+                // only removes a `root + separator` prefix, so without this the
+                // entry would carry the absolute host path into every JSON
+                // surface while its siblings render `.`.
+                .into_root_relative(&config.root),
+            )
         })
         .collect()
 }
@@ -937,6 +958,17 @@ impl FileVisitor<'_> {
     /// Runs only on files `is_match` already rejected, so the kept-file path
     /// still pays a single boolean match.
     fn record_default_ignore_exclusion(&mut self, relative: &Path) {
+        // Cheap pre-filter, not a second rule: `**/node_modules/**` is in
+        // UNREPORTED_DEFAULT_IGNORES, and it is also the one built-in that
+        // fires on an entire dependency tree. Testing a path component beats
+        // running the whole glob union over tens of thousands of files whose
+        // attribution the report would then discard.
+        if relative
+            .components()
+            .any(|component| component.as_os_str() == OsStr::new("node_modules"))
+        {
+            return;
+        }
         self.match_buf.clear();
         self.ignore_patterns
             .matches_into(relative, &mut self.match_buf);
@@ -954,6 +986,9 @@ impl FileVisitor<'_> {
         else {
             return;
         };
+        if UNREPORTED_DEFAULT_IGNORES.contains(pattern) {
+            return;
+        }
         self.excluded_local
             .entry(first - self.user_ignore_pattern_count)
             .or_default()
@@ -1501,7 +1536,8 @@ mod tests {
                 "**/node_modules/**"
             ),
             PathBuf::from("node_modules"),
-            "one entry per vendored root, not one per package"
+            "the helper is shape-only: `**/node_modules/**` is never tallied, \
+             but a directory-shaped pattern still collapses to its literal segment"
         );
     }
 
@@ -1541,12 +1577,21 @@ mod tests {
         );
     }
 
+    /// Issue #2638: `directory_count` distinguishes one contained tree from an
+    /// exclusion scattered over sibling packages, which is what keeps the
+    /// rendered message from claiming a majority it does not have.
     #[test]
-    fn first_literal_segment_skips_wildcards_and_dot_components() {
-        assert_eq!(first_literal_segment("**/build/**"), Some("build"));
-        assert_eq!(first_literal_segment("**/*.min.js"), None);
-        assert_eq!(first_literal_segment("./dist/**"), Some("dist"));
-        assert_eq!(first_literal_segment("**/{a,b}/**"), None);
+    fn the_directory_count_is_the_number_of_distinct_scopes() {
+        let mut one_tree = ExcludedByPattern::default();
+        one_tree.record(PathBuf::from("packages/web/build"));
+        one_tree.record(PathBuf::from("packages/web/build"));
+        assert_eq!(one_tree.file_count, 2);
+        assert_eq!(one_tree.directory_count(), 1);
+
+        let mut scattered = ExcludedByPattern::default();
+        scattered.record(PathBuf::from("packages/a/dist"));
+        scattered.record(PathBuf::from("packages/b/dist"));
+        assert_eq!(scattered.directory_count(), 2);
     }
 
     /// Issue #2638 (AC2): the anchor is the directory with the most excluded

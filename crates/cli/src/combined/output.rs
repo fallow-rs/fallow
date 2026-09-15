@@ -487,6 +487,13 @@ fn print_human_sections(
     // once per analysis and a registry read answers "whichever walk wrote
     // last" (issue #2366).
     if let Some(result) = check_result {
+        crate::discovery_note::print_all_source_excluded_warning(
+            &result.workspace_diagnostics,
+            result.discovered_file_count,
+            result.explain_skipped,
+            opts.quiet,
+            opts.output,
+        );
         crate::discovery_note::print_default_ignore_exclusion_note(
             opts.root,
             &result.workspace_diagnostics,

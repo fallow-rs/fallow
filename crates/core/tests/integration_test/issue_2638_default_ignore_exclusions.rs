@@ -6,8 +6,8 @@
 //! The walk now records one `excluded-by-default-ignore` diagnostic per
 //! built-in pattern that excluded at least one candidate source file. These
 //! tests are written on the serialized diagnostic rather than on the typed
-//! variant, because the wire shape (`kind`, `pattern`, `file_count`, `path`)
-//! is the contract the issue asks for.
+//! variant, because the wire shape (`kind`, `pattern`, `file_count`,
+//! `directory_count`, `path`) is the contract the issue asks for.
 
 use std::fs;
 use std::path::Path;
@@ -63,6 +63,7 @@ fn a_built_in_pattern_that_excluded_source_files_is_reported_once_with_an_exact_
     assert_eq!(reported[0]["kind"], KIND);
     assert_eq!(reported[0]["pattern"], "**/build/**");
     assert_eq!(reported[0]["file_count"], 2);
+    assert_eq!(reported[0]["directory_count"], 1);
     assert_eq!(reported[0]["path"], "packages/web/build");
     let message = reported[0]["message"]
         .as_str()
@@ -170,6 +171,103 @@ fn non_source_files_inside_an_excluded_directory_are_not_counted() {
 
     assert_eq!(reported.len(), 1, "{reported:?}");
     assert_eq!(reported[0]["file_count"], 1);
+}
+
+/// The flat monorepo shape the issue is about: ten packages each losing one
+/// file makes every `dist/` directory "the largest", so the entry has to say
+/// how many directories it is leaving unnamed instead of implying `path` holds
+/// most of them.
+#[test]
+fn an_exclusion_spread_over_sibling_packages_counts_its_directories() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+
+    write_file(root, "package.json", r#"{ "name": "issue-2638-flat" }"#);
+    write_file(root, "src/app.ts", "export const app = 1;\n");
+    for package in ["a", "b", "c"] {
+        write_file(
+            root,
+            &format!("packages/{package}/dist/gen.ts"),
+            "export const gen = 1;\n",
+        );
+    }
+
+    let config = create_config(root.to_path_buf());
+    let reported = exclusion_diagnostics(&config);
+
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert_eq!(reported[0]["file_count"], 3);
+    assert_eq!(reported[0]["directory_count"], 3);
+    assert_eq!(reported[0]["path"], "packages/a/dist");
+    let message = reported[0]["message"]
+        .as_str()
+        .expect("message is a string");
+    assert!(
+        message.contains("across 3 directories, the largest group under 'packages/a/dist'"),
+        "a max-of-group is not a majority: {message}"
+    );
+}
+
+/// A file-shaped built-in that matched a file at the analysis root anchors at
+/// the root itself, and the entry has to render that as a location rather than
+/// as an empty string or an absolute host path.
+#[test]
+fn a_root_anchored_exclusion_is_reported_relative_to_the_root() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+
+    write_file(root, "package.json", r#"{ "name": "issue-2638-root" }"#);
+    write_file(root, "src/app.ts", "export const app = 1;\n");
+    write_file(root, "app.min.js", "var a = 1;\n");
+
+    let config = create_config(root.to_path_buf());
+    let reported = exclusion_diagnostics(&config);
+
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert_eq!(reported[0]["pattern"], "**/*.min.js");
+    assert_eq!(reported[0]["path"], ".");
+    let message = reported[0]["message"]
+        .as_str()
+        .expect("message is a string");
+    assert!(
+        message.starts_with("Skipped 1 source file under '.'"),
+        "{message}"
+    );
+    assert!(
+        !message.contains("fallow --root"),
+        "the message explains why re-rooting fails, it does not prescribe it: {message}"
+    );
+}
+
+/// Installed dependencies are not the first-party source this diagnostic is
+/// about. A project that does not gitignore `node_modules` would otherwise
+/// report a five-figure count whose only honest remedy is "that is your
+/// dependency tree".
+#[test]
+fn a_non_gitignored_node_modules_tree_is_never_reported() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+
+    write_file(root, "package.json", r#"{ "name": "issue-2638-deps" }"#);
+    write_file(root, "src/app.ts", "export const app = 1;\n");
+    write_file(
+        root,
+        "node_modules/left-pad/index.js",
+        "module.exports = 1;\n",
+    );
+    write_file(
+        root,
+        "node_modules/left-pad/lib/pad.js",
+        "module.exports = 2;\n",
+    );
+
+    let config = create_config(root.to_path_buf());
+    let reported = exclusion_diagnostics(&config);
+
+    assert!(
+        reported.is_empty(),
+        "dependencies are not a surprise exclusion: {reported:?}"
+    );
 }
 
 /// A project no built-in pattern touches stays silent, which is the case that

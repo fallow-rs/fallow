@@ -433,12 +433,15 @@ workspace-package candidate filtering.
 Because the exclusion is silent by construction, the walk counts it. Every
 candidate source file a built-in pattern drops is attributed to that pattern,
 and one `excluded-by-default-ignore` workspace diagnostic per pattern reaches
-`workspace_diagnostics[]` carrying the pattern text, an exact `file_count`, and
-a `path` anchored at the directory that lost the most files. One entry per
-pattern is what keeps the array bounded on a project of any size; per-file or
-per-directory entries would scale with the tree.
+`workspace_diagnostics[]` carrying the pattern text, an exact `file_count`, a
+`directory_count`, and a `path` anchored at the directory that lost the most
+files. One entry per pattern is what keeps the array bounded on a project of
+any size; per-file or per-directory entries would scale with the tree. `path`
+names the largest group and not a majority, which is why `directory_count`
+travels with it: ten packages each losing one file to `**/dist/**` make every
+one of them "the largest".
 
-Three properties of that count are load-bearing:
+Four properties of that count are load-bearing:
 
 - Attribution reads the index layout of the compiled union. User
   `ignorePatterns` occupy `0..user_ignore_pattern_count` and
@@ -452,14 +455,33 @@ Three properties of that count are load-bearing:
 - Only excluded files pay for attribution. The kept-file path still runs a
   single `GlobSet::is_match`; `matches_into` runs on a per-thread reusable
   buffer and only for paths that match already.
+- `**/node_modules/**` is never reported. Installed dependencies are not the
+  first-party source this diagnostic is about, a project that does not gitignore
+  them would report a five-figure count with no useful remedy, and skipping the
+  attribution on a `node_modules` component keeps the dependency tree off the
+  attribution path entirely. `**/.git/**` cannot fire, since hidden directories
+  are not traversed.
 
 The diagnostic does not warn on stderr and is not a
 `source_never_analyzed` kind: these exclusions are designed behavior on
 generated output, so caveating findings would fire on most projects and make
 `fallow fix` withhold `delete-file` and `remove-export` project-wide. A human
-run mentions the counts only under `--explain-skipped`, which also widens the
-duplication note. The remedy the message advertises is `fallow --root <dir>`,
-because the compiled union cannot be negated.
+run mentions the counts only under `--explain-skipped` on `check`, `dead-code`,
+`audit` and the default run, the same flag that widens the duplication note on
+`dupes` and `audit`. The one exception is a run that discovered no source files
+at all while a built-in pattern took some: that run says so on stderr without
+the flag, because it has nothing else to report and a green result would be
+misleading.
+
+The remedy depends on the pattern's shape, and the two are not
+interchangeable. `ignorePatterns` is never the remedy, because the compiled
+union only ever adds. A directory-shaped built-in (`**/dist/**`) is matched
+against the path relative to the run root, so re-rooting inside the matched
+directory removes the matched segment and the files become visible: that is the
+`fallow --root <dir>` advice. A file-shaped built-in (`**/*.min.js`,
+`**/*.min.mjs`, `**/*.min.cjs`, `**/*.bundle.js`) matches on the file name and
+keeps matching at every root, so re-rooting re-excludes the same file; those
+entries say so and point at renaming instead.
 
 The ignore filter in `crates/core/src/discover/walk.rs` runs before the walker
 splits a path into the source set and the config-candidate channel, so an

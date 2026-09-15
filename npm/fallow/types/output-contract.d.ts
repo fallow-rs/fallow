@@ -512,6 +512,12 @@ pattern: string
  * Exact: the walk counts each excluded candidate once.
  */
 file_count: number
+/**
+ * Distinct directories those files sat in, `path` included. Exact,
+ * and `1` whenever the exclusion is one contained tree. Anything
+ * higher says `path` names a fraction of the excluded source.
+ */
+directory_count: number
 kind: "excluded-by-default-ignore"
 })
 /**
