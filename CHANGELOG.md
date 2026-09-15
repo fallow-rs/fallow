@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SuspenseFallback` is the customizable Suspense fallback added in SDK 56. A
   route file exporting any of them was reported as an unused export until now.
 
+- **`dead-code --baseline` warns when the saved baseline has gone stale.** A
+  dead-code baseline is only as good as the findings it still describes, but
+  until now a baseline could rot for months and every run stayed green and
+  silent, so a later `--save-baseline` refresh mixed cleanup of long-fixed
+  entries with newly suppressed problems in one unreviewable diff. When a
+  quarter or more of the saved entries match no current issue, the run now says
+  so on stderr and points at the re-save command, in the same wording
+  `health --baseline` has used since 3.12.0. Below that share nothing is
+  printed, `--quiet` suppresses the line, machine-readable output is unchanged,
+  and exit codes are untouched: the warning is advisory, and
+  `baseline.entries` / `baseline.matched` in the JSON envelope keep their
+  meaning for anyone gating on them
+  (Closes [#2627](https://github.com/fallow-rs/fallow/issues/2627)).
+
 ### Changed
 
 - **Unused- and unlisted-dependency checks are faster on large workspace
@@ -23,6 +37,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for every package-usage entry and import site. On a repository with about
   18,000 files and 800 workspaces the check went from roughly 30 seconds to
   6 seconds, and findings are unchanged.
+
+- **The built-in `build` exclusion now matches at any depth.** The default
+  discovery ignore list carried `build/**`, which is anchored at the project
+  root, while every neighboring generated-output default (`**/dist/**`,
+  `**/coverage/**`, `**/node_modules/**`) is recursive. A monorepo that keeps
+  per-package output in `projects/*/apps/web/build/` therefore had that output
+  walked, parsed, graphed and reported, producing unused files, unused exports,
+  duplication and health findings for generated code. The default is now
+  `**/build/**`, so a `build` path segment is treated as generated output
+  wherever it appears, which also matches how workspace discovery has always
+  classified the name. Paths that merely contain the word, such as
+  `src/build.ts` or `src/rebuild/helper.ts`, are unaffected, and a root-level
+  `build/` stays excluded as before.
+
+  Everything under a `build` segment now leaves analysis, and `ignorePatterns`
+  cannot bring it back: the field has no negation, so a `!`-prefixed entry is
+  compiled as a literal glob, and a positional path only narrows what is
+  reported from the files discovery already kept. Five consequences are worth
+  stating plainly before upgrading.
+
+  - **Hand-written source in a nested `build/` directory is skipped.** The
+    remedy is to rename or move the directory. Analyzing it as its own project
+    with `fallow --root <that directory>` also works, but a sub-root run cannot
+    see importers above that root, so a file imported only from the parent
+    project is reported as unused there.
+  - **A workspace package literally named `build` keeps its entry in workspace
+    discovery and still appears in `fallow list --workspaces`, but none of its
+    files are analyzed.** It contributes no unused-file, unused-export,
+    duplication or health findings, and its `package.json` no longer produces
+    unused-dependency findings, because the manifest filter shares this globset.
+  - **A framework config inside a nested `build/` directory is no longer
+    discovered, so the path aliases it declares are lost.** An
+    `app/build/webpack.config.js` that maps `@app` to `../src` stops being read,
+    and imports through that alias are then reported as unlisted dependencies.
+    Move the config out of the `build` directory, or declare the same aliases in
+    `tsconfig.json` `paths`, which is read from its own location.
+  - **A dependency imported only from a nested `build/` directory is reported
+    as unused, and that finding is auto-fixable.** Its importers left analysis
+    with the directory, so `fallow fix` would drop the dependency from the
+    manifest. Keep it with `ignoreDependencies`, or move the importing code
+    out of the `build` directory.
+  - **An entry point that resolves into a nested `build/` directory stops being
+    an entry point.** A package manifest whose `main` or `exports` names
+    `./build/index.js`, or a configured `entry` glob under `build/`, no longer
+    seeds reachability, so the source behind it can be reported as an unused
+    file and a run that exited 0 can start exiting 1. This is the same behavior
+    the already-recursive `**/dist/**` default has always had for a `dist`
+    directory; point `entry` at the source that produces the output instead
+    (#2622).
 
 ### Fixed
 
@@ -34,6 +97,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected the whole project's resolver output on every run, so imports were
   re-resolved from scratch each time. Every pattern now keeps one row, empty or
   not, and an empty row still contributes no graph edges.
+
+- **The config JSON Schema now advertises the JSONC dialect fallow parses.**
+  `.fallowrc.json` and `.fallowrc.jsonc` have always accepted comments and
+  trailing commas, but editors validating those files against the published
+  schema reported `Trailing comma` anyway, because the schema said nothing
+  about the dialect. The schema now carries `allowComments` and
+  `allowTrailingCommas`, so JSON language service clients such as VS Code and
+  Zed stop flagging syntax the loader accepts. The keywords are annotations for
+  editors; analysis behaviour is unchanged
+  (Closes [#2623](https://github.com/fallow-rs/fallow/issues/2623)).
+
+- **Istanbul statement coverage no longer charges a nested function body to
+  the function that contains it.** Every statement in a `statementMap` is now
+  assigned to the innermost `fnMap` record whose body range encloses it, so a
+  function that executed every statement it owns is scored on its own body
+  rather than on the closures it returns or declares. This moves `coverage_pct`,
+  `coverage_tier` and `crap` for functions that lexically contain another
+  function, in either direction: a function whose own body ran while its
+  closures did not now scores higher, and one whose closures ran while its own
+  body did not no longer borrows their credit. Functions with no nested
+  functions are unaffected, and a health snapshot taken before this change
+  compares against a later one with a delta on units that nest. (#2620)
+
+- **Inline editor diagnostics honour per-path `overrides[].rules`.** The
+  language server loaded the project config but resolved rule severity from the
+  base `rules` block only, so a file matching an `overrides[].files` glob that
+  turns a rule off still got squiggles for it while `fallow dead-code` and the
+  VS Code Unused Code sidebar reported nothing there. Per-path rule resolution
+  now lives in the analysis engine and runs on the editor analysis path as well
+  as the CLI, so the three surfaces report one result set. Each project root
+  resolves its own overrides before a multi-root session merges results, and the
+  pass runs again after type-aware reconciliation so a finding added there is
+  filtered too. CLI output is unchanged
+  ([#2621](https://github.com/fallow-rs/fallow/issues/2621)).
+
+- **A narrowed `dead-code --baseline` run no longer advises a re-save that
+  would gut the baseline.** Scope and issue-type narrowing (`--file`,
+  `--changed-since`, `--diff-file`, `--workspace`, `--changed-workspaces`, a
+  positional path, `--production`, or an `--unused-*` filter) runs before the baseline
+  comparison, so such a run legitimately matches only the slice of the baseline
+  it looked at. The existing zero-overlap warning fired there anyway and told
+  the user to re-save, which would have dropped every entry outside the scope.
+  Both staleness warnings now stay silent for a narrowed run, matching the
+  guard `health --baseline` already applies
+  ([#2627](https://github.com/fallow-rs/fallow/issues/2627)).
 
 ## [3.25.0] - 2026-09-11
 
