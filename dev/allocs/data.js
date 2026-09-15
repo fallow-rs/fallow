@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789431356238,
+  "lastUpdate": 1789454083256,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "dfa135e5a59103dab969e063789ff8ebd5533be9",
-          "message": "Merge pull request #2439 from fallow-rs/feat/stylex-theme-styling\n\nfeat: complete StyleX theme styling support",
-          "timestamp": "2026-08-26T12:26:06+02:00",
-          "tree_id": "ead5dcae2432185db584b5bfe74b6a93afe024a6",
-          "url": "https://github.com/fallow-rs/fallow/commit/dfa135e5a59103dab969e063789ff8ebd5533be9"
-        },
-        "date": 1787740295093,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9759365,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49363,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1188674,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8436,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8379,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c00331886f81edf7fe4dbf8e5ab4b784d9f363e8",
+          "message": "fix(lsp): resolve per-path rule overrides on the editor analysis path (#2635)\n\nRule severity resolution, including overrides[].rules, lived in the check\ncommand, so the language server published diagnostics for rules a project had\nturned off for the matching path while fallow dead-code filtered them out.\nThe pass now lives in fallow-engine next to the sibling dead-code result\nfilters and runs inside EditorAnalysisSession, once per analyzed project slice\nand again after type-aware refinement because reconciliation can add\nfindings. The check command delegates to the same code, so CLI output is\nunchanged. The programmatic runtime behind MCP does not run the pass yet.\n\nFixes #2621",
+          "timestamp": "2026-09-15T08:29:22+02:00",
+          "tree_id": "7a08998b33bfa08ce5fbac050fa82773e1a0cfe7",
+          "url": "https://github.com/fallow-rs/fallow/commit/c00331886f81edf7fe4dbf8e5ab4b784d9f363e8"
+        },
+        "date": 1789454079162,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9926052,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51236,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1208067,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8491,
             "unit": "allocations"
           }
         ]
