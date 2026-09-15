@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789429802503,
+  "lastUpdate": 1789431356238,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "10cc20b72382fd1b0f0ef19efa30f44b8c5913ec",
-          "message": "feat: harden similar-code agent discovery workflow\n\nHarden scoped semantic discovery, snapshot-stable inspection, cache and provider lifecycle safety, programmatic contracts, conformance evidence, and release gates.",
-          "timestamp": "2026-08-26T11:56:44+02:00",
-          "tree_id": "fea78994dffea9ee1054f9024a1ac0a3474672fc",
-          "url": "https://github.com/fallow-rs/fallow/commit/10cc20b72382fd1b0f0ef19efa30f44b8c5913ec"
-        },
-        "date": 1787738509245,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9757845,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49361,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1218940,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8535,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8455,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f89a4d571e1a092e2b4b08dcb01489a1540e5f37",
+          "message": "feat(plugins): recognize the Expo getNavOptions and generateMetadata exports (#2629)\n\nCompletes the Expo Router route-export list against the framework's own LoadedRoute type, following #2618 which added SuspenseFallback.\n\nExpo Router declares eight members on LoadedRoute. Six were recognized; getNavOptions and generateMetadata were not, so a route file exporting either was reported as an unused export. The author of #2618 flagged both and kept that change to a single export.\n\nRemoving the two plugin entries makes the fixture integration test fail on src/app/_layout.tsx:getNavOptions, so the added assertions are load-bearing. No interaction with the Next.js invalid-client-export rule, which also knows generateMetadata: that detector is gated on the project declaring next as a dependency, and the Expo fixture declares only expo and expo-router.",
+          "timestamp": "2026-09-15T02:11:23+02:00",
+          "tree_id": "f500de20b0ee63b6404728bbf56bfc04800b9411",
+          "url": "https://github.com/fallow-rs/fallow/commit/f89a4d571e1a092e2b4b08dcb01489a1540e5f37"
+        },
+        "date": 1789431352658,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9894226,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51177,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1178550,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8379,
             "unit": "allocations"
           }
         ]
