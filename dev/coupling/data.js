@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789454137583,
+  "lastUpdate": 1789454502262,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "8eaa92c8e95f33ebfc8148bb9cf81706fbba21a6",
-          "message": "fix: keep main green on Windows and within the bundled skill line cap\n\nThe similar-code provider environment test read `Command`'s Debug output,\nwhich lists environment entries on Unix only, so it failed on Windows; it\nnow inspects `get_envs()` directly. The bundled SKILL.md had grown to 502\nvalidator lines after the agent and MCP resource additions; three blank\nlines after headings are dropped so it stays under the 500-line limit.",
-          "timestamp": "2026-08-26T16:36:58+02:00",
-          "tree_id": "cf55203ca01402bf9c8dcdfa4403e0b15facb1fb",
-          "url": "https://github.com/fallow-rs/fallow/commit/8eaa92c8e95f33ebfc8148bb9cf81706fbba21a6"
-        },
-        "date": 1787755385044,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c00331886f81edf7fe4dbf8e5ab4b784d9f363e8"
         },
         "date": 1789454134048,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 477,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1306,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9dabdbd75f746848fdbe891e7217077774f62c06",
+          "message": "fix(config): exclude build directories at any depth by default (#2632)\n\nThe built-in discovery ignore list anchored `build/**` at the project root\nwhile every neighboring generated-output default is recursive, so a monorepo\nthat keeps per-package output under `projects/*/apps/web/build/` had that\noutput walked, graphed and reported as unused files, unused exports,\nduplication and health findings. The default is now `**/build/**`, which also\nmatches how workspace discovery has always classified the directory name.\n\nEverything under a `build` segment now leaves analysis and `ignorePatterns`\ncannot bring it back, since the field has no negation. Hand-written source in\na nested `build/` directory is skipped; a workspace package literally named\n`build` keeps its workspace entry but none of its files are analyzed; a\nframework config under a nested `build/` directory is no longer read, so the\npath aliases it declares are lost; and an entry point that resolves into a\nnested `build/` directory stops seeding reachability. Tests pin each of these\nconsequences so they are recorded choices rather than surprises.\n\nFixes #2622",
+          "timestamp": "2026-09-15T08:40:20+02:00",
+          "tree_id": "ed405b4eb67ad91ceb0c87619cbe3a299ec1f42c",
+          "url": "https://github.com/fallow-rs/fallow/commit/9dabdbd75f746848fdbe891e7217077774f62c06"
+        },
+        "date": 1789454498470,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
