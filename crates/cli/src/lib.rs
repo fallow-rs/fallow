@@ -5990,6 +5990,22 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         Ok(inputs) => inputs,
         Err(code) => return code,
     };
+    // The brief owns no exit gates (see `decision_surface_audit_options`), so
+    // an opted-in stale-baseline gate stands down here and says so for every
+    // baseline the config supplied, like every other path that skips it.
+    if dispatch.cli.fail_on_stale_baseline {
+        for path in [
+            &inputs.dead_code_baseline,
+            &inputs.health_baseline,
+            &inputs.dupes_baseline,
+        ] {
+            baseline_gate::note_stood_down(
+                path.as_deref(),
+                true,
+                "decision-surface renders a brief without exit gates",
+            );
+        }
+    }
     audit::run_decision_surface(&decision_surface_audit_options(
         dispatch,
         &inputs,

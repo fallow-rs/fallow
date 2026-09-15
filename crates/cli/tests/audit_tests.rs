@@ -2986,6 +2986,64 @@ fn a_whole_project_run_judges_the_baseline_audit_stands_down_on() {
 /// legitimately matches less of it and the opt-in gate can never judge it.
 /// The run has to say so: a job that passes the flag and gets a silent green
 /// would believe it is gating when it never was.
+/// `decision-surface` renders the brief through a path that owns no exit
+/// gates, so `--fail-on-stale-baseline` cannot fire there. A config-provided
+/// audit baseline is the one way a baseline reaches that command, and the
+/// opted-in gate must say it stood down rather than exit 0 in silence.
+#[test]
+fn decision_surface_says_the_stale_baseline_gate_stood_down() {
+    let (tmp, baseline_path) = rotted_audit_baseline_fixture();
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        format!(
+            "{{\"audit\": {{\"deadCodeBaseline\": \"{}\"}}}}",
+            baseline_path.file_name().unwrap().to_str().unwrap()
+        ),
+    )
+    .unwrap();
+
+    let output = run_fallow_raw(&[
+        "decision-surface",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--fail-on-stale-baseline",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        !output.stderr.contains("Baseline gate failed"),
+        "the brief owns no gates, so nothing may fail: {}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains("--fail-on-stale-baseline did not run"),
+        "the run must say the gate stood down: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("renders a brief without exit gates"),
+        "the reason must name the brief: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains(".fallow-dead-code-baseline.json"),
+        "the note must name the baseline that was not judged: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "decision-surface never fails on the gate: {}\n{}",
+        output.stdout, output.stderr
+    );
+}
+
 #[test]
 fn audit_says_why_the_stale_baseline_gate_cannot_run() {
     let (tmp, baseline_path) = rotted_audit_baseline_fixture();
