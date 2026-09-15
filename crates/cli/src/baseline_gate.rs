@@ -9,9 +9,16 @@
 //!
 //! Every outcome of the flag says so on stderr. A gate a repository opted into
 //! that then stays quiet is worse than no gate at all: the build goes green and
-//! nobody learns the baseline was never judged. So a run narrowed to part of
-//! the project, which cannot judge a whole-project baseline, names the reason
-//! it is standing down instead of returning silently.
+//! nobody learns the baseline was never judged. So the runs that cannot or will
+//! not apply the gate, a run narrowed to part of the project and
+//! `health --report-only`, name the reason they are standing down instead of
+//! returning silently.
+//!
+//! The verdict is the exit code plus one stderr line, in every output format.
+//! No report envelope gains a field: `dead-code` already carries
+//! `baseline.entries` and `baseline.matched`, and `health` already carries
+//! `summary.baseline_staleness`, so a machine consumer that wants the numbers
+//! has them, with or without the flag.
 
 #![allow(
     clippy::print_stderr,
@@ -72,15 +79,38 @@ pub fn gate_failed_from_counts(
     report_gate(entries, matched, change_scoped, path, noun)
 }
 
+/// Say that a run which asked for the gate deliberately did not apply it,
+/// naming the reason.
+///
+/// Same contract as the scope note in [`report_gate`], for the paths that
+/// suppress the gate before it is ever evaluated: an opted-in gate that stays
+/// quiet is worse than no gate at all, so every path that skips it says so.
+/// Silent when the flag was not passed or no baseline was loaded, because
+/// there is nothing to stand down from.
+pub fn note_stood_down(path: Option<&Path>, enabled: bool, reason: &str) {
+    if !enabled {
+        return;
+    }
+    let Some(path) = path else {
+        return;
+    };
+    eprintln!(
+        "Note: --fail-on-stale-baseline did not run: {reason}, so the baseline {} was not judged.",
+        path.display(),
+    );
+}
+
 /// Print the gate's verdict for one loaded baseline and report whether it
 /// fired.
 ///
 /// Both the failure line and the stood-down note print regardless of
 /// `--quiet`. Unlike the score and findings gates, whose condition is visible
-/// in the report itself, a stale baseline appears nowhere in human or JSON
-/// output, so suppressing them would leave either a bare exit 1 or a green run
-/// with nothing to act on. `--ci` implies `--quiet`, which is exactly the
-/// configuration where that matters.
+/// in the report itself, the gate's verdict appears in no report: the human
+/// output never mentions the baseline counts, and the envelopes that do carry
+/// them (`baseline` on dead-code, `summary.baseline_staleness` on health) say
+/// nothing about whether the gate fired. Suppressing the line would leave
+/// either a bare exit 1 or a green run with nothing to act on. `--ci` implies
+/// `--quiet`, which is exactly the configuration where that matters.
 fn report_gate(
     entries: usize,
     matched: usize,

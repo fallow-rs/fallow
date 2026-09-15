@@ -307,8 +307,17 @@ fn should_emit_no_match_threshold_overrides(
 
 /// True when this run analyzes a subset of the project, so a loaded full-repo
 /// baseline would look stale for reasons that have nothing to do with rot.
+///
+/// Production mode counts: it drops test, story and dev files before analysis,
+/// so their baseline entries match nothing on a project nobody touched. The
+/// resolved config carries the effective flag whether it came from the CLI or
+/// from the project config, which is the same reading `dead-code` takes in
+/// `baseline_scope_is_narrowed` and `dupes` in `duplication_comparison_is_narrowed`.
 fn is_change_scoped(input: &HealthFindingsInput<'_>) -> bool {
-    input.diff_index.is_some() || input.changed_files.is_some() || input.ws_roots.is_some()
+    input.diff_index.is_some()
+        || input.changed_files.is_some()
+        || input.ws_roots.is_some()
+        || input.config.production
 }
 
 struct HealthFindingFinalizeResult {

@@ -23102,7 +23102,7 @@
         },
         "change_scoped": {
           "type": "boolean",
-          "description": "True when this run analyzed a subset of the project (changed-file,\ndiff, or workspace scoping), so the baseline was compared against a\nnarrowed finding set and staleness cannot be judged. `stale` is always\nfalse on scoped runs."
+          "description": "True when this run analyzed a subset of the project (changed-file,\ndiff, or workspace scoping, or production mode, which drops test, story\nand dev files), so the baseline was compared against a narrowed finding\nset and staleness cannot be judged. `stale` is always false on scoped\nruns."
         },
         "stale": {
           "type": "boolean",

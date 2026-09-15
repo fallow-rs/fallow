@@ -47,7 +47,11 @@ pub(super) fn print_combined_report(
         health_result,
         total_elapsed,
     )? {
-        return Ok(code);
+        return Ok(machine_combined_code_with_stale_baseline_gate(
+            opts,
+            check_result,
+            code,
+        ));
     }
 
     Ok(print_human_sections(
@@ -57,6 +61,32 @@ pub(super) fn print_combined_report(
         health_result,
         resolver,
     ))
+}
+
+/// Apply the opt-in stale-baseline gate to a machine-rendered combined run.
+///
+/// The machine renderers collapse every gate to zero: the bare run has never
+/// exited non-zero for issues in `--format json`, `sarif`, `codeclimate` or the
+/// GitHub formats, and that stays true. `--fail-on-stale-baseline` is the
+/// exception because it is opt-in and its condition appears in no envelope: a
+/// CI job that asked for the gate and renders JSON, which is the documented
+/// machine-readable shape, would otherwise be green forever. The gate prints
+/// its line on stderr, so stdout is byte-identical with and without the flag.
+///
+/// The human path reaches the same gate through `print_check_result`, so only
+/// one of the two evaluates it on any given run. Only the dead-code sub-pass
+/// receives a baseline in combined mode.
+fn machine_combined_code_with_stale_baseline_gate(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    code: u8,
+) -> u8 {
+    let failed = crate::baseline_gate::gate_failed(
+        check_result.and_then(|result| result.baseline_staleness.as_ref()),
+        opts.fail_on_stale_baseline,
+        crate::baseline_gate::DEAD_CODE_NOUN,
+    );
+    if failed { code.max(1) } else { code }
 }
 
 fn print_machine_combined_report(

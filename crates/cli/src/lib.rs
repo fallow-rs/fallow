@@ -507,9 +507,12 @@ struct Cli {
     /// Exit with code 1 if a loaded --baseline has entries that match nothing in this run.
     ///
     /// Stricter than the default advisory warning: any stale entry fails, not
-    /// just a quarter of the baseline. Inert when no baseline is loaded, and on
-    /// runs narrowed to part of the project, which cannot judge a whole-project
-    /// baseline; such a run prints why it stood down instead of passing
+    /// just a quarter of the baseline. Applies in every output format, because
+    /// the verdict is the exit code plus one stderr line and no report envelope
+    /// changes. Inert when no baseline is loaded, on runs narrowed to part of
+    /// the project (including production mode), which cannot judge a
+    /// whole-project baseline, and under `health --report-only`, which never
+    /// fails a run; such a run prints why it stood down instead of passing
     /// quietly. `fallow audit` always analyzes only changed files, so the gate
     /// never fires there.
     #[arg(hide_short_help = true, long, global = true)]

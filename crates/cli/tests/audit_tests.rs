@@ -2902,20 +2902,16 @@ fn audit_dependency_location_change_is_introduced() {
     );
 }
 
-/// `audit` always analyzes a changed-code slice, so a whole-project baseline
-/// legitimately matches less of it and the opt-in gate can never judge it.
-/// The run has to say so: a job that passes the flag and gets a silent green
-/// would believe it is gating when it never was.
-#[test]
-fn audit_says_why_the_stale_baseline_gate_cannot_run() {
+/// An audit fixture whose dead-code baseline is saved on `main` and then
+/// rotted on `feature`, so a whole-project comparison calls the baseline stale
+/// while every audit run sees only the changed slice.
+fn rotted_audit_baseline_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     let tmp = create_audit_baseline_fixture();
-    let dir = tmp.path();
-    let baseline_path = dir.join(".fallow-dead-code-baseline.json");
-
+    let baseline_path = tmp.path().join(".fallow-dead-code-baseline.json");
     let git = |args: &[&str]| {
         Command::new("git")
             .args(args)
-            .current_dir(dir)
+            .current_dir(tmp.path())
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -2931,7 +2927,7 @@ fn audit_says_why_the_stale_baseline_gate_cannot_run() {
     run_fallow_raw(&[
         "dead-code",
         "--root",
-        dir.to_str().unwrap(),
+        tmp.path().to_str().unwrap(),
         "--save-baseline",
         baseline_path.to_str().unwrap(),
         "--format",
@@ -2946,12 +2942,54 @@ fn audit_says_why_the_stale_baseline_gate_cannot_run() {
     // Drop most of what the baseline described, so a whole-project comparison
     // would call it stale.
     fs::write(
-        dir.join("src/legacy.ts"),
+        tmp.path().join("src/legacy.ts"),
         "export const used = 1;\nexport const unusedA = 'a';\n",
     )
     .unwrap();
     git(&["add", "."]);
     git(&["-c", "commit.gpgsign=false", "commit", "-m", "prune legacy"]);
+    (tmp, baseline_path)
+}
+
+/// The control for [`audit_says_why_the_stale_baseline_gate_cannot_run`]: the
+/// same baseline on the same worktree really is stale, so audit's stand-down
+/// reports a suppression and not a fresh baseline. Without this the other test
+/// would stay green if the stand-down were deleted and the gate simply never
+/// had anything to fire on.
+#[test]
+fn a_whole_project_run_judges_the_baseline_audit_stands_down_on() {
+    let (tmp, baseline_path) = rotted_audit_baseline_fixture();
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--baseline",
+        baseline_path.to_str().unwrap(),
+        "--fail-on-stale-baseline",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert!(
+        output.stderr.contains("Baseline gate failed"),
+        "a whole-project run judges the same baseline stale: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 1,
+        "the control run must fail on the same baseline: {}\n{}",
+        output.stdout, output.stderr
+    );
+}
+
+/// `audit` always analyzes a changed-code slice, so a whole-project baseline
+/// legitimately matches less of it and the opt-in gate can never judge it.
+/// The run has to say so: a job that passes the flag and gets a silent green
+/// would believe it is gating when it never was.
+#[test]
+fn audit_says_why_the_stale_baseline_gate_cannot_run() {
+    let (tmp, baseline_path) = rotted_audit_baseline_fixture();
+    let dir = tmp.path();
 
     let output = run_fallow_raw(&[
         "audit",

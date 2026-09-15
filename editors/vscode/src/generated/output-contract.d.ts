@@ -6034,9 +6034,10 @@ stale_entries: number
 moved_entries: number
 /**
  * True when this run analyzed a subset of the project (changed-file,
- * diff, or workspace scoping), so the baseline was compared against a
- * narrowed finding set and staleness cannot be judged. `stale` is always
- * false on scoped runs.
+ * diff, or workspace scoping, or production mode, which drops test, story
+ * and dev files), so the baseline was compared against a narrowed finding
+ * set and staleness cannot be judged. `stale` is always false on scoped
+ * runs.
  */
 change_scoped: boolean
 /**

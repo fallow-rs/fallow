@@ -584,6 +584,7 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions<'_
     }
 
     if options.gates.report_only {
+        note_stale_baseline_gate_stood_down(result, options);
         return ExitCode::SUCCESS;
     }
 
@@ -638,6 +639,25 @@ fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_
     let runtime_coverage = has_failing_runtime_coverage(result);
     let stale_baseline = stale_baseline_gate_failed(result, options);
     score || findings || runtime_coverage || stale_baseline
+}
+
+/// Say that `--report-only` suppressed the gate, so a job that passes both
+/// flags learns its baseline was never judged instead of going green forever.
+///
+/// `--report-only` is an explicit request never to fail the run, so the gate
+/// obeys it rather than overriding it; it just does not obey it in silence.
+fn note_stale_baseline_gate_stood_down(result: &HealthResult, options: HealthPrintOptions<'_>) {
+    let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
+        return;
+    };
+    if staleness.baseline_entries == 0 {
+        return;
+    }
+    crate::baseline_gate::note_stood_down(
+        options.baseline_path,
+        options.gates.fail_on_stale_baseline,
+        "--report-only never fails a run",
+    );
 }
 
 /// The opt-in `--fail-on-stale-baseline` gate. Reads the staleness the engine

@@ -878,9 +878,10 @@ pub struct HealthBaselineStaleness {
     /// Always zero in count mode.
     pub moved_entries: usize,
     /// True when this run analyzed a subset of the project (changed-file,
-    /// diff, or workspace scoping), so the baseline was compared against a
-    /// narrowed finding set and staleness cannot be judged. `stale` is always
-    /// false on scoped runs.
+    /// diff, or workspace scoping, or production mode, which drops test, story
+    /// and dev files), so the baseline was compared against a narrowed finding
+    /// set and staleness cannot be judged. `stale` is always false on scoped
+    /// runs.
     pub change_scoped: bool,
     /// True exactly when the run was not change-scoped, at least one current
     /// finding existed before baseline filtering, and `stale_entries` reached

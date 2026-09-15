@@ -2673,6 +2673,124 @@ fn fail_on_stale_baseline_leaves_json_output_unchanged() {
     assert_eq!(with.code, 1, "the run fails with the flag");
 }
 
+/// Exit precedence puts the regression gate ahead of the baseline gate, but a
+/// stale baseline appears in no report, so the line has to print anyway. A
+/// run that returns on the first failing gate would exit 1 without a word
+/// about the baseline the user explicitly gated on.
+#[test]
+fn fail_on_stale_baseline_still_prints_behind_the_regression_gate() {
+    let project = rotted_baseline_project(4, 2);
+    let regression = project.path().join("regression.json");
+    let regression_path = regression.to_str().expect("temp path is UTF-8");
+    // Saved while the baseline still filters everything, so the module added
+    // below is the only regression.
+    run_with_baseline(
+        project.path(),
+        &["--quiet", "--save-regression-baseline", regression_path],
+    );
+    std::fs::write(
+        project.path().join("src/extra.ts"),
+        "export const brandNew = () => 1;\n",
+    )
+    .expect("write an unreferenced module");
+
+    let output = run_with_baseline(
+        project.path(),
+        &[
+            "--regression-baseline",
+            regression_path,
+            "--fail-on-regression",
+            "--fail-on-stale-baseline",
+        ],
+    );
+    assert!(
+        output.stderr.contains("Regression detected"),
+        "the regression gate fires first: {}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains("Baseline gate failed: 2 of 4 entries"),
+        "the baseline gate still says what it found: {}",
+        output.stderr
+    );
+    assert_eq!(output.code, 1, "the run fails: {}", output.stderr);
+}
+
+/// Run the bare combined command against a prepared fixture. The bare run is
+/// the shape a repository gets from `fallow` with no subcommand, and its
+/// machine renderers collapse every gate to exit 0, so the opt-in gate needs
+/// its own coverage there.
+fn run_bare_with_baseline(root: &std::path::Path, extra: &[&str]) -> common::CommandOutput {
+    let baseline = root.join("baseline.json");
+    let mut args = vec![
+        "--root",
+        root.to_str().expect("temp path is UTF-8"),
+        "--no-cache",
+        "--baseline",
+        baseline.to_str().expect("temp path is UTF-8"),
+    ];
+    args.extend_from_slice(extra);
+    run_fallow_raw(&args)
+}
+
+/// CI reads `--format json`, so a gate that only fires on the human renderer
+/// is a gate that never fires in the job that asked for it.
+#[test]
+fn fail_on_stale_baseline_gates_the_bare_run_in_json() {
+    let project = rotted_baseline_project(4, 2);
+    let without = run_bare_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    let with = run_bare_with_baseline(
+        project.path(),
+        &["--format", "json", "--quiet", "--fail-on-stale-baseline"],
+    );
+    assert!(
+        with.stderr.contains("Baseline gate failed: 2 of 4 entries"),
+        "the bare run names the stale share on stderr: {}",
+        with.stderr
+    );
+    assert_eq!(
+        without.code, 0,
+        "the bare JSON run is green without the flag: {}",
+        without.stderr
+    );
+    assert_eq!(
+        with.code, 1,
+        "the opt-in gate fails the bare JSON run: {}",
+        with.stderr
+    );
+    assert_eq!(
+        canonical_report(&without),
+        canonical_report(&with),
+        "the gate changes the exit code and stderr, never the combined envelope"
+    );
+}
+
+/// The same contract on the other machine renderers the bare run offers.
+#[test]
+fn fail_on_stale_baseline_gates_the_bare_run_in_every_machine_format() {
+    let project = rotted_baseline_project(4, 2);
+    for format in ["sarif", "codeclimate", "github-annotations"] {
+        let output = run_bare_with_baseline(
+            project.path(),
+            &["--format", format, "--quiet", "--fail-on-stale-baseline"],
+        );
+        assert!(
+            output
+                .stderr
+                .contains("Baseline gate failed: 2 of 4 entries"),
+            "--format {format} must carry the gate line on stderr: {}",
+            output.stderr
+        );
+        assert_eq!(
+            output.code, 1,
+            "--format {format} must carry the gate exit code: {}",
+            output.stderr
+        );
+    }
+}
+
 #[test]
 fn scoped_run_does_not_warn_about_baseline_staleness() {
     let project = rotted_baseline_project(4, 2);
