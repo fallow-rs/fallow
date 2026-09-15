@@ -47,13 +47,14 @@ pub fn run_decision_surface(
         });
     }
 
-    let head = run_decision_analysis(&resolved, Some(&changed_files))?;
+    let head = run_decision_analysis(&resolved, Some(&changed_files), None)?;
     let manifests = changed_manifests(&resolved.root, &changed_files);
     let base = compute_base_decision_snapshot(
         options,
         &resolved.root,
         &resolved_base.git_ref,
         &manifests,
+        &head.config,
     )?;
     let manifest_pairs = manifest_pairs(&resolved.root, &manifests, &base);
     let dependency_anchors = crate::dependency_deltas::dependency_anchors_from_manifests(
@@ -79,15 +80,18 @@ fn audit_options_for_decision_surface(options: &DecisionSurfaceOptions) -> Audit
     }
 }
 
-struct DecisionAnalysis {
+pub(super) struct DecisionAnalysis {
     root: PathBuf,
-    results: fallow_types::results::AnalysisResults,
+    pub(super) results: fallow_types::results::AnalysisResults,
     public_api: FxHashSet<String>,
     impact_closure: Option<fallow_engine::module_graph::ImpactClosurePaths>,
     export_lines: Option<FxHashMap<String, Vec<(String, u32)>>>,
     internal_consumers: Option<FxHashMap<String, u64>>,
     package_importers: Option<FxHashMap<String, fallow_engine::module_graph::PackageImporters>>,
     routing: fallow_output::RoutingFacts,
+    /// The configuration the analysis session loaded, kept so the base
+    /// snapshot can resolve rule severity against the head configuration.
+    pub(super) config: fallow_config::ResolvedConfig,
 }
 
 struct DecisionGraphSignals {
@@ -132,9 +136,14 @@ fn manifest_pairs(
         .collect()
 }
 
-fn run_decision_analysis(
+/// Analyze one revision for the decision surface. `severity_config` resolves
+/// rule severity in place of the session's own configuration; the base
+/// snapshot passes the head configuration so both revisions are judged by the
+/// rules under review, as the CLI's base worktree pass already does.
+pub(super) fn run_decision_analysis(
     resolved: &ProgrammaticAnalysisContext,
     changed_files: Option<&FxHashSet<PathBuf>>,
+    severity_config: Option<&fallow_config::ResolvedConfig>,
 ) -> ProgrammaticResult<DecisionAnalysis> {
     let session = super::dead_code::load_dead_code_session(
         &super::dead_code::default_dead_code_options_for_context(resolved),
@@ -158,7 +167,8 @@ fn run_decision_analysis(
     // Rule severity is resolved before anything is framed as a decision, so a
     // rule or a per-path override that turns a finding off also removes the
     // decision built from it. The CLI reaches the same state through `check`.
-    fallow_engine::dead_code::apply_rule_severities(&mut output.results, session.config());
+    let severity = severity_config.unwrap_or_else(|| session.config());
+    fallow_engine::dead_code::apply_rule_severities(&mut output.results, severity);
 
     let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
     filter_decision_results(
@@ -182,6 +192,7 @@ fn run_decision_analysis(
         internal_consumers: graph_signals.internal_consumers,
         package_importers: graph_signals.package_importers,
         routing,
+        config: session.config().clone(),
     })
 }
 
@@ -247,6 +258,7 @@ fn compute_base_decision_snapshot(
     current_root: &Path,
     base_ref: &str,
     manifests: &[String],
+    head_config: &fallow_config::ResolvedConfig,
 ) -> ProgrammaticResult<DecisionSnapshot> {
     let worktree = TemporaryBaseWorktree::create(current_root, base_ref).map_err(|err| {
         ProgrammaticError::new(err.to_string(), 2)
@@ -272,7 +284,7 @@ fn compute_base_decision_snapshot(
         ..options.analysis.clone()
     };
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&base_analysis)?;
-    let base = run_decision_analysis(&resolved, None)?;
+    let base = run_decision_analysis(&resolved, None, Some(head_config))?;
     let mut snapshot = snapshot_from_decision_analysis(&base);
     snapshot.manifests = base_manifests;
     Ok(snapshot)

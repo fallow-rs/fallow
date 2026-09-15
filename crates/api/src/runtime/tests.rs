@@ -1452,6 +1452,45 @@ fn run_dead_code_honors_per_path_rule_overrides() {
     );
 }
 
+/// The decision surface judges the base revision by the head configuration,
+/// as the CLI's base worktree pass does, so the severity pass must take the
+/// configuration it is handed over the one the base session loaded from disk.
+#[test]
+fn decision_analysis_resolves_severity_against_the_given_config() {
+    let project = rule_override_project(true);
+    let resolved = resolve_programmatic_analysis_context(&analysis_at(project.path()))
+        .expect("context resolves");
+
+    let own = super::decision_surface::run_decision_analysis(&resolved, None, None)
+        .expect("analysis with the session's own config");
+    let own_paths: Vec<PathBuf> = own
+        .results
+        .unused_exports
+        .iter()
+        .map(|finding| finding.export.path.clone())
+        .collect();
+    assert!(
+        own_paths.iter().all(|path| !path.ends_with("ui/kit.ts")),
+        "the session's own override turns the rule off for ui/: {own_paths:?}"
+    );
+
+    let mut head_config = own.config;
+    head_config.overrides.clear();
+    let judged =
+        super::decision_surface::run_decision_analysis(&resolved, None, Some(&head_config))
+            .expect("analysis judged by another config");
+    let judged_paths: Vec<PathBuf> = judged
+        .results
+        .unused_exports
+        .iter()
+        .map(|finding| finding.export.path.clone())
+        .collect();
+    assert!(
+        judged_paths.iter().any(|path| path.ends_with("ui/kit.ts")),
+        "the configuration handed in must win over the session's own: {judged_paths:?}"
+    );
+}
+
 #[test]
 fn run_dead_code_without_overrides_is_unchanged() {
     let project = rule_override_project(false);

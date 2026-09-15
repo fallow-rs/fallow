@@ -396,9 +396,14 @@ These are documented for the rare CI script that depended on the old behavior. N
   turned its rule off was reported there while `fallow dead-code` and the editor
   suppressed it. All of them now run the same engine pass the CLI runs. A
   consumer that relied on the wider result set sees those findings disappear;
-  turning the rule back on for the path restores them. The default
-  configuration is unaffected, because with no `rules` or `overrides` entry the
-  pass removes nothing. Separately, `fallow dead-code --type-aware` now applies
+  turning the rule back on for the path restores them. The default severities
+  apply there too: a project with no config no longer sees findings for rules
+  that default to off, such as `private-type-leaks`, in the programmatic
+  payload, which is what the CLI has always shown. The MCP `decision_surface`
+  tool resolves its base snapshot with the head configuration, as `fallow
+  decision-surface` does, so a rule flipped on in the change under review does
+  not frame a decision for an edge that already existed at base. Separately,
+  `fallow dead-code --type-aware` now applies
   the pass again after type-aware reconciliation, so a private-type leak that
   only the semantic pass discovers is subject to an override on its path just
   like a syntactic one. No field is renamed, retyped, or added, and no
