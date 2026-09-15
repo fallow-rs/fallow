@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789454815608,
+  "lastUpdate": 1789496692455,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "5a2a685eb56790043daaf15245ecad2ab5901387",
-          "message": "chore: release v3.20.0",
-          "timestamp": "2026-08-28T02:21:21+02:00",
-          "tree_id": "d12b08d634a7b9adc277279b0efd4614b43f99f0",
-          "url": "https://github.com/fallow-rs/fallow/commit/5a2a685eb56790043daaf15245ecad2ab5901387"
-        },
-        "date": 1787877051136,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2899,6 +2870,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "Code Coverage",
             "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2e878e711b42b9a56f5b92c72bb97d92375182d1",
+          "message": "docs(changelog): record the three follow-up fixes awaiting release (#2669)\n\nEntries for the rule-override surfaces (#2636), the baseline staleness gate and parity fixes (#2637) and the built-in exclusion diagnostics (#2638), kept out of the fix branches so they do not conflict on CHANGELOG.md.",
+          "timestamp": "2026-09-15T20:16:38+02:00",
+          "tree_id": "64837e7acf1f0554ae5dde96ee245b664b9b322a",
+          "url": "https://github.com/fallow-rs/fallow/commit/2e878e711b42b9a56f5b92c72bb97d92375182d1"
+        },
+        "date": 1789496689279,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
             "unit": "%"
           }
         ]
