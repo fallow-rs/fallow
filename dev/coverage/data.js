@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789501872754,
+  "lastUpdate": 1789507822119,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "df15924cb3ace9155aa431625f7e151d445617a6",
-          "message": "fix(health): attribute Istanbul coverage to the function that owns the position (#2449)\n\nIstanbul coverage now reaches the functions whose extracted position falls\nbetween the producer's declaration and its body: a class member carrying a\ndecorator and a wrapped parameter list, and the innermost arrow of a curried\nchain formatted one per line. The header span identifies those, and it is read\nonly when exactly one anonymous record covers the position and no other\nfunction is declared inside it.\n\nAttribution is tightened at the same time. A member whose parameter list holds\na function no longer reports that function's coverage, a private class member\ntakes the static estimate rather than the coverage of whatever encloses it, and\na named function expression is resolved against the real source rather than a\nguess at the keyword's width. Coverage maps with project-relative keys join\nfrom any working directory, and the fallbacks are bounded by line indexes so a\nmap that does not join no longer costs a full scan per function.\n\nCloses #2448\n\nThanks to @PrinceD96 for the report and the implementation.",
-          "timestamp": "2026-08-29T08:01:05+02:00",
-          "tree_id": "f9149d4ff6be4fc046834d0a2ad9e53870db824e",
-          "url": "https://github.com/fallow-rs/fallow/commit/df15924cb3ace9155aa431625f7e151d445617a6"
-        },
-        "date": 1787983816248,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/8102e22e0afcc70fb518cd26ea1a2f18f5d710ff"
         },
         "date": 1789501869473,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "4f3bd9720ca6b22c8547adb7f1d225f57fc502d4",
+          "message": "fix(similar-code): update rustls to 0.23.45 in the sidecar lockfile\n\nThe standalone similar-code sidecar lockfile still pinned rustls 0.23.43, which RUSTSEC-2026-0285 covers, so the sidecar audit step rejected the release build. The workspace lockfile moved to 0.23.45 in #2630; the sidecar now matches it.",
+          "timestamp": "2026-09-15T23:20:57+02:00",
+          "tree_id": "c0b58478ea704b9d0f17ccd9f1a04325d7888b47",
+          "url": "https://github.com/fallow-rs/fallow/commit/4f3bd9720ca6b22c8547adb7f1d225f57fc502d4"
+        },
+        "date": 1789507817857,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
