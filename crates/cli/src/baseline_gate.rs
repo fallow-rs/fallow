@@ -6,6 +6,12 @@
 //! repository asks for when it wants any stale entry to break the build. Both
 //! read the same [`fallow_engine::baseline::BaselineStaleness`], so the two can
 //! disagree about whether to speak but never about the facts.
+//!
+//! Every outcome of the flag says so on stderr. A gate a repository opted into
+//! that then stays quiet is worse than no gate at all: the build goes green and
+//! nobody learns the baseline was never judged. So a run narrowed to part of
+//! the project, which cannot judge a whole-project baseline, names the reason
+//! it is standing down instead of returning silently.
 
 #![allow(
     clippy::print_stderr,
@@ -29,13 +35,8 @@ pub const DEAD_CODE_NOUN: &str = "issue";
 pub const DUPES_NOUN: &str = "clone group";
 pub const HEALTH_NOUN: &str = "finding";
 
-/// Evaluate the gate for a loaded baseline and print its line when it fires.
-///
-/// The line prints regardless of `--quiet`. Unlike the score and findings
-/// gates, whose condition is visible in the report itself, a stale baseline
-/// appears nowhere in human or JSON output, so suppressing the line would leave
-/// a bare exit 1 with nothing to act on. `--ci` implies `--quiet`, which is
-/// exactly the configuration where that matters.
+/// Evaluate the gate for a loaded baseline, print what it decided, and report
+/// whether it fired.
 pub fn gate_failed(loaded: Option<&LoadedBaselineStaleness>, enabled: bool, noun: &str) -> bool {
     if !enabled {
         return false;
@@ -71,6 +72,15 @@ pub fn gate_failed_from_counts(
     report_gate(entries, matched, change_scoped, path, noun)
 }
 
+/// Print the gate's verdict for one loaded baseline and report whether it
+/// fired.
+///
+/// Both the failure line and the stood-down note print regardless of
+/// `--quiet`. Unlike the score and findings gates, whose condition is visible
+/// in the report itself, a stale baseline appears nowhere in human or JSON
+/// output, so suppressing them would leave either a bare exit 1 or a green run
+/// with nothing to act on. `--ci` implies `--quiet`, which is exactly the
+/// configuration where that matters.
 fn report_gate(
     entries: usize,
     matched: usize,
@@ -79,6 +89,19 @@ fn report_gate(
     noun: &str,
 ) -> bool {
     if !stale_baseline_gate_trips(entries, matched, change_scoped) {
+        // A run narrowed to part of the project is the one case where the flag
+        // was asked for and still cannot answer. Saying so is the difference
+        // between a gate that passed and a gate that never ran: `--production`
+        // and `--changed-since` are ordinary CI shapes, and a job that believes
+        // it gates would otherwise stay green forever.
+        if change_scoped && entries > 0 {
+            eprintln!(
+                "Note: --fail-on-stale-baseline did not run: this analysis covered only part of \
+                 the project, which cannot judge the whole-project baseline {}. Re-run over the \
+                 whole project to gate on it.",
+                path.display(),
+            );
+        }
         return false;
     }
     let stale = entries.saturating_sub(matched);

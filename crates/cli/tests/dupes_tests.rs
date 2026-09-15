@@ -1480,6 +1480,57 @@ fn fail_on_stale_baseline_exits_one_on_a_stale_dupes_baseline() {
     );
 }
 
+/// The duplication percentage is printed in the report, a stale baseline is
+/// not, so the threshold gate must not exit first and leave the gate the user
+/// opted into unmentioned.
+#[test]
+fn dupes_stale_baseline_gate_still_prints_behind_the_threshold_gate() {
+    let project = rotted_dupes_project(4, 1);
+    // A pair the baseline never saw, so duplication survives the baseline
+    // filter and the threshold gate fires alongside the stale-baseline gate.
+    write_clone_pair(project.path(), 5, CLONE_BODIES[5]);
+    let output = run_dupes_with_baseline(
+        project.path(),
+        &["--threshold", "1", "--fail-on-stale-baseline"],
+    );
+    assert!(
+        output.stderr.contains("exceeds threshold"),
+        "the threshold gate still reports: {}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains("Baseline gate failed: 3 of 4 entries"),
+        "the baseline gate reports as well: {}",
+        output.stderr
+    );
+    assert_eq!(output.code, 1, "both gates fail the run: {}", output.stderr);
+}
+
+/// Production mode is the one narrowing channel `dupes` honours, and a run
+/// that stands down says so instead of passing quietly.
+#[test]
+fn dupes_stale_baseline_gate_says_why_it_stood_down_in_production_mode() {
+    let project = rotted_dupes_project(4, 1);
+    let output = run_dupes_with_baseline(
+        project.path(),
+        &["--production", "--fail-on-stale-baseline"],
+    );
+    assert!(
+        output
+            .stderr
+            .contains("--fail-on-stale-baseline did not run"),
+        "the run names the reason the gate stood down: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("Baseline gate failed"),
+        "production mode drops files before the comparison: {}",
+        output.stderr
+    );
+}
+
 #[test]
 fn dupes_stale_baseline_gate_leaves_json_output_unchanged() {
     let project = rotted_dupes_project(4, 1);

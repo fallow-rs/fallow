@@ -1362,23 +1362,32 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     print_type_aware_summary(result);
     print_type_aware_warnings(result, prepared.quiet);
 
-    if type_aware_completeness_failed(result, prepared.quiet) {
-        return ExitCode::from(1);
-    }
-
-    if let Some(exit) = check_regression_exit_code(result.regression.as_ref(), prepared.quiet) {
-        return exit;
-    }
+    // Every gate is evaluated before any of them returns, so none can swallow
+    // another's stderr line. The baseline gate is why: its condition appears in
+    // no output format, so a run that exits 1 for a type-aware or regression
+    // failure would otherwise leave an opted-in stale baseline unmentioned.
+    // Evaluation order, and with it the order the lines print, is unchanged,
+    // and so is exit precedence.
+    let type_aware_failed = type_aware_completeness_failed(result, prepared.quiet);
+    let regression_exit = check_regression_exit_code(result.regression.as_ref(), prepared.quiet);
 
     print_load_data_key_abstain_note(result, prepared.quiet);
     print_unused_component_props_exempted_note(result, prepared.quiet);
     print_unmatched_ignore_findings_note(result, prepared.quiet);
 
-    if crate::baseline_gate::gate_failed(
+    let stale_baseline_failed = crate::baseline_gate::gate_failed(
         result.baseline_staleness.as_ref(),
         result.fail_on_stale_baseline,
         crate::baseline_gate::DEAD_CODE_NOUN,
-    ) {
+    );
+
+    if type_aware_failed {
+        return ExitCode::from(1);
+    }
+    if let Some(exit) = regression_exit {
+        return exit;
+    }
+    if stale_baseline_failed {
         return ExitCode::from(1);
     }
 

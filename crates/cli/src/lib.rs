@@ -507,9 +507,11 @@ struct Cli {
     /// Exit with code 1 if a loaded --baseline has entries that match nothing in this run.
     ///
     /// Stricter than the default advisory warning: any stale entry fails, not
-    /// just a quarter of the baseline. Inert when no baseline is loaded and on
+    /// just a quarter of the baseline. Inert when no baseline is loaded, and on
     /// runs narrowed to part of the project, which cannot judge a whole-project
-    /// baseline.
+    /// baseline; such a run prints why it stood down instead of passing
+    /// quietly. `fallow audit` always analyzes only changed files, so the gate
+    /// never fires there.
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_stale_baseline: bool,
 
@@ -5943,7 +5945,7 @@ fn run_resolved_audit(
             health_baseline: inputs.health_baseline.as_deref(),
             dupes_baseline: inputs.dupes_baseline.as_deref(),
             health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
-            fail_on_stale_baseline: false,
+            fail_on_stale_baseline: cli.fail_on_stale_baseline,
             max_crap: args.max_crap,
             coverage: inputs.coverage.as_deref(),
             coverage_root: inputs.coverage_root.as_deref(),
@@ -6053,6 +6055,9 @@ fn decision_surface_audit_options<'a>(
         health_baseline: inputs.health_baseline.as_deref(),
         dupes_baseline: inputs.dupes_baseline.as_deref(),
         health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
+        // The decision surface renders the apex brief through
+        // `run_decision_surface`, which owns no exit gates and prints no gate
+        // lines, so the flag has nothing to say on this path.
         fail_on_stale_baseline: false,
         max_crap: None,
         coverage: None,

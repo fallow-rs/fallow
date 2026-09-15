@@ -137,10 +137,13 @@ pub struct AuditOptions<'a> {
     pub dupes_baseline: Option<&'a std::path::Path>,
     /// How the health baseline is matched against current findings.
     pub health_baseline_mode: fallow_engine::baseline::HealthBaselineMode,
-    /// Fail the run when a loaded baseline has entries that match nothing.
-    /// Evaluated once here rather than in the sub-passes, because every audit
-    /// output mode renders through this command and only some of them run the
-    /// sub-pass renderers.
+    /// Whether `--fail-on-stale-baseline` was passed.
+    ///
+    /// The gate itself cannot fire here: audit analyzes the files that changed
+    /// against its base ref, so every sub-pass is change-scoped and a
+    /// whole-project baseline would look stale for reasons that are not rot.
+    /// Audit reads the flag only to say so once, in
+    /// [`note_stale_baseline_gate_inert`], instead of accepting it silently.
     pub fail_on_stale_baseline: bool,
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
@@ -2918,6 +2921,8 @@ fn run_audit_check<'a>(
         use_shared_diff_index: true,
         baseline: opts.dead_code_baseline,
         save_baseline: None,
+        // The gate is answered once by `note_stale_baseline_gate_inert`;
+        // this sub-pass is change-scoped and could only stand down again.
         fail_on_stale_baseline: false,
         sarif_file: None,
         production: opts.production_dead_code.unwrap_or(opts.production),
@@ -3032,6 +3037,7 @@ fn build_audit_dupes_options<'a>(
         top: None,
         baseline_path: opts.dupes_baseline,
         save_baseline_path: None,
+        // See the dead-code sub-pass: audit answers the flag once itself.
         fail_on_stale_baseline: false,
         production: opts.production_dupes.unwrap_or(opts.production),
         production_override: opts.production_dupes,
@@ -3198,10 +3204,8 @@ pub fn run_audit_with_type_aware(
         Ok(result) => {
             let _ = record_audit_impact(opts, gate_marker, &result);
             let report_exit = print_audit_command_result(opts, &result, opts.json_style);
-            let stale_baseline = audit_stale_baseline_gate_failed(opts, &result);
-            if report_exit == ExitCode::SUCCESS
-                && (audit_type_aware_completeness_failed(&result) || stale_baseline)
-            {
+            note_stale_baseline_gate_inert(opts);
+            if report_exit == ExitCode::SUCCESS && audit_type_aware_completeness_failed(&result) {
                 ExitCode::from(1)
             } else {
                 report_exit
@@ -3211,41 +3215,30 @@ pub fn run_audit_with_type_aware(
     }
 }
 
-/// The opt-in `--fail-on-stale-baseline` gate across the three baselines
-/// `audit` can load. Each sub-pass carries its own scope guard, so an audit
-/// narrowed to changed code never trips it.
-fn audit_stale_baseline_gate_failed(opts: &AuditOptions<'_>, result: &AuditResult) -> bool {
-    let dead_code = crate::baseline_gate::gate_failed(
-        result
-            .check
-            .as_ref()
-            .and_then(|check| check.baseline_staleness.as_ref()),
-        opts.fail_on_stale_baseline,
-        crate::baseline_gate::DEAD_CODE_NOUN,
+/// Say once that `--fail-on-stale-baseline` cannot fire on `fallow audit`.
+///
+/// Audit always narrows every sub-pass to the files that changed against its
+/// base ref, so a whole-project baseline matches less of the run for reasons
+/// that are not rot; gating on that would fail every review job that loads a
+/// baseline. Accepting the flag in silence is the worse option, because a job
+/// that believes it gates would stay green forever, so the run names the
+/// reason. It is printed here rather than forwarded into the three sub-passes
+/// so that an audit with three baselines says it once, not three times.
+fn note_stale_baseline_gate_inert(opts: &AuditOptions<'_>) {
+    if !opts.fail_on_stale_baseline {
+        return;
+    }
+    if opts.dead_code_baseline.is_none()
+        && opts.health_baseline.is_none()
+        && opts.dupes_baseline.is_none()
+    {
+        return;
+    }
+    eprintln!(
+        "Note: --fail-on-stale-baseline did not run: `fallow audit` analyzes only the files that \
+         changed against its base, which cannot judge a whole-project baseline. Run the gate on \
+         `fallow dead-code`, `fallow dupes` or `fallow health` instead."
     );
-    let dupes = crate::baseline_gate::gate_failed(
-        result
-            .dupes
-            .as_ref()
-            .and_then(|dupes| dupes.baseline_staleness.as_ref()),
-        opts.fail_on_stale_baseline,
-        crate::baseline_gate::DUPES_NOUN,
-    );
-    let health = result
-        .health
-        .as_ref()
-        .and_then(|health| health.report.summary.baseline_staleness.as_ref())
-        .is_some_and(|staleness| {
-            crate::baseline_gate::gate_failed_from_counts(
-                staleness.baseline_entries,
-                staleness.matched_entries,
-                staleness.change_scoped,
-                opts.health_baseline,
-                opts.fail_on_stale_baseline,
-                crate::baseline_gate::HEALTH_NOUN,
-            )
-        });
-    dead_code || dupes || health
 }
 
 fn audit_type_aware_completeness_failed(result: &AuditResult) -> bool {

@@ -2903,10 +2903,11 @@ fn audit_dependency_location_change_is_introduced() {
 }
 
 /// `audit` always analyzes a changed-code slice, so a whole-project baseline
-/// legitimately matches less of it. The opt-in stale-baseline gate inherits
-/// that guard instead of failing every review run.
+/// legitimately matches less of it and the opt-in gate can never judge it.
+/// The run has to say so: a job that passes the flag and gets a silent green
+/// would believe it is gating when it never was.
 #[test]
-fn audit_stale_baseline_gate_is_inert_on_a_change_scoped_run() {
+fn audit_says_why_the_stale_baseline_gate_cannot_run() {
     let tmp = create_audit_baseline_fixture();
     let dir = tmp.path();
     let baseline_path = dir.join(".fallow-dead-code-baseline.json");
@@ -2971,10 +2972,45 @@ fn audit_stale_baseline_gate_is_inert_on_a_change_scoped_run() {
         "a changed-code run cannot judge a whole-project baseline: {}",
         output.stderr
     );
+    assert!(
+        output
+            .stderr
+            .contains("--fail-on-stale-baseline did not run"),
+        "the run must name the reason the gate stood down: {}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains("analyzes only the files that changed against its base"),
+        "the reason must be audit's changed-code scope: {}",
+        output.stderr
+    );
     assert_eq!(
         output.code, 0,
         "the gate must stay usable in review jobs: {}\n{}",
         output.stdout, output.stderr
+    );
+    // The note is stderr only: `--format json` stdout stays parseable.
+    let _ = parse_json(&output);
+
+    // Without a baseline there is nothing to stand down from, so the flag
+    // stays silent rather than explaining itself on every audit run.
+    let no_baseline = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--fail-on-stale-baseline",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert!(
+        !no_baseline.stderr.contains("--fail-on-stale-baseline"),
+        "no baseline means no note: {}",
+        no_baseline.stderr
     );
 }
 

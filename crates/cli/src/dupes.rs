@@ -887,19 +887,26 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     // entry point inherits it. Standalone `dupes` and combined mode previously
     // rendered through two near-identical functions and only the combined one
     // gated, so `fallow dupes --threshold 1` exited 0 at 100% duplication (#2009).
-    if exceeds_threshold(result.threshold, result.report.stats.duplication_percentage) {
+    let threshold_exceeded =
+        exceeds_threshold(result.threshold, result.report.stats.duplication_percentage);
+    if threshold_exceeded {
         eprintln!(
             "Duplication ({:.1}%) exceeds threshold ({:.1}%)",
             result.report.stats.duplication_percentage, result.threshold
         );
-        return ExitCode::from(1);
     }
 
-    if crate::baseline_gate::gate_failed(
+    // Evaluated even when the threshold gate already failed. The duplication
+    // percentage is printed in the report, a stale baseline is not, so
+    // returning on the threshold first would exit 1 without a word about the
+    // baseline the user explicitly gated on.
+    let stale_baseline_failed = crate::baseline_gate::gate_failed(
         result.baseline_staleness.as_ref(),
         result.fail_on_stale_baseline,
         crate::baseline_gate::DUPES_NOUN,
-    ) {
+    );
+
+    if threshold_exceeded || stale_baseline_failed {
         return ExitCode::from(1);
     }
 

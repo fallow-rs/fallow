@@ -2542,6 +2542,44 @@ fn fail_on_stale_baseline_exits_one_on_a_stale_health_baseline() {
     );
 }
 
+/// The score and findings gates have their condition printed in the report, a
+/// stale baseline has it nowhere, so a run that fails the findings gate as well
+/// must still say what the opted-in baseline gate found.
+#[test]
+fn health_stale_baseline_gate_still_prints_behind_the_findings_gate() {
+    let project = rotted_health_baseline_project(5, 4);
+    let index = project.path().join("src/index.ts");
+    let mut source = std::fs::read_to_string(&index).expect("read the fixture source");
+    // A hotspot the baseline never saw, so one finding survives the baseline
+    // filter and the findings gate fires alongside the stale-baseline gate.
+    source.push_str(&hotspot_source("unbaselined"));
+    write_file(&index, &source);
+
+    let output = run_health_baseline_human(project.path(), &["--fail-on-stale-baseline"]);
+    assert!(
+        output
+            .stderr
+            .contains("Baseline gate failed: 1 of 5 entries"),
+        "the baseline gate reports even though findings remain: {}",
+        redact_all(&output.stderr, project.path())
+    );
+    assert_eq!(
+        output.code,
+        1,
+        "both gates fail the run: {}",
+        redact_all(&output.stderr, project.path())
+    );
+
+    let quiet = run_health_baseline_human(project.path(), &["--fail-on-stale-baseline", "--quiet"]);
+    assert!(
+        quiet
+            .stderr
+            .contains("Baseline gate failed: 1 of 5 entries"),
+        "--ci implies --quiet, which is exactly where a bare exit 1 would be          unexplained: {}",
+        redact_all(&quiet.stderr, project.path())
+    );
+}
+
 /// `--report-only` short-circuits every health gate, and the stale-baseline
 /// gate is not an exception to that one rule.
 #[test]

@@ -538,8 +538,9 @@ pub type HealthResult =
 ///
 /// Exit-code gating (when `report_only` is `false`): the score gate
 /// (`--min-score`), the findings gate (`--min-severity`, or any finding when
-/// no gate flag is set), the runtime-coverage gate, and the coverage-gap gate
-/// are OR-combined. `report_only` short-circuits all of them to
+/// no gate flag is set), the runtime-coverage gate, the opt-in stale-baseline
+/// gate (`--fail-on-stale-baseline`) and the coverage-gap gate are
+/// OR-combined. `report_only` short-circuits all of them to
 /// `ExitCode::SUCCESS` after rendering. Combined and audit callers pass
 /// `report_only: false` (they own their own gate semantics).
 ///
@@ -624,11 +625,19 @@ fn health_report_context<'a>(
     }
 }
 
+/// The OR of every health exit gate, with each one evaluated before the verdict
+/// is combined so that none of them can swallow another's stderr line.
+///
+/// The baseline gate is why this is not a short-circuiting chain: the score and
+/// findings gates have their condition printed in the report, a stale baseline
+/// has it nowhere, so a run that already fails the findings gate would exit 1
+/// with nothing about the baseline the user explicitly gated on.
 fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
-    score_gate_failed(result, options)
-        || findings_gate_failed(result, options)
-        || has_failing_runtime_coverage(result)
-        || stale_baseline_gate_failed(result, options)
+    let score = score_gate_failed(result, options);
+    let findings = findings_gate_failed(result, options);
+    let runtime_coverage = has_failing_runtime_coverage(result);
+    let stale_baseline = stale_baseline_gate_failed(result, options);
+    score || findings || runtime_coverage || stale_baseline
 }
 
 /// The opt-in `--fail-on-stale-baseline` gate. Reads the staleness the engine

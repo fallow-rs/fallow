@@ -2549,8 +2549,12 @@ fn fail_on_stale_baseline_is_green_on_a_fresh_baseline() {
     );
 }
 
+/// A narrowed run cannot judge a whole-project baseline, but it must say so:
+/// `--file`, `--changed-since` and `--production` are ordinary CI shapes, and
+/// a job that opted into a build-failing gate would otherwise stay green
+/// forever without ever judging the baseline.
 #[test]
-fn fail_on_stale_baseline_is_inert_on_a_scoped_run() {
+fn fail_on_stale_baseline_says_why_it_stood_down_on_a_scoped_run() {
     let project = rotted_baseline_project(4, 2);
     let output = run_with_baseline(
         project.path(),
@@ -2561,9 +2565,44 @@ fn fail_on_stale_baseline_is_inert_on_a_scoped_run() {
         "a narrowed run cannot judge a whole-project baseline: {}",
         output.stderr
     );
+    assert!(
+        output
+            .stderr
+            .contains("--fail-on-stale-baseline did not run"),
+        "the run names the reason the gate stood down: {}",
+        output.stderr
+    );
     assert_eq!(
         output.code, 0,
         "the gate must stay usable in changed-file CI jobs: {}",
+        output.stderr
+    );
+}
+
+/// Production mode narrows through the config rather than a scope flag, and
+/// reaches the same guard and the same note.
+#[test]
+fn fail_on_stale_baseline_says_why_it_stood_down_in_production_mode() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(
+        project.path(),
+        &["--production", "--quiet", "--fail-on-stale-baseline"],
+    );
+    assert!(
+        output
+            .stderr
+            .contains("--fail-on-stale-baseline did not run"),
+        "the note survives --quiet, like the gate line: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("Baseline gate failed"),
+        "production mode drops files, so the comparison is partial: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "a stood-down gate does not fail the run: {}",
         output.stderr
     );
 }
@@ -2581,6 +2620,11 @@ fn fail_on_stale_baseline_is_inert_without_a_baseline() {
     assert!(
         !output.stderr.contains("Baseline gate failed"),
         "there is no baseline to judge: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("--fail-on-stale-baseline"),
+        "with nothing loaded the flag has nothing to explain: {}",
         output.stderr
     );
     assert_ne!(
