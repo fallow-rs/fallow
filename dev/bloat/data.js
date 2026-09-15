@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789455383976,
+  "lastUpdate": 1789497303010,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "536f96da2ec0b83aa5ee676fd2a2cdd56c124139",
-          "message": "chore: release v3.18.0",
-          "timestamp": "2026-08-25T00:00:27+02:00",
-          "tree_id": "a7c5e143f1b082b6655fc9afc2c4031b47a825e0",
-          "url": "https://github.com/fallow-rs/fallow/commit/536f96da2ec0b83aa5ee676fd2a2cdd56c124139"
-        },
-        "date": 1787609764458,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 517537304,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20316928,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25759096,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 39107000,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43263560,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "39e13ca491388e3e67a372af0fd86d97319cdf15",
+          "message": "feat(cli): add --fail-on-stale-baseline and align baseline staleness across commands (#2642)\n\nAdds the global --fail-on-stale-baseline flag: when a loaded baseline has any entry that matched nothing this run, the run exits 1 with one stderr line naming the stale count, the baseline path and the re-save command, in every output format and on dead-code, check, the bare run, dupes and health. A run that cannot judge the baseline (a narrowed scope, health --report-only, audit's changed-code slice, decision-surface's brief) stands down and says so on stderr. dupes --baseline gets the same partial-staleness warning and change-scope guard as dead-code and health through the shared predicate, no baseline warning fires on a project with no findings left to compare, and health's scope guard includes production mode so a fresh baseline is never called stale on an unchanged production run. JSON envelopes are unchanged.\n\nFixes #2637",
+          "timestamp": "2026-09-15T20:16:22+02:00",
+          "tree_id": "51819a833be59c4e7029f65ba08d67b73b6d99ca",
+          "url": "https://github.com/fallow-rs/fallow/commit/39e13ca491388e3e67a372af0fd86d97319cdf15"
+        },
+        "date": 1789497298807,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 572351904,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21584392,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28614152,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43416920,
             "unit": "bytes"
           }
         ]
