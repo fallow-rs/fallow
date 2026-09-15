@@ -44,6 +44,12 @@ lifecycle behavior.
   `security-sink` and `security-client-server-leak` default to `off`, retain
   those exact diagnostic codes, and publish at information severity because
   candidates are not verified vulnerabilities.
+- The `workspace/didChangeWatchedFiles` registration derives its config-file
+  globs from `fallow_config::CONFIG_FILE_NAMES`, the list the loader itself
+  reads, and `type_aware_resolution_file` matches the same names. Add a config
+  file name there, not in `crates/lsp`. The legacy `fallow.json`-style patterns
+  stay registered separately because `initializationOptions.configPath` can
+  still point at one.
 - Code actions must be safe, scoped, and derived from the current issue.
 - Initialization options and issue metadata stay aligned with generated VS
   Code contracts.
@@ -74,6 +80,8 @@ findings. Per-path `overrides[].rules` therefore reach inline diagnostics, the
 CLI, and the sidebar identically, and each project root is filtered with its own
 config before a multi-root session merges the outputs. Do not reintroduce rule
 filtering in `crates/lsp`; the session hands back an already-resolved result set.
+The programmatic runtime behind MCP resolves severities at the same two points,
+so every reporting surface narrows to the same set.
 
 The shared LSP owns diagnostics, hover, quick fixes, Code Lens, and their
 initialization contract. Host-specific sidebars, status items, full Health

@@ -624,11 +624,20 @@ fn type_aware_file_classification_covers_source_and_resolution_inputs() {
         "package.json",
         "pnpm-lock.yaml",
         "fallow.toml",
+        ".fallowrc.json",
+        ".fallowrc.jsonc",
+        ".fallow.toml",
         "src/framework.d.ts",
     ] {
         assert!(
             type_aware_resolution_file(Path::new(path)),
             "{path} must force a full semantic invalidation"
+        );
+    }
+    for name in fallow_config::CONFIG_FILE_NAMES {
+        assert!(
+            type_aware_resolution_file(Path::new(name)),
+            "{name} is a config file the loader reads, so it must invalidate the semantic session"
         );
     }
     for path in ["src/index.ts", "src/view.tsx", "src/runtime.js"] {
@@ -4614,5 +4623,128 @@ fn analyze_project_root_honors_per_path_rule_overrides() {
     assert!(
         unaffected.iter().any(|code| code == "private-type-leak"),
         "paths outside the override keep their private-type-leak diagnostic: {unaffected:?}"
+    );
+}
+
+#[test]
+fn watched_file_globs_cover_every_config_file_name() {
+    let globs = watched_file_globs();
+
+    for name in fallow_config::CONFIG_FILE_NAMES {
+        let expected = format!("**/{name}");
+        assert!(
+            globs.contains(&expected),
+            "{name} is a config file the loader reads, so the watcher must register {expected}: {globs:?}"
+        );
+    }
+}
+
+/// Drain server-to-client traffic until a `publishDiagnostics` notification for
+/// `uri` carries (or no longer carries) an `unused-export` diagnostic. Returns
+/// `false` when the stream ends or goes quiet first.
+async fn wait_for_unused_export_diagnostic(
+    socket: &mut tower_lsp_server::ClientSocket,
+    uri: &str,
+    expected: bool,
+) -> bool {
+    use futures::StreamExt;
+
+    loop {
+        let Ok(next) = tokio::time::timeout(Duration::from_secs(20), socket.next()).await else {
+            return false;
+        };
+        let Some(message) = next else {
+            return false;
+        };
+        if message.method() != "textDocument/publishDiagnostics" {
+            continue;
+        }
+        let Some(params) = message.params() else {
+            continue;
+        };
+        if params["uri"] != json!(uri) {
+            continue;
+        }
+        let reported = params["diagnostics"].as_array().is_some_and(|diagnostics| {
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic["code"] == json!("unused-export"))
+        });
+        if reported == expected {
+            return true;
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn config_change_through_watched_files_republishes_diagnostics() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("canonical root");
+    std::fs::create_dir_all(root.join("src/ui")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"lsp-config-watch","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import './ui/kit';\nexport const entry = 1;\nconsole.log(entry);\n",
+    )
+    .expect("write entry");
+    let source = root.join("src/ui/kit.ts");
+    std::fs::write(&source, "export const uiDead = 1;\n").expect("write source");
+    let config = root.join(".fallowrc.json");
+    std::fs::write(&config, r#"{"rules":{"unused-exports":"warn"}}"#).expect("write config");
+
+    let source_uri = Uri::from_file_path(&source).expect("source file URI");
+    let config_uri = Uri::from_file_path(&config).expect("config file URI");
+    let source_uri_text = source_uri.to_string();
+
+    let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
+    // Diagnostics only reach the client after the initialize handshake; log
+    // messages do not, so a server set up by hand looks alive while every
+    // publish is dropped.
+    let initialize = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "rootUri": Uri::from_file_path(&root).expect("root URI").to_string(),
+        }))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("service ready")
+        .call(initialize)
+        .await
+        .expect("initialize call")
+        .expect("initialize response");
+    let backend = service.inner();
+
+    backend
+        .did_save(DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier::new(source_uri),
+            text: None,
+        })
+        .await;
+    assert!(
+        wait_for_unused_export_diagnostic(&mut socket, &source_uri_text, true).await,
+        "the first analysis must report the unused export before the override lands",
+    );
+
+    std::fs::write(
+        &config,
+        r#"{"rules":{"unused-exports":"warn"},"overrides":[{"files":["src/ui/**"],"rules":{"unused-exports":"off"}}]}"#,
+    )
+    .expect("rewrite config");
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent::new(config_uri, FileChangeType::CHANGED)],
+        })
+        .await;
+
+    assert!(
+        wait_for_unused_export_diagnostic(&mut socket, &source_uri_text, false).await,
+        "a watched config change must re-publish diagnostics without the overridden finding",
     );
 }

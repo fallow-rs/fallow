@@ -355,6 +355,45 @@ fn configured_type_aware_accepts_gitlab_review_renderer() {
     assert!(rendered.contains("actuallyUnused"), "review: {rendered}");
 }
 
+/// Type-aware reconciliation appends a private-type leak the syntactic pass
+/// never produced, so the CLI resolves rule severities again over the refined
+/// set. Without that second pass a path whose override turns the rule off is
+/// still reported, while the editor suppresses it.
+#[test]
+fn type_aware_reconciliation_respects_per_path_rule_overrides() {
+    let root = fixture_path("type-aware-private-type-leak-overrides");
+    let root_arg = root.to_string_lossy();
+    let output = run_fallow_raw_with_type_aware_sidecar(&[
+        "dead-code",
+        "--root",
+        &root_arg,
+        "--type-aware",
+        "--private-type-leaks",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    let json = parse_json(&output);
+    let paths: Vec<&str> = json["private_type_leaks"]
+        .as_array()
+        .expect("private type leaks array")
+        .iter()
+        .map(|leak| leak["path"].as_str().expect("leak path"))
+        .collect();
+
+    assert!(
+        paths.contains(&"src/lib/util.ts"),
+        "the control leak outside the override must stay reported: {paths:?} (stderr: {})",
+        output.stderr
+    );
+    assert!(
+        !paths.contains(&"src/ui/kit.ts"),
+        "a leak added by reconciliation on an overridden path must be dropped: {paths:?}"
+    );
+}
+
 #[test]
 fn explicit_type_aware_accepts_gitlab_sticky_comment_renderer() {
     let root = fixture_path("type-aware-unused-export-refinement");

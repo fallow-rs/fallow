@@ -54,6 +54,7 @@ fn type_aware_resolution_file(path: &Path) -> bool {
                 | "fallow.yml"
                 | "fallow.toml"
         )
+        || fallow_config::CONFIG_FILE_NAMES.contains(&name)
         || name.ends_with(".d.ts")
 }
 
@@ -161,6 +162,8 @@ use server_capabilities::{
 const WATCHED_FILES_REGISTRATION_ID: &str = "fallow-watched-files";
 const WATCHED_FILES_METHOD: &str = "workspace/didChangeWatchedFiles";
 const MAX_PENDING_TYPE_AWARE_CHANGES: usize = 2_048;
+/// Resolution inputs and legacy config spellings a client may still hold. The
+/// names the loader itself accepts are appended by [`watched_file_globs`].
 const WATCHED_FILE_GLOBS: &[&str] = &[
     "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}",
     "**/*.d.ts",
@@ -168,6 +171,24 @@ const WATCHED_FILE_GLOBS: &[&str] = &[
     "**/{package.json,package-lock.json,pnpm-lock.yaml,yarn.lock,bun.lock,bun.lockb}",
     "**/{fallow.json,fallow.jsonc,fallow.yaml,fallow.yml,fallow.toml}",
 ];
+
+/// Glob patterns registered for `workspace/didChangeWatchedFiles`.
+///
+/// Derived from the loader's own config-file list so a name added there starts
+/// being watched without a second list to keep in step. The legacy patterns
+/// above stay registered because a client can still point
+/// `initializationOptions.configPath` at one of those spellings.
+fn watched_file_globs() -> Vec<String> {
+    WATCHED_FILE_GLOBS
+        .iter()
+        .map(|pattern| (*pattern).to_string())
+        .chain(
+            fallow_config::CONFIG_FILE_NAMES
+                .iter()
+                .map(|name| format!("**/{name}")),
+        )
+        .collect()
+}
 
 fn disabled_diagnostic_codes(options: &LspInitializationOptions) -> FxHashSet<String> {
     let muted_categories: FxHashSet<&str> = options
@@ -349,10 +370,10 @@ impl LanguageServer for FallowLspServer {
 
     async fn initialized(&self, _: InitializedParams) {
         if self.watched_file_registration.load(Ordering::SeqCst) {
-            let watchers = WATCHED_FILE_GLOBS
-                .iter()
+            let watchers = watched_file_globs()
+                .into_iter()
                 .map(|pattern| FileSystemWatcher {
-                    glob_pattern: GlobPattern::String((*pattern).to_string()),
+                    glob_pattern: GlobPattern::String(pattern),
                     kind: None,
                 })
                 .collect();

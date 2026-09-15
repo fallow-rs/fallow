@@ -1,0 +1,13 @@
+{
+  "rules": {
+    "private-type-leaks": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["src/ui/**"],
+      "rules": {
+        "private-type-leaks": "off"
+      }
+    }
+  ]
+}

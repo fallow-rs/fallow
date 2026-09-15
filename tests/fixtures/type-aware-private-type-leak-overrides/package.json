@@ -1,0 +1,4 @@
+{
+  "name": "type-aware-private-type-leak-overrides-fixture",
+  "main": "src/index.ts"
+}

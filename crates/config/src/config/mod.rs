@@ -31,7 +31,7 @@ pub use finding_ignore::FindingIgnoreMatcher;
 pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
 pub use health::{EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig};
-pub use parsing::ConfigLoadOptions;
+pub use parsing::{CONFIG_FILE_NAMES, ConfigLoadOptions};
 pub use resolution::{
     AnalysisSnapshot, CompiledIgnoreCatalogReferenceRule, CompiledIgnoreDependencyOverrideRule,
     CompiledIgnoreExportRule, ConfigOverride, DEFAULT_MAX_FILE_SIZE_BYTES,

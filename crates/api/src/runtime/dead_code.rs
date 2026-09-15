@@ -126,15 +126,16 @@ pub(super) fn run_dead_code_with_session(
     let mut results = analysis.results;
     let unfiltered_unused_files = results.unused_files.clone();
 
-    apply_dead_code_scope(options, resolved, session, changed_files, &mut results)?;
-    apply_dead_code_filters(&options.filters, &mut results);
-    post_filter(&mut results);
-    let type_aware_meta = refine_with_unfiltered_unused_files(
-        &options.analysis.type_aware,
-        &options.filters,
-        session,
+    let type_aware_meta = finish_dead_code_results(
+        DeadCodeReportInputs {
+            options,
+            resolved,
+            session,
+            changed_files,
+            unfiltered_unused_files,
+        },
         &mut results,
-        unfiltered_unused_files,
+        post_filter,
     )?;
 
     Ok(build_dead_code_programmatic_output(
@@ -168,21 +169,16 @@ pub(super) fn run_dead_code_with_session_artifacts(
         })?;
     let unfiltered_unused_files = artifacts.results.unused_files.clone();
 
-    apply_dead_code_scope(
-        options,
-        resolved,
-        session,
-        changed_files,
+    let type_aware_meta = finish_dead_code_results(
+        DeadCodeReportInputs {
+            options,
+            resolved,
+            session,
+            changed_files,
+            unfiltered_unused_files,
+        },
         &mut artifacts.results,
-    )?;
-    apply_dead_code_filters(&options.filters, &mut artifacts.results);
-    post_filter(&mut artifacts.results);
-    let type_aware_meta = refine_with_unfiltered_unused_files(
-        &options.analysis.type_aware,
-        &options.filters,
-        session,
-        &mut artifacts.results,
-        unfiltered_unused_files,
+        post_filter,
     )?;
 
     Ok(build_dead_code_run_with_artifacts(
@@ -204,20 +200,16 @@ pub(super) fn run_dead_code_from_artifacts(
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticRunWithArtifacts> {
     let unfiltered_unused_files = artifacts.results.unused_files.clone();
-    apply_dead_code_scope(
-        options,
-        resolved,
-        session,
-        changed_files,
+    let type_aware_meta = finish_dead_code_results(
+        DeadCodeReportInputs {
+            options,
+            resolved,
+            session,
+            changed_files,
+            unfiltered_unused_files,
+        },
         &mut artifacts.results,
-    )?;
-    apply_dead_code_filters(&options.filters, &mut artifacts.results);
-    let type_aware_meta = refine_with_unfiltered_unused_files(
-        &options.analysis.type_aware,
-        &options.filters,
-        session,
-        &mut artifacts.results,
-        unfiltered_unused_files,
+        |_| {},
     )?;
 
     Ok(build_dead_code_run_with_artifacts(
@@ -228,6 +220,51 @@ pub(super) fn run_dead_code_from_artifacts(
         type_aware_meta,
         start,
     ))
+}
+
+/// Inputs the reporting tail needs from whichever entry point produced the
+/// analysis.
+struct DeadCodeReportInputs<'a> {
+    options: &'a DeadCodeOptions,
+    resolved: &'a ProgrammaticAnalysisContext,
+    session: &'a AnalysisSession,
+    changed_files: Option<&'a FxHashSet<std::path::PathBuf>>,
+    /// Unused files as the engine reported them, before scope narrowing, which
+    /// type-aware refinement needs to reason about the whole project.
+    unfiltered_unused_files: Vec<fallow_types::output_dead_code::UnusedFileFinding>,
+}
+
+/// Shared reporting tail for every programmatic dead-code entry point: scope,
+/// issue-type filters, effective rule severities, the caller's family filter,
+/// and type-aware refinement.
+///
+/// The severity pass belongs here rather than at each entry point. Spelling
+/// the sequence out per entry point is what let the programmatic runtime
+/// report findings for rules a project had turned off while the CLI and the
+/// editor did not.
+fn finish_dead_code_results(
+    inputs: DeadCodeReportInputs<'_>,
+    results: &mut AnalysisResults,
+    post_filter: impl FnOnce(&mut AnalysisResults),
+) -> ProgrammaticResult<Option<fallow_types::envelope::TypeAwareMeta>> {
+    let DeadCodeReportInputs {
+        options,
+        resolved,
+        session,
+        changed_files,
+        unfiltered_unused_files,
+    } = inputs;
+    apply_dead_code_scope(options, resolved, session, changed_files, results)?;
+    apply_dead_code_filters(&options.filters, results);
+    fallow_engine::dead_code::apply_rule_severities(results, session.config());
+    post_filter(results);
+    refine_with_unfiltered_unused_files(
+        &options.analysis.type_aware,
+        &options.filters,
+        session,
+        results,
+        unfiltered_unused_files,
+    )
 }
 
 fn refine_with_unfiltered_unused_files(
@@ -242,6 +279,12 @@ fn refine_with_unfiltered_unused_files(
     let outcome =
         crate::type_aware::refine_programmatic_dead_code(options, filters, session, results);
     results.unused_files = reported_unused_files;
+    if options.enabled {
+        // Reconciliation can add findings, so rule severities are resolved
+        // again over the refined set. The pass only removes findings, so
+        // repeating it is idempotent. Mirrors EditorAnalysisSession.
+        fallow_engine::dead_code::apply_rule_severities(results, session.config());
+    }
     outcome
 }
 

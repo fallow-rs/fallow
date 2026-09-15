@@ -3931,4 +3931,68 @@ mod tests {
         apply_rules(&mut results, &config);
         assert!(results.unprovided_injects.is_empty());
     }
+
+    /// Base rules with `private-type-leaks` reportable, plus one override that
+    /// turns the rule off for `src/ui/**`.
+    fn config_with_private_type_leak_override() -> ResolvedConfig {
+        let base = config_with_rules(RulesConfig {
+            private_type_leaks: Severity::Warn,
+            ..RulesConfig::default()
+        });
+        ResolvedConfig {
+            overrides: vec![fallow_config::ResolvedOverride {
+                matchers: vec![
+                    globset::Glob::new("src/ui/**")
+                        .expect("override glob compiles")
+                        .compile_matcher(),
+                ],
+                rules: fallow_config::PartialRulesConfig {
+                    private_type_leaks: Some(Severity::Off),
+                    ..fallow_config::PartialRulesConfig::default()
+                },
+            }],
+            ..base
+        }
+    }
+
+    fn private_type_leak_at(path: &str) -> PrivateTypeLeakFinding {
+        PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
+            path: PathBuf::from(path),
+            export_name: "build".to_string(),
+            type_name: "Internal".to_string(),
+            line: 1,
+            col: 0,
+            span_start: 0,
+            semantic: None,
+        })
+    }
+
+    /// Type-aware reconciliation appends findings the syntactic pass never saw,
+    /// so both the CLI and the editor resolve severities again over the refined
+    /// set. Pins that the second pass reaches such a finding.
+    #[test]
+    fn override_off_removes_a_finding_appended_after_the_first_pass() {
+        let config = config_with_private_type_leak_override();
+        let mut results = AnalysisResults::default();
+        results
+            .private_type_leaks
+            .push(private_type_leak_at("/project/src/lib/util.ts"));
+
+        apply_rules(&mut results, &config);
+        assert_eq!(results.private_type_leaks.len(), 1);
+
+        // Stand in for the reconciliation stage, which pushes a semantic-only
+        // leak straight onto the already-filtered result set.
+        results
+            .private_type_leaks
+            .push(private_type_leak_at("/project/src/ui/kit.ts"));
+        apply_rules(&mut results, &config);
+
+        let paths: Vec<PathBuf> = results
+            .private_type_leaks
+            .iter()
+            .map(|finding| finding.leak.path.clone())
+            .collect();
+        assert_eq!(paths, vec![PathBuf::from("/project/src/lib/util.ts")]);
+    }
 }

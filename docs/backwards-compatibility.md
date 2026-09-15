@@ -389,6 +389,21 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **Agent-facing JSON now applies `rules` and per-path `overrides[].rules`.**
+  The programmatic runtime behind the MCP `analyze` and `check_changed` tools,
+  the audit sub-analyses, Code Mode's combined run, and the Node bindings
+  resolved effective severities nowhere, so a finding on a path whose override
+  turned its rule off was reported there while `fallow dead-code` and the editor
+  suppressed it. All of them now run the same engine pass the CLI runs. A
+  consumer that relied on the wider result set sees those findings disappear;
+  turning the rule back on for the path restores them. The default
+  configuration is unaffected, because with no `rules` or `overrides` entry the
+  pass removes nothing. Separately, `fallow dead-code --type-aware` now applies
+  the pass again after type-aware reconciliation, so a private-type leak that
+  only the semantic pass discovers is subject to an override on its path just
+  like a syntactic one. No field is renamed, retyped, or added, and no
+  `schema_version` moves.
+
 - **Every SARIF result in one run now carries its own
   `partialFingerprints` value.** GitHub code scanning treats that value as
   alert identity, so two results sharing one were shown as a single alert and

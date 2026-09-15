@@ -1128,6 +1128,14 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     } else {
         (None, None)
     };
+    if config.type_aware.enabled {
+        // Reconciliation can add findings a syntactic pass never produced, so
+        // effective severities are resolved once more over the refined set.
+        // The pass only removes findings, so a run that reconciled nothing is
+        // unchanged. Mirrors EditorAnalysisSession, which keeps the CLI and
+        // the editor reporting the same set for an overridden path.
+        rules::apply_rules(&mut data.results, &config);
+    }
     let elapsed = start.elapsed();
     let analysis_identity = type_aware
         .as_ref()
