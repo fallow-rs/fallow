@@ -7,52 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **The built-in `build` exclusion now matches at any depth.** The default
-  discovery ignore list carried `build/**`, which is anchored at the project
-  root, while every neighboring generated-output default (`**/dist/**`,
-  `**/coverage/**`, `**/node_modules/**`) is recursive. A monorepo that keeps
-  per-package output in `projects/*/apps/web/build/` therefore had that output
-  walked, parsed, graphed and reported, producing unused files, unused exports,
-  duplication and health findings for generated code. The default is now
-  `**/build/**`, so a `build` path segment is treated as generated output
-  wherever it appears, which also matches how workspace discovery has always
-  classified the name. Paths that merely contain the word, such as
-  `src/build.ts` or `src/rebuild/helper.ts`, are unaffected, and a root-level
-  `build/` stays excluded as before.
-
-  Everything under a `build` segment now leaves analysis, and `ignorePatterns`
-  cannot bring it back: the field has no negation, so a `!`-prefixed entry is
-  compiled as a literal glob, and a positional path only narrows what is
-  reported from the files discovery already kept. Four consequences are worth
-  stating plainly before upgrading.
-
-  - **Hand-written source in a nested `build/` directory is skipped.** The
-    remedy is to rename or move the directory. Analyzing it as its own project
-    with `fallow --root <that directory>` also works, but a sub-root run cannot
-    see importers above that root, so a file imported only from the parent
-    project is reported as unused there.
-  - **A workspace package literally named `build` keeps its entry in workspace
-    discovery and still appears in `fallow list --workspaces`, but none of its
-    files are analyzed.** It contributes no unused-file, unused-export,
-    duplication or health findings, and its `package.json` no longer produces
-    unused-dependency findings, because the manifest filter shares this globset.
-  - **A framework config inside a nested `build/` directory is no longer
-    discovered, so the path aliases it declares are lost.** An
-    `app/build/webpack.config.js` that maps `@app` to `../src` stops being read,
-    and imports through that alias are then reported as unlisted dependencies.
-    Move the config out of the `build` directory, or declare the same aliases in
-    `tsconfig.json` `paths`, which is read from its own location.
-  - **An entry point that resolves into a nested `build/` directory stops being
-    an entry point.** A package manifest whose `main` or `exports` names
-    `./build/index.js`, or a configured `entry` glob under `build/`, no longer
-    seeds reachability, so the source behind it can be reported as an unused
-    file and a run that exited 0 can start exiting 1. This is the same behavior
-    the already-recursive `**/dist/**` default has always had for a `dist`
-    directory; point `entry` at the source that produces the output instead
-    (#2622).
-
 ## [3.25.0] - 2026-09-11
 
 ### Added
