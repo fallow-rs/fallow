@@ -740,7 +740,7 @@ fn display_relative(root: &Path, path: &Path) -> String {
 /// names a real directory rather than a wildcard.
 ///
 /// Source discovery uses it to decide which directory a built-in ignore
-/// pattern excluded a file "at"; [`render_message`] uses it to decide which
+/// pattern excluded a file "at"; `render_message` uses it to decide which
 /// remedy is true for that pattern. The two have to agree, so the function
 /// lives here rather than once per crate: a pattern with such a segment
 /// (`**/dist/**`) is lifted by re-rooting inside the matched directory,
