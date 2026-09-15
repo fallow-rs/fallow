@@ -149,8 +149,8 @@ pub fn print_default_ignore_exclusion_note(
 }
 
 /// Build the default (unflagged) warning for a run that discovered no source
-/// files at all because a built-in ignore pattern took them, or `None` when
-/// either half of that is untrue.
+/// files while a built-in ignore pattern excluded some, or `None` when either
+/// half of that is untrue.
 ///
 /// This is the one line the exclusions get outside `--explain-skipped`, and
 /// the guard is what makes it safe: a project that discovered even one source
@@ -158,6 +158,14 @@ pub fn print_default_ignore_exclusion_note(
 /// monorepo with a non-gitignored `dist/`. Without it the issue's headline
 /// case, pointing fallow at a directory a built-in matches, still prints a
 /// green "No issues found" with exit 0 and no hint that the flag exists.
+///
+/// The sentence reports two measured facts and joins them with a period, not
+/// with a colon. The tally is not the only way a run ends with no files:
+/// `--production` drops test-only source AFTER the ignore check, a skipped
+/// hidden directory or a size or minification skip can take the rest, and none
+/// of those is visible here. Naming the pattern as the cause would be wrong on
+/// exactly those runs, and this is the line that fires without any flag, so a
+/// false causal claim is more expensive here than anywhere else.
 #[must_use]
 pub fn build_all_source_excluded_warning(
     diagnostics: &[WorkspaceDiagnostic],
@@ -183,20 +191,20 @@ pub fn build_all_source_excluded_warning(
         return None;
     }
     let noun = if total == 1 { "file" } else { "files" };
-    let cause = if let [(_, pattern)] = excluded.as_slice() {
-        format!("fallow's built-in ignore pattern '{pattern}'")
+    let subject = if let [(_, pattern)] = excluded.as_slice() {
+        format!("The built-in ignore pattern '{pattern}'")
     } else {
-        "fallow's built-in ignore patterns".to_owned()
+        "The built-in ignore patterns".to_owned()
     };
     // The breakdown is already on the page when the flag is set, so pointing at
     // the flag there would be the only wrong half of the sentence.
     let pointer = if explain_skipped {
-        ""
+        "."
     } else {
-        " Re-run with --explain-skipped for the per-pattern breakdown."
+        "; run with --explain-skipped for the breakdown."
     };
     Some(format!(
-        "No source files were analyzed: {cause} excluded {total} {noun}.{pointer}"
+        "No source files were analyzed. {subject} excluded {total} {noun}{pointer}"
     ))
 }
 
@@ -320,6 +328,24 @@ mod tests {
         assert!(warning.contains("**/build/**"), "{warning}");
         assert!(warning.contains("3 files"), "{warning}");
         assert!(warning.contains("--explain-skipped"), "{warning}");
+    }
+
+    /// The line fires on every run that discovered nothing, and a built-in
+    /// exclusion is not always the reason one did: production excludes, a
+    /// skipped hidden directory, and a size or minification skip each empty
+    /// the file list on their own, and none of them is in this tally. So the
+    /// sentence states the two facts it measured and leaves the link to the
+    /// reader instead of naming a cause it cannot establish.
+    #[test]
+    fn the_warning_states_measured_facts_and_asserts_no_cause() {
+        let warning =
+            build_all_source_excluded_warning(&[excluded("build", "**/build/**", 3)], 0, false)
+                .expect("warning");
+        assert_eq!(
+            warning,
+            "No source files were analyzed. The built-in ignore pattern '**/build/**' excluded \
+             3 files; run with --explain-skipped for the breakdown."
+        );
     }
 
     /// The guard that keeps this off every healthy project: one discovered

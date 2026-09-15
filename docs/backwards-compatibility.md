@@ -675,7 +675,12 @@ These are documented for the rare CI script that depended on the old behavior. N
   no `fallow fix` action is withheld. Human output is unchanged unless
   `--explain-skipped` is passed, with one exception: a run that discovered no
   source files at all while a built-in pattern excluded some now says so on
-  stderr, because the alternative is a green result that is misleading. SARIF,
+  stderr, on `check`, `dead-code`, `audit` and the default run, because the
+  alternative is a green result that is misleading. That line states the two
+  facts it measured and joins them with a period ("No source files were
+  analyzed. The built-in ignore pattern `**/build/**` excluded 3 files"); it
+  does not claim the pattern is the reason the run was empty, because
+  `--production` and the other skips can empty a file list on their own. SARIF,
   CodeClimate, compact, and badge output carry no workspace diagnostic and are
   unchanged. The new kind moves no `schema_version` under the open-set exception
   for `workspace_diagnostics[].kind` documented above.

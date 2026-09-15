@@ -198,10 +198,19 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
         eprintln!("{scope}");
     }
 
-    // Preamble, not epilogue: check and the combined run both print this note
+    // Preamble, not epilogue: check and the combined run both print these
     // before their findings, and wedged between audit's two result lines it was
-    // the same note in the least scannable place on the page.
+    // the same note in the least scannable place on the page. Audit prints the
+    // discovery note, so it prints the unflagged line too: a green verdict over
+    // a tree nothing was read from is most expensive on the CI-gating surface.
     if let Some(ref check) = result.check {
+        crate::discovery_note::print_all_source_excluded_warning(
+            &check.workspace_diagnostics,
+            check.discovered_file_count,
+            check.explain_skipped,
+            quiet,
+            check.config.output,
+        );
         crate::discovery_note::print_default_ignore_exclusion_note(
             &check.config.root,
             &check.workspace_diagnostics,

@@ -434,12 +434,20 @@ Because the exclusion is silent by construction, the walk counts it. Every
 candidate source file a built-in pattern drops is attributed to that pattern,
 and one `excluded-by-default-ignore` workspace diagnostic per pattern reaches
 `workspace_diagnostics[]` carrying the pattern text, an exact `file_count`, a
-`directory_count`, and a `path` anchored at the directory that lost the most
-files. One entry per pattern is what keeps the array bounded on a project of
-any size; per-file or per-directory entries would scale with the tree. `path`
+`directory_count`, and a `path` anchored at the matched directory that lost the
+most files. One entry per pattern is what keeps the array bounded on a project
+of any size; per-file or per-directory entries would scale with the tree. `path`
 names the largest group and not a majority, which is why `directory_count`
 travels with it: ten packages each losing one file to `**/dist/**` make every
-one of them "the largest".
+one of them "the largest". `directory_count` counts matched scopes, not the
+directories the files sat in, so one excluded subtree counts once however deep
+it nests.
+
+The anchor is the DEEPEST segment the pattern matched, not the first. The glob
+is tested against the path relative to the run root, so on
+`build/tools/build/a.ts` an anchor at the outer `build` would name a root under
+which `**/build/**` matches again and the `--root` remedy would recover
+nothing.
 
 Four properties of that count are load-bearing:
 
@@ -469,9 +477,14 @@ generated output, so caveating findings would fire on most projects and make
 run mentions the counts only under `--explain-skipped` on `check`, `dead-code`,
 `audit` and the default run, the same flag that widens the duplication note on
 `dupes` and `audit`. The one exception is a run that discovered no source files
-at all while a built-in pattern took some: that run says so on stderr without
-the flag, because it has nothing else to report and a green result would be
-misleading.
+at all while a built-in pattern excluded some: that run says so on stderr
+without the flag, on the same commands, because it has nothing else to report
+and a green result would be misleading. That line states two measured facts
+("No source files were analyzed. The built-in ignore pattern `<p>` excluded N
+files") and joins them with a period rather than a colon: `--production`
+excludes, a skipped hidden directory, and the size and minification skips can
+each empty the file list on their own and none of them is in this tally, so
+naming the pattern as the cause would be false on exactly those runs.
 
 The remedy depends on the pattern's shape, and the two are not
 interchangeable. `ignorePatterns` is never the remedy, because the compiled

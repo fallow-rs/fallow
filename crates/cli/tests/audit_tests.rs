@@ -6925,3 +6925,47 @@ fn review_json_dead_code_section_carries_analysis_stage_workspace_diagnostics() 
         assert_dead_code_section_carries_bun_lockb_skip(&json);
     }
 }
+
+/// Issue #2638: audit prints the `--explain-skipped` discovery note, so it has
+/// to print the unflagged line too. Audit is the CI-gating surface, where a
+/// green verdict over a tree nothing was read from is the most expensive place
+/// for the exclusion to stay silent.
+#[test]
+fn audit_says_when_a_built_in_pattern_left_it_nothing_to_analyze() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"issue-2638-audit","private":true}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join("build/src")).unwrap();
+    for name in ["a.ts", "b.ts"] {
+        fs::write(
+            dir.join("build/src").join(name),
+            "export const excluded = 1;\n",
+        )
+        .unwrap();
+    }
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    git(dir, &["checkout", "-b", "feature"]);
+    fs::write(
+        dir.join("build/src/c.ts"),
+        "export const alsoExcluded = 1;\n",
+    )
+    .unwrap();
+    commit_all(dir, "add generated source");
+
+    let root = dir.to_str().expect("fixture path should be UTF-8");
+    let output = run_fallow_raw(&["audit", "--root", root, "--base", "main", "--no-cache"]);
+
+    assert!(
+        output.stderr.contains(
+            "No source files were analyzed. The built-in ignore pattern '**/build/**' excluded \
+             3 files; run with --explain-skipped for the breakdown."
+        ),
+        "audit carries the same unflagged line as check and the combined run: {}",
+        output.stderr
+    );
+}

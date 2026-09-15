@@ -75,16 +75,19 @@ impl ExcludedByPattern {
         }
     }
 
-    /// Distinct directories this pattern excluded files from. Exact, and the
-    /// number the message needs to say whether [`Self::anchor`] names the
-    /// whole exclusion or one group of many.
+    /// Distinct directories this pattern MATCHED at, which for a
+    /// directory-shaped pattern is not the number of directories that held
+    /// the files: everything under one matched `dist/` collapses to that one
+    /// scope. Exact, and the number the message needs to say whether
+    /// [`Self::anchor`] names the whole exclusion or one matched location of
+    /// several.
     fn directory_count(&self) -> u32 {
         u32::try_from(self.scopes.len()).unwrap_or(u32::MAX)
     }
 
-    /// The directory this pattern excluded the most files from, ties broken by
-    /// the lexicographically first path so two runs on one tree report the
-    /// same anchor.
+    /// The matched directory this pattern excluded the most files from, ties
+    /// broken by the lexicographically first path so two runs on one tree
+    /// report the same anchor.
     fn anchor(&self) -> PathBuf {
         self.scopes
             .iter()
@@ -114,28 +117,33 @@ type ExclusionTally = FxHashMap<usize, ExcludedByPattern>;
 /// two exclusions read as one policy rather than as an accident.
 const UNREPORTED_DEFAULT_IGNORES: &[&str] = &["**/node_modules/**", "**/.git/**"];
 
-/// The directory a built-in pattern excluded a file "at": the shortest prefix
-/// of the file's project-relative path ending in the pattern's first literal
-/// segment, or the file's parent when the pattern has no literal segment.
+/// The directory a built-in pattern excluded a file "at": the LONGEST prefix
+/// of the file's project-relative parent directory ending in the pattern's
+/// literal segment, or the parent itself when the pattern has no literal
+/// segment.
 ///
 /// `**/build/**` with `projects/app/build/static/js/main.js` gives
 /// `projects/app/build`, which is the directory a reader can act on and the
-/// one `fallow --root` takes. `**/*.min.js` has no literal segment, so
-/// `vendor/a.min.js` gives `vendor`. A root-level match returns the empty
-/// path, which the diagnostic renders as the root itself.
+/// one `fallow --root` takes. The deepest match is what makes that remedy
+/// true: the glob is tested against the path relative to the run root, so on
+/// `build/tools/build/a.ts` an anchor at the outer `build` leaves the inner
+/// one in the relative path and the built-in matches again. `**/*.min.js` has
+/// no literal segment, so `vendor/a.min.js` gives `vendor`. A root-level match
+/// returns the empty path, which the diagnostic renders as the root itself.
 fn exclusion_scope(relative: &Path, pattern: &str) -> PathBuf {
-    let parent = || relative.parent().map(Path::to_path_buf).unwrap_or_default();
+    let parent = relative.parent().unwrap_or_else(|| Path::new(""));
     let Some(literal) = glob_first_literal_segment(pattern) else {
-        return parent();
+        return parent.to_path_buf();
     };
-    let mut scope = PathBuf::new();
-    for component in relative.components() {
-        scope.push(component);
+    let mut prefix = PathBuf::new();
+    let mut deepest = None;
+    for component in parent.components() {
+        prefix.push(component);
         if component.as_os_str() == OsStr::new(literal) {
-            return scope;
+            deepest = Some(prefix.clone());
         }
     }
-    parent()
+    deepest.unwrap_or_else(|| parent.to_path_buf())
 }
 
 /// Number of example file paths named in the aggregated skipped-large-file and
@@ -1541,13 +1549,20 @@ mod tests {
         );
     }
 
-    /// The first `build` wins, so a nested `build/build` still anchors at the
-    /// outermost matched directory.
+    /// The DEEPEST matching segment wins, because the anchor is the directory
+    /// the `--root` remedy names. Anchoring at the outermost `build` would
+    /// leave the inner one in the path relative to the new root, so the
+    /// built-in would match again and the advertised remedy would recover
+    /// nothing.
     #[test]
-    fn exclusion_scope_takes_the_first_matching_segment() {
+    fn exclusion_scope_takes_the_deepest_matching_segment() {
         assert_eq!(
             exclusion_scope(Path::new("build/tools/build/a.ts"), "**/build/**"),
-            PathBuf::from("build")
+            PathBuf::from("build/tools/build")
+        );
+        assert_eq!(
+            exclusion_scope(Path::new("dist/pkg/dist/inner/a.ts"), "**/dist/**"),
+            PathBuf::from("dist/pkg/dist")
         );
     }
 

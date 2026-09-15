@@ -199,19 +199,29 @@ pub enum WorkspaceDiagnosticKind {
     /// zero. The unconfigured counterpart of
     /// [`Self::BoundariesNotConfigured`].
     RulePacksNotConfigured,
-    /// One of fallow's built-in discovery ignore patterns (`**/node_modules/**`,
-    /// `**/dist/**`, `**/build/**`, `**/coverage/**`, the minified-bundle
-    /// globs, ...) removed at least one candidate source file from this walk.
-    /// The files are never read, so their imports and exports are invisible to
-    /// every analysis, and until issue #2638 the drop was completely silent:
+    /// One of fallow's built-in discovery ignore patterns (`**/dist/**`,
+    /// `**/build/**`, `**/coverage/**`, and the four minified-bundle globs)
+    /// removed at least one candidate source file from this walk. The files
+    /// are never read, so their imports and exports are invisible to every
+    /// analysis, and until issue #2638 the drop was completely silent:
     /// pointing fallow at a directory a built-in pattern matches returned a
     /// clean report with exit 0 and nothing said why.
     ///
+    /// `**/node_modules/**` is carved out and never appears in `pattern`:
+    /// installed dependencies are not the first-party source this diagnostic
+    /// is about, and a project that does not gitignore them would get a
+    /// five-figure count with no useful remedy. `**/.git/**` cannot fire,
+    /// because hidden directories are not traversed.
+    ///
     /// One entry per pattern, never per file or per directory, so the array
     /// grows by at most the number of built-in patterns on a project of any
-    /// size. `path` anchors at the directory holding the most excluded files
-    /// for that pattern, ties broken by the lexicographically first path, so
-    /// two runs on one tree report the same location. That directory is the
+    /// size. `path` anchors at the matched directory holding the most excluded
+    /// files for that pattern, ties broken by the lexicographically first
+    /// path, so two runs on one tree report the same location. On a nested
+    /// match it is the DEEPEST segment the pattern matched
+    /// (`build/tools/build`, not `build`), because that is the directory the
+    /// `--root` remedy names and re-rooting at a shallower one would leave a
+    /// matching segment behind. That directory is the
     /// largest group and not a majority: a flat monorepo can spread ten
     /// excluded files over ten sibling `dist/` directories and every one of
     /// them is then "the largest". `file_count` spans all of them, and
@@ -219,7 +229,8 @@ pub enum WorkspaceDiagnosticKind {
     /// single tree from a scattered one without a directory list in the
     /// payload.
     ///
-    /// Two properties of the population are load-bearing and easy to misread:
+    /// Three properties of the population are load-bearing and easy to
+    /// misread:
     ///
     /// - **Gitignored trees count zero.** Source discovery honors
     ///   `.gitignore`, `.git/info/exclude`, and the global gitignore, and
@@ -255,9 +266,15 @@ pub enum WorkspaceDiagnosticKind {
         /// every directory it matched, not just the one `path` anchors at.
         /// Exact: the walk counts each excluded candidate once.
         file_count: u32,
-        /// Distinct directories those files sat in, `path` included. Exact,
-        /// and `1` whenever the exclusion is one contained tree. Anything
-        /// higher says `path` names a fraction of the excluded source.
+        /// Distinct directories this pattern matched at, `path` included, and
+        /// not the number of directories that held the files. A
+        /// directory-shaped pattern (`**/dist/**`) matches at the directory it
+        /// names, so an excluded subtree counts once however many nested
+        /// directories inside it held source: a `dist/` holding files in three
+        /// sub-directories reports `1`. A file-shaped pattern (`**/*.min.js`)
+        /// has no directory to collapse to and counts each matched file's own
+        /// parent. Exact either way, and anything above `1` says `path` names
+        /// one matched location out of several.
         directory_count: u32,
     },
 }

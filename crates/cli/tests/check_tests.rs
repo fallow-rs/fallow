@@ -2676,19 +2676,110 @@ fn a_run_whose_whole_source_tree_was_excluded_says_so_by_default() {
 
     let output = run_fallow_raw(&["dead-code", "--root", root, "--no-cache"]);
     assert!(
-        output.stderr.contains("No source files were analyzed"),
-        "the default run names the outcome: {}",
+        output.stderr.contains(
+            "No source files were analyzed. The built-in ignore pattern '**/build/**' excluded \
+             3 files; run with --explain-skipped for the breakdown."
+        ),
+        "the default run states the outcome and the measured exclusion: {}",
+        output.stderr
+    );
+}
+
+/// The unflagged line fires whenever a run discovered nothing, and a built-in
+/// exclusion is not always why. `--production` drops test-only source AFTER the
+/// ignore check, so the tally never sees it: here the project is all tests and
+/// the run would analyze nothing with or without `dist/`. The sentence must
+/// still be true, which means it reports two facts and blames neither.
+#[test]
+fn a_production_run_with_no_source_left_states_facts_without_naming_a_cause() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2638-production","private":true}"#,
+    )
+    .expect("write package.json");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(
+        dir.path().join("src/app.test.ts"),
+        "export const spec = 1;\n",
+    )
+    .expect("write test source");
+    std::fs::create_dir_all(dir.path().join("dist")).expect("create dist");
+    std::fs::write(dir.path().join("dist/gen.ts"), "export const gen = 1;\n")
+        .expect("write generated source");
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+
+    let output = run_fallow_raw(&["dead-code", "--root", root, "--no-cache", "--production"]);
+    assert!(
+        output.stderr.contains(
+            "No source files were analyzed. The built-in ignore pattern '**/dist/**' excluded \
+             1 file; run with --explain-skipped for the breakdown."
+        ),
+        "two measured facts, joined by a period: {}",
         output.stderr
     );
     assert!(
-        output.stderr.contains("**/build/**"),
-        "and the pattern responsible: {}",
+        !output.stderr.contains("were analyzed:"),
+        "production mode emptied the file list here, so a causal colon would name the wrong \
+         reason: {}",
         output.stderr
     );
-    assert!(
-        output.stderr.contains("--explain-skipped"),
-        "and where the breakdown lives: {}",
-        output.stderr
+}
+
+/// Issue #2638: the anchor the note prints is the directory the `--root`
+/// remedy names, so running that command has to recover the files. A nested
+/// match is the case that proves it: anchoring at the outer `build` leaves the
+/// inner one in the relative path and the built-in matches again.
+#[test]
+fn the_anchor_a_nested_match_reports_is_the_directory_that_recovers_the_files() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2638-nested","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::create_dir_all(dir.path().join("build/tools/build")).expect("create nested tree");
+    std::fs::write(
+        dir.path().join("build/tools/build/gen.ts"),
+        "export const gen = 1;\n",
+    )
+    .expect("write excluded source");
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+
+    let json = parse_json(&run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+    let reported = combined_root_diagnostics_of_kind(&json, "excluded-by-default-ignore");
+    assert_eq!(reported.len(), 1, "{}", json["workspace_diagnostics"]);
+    assert_eq!(
+        reported[0]["path"], "build/tools/build",
+        "the anchor is the deepest matched segment: {}",
+        reported[0]
+    );
+
+    let anchor = dir.path().join("build/tools/build");
+    let listed = parse_json(&run_fallow_raw(&[
+        "list",
+        "--files",
+        "--root",
+        anchor.to_str().expect("temp path is UTF-8"),
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+    assert_eq!(
+        listed["file_count"], 1,
+        "the advertised remedy has to recover the files in one hop: {listed}"
     );
 }
 

@@ -102,13 +102,15 @@ pub struct CheckOutput {
     ///
     /// `excluded-by-default-ignore` is the one source-discovery kind that
     /// reports unseen files WITHOUT raising a caveat. It names a built-in
-    /// ignore pattern (`**/node_modules/**`, `**/dist/**`, `**/build/**`,
-    /// `**/coverage/**`, the minified-bundle globs) that removed candidate
-    /// source files from the walk, which is designed behavior on generated
-    /// output rather than a degraded run, so it is advisory only and no
-    /// finding inherits it. One entry per pattern, never per file, so the
-    /// array stays bounded on a project of any size. Gitignored trees are
-    /// pruned before the walk sees them and count zero.
+    /// ignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one
+    /// of the four minified-bundle globs) that removed candidate source files
+    /// from the walk, which is designed behavior on generated output rather
+    /// than a degraded run, so it is advisory only and no finding inherits it.
+    /// One entry per pattern, never per file, so the array stays bounded on a
+    /// project of any size. Gitignored trees are pruned before the walk sees
+    /// them and count zero, and `**/node_modules/**` is never reported:
+    /// installed dependencies are not the first-party source the kind is
+    /// about.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted

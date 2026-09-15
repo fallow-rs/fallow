@@ -283,3 +283,39 @@ fn a_project_with_no_excluded_source_reports_nothing() {
     let config = create_config(root.to_path_buf());
     assert!(exclusion_diagnostics(&config).is_empty());
 }
+
+/// The anchor is the directory the `--root` remedy names, so it has to be the
+/// DEEPEST matched segment. A nested `build/tools/build` anchored at the outer
+/// `build` would hand the reader a root under which the built-in matches
+/// again, which is the same defect as advertising `--root` for a file-name
+/// glob: a command that recovers nothing.
+#[test]
+fn a_nested_match_anchors_where_re_rooting_recovers_the_files() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+
+    write_file(root, "package.json", r#"{ "name": "issue-2638-nested" }"#);
+    write_file(root, "src/app.ts", "export const app = 1;\n");
+    write_file(root, "build/tools/build/gen.ts", "export const gen = 1;\n");
+
+    let config = create_config(root.to_path_buf());
+    let reported = exclusion_diagnostics(&config);
+
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert_eq!(reported[0]["pattern"], "**/build/**");
+    assert_eq!(reported[0]["file_count"], 1);
+    assert_eq!(reported[0]["path"], "build/tools/build");
+
+    // The remedy the message advertises, executed: analyzing the anchor on its
+    // own leaves no `build` segment in the relative path, so the file is
+    // discovered.
+    let rerooted = create_config(root.join("build/tools/build"));
+    let discovered =
+        fallow_core::discover::discover_files_config_candidates_and_diagnostics(&rerooted, &[])
+            .files;
+    assert_eq!(
+        discovered.len(),
+        1,
+        "re-rooting at the reported anchor has to recover the files: {discovered:?}"
+    );
+}
