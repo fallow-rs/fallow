@@ -29,6 +29,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   meaning for anyone gating on them
   (Closes [#2627](https://github.com/fallow-rs/fallow/issues/2627)).
 
+- **`--fail-on-stale-baseline` turns a rotting baseline into a failing build.**
+  Baseline staleness has only ever been advisory, so a repository that wants
+  every stale entry fixed had no lever: the warning fires at a quarter of the
+  baseline, which leaves a handful of dead entries out of dozens silent
+  indefinitely. The new global flag exits 1 when a loaded `--baseline` has any
+  entry that matched nothing this run, on `dead-code` / `check`, the bare run,
+  `dupes` and `health`. It is deliberately stricter than the warning: the
+  quarter threshold and the silence on a run with no findings both exist to keep
+  an unasked-for line worth reading, and a repository that passes the flag has
+  asked for neither. The verdict is the exit code plus one stderr line naming
+  the stale count, the total, the baseline path and the re-save command, so it
+  applies in every `--format`, including `json`, `sarif`, `codeclimate`, the
+  GitHub formats and the PR-comment and review formats, and including the bare
+  combined run that collapses every other gate to 0. Report output is
+  byte-identical with and without the flag: no envelope gains a field, and
+  `baseline.entries` / `baseline.matched` on dead-code and
+  `summary.baseline_staleness` on health keep their meaning for anyone already
+  gating on them. The line prints even under `--quiet` and `--ci`, because the
+  gate's condition appears in no report.
+
+  A run that cannot or will not judge the baseline stands down and says so on
+  stderr rather than passing quietly, because a gate that goes green in silence
+  is worse than no gate. That covers a run narrowed to part of the project, so
+  the flag stays usable in changed-file CI jobs; `health --report-only`, which
+  is an explicit request never to fail; `fallow audit`, which only ever
+  analyzes the files that changed against its base ref; and `fallow
+  decision-surface`, which renders a brief without exit gates and names the
+  config-provided baseline it did not judge. What counts as narrowing
+  follows each command's own pipeline: `dead-code` counts a diff, a base ref,
+  `--workspace`, `--changed-workspaces`, a positional path, `--file`, an
+  issue-type filter and production mode, while `dupes` counts only a resolved
+  changed-file set and production mode, because it compares and re-saves the
+  baseline before its scope filters run and its reading of the whole project is
+  honest. The flag defaults to off, so no existing invocation changes its exit
+  code (Closes [#2637](https://github.com/fallow-rs/fallow/issues/2637)).
+
+- **A run can now say which built-in ignore pattern removed source files from
+  discovery.** fallow compiles the project's `ignorePatterns` and its built-in
+  discovery ignores into one glob union and matched it with a plain boolean, so
+  a built-in could remove candidate source files from every surface without a
+  trace: pointing fallow at a directory a default pattern matches returned a
+  clean report with exit 0. The file walk now attributes each excluded
+  candidate to the pattern that removed it and records one
+  `excluded-by-default-ignore` entry per pattern in `workspace_diagnostics[]`,
+  carrying the glob verbatim, an exact `file_count`, a `directory_count` of the
+  distinct locations the pattern matched at (a `dist/` holding files in three
+  sub-directories counts once), and a `path` anchored at the matched directory
+  that lost the most files, taking the deepest matching segment on a nested
+  match so that `fallow --root <that directory>` really recovers the files.
+  `**/node_modules/**` is carved out and never reported. One entry per
+  pattern, never per file, so the array stays bounded. With
+  `--explain-skipped`, `check`, `dead-code`, `audit` and the default run print
+  a short per-pattern note next to the existing duplication skip note. Without
+  the flag, human output changes in one case only: a run that discovered no
+  source files at all while a built-in pattern excluded some prints
+  `No source files were analyzed. The built-in ignore pattern '<pattern>'
+  excluded N files; run with --explain-skipped for the breakdown.` on stderr,
+  stating the two measured facts without claiming one caused the other, since
+  `--production` and the size and minification skips can empty a file list on
+  their own. The remedy is offered only for directory-shaped patterns; the
+  file-shaped minified-bundle globs cannot be recovered by re-rooting.
+  `--quiet` suppresses the notes, no finding gains a caveat, and `fallow fix`
+  withholds nothing
+  (Closes [#2638](https://github.com/fallow-rs/fallow/issues/2638)).
+
 ### Changed
 
 - **Unused- and unlisted-dependency checks are faster on large workspace
@@ -142,6 +207,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Both staleness warnings now stay silent for a narrowed run, matching the
   guard `health --baseline` already applies
   ([#2627](https://github.com/fallow-rs/fallow/issues/2627)).
+
+- **Rule severity, including per-path `overrides[].rules`, is now resolved on
+  every surface that reports findings.** The programmatic runtime behind the
+  MCP `analyze` and `check_changed` tools, the audit sub-analyses, Code Mode's
+  combined run and the Node bindings resolved effective severities nowhere, so
+  a finding on a path whose override turned its rule off was reported there
+  while `fallow dead-code` and the editor suppressed it. All of them now run
+  the same engine pass the CLI runs, at the same two points: once over the
+  analyzed set and once after type-aware reconciliation. The `decision_surface`
+  tool is covered too, so a coupling or cycle decision is no longer framed as a
+  judgment question from a finding a rule turns off; the `fallow
+  decision-surface` command already behaved that way and its output is
+  unchanged. `fallow dead-code --type-aware` gained the second pass as well, so
+  a private-type leak that only the semantic pass discovers is subject to an
+  override on its path exactly like a syntactic one, and the default CLI path
+  is unchanged. The language server now derives its watched-file registration
+  and its semantic invalidation classifier from the config file names the
+  loader accepts, so editing `.fallowrc.json`, `.fallowrc.jsonc` or
+  `.fallow.toml` refreshes diagnostics in clients that register no watcher of
+  their own. A consumer that relied on the wider result set sees those findings
+  disappear; turning the rule back on for the path restores them. The default
+  severities apply there too, so a project with no config no longer sees
+  findings for rules that default to off, such as `private-type-leaks`, in the
+  programmatic payload, matching the CLI. The MCP `decision_surface` tool
+  resolves the base snapshot with the head configuration, as `fallow
+  decision-surface` does, so flipping a rule on in the change under review no
+  longer frames a decision for an edge that already existed
+  (Closes [#2636](https://github.com/fallow-rs/fallow/issues/2636)).
+
+- **`dupes --baseline` warns about a partially stale baseline, and no baseline
+  warning fires on a project with nothing left to compare.** The staleness
+  decision was split across three commands: `dupes` had neither the partial
+  warning nor a scope guard, `dead-code` re-derived only the scope guard, and
+  `health` alone stayed silent when the run produced no findings. All three now
+  read one shared decision, so the same situation gets the same answer
+  everywhere. `dupes` gains the partial wording and is silent on a run narrowed
+  by changed files or production mode; a run narrowed only by `--workspace`,
+  `--changed-workspaces`, `--diff-file` or the positional path still judges the
+  baseline. `dead-code` and `dupes` no longer warn about zero overlap on a
+  project that has been cleaned up: with no findings to compare, a dead baseline
+  and a tidy repository are indistinguishable, and advising a re-save is wrong
+  when the right move is deleting the file. A run that has findings and matches
+  none of them still gets the zero-overlap warning verbatim
+  (Closes [#2637](https://github.com/fallow-rs/fallow/issues/2637)).
+
+- **`health --production --baseline` no longer calls a fresh baseline stale.**
+  Production mode drops test, story and dev files before analysis, so their
+  baseline entries match nothing on a project nobody touched. `dead-code` and
+  `dupes` have always treated that as narrowing rather than rot; `health` did
+  not, and advised a re-save that would have deleted every entry the run never
+  looked at. Both halves are corrected: the advisory staleness warning is silent
+  under `--production`, and `--fail-on-stale-baseline` stands down there with the
+  same note the other commands print instead of failing an unchanged project.
+  The resolved production flag is what is read, so a project config with
+  `production: true` behaves like the flag. In `health --format json`,
+  `summary.baseline_staleness.change_scoped` is now `true` and `.stale` `false`
+  on a production run, which is what those fields have always meant for the
+  other narrowings; no field was added or removed
+  (Closes [#2637](https://github.com/fallow-rs/fallow/issues/2637)).
 
 ## [3.25.0] - 2026-09-11
 
