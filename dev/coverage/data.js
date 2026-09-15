@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789431966669,
+  "lastUpdate": 1789454220898,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "446e3f0a55c68c95ef765cfe5c872e1e8a16e509",
-          "message": "docs(changelog): move the review schema 8 entries to Unreleased\n\nThey were added under the 3.19.0 heading after that tag was cut, so the\nchangelog credited a released version with features it does not contain.\nThey ship in the next release.",
-          "timestamp": "2026-08-28T00:30:13+02:00",
-          "tree_id": "7c44bddd67f375455f7909d3febfd9d3e55d88d6",
-          "url": "https://github.com/fallow-rs/fallow/commit/446e3f0a55c68c95ef765cfe5c872e1e8a16e509"
-        },
-        "date": 1787870389625,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/68c6e4b87d2743479bdeb98b98d24cef47b046b8"
         },
         "date": 1789431962614,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c00331886f81edf7fe4dbf8e5ab4b784d9f363e8",
+          "message": "fix(lsp): resolve per-path rule overrides on the editor analysis path (#2635)\n\nRule severity resolution, including overrides[].rules, lived in the check\ncommand, so the language server published diagnostics for rules a project had\nturned off for the matching path while fallow dead-code filtered them out.\nThe pass now lives in fallow-engine next to the sibling dead-code result\nfilters and runs inside EditorAnalysisSession, once per analyzed project slice\nand again after type-aware refinement because reconciliation can add\nfindings. The check command delegates to the same code, so CLI output is\nunchanged. The programmatic runtime behind MCP does not run the pass yet.\n\nFixes #2621",
+          "timestamp": "2026-09-15T08:29:22+02:00",
+          "tree_id": "7a08998b33bfa08ce5fbac050fa82773e1a0cfe7",
+          "url": "https://github.com/fallow-rs/fallow/commit/c00331886f81edf7fe4dbf8e5ab4b784d9f363e8"
+        },
+        "date": 1789454217472,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
