@@ -372,6 +372,10 @@ pub struct CheckOptions<'a> {
     /// `audit --base` pass so revision-specific diagnostics name the base
     /// revision instead of reading as a current-configuration defect.
     pub analysis_snapshot: fallow_config::AnalysisSnapshot,
+    /// Expand the skipped-file notes: with this set, a human run also reports
+    /// which built-in discovery ignore patterns removed candidate source files
+    /// (issue #2638). The typed diagnostics reach JSON either way.
+    pub explain_skipped: bool,
 }
 
 /// Result of executing check analysis without printing.
@@ -455,6 +459,11 @@ pub struct CheckResult {
     pub package_importers:
         Option<rustc_hash::FxHashMap<String, fallow_engine::module_graph::PackageImporters>>,
     pub workspaces: Vec<WorkspaceInfo>,
+    /// Whether this run asked for the expanded skipped-file notes
+    /// (`--explain-skipped`), carried on the result the way `DupesResult`
+    /// carries it so every human-output site reads one owned value instead of
+    /// re-plumbing the flag (issue #2638).
+    pub explain_skipped: bool,
     retained_files: Option<Vec<DiscoveredFile>>,
 }
 
@@ -981,6 +990,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         type_coupling,
         type_aware_warnings,
         workspace_diagnostics,
+        explain_skipped: opts.explain_skipped,
         syntactic_dead_code_keys,
         impact_closure: None,
         public_api_keys: None,
@@ -1223,6 +1233,7 @@ pub fn benchmark_dead_code_json(
         retain_modules_for_health: false,
         defer_performance: false,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
+        explain_skipped: false,
     })?;
     let rendered = report::render_check_json(&report::CheckJsonRenderInput {
         results: &result.results,
@@ -1543,6 +1554,13 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     if !opts.quiet && matches!(opts.output, OutputFormat::Human) {
         crate::combined::print_entry_point_summary(&result.results);
     }
+    crate::discovery_note::print_default_ignore_exclusion_note(
+        opts.root,
+        &result.workspace_diagnostics,
+        result.explain_skipped,
+        opts.quiet,
+        opts.output,
+    );
 
     let resolver = match crate::build_ownership_resolver(
         opts.group_by,

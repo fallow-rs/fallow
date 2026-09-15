@@ -483,6 +483,19 @@ fn print_human_sections(
         }
     }
 
+    // The stage's own list, never the process registry: a combined run walks
+    // once per analysis and a registry read answers "whichever walk wrote
+    // last" (issue #2366).
+    if let Some(result) = check_result {
+        crate::discovery_note::print_default_ignore_exclusion_note(
+            opts.root,
+            &result.workspace_diagnostics,
+            result.explain_skipped,
+            opts.quiet,
+            opts.output,
+        );
+    }
+
     let has_any_findings = check_result.is_some_and(|result| result.results.total_issues() > 0)
         || dupes_result.is_some_and(|result| !result.report.clone_groups.is_empty())
         || health_result.is_some_and(|result| !result.report.findings.is_empty());

@@ -2548,3 +2548,222 @@ fn partially_stale_baseline_leaves_json_output_unchanged() {
         json["baseline"]
     );
 }
+
+/// Write a project whose only source outside `src/` sits under a directory a
+/// built-in discovery ignore pattern matches, with no `.gitignore` to hide it
+/// first (issue #2638).
+fn default_ignore_exclusion_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"issue-2638-default-ignore-exclusions","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source");
+    std::fs::create_dir_all(dir.path().join("packages/web/build/src"))
+        .expect("create excluded tree");
+    for name in ["a.ts", "b.ts"] {
+        std::fs::write(
+            dir.path().join("packages/web/build/src").join(name),
+            "export const excluded = 1;\n",
+        )
+        .expect("write excluded source");
+    }
+    dir
+}
+
+/// Issue #2638 (R3): `--explain-skipped` now reaches discovery, so the run says
+/// which built-in pattern removed files and where they were.
+#[test]
+fn explain_skipped_names_the_built_in_pattern_that_excluded_source_files() {
+    let dir = default_ignore_exclusion_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--no-cache",
+        "--explain-skipped",
+    ]);
+
+    assert!(
+        output.stderr.contains("**/build/**"),
+        "the note names the pattern: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("packages/web/build"),
+        "the note names the directory: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains('2'),
+        "the note carries the count: {}",
+        output.stderr
+    );
+}
+
+/// Issue #2638 (AC4): the default run gains no noise. The note is a
+/// presentation choice the flag owns, not a warning the walk emits.
+#[test]
+fn a_default_run_says_nothing_about_built_in_ignore_exclusions() {
+    let dir = default_ignore_exclusion_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let output = run_fallow_raw(&["dead-code", "--root", root, "--no-cache"]);
+
+    assert!(
+        !output.stderr.contains("built-in ignore"),
+        "no default stderr note: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("**/build/**"),
+        "no default stderr note: {}",
+        output.stderr
+    );
+}
+
+/// Issue #2638 (AC5): `--quiet` suppresses the note even with the flag.
+#[test]
+fn quiet_suppresses_the_built_in_ignore_exclusion_note() {
+    let dir = default_ignore_exclusion_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--no-cache",
+        "--explain-skipped",
+        "--quiet",
+    ]);
+
+    assert!(
+        !output.stderr.contains("**/build/**"),
+        "--quiet suppresses the note: {}",
+        output.stderr
+    );
+}
+
+/// Issue #2638 (R4, AC6): the typed entry is unconditional in JSON, with or
+/// without the flag, and carries a project-relative forward-slash path.
+#[test]
+fn dead_code_json_carries_the_excluded_by_default_ignore_diagnostic() {
+    let dir = default_ignore_exclusion_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    for extra in [Vec::new(), vec!["--explain-skipped"]] {
+        let mut args = vec![
+            "dead-code",
+            "--root",
+            root,
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ];
+        args.extend(extra.iter().copied());
+        let json = parse_json(&run_fallow_raw(&args));
+
+        let reported = combined_root_diagnostics_of_kind(&json, "excluded-by-default-ignore");
+        assert_eq!(
+            reported.len(),
+            1,
+            "one entry per excluding pattern: {}",
+            json["workspace_diagnostics"]
+        );
+        assert_eq!(reported[0]["pattern"], "**/build/**");
+        assert_eq!(reported[0]["file_count"], 2);
+        assert_eq!(reported[0]["path"], "packages/web/build");
+    }
+}
+
+/// Issue #2638 (AC6): combined mode's per-analysis config reloads must not wipe
+/// the entry before the root envelope is built.
+#[test]
+fn combined_json_root_carries_the_excluded_by_default_ignore_diagnostic() {
+    let dir = default_ignore_exclusion_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let json = parse_json(&run_fallow_raw(&[
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+
+    let reported = combined_root_diagnostics_of_kind(&json, "excluded-by-default-ignore");
+    assert_eq!(
+        reported.len(),
+        1,
+        "the combined root reports the exclusion once: {}",
+        json["workspace_diagnostics"]
+    );
+}
+
+/// Issue #2638 (AC7): this is an advisory about project layout, not a finding.
+/// Giving it a rule id would put it in a reviewer's annotations on every
+/// monorepo, so the CI report formats must stay silent about it.
+#[test]
+fn ci_report_formats_say_nothing_about_built_in_ignore_exclusions() {
+    let dir = default_ignore_exclusion_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    for format in ["sarif", "codeclimate"] {
+        let output = run_fallow_raw(&[
+            "dead-code",
+            "--root",
+            root,
+            "--format",
+            format,
+            "--quiet",
+            "--no-cache",
+        ]);
+        assert!(
+            !output.stdout.contains("excluded-by-default-ignore"),
+            "{format} output must not carry the discovery advisory: {}",
+            output.stdout
+        );
+    }
+}
+
+/// Issue #2638 (AC8): the exclusions are designed behavior, not a degraded run.
+/// A caveat here would fire on nearly every project and make `fallow fix`
+/// withhold `delete-file` and `remove-export` project-wide.
+#[test]
+fn a_built_in_ignore_exclusion_raises_no_reachability_caveat() {
+    let dir = default_ignore_exclusion_project();
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let json = parse_json(&run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]));
+
+    assert!(
+        !combined_root_diagnostics_of_kind(&json, "excluded-by-default-ignore").is_empty(),
+        "fixture must actually trigger the diagnostic: {}",
+        json["workspace_diagnostics"]
+    );
+    let caveated: Vec<&serde_json::Value> = json["unused_files"]
+        .as_array()
+        .map(|files| {
+            files
+                .iter()
+                .filter(|file| {
+                    file["reachability_caveats"]
+                        .as_array()
+                        .is_some_and(|caveats| !caveats.is_empty())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        caveated.is_empty(),
+        "no finding may inherit a caveat from this advisory: {caveated:?}"
+    );
+}

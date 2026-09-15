@@ -199,6 +199,52 @@ pub enum WorkspaceDiagnosticKind {
     /// zero. The unconfigured counterpart of
     /// [`Self::BoundariesNotConfigured`].
     RulePacksNotConfigured,
+    /// One of fallow's built-in discovery ignore patterns (`**/node_modules/**`,
+    /// `**/dist/**`, `**/build/**`, `**/coverage/**`, the minified-bundle
+    /// globs, ...) removed at least one candidate source file from this walk.
+    /// The files are never read, so their imports and exports are invisible to
+    /// every analysis, and until issue #2638 the drop was completely silent:
+    /// pointing fallow at a directory a built-in pattern matches returned a
+    /// clean report with exit 0 and nothing said why.
+    ///
+    /// One entry per pattern, never per file or per directory, so the array
+    /// grows by at most the number of built-in patterns on a project of any
+    /// size. `path` anchors at the directory holding the most excluded files
+    /// for that pattern, ties broken by the lexicographically first path, so
+    /// two runs on one tree report the same location. `file_count` still spans
+    /// every directory the pattern matched, so it can exceed what that one
+    /// directory holds.
+    ///
+    /// Two properties of the population are load-bearing and easy to misread:
+    ///
+    /// - **Gitignored trees count zero.** Source discovery honors
+    ///   `.gitignore`, `.git/info/exclude`, and the global gitignore, and
+    ///   prunes those directories before this check runs. The honest reading
+    ///   is "candidate source files git did not already hide and a built-in
+    ///   pattern then dropped", which is why a repository that gitignores its
+    ///   own `dist/` never sees this diagnostic.
+    /// - **A user `ignorePatterns` entry is not a surprise.** The compiled
+    ///   ignore set is the union of `ignorePatterns` and the built-ins, so a
+    ///   file both matched was an explicit project choice and is attributed to
+    ///   no pattern here. The union also only ever adds: `ignorePatterns`
+    ///   cannot negate a built-in, so the message advertises `fallow --root`
+    ///   against the excluded directory rather than a config edit.
+    ///
+    /// Deliberately NOT one of the [`Self::source_never_analyzed`] kinds. These
+    /// exclusions are the product's designed behavior on generated output, not
+    /// a degraded run: answering `true` would attach `IncompleteFileAnalysis`
+    /// and `IncompleteImportGraph` caveats to findings on nearly every project
+    /// that keeps a non-gitignored `dist/` or `coverage/`, and make `fallow
+    /// fix` withhold `delete-file` and `remove-export` actions project-wide.
+    ExcludedByDefaultIgnore {
+        /// The built-in glob that matched, verbatim (for example
+        /// `**/build/**`).
+        pattern: String,
+        /// Candidate source files this pattern excluded in this walk, across
+        /// every directory it matched, not just the one `path` anchors at.
+        /// Exact: the walk counts each excluded candidate once.
+        file_count: u32,
+    },
 }
 
 impl WorkspaceDiagnosticKind {
@@ -223,6 +269,7 @@ impl WorkspaceDiagnosticKind {
             Self::NodeModulesMissing => "node-modules-missing",
             Self::BoundariesNotConfigured => "boundaries-not-configured",
             Self::RulePacksNotConfigured => "rule-packs-not-configured",
+            Self::ExcludedByDefaultIgnore { .. } => "excluded-by-default-ignore",
         }
     }
 
@@ -242,7 +289,9 @@ impl WorkspaceDiagnosticKind {
     #[must_use]
     pub const fn warns_on_stderr(&self) -> bool {
         match self {
-            Self::BoundariesNotConfigured | Self::RulePacksNotConfigured => false,
+            Self::BoundariesNotConfigured
+            | Self::RulePacksNotConfigured
+            | Self::ExcludedByDefaultIgnore { .. } => false,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
@@ -279,6 +328,7 @@ impl WorkspaceDiagnosticKind {
                 | Self::SourceReadFailure { .. }
                 | Self::SourceParseDegraded { .. }
                 | Self::NodeModulesMissing
+                | Self::ExcludedByDefaultIgnore { .. }
         )
     }
 
@@ -302,6 +352,7 @@ impl WorkspaceDiagnosticKind {
                 | Self::SkippedMinifiedFile { .. }
                 | Self::SkippedSourceDotdir
                 | Self::NodeModulesMissing
+                | Self::ExcludedByDefaultIgnore { .. }
         )
     }
 
@@ -329,7 +380,12 @@ impl WorkspaceDiagnosticKind {
     ///   read, so nothing was extracted from it at all.
     ///
     /// `source-parse-degraded` is deliberately NOT one of these, though it
-    /// belongs to the same family. That file WAS read, so it has a module and
+    /// belongs to the same family. Neither is `excluded-by-default-ignore`,
+    /// for a different reason: that one reports designed behavior on generated
+    /// output rather than a degraded run, and its own doc comment carries the
+    /// argument.
+    ///
+    /// `source-parse-degraded`: that file WAS read, so it has a module and
     /// a graph node and its reachability is observable, which lets the caveat
     /// pass narrow it: a degraded module that is itself unreachable cannot
     /// change a reachability verdict. Every kind above has no node to ask (a
@@ -359,7 +415,8 @@ impl WorkspaceDiagnosticKind {
             | Self::BunResolutionsShadowedByOverrides
             | Self::NodeModulesMissing
             | Self::BoundariesNotConfigured
-            | Self::RulePacksNotConfigured => false,
+            | Self::RulePacksNotConfigured
+            | Self::ExcludedByDefaultIgnore { .. } => false,
         }
     }
 
@@ -396,7 +453,8 @@ impl WorkspaceDiagnosticKind {
             | Self::SkippedSourceDotdir
             | Self::SourceReadFailure { .. }
             | Self::SourceParseDegraded { .. }
-            | Self::NodeModulesMissing => false,
+            | Self::NodeModulesMissing
+            | Self::ExcludedByDefaultIgnore { .. } => false,
         }
     }
 }
@@ -751,6 +809,34 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              counts are zero because nothing was measured. Add `rulePacks` to the config, or set \
              `policy-violation` to off to state that the check is not wanted."
                 .to_string()
+        }
+        WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+            pattern,
+            file_count,
+        } => {
+            // The payload carries no directory list, so the message names the
+            // one directory `path` anchors at. With more than one excluded
+            // directory it is the largest group, which is the location worth
+            // acting on first and the one the `--root` remedy applies to.
+            let (location, subject) = if *file_count == 1 {
+                (
+                    format!("Skipped 1 source file under '{display}'"),
+                    "it matches",
+                )
+            } else {
+                (
+                    format!(
+                        "Skipped {file_count} source files, the most of them under '{display}'"
+                    ),
+                    "they match",
+                )
+            };
+            format!(
+                "{location}: {subject} fallow's built-in ignore pattern '{pattern}', so nothing \
+                 they import, export, or define is visible to this run. Built-in ignores cannot \
+                 be switched off through ignorePatterns. Move first-party source out of the \
+                 matched directory, or analyze it on its own with fallow --root {display}."
+            )
         }
     }
 }
@@ -1320,6 +1406,106 @@ mod tests {
                 kind.id()
             );
         }
+    }
+
+    /// Issue #2638, the single most load-bearing classification in the new
+    /// kind. Answering `true` here would attach `IncompleteFileAnalysis` and
+    /// `IncompleteImportGraph` caveats to findings on nearly every project
+    /// that keeps a non-gitignored `dist/` or `coverage/`, and make
+    /// `fallow fix` withhold `delete-file` and `remove-export` project-wide.
+    /// A built-in exclusion is designed behavior on generated output, not a
+    /// degraded run.
+    #[test]
+    fn a_built_in_ignore_exclusion_is_not_a_file_the_run_failed_to_analyze() {
+        let kind = WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+            pattern: "**/build/**".to_owned(),
+            file_count: 3,
+        };
+        assert!(!kind.source_never_analyzed());
+    }
+
+    /// Issue #2638: these exclusions fire in the product's default state on
+    /// most monorepos, so a default stderr line would be permanent noise that
+    /// names no defect. The CLI prints a note under `--explain-skipped`
+    /// instead.
+    #[test]
+    fn a_built_in_ignore_exclusion_does_not_warn_on_stderr_by_default() {
+        let kind = WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+            pattern: "**/build/**".to_owned(),
+            file_count: 3,
+        };
+        assert!(!kind.warns_on_stderr());
+    }
+
+    /// Issue #2638 plus issue #2366: the walk writes it, so it has to be
+    /// classified as source-discovery (or combined mode's per-analysis config
+    /// reloads wipe it before serialization) AND as walk-recorded (or a
+    /// concurrent walk's tally is folded into another analysis's list).
+    #[test]
+    fn a_built_in_ignore_exclusion_is_walk_recorded_source_discovery() {
+        let kind = WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+            pattern: "**/build/**".to_owned(),
+            file_count: 3,
+        };
+        assert!(kind.is_source_discovery());
+        assert!(kind.is_source_walk_recorded());
+        assert!(!kind.is_analysis_stage());
+        assert_eq!(kind.id(), "excluded-by-default-ignore");
+    }
+
+    /// Issue #2638: the message has to name the pattern the reader cannot see,
+    /// the directory, and the only remedy that actually analyzes the tree.
+    /// `ignorePatterns` is not that remedy: the compiled set unions, so it
+    /// cannot negate a built-in.
+    #[test]
+    fn a_built_in_ignore_exclusion_message_names_the_pattern_and_the_root_remedy() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join("packages/web/build"),
+            WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+                pattern: "**/build/**".to_owned(),
+                file_count: 4,
+            },
+        );
+        assert!(diag.message.contains("**/build/**"), "{}", diag.message);
+        assert!(
+            diag.message.contains("packages/web/build"),
+            "{}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("fallow --root packages/web/build"),
+            "the remedy is copy-pasteable: {}",
+            diag.message
+        );
+        assert!(
+            diag.message
+                .contains("cannot be switched off through ignorePatterns"),
+            "the message must not advertise a negation that does not exist: {}",
+            diag.message
+        );
+    }
+
+    /// One excluded file reads as one file, not as "1 source files".
+    #[test]
+    fn a_single_excluded_file_message_is_singular() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join("dist"),
+            WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+                pattern: "**/dist/**".to_owned(),
+                file_count: 1,
+            },
+        );
+        assert!(
+            diag.message
+                .starts_with("Skipped 1 source file under 'dist'"),
+            "{}",
+            diag.message
+        );
+        assert!(diag.message.contains("it matches"), "{}", diag.message);
     }
 
     #[test]

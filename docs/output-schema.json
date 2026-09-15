@@ -885,7 +885,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `source-read-failure`, `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/node_modules/**`, `**/dist/**`, `**/build/**`,\n`**/coverage/**`, the minified-bundle globs) that removed candidate\nsource files from the walk, which is designed behavior on generated\noutput rather than a degraded run, so it is advisory only and no\nfinding inherits it. One entry per pattern, never per file, so the\narray stays bounded on a project of any size. Gitignored trees are\npruned before the walk sees them and count zero."
         },
         "next_steps": {
           "type": "array",
@@ -11708,6 +11708,29 @@
             "kind"
           ],
           "description": "`rulePacks` is empty while `policy-violation` is not `off`, so the\npolicy detector never ran and its summary counters are structurally\nzero. The unconfigured counterpart of\n[`Self::BoundariesNotConfigured`]."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "The built-in glob that matched, verbatim (for example\n`**/build/**`)."
+            },
+            "file_count": {
+              "type": "integer",
+              "description": "Candidate source files this pattern excluded in this walk, across\nevery directory it matched, not just the one `path` anchors at.\nExact: the walk counts each excluded candidate once."
+            },
+            "kind": {
+              "type": "string",
+              "const": "excluded-by-default-ignore"
+            }
+          },
+          "required": [
+            "kind",
+            "pattern",
+            "file_count"
+          ],
+          "description": "One of fallow's built-in discovery ignore patterns (`**/node_modules/**`,\n`**/dist/**`, `**/build/**`, `**/coverage/**`, the minified-bundle\nglobs, ...) removed at least one candidate source file from this walk.\nThe files are never read, so their imports and exports are invisible to\nevery analysis, and until issue #2638 the drop was completely silent:\npointing fallow at a directory a built-in pattern matches returned a\nclean report with exit 0 and nothing said why.\n\nOne entry per pattern, never per file or per directory, so the array\ngrows by at most the number of built-in patterns on a project of any\nsize. `path` anchors at the directory holding the most excluded files\nfor that pattern, ties broken by the lexicographically first path, so\ntwo runs on one tree report the same location. `file_count` still spans\nevery directory the pattern matched, so it can exceed what that one\ndirectory holds.\n\nTwo properties of the population are load-bearing and easy to misread:\n\n- **Gitignored trees count zero.** Source discovery honors\n  `.gitignore`, `.git/info/exclude`, and the global gitignore, and\n  prunes those directories before this check runs. The honest reading\n  is \"candidate source files git did not already hide and a built-in\n  pattern then dropped\", which is why a repository that gitignores its\n  own `dist/` never sees this diagnostic.\n- **A user `ignorePatterns` entry is not a surprise.** The compiled\n  ignore set is the union of `ignorePatterns` and the built-ins, so a\n  file both matched was an explicit project choice and is attributed to\n  no pattern here. The union also only ever adds: `ignorePatterns`\n  cannot negate a built-in, so the message advertises `fallow --root`\n  against the excluded directory rather than a config edit.\n\nDeliberately NOT one of the [`Self::source_never_analyzed`] kinds. These\nexclusions are the product's designed behavior on generated output, not\na degraded run: answering `true` would attach `IncompleteFileAnalysis`\nand `IncompleteImportGraph` caveats to findings on nearly every project\nthat keeps a non-gitignored `dist/` or `coverage/`, and make `fallow\nfix` withhold `delete-file` and `remove-export` actions project-wide."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."

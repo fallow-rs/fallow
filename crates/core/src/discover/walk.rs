@@ -2,10 +2,12 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use fallow_config::{ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind};
+use fallow_config::{
+    DEFAULT_IGNORE_PATTERNS, ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
+};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use ignore::WalkBuilder;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{ALLOWED_HIDDEN_DIRS, SCRIPT_SCOPE_DENYLIST};
 
@@ -34,6 +36,96 @@ type SizedFile = (PathBuf, u64);
 /// borrow a local nor mutate captured state directly, and the predicate runs
 /// on every walker thread.
 type SkippedDotdirSink = Arc<Mutex<Vec<PathBuf>>>;
+
+/// Candidate source files ONE built-in ignore pattern removed from a walk,
+/// with the directories they sat in (issue #2638).
+///
+/// The scope map is deliberately uncapped, and its size is not the risk it
+/// looks like. For a directory-shaped pattern every file under one matched
+/// directory collapses to a single key (`**/node_modules/**` contributes one
+/// entry per `node_modules` root, not one per vendored package), and only the
+/// file-shaped patterns (`**/*.min.js` and friends) key on a file's parent, on
+/// files that are rare by construction. The map is therefore strictly smaller
+/// than the file list the same walk already holds. A ceiling would buy nothing
+/// and would cost determinism: the parallel walk fills per-thread maps in
+/// nondeterministic order, so "the first N directories" is not a stable set,
+/// and the anchor directory picked from a truncated set would differ between
+/// runs of the same command.
+#[derive(Default)]
+struct ExcludedByPattern {
+    /// Candidate source files this pattern excluded. Exact.
+    file_count: u32,
+    /// Excluded files per scope directory, project-root-relative.
+    scopes: FxHashMap<PathBuf, u32>,
+}
+
+impl ExcludedByPattern {
+    fn record(&mut self, scope: PathBuf) {
+        self.file_count = self.file_count.saturating_add(1);
+        *self.scopes.entry(scope).or_insert(0) += 1;
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.file_count = self.file_count.saturating_add(other.file_count);
+        for (scope, count) in other.scopes {
+            *self.scopes.entry(scope).or_insert(0) += count;
+        }
+    }
+
+    /// The directory this pattern excluded the most files from, ties broken by
+    /// the lexicographically first path so two runs on one tree report the
+    /// same anchor.
+    fn anchor(&self) -> PathBuf {
+        self.scopes
+            .iter()
+            .max_by(|(left_path, left_count), (right_path, right_count)| {
+                left_count
+                    .cmp(right_count)
+                    .then_with(|| right_path.cmp(left_path))
+            })
+            .map(|(path, _)| path.clone())
+            .unwrap_or_default()
+    }
+}
+
+/// Per-built-in-pattern exclusion tallies, keyed by index into
+/// [`DEFAULT_IGNORE_PATTERNS`].
+type ExclusionTally = FxHashMap<usize, ExcludedByPattern>;
+
+/// The directory a built-in pattern excluded a file "at": the shortest prefix
+/// of the file's project-relative path ending in the pattern's first literal
+/// segment, or the file's parent when the pattern has no literal segment.
+///
+/// `**/build/**` with `projects/app/build/static/js/main.js` gives
+/// `projects/app/build`, which is the directory a reader can act on and the
+/// one `fallow --root` takes. `**/*.min.js` has no literal segment, so
+/// `vendor/a.min.js` gives `vendor`. A root-level match returns the empty
+/// path, which the diagnostic renders as the root itself.
+fn exclusion_scope(relative: &Path, pattern: &str) -> PathBuf {
+    let parent = || relative.parent().map(Path::to_path_buf).unwrap_or_default();
+    let Some(literal) = first_literal_segment(pattern) else {
+        return parent();
+    };
+    let mut scope = PathBuf::new();
+    for component in relative.components() {
+        scope.push(component);
+        if component.as_os_str() == OsStr::new(literal) {
+            return scope;
+        }
+    }
+    parent()
+}
+
+/// The first path segment of a glob that contains no glob metacharacters, so
+/// it names a real directory rather than a wildcard.
+fn first_literal_segment(pattern: &str) -> Option<&str> {
+    pattern.split('/').find(|segment| {
+        !segment.is_empty()
+            && !segment.contains(['*', '?', '[', ']', '{', '}'])
+            && *segment != "."
+            && *segment != ".."
+    })
+}
 
 /// Number of example file paths named in the aggregated skipped-large-file and
 /// largest-files stderr notes before the tail collapses to "and N more". Keeps
@@ -533,6 +625,37 @@ fn dotdir_is_scan_candidate(config: &ResolvedConfig, dir: &Path) -> bool {
     })
 }
 
+/// Build the typed diagnostics for the built-in ignore patterns that removed
+/// candidate source files from this walk (issue #2638).
+///
+/// One entry per pattern, in [`DEFAULT_IGNORE_PATTERNS`] order, so the array
+/// grows by at most the number of built-in patterns on a project of any size
+/// and its order does not depend on the parallel walk. No stderr output: the
+/// kind answers `warns_on_stderr()` with `false`, and the CLI prints a note
+/// only under `--explain-skipped`.
+fn report_default_ignore_exclusions(
+    config: &ResolvedConfig,
+    tally: &ExclusionTally,
+) -> Vec<WorkspaceDiagnostic> {
+    let mut indices: Vec<usize> = tally.keys().copied().collect();
+    indices.sort_unstable();
+    indices
+        .into_iter()
+        .filter_map(|index| {
+            let excluded = tally.get(&index)?;
+            let pattern = DEFAULT_IGNORE_PATTERNS.get(index)?;
+            Some(WorkspaceDiagnostic::new(
+                &config.root,
+                config.root.join(excluded.anchor()),
+                WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+                    pattern: (*pattern).to_owned(),
+                    file_count: excluded.file_count,
+                },
+            ))
+        })
+        .collect()
+}
+
 /// Build the typed diagnostics for the dot-prefixed directories this walk
 /// dropped that hold source files the project has not excluded, and emit one
 /// aggregated `tracing::warn!` so the otherwise silent skip is visible on
@@ -791,11 +914,51 @@ struct FileVisitor<'a> {
     root: &'a Path,
     canonical_root: Option<&'a Path>,
     ignore_patterns: &'a globset::GlobSet,
+    /// Globs at the front of `ignore_patterns` that came from the project's
+    /// own `ignorePatterns`; the built-in defaults follow them.
+    user_ignore_pattern_count: usize,
     production_excludes: &'a Option<globset::GlobSet>,
     shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
     config_shared: Option<&'a Mutex<Vec<std::path::PathBuf>>>,
+    excluded_shared: &'a Mutex<ExclusionTally>,
     local: Vec<(std::path::PathBuf, u64)>,
     config_local: Vec<std::path::PathBuf>,
+    excluded_local: ExclusionTally,
+    /// Reused across every excluded candidate so attribution allocates once
+    /// per walker thread rather than once per file.
+    match_buf: Vec<usize>,
+}
+
+impl FileVisitor<'_> {
+    /// Attribute one excluded candidate source file to the built-in pattern
+    /// that removed it, or to nothing when the project asked for the exclusion
+    /// itself (issue #2638).
+    ///
+    /// Runs only on files `is_match` already rejected, so the kept-file path
+    /// still pays a single boolean match.
+    fn record_default_ignore_exclusion(&mut self, relative: &Path) {
+        self.match_buf.clear();
+        self.ignore_patterns
+            .matches_into(relative, &mut self.match_buf);
+        // globset returns ascending indices, so the first match is both the
+        // cheapest user-pattern test and the lowest-index built-in.
+        let Some(&first) = self.match_buf.first() else {
+            return;
+        };
+        if first < self.user_ignore_pattern_count {
+            // An `ignorePatterns` entry also matched. The project chose this
+            // exclusion, so reporting it as a surprise would be wrong.
+            return;
+        }
+        let Some(pattern) = DEFAULT_IGNORE_PATTERNS.get(first - self.user_ignore_pattern_count)
+        else {
+            return;
+        };
+        self.excluded_local
+            .entry(first - self.user_ignore_pattern_count)
+            .or_default()
+            .record(exclusion_scope(relative, pattern));
+    }
 }
 
 impl ignore::ParallelVisitor for FileVisitor<'_> {
@@ -811,6 +974,9 @@ impl ignore::ParallelVisitor for FileVisitor<'_> {
             .strip_prefix(self.root)
             .unwrap_or_else(|_| entry.path());
         if self.ignore_patterns.is_match(relative) {
+            if has_source_extension(entry.path()) {
+                self.record_default_ignore_exclusion(relative);
+            }
             return ignore::WalkState::Continue;
         }
         if self
@@ -875,6 +1041,15 @@ impl Drop for FileVisitor<'_> {
                 .expect("walk config collector lock poisoned")
                 .append(&mut self.config_local);
         }
+        if !self.excluded_local.is_empty() {
+            let mut shared = self
+                .excluded_shared
+                .lock()
+                .expect("walk exclusion collector lock poisoned");
+            for (index, tally) in std::mem::take(&mut self.excluded_local) {
+                shared.entry(index).or_default().merge(tally);
+            }
+        }
     }
 }
 
@@ -883,9 +1058,11 @@ struct FileVisitorBuilder<'a> {
     root: &'a Path,
     canonical_root: Option<&'a Path>,
     ignore_patterns: &'a globset::GlobSet,
+    user_ignore_pattern_count: usize,
     production_excludes: &'a Option<globset::GlobSet>,
     shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
     config_shared: Option<&'a Mutex<Vec<std::path::PathBuf>>>,
+    excluded_shared: &'a Mutex<ExclusionTally>,
 }
 
 impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
@@ -894,11 +1071,15 @@ impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
             root: self.root,
             canonical_root: self.canonical_root,
             ignore_patterns: self.ignore_patterns,
+            user_ignore_pattern_count: self.user_ignore_pattern_count,
             production_excludes: self.production_excludes,
             shared: self.shared,
             config_shared: self.config_shared,
+            excluded_shared: self.excluded_shared,
             local: Vec::new(),
             config_local: Vec::new(),
+            excluded_local: ExclusionTally::default(),
+            match_buf: Vec::new(),
         })
     }
 }
@@ -1204,13 +1385,16 @@ pub fn discover_files_config_candidates_and_diagnostics(
 
     let collected: Mutex<Vec<(std::path::PathBuf, u64)>> = Mutex::new(Vec::new());
     let config_collected: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
+    let excluded_collected: Mutex<ExclusionTally> = Mutex::new(ExclusionTally::default());
     let mut visitor_builder = FileVisitorBuilder {
         root: &config.root,
         canonical_root: canonical_root.as_deref(),
         ignore_patterns: &config.ignore_patterns,
+        user_ignore_pattern_count: config.user_ignore_pattern_count,
         production_excludes: &production_excludes,
         shared: &collected,
         config_shared: capture_config.then_some(&config_collected),
+        excluded_shared: &excluded_collected,
     };
     walk_builder.build_parallel().visit(&mut visitor_builder);
 
@@ -1230,6 +1414,10 @@ pub fn discover_files_config_candidates_and_diagnostics(
         .into_inner()
         .expect("walk config collector lock poisoned");
     config_candidates.sort_unstable();
+
+    let excluded_by_default_ignore = excluded_collected
+        .into_inner()
+        .expect("walk exclusion collector lock poisoned");
 
     // The parallel walk records dotdirs in nondeterministic thread order, and
     // the diagnostic array order is part of the JSON contract, so sort and
@@ -1256,6 +1444,10 @@ pub fn discover_files_config_candidates_and_diagnostics(
                 config,
                 production_excludes.as_ref(),
                 &dotdir_candidates,
+            ))
+            .chain(report_default_ignore_exclusions(
+                config,
+                &excluded_by_default_ignore,
             ))
             .chain(report_missing_node_modules(config))
             .collect(),
@@ -1286,6 +1478,112 @@ mod tests {
     use std::path::MAIN_SEPARATOR;
 
     use super::*;
+
+    /// Issue #2638: the anchor a directory-shaped built-in reports is the
+    /// directory a reader can act on and the one `fallow --root` takes, not
+    /// the deepest directory that happens to hold the file.
+    #[test]
+    fn exclusion_scope_stops_at_the_patterns_literal_directory_segment() {
+        assert_eq!(
+            exclusion_scope(
+                Path::new("projects/app/build/static/js/main.js"),
+                "**/build/**"
+            ),
+            PathBuf::from("projects/app/build")
+        );
+        assert_eq!(
+            exclusion_scope(Path::new("dist/a.ts"), "**/dist/**"),
+            PathBuf::from("dist")
+        );
+        assert_eq!(
+            exclusion_scope(
+                Path::new("node_modules/react/index.js"),
+                "**/node_modules/**"
+            ),
+            PathBuf::from("node_modules"),
+            "one entry per vendored root, not one per package"
+        );
+    }
+
+    /// The first `build` wins, so a nested `build/build` still anchors at the
+    /// outermost matched directory.
+    #[test]
+    fn exclusion_scope_takes_the_first_matching_segment() {
+        assert_eq!(
+            exclusion_scope(Path::new("build/tools/build/a.ts"), "**/build/**"),
+            PathBuf::from("build")
+        );
+    }
+
+    /// A file-shaped pattern has no literal segment to stop at, so the file's
+    /// own directory is the most specific honest answer.
+    #[test]
+    fn exclusion_scope_falls_back_to_the_parent_for_a_file_shaped_pattern() {
+        assert_eq!(
+            exclusion_scope(Path::new("vendor/a.min.js"), "**/*.min.js"),
+            PathBuf::from("vendor")
+        );
+        assert_eq!(
+            exclusion_scope(Path::new("a.min.js"), "**/*.min.js"),
+            PathBuf::new(),
+            "a root-level match anchors at the root itself"
+        );
+    }
+
+    /// A pattern whose literal segment is absent from the path (only reachable
+    /// through a future pattern shape) degrades to the parent rather than
+    /// returning the whole path.
+    #[test]
+    fn exclusion_scope_falls_back_when_the_literal_segment_is_absent() {
+        assert_eq!(
+            exclusion_scope(Path::new("src/nested/a.ts"), "**/build/**"),
+            PathBuf::from("src/nested")
+        );
+    }
+
+    #[test]
+    fn first_literal_segment_skips_wildcards_and_dot_components() {
+        assert_eq!(first_literal_segment("**/build/**"), Some("build"));
+        assert_eq!(first_literal_segment("**/*.min.js"), None);
+        assert_eq!(first_literal_segment("./dist/**"), Some("dist"));
+        assert_eq!(first_literal_segment("**/{a,b}/**"), None);
+    }
+
+    /// Issue #2638 (AC2): the anchor is the directory with the most excluded
+    /// files, and a tie resolves to the lexicographically first path so two
+    /// runs on one tree report the same location.
+    #[test]
+    fn the_anchor_is_the_largest_group_with_ties_broken_by_path() {
+        let mut tally = ExcludedByPattern::default();
+        for _ in 0..3 {
+            tally.record(PathBuf::from("packages/web/build"));
+        }
+        tally.record(PathBuf::from("packages/api/build"));
+        assert_eq!(tally.file_count, 4);
+        assert_eq!(tally.anchor(), PathBuf::from("packages/web/build"));
+
+        let mut tied = ExcludedByPattern::default();
+        tied.record(PathBuf::from("z/build"));
+        tied.record(PathBuf::from("a/build"));
+        assert_eq!(tied.anchor(), PathBuf::from("a/build"));
+    }
+
+    /// Per-thread tallies merge into one exact total, which is what makes
+    /// `file_count` trustworthy on a parallel walk.
+    #[test]
+    fn merging_two_thread_tallies_keeps_the_count_exact() {
+        let mut left = ExcludedByPattern::default();
+        left.record(PathBuf::from("dist"));
+        left.record(PathBuf::from("dist"));
+        let mut right = ExcludedByPattern::default();
+        right.record(PathBuf::from("dist"));
+        right.record(PathBuf::from("packages/ui/dist"));
+
+        left.merge(right);
+        assert_eq!(left.file_count, 4);
+        assert_eq!(left.scopes.get(Path::new("dist")), Some(&3));
+        assert_eq!(left.anchor(), PathBuf::from("dist"));
+    }
 
     #[test]
     fn skipped_dotdirs_note_names_the_directory_when_there_is_one() {

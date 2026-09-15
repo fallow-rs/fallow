@@ -688,6 +688,37 @@ mod tests {
         );
     }
 
+    /// Issue #2638: a built-in ignore pattern that removed generated output is
+    /// designed behavior, not a degraded run. Raising a caveat here would fire
+    /// on every project with a non-gitignored `dist/` or `coverage/` and make
+    /// `fallow fix` withhold `delete-file` and `remove-export` project-wide.
+    #[test]
+    fn a_built_in_ignore_exclusion_flags_nothing() {
+        let graph = graph();
+        let mut results = with_unused_dependency(unused(&[HELPER, ORPHAN]));
+        let diagnostics = vec![diagnostic(
+            "/p/packages/web/build",
+            WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
+                pattern: "**/build/**".to_owned(),
+                file_count: 12,
+            },
+        )];
+
+        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
+            .annotate(&mut results);
+
+        assert!(
+            results
+                .unused_files
+                .iter()
+                .all(|finding| finding.reachability_caveats.is_empty())
+                && results.unused_dependencies[0]
+                    .reachability_caveats
+                    .is_empty(),
+            "generated output the product is designed to exclude raises no caveat"
+        );
+    }
+
     /// A diagnostic outside the class must keep a healthy run byte-identical.
     /// `node-modules-missing` fires on every uninstalled tree and
     /// `boundaries-not-configured` fires on every project that never opted in,

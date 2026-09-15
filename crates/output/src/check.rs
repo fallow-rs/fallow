@@ -77,7 +77,8 @@ pub struct CheckOutput {
     ///   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
     /// - source discovery, during the file walk: `skipped-large-file`,
     ///   `skipped-minified-file`, `skipped-source-dotdir`,
-    ///   `source-read-failure`, `source-parse-degraded`;
+    ///   `excluded-by-default-ignore`, `source-read-failure`,
+    ///   `source-parse-degraded`;
     /// - dead-code analysis, from the dependency-catalog and override
     ///   detectors: `malformed-pnpm-workspace-yaml`,
     ///   `bun-lockb-override-resolution-skipped`.
@@ -98,6 +99,16 @@ pub struct CheckOutput {
     /// optional `reachability_caveats[]` array, and a reader who never scrolls
     /// back up to this list still sees it. `fallow fix` reads the same array
     /// and withholds the removal while a caveat stands.
+    ///
+    /// `excluded-by-default-ignore` is the one source-discovery kind that
+    /// reports unseen files WITHOUT raising a caveat. It names a built-in
+    /// ignore pattern (`**/node_modules/**`, `**/dist/**`, `**/build/**`,
+    /// `**/coverage/**`, the minified-bundle globs) that removed candidate
+    /// source files from the walk, which is designed behavior on generated
+    /// output rather than a degraded run, so it is advisory only and no
+    /// finding inherits it. One entry per pattern, never per file, so the
+    /// array stays bounded on a project of any size. Gitignored trees are
+    /// pruned before the walk sees them and count zero.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted

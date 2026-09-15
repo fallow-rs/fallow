@@ -430,6 +430,37 @@ compiled globset has no negation, so a hand-written source directory named
 analyzed from its own root. Keep discovery ignore behavior separate from
 workspace-package candidate filtering.
 
+Because the exclusion is silent by construction, the walk counts it. Every
+candidate source file a built-in pattern drops is attributed to that pattern,
+and one `excluded-by-default-ignore` workspace diagnostic per pattern reaches
+`workspace_diagnostics[]` carrying the pattern text, an exact `file_count`, and
+a `path` anchored at the directory that lost the most files. One entry per
+pattern is what keeps the array bounded on a project of any size; per-file or
+per-directory entries would scale with the tree.
+
+Three properties of that count are load-bearing:
+
+- Attribution reads the index layout of the compiled union. User
+  `ignorePatterns` occupy `0..user_ignore_pattern_count` and
+  `DEFAULT_IGNORE_PATTERNS` follows in order, so a file whose lowest match
+  falls in the user range was an explicit project choice and is attributed to
+  nothing. Reordering either half changes an output contract.
+- Gitignored trees count zero. The walker sets `git_ignore`, `git_global`, and
+  `git_exclude`, so a repository that already hides its own `dist/` prunes it
+  before the visitor runs. The honest population is "candidate source files git
+  did not already hide and a built-in pattern then dropped".
+- Only excluded files pay for attribution. The kept-file path still runs a
+  single `GlobSet::is_match`; `matches_into` runs on a per-thread reusable
+  buffer and only for paths that match already.
+
+The diagnostic does not warn on stderr and is not a
+`source_never_analyzed` kind: these exclusions are designed behavior on
+generated output, so caveating findings would fire on most projects and make
+`fallow fix` withhold `delete-file` and `remove-export` project-wide. A human
+run mentions the counts only under `--explain-skipped`, which also widens the
+duplication note. The remedy the message advertises is `fallow --root <dir>`,
+because the compiled union cannot be negated.
+
 The ignore filter in `crates/core/src/discover/walk.rs` runs before the walker
 splits a path into the source set and the config-candidate channel, so an
 excluded path reaches neither. A framework config under an ignored segment,

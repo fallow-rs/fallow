@@ -214,6 +214,15 @@ pub struct ResolvedConfig {
     /// ignores (`node_modules`, `dist`, minified bundles, ...); matching files
     /// are excluded from discovery entirely.
     pub ignore_patterns: GlobSet,
+    /// How many globs at the FRONT of [`Self::ignore_patterns`] came from the
+    /// user's `ignorePatterns`. The rest, in order, are
+    /// [`DEFAULT_IGNORE_PATTERNS`].
+    ///
+    /// Source discovery needs the split to answer "which pattern removed this
+    /// file": a match index below this count is the project's own explicit
+    /// choice and is reported nowhere, while an index at or above it names a
+    /// built-in the user never asked for (issue #2638).
+    pub user_ignore_pattern_count: usize,
     /// Post-analysis finding-path matcher built from `ignoreFindings`; hides
     /// findings without removing files from the module graph.
     pub ignore_findings: FindingIgnoreMatcher,
@@ -401,6 +410,31 @@ fn normalize_user_glob_pattern(pattern: &str) -> &str {
     pattern.strip_prefix("./").unwrap_or(pattern)
 }
 
+/// Built-in discovery ignore patterns, unioned into
+/// [`ResolvedConfig::ignore_patterns`] after the user's own `ignorePatterns`.
+///
+/// Public and ordered because the order IS the index layout of that union:
+/// user patterns occupy `0..user_ignore_pattern_count` and these follow, in
+/// this order. Source discovery maps a match index back to the pattern text
+/// through that layout when it reports which built-in removed a candidate
+/// source file (issue #2638), so reordering this list or changing where it is
+/// appended changes an output contract.
+///
+/// The union only ever adds: an `ignorePatterns` entry cannot negate a
+/// built-in, so "write a negation" is never the remedy for a file excluded
+/// here.
+pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.git/**",
+    "**/coverage/**",
+    "**/*.min.js",
+    "**/*.min.mjs",
+    "**/*.min.cjs",
+    "**/*.bundle.js",
+];
+
 #[expect(
     clippy::expect_used,
     reason = "user glob patterns are validated before config resolution"
@@ -414,18 +448,7 @@ fn compile_ignore_patterns(ignore_patterns: &[String]) -> GlobSet {
         );
     }
 
-    let default_ignores = [
-        "**/node_modules/**",
-        "**/dist/**",
-        "**/build/**",
-        "**/.git/**",
-        "**/coverage/**",
-        "**/*.min.js",
-        "**/*.min.mjs",
-        "**/*.min.cjs",
-        "**/*.bundle.js",
-    ];
-    for pattern in &default_ignores {
+    for pattern in DEFAULT_IGNORE_PATTERNS {
         ignore_builder.add(Glob::new(pattern).expect("default ignore pattern is valid"));
     }
 
@@ -583,6 +606,7 @@ fn compile_ignore_dependency_override_rules(
 
 struct CompiledIgnoreSettings {
     patterns: GlobSet,
+    user_pattern_count: usize,
     findings: FindingIgnoreMatcher,
     unresolved_imports: Vec<GlobMatcher>,
     exports: Vec<CompiledIgnoreExportRule>,
@@ -593,6 +617,7 @@ struct CompiledIgnoreSettings {
 fn compile_ignore_settings(config: &FallowConfig) -> CompiledIgnoreSettings {
     CompiledIgnoreSettings {
         patterns: compile_ignore_patterns(&config.ignore_patterns),
+        user_pattern_count: config.ignore_patterns.len(),
         findings: FindingIgnoreMatcher::compile(&config.ignore_findings),
         unresolved_imports: compile_ignore_unresolved_imports(&config.ignore_unresolved_imports),
         exports: compile_ignore_export_rules(&config.ignore_exports),
@@ -760,6 +785,7 @@ impl FallowConfig {
             root,
             entry_patterns: self.entry,
             ignore_patterns: compiled_ignores.patterns,
+            user_ignore_pattern_count: compiled_ignores.user_pattern_count,
             ignore_findings: compiled_ignores.findings,
             output,
             cache_dir: cache.dir,
@@ -1445,6 +1471,76 @@ mod tests {
                 .ignore_patterns
                 .is_match("packages/ui/dist/index.js")
         );
+    }
+
+    /// Issue #2638: source discovery maps a `GlobSet` match index back to the
+    /// pattern text through this layout, so the split point and the order of
+    /// the built-ins are an output contract, not an implementation detail.
+    /// A future reordering of `compile_ignore_patterns` fails here first.
+    #[test]
+    fn the_compiled_ignore_union_puts_user_patterns_first_and_the_built_ins_in_order() {
+        let mut config = make_config(false);
+        config.ignore_patterns = vec!["vendor/**".to_owned(), "legacy/**".to_owned()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert_eq!(resolved.user_ignore_pattern_count, 2);
+        assert_eq!(
+            resolved.ignore_patterns.len(),
+            2 + DEFAULT_IGNORE_PATTERNS.len(),
+            "the union only ever adds"
+        );
+        assert_eq!(
+            resolved.ignore_patterns.matches("vendor/a.ts"),
+            vec![0],
+            "a user pattern keeps its configured index"
+        );
+        for (offset, pattern) in DEFAULT_IGNORE_PATTERNS.iter().enumerate() {
+            let sample = match *pattern {
+                "**/node_modules/**" => "node_modules/react/index.js",
+                "**/dist/**" => "dist/a.ts",
+                "**/build/**" => "build/a.ts",
+                "**/.git/**" => ".git/hooks/a.js",
+                "**/coverage/**" => "coverage/a.ts",
+                "**/*.min.js" => "a.min.js",
+                "**/*.min.mjs" => "a.min.mjs",
+                "**/*.min.cjs" => "a.min.cjs",
+                "**/*.bundle.js" => "a.bundle.js",
+                other => panic!("no sample path for built-in ignore {other}"),
+            };
+            assert_eq!(
+                resolved.ignore_patterns.matches(sample),
+                vec![resolved.user_ignore_pattern_count + offset],
+                "{pattern} must sit at its DEFAULT_IGNORE_PATTERNS offset"
+            );
+        }
+    }
+
+    /// A file both a user pattern and a built-in match reports the user index
+    /// first, which is how discovery tells an explicit project choice from a
+    /// built-in the user never asked for (issue #2638).
+    #[test]
+    fn a_user_pattern_that_overlaps_a_built_in_matches_at_the_lower_index() {
+        let mut config = make_config(false);
+        config.ignore_patterns = vec!["dist/**".to_owned()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        let matches = resolved.ignore_patterns.matches("dist/a.ts");
+        assert_eq!(matches.first(), Some(&0));
+        assert!(matches.len() > 1, "the built-in still matches too");
     }
 
     #[test]

@@ -2943,6 +2943,7 @@ fn run_audit_check<'a>(
         retain_modules_for_health,
         defer_performance: false,
         analysis_snapshot,
+        explain_skipped: opts.explain_skipped,
     }) {
         Ok(mut result) => {
             if let Some(changed_files) = changed_files {

@@ -500,6 +500,19 @@ kind: "node-modules-missing"
 kind: "boundaries-not-configured"
 } | {
 kind: "rule-packs-not-configured"
+} | {
+/**
+ * The built-in glob that matched, verbatim (for example
+ * `** /build/**`).
+ */
+pattern: string
+/**
+ * Candidate source files this pattern excluded in this walk, across
+ * every directory it matched, not just the one `path` anchors at.
+ * Exact: the walk counts each excluded candidate once.
+ */
+file_count: number
+kind: "excluded-by-default-ignore"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
@@ -2663,7 +2676,8 @@ _meta?: (Meta | null)
  *   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
- *   `source-read-failure`, `source-parse-degraded`;
+ *   `excluded-by-default-ignore`, `source-read-failure`,
+ *   `source-parse-degraded`;
  * - dead-code analysis, from the dependency-catalog and override
  *   detectors: `malformed-pnpm-workspace-yaml`,
  *   `bun-lockb-override-resolution-skipped`.
@@ -2684,6 +2698,16 @@ _meta?: (Meta | null)
  * optional `reachability_caveats[]` array, and a reader who never scrolls
  * back up to this list still sees it. `fallow fix` reads the same array
  * and withholds the removal while a caveat stands.
+ *
+ * `excluded-by-default-ignore` is the one source-discovery kind that
+ * reports unseen files WITHOUT raising a caveat. It names a built-in
+ * ignore pattern (`** /node_modules/**`, `** /dist/**`, `** /build/**`,
+ * `** /coverage/**`, the minified-bundle globs) that removed candidate
+ * source files from the walk, which is designed behavior on generated
+ * output rather than a degraded run, so it is advisory only and no
+ * finding inherits it. One entry per pattern, never per file, so the
+ * array stays bounded on a project of any size. Gitignored trees are
+ * pruned before the walk sees them and count zero.
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**

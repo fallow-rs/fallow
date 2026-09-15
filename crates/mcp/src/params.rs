@@ -472,7 +472,8 @@ pub struct FindDupesParams {
     /// `false` to count them again.
     pub ignore_imports: Option<bool>,
 
-    /// Show a per-pattern breakdown for default duplicate ignores.
+    /// Show per-pattern counts for files skipped by built-in ignores
+    /// (duplicates and, on commands that walk sources, discovery).
     /// Human-format only (human/markdown CLI output); MCP JSON responses suppress the note.
     pub explain_skipped: Option<bool>,
 
@@ -1538,7 +1539,8 @@ pub struct AuditParams {
     /// `--dupes-baseline` flag.
     pub dupes_baseline: Option<String>,
 
-    /// Show a per-pattern breakdown for default duplicates ignores.
+    /// Show per-pattern counts for files skipped by built-in ignores
+    /// (duplicates and, on commands that walk sources, discovery).
     /// Human-format only (human/markdown CLI output); MCP JSON responses suppress the note.
     pub explain_skipped: Option<bool>,
 

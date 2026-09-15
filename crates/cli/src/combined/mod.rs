@@ -184,6 +184,7 @@ fn build_combined_check_options<'a>(
         retain_modules_for_health: opts.run_health,
         defer_performance: true,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
+        explain_skipped: opts.explain_skipped,
     })
 }
 

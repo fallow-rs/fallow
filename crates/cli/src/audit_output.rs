@@ -221,6 +221,16 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
         crate::dupes::print_min_occurrences_note(dupes, quiet);
     }
 
+    if let Some(ref check) = result.check {
+        crate::discovery_note::print_default_ignore_exclusion_note(
+            &check.config.root,
+            &check.workspace_diagnostics,
+            check.explain_skipped,
+            quiet,
+            check.config.output,
+        );
+    }
+
     if !quiet {
         print_audit_status_line(result);
     }
