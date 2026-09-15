@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789393327884,
+  "lastUpdate": 1789475778934,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "f7161395e92145f1e673fa5b9d99bf52e60ec28e",
-          "message": "fix: tighten security source matching\n\nTighten framework-source detection and package-subpath provenance for the security catalogue follow-up.",
-          "timestamp": "2026-06-07T09:20:22Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/f7161395e92145f1e673fa5b9d99bf52e60ec28e"
-        },
-        "date": 1780826722483,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 196,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 175,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 315,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 256,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 162,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 139,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 501,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 428,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1360,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1327,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 973,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 931,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 896,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 802,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7998,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7173,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9319,6 +9217,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 910,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "2c58e501eb11aaae5749310e6c8c2608b7992603",
+          "message": "docs(changelog): record the five external-issue fixes awaiting release (#2639)\n\nEntries for the JSONC schema hint (#2623), the recursive build ignore\n(#2622), the dead-code baseline staleness warning and its scope guard\n(#2627), the istanbul nested-function ownership fix (#2620) and the editor\nrule-override fix (#2621). Kept out of the fix branches so they do not\nconflict with each other on this file.",
+          "timestamp": "2026-09-15T06:40:29Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/2c58e501eb11aaae5749310e6c8c2608b7992603"
+        },
+        "date": 1789475775590,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 307,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 207,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 307,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 615,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 414,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1744,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1227,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1228,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1022,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1341,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1122,
             "unit": "ms"
           }
         ]
