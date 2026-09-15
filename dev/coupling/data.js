@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789454502262,
+  "lastUpdate": 1789496089412,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "bf98a4270ab5ce6fb9aca1e5c92a51da6dde2023",
-          "message": "chore(docker): pin Dockerfile to v3.19.0",
-          "timestamp": "2026-08-27T11:55:55+02:00",
-          "tree_id": "55c52365376ec9d37614cbefdb1f12aac052f1eb",
-          "url": "https://github.com/fallow-rs/fallow/commit/bf98a4270ab5ce6fb9aca1e5c92a51da6dde2023"
-        },
-        "date": 1787824946114,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/9dabdbd75f746848fdbe891e7217077774f62c06"
         },
         "date": 1789454498470,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 477,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1306,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ea2e2e6bb27228b3465c2c18edeb756c89ee0549",
+          "message": "fix(engine): resolve rule severity on every surface and watch every config file name (#2640)\n\nRule severity, including per-path overrides[].rules, is now resolved on every surface that reports findings: the programmatic runtime behind the MCP analyze and check_changed tools, the audit sub-analyses, Code Mode's combined run, the Node bindings and the decision surface run the same engine pass the CLI runs, once over the analyzed set and once after type-aware reconciliation. The CLI applies the second pass on --type-aware runs as the editor already did. The language server derives its watched-file registration and its semantic invalidation classifier from the config file names the loader accepts, so editing .fallowrc.json, .fallowrc.jsonc or .fallow.toml refreshes diagnostics. The MCP decision_surface tool judges its base snapshot by the head configuration, as the CLI does.\n\nFixes #2636",
+          "timestamp": "2026-09-15T20:10:08+02:00",
+          "tree_id": "c8031b0412f80a36f028f2dcbf58b4e3ce3e063f",
+          "url": "https://github.com/fallow-rs/fallow/commit/ea2e2e6bb27228b3465c2c18edeb756c89ee0549"
+        },
+        "date": 1789496085951,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
