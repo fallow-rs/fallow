@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789537027687,
+  "lastUpdate": 1789577468656,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6d00a7337007105a76c5d538acb98127b974dec1",
-          "message": "test(coverage): pin the geometry every coverage producer emits (#2466)\n\nThe coverage matcher rests on where each producer anchors a function record,\nand every geometry assertion in the repository was hand written inside a Rust\ntest module. Nothing noticed when a producer moved an anchor, and twice a\nhand-written fixture asserted geometry no producer emits while its test passed.\n\nThe corpus records real output from five pinned producer profiles over seven\nprobes chosen by measured divergence. The gate runs the real binary against\nthose maps and asserts per-unit coverage provenance rather than coordinates, so\na producer move the matcher absorbs is a reviewable map diff with an unchanged\ncensus, and only a census delta needs a human. Each run proves the gate can\nstill fail by perturbing a record past the line-drift window and by moving\nevery column past the end of its line.\n\nThe producers install under their own prefix and add nothing to the root\ninstall. The gate is offline and reads only committed maps.\n\nRefs #2457",
-          "timestamp": "2026-08-30T22:14:31+02:00",
-          "tree_id": "6db047bdc9bba947f0e768573f7c3d2001cc25d4",
-          "url": "https://github.com/fallow-rs/fallow/commit/6d00a7337007105a76c5d538acb98127b974dec1"
-        },
-        "date": 1788121401242,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/1080fe084b5a0fbd61e05f808664c82290427cd2"
         },
         "date": 1789537023341,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "de90d3109e5eee2bb7729f487c65476a3d0a2df2",
+          "message": "fix(action): surface baseline staleness and propagate the stale-baseline gate in CI (#2674)\n\nThe dead-code baseline staleness warning and the opt-in stale-baseline gate shipped in 3.26.0 were unreachable through the GitHub Action and the GitLab template: both run with `--quiet --format json`, the warning is quiet-suppressed, stderr went to `::debug::`, and the CLI exit code was dropped whenever stdout parsed as JSON.\n\n- dead-code, dupes and health envelopes publish one shared `baseline_staleness` object (health's existing member names plus `current_findings`, `warning` and `gate_trips`); no schema version moves and the `HealthBaselineStaleness` TypeScript name stays as a deprecated alias.\n- The action and the GitLab template read the verdict from that object, never from the exit code, so `fail-on-issues: false` keeps its meaning; a new `fail-on-stale-baseline` input (`FALLOW_FAIL_ON_STALE_BASELINE` on GitLab) fails the job on a tripped gate.\n- On pull requests the primary run is change-scoped, so a second unscoped, report-discarding run judges the baseline whenever the action itself narrowed the run; the advisory lands as `::warning::`, a tripped gate as `::error::`, a stand-down as `::warning::`, and a line in the step summary.\n- Fail open on an older binary or a command without staleness; invalid input combinations are rejected at validation.\n\nFixes #2673",
+          "timestamp": "2026-09-16T18:44:44+02:00",
+          "tree_id": "04ca6836a569a821d7453c67930f0a5ce3c3bdc1",
+          "url": "https://github.com/fallow-rs/fallow/commit/de90d3109e5eee2bb7729f487c65476a3d0a2df2"
+        },
+        "date": 1789577465242,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
