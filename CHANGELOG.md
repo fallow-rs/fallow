@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Baseline staleness reaches CI again.** 3.26.0 shipped the advisory that a
+  dead-code baseline has gone stale, and `--fail-on-stale-baseline` to turn that
+  into a failing build, but both lived on stderr only. Every CI path fallow
+  ships analyzes with `--quiet`, which removes the advisory at the source, and
+  the GitHub Action replays what is left as `::debug::` and discards the exit
+  code whenever stdout parses as JSON. So the documented CI path, the path the
+  original report came from, got exactly the pre-3.26.0 behaviour: a baseline
+  rotted for months and every run stayed green and silent. `fail-on-issues` did
+  not recover it either, because a baseline whose entries all match nothing
+  while the project itself is clean reports zero issues, which is the case the
+  gate exists for.
+
+  Every command that accepts `--baseline` now publishes one `baseline_staleness`
+  object in its JSON envelope: the counts, how many findings there were to match
+  against, whether the run was narrowed, the advisory verdict, and `gate_trips`,
+  the same boolean `--fail-on-stale-baseline` exits on. `dupes` carried nothing
+  about a loaded baseline before; `health` keeps the object it has had since
+  3.12.0 and gains the verdict. The object is absent when no baseline was
+  loaded, and emitted with or without the flag, so no envelope schema version
+  moved and the flag still changes nothing but the exit code and the stderr
+  line. Read `change_scoped` before dividing the counts: a run narrowed to part
+  of the project can report `matched_entries: 0` on a perfectly healthy
+  baseline, which is why deriving staleness from `baseline.entries` and
+  `baseline.matched` alone was never safe.
+
+  The GitHub Action and the GitLab template read that object. A stale baseline
+  now surfaces as a `::warning::` (GitHub) or a warning line (GitLab) and in the
+  job summary, on any run that loads a baseline, whether or not the gate is
+  asked for. The new `fail-on-stale-baseline` input and
+  `FALLOW_FAIL_ON_STALE_BASELINE` variable turn it into a failing job. They are
+  independent of `fail-on-issues` / `FALLOW_FAIL_ON_ISSUES`, like
+  `type-aware-require` and the security gate already were, and the verdict comes
+  from the envelope rather than the exit code, so a findings exit and a gate
+  exit cannot be confused. Every branch fails open: a pinned fallow older than
+  this release, or a command that reports no staleness, warns and leaves the job
+  green.
+
+  Pull requests are the case that made a plain input pointless. Both integrations
+  scope the analysis to the changed files there, and a narrowed run cannot judge
+  a whole-project baseline, so the gate correctly stands down and would only ever
+  have fired on `push`. With the gate on, the run now re-reads the baseline once
+  over the whole project, with every narrowing flag and every writing flag
+  removed and the diff scoping cleared, and reads nothing from it but the
+  verdict: it writes no baseline, no snapshot and no SARIF, and feeds no comment,
+  annotation or summary. Measured on an 870-file TypeScript project that second
+  read costs 0.11s on a warm cache and 0.11s on a cold one (the first run
+  populates the cache), 0.15s with caching disabled, and 0.24s with type-aware
+  analysis on, in every case less than the run it follows. When the narrowing is
+  something the integration cannot remove, such as production mode or workspace
+  scoping, the gate says it stood down instead of passing in silence.
+
+  Two notes for existing configurations. A repository that already passes
+  `--fail-on-stale-baseline` through the `args` input or `FALLOW_ARGS` should
+  move to the input: on GitHub that flag never failed the job, and on GitLab it
+  printed a verdict the pipeline ignored, so moving to the input turns an
+  informational line into a real gate. And a repository that uses a baseline
+  without asking for any gate will start seeing the advisory warning on runs
+  where a quarter or more of the baseline has gone stale; that is the point of
+  the change, and re-saving the baseline clears it. The PR comment and the
+  GitLab MR note do not carry the advisory yet
+  (Closes [#2673](https://github.com/fallow-rs/fallow/issues/2673)). Thanks to
+  the reporter for tracing it through the action scripts line by line.
+
+
 ## [3.26.0] - 2026-09-15
 
 ### Added

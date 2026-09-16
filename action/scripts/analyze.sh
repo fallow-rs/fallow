@@ -720,8 +720,11 @@ BASELINE_STALENESS_JQ='.baseline_staleness // .summary.baseline_staleness // .ch
 # when the object or the member is absent.
 read_staleness_field() {
   local file=$1 field=$2
+  # `// empty` cannot be used here: jq treats `false` as absent, which would
+  # silently blank `change_scoped: false` and `gate_trips: false`.
   jq -r --arg field "$field" \
-    "(${BASELINE_STALENESS_JQ}) | .[\$field] // empty" "$file" 2>/dev/null || true
+    "(${BASELINE_STALENESS_JQ}) | if has(\$field) then .[\$field] else empty end" \
+    "$file" 2>/dev/null || true
 }
 
 BASELINE_ENTRIES=$(read_staleness_field "$RESULTS_FILE" baseline_entries)
