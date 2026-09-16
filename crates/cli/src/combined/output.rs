@@ -954,7 +954,7 @@ fn check_json_extras_for_combined(result: &CheckResult) -> fallow_api::CheckJson
         result
             .baseline_staleness
             .as_ref()
-            .map(|loaded| loaded.staleness.to_envelope(None)),
+            .map(|loaded| loaded.staleness.to_envelope(0)),
     )
 }
 

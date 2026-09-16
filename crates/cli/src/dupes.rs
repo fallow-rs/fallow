@@ -870,7 +870,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         baseline_staleness: result
             .baseline_staleness
             .as_ref()
-            .map(|loaded| loaded.staleness.to_envelope(None)),
+            .map(|loaded| loaded.staleness.to_envelope(0)),
         config_fixable: false,
         skip_score_and_trend: false,
         css_requested: false,

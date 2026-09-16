@@ -9809,3 +9809,26 @@ fn health_baseline_staleness_gate_verdict_matches_the_exit_code() {
         redact_all(&gated.stderr, project.path())
     );
 }
+
+/// The grouped health envelope flattens the same report body, so `summary`
+/// carries the object there too.
+#[test]
+fn the_grouped_health_envelope_carries_baseline_staleness() {
+    let project = rotted_health_baseline_project(5, 4);
+    let baseline_path = project.path().join("health-baseline.json");
+    let output = run_health_with_baseline(
+        project.path(),
+        &[
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+            "--group-by",
+            "directory",
+        ],
+    );
+    let staleness = parse_json(&output)["summary"]["baseline_staleness"].clone();
+    assert_eq!(staleness["baseline_entries"], 5);
+    assert_eq!(staleness["gate_trips"], true);
+    assert!(staleness["moved_entries"].is_number());
+}

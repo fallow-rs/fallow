@@ -2682,9 +2682,9 @@ baseline?: (BaselineMatch | null)
  * This run's view of the loaded baseline, present only in baseline runs.
  * Carries the staleness counts, the advisory verdict and `gate_trips`, the
  * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
- * reads one field instead of restating the rule. See
- * [`crate::BaselineStaleness`]; `change_scoped` must be read before
- * dividing `matched_entries` by `baseline_entries`.
+ * reads one field instead of restating the rule. Read `change_scoped`
+ * before dividing `matched_entries` by `baseline_entries`: a narrowed run
+ * can report `matched_entries: 0` on a healthy baseline.
  */
 baseline_staleness?: (BaselineStaleness | null)
 /**
@@ -5172,17 +5172,22 @@ change_scoped: boolean
 stale: boolean
 warning: BaselineStalenessAdvisory
 /**
- * True when `--fail-on-stale-baseline` would exit 1 on this run, whether
- * or not the flag was passed. Deliberately stricter than `stale`: any
- * unmatched entry counts. Equal to
- * `!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`.
+ * True exactly when
+ * `!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`,
+ * which is the rule `--fail-on-stale-baseline` applies. Deliberately
+ * stricter than `stale`: any unmatched entry counts. It describes the
+ * baseline, not the run's exit code: `health --report-only` is an explicit
+ * request never to fail, so that run exits 0 and says so on stderr while
+ * still reporting `gate_trips: true` here.
  */
 gate_trips: boolean
 /**
- * Entries that matched only by following a file move in health's identity
- * mode. Emitted by `health` only, and always zero in count mode.
+ * Entries that matched only by following a file move. Only `health` can
+ * follow one, in its identity baseline mode; `dead-code` and `dupes` match
+ * entries by fingerprint and never classify one as moved, so they report
+ * `0`. Always `0` in health's count mode too.
  */
-moved_entries?: (number | null)
+moved_entries: number
 }
 /**
  * Result of regression detection (`--fail-on-regression`). Compares current
@@ -11061,9 +11066,9 @@ groups?: (DuplicationGroup[] | null)
  * This run's view of the loaded baseline, present only in baseline runs.
  * Carries the staleness counts, the advisory verdict and `gate_trips`, the
  * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
- * reads one field instead of restating the rule. See
- * [`crate::BaselineStaleness`]; `change_scoped` must be read before
- * dividing `matched_entries` by `baseline_entries`.
+ * reads one field instead of restating the rule. Read `change_scoped`
+ * before dividing `matched_entries` by `baseline_entries`: a narrowed run
+ * can report `matched_entries: 0` on a healthy baseline.
  */
 baseline_staleness?: (BaselineStaleness | null)
 /**
@@ -11228,9 +11233,9 @@ groups: CheckGroupedEntry[]
  * This run's view of the loaded baseline, present only in baseline runs.
  * Carries the staleness counts, the advisory verdict and `gate_trips`, the
  * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
- * reads one field instead of restating the rule. See
- * [`crate::BaselineStaleness`]; `change_scoped` must be read before
- * dividing `matched_entries` by `baseline_entries`.
+ * reads one field instead of restating the rule. Read `change_scoped`
+ * before dividing `matched_entries` by `baseline_entries`: a narrowed run
+ * can report `matched_entries: 0` on a healthy baseline.
  */
 baseline_staleness?: (BaselineStaleness | null)
 /**
@@ -15349,3 +15354,9 @@ export type UnusedDependency = UnusedDependencyFinding | UnusedDevDependencyFind
  * this alias; new code should narrow on the specific wrapper variant.
  */
 export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedStoreMemberFinding;
+
+
+/**
+ * @deprecated Renamed to BaselineStaleness in 3.27.0, when dead-code and dupes started carrying the same shape. The members are unchanged.
+ */
+export type HealthBaselineStaleness = BaselineStaleness;

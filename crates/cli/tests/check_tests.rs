@@ -3435,9 +3435,9 @@ fn json_envelope_carries_baseline_staleness_on_a_whole_project_run() {
         "the gate's own rule, published so a CI integration reads one boolean: {}",
         output.stdout
     );
-    assert!(
-        staleness.get("moved_entries").is_none(),
-        "only health can follow a file move: {}",
+    assert_eq!(
+        staleness["moved_entries"], 0,
+        "dead-code matches entries by fingerprint and never follows a move: {}",
         output.stdout
     );
 }
@@ -3581,11 +3581,34 @@ fn baseline_staleness_does_not_depend_on_the_gate_flag() {
 
 /// The new object is additive and absent by default, which is exactly the
 /// condition `docs/backwards-compatibility.md` sets for not bumping a version.
+/// Every envelope whose embedded shape changed is pinned, not only the two that
+/// carry the object at their own root.
 #[test]
 fn adding_baseline_staleness_moved_no_schema_version() {
     let project = rotted_baseline_project(4, 2);
+    let root = project.path().to_str().expect("temp path is UTF-8");
     let dead_code = run_with_baseline(project.path(), &["--format", "json", "--quiet"]);
     assert_eq!(parse_json(&dead_code)["schema_version"], 9);
+    let dupes = run_fallow_raw(&[
+        "dupes",
+        "--root",
+        root,
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(parse_json(&dupes)["schema_version"], 10);
+    let health = run_fallow_raw(&[
+        "health",
+        "--root",
+        root,
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(parse_json(&health)["schema_version"], 11);
     let combined = run_fallow_raw(&[
         "--root",
         project.path().to_str().expect("temp path is UTF-8"),
@@ -3624,4 +3647,43 @@ fn the_combined_envelope_carries_baseline_staleness_under_check() {
     let staleness = parse_json(&output)["check"]["baseline_staleness"].clone();
     assert_eq!(staleness["baseline_entries"], 4);
     assert_eq!(staleness["gate_trips"], true);
+}
+
+/// `--group-by` is a distinct envelope kind, and the MCP tools accept it, so an
+/// agent can reach it. It must carry the same object as the flat envelope.
+#[test]
+fn the_grouped_dead_code_envelope_carries_baseline_staleness() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(
+        project.path(),
+        &["--format", "json", "--quiet", "--group-by", "directory"],
+    );
+    let envelope = parse_json(&output);
+    assert_eq!(envelope["kind"], "dead-code-grouped");
+    let staleness = &envelope["baseline_staleness"];
+    assert_eq!(staleness["baseline_entries"], 4);
+    assert_eq!(staleness["matched_entries"], 2);
+    assert_eq!(staleness["gate_trips"], true);
+    assert_eq!(staleness["moved_entries"], 0);
+}
+
+#[test]
+fn the_grouped_dead_code_envelope_omits_baseline_staleness_without_a_baseline() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        project.path().to_str().expect("temp path is UTF-8"),
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+        "--group-by",
+        "directory",
+    ]);
+    assert!(
+        parse_json(&output).get("baseline_staleness").is_none(),
+        "a grouped run with no baseline keeps the wire byte-identical: {}",
+        output.stdout
+    );
 }

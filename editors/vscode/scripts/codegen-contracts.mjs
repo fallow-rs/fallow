@@ -178,6 +178,48 @@ function flattenRefSiblings(node) {
 }
 
 /**
+ * Interfaces that were renamed while their shape stayed identical, kept
+ * compiling under their old exported name.
+ *
+ * A renamed definition disappears from the generated `.d.ts`, which is a
+ * compile break for a pinned consumer even when no `schema_version` moved and
+ * no wire field changed. A deprecated alias costs one line and keeps the old
+ * import working, so the rename can be a documentation event rather than a
+ * breaking one. Entries stay until a deliberate major.
+ */
+const RENAMED_TYPE_ALIASES = [
+  {
+    from: "HealthBaselineStaleness",
+    to: "BaselineStaleness",
+    note: "Renamed to BaselineStaleness in 3.27.0, when dead-code and dupes started carrying the same shape. The members are unchanged.",
+  },
+];
+
+/**
+ * Append a deprecated alias for every renamed interface, after checking that
+ * the successor really is in the generated output. A silently missing alias
+ * would reintroduce the break the table exists to prevent.
+ */
+function appendRenamedTypeAliases(contents) {
+  let output = contents;
+  for (const { from, to, note } of RENAMED_TYPE_ALIASES) {
+    const successor = new RegExp(`^export (interface|type) ${to}\\b`, "m");
+    if (!successor.test(output)) {
+      throw new Error(
+        `renamed-type alias ${from} -> ${to}: ${to} is absent from the generated contract`,
+      );
+    }
+    if (new RegExp(`^export (interface|type) ${from}\\b`, "m").test(output)) {
+      throw new Error(
+        `renamed-type alias ${from} -> ${to}: ${from} is still generated, so the alias would collide`,
+      );
+    }
+    output += `\n\n/**\n * @deprecated ${note}\n */\nexport type ${from} = ${to};`;
+  }
+  return output;
+}
+
+/**
  * Preserve the legacy generic alias when no root envelope references it.
  * Existing TypeScript consumers imported `SchemaVersion` when every primary
  * envelope shared the dead-code/check version. Keep that alias source-compatible
@@ -786,11 +828,18 @@ async function generateOutputContract(capabilitySchema) {
   // With the root title stripped, jstt uses the second arg as the name of the
   // top-level union type.
   const raw_ts = await compile(parsed, "FallowJsonOutput", OPTIONS);
-  const final = appendDedupedFlattenAliases(
-    appendLegacySchemaVersionAlias(stripTrailingWhitespace(raw_ts), parsed),
-    deadCodeAliases,
+  const final = appendRenamedTypeAliases(
+    appendDedupedFlattenAliases(
+      appendLegacySchemaVersionAlias(stripTrailingWhitespace(raw_ts), parsed),
+      deadCodeAliases,
+    ),
   );
   assertAliasesEmitted(final, deadCodeAliases);
+  for (const { from, to } of RENAMED_TYPE_ALIASES) {
+    if (!new RegExp(`^export type ${from} = ${to};?$`, "m").test(final)) {
+      throw new Error(`generated output must preserve the \`${from} = ${to}\` alias`);
+    }
+  }
   if (!/^export type SchemaVersion = CheckSchemaVersion;?$/m.test(final)) {
     throw new Error(
       "generated output must preserve the legacy `SchemaVersion = CheckSchemaVersion` alias",

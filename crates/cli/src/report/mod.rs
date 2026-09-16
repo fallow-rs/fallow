@@ -270,7 +270,7 @@ pub(crate) fn render_check_json(
         type_aware: input.type_aware,
         regression: input.regression,
         baseline_matched: input.baseline_matched,
-        baseline_staleness: input.baseline_staleness.clone(),
+        baseline_staleness: input.baseline_staleness,
         config_fixable: input.config_fixable,
         workspace_diagnostics: input.workspace_diagnostics,
         json_style: input.json_style,
@@ -381,7 +381,7 @@ pub(crate) fn print_results(
             type_aware: ctx.type_aware,
             regression,
             baseline_matched: ctx.baseline_matched,
-            baseline_staleness: ctx.baseline_staleness.clone(),
+            baseline_staleness: ctx.baseline_staleness,
             config_fixable: ctx.config_fixable,
             workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
@@ -512,7 +512,7 @@ fn print_grouped_results(
             type_aware: ctx.type_aware,
             resolver,
             config_fixable: ctx.config_fixable,
-            baseline_staleness: ctx.baseline_staleness.clone(),
+            baseline_staleness: ctx.baseline_staleness,
             workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
         }),
@@ -582,7 +582,7 @@ pub(crate) fn print_duplication_report(
             json::DuplicationJsonRender {
                 explain: ctx.explain,
                 include_fragments: ctx.include_fragments,
-                baseline_staleness: ctx.baseline_staleness.clone(),
+                baseline_staleness: ctx.baseline_staleness,
             },
             ctx.workspace_diagnostics,
             ctx.json_style,
@@ -621,7 +621,7 @@ fn print_dupes_github_format(
         json::DuplicationJsonRender {
             explain: ctx.explain,
             include_fragments: ctx.include_fragments,
-            baseline_staleness: ctx.baseline_staleness.clone(),
+            baseline_staleness: ctx.baseline_staleness,
         },
         ctx.workspace_diagnostics,
     ) {
@@ -680,7 +680,7 @@ fn print_grouped_duplication_report(
             json::DuplicationJsonRender {
                 explain: ctx.explain,
                 include_fragments: ctx.include_fragments,
-                baseline_staleness: ctx.baseline_staleness.clone(),
+                baseline_staleness: ctx.baseline_staleness,
             },
             ctx.workspace_diagnostics,
             ctx.json_style,

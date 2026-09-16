@@ -429,6 +429,9 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
 
 /// Exit 1 when the watch cycle required complete semantic analysis and did not
 /// get it, mirroring the standalone commands' completeness gate.
+///
+/// Split out of `analyze_and_report` so that function stays inside the
+/// `too_many_lines` budget after gaining a `ReportContext` member.
 fn watch_type_aware_exit_code(
     config: &fallow_config::ResolvedConfig,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,

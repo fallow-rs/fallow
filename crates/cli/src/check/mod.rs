@@ -1434,7 +1434,7 @@ fn envelope_baseline_staleness(result: &CheckResult) -> Option<fallow_output::Ba
     result
         .baseline_staleness
         .as_ref()
-        .map(|loaded| loaded.staleness.to_envelope(None))
+        .map(|loaded| loaded.staleness.to_envelope(0))
 }
 
 fn type_aware_completeness_failed(result: &CheckResult, quiet: bool) -> bool {

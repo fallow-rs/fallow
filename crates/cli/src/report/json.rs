@@ -63,7 +63,7 @@ pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_js
             input.regression,
             None,
             input.baseline_matched,
-            input.baseline_staleness.clone(),
+            input.baseline_staleness,
         ),
         input.workspace_diagnostics,
     )?;
@@ -93,7 +93,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         elapsed: input.elapsed,
         grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
         config_fixable: input.config_fixable,
-        baseline_staleness: input.baseline_staleness.clone(),
+        baseline_staleness: input.baseline_staleness,
         meta: check_output_meta(input.explain, input.type_aware),
         workspace_diagnostics: input.workspace_diagnostics.to_vec(),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
@@ -829,7 +829,7 @@ pub(super) fn print_grouped_health_json(
 
 /// The two presentation switches the duplication JSON path carries, paired so
 /// they travel as one argument through the render chain.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(super) struct DuplicationJsonRender {
     /// This run's view of the loaded duplication baseline, for baseline runs.
     pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,

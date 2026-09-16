@@ -65,9 +65,9 @@ pub struct CheckOutput {
     /// This run's view of the loaded baseline, present only in baseline runs.
     /// Carries the staleness counts, the advisory verdict and `gate_trips`, the
     /// same boolean `--fail-on-stale-baseline` exits on, so a CI integration
-    /// reads one field instead of restating the rule. See
-    /// [`crate::BaselineStaleness`]; `change_scoped` must be read before
-    /// dividing `matched_entries` by `baseline_entries`.
+    /// reads one field instead of restating the rule. Read `change_scoped`
+    /// before dividing `matched_entries` by `baseline_entries`: a narrowed run
+    /// can report `matched_entries: 0` on a healthy baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_staleness: Option<crate::BaselineStaleness>,
     /// Regression verdict against the baseline, in `--fail-on-regression` runs.
@@ -162,9 +162,9 @@ pub struct CheckGroupedOutput {
     /// This run's view of the loaded baseline, present only in baseline runs.
     /// Carries the staleness counts, the advisory verdict and `gate_trips`, the
     /// same boolean `--fail-on-stale-baseline` exits on, so a CI integration
-    /// reads one field instead of restating the rule. See
-    /// [`crate::BaselineStaleness`]; `change_scoped` must be read before
-    /// dividing `matched_entries` by `baseline_entries`.
+    /// reads one field instead of restating the rule. Read `change_scoped`
+    /// before dividing `matched_entries` by `baseline_entries`: a narrowed run
+    /// can report `matched_entries: 0` on a healthy baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_staleness: Option<crate::BaselineStaleness>,
     /// `_meta` block with docs and rule definitions, when `--explain` was

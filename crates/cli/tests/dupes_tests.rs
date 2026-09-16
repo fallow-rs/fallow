@@ -1758,9 +1758,9 @@ fn dupes_json_envelope_carries_baseline_staleness() {
     assert_eq!(staleness["stale"], true);
     assert_eq!(staleness["warning"], "partial");
     assert_eq!(staleness["gate_trips"], true);
-    assert!(
-        staleness.get("moved_entries").is_none(),
-        "duplication cannot follow a file move: {}",
+    assert_eq!(
+        staleness["moved_entries"], 0,
+        "duplication matches clone groups by fingerprint and never follows a move: {}",
         output.stdout
     );
 }
@@ -1798,4 +1798,19 @@ fn dupes_baseline_staleness_agrees_with_the_exit_gate() {
         "the published boolean and the exit code cannot disagree: {}",
         gated.stderr
     );
+}
+
+/// The grouped duplication envelope is the shape an agent reaches through the
+/// MCP `find_dupes` tool's `group_by` parameter.
+#[test]
+fn the_grouped_dupes_envelope_carries_baseline_staleness() {
+    let project = rotted_dupes_project(4, 1);
+    let output = run_dupes_with_baseline(
+        project.path(),
+        &["--format", "json", "--quiet", "--group-by", "directory"],
+    );
+    let staleness = parse_json(&output)["baseline_staleness"].clone();
+    assert_eq!(staleness["baseline_entries"], 4);
+    assert_eq!(staleness["gate_trips"], true);
+    assert_eq!(staleness["moved_entries"], 0);
 }

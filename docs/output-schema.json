@@ -867,7 +867,7 @@
               "type": "null"
             }
           ],
-          "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. See\n[`crate::BaselineStaleness`]; `change_scoped` must be read before\ndividing `matched_entries` by `baseline_entries`."
+          "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. Read `change_scoped`\nbefore dividing `matched_entries` by `baseline_entries`: a narrowed run\ncan report `matched_entries: 0` on a healthy baseline."
         },
         "regression": {
           "anyOf": [
@@ -969,7 +969,7 @@
               "type": "null"
             }
           ],
-          "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. See\n[`crate::BaselineStaleness`]; `change_scoped` must be read before\ndividing `matched_entries` by `baseline_entries`."
+          "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. Read `change_scoped`\nbefore dividing `matched_entries` by `baseline_entries`: a narrowed run\ncan report `matched_entries: 0` on a healthy baseline."
         },
         "_meta": {
           "anyOf": [
@@ -2821,7 +2821,7 @@
               "type": "null"
             }
           ],
-          "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. See\n[`crate::BaselineStaleness`]; `change_scoped` must be read before\ndividing `matched_entries` by `baseline_entries`."
+          "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. Read `change_scoped`\nbefore dividing `matched_entries` by `baseline_entries`: a narrowed run\ncan report `matched_entries: 0` on a healthy baseline."
         },
         "_meta": {
           "anyOf": [
@@ -23142,44 +23142,6 @@
       "pattern": "^[A-Za-z0-9._-]+$",
       "description": "Stable identifier used to isolate independent review integrations on the\nsame pull or merge request."
     },
-    "HealthBaselineStaleness": {
-      "type": "object",
-      "properties": {
-        "baseline_entries": {
-          "type": "integer",
-          "description": "Complexity and CRAP finding entries carried by the loaded baseline."
-        },
-        "matched_entries": {
-          "type": "integer",
-          "description": "Entries that matched a current finding in the active baseline mode,\nincluding entries matched through a followed file move."
-        },
-        "stale_entries": {
-          "type": "integer",
-          "description": "Entries that matched no current finding on this run."
-        },
-        "moved_entries": {
-          "type": "integer",
-          "description": "Entries that matched only by following a file move in identity mode.\nAlways zero in count mode."
-        },
-        "change_scoped": {
-          "type": "boolean",
-          "description": "True when this run analyzed a subset of the project (changed-file,\ndiff, or workspace scoping, or production mode, which drops test, story\nand dev files), so the baseline was compared against a narrowed finding\nset and staleness cannot be judged. `stale` is always false on scoped\nruns."
-        },
-        "stale": {
-          "type": "boolean",
-          "description": "True exactly when the run was not change-scoped, at least one current\nfinding existed before baseline filtering, and `stale_entries` reached\na quarter of `baseline_entries`. Mirrors the human warning so machine\nconsumers do not have to reimplement the threshold."
-        }
-      },
-      "required": [
-        "baseline_entries",
-        "matched_entries",
-        "stale_entries",
-        "moved_entries",
-        "change_scoped",
-        "stale"
-      ],
-      "description": "Staleness of a loaded health baseline.\n\nReports how many saved complexity and CRAP finding entries still matched a\ncurrent finding on this run, so consumers can see a rotting baseline before\nit degrades to zero overlap. Runtime-coverage suppressions and refactoring\ntarget keys carried by the same baseline are not counted here. Present in\nthe summary only when a baseline was loaded."
-    },
     "HealthSchemaVersion": {
       "type": "integer",
       "const": 11,
@@ -25962,19 +25924,16 @@
           "description": "True exactly when the advisory stderr warning fired: not change-scoped,\nat least one current finding before baseline filtering, and either\nnothing matched or `stale_entries` reached a quarter of\n`baseline_entries`."
         },
         "warning": {
-          "description": "Which advisory this run earned. `none` whenever `stale` is false.",
+          "description": "Which advisory this run earned, so a consumer can render the same\ndistinction the stderr warning makes instead of inferring it from the\ncounts. `none` whenever `stale` is false.",
           "$ref": "#/definitions/BaselineStalenessAdvisory"
         },
         "gate_trips": {
           "type": "boolean",
-          "description": "True when `--fail-on-stale-baseline` would exit 1 on this run, whether\nor not the flag was passed. Deliberately stricter than `stale`: any\nunmatched entry counts. Equal to\n`!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`."
+          "description": "True exactly when\n`!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`,\nwhich is the rule `--fail-on-stale-baseline` applies. Deliberately\nstricter than `stale`: any unmatched entry counts. It describes the\nbaseline, not the run's exit code: `health --report-only` is an explicit\nrequest never to fail, so that run exits 0 and says so on stderr while\nstill reporting `gate_trips: true` here."
         },
         "moved_entries": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "description": "Entries that matched only by following a file move in health's identity\nmode. Emitted by `health` only, and always zero in count mode."
+          "type": "integer",
+          "description": "Entries that matched only by following a file move. Only `health` can\nfollow one, in its identity baseline mode; `dead-code` and `dupes` match\nentries by fingerprint and never classify one as moved, so they report\n`0`. Always `0` in health's count mode too."
         }
       },
       "required": [
@@ -25985,7 +25944,8 @@
         "change_scoped",
         "stale",
         "warning",
-        "gate_trips"
+        "gate_trips",
+        "moved_entries"
       ],
       "description": "One run's machine-readable view of a loaded baseline.\n\n`stale` and `gate_trips` answer different questions and legitimately\ndisagree. `stale` mirrors the unasked-for stderr advisory, which stays silent\nbelow a quarter of the baseline and on a run that produced no findings at\nall, because a cleaned project and a rotted baseline look identical from\nthere. `gate_trips` mirrors the opt-in `--fail-on-stale-baseline` rule, which\na repository asks for precisely to catch those cases, so it fires on any\nstale entry. A rotted baseline on a cleaned project reports\n`stale: false` with `gate_trips: true`; that is the contract, not a defect.\n\n`change_scoped` is the member a consumer must read before dividing\n`matched_entries` by `baseline_entries`. A run narrowed to part of the\nproject compares a whole-project baseline against a slice of it and can\nreport `matched_entries: 0` while the baseline is perfectly healthy, so both\n`stale` and `gate_trips` are false there by construction. The remedy for a\ntripped gate is always the same: re-save the baseline from a whole-project\nrun with `--save-baseline`."
     },

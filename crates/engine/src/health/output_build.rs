@@ -217,7 +217,7 @@ fn build_health_report_pipeline_input<R>(
         sev_critical: build.sev_critical,
         sev_high: build.sev_high,
         sev_moderate: build.sev_moderate,
-        baseline_staleness: build.baseline_staleness.clone(),
+        baseline_staleness: build.baseline_staleness,
     }
 }
 

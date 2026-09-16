@@ -145,11 +145,11 @@ impl BaselineStaleness {
     /// This run's machine-readable view of the baseline, for the JSON envelope.
     ///
     /// Every member is derived here rather than in a consumer, so the advisory
-    /// threshold and the gate rule have exactly one implementation. `health`
-    /// passes `Some(moved)`; the commands that cannot follow a file move pass
-    /// `None` and the member is omitted from the wire.
+    /// threshold and the gate rule have exactly one implementation. Only
+    /// `health` can follow a file move; the commands that match entries by
+    /// fingerprint pass `0`.
     #[must_use]
-    pub fn to_envelope(&self, moved_entries: Option<usize>) -> fallow_output::BaselineStaleness {
+    pub fn to_envelope(&self, moved_entries: usize) -> fallow_output::BaselineStaleness {
         let warning = self.warning();
         fallow_output::BaselineStaleness {
             baseline_entries: self.entries,

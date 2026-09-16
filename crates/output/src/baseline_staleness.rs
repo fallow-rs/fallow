@@ -7,10 +7,10 @@
 //!
 //! Every member is a projection of the run's
 //! `fallow_engine::baseline::BaselineStaleness`, so nothing here restates a rule
-//! that lives in the engine. [`BaselineStaleness::gate_trips`] in particular is
-//! computed by the same function the `--fail-on-stale-baseline` exit gate calls,
-//! which is why a CI integration can read one boolean instead of reimplementing
-//! the condition in jq.
+//! that lives in the engine. `gate_trips` in particular is computed by the same
+//! function the `--fail-on-stale-baseline` exit gate calls, which is why a CI
+//! integration can read one boolean instead of reimplementing the condition in
+//! jq.
 
 use serde::Serialize;
 
@@ -53,7 +53,7 @@ pub enum BaselineStalenessAdvisory {
 /// `stale` and `gate_trips` are false there by construction. The remedy for a
 /// tripped gate is always the same: re-save the baseline from a whole-project
 /// run with `--save-baseline`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BaselineStaleness {
     /// Entries carried by the loaded baseline file. On health these are the
@@ -84,15 +84,21 @@ pub struct BaselineStaleness {
     /// nothing matched or `stale_entries` reached a quarter of
     /// `baseline_entries`.
     pub stale: bool,
-    /// Which advisory this run earned. `none` whenever `stale` is false.
+    /// Which advisory this run earned, so a consumer can render the same
+    /// distinction the stderr warning makes instead of inferring it from the
+    /// counts. `none` whenever `stale` is false.
     pub warning: BaselineStalenessAdvisory,
-    /// True when `--fail-on-stale-baseline` would exit 1 on this run, whether
-    /// or not the flag was passed. Deliberately stricter than `stale`: any
-    /// unmatched entry counts. Equal to
-    /// `!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`.
+    /// True exactly when
+    /// `!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`,
+    /// which is the rule `--fail-on-stale-baseline` applies. Deliberately
+    /// stricter than `stale`: any unmatched entry counts. It describes the
+    /// baseline, not the run's exit code: `health --report-only` is an explicit
+    /// request never to fail, so that run exits 0 and says so on stderr while
+    /// still reporting `gate_trips: true` here.
     pub gate_trips: bool,
-    /// Entries that matched only by following a file move in health's identity
-    /// mode. Emitted by `health` only, and always zero in count mode.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub moved_entries: Option<usize>,
+    /// Entries that matched only by following a file move. Only `health` can
+    /// follow one, in its identity baseline mode; `dead-code` and `dupes` match
+    /// entries by fingerprint and never classify one as moved, so they report
+    /// `0`. Always `0` in health's count mode too.
+    pub moved_entries: usize,
 }

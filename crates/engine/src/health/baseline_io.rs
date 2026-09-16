@@ -232,7 +232,7 @@ struct StalenessCounts {
 /// Staleness data for a loaded baseline that matched `matched_entries` of its
 /// `baseline_entries` saved entries on this run.
 fn staleness_from_counts(counts: &StalenessCounts) -> fallow_output::BaselineStaleness {
-    staleness_decision(counts).to_envelope(Some(counts.moved_entries))
+    staleness_decision(counts).to_envelope(counts.moved_entries)
 }
 
 #[cfg(test)]
@@ -310,7 +310,7 @@ mod tests {
             moved_entries: 2,
             ..counts(10, 9)
         });
-        assert_eq!(staleness.moved_entries, Some(2));
+        assert_eq!(staleness.moved_entries, 2);
         assert!(!staleness.stale);
     }
 }
