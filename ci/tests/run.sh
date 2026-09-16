@@ -251,6 +251,23 @@ if [ "${MOCK_TYPE_AWARE_INCOMPLETE:-}" = "1" ]; then
   printf '%s\n' '{"kind":"dead-code","schema_version":9,"version":"test","total_issues":0,"_meta":{"type_aware":{"required_completeness":"complete","identity":{"completeness":"partial"},"queries":[]}}}'
   exit 1
 fi
+if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
+  scoped=false
+  for arg in "$@"; do
+    case "$arg" in
+      --changed-since|--changed-since=*) scoped=true ;;
+    esac
+  done
+  if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
+    scoped=true
+  fi
+  if [ "$scoped" = "true" ]; then
+    printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":0,"stale_entries":8,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}'
+    exit 0
+  fi
+  printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":3,"stale_entries":5,"current_findings":3,"change_scoped":false,"stale":true,"warning":"partial","gate_trips":true}}'
+  exit 0
+fi
 printf '{"total_issues":0}\n'
 SH
 chmod +x "$RUNNER_TMP/bin/fallow"
@@ -284,6 +301,7 @@ OUT=$(cd "$RUNNER_TMP" && env \
   FALLOW_CHANGED_SINCE= \
   FALLOW_BASELINE= \
   FALLOW_SAVE_BASELINE= \
+  FALLOW_FAIL_ON_STALE_BASELINE=false \
   FALLOW_WORKSPACE= \
   FALLOW_CHANGED_WORKSPACES= \
   FALLOW_ISSUE_TYPES= \
@@ -376,6 +394,128 @@ run_generated_gitlab_fixture() {
       bash /tmp/fallow-run.sh 2>&1
   )
 }
+
+# --- Baseline staleness gate (issue #2673) ---
+
+STALE_WORK="$RUNNER_TMP/stale-baseline"
+mkdir -p "$STALE_WORK"
+
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_BASELINE=baseline.json)
+cmd_status=$?
+assert_contains "$OUT" "WARNING: baseline is partially stale: 5 of 8 entries" \
+  "stale gate: a partially stale baseline warns without the gate"
+if [ "$cmd_status" -eq 0 ]; then
+  pass "stale gate: the advisory alone does not fail the pipeline"
+else
+  fail "stale gate: the advisory alone does not fail the pipeline" "exit $cmd_status"
+fi
+
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+cmd_status=$?
+assert_contains "$OUT" "ERROR: Fallow baseline gate failed: 5 of 8 entries" \
+  "stale gate: the gate fails the pipeline"
+if [ "$cmd_status" -eq 1 ]; then
+  pass "stale gate: a tripped gate exits 1"
+else
+  fail "stale gate: a tripped gate exits 1" "exit $cmd_status"
+fi
+
+# The template's own MR auto-scoping is the shape that made a plain variable
+# inert, so the gate re-runs the comparison unscoped.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_SAVE_BASELINE=baseline.json \
+  FALLOW_CHANGED_SINCE=abc123 \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+cmd_status=$?
+GATE_ARGV=$(sed -n '2p' "$STALE_LOG")
+assert_not_contains "$GATE_ARGV" "--changed-since" \
+  "stale gate: the unscoped re-run drops --changed-since"
+assert_not_contains "$GATE_ARGV" "--save-baseline" \
+  "stale gate: the unscoped re-run never rewrites the baseline"
+assert_contains "$GATE_ARGV" "--baseline baseline.json" \
+  "stale gate: the unscoped re-run still loads the baseline"
+assert_contains "$OUT" "ERROR: Fallow baseline gate failed" \
+  "stale gate: the re-run's verdict fails the merge-request pipeline"
+if [ "$cmd_status" -eq 1 ]; then
+  pass "stale gate: the merge-request re-run can fail the pipeline"
+else
+  fail "stale gate: the merge-request re-run can fail the pipeline" "exit $cmd_status"
+fi
+
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_CHANGED_SINCE=abc123)
+STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
+if [ "$STALE_RUNS" = "1" ]; then
+  pass "stale gate: a pipeline without the gate analyzes exactly once"
+else
+  fail "stale gate: a pipeline without the gate analyzes exactly once" "ran $STALE_RUNS times"
+fi
+
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_CHANGED_SINCE=abc123 \
+  FALLOW_PRODUCTION=true \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+cmd_status=$?
+STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
+if [ "$STALE_RUNS" = "1" ]; then
+  pass "stale gate: production mode skips the re-run instead of paying for it"
+else
+  fail "stale gate: production mode skips the re-run instead of paying for it" "ran $STALE_RUNS times"
+fi
+assert_contains "$OUT" "WARNING: FALLOW_FAIL_ON_STALE_BASELINE stood down" \
+  "stale gate: a stand-down is stated, never silent"
+if [ "$cmd_status" -eq 0 ]; then
+  pass "stale gate: a stand-down does not fail the pipeline"
+else
+  fail "stale gate: a stand-down does not fail the pipeline" "exit $cmd_status"
+fi
+
+# A binary older than the envelope field must warn, not fail.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+cmd_status=$?
+assert_contains "$OUT" "A fallow older than 3.27.0 cannot report it" \
+  "stale gate: an old binary warns instead of failing silently"
+if [ "$cmd_status" -eq 0 ]; then
+  pass "stale gate: an old binary fails open"
+else
+  fail "stale gate: an old binary fails open" "exit $cmd_status"
+fi
+
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+cmd_status=$?
+assert_contains "$OUT" "has no baseline to judge" \
+  "stale gate: the gate without a baseline is rejected"
+if [ "$cmd_status" -eq 2 ]; then
+  pass "stale gate: an invalid combination exits 2"
+else
+  fail "stale gate: an invalid combination exits 2" "exit $cmd_status"
+fi
 
 INCOMPLETE_WORK="$RUNNER_TMP/type-aware-incomplete"
 mkdir -p "$INCOMPLETE_WORK"
