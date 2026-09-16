@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789501364217,
+  "lastUpdate": 1789517598295,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "Patrick.Leong.Shaw@gmail.com",
-            "name": "Patrick Shaw",
-            "username": "PatrickShaw"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "b0585d4b6b699447066714569c1ea5e2a612c90c",
-          "message": "fix(graph): scope a referenced tsconfig without include to its own directory (#2436)\n\nA tsconfig.json without `include` or `files` now applies only to files under its own directory when fallow follows project `references`, matching tsc's `**/*` default project scope. Previously such a referenced config matched every file in the repository, so its `paths` aliases leaked to files outside that directory and every referenced project was walked for every import.\n\nImports that only resolved through that leak are now reported as `unresolved-import` findings, which are error severity by default, and a file that was only reachable through such an import may now be reported as unused. Give the subdirectory config an explicit `include`, or move the shared aliases to a config whose directory contains the importing files. Root and workspace configs are unaffected.\n\nBumps GRAPH_CACHE_VERSION so a warm cache does not replay the old resolutions.\n\nThanks to @PatrickShaw for the contribution.",
-          "timestamp": "2026-08-27T21:58:11+02:00",
-          "tree_id": "51e192031afe2836b05808f641f708ca3cbd7f65",
-          "url": "https://github.com/fallow-rs/fallow/commit/b0585d4b6b699447066714569c1ea5e2a612c90c"
-        },
-        "date": 1787860871068,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/8102e22e0afcc70fb518cd26ea1a2f18f5d710ff"
         },
         "date": 1789501359949,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 478,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1307,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "5e509d0ce7a9c3ec63c07f73e7d00cf7ef17f8ba",
+          "message": "chore(napi): sync package.json / package-lock / index.js to v3.26.0",
+          "timestamp": "2026-09-16T02:08:38+02:00",
+          "tree_id": "8159bceec3d91f5b09e92b3d0bf220c9fae7de69",
+          "url": "https://github.com/fallow-rs/fallow/commit/5e509d0ce7a9c3ec63c07f73e7d00cf7ef17f8ba"
+        },
+        "date": 1789517593759,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
