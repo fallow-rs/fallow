@@ -126,6 +126,9 @@ pub(super) fn run_duplication_report_with_session(
             grouped_by: None,
             total_issues: None,
             groups: None,
+            // The programmatic duplication route loads no baseline, so there is
+            // no staleness to report.
+            baseline_staleness: None,
             meta: resolved.explain_enabled().then(dupes_meta),
             workspace_diagnostics: session.workspace_diagnostics().to_vec(),
             next_steps,

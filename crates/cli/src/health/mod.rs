@@ -618,6 +618,7 @@ fn health_report_context<'a>(
         summary_heading: options.summary_heading,
         show_explain_tip: options.show_explain_tip,
         baseline_matched: None,
+        baseline_staleness: None,
         config_fixable: false,
         skip_score_and_trend: options.skip_score_and_trend,
         css_requested: options.css_requested,

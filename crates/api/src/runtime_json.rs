@@ -722,6 +722,7 @@ mod tests {
     ) -> DuplicationProgrammaticOutput {
         DuplicationProgrammaticOutput {
             output: build_dupes_output(DupesOutputInput {
+                baseline_staleness: None,
                 schema_version: DUPES_SCHEMA_VERSION,
                 version: "0.0.0-test".to_owned(),
                 elapsed: Duration::ZERO,

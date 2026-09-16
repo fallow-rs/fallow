@@ -403,6 +403,14 @@ export type DependencyOverrideSource = ("pnpm-workspace.yaml" | "package.json")
  */
 export type DependencyOverrideMisconfigReason = ("unparsable-key" | "empty-value")
 /**
+ * Which advisory a loaded baseline earned on this run.
+ *
+ * Mirrors `fallow_engine::baseline::BaselineStalenessWarning` so a consumer can
+ * render the same distinction the stderr warning makes, instead of inferring it
+ * from counts.
+ */
+export type BaselineStalenessAdvisory = ("none" | "zero-overlap" | "partial")
+/**
  * Status of a regression-check pass.
  */
 export type RegressionStatus = ("pass" | "exceeded" | "skipped")
@@ -2670,6 +2678,15 @@ baseline_deltas?: (BaselineDeltas | null)
  * Which baseline snapshot was matched, in baseline runs.
  */
 baseline?: (BaselineMatch | null)
+/**
+ * This run's view of the loaded baseline, present only in baseline runs.
+ * Carries the staleness counts, the advisory verdict and `gate_trips`, the
+ * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
+ * reads one field instead of restating the rule. See
+ * [`crate::BaselineStaleness`]; `change_scoped` must be read before
+ * dividing `matched_entries` by `baseline_entries`.
+ */
+baseline_staleness?: (BaselineStaleness | null)
 /**
  * Regression verdict against the baseline, in `--fail-on-regression` runs.
  */
@@ -5093,6 +5110,81 @@ entries: number
 matched: number
 }
 /**
+ * One run's machine-readable view of a loaded baseline.
+ *
+ * `stale` and `gate_trips` answer different questions and legitimately
+ * disagree. `stale` mirrors the unasked-for stderr advisory, which stays silent
+ * below a quarter of the baseline and on a run that produced no findings at
+ * all, because a cleaned project and a rotted baseline look identical from
+ * there. `gate_trips` mirrors the opt-in `--fail-on-stale-baseline` rule, which
+ * a repository asks for precisely to catch those cases, so it fires on any
+ * stale entry. A rotted baseline on a cleaned project reports
+ * `stale: false` with `gate_trips: true`; that is the contract, not a defect.
+ *
+ * `change_scoped` is the member a consumer must read before dividing
+ * `matched_entries` by `baseline_entries`. A run narrowed to part of the
+ * project compares a whole-project baseline against a slice of it and can
+ * report `matched_entries: 0` while the baseline is perfectly healthy, so both
+ * `stale` and `gate_trips` are false there by construction. The remedy for a
+ * tripped gate is always the same: re-save the baseline from a whole-project
+ * run with `--save-baseline`.
+ */
+export interface BaselineStaleness {
+/**
+ * Entries carried by the loaded baseline file. On health these are the
+ * complexity and CRAP finding entries; runtime-coverage suppressions and
+ * refactoring target keys carried by the same file are not counted.
+ */
+baseline_entries: number
+/**
+ * Entries that matched a current finding on this run and were filtered out
+ * of the report. On health this includes entries matched through a
+ * followed file move.
+ */
+matched_entries: number
+/**
+ * Entries that matched no current finding on this run:
+ * `baseline_entries - matched_entries`.
+ */
+stale_entries: number
+/**
+ * Findings this run produced before the baseline filtered them. Zero means
+ * there was nothing to compare, either because the project is clean or
+ * because the scope was empty, which is why `stale` stays false there even
+ * when every entry went unmatched.
+ */
+current_findings: number
+/**
+ * True when this run analyzed only part of the project, so a whole-project
+ * baseline matches less of it for reasons that are not rot. The channels
+ * differ per command and include a diff, a base ref, `--changed-since`,
+ * `--workspace`, `--changed-workspaces`, `--scope`, `--file`, an
+ * issue-type filter, and production mode. Both `stale` and `gate_trips`
+ * are false whenever this is true.
+ */
+change_scoped: boolean
+/**
+ * True exactly when the advisory stderr warning fired: not change-scoped,
+ * at least one current finding before baseline filtering, and either
+ * nothing matched or `stale_entries` reached a quarter of
+ * `baseline_entries`.
+ */
+stale: boolean
+warning: BaselineStalenessAdvisory
+/**
+ * True when `--fail-on-stale-baseline` would exit 1 on this run, whether
+ * or not the flag was passed. Deliberately stricter than `stale`: any
+ * unmatched entry counts. Equal to
+ * `!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`.
+ */
+gate_trips: boolean
+/**
+ * Entries that matched only by following a file move in health's identity
+ * mode. Emitted by `health` only, and always zero in count mode.
+ */
+moved_entries?: (number | null)
+}
+/**
  * Result of regression detection (`--fail-on-regression`). Compares current
  * issue counts against a baseline from config or an explicit file.
  */
@@ -6040,51 +6132,7 @@ severity_moderate_count: number
 /**
  * Baseline staleness data, present only when a baseline was loaded.
  */
-baseline_staleness?: (HealthBaselineStaleness | null)
-}
-/**
- * Staleness of a loaded health baseline.
- *
- * Reports how many saved complexity and CRAP finding entries still matched a
- * current finding on this run, so consumers can see a rotting baseline before
- * it degrades to zero overlap. Runtime-coverage suppressions and refactoring
- * target keys carried by the same baseline are not counted here. Present in
- * the summary only when a baseline was loaded.
- */
-export interface HealthBaselineStaleness {
-/**
- * Complexity and CRAP finding entries carried by the loaded baseline.
- */
-baseline_entries: number
-/**
- * Entries that matched a current finding in the active baseline mode,
- * including entries matched through a followed file move.
- */
-matched_entries: number
-/**
- * Entries that matched no current finding on this run.
- */
-stale_entries: number
-/**
- * Entries that matched only by following a file move in identity mode.
- * Always zero in count mode.
- */
-moved_entries: number
-/**
- * True when this run analyzed a subset of the project (changed-file,
- * diff, or workspace scoping, or production mode, which drops test, story
- * and dev files), so the baseline was compared against a narrowed finding
- * set and staleness cannot be judged. `stale` is always false on scoped
- * runs.
- */
-change_scoped: boolean
-/**
- * True exactly when the run was not change-scoped, at least one current
- * finding existed before baseline filtering, and `stale_entries` reached
- * a quarter of `baseline_entries`. Mirrors the human warning so machine
- * consumers do not have to reimplement the threshold.
- */
-stale: boolean
+baseline_staleness?: (BaselineStaleness | null)
 }
 /**
  * Report entry describing whether a threshold override is active, stale, or
@@ -11010,6 +11058,15 @@ total_issues?: (number | null)
  */
 groups?: (DuplicationGroup[] | null)
 /**
+ * This run's view of the loaded baseline, present only in baseline runs.
+ * Carries the staleness counts, the advisory verdict and `gate_trips`, the
+ * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
+ * reads one field instead of restating the rule. See
+ * [`crate::BaselineStaleness`]; `change_scoped` must be read before
+ * dividing `matched_entries` by `baseline_entries`.
+ */
+baseline_staleness?: (BaselineStaleness | null)
+/**
  * `_meta` block with metric / rule definitions, emitted when `--explain`
  * is passed (always present in MCP responses).
  */
@@ -11167,6 +11224,15 @@ total_issues: number
  * One bucket per resolver key.
  */
 groups: CheckGroupedEntry[]
+/**
+ * This run's view of the loaded baseline, present only in baseline runs.
+ * Carries the staleness counts, the advisory verdict and `gate_trips`, the
+ * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
+ * reads one field instead of restating the rule. See
+ * [`crate::BaselineStaleness`]; `change_scoped` must be read before
+ * dividing `matched_entries` by `baseline_entries`.
+ */
+baseline_staleness?: (BaselineStaleness | null)
 /**
  * `_meta` block with docs and rule definitions, when `--explain` was
  * passed.

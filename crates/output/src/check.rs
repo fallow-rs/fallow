@@ -62,6 +62,14 @@ pub struct CheckOutput {
     /// Which baseline snapshot was matched, in baseline runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<BaselineMatch>,
+    /// This run's view of the loaded baseline, present only in baseline runs.
+    /// Carries the staleness counts, the advisory verdict and `gate_trips`, the
+    /// same boolean `--fail-on-stale-baseline` exits on, so a CI integration
+    /// reads one field instead of restating the rule. See
+    /// [`crate::BaselineStaleness`]; `change_scoped` must be read before
+    /// dividing `matched_entries` by `baseline_entries`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_staleness: Option<crate::BaselineStaleness>,
     /// Regression verdict against the baseline, in `--fail-on-regression` runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regression: Option<RegressionResult>,
@@ -151,6 +159,14 @@ pub struct CheckGroupedOutput {
     pub total_issues: usize,
     /// One bucket per resolver key.
     pub groups: Vec<CheckGroupedEntry>,
+    /// This run's view of the loaded baseline, present only in baseline runs.
+    /// Carries the staleness counts, the advisory verdict and `gate_trips`, the
+    /// same boolean `--fail-on-stale-baseline` exits on, so a CI integration
+    /// reads one field instead of restating the rule. See
+    /// [`crate::BaselineStaleness`]; `change_scoped` must be read before
+    /// dividing `matched_entries` by `baseline_entries`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_staleness: Option<crate::BaselineStaleness>,
     /// `_meta` block with docs and rule definitions, when `--explain` was
     /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
@@ -250,6 +266,7 @@ pub fn build_check_output(input: CheckOutputInput) -> CheckOutput {
         results,
         baseline_deltas: None,
         baseline: None,
+        baseline_staleness: None,
         regression: None,
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
@@ -1257,6 +1274,7 @@ mod tests {
     fn grouped_check_json_output_uses_output_owned_root_contract() {
         let root = std::path::Path::new("/project");
         let output = CheckGroupedOutput {
+            baseline_staleness: None,
             schema_version: SchemaVersion(7),
             version: ToolVersion("0.0.0".to_string()),
             elapsed_ms: ElapsedMs(1),

@@ -72,6 +72,9 @@ pub struct CheckJsonExtraOutputs {
     pub baseline_deltas: Option<BaselineDeltas>,
     /// Which baseline snapshot the run was compared against.
     pub baseline: Option<BaselineMatch>,
+    /// This run's view of that baseline: counts, advisory verdict and the
+    /// `--fail-on-stale-baseline` verdict.
+    pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
     /// Outcome of the regression gate against the baseline.
     pub regression: Option<RegressionResult>,
 }
@@ -88,6 +91,9 @@ struct CheckJsonEnvelopeInput<'a> {
 
 /// Inputs for grouped dead-code JSON output assembly.
 pub struct GroupedCheckJsonOutputInput<'a> {
+    /// This run's view of the loaded baseline, for baseline runs.
+    pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
+
     /// Results already partitioned into groups, in output order.
     pub groups: &'a [ResultGroup],
     /// Ungrouped results, used for the envelope's `total_issues` count.
@@ -115,6 +121,9 @@ pub struct GroupedCheckJsonOutputInput<'a> {
 
 /// Inputs for `fallow dupes --format json` output assembly.
 pub struct DuplicationJsonOutputInput<'a> {
+    /// This run's view of the loaded duplication baseline, for baseline runs.
+    pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
+
     /// Typed duplication report to serialize.
     pub report: &'a DuplicationReport,
     /// Project root; its prefix is stripped from every path in the output.
@@ -137,6 +146,9 @@ pub struct DuplicationJsonOutputInput<'a> {
 
 /// Inputs for grouped duplication JSON output assembly.
 pub struct GroupedDuplicationJsonOutputInput<'a> {
+    /// This run's view of the loaded duplication baseline, for baseline runs.
+    pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
+
     /// Typed duplication report to serialize.
     pub report: &'a DuplicationReport,
     /// Precomputed grouping whose groups replace the flat `groups` array.
@@ -238,6 +250,7 @@ pub fn serialize_grouped_check_json(
         grouped_by: input.grouped_by,
         total_issues: input.original.total_issues(),
         groups: entries,
+        baseline_staleness: input.baseline_staleness,
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
@@ -275,6 +288,7 @@ pub fn serialize_duplication_json(
             grouped_by: None,
             total_issues: None,
             groups: None,
+            baseline_staleness: input.baseline_staleness,
             meta: input.meta,
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
@@ -313,6 +327,7 @@ pub fn serialize_grouped_duplication_json(
             grouped_by: Some(group_by_mode_from_label(input.grouping.mode)),
             total_issues: Some(input.report.clone_groups.len()),
             groups: None,
+            baseline_staleness: input.baseline_staleness,
             meta: input.meta,
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
@@ -361,6 +376,7 @@ fn build_check_json_envelope(input: CheckJsonEnvelopeInput<'_>) -> CheckOutput {
     });
     output.baseline_deltas = input.extras.baseline_deltas;
     output.baseline = input.extras.baseline;
+    output.baseline_staleness = input.extras.baseline_staleness;
     output.regression = input.extras.regression;
     output
 }
@@ -388,6 +404,7 @@ mod tests {
     fn grouped_check_json_carries_workspace_diagnostics_with_relative_paths() {
         let root = Path::new("/project");
         let output = serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+            baseline_staleness: None,
             groups: &[],
             original: &AnalysisResults::default(),
             root,

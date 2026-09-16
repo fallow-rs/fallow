@@ -867,6 +867,10 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         summary_heading: input.summary_heading,
         show_explain_tip: input.show_explain_tip,
         baseline_matched: None,
+        baseline_staleness: result
+            .baseline_staleness
+            .as_ref()
+            .map(|loaded| loaded.staleness.to_envelope(None)),
         config_fixable: false,
         skip_score_and_trend: false,
         css_requested: false,

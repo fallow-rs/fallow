@@ -951,6 +951,10 @@ fn check_json_extras_for_combined(result: &CheckResult) -> fallow_api::CheckJson
         result.regression.as_ref(),
         baseline_deltas,
         result.baseline_matched,
+        result
+            .baseline_staleness
+            .as_ref()
+            .map(|loaded| loaded.staleness.to_envelope(None)),
     )
 }
 

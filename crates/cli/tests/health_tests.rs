@@ -9739,3 +9739,73 @@ fn health_owned_sections_survive_file_score_selection_and_top() {
     assert!(score_only.get("coverage_gaps").is_none());
     assert!(score_only.get("prop_drilling_chains").is_none());
 }
+
+// --- `summary.baseline_staleness` gains the gate verdict (issue #2673) ----
+//
+// Health has published the counts since 3.12.0 but never the verdict, so a
+// CI integration still could not tell a rotting baseline from a healthy one
+// without restating the rule.
+
+#[test]
+fn health_baseline_staleness_carries_the_gate_verdict() {
+    let project = rotted_health_baseline_project(5, 4);
+    let baseline_path = project.path().join("health-baseline.json");
+    let output = run_health_with_baseline(
+        project.path(),
+        &[
+            "--baseline",
+            baseline_path.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+    let staleness = parse_json(&output)["summary"]["baseline_staleness"].clone();
+    assert_eq!(staleness["baseline_entries"], 5);
+    assert_eq!(staleness["matched_entries"], 4);
+    assert_eq!(staleness["stale_entries"], 1);
+    assert_eq!(
+        staleness["stale"], false,
+        "one stale entry out of five stays below the advisory threshold: {}",
+        output.stdout
+    );
+    assert_eq!(staleness["warning"], "none");
+    assert_eq!(
+        staleness["gate_trips"], true,
+        "the opt-in gate is stricter than the advisory and must say so: {}",
+        output.stdout
+    );
+    assert!(
+        staleness["moved_entries"].is_number(),
+        "health keeps its move counter: {}",
+        output.stdout
+    );
+    assert!(
+        staleness["current_findings"].is_number(),
+        "current_findings explains why the advisory stayed silent: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn health_baseline_staleness_gate_verdict_matches_the_exit_code() {
+    let project = rotted_health_baseline_project(5, 4);
+    let baseline_path = project.path().join("health-baseline.json");
+    let args = [
+        "--baseline",
+        baseline_path.to_str().unwrap(),
+        "--baseline-mode",
+        "identity",
+    ];
+    let published = parse_json(&run_health_with_baseline(project.path(), &args))["summary"]
+        ["baseline_staleness"]["gate_trips"]
+        .as_bool();
+    let mut gated_args = args.to_vec();
+    gated_args.push("--fail-on-stale-baseline");
+    let gated = run_health_with_baseline(project.path(), &gated_args);
+    assert_eq!(
+        published,
+        Some(gated.code == 1),
+        "the published boolean and the exit code cannot disagree: {}",
+        redact_all(&gated.stderr, project.path())
+    );
+}

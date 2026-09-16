@@ -30,7 +30,7 @@ pub(super) struct HealthFindingsData {
     pub(super) sev_high: usize,
     pub(super) sev_moderate: usize,
     pub(super) loaded_baseline: Option<HealthBaselineData>,
-    pub(super) baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
+    pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
 }
 
 struct CollectedHealthFindings {
@@ -326,7 +326,7 @@ struct HealthFindingFinalizeResult {
     sev_high: usize,
     sev_moderate: usize,
     loaded_baseline: Option<HealthBaselineData>,
-    baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
+    baseline_staleness: Option<fallow_output::BaselineStaleness>,
 }
 
 fn finalize_health_findings(
@@ -375,7 +375,7 @@ fn count_finding_severities(findings: &[ComplexityViolation]) -> (usize, usize, 
 
 type LoadedBaselineParts = (
     Option<HealthBaselineData>,
-    Option<fallow_output::HealthBaselineStaleness>,
+    Option<fallow_output::BaselineStaleness>,
 );
 
 fn apply_health_baseline_and_top(

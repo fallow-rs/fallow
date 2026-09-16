@@ -61,7 +61,7 @@ pub(super) struct HealthOutputBuildInput<'a, R> {
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
-    baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
+    baseline_staleness: Option<fallow_output::BaselineStaleness>,
     timing_base: HealthTimingBaseInput,
     start: &'a Instant,
 }
@@ -296,7 +296,7 @@ struct HealthReportPipelineInput {
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
-    baseline_staleness: Option<fallow_output::HealthBaselineStaleness>,
+    baseline_staleness: Option<fallow_output::BaselineStaleness>,
 }
 
 fn build_health_report_from_pipeline(

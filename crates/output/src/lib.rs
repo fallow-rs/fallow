@@ -24,6 +24,7 @@ mod audit_render;
 mod audit_routing;
 mod audit_walkthrough;
 mod audit_weakening;
+mod baseline_staleness;
 mod check;
 mod ci_output;
 mod codeclimate;
@@ -109,6 +110,7 @@ pub use audit_walkthrough::{
     is_judgment_action,
 };
 pub use audit_weakening::{WeakeningKind, WeakeningSignal};
+pub use baseline_staleness::{BaselineStaleness, BaselineStalenessAdvisory};
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     GroupByMode, apply_config_fixable_to_duplicate_exports, build_check_output,
@@ -220,13 +222,13 @@ pub use health_scores::{
     CoverageSourceConsistency, CoverageTier, DEFAULT_COGNITIVE_CRITICAL, DEFAULT_COGNITIVE_HIGH,
     DEFAULT_CRAP_CRITICAL, DEFAULT_CRAP_HIGH, DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH,
     DEFAULT_MAX_UNIT_SIZE, ExceededThreshold, FileHealthScore, FindingSeverity,
-    HEALTH_SCORE_FORMULA_VERSION, HOTSPOT_SCORE_THRESHOLD, HealthBaselineStaleness,
-    HealthConfiguredThresholds, HealthEffectiveThresholds, HealthScore, HealthScorePenalties,
-    HealthSummary, HotspotEntry, HotspotSummary, LargeFunctionEntry, MI_DENSITY_MIN_LINES,
-    OwnershipMetrics, OwnershipState, ReactHookProfile, STYLING_HEALTH_FORMULA_VERSION,
-    StylingHealth, StylingHealthConfidence, StylingHealthPenalties, ThresholdOverrideDimension,
-    ThresholdOverrideMetrics, ThresholdOverrideState, ThresholdOverrideStatus, ThresholdSource,
-    compute_finding_severity, letter_grade, summarize_coverage_source_consistency,
+    HEALTH_SCORE_FORMULA_VERSION, HOTSPOT_SCORE_THRESHOLD, HealthConfiguredThresholds,
+    HealthEffectiveThresholds, HealthScore, HealthScorePenalties, HealthSummary, HotspotEntry,
+    HotspotSummary, LargeFunctionEntry, MI_DENSITY_MIN_LINES, OwnershipMetrics, OwnershipState,
+    ReactHookProfile, STYLING_HEALTH_FORMULA_VERSION, StylingHealth, StylingHealthConfidence,
+    StylingHealthPenalties, ThresholdOverrideDimension, ThresholdOverrideMetrics,
+    ThresholdOverrideState, ThresholdOverrideStatus, ThresholdSource, compute_finding_severity,
+    letter_grade, summarize_coverage_source_consistency,
 };
 pub use health_targets::{
     CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,

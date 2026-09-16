@@ -73,6 +73,14 @@ pub struct DupesOutput<Report, Group> {
     /// Grouped findings; present only in grouped output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<Group>>,
+    /// This run's view of the loaded baseline, present only in baseline runs.
+    /// Carries the staleness counts, the advisory verdict and `gate_trips`, the
+    /// same boolean `--fail-on-stale-baseline` exits on, so a CI integration
+    /// reads one field instead of restating the rule. See
+    /// [`crate::BaselineStaleness`]; `change_scoped` must be read before
+    /// dividing `matched_entries` by `baseline_entries`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_staleness: Option<crate::BaselineStaleness>,
     /// `_meta` block with metric / rule definitions, emitted when `--explain`
     /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
@@ -118,6 +126,8 @@ pub struct DupesOutputInput<Report, Group> {
     pub total_issues: Option<usize>,
     /// Grouped findings, for grouped output.
     pub groups: Option<Vec<Group>>,
+    /// This run's view of the loaded duplication baseline, for baseline runs.
+    pub baseline_staleness: Option<crate::BaselineStaleness>,
     /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<Meta>,
     /// Workspace-discovery and source-discovery diagnostics. See
@@ -144,6 +154,7 @@ pub fn build_dupes_output<Report, Group>(
         grouped_by: input.grouped_by,
         total_issues: input.total_issues,
         groups: input.groups,
+        baseline_staleness: input.baseline_staleness,
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
@@ -324,6 +335,7 @@ mod tests {
     #[test]
     fn dupes_json_output_uses_output_owned_root_contract() {
         let output = build_dupes_output(DupesOutputInput::<_, serde_json::Value> {
+            baseline_staleness: None,
             schema_version: 7,
             version: "0.0.0".to_string(),
             elapsed: Duration::from_millis(5),

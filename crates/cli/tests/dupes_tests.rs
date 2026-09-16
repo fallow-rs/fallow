@@ -1739,3 +1739,63 @@ fn dupes_threshold_verdict_matches_between_standalone_and_combined() {
         combined.stderr
     );
 }
+
+// --- `baseline_staleness` on the duplication envelope (issue #2673) -------
+//
+// The duplication envelope carried nothing at all about a loaded baseline
+// before 3.27.0, so a CI integration reading JSON could not see a rotting
+// duplication baseline by any route.
+
+#[test]
+fn dupes_json_envelope_carries_baseline_staleness() {
+    let project = rotted_dupes_project(4, 1);
+    let output = run_dupes_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    let staleness = parse_json(&output)["baseline_staleness"].clone();
+    assert_eq!(staleness["baseline_entries"], 4);
+    assert_eq!(staleness["matched_entries"], 1);
+    assert_eq!(staleness["stale_entries"], 3);
+    assert_eq!(staleness["change_scoped"], false);
+    assert_eq!(staleness["stale"], true);
+    assert_eq!(staleness["warning"], "partial");
+    assert_eq!(staleness["gate_trips"], true);
+    assert!(
+        staleness.get("moved_entries").is_none(),
+        "duplication cannot follow a file move: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn dupes_baseline_staleness_is_absent_without_a_baseline() {
+    let project = rotted_dupes_project(4, 1);
+    let output = run_fallow_in_root(
+        "dupes",
+        project.path(),
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    assert!(
+        parse_json(&output).get("baseline_staleness").is_none(),
+        "a run with no baseline keeps the duplication wire byte-identical: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn dupes_baseline_staleness_agrees_with_the_exit_gate() {
+    let project = rotted_dupes_project(4, 1);
+    let staleness = parse_json(&run_dupes_with_baseline(
+        project.path(),
+        &["--format", "json", "--quiet"],
+    ))["baseline_staleness"]
+        .clone();
+    let gated = run_dupes_with_baseline(
+        project.path(),
+        &["--format", "json", "--quiet", "--fail-on-stale-baseline"],
+    );
+    assert_eq!(
+        staleness["gate_trips"].as_bool(),
+        Some(gated.code == 1),
+        "the published boolean and the exit code cannot disagree: {}",
+        gated.stderr
+    );
+}

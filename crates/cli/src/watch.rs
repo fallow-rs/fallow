@@ -413,6 +413,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         summary_heading: true,
         show_explain_tip: true,
         baseline_matched: None,
+        baseline_staleness: None,
         config_fixable: crate::fix::is_config_fixable(&config.root, opts.config_path.as_ref()),
         skip_score_and_trend: false,
         css_requested: false,
@@ -423,9 +424,17 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
     if report_code != ExitCode::SUCCESS {
         eprintln!("Warning: report output failed");
     }
+    watch_type_aware_exit_code(config, type_aware.as_ref())
+}
+
+/// Exit 1 when the watch cycle required complete semantic analysis and did not
+/// get it, mirroring the standalone commands' completeness gate.
+fn watch_type_aware_exit_code(
+    config: &fallow_config::ResolvedConfig,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+) -> ExitCode {
     if config.type_aware.require == fallow_config::TypeAwareRequire::Complete
         && type_aware
-            .as_ref()
             .and_then(|meta| meta.identity.as_ref())
             .is_some_and(|identity| {
                 identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete

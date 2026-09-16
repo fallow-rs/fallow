@@ -123,6 +123,11 @@ pub(crate) struct ReportContext<'a> {
     pub(crate) show_explain_tip: bool,
     /// When a baseline was loaded: (total entries in baseline, entries that matched).
     pub(crate) baseline_matched: Option<(usize, usize)>,
+    /// This run's full view of the loaded baseline, for the JSON envelope's
+    /// `baseline_staleness`. Carries what `baseline_matched` cannot: whether the
+    /// run was change-scoped, the advisory verdict and the
+    /// `--fail-on-stale-baseline` verdict.
+    pub(crate) baseline_staleness: Option<fallow_output::BaselineStaleness>,
     /// Whether config-edit actions can be applied by `fallow fix`.
     ///
     /// This is caller-provided because an explicit `--config` path is fixable
@@ -248,6 +253,7 @@ pub(crate) struct CheckJsonRenderInput<'a> {
     pub(crate) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
     pub(crate) regression: Option<&'a crate::regression::RegressionOutcome>,
     pub(crate) baseline_matched: Option<(usize, usize)>,
+    pub(crate) baseline_staleness: Option<fallow_output::BaselineStaleness>,
     pub(crate) config_fixable: bool,
     pub(crate) workspace_diagnostics: &'a [fallow_config::WorkspaceDiagnostic],
     pub(crate) json_style: crate::json_style::JsonStyle,
@@ -264,6 +270,7 @@ pub(crate) fn render_check_json(
         type_aware: input.type_aware,
         regression: input.regression,
         baseline_matched: input.baseline_matched,
+        baseline_staleness: input.baseline_staleness.clone(),
         config_fixable: input.config_fixable,
         workspace_diagnostics: input.workspace_diagnostics,
         json_style: input.json_style,
@@ -374,6 +381,7 @@ pub(crate) fn print_results(
             type_aware: ctx.type_aware,
             regression,
             baseline_matched: ctx.baseline_matched,
+            baseline_staleness: ctx.baseline_staleness.clone(),
             config_fixable: ctx.config_fixable,
             workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
@@ -504,6 +512,7 @@ fn print_grouped_results(
             type_aware: ctx.type_aware,
             resolver,
             config_fixable: ctx.config_fixable,
+            baseline_staleness: ctx.baseline_staleness.clone(),
             workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
         }),
@@ -573,6 +582,7 @@ pub(crate) fn print_duplication_report(
             json::DuplicationJsonRender {
                 explain: ctx.explain,
                 include_fragments: ctx.include_fragments,
+                baseline_staleness: ctx.baseline_staleness.clone(),
             },
             ctx.workspace_diagnostics,
             ctx.json_style,
@@ -611,6 +621,7 @@ fn print_dupes_github_format(
         json::DuplicationJsonRender {
             explain: ctx.explain,
             include_fragments: ctx.include_fragments,
+            baseline_staleness: ctx.baseline_staleness.clone(),
         },
         ctx.workspace_diagnostics,
     ) {
@@ -669,6 +680,7 @@ fn print_grouped_duplication_report(
             json::DuplicationJsonRender {
                 explain: ctx.explain,
                 include_fragments: ctx.include_fragments,
+                baseline_staleness: ctx.baseline_staleness.clone(),
             },
             ctx.workspace_diagnostics,
             ctx.json_style,
@@ -1198,6 +1210,7 @@ mod tests {
 
     fn test_context<'a>(root: &'a Path, rules: &'a RulesConfig) -> ReportContext<'a> {
         ReportContext {
+            baseline_staleness: None,
             root,
             rules,
             workspace_diagnostics: &[],

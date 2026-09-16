@@ -1276,6 +1276,7 @@ pub fn benchmark_dead_code_json(
         type_aware: result.type_aware_meta.as_ref(),
         regression: result.regression.as_ref(),
         baseline_matched: result.baseline_matched,
+        baseline_staleness: envelope_baseline_staleness(&result),
         config_fixable: result.config_fixable,
         workspace_diagnostics: &result.workspace_diagnostics,
         json_style: crate::json_style::JsonStyle::Compact,
@@ -1350,6 +1351,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             summary_heading: opts.summary_heading,
             show_explain_tip: opts.show_explain_tip,
             baseline_matched: result.baseline_matched,
+            baseline_staleness: envelope_baseline_staleness(result),
             config_fixable: result.config_fixable,
             skip_score_and_trend: false,
             css_requested: false,
@@ -1421,6 +1423,18 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     }
 
     issue_severity_exit_code(result, &prepared.effective_rules)
+}
+
+/// This run's view of the loaded baseline, in the shape the JSON envelope
+/// publishes as `baseline_staleness`.
+///
+/// `None` when no baseline was loaded, which is what keeps the key off the wire
+/// for every run that does not use one.
+fn envelope_baseline_staleness(result: &CheckResult) -> Option<fallow_output::BaselineStaleness> {
+    result
+        .baseline_staleness
+        .as_ref()
+        .map(|loaded| loaded.staleness.to_envelope(None))
 }
 
 fn type_aware_completeness_failed(result: &CheckResult, quiet: bool) -> bool {

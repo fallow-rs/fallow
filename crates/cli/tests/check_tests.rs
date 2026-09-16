@@ -3406,3 +3406,222 @@ fn a_built_in_ignore_exclusion_raises_no_reachability_caveat() {
         "no finding may inherit a caveat from this advisory: {caveated:?}"
     );
 }
+
+// --- `baseline_staleness` on the dead-code envelope (issue #2673) ---------
+//
+// 3.26.0 published the staleness verdict on stderr only, which put it out of
+// reach of every consumer that runs `--quiet --format json`. These pin the
+// envelope half of the fix.
+
+/// Read the dead-code envelope's `baseline_staleness` object.
+fn envelope_staleness(output: &common::CommandOutput) -> serde_json::Value {
+    parse_json(output)["baseline_staleness"].clone()
+}
+
+#[test]
+fn json_envelope_carries_baseline_staleness_on_a_whole_project_run() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    let staleness = envelope_staleness(&output);
+    assert_eq!(staleness["baseline_entries"], 4);
+    assert_eq!(staleness["matched_entries"], 2);
+    assert_eq!(staleness["stale_entries"], 2);
+    assert_eq!(staleness["current_findings"], 2);
+    assert_eq!(staleness["change_scoped"], false);
+    assert_eq!(staleness["stale"], true);
+    assert_eq!(staleness["warning"], "partial");
+    assert_eq!(
+        staleness["gate_trips"], true,
+        "the gate's own rule, published so a CI integration reads one boolean: {}",
+        output.stdout
+    );
+    assert!(
+        staleness.get("moved_entries").is_none(),
+        "only health can follow a file move: {}",
+        output.stdout
+    );
+}
+
+/// The reading that makes a jq derivation from `baseline.matched` alone wrong:
+/// a narrowed run legitimately matches nothing while the baseline is healthy.
+#[test]
+fn scoped_run_publishes_change_scoped_so_zero_matches_cannot_be_misread() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(
+        project.path(),
+        &["--file", "src/index.ts", "--format", "json", "--quiet"],
+    );
+    let staleness = envelope_staleness(&output);
+    assert_eq!(staleness["change_scoped"], true);
+    assert_eq!(
+        staleness["stale"], false,
+        "a narrowed run cannot judge a whole-project baseline: {}",
+        output.stdout
+    );
+    assert_eq!(
+        staleness["gate_trips"], false,
+        "and the gate stands down for the same reason: {}",
+        output.stdout
+    );
+}
+
+/// The case #2673 names as the reason the gate exists: the project is clean,
+/// every baseline entry is dead, and the advisory is silent by design. A
+/// consumer keying only on `stale` would stay green forever.
+#[test]
+fn a_cleaned_project_reports_a_silent_advisory_and_a_tripped_gate() {
+    let project = rotted_baseline_project(4, 0);
+    let output = run_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    let envelope = parse_json(&output);
+    assert_eq!(envelope["total_issues"], 0);
+    let staleness = &envelope["baseline_staleness"];
+    assert_eq!(staleness["current_findings"], 0);
+    assert_eq!(staleness["stale"], false);
+    assert_eq!(staleness["warning"], "none");
+    assert_eq!(
+        staleness["gate_trips"], true,
+        "the gate is deliberately stricter than the advisory: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn baseline_staleness_is_absent_without_a_baseline() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        project.path().to_str().expect("temp path is UTF-8"),
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let envelope = parse_json(&output);
+    assert!(
+        envelope.get("baseline_staleness").is_none(),
+        "a run with no baseline keeps the wire byte-identical: {}",
+        output.stdout
+    );
+}
+
+/// `baseline` predates `baseline_staleness` and stays untouched, so anyone
+/// gating on it is undisturbed. The two must never disagree.
+#[test]
+fn the_legacy_baseline_object_agrees_with_baseline_staleness() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    let envelope = parse_json(&output);
+    assert_eq!(
+        envelope["baseline"]["entries"],
+        envelope["baseline_staleness"]["baseline_entries"]
+    );
+    assert_eq!(
+        envelope["baseline"]["matched"],
+        envelope["baseline_staleness"]["matched_entries"]
+    );
+}
+
+/// `gate_trips` is redundant with the three counts on purpose, so a consumer
+/// reads one boolean instead of restating the rule. This pins the identity so
+/// the redundancy cannot silently diverge from the engine.
+#[test]
+fn gate_trips_equals_the_rule_the_exit_gate_applies() {
+    for (saved, remaining, extra) in [
+        (4_u64, 2_u64, Vec::new()),
+        (4, 0, Vec::new()),
+        (4, 4, Vec::new()),
+        (4, 2, vec!["--file", "src/index.ts"]),
+    ] {
+        let project = rotted_baseline_project(saved, remaining);
+        let mut args = vec!["--format", "json", "--quiet"];
+        args.extend_from_slice(&extra);
+        let staleness = envelope_staleness(&run_with_baseline(project.path(), &args));
+        let entries = staleness["baseline_entries"].as_u64().expect("entries");
+        let matched = staleness["matched_entries"].as_u64().expect("matched");
+        let change_scoped = staleness["change_scoped"].as_bool().expect("scoped");
+        let expected = !change_scoped && entries > 0 && matched < entries;
+        assert_eq!(
+            staleness["gate_trips"], expected,
+            "gate_trips must equal !change_scoped && entries > 0 && matched < entries for \
+             saved={saved} remaining={remaining} extra={extra:?}"
+        );
+
+        // And it must equal what the exit gate actually does.
+        let mut gate_args = vec!["--format", "json", "--quiet", "--fail-on-stale-baseline"];
+        gate_args.extend_from_slice(&extra);
+        let gated = run_with_baseline(project.path(), &gate_args);
+        assert_eq!(
+            gated.code == 1,
+            expected,
+            "the published boolean and the exit code cannot disagree: {}",
+            gated.stderr
+        );
+    }
+}
+
+/// `docs/backwards-compatibility.md` promises the flag changes nothing but the
+/// exit code and the stderr line, so the object is emitted either way.
+#[test]
+fn baseline_staleness_does_not_depend_on_the_gate_flag() {
+    let project = rotted_baseline_project(4, 2);
+    let without = run_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    let with = run_with_baseline(
+        project.path(),
+        &["--format", "json", "--quiet", "--fail-on-stale-baseline"],
+    );
+    assert_eq!(
+        canonical_report(&without),
+        canonical_report(&with),
+        "the gate changes the exit code and stderr, never the JSON envelope"
+    );
+    assert_eq!(without.code, 0);
+    assert_eq!(with.code, 1);
+}
+
+/// The new object is additive and absent by default, which is exactly the
+/// condition `docs/backwards-compatibility.md` sets for not bumping a version.
+#[test]
+fn adding_baseline_staleness_moved_no_schema_version() {
+    let project = rotted_baseline_project(4, 2);
+    let dead_code = run_with_baseline(project.path(), &["--format", "json", "--quiet"]);
+    assert_eq!(parse_json(&dead_code)["schema_version"], 9);
+    let combined = run_fallow_raw(&[
+        "--root",
+        project.path().to_str().expect("temp path is UTF-8"),
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        project
+            .path()
+            .join("baseline.json")
+            .to_str()
+            .expect("temp path is UTF-8"),
+    ]);
+    assert_eq!(parse_json(&combined)["schema_version"], 12);
+}
+
+/// The bare combined run is the action's default shape.
+#[test]
+fn the_combined_envelope_carries_baseline_staleness_under_check() {
+    let project = rotted_baseline_project(4, 2);
+    let output = run_fallow_raw(&[
+        "--root",
+        project.path().to_str().expect("temp path is UTF-8"),
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        project
+            .path()
+            .join("baseline.json")
+            .to_str()
+            .expect("temp path is UTF-8"),
+    ]);
+    let staleness = parse_json(&output)["check"]["baseline_staleness"].clone();
+    assert_eq!(staleness["baseline_entries"], 4);
+    assert_eq!(staleness["gate_trips"], true);
+}

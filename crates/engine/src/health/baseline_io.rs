@@ -112,7 +112,7 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
 
 pub(super) struct LoadedHealthBaseline {
     pub(super) data: HealthBaselineData,
-    pub(super) staleness: fallow_output::HealthBaselineStaleness,
+    pub(super) staleness: fallow_output::BaselineStaleness,
 }
 
 /// Load and apply a health baseline, filtering findings to show only new ones.
@@ -166,11 +166,11 @@ pub(super) fn load_health_baseline(
     let staleness = staleness_from_counts(&counts);
     if !quiet {
         warn_on_staleness(&counts, baseline_path);
-        if staleness.moved_entries > 0 {
+        if counts.moved_entries > 0 {
             eprintln!(
                 "Note: {} baseline entr{} matched through a followed file move.",
-                staleness.moved_entries,
-                if staleness.moved_entries == 1 {
+                counts.moved_entries,
+                if counts.moved_entries == 1 {
                     "y"
                 } else {
                     "ies"
@@ -231,18 +231,8 @@ struct StalenessCounts {
 
 /// Staleness data for a loaded baseline that matched `matched_entries` of its
 /// `baseline_entries` saved entries on this run.
-fn staleness_from_counts(counts: &StalenessCounts) -> fallow_output::HealthBaselineStaleness {
-    let stale_entries = counts
-        .baseline_entries
-        .saturating_sub(counts.matched_entries);
-    fallow_output::HealthBaselineStaleness {
-        baseline_entries: counts.baseline_entries,
-        matched_entries: counts.matched_entries,
-        stale_entries,
-        moved_entries: counts.moved_entries,
-        change_scoped: counts.change_scoped,
-        stale: staleness_decision(counts).warning() != BaselineStalenessWarning::None,
-    }
+fn staleness_from_counts(counts: &StalenessCounts) -> fallow_output::BaselineStaleness {
+    staleness_decision(counts).to_envelope(Some(counts.moved_entries))
 }
 
 #[cfg(test)]
@@ -320,7 +310,7 @@ mod tests {
             moved_entries: 2,
             ..counts(10, 9)
         });
-        assert_eq!(staleness.moved_entries, 2);
+        assert_eq!(staleness.moved_entries, Some(2));
         assert!(!staleness.stale);
     }
 }

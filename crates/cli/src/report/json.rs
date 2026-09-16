@@ -34,6 +34,7 @@ pub(super) struct PrintJsonInput<'a> {
     pub(super) regression: Option<&'a crate::regression::RegressionOutcome>,
     pub(super) baseline_matched: Option<(usize, usize)>,
     pub(super) config_fixable: bool,
+    pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
 }
@@ -58,7 +59,12 @@ pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_js
         input.elapsed,
         input.config_fixable,
         check_output_meta(input.explain, input.type_aware),
-        check_json_extras(input.regression, None, input.baseline_matched),
+        check_json_extras(
+            input.regression,
+            None,
+            input.baseline_matched,
+            input.baseline_staleness.clone(),
+        ),
         input.workspace_diagnostics,
     )?;
     input.json_style.serialize(&output)
@@ -74,6 +80,7 @@ pub(super) struct PrintGroupedJsonInput<'a> {
     pub(super) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
     pub(super) resolver: &'a OwnershipResolver,
     pub(super) config_fixable: bool,
+    pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
 }
@@ -86,6 +93,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         elapsed: input.elapsed,
         grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
         config_fixable: input.config_fixable,
+        baseline_staleness: input.baseline_staleness.clone(),
         meta: check_output_meta(input.explain, input.type_aware),
         workspace_diagnostics: input.workspace_diagnostics.to_vec(),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
@@ -586,11 +594,13 @@ pub fn check_json_extras(
     regression: Option<&crate::regression::RegressionOutcome>,
     baseline_deltas: Option<BaselineDeltas>,
     baseline_matched: Option<(usize, usize)>,
+    baseline_staleness: Option<fallow_output::BaselineStaleness>,
 ) -> CheckJsonExtraOutputs {
     CheckJsonExtraOutputs {
         regression: regression.map(regression_output),
         baseline_deltas,
         baseline: baseline_matched.map(|(entries, matched)| BaselineMatch { entries, matched }),
+        baseline_staleness,
     }
 }
 
@@ -819,8 +829,10 @@ pub(super) fn print_grouped_health_json(
 
 /// The two presentation switches the duplication JSON path carries, paired so
 /// they travel as one argument through the render chain.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) struct DuplicationJsonRender {
+    /// This run's view of the loaded duplication baseline, for baseline runs.
+    pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
     /// Attach the `_meta` explain block.
     pub(super) explain: bool,
     /// Serialize `instances[].fragment`. Off for a location-only payload.
@@ -849,6 +861,7 @@ pub(super) fn api_duplication_json_document(
         meta: render.explain.then(fallow_output::dupes_meta),
         workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps,
+        baseline_staleness: render.baseline_staleness,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
@@ -895,6 +908,7 @@ fn api_grouped_duplication_json_document(
         meta: render.explain.then(fallow_output::dupes_meta),
         workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps,
+        baseline_staleness: render.baseline_staleness,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })

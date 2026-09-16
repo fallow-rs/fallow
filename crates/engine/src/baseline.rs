@@ -142,6 +142,35 @@ impl BaselineStaleness {
     pub const fn trips_gate(&self) -> bool {
         stale_baseline_gate_trips(self.entries, self.matched, self.change_scoped)
     }
+    /// This run's machine-readable view of the baseline, for the JSON envelope.
+    ///
+    /// Every member is derived here rather than in a consumer, so the advisory
+    /// threshold and the gate rule have exactly one implementation. `health`
+    /// passes `Some(moved)`; the commands that cannot follow a file move pass
+    /// `None` and the member is omitted from the wire.
+    #[must_use]
+    pub fn to_envelope(&self, moved_entries: Option<usize>) -> fallow_output::BaselineStaleness {
+        let warning = self.warning();
+        fallow_output::BaselineStaleness {
+            baseline_entries: self.entries,
+            matched_entries: self.matched,
+            stale_entries: self.stale_entries(),
+            current_findings: self.current_findings,
+            change_scoped: self.change_scoped,
+            stale: warning != BaselineStalenessWarning::None,
+            warning: match warning {
+                BaselineStalenessWarning::None => fallow_output::BaselineStalenessAdvisory::None,
+                BaselineStalenessWarning::ZeroOverlap => {
+                    fallow_output::BaselineStalenessAdvisory::ZeroOverlap
+                }
+                BaselineStalenessWarning::Partial => {
+                    fallow_output::BaselineStalenessAdvisory::Partial
+                }
+            },
+            gate_trips: self.trips_gate(),
+            moved_entries,
+        }
+    }
 }
 
 /// [`BaselineStaleness::trips_gate`] over the three counts it reads, for

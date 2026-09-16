@@ -15,10 +15,12 @@
 //! returning silently.
 //!
 //! The verdict is the exit code plus one stderr line, in every output format.
-//! No report envelope gains a field: `dead-code` already carries
-//! `baseline.entries` and `baseline.matched`, and `health` already carries
-//! `summary.baseline_staleness`, so a machine consumer that wants the numbers
-//! has them, with or without the flag.
+//! A machine consumer reads it from the envelope instead: `dead-code`, `dupes`
+//! and `health` publish `baseline_staleness`, whose `gate_trips` is this gate's
+//! rule computed by [`stale_baseline_gate_trips`], so a CI integration that
+//! cannot see stderr does not have to restate the condition. That object is
+//! emitted whenever a baseline was loaded, with or without this flag, so the
+//! flag still changes nothing but the exit code and the stderr line.
 
 #![allow(
     clippy::print_stderr,
@@ -105,12 +107,12 @@ pub fn note_stood_down(path: Option<&Path>, enabled: bool, reason: &str) {
 ///
 /// Both the failure line and the stood-down note print regardless of
 /// `--quiet`. Unlike the score and findings gates, whose condition is visible
-/// in the report itself, the gate's verdict appears in no report: the human
-/// output never mentions the baseline counts, and the envelopes that do carry
-/// them (`baseline` on dead-code, `summary.baseline_staleness` on health) say
-/// nothing about whether the gate fired. Suppressing the line would leave
-/// either a bare exit 1 or a green run with nothing to act on. `--ci` implies
-/// `--quiet`, which is exactly the configuration where that matters.
+/// in the report itself, the gate's verdict appears in no *human* output: the
+/// human renderers never mention the baseline counts. Suppressing the line
+/// would leave either a bare exit 1 or a green run with nothing to act on, and
+/// `--ci` implies `--quiet`, which is exactly the configuration where that
+/// matters. Machine consumers read `baseline_staleness.gate_trips` from the
+/// envelope instead of this line.
 fn report_gate(
     entries: usize,
     matched: usize,

@@ -7275,3 +7275,72 @@ fn audit_says_when_a_built_in_pattern_left_it_nothing_to_analyze() {
         output.stderr
     );
 }
+
+/// `audit` narrows every sub-pass to the changed slice, so the embedded health
+/// summary must report the gate as inert. An envelope that claimed otherwise
+/// would tell a reader the gate fires on a command whose stderr says it stood
+/// down (issue #2673).
+#[test]
+fn audit_embeds_a_health_baseline_staleness_that_agrees_with_the_stood_down_gate() {
+    let (tmp, baseline_path) = rotted_audit_baseline_fixture();
+    let dir = tmp.path();
+    let health_baseline = dir.join("health-baseline.json");
+    let save = run_fallow_raw(&[
+        "health",
+        "--root",
+        dir.to_str().unwrap(),
+        "--quiet",
+        "--format",
+        "json",
+        "--save-baseline",
+        health_baseline.to_str().unwrap(),
+    ]);
+    assert!(
+        health_baseline.exists(),
+        "the health baseline must be saved first: {}",
+        save.stderr
+    );
+    let _ = baseline_path;
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--health-baseline",
+        health_baseline.to_str().unwrap(),
+        "--fail-on-stale-baseline",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let staleness = parse_json(&output)["complexity"]["summary"]["baseline_staleness"].clone();
+    assert!(
+        !staleness.is_null(),
+        "the audit envelope must carry the embedded health staleness: {}",
+        output.stdout
+    );
+    assert_eq!(
+        staleness["change_scoped"], true,
+        "audit only ever sees the changed slice: {}",
+        output.stdout
+    );
+    assert_eq!(
+        staleness["gate_trips"], false,
+        "so the gate is inert and the envelope must agree with stderr: {}",
+        output.stdout
+    );
+    assert!(
+        output
+            .stderr
+            .contains("--fail-on-stale-baseline did not run"),
+        "and the run still says it stood down: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "an inert gate cannot fail: {}",
+        output.stderr
+    );
+}

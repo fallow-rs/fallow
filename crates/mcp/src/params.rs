@@ -89,7 +89,11 @@ pub struct AnalyzeParams {
     pub boundary_violations: Option<bool>,
 
     /// Compare results against a saved baseline file. Only new issues (not in
-    /// the baseline) are reported.
+    /// the baseline) are reported. The response carries `baseline_staleness`:
+    /// read `gate_trips` to see whether the baseline has entries that match
+    /// nothing any more (re-save it with `save_baseline`), and read
+    /// `change_scoped` first, because a run narrowed to part of the project can
+    /// report `matched_entries: 0` on a perfectly healthy baseline.
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons.
@@ -256,7 +260,11 @@ pub struct CheckChangedParams {
     pub workspace: Option<String>,
 
     /// Compare results against a saved baseline file. Only new issues (not in
-    /// the baseline) are reported.
+    /// the baseline) are reported. The response carries `baseline_staleness`:
+    /// read `gate_trips` to see whether the baseline has entries that match
+    /// nothing any more (re-save it with `save_baseline`), and read
+    /// `change_scoped` first, because a run narrowed to part of the project can
+    /// report `matched_entries: 0` on a perfectly healthy baseline.
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons.
@@ -492,7 +500,11 @@ pub struct FindDupesParams {
     pub include_fragments: Option<bool>,
 
     /// Compare results against a saved baseline file. Only new clone groups
-    /// (not in the baseline) are reported.
+    /// (not in the baseline) are reported. The response carries
+    /// `baseline_staleness`: read `gate_trips` to see whether the baseline has
+    /// entries that match nothing any more (re-save it with `save_baseline`),
+    /// and read `change_scoped` first, because a run narrowed to part of the
+    /// project can report `matched_entries: 0` on a healthy baseline.
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons.
@@ -1218,6 +1230,9 @@ pub struct HealthParams {
     pub save_snapshot: Option<String>,
 
     /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
+    /// `summary.baseline_staleness` reports how much of the baseline still matches: read `gate_trips`
+    /// to see whether entries have gone stale (re-save with `save_baseline`), and read `change_scoped`
+    /// first, because a narrowed run can report `matched_entries: 0` on a healthy baseline.
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons.
