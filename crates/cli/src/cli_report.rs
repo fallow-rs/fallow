@@ -193,6 +193,13 @@ fn render_saved_ci_target(
         }
     };
     let command = command_label(kind);
+    // The comment and the job summary render from one envelope, so a run whose
+    // gate failed must not say "Quality gate passed" on the surface a reviewer
+    // actually reads while the summary says it failed. The gate line is carried
+    // as the status note, which leaves the check-run `conclusion` alone: that
+    // is a documented non-blocker and moving it is a separate decision.
+    let status_message = saved_status_message(envelope, status_message);
+    let status_message = status_message.as_deref();
     match target {
         ReportTarget::PrComment(_) => {
             crate::report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
@@ -218,6 +225,48 @@ fn render_saved_ci_target(
             ),
         },
         _ => unreachable!("saved CI target dispatch only accepts comment and review targets"),
+    }
+}
+
+/// The note a saved envelope's comment and review bodies carry: the existing
+/// type-aware message, the gate verdict, or both.
+///
+/// Additive to whatever `saved_ci_conclusion` already produced, so the
+/// type-aware message keeps its place and the gate line joins it rather than
+/// replacing it.
+fn saved_status_message(
+    envelope: &serde_json::Value,
+    existing: Option<&'static str>,
+) -> Option<String> {
+    let gates = crate::report::gate_outcome_text::summary_line(envelope);
+    match (existing, gates) {
+        (Some(existing), Some(gates)) => Some(format!("{existing} {gates}")),
+        (Some(existing), None) => Some(existing.to_owned()),
+        (None, gates) => gates,
+    }
+}
+
+#[cfg(test)]
+mod status_note_tests {
+    /// The live path builds the note from typed gates and the saved path from
+    /// the parsed envelope. They must produce the same string, or
+    /// `report --from` stops being byte-identical to a direct render.
+    #[test]
+    fn the_live_and_saved_notes_agree() {
+        let mut gates = fallow_output::GateOutcomes::new();
+        gates.insert(
+            fallow_output::GateName::Regression,
+            fallow_output::GateOutcome::measured(fallow_output::GateStatus::Fail, true, 5.0, 0.0),
+        );
+        let envelope = serde_json::json!({ "gate_outcomes": gates });
+        assert_eq!(
+            super::saved_status_message(&envelope, None),
+            crate::report::ci_status_note(None, Some(&gates)),
+        );
+        assert_eq!(
+            super::saved_status_message(&envelope, Some("Note.")),
+            crate::report::ci_status_note(Some("Note."), Some(&gates)),
+        );
     }
 }
 

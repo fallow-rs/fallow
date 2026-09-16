@@ -171,12 +171,17 @@ fn sanitize_marker_segment(value: &str) -> String {
 }
 
 #[must_use]
-pub(crate) fn print_pr_comment(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
+pub(crate) fn print_pr_comment(
+    command: &str,
+    provider: Provider,
+    codeclimate: &Value,
+    status_message: Option<&str>,
+) -> ExitCode {
     let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
         issues_from_codeclimate(codeclimate),
     ));
     let conclusion = issue_decision_conclusion(issues.is_empty());
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, None)
+    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status_message)
 }
 
 #[must_use]

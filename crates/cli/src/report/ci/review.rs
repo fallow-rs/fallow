@@ -114,11 +114,12 @@ pub(crate) fn print_review_envelope(
     command: &str,
     provider: Provider,
     codeclimate: &Value,
+    status_message: Option<&str>,
 ) -> ExitCode {
     let issues = super::diff_filter::filter_issues_from_env(
         super::pr_comment::issues_from_codeclimate(codeclimate),
     );
-    print_review_envelope_from_ci_issues(command, provider, &issues, None, None)
+    print_review_envelope_from_ci_issues(command, provider, &issues, None, status_message)
 }
 
 #[must_use]

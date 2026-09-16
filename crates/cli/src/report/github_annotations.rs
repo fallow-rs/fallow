@@ -44,13 +44,14 @@ pub enum EnvelopeKind {
 pub(crate) fn print_annotations(kind: EnvelopeKind, envelope: &Value, root: &Path) -> ExitCode {
     let options = resolve_render_options(root);
     let rendered = render_annotations(kind, envelope, &options);
-    if !rendered.is_empty() {
-        outln!("{rendered}");
-    }
-    // After the findings, so a reader who scrolls to the end sees why the run
-    // failed rather than having to infer it from a count.
+    // Before the findings, because the consumer caps this stream: the action
+    // pipes it through `head -n "$MAX"` (`action/scripts/annotate.sh`), so a
+    // verdict appended after the findings is the first thing a noisy run drops.
     if let Some(line) = crate::report::gate_outcome_text::annotation_line(envelope) {
         outln!("{line}");
+    }
+    if !rendered.is_empty() {
+        outln!("{rendered}");
     }
     ExitCode::SUCCESS
 }

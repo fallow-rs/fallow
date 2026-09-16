@@ -16,7 +16,9 @@
 //!
 //! Deliberately NOT wired into the pull-request check-run `conclusion`: that
 //! stays the non-blocker it has been, and moving it is a separate decision with
-//! its own blast radius.
+//! its own blast radius. The line is informational on every surface, so the
+//! integration that knows which gates the repository armed keeps ownership of
+//! the failing exit.
 
 use serde_json::Value;
 
@@ -27,23 +29,30 @@ pub struct GateLine {
     pub enforced: bool,
     pub observed: Option<f64>,
     pub threshold: Option<f64>,
+    pub threshold_label: Option<String>,
 }
 
 impl GateLine {
-    /// Whether this gate made, or would have made, the run exit non-zero.
-    fn failed(&self) -> bool {
-        self.status == "fail"
-    }
-
-    /// The trailing `(85 of 90)` clause, when the gate compared numbers.
+    /// The trailing `(85 against 90)` clause, when the gate compared something.
     fn measured_clause(&self) -> String {
-        match (self.observed, self.threshold) {
-            (Some(observed), Some(threshold)) => {
+        match (
+            self.observed,
+            self.threshold,
+            self.threshold_label.as_deref(),
+        ) {
+            (Some(observed), Some(threshold), _) => {
                 format!(" ({} against {})", trim_num(observed), trim_num(threshold))
             }
-            (Some(observed), None) => format!(" ({})", trim_num(observed)),
+            (Some(observed), None, Some(label)) => {
+                format!(" ({} at or above {label})", trim_num(observed))
+            }
+            (Some(observed), None, None) => format!(" ({})", trim_num(observed)),
             _ => String::new(),
         }
+    }
+
+    fn described(&self) -> String {
+        format!("{}{}", self.name, self.measured_clause())
     }
 }
 
@@ -73,70 +82,119 @@ pub fn read_gate_outcomes(envelope: &Value) -> Vec<GateLine> {
                 enforced: entry.get("enforced").and_then(Value::as_bool)?,
                 observed: entry.get("observed").and_then(Value::as_f64),
                 threshold: entry.get("threshold").and_then(Value::as_f64),
+                threshold_label: entry
+                    .get("threshold_label")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             })
         })
         .collect()
 }
 
-/// A one-line verdict for the job summary and the pull-request comment, or
-/// `None` when the run armed no gate.
+/// The four outcomes, kept apart.
 ///
-/// Names the gates that failed, and says which of them actually fail the build,
-/// because those are different questions: a stale-baseline verdict published
-/// without its opt-in flag reports `fail` and enforces nothing.
+/// `skipped` is not a pass and `warn` is not a pass: the status is four-valued
+/// precisely so a gate that stood down is distinguishable from one that was
+/// evaluated and held. Collapsing them was how a change-scoped pull request
+/// ended up with "Gates passed: stale-baseline." directly under a job-summary
+/// advisory saying the same baseline had gone stale.
+struct Partitioned<'a> {
+    failed: Vec<&'a GateLine>,
+    warned: Vec<&'a GateLine>,
+    skipped: Vec<&'a GateLine>,
+    passed: Vec<&'a GateLine>,
+}
+
+fn partition(gates: &[GateLine]) -> Partitioned<'_> {
+    let mut out = Partitioned {
+        failed: Vec::new(),
+        warned: Vec::new(),
+        skipped: Vec::new(),
+        passed: Vec::new(),
+    };
+    for gate in gates {
+        match gate.status.as_str() {
+            "fail" => out.failed.push(gate),
+            "skipped" => out.skipped.push(gate),
+            "pass" => out.passed.push(gate),
+            // "warn", and any status this build does not recognise: the set is
+            // open, and an unknown value must not be silently counted as a pass.
+            _ => out.warned.push(gate),
+        }
+    }
+    out
+}
+
+fn join(gates: &[&GateLine]) -> String {
+    gates
+        .iter()
+        .map(|gate| gate.described())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A one-line verdict for the job summary, the pull-request comment and the
+/// merge-request note, or `None` when the run armed no gate.
+///
+/// Informational on purpose. Whether a tripped gate should fail the build is
+/// the consumer's decision, not this renderer's: `enforced` describes the
+/// CLI's own exit code, and the GitHub Action deliberately does not pass
+/// `--fail-on-issues` to the CLI, so a gate this line calls enforced may sit on
+/// a job the repository has configured to pass. The line says what happened and
+/// the integration decides what to do about it.
 pub fn summary_line(envelope: &Value) -> Option<String> {
     let gates = read_gate_outcomes(envelope);
     if gates.is_empty() {
         return None;
     }
-    let failed: Vec<&GateLine> = gates.iter().filter(|gate| gate.failed()).collect();
-    if failed.is_empty() {
-        let names: Vec<&str> = gates.iter().map(|gate| gate.name.as_str()).collect();
-        return Some(format!("Gates passed: {}.", names.join(", ")));
+    let parts = partition(&gates);
+    let mut clauses: Vec<String> = Vec::new();
+    if !parts.failed.is_empty() {
+        let enforced = parts.failed.iter().filter(|gate| gate.enforced).count();
+        let suffix = if enforced == 0 {
+            ", none of which fails this run"
+        } else {
+            ""
+        };
+        clauses.push(format!("Gates failed: {}{suffix}.", join(&parts.failed)));
     }
-    let described: Vec<String> = failed
-        .iter()
-        .map(|gate| format!("{}{}", gate.name, gate.measured_clause()))
-        .collect();
-    let enforced_count = failed.iter().filter(|gate| gate.enforced).count();
-    let enforcement = if enforced_count == 0 {
-        " Reported only: none of them fails this run.".to_owned()
-    } else if enforced_count == failed.len() {
-        String::new()
-    } else {
-        format!(" {enforced_count} of them fails this run.")
-    };
-    Some(format!(
-        "Gates failed: {}.{enforcement}",
-        described.join(", ")
-    ))
+    if !parts.warned.is_empty() {
+        clauses.push(format!("Gates warned: {}.", join(&parts.warned)));
+    }
+    if !parts.skipped.is_empty() {
+        clauses.push(format!("Stood down: {}.", join(&parts.skipped)));
+    }
+    if !parts.passed.is_empty() {
+        clauses.push(format!("Gates passed: {}.", join(&parts.passed)));
+    }
+    Some(clauses.join(" "))
+}
+
+/// [`summary_line`] for a live run, which holds the gates typed rather than as
+/// a parsed envelope.
+///
+/// Routed through the same function on purpose: `fallow report --from` must
+/// render byte-identically to the direct `--format` run, which is a contract
+/// with its own parity suite, so the live and saved paths cannot each format
+/// the verdict their own way.
+pub fn summary_line_for_gates(gates: Option<&fallow_output::GateOutcomes>) -> Option<String> {
+    let gates = gates?;
+    let envelope = serde_json::json!({ "gate_outcomes": gates });
+    summary_line(&envelope)
 }
 
 /// The same verdict as a GitHub workflow-command annotation, or `None` when the
-/// run armed no gate or every gate passed.
+/// run armed no gate.
 ///
-/// `::error::` only for a gate that fails the run, `::warning::` for a verdict
-/// published without enforcement, so a repository that asked for nothing never
-/// gets an unsilenceable red line.
+/// Always `::notice::`, never `::error::`. The render cannot know whether the
+/// consumer armed the gate through its own inputs, and `audit-verdict` is
+/// always enforced by the CLI while `command: audit` with `fail-on-issues:
+/// false` is a passing reporting job, so an error-level line here paints a red
+/// annotation on a green run. The integration owns the `::error::` and the
+/// failing exit; this line owns the fact.
 pub fn annotation_line(envelope: &Value) -> Option<String> {
-    let gates = read_gate_outcomes(envelope);
-    let failed: Vec<&GateLine> = gates.iter().filter(|gate| gate.failed()).collect();
-    if failed.is_empty() {
-        return None;
-    }
-    let described: Vec<String> = failed
-        .iter()
-        .map(|gate| format!("{}{}", gate.name, gate.measured_clause()))
-        .collect();
-    let level = if failed.iter().any(|gate| gate.enforced) {
-        "error"
-    } else {
-        "warning"
-    };
-    Some(format!(
-        "::{level}::Fallow gates failed: {}",
-        described.join(", ")
-    ))
+    let line = summary_line(envelope)?;
+    Some(format!("::notice::Fallow: {line}"))
 }
 
 #[cfg(test)]
@@ -155,39 +213,75 @@ mod tests {
     }
 
     #[test]
-    fn a_failing_enforced_gate_is_an_error_annotation() {
+    fn a_failing_gate_names_what_it_compared() {
         let value = envelope(&serde_json::json!({
             "health-min-score": {
                 "status": "fail", "enforced": true, "observed": 85.0, "threshold": 90.0
             }
         }));
         assert_eq!(
-            annotation_line(&value).expect("a gate failed"),
-            "::error::Fallow gates failed: health-min-score (85 against 90)"
-        );
-        assert_eq!(
             summary_line(&value).expect("a gate ran"),
             "Gates failed: health-min-score (85 against 90)."
         );
     }
 
+    /// The render never escalates. `enforced` is the CLI's statement about its
+    /// own exit code, and the integrations deliberately do not pass
+    /// `--fail-on-issues` to the CLI, so an error-level annotation here would
+    /// paint a red line on a job the repository configured to pass.
     #[test]
-    fn an_unenforced_verdict_warns_instead_of_erroring() {
+    fn the_annotation_is_always_a_notice() {
+        for enforced in [true, false] {
+            let value = envelope(&serde_json::json!({
+                "audit-verdict": { "status": "fail", "enforced": enforced }
+            }));
+            let line = annotation_line(&value).expect("a gate ran");
+            assert!(
+                line.starts_with("::notice::"),
+                "the render states the fact and leaves the escalation to the consumer: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unenforced_failure_says_it_does_not_fail_the_run() {
         let value = envelope(&serde_json::json!({
             "stale-baseline": { "status": "fail", "enforced": false }
         }));
         assert_eq!(
-            annotation_line(&value).expect("a gate failed"),
-            "::warning::Fallow gates failed: stale-baseline"
+            summary_line(&value).expect("a gate ran"),
+            "Gates failed: stale-baseline, none of which fails this run."
         );
+    }
+
+    /// A change-scoped pull request stands the baseline gate down, and #2674
+    /// built a whole mechanism to keep "could not be judged" apart from
+    /// "passed". Collapsing `skipped` into the passed list reversed that inside
+    /// one job summary.
+    #[test]
+    fn a_stood_down_gate_is_not_a_pass() {
+        let value = envelope(&serde_json::json!({
+            "stale-baseline": { "status": "skipped", "enforced": false }
+        }));
         assert_eq!(
             summary_line(&value).expect("a gate ran"),
-            "Gates failed: stale-baseline. Reported only: none of them fails this run."
+            "Stood down: stale-baseline."
         );
     }
 
     #[test]
-    fn passing_gates_are_summarized_and_never_annotated() {
+    fn a_warn_tier_is_not_a_pass() {
+        let value = envelope(&serde_json::json!({
+            "audit-verdict": { "status": "warn", "enforced": true }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("a gate ran"),
+            "Gates warned: audit-verdict."
+        );
+    }
+
+    #[test]
+    fn passing_gates_are_named_on_their_own() {
         let value = envelope(&serde_json::json!({
             "regression": { "status": "pass", "enforced": true }
         }));
@@ -195,18 +289,34 @@ mod tests {
             summary_line(&value).expect("a gate ran"),
             "Gates passed: regression."
         );
-        assert!(annotation_line(&value).is_none());
     }
 
     #[test]
-    fn a_skipped_gate_is_not_a_failure() {
+    fn all_four_outcomes_stay_apart_in_one_line() {
         let value = envelope(&serde_json::json!({
-            "stale-baseline": { "status": "skipped", "enforced": false }
+            "regression": { "status": "fail", "enforced": true },
+            "audit-verdict": { "status": "warn", "enforced": true },
+            "stale-baseline": { "status": "skipped", "enforced": false },
+            "duplication-threshold": { "status": "pass", "enforced": true }
         }));
-        assert!(annotation_line(&value).is_none());
+        assert_eq!(
+            summary_line(&value).expect("gates ran"),
+            "Gates failed: regression. Gates warned: audit-verdict. \
+             Stood down: stale-baseline. Gates passed: duplication-threshold."
+        );
+    }
+
+    #[test]
+    fn a_named_floor_is_rendered_instead_of_a_number() {
+        let value = envelope(&serde_json::json!({
+            "health-min-severity": {
+                "status": "fail", "enforced": true, "observed": 3.0,
+                "threshold_label": "critical"
+            }
+        }));
         assert_eq!(
             summary_line(&value).expect("a gate ran"),
-            "Gates passed: stale-baseline."
+            "Gates failed: health-min-severity (3 at or above critical)."
         );
     }
 
@@ -216,8 +326,21 @@ mod tests {
             "some-future-gate": { "status": "fail", "enforced": true }
         }));
         assert_eq!(
-            annotation_line(&value).expect("a gate failed"),
-            "::error::Fallow gates failed: some-future-gate"
+            annotation_line(&value).expect("a gate ran"),
+            "::notice::Fallow: Gates failed: some-future-gate."
+        );
+    }
+
+    /// The status set is open, so a value this build does not know must not be
+    /// silently counted as a pass.
+    #[test]
+    fn an_unrecognised_status_is_not_a_pass() {
+        let value = envelope(&serde_json::json!({
+            "some-future-gate": { "status": "deferred", "enforced": false }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("a gate ran"),
+            "Gates warned: some-future-gate."
         );
     }
 
@@ -229,7 +352,7 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("gates ran"),
-            "Gates failed: regression, stale-baseline. 1 of them fails this run."
+            "Gates failed: regression, stale-baseline."
         );
     }
 }

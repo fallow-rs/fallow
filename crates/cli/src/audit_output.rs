@@ -178,7 +178,11 @@ fn print_audit_pr_comment(
         provider,
         &value,
         conclusion,
-        incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+        report::ci_status_note(
+            incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+            audit_gate_outcomes(result).as_ref(),
+        )
+        .as_deref(),
     )
 }
 
@@ -203,7 +207,11 @@ fn print_audit_review(
         provider,
         &value,
         conclusion,
-        incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+        report::ci_status_note(
+            incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+            audit_gate_outcomes(result).as_ref(),
+        )
+        .as_deref(),
     )
 }
 
