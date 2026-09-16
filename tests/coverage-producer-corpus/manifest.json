@@ -5,7 +5,7 @@
     "platform": "darwin-arm64",
     "coverage_root": "/fallow/corpus",
     "producers_lock_file": "producers/package-lock.json",
-    "producers_lock_sha256": "e673a88ff57403ae9f720c211556e3703f03d00cf3b13cd811bc95b8c703959c"
+    "producers_lock_sha256": "4245f341ef8af729dd57e74411e18fb549967906741090d53f82e1752d21e402"
   },
   "invariants": [
     {
