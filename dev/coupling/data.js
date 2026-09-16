@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789536674364,
+  "lastUpdate": 1789577155619,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8d53657a9e18fa00f8b8a83337428bf912de8c23",
-          "message": "fix(check): fail strict runs on findings the override path let through (#2447)\n\nWith any per-path `overrides` entry configured, the exit-code check switches to per-file severity resolution. That path never consulted import-direction boundary violations, so an error-severity `boundary-violation` was reported but the run exited 0. The same path started from unpromoted base rules, so the warn-to-error promotion of `--fail-on-issues` and `--ci` never reached it and a `warn` rule plus any override exited 0 as well.\n\nBoth now resolve per file and promote after override resolution. Because the override path handles every file once any `overrides` entry exists, this affects all warn-severity rules in a project that configures overrides, not only the rules set inside the override block: a strict run that previously exited 0 can now exit 1 on those findings. To keep the previous outcome, set the rule to `off` rather than `warn`, or drop the strict flag for that job. The findings themselves are unchanged; only the exit code is.\n\nThanks to @DeLuke84 for the precise repro.\n\nCloses #2445",
-          "timestamp": "2026-08-27T23:13:15+02:00",
-          "tree_id": "25ac228449682b492e8e57a9748a5966b4c37934",
-          "url": "https://github.com/fallow-rs/fallow/commit/8d53657a9e18fa00f8b8a83337428bf912de8c23"
-        },
-        "date": 1787865579860,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/1080fe084b5a0fbd61e05f808664c82290427cd2"
         },
         "date": 1789536671091,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 478,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1307,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "de90d3109e5eee2bb7729f487c65476a3d0a2df2",
+          "message": "fix(action): surface baseline staleness and propagate the stale-baseline gate in CI (#2674)\n\nThe dead-code baseline staleness warning and the opt-in stale-baseline gate shipped in 3.26.0 were unreachable through the GitHub Action and the GitLab template: both run with `--quiet --format json`, the warning is quiet-suppressed, stderr went to `::debug::`, and the CLI exit code was dropped whenever stdout parsed as JSON.\n\n- dead-code, dupes and health envelopes publish one shared `baseline_staleness` object (health's existing member names plus `current_findings`, `warning` and `gate_trips`); no schema version moves and the `HealthBaselineStaleness` TypeScript name stays as a deprecated alias.\n- The action and the GitLab template read the verdict from that object, never from the exit code, so `fail-on-issues: false` keeps its meaning; a new `fail-on-stale-baseline` input (`FALLOW_FAIL_ON_STALE_BASELINE` on GitLab) fails the job on a tripped gate.\n- On pull requests the primary run is change-scoped, so a second unscoped, report-discarding run judges the baseline whenever the action itself narrowed the run; the advisory lands as `::warning::`, a tripped gate as `::error::`, a stand-down as `::warning::`, and a line in the step summary.\n- Fail open on an older binary or a command without staleness; invalid input combinations are rejected at validation.\n\nFixes #2673",
+          "timestamp": "2026-09-16T18:44:44+02:00",
+          "tree_id": "04ca6836a569a821d7453c67930f0a5ce3c3bdc1",
+          "url": "https://github.com/fallow-rs/fallow/commit/de90d3109e5eee2bb7729f487c65476a3d0a2df2"
+        },
+        "date": 1789577151381,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
