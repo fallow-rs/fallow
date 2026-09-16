@@ -3226,6 +3226,281 @@ assert_issuekind_summary_coverage "github filter-changed"   "$JQ_DIR/filter-chan
 assert_issuekind_vscode_category_coverage "vscode DIAGNOSTIC_CATEGORIES" \
   "$DIR/../../editors/vscode/src/generated/issue-types.ts"
 
+# --- Baseline staleness gate (issue #2673) ---
+
+echo ""
+echo "=== Baseline staleness gate ==="
+
+STALE_WORK=$(mktemp -d)
+STALE_BIN="$STALE_WORK/bin"
+mkdir -p "$STALE_BIN"
+
+# The mock behaves like the real binary on the three things this gate reads:
+# it answers the capability probes, it logs every analysis argv, and it emits an
+# envelope whose `baseline_staleness` reflects whether the run was narrowed.
+cat > "$STALE_BIN/fallow" <<'SH'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [ "$arg" = "--help" ]; then
+    printf 'usage\n--no-type-aware\n'
+    exit 0
+  fi
+done
+if [ "${1:-}" = "report" ]; then
+  printf '{}\n'
+  exit 0
+fi
+printf 'analysis %s\n' "$*" >> "$MOCK_ANALYSIS_LOG"
+scoped=false
+for arg in "$@"; do
+  case "$arg" in
+    --changed-since|--changed-since=*) scoped=true ;;
+  esac
+done
+if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
+  scoped=true
+fi
+if [ "${MOCK_NO_STALENESS:-}" = "1" ]; then
+  printf '{"schema_version":9,"total_issues":0,"baseline":{"entries":8,"matched":3}}\n'
+  exit 0
+fi
+if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ] && [ "$scoped" = "false" ]; then
+  printf 'not json at all\n'
+  exit 2
+fi
+advisory=${MOCK_ADVISORY:-partial}
+entries=${MOCK_ENTRIES:-8}
+matched=${MOCK_MATCHED:-3}
+stale=$((entries - matched))
+findings=${MOCK_FINDINGS:-3}
+if [ "$scoped" = "true" ]; then
+  printf '{"schema_version":9,"total_issues":0,"baseline_staleness":{"baseline_entries":%s,"matched_entries":0,"stale_entries":%s,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}\n' "$entries" "$entries"
+  exit 0
+fi
+gate_trips=false
+if [ "$stale" -gt 0 ]; then gate_trips=true; fi
+stale_flag=false
+if [ "$advisory" != "none" ]; then stale_flag=true; fi
+printf '{"schema_version":9,"total_issues":%s,"baseline_staleness":{"baseline_entries":%s,"matched_entries":%s,"stale_entries":%s,"current_findings":%s,"change_scoped":false,"stale":%s,"warning":"%s","gate_trips":%s}}\n' \
+  "${MOCK_TOTAL_ISSUES:-0}" "$entries" "$matched" "$stale" "$findings" "$stale_flag" "$advisory" "$gate_trips"
+if [ "${MOCK_EXIT_ONE:-}" = "1" ]; then
+  exit 1
+fi
+SH
+chmod +x "$STALE_BIN/fallow"
+
+# Run analyze.sh with the action's environment. Prints stderr plus the workflow
+# commands the script wrote, and records the exit status in STALE_EXIT.
+run_stale_analyze() {
+  local run_dir
+  run_dir=$(mktemp -d "$STALE_WORK/run.XXXXXX")
+  STALE_OUTPUT_FILE="$run_dir/github_output"
+  STALE_ENV_FILE="$run_dir/github_env"
+  STALE_SUMMARY_FILE="$run_dir/step_summary"
+  MOCK_ANALYSIS_LOG="$run_dir/analysis.log"
+  : > "$STALE_OUTPUT_FILE"
+  : > "$STALE_ENV_FILE"
+  : > "$STALE_SUMMARY_FILE"
+  : > "$MOCK_ANALYSIS_LOG"
+  set +e
+  STALE_STDOUT=$(
+    cd "$run_dir" \
+      && PATH="$STALE_BIN:$PATH" \
+      MOCK_ANALYSIS_LOG="$MOCK_ANALYSIS_LOG" \
+      GITHUB_OUTPUT="$STALE_OUTPUT_FILE" \
+      GITHUB_ENV="$STALE_ENV_FILE" \
+      GITHUB_STEP_SUMMARY="$STALE_SUMMARY_FILE" \
+      INPUT_ROOT="." \
+      INPUT_FORMAT="json" \
+      INPUT_ARTIFACTS_DIR="." \
+      env "$@" bash "$SCRIPTS_DIR/analyze.sh" 2>&1
+  )
+  STALE_EXIT=$?
+  set -e
+  STALE_ANALYSIS_LOG=$(cat "$MOCK_ANALYSIS_LOG")
+}
+
+# 1. A partially stale baseline warns even with the gate off.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json"
+assert_contains "$STALE_STDOUT" "::warning::fallow: baseline is partially stale: 5 of 8 entries" \
+  "stale gate: a partially stale baseline warns without the gate"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "stale gate: the advisory alone does not fail the run"
+else
+  fail "stale gate: the advisory alone does not fail the run" "exit ${STALE_EXIT}"
+fi
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_gate_trips=true" \
+  "stale gate: the verdict reaches the step outputs"
+
+# 2. Zero overlap has its own wording.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  MOCK_ADVISORY="zero-overlap" MOCK_MATCHED="0"
+assert_contains "$STALE_STDOUT" "::warning::fallow: baseline has 8 entries but matched nothing this run" \
+  "stale gate: zero overlap keeps its own wording"
+
+# 3. The issue's headline case: nothing left to report, every entry dead, the
+# advisory silent by design, and the gate the only thing that can speak.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  MOCK_ADVISORY="none" MOCK_MATCHED="0" MOCK_FINDINGS="0" \
+  INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" "8 of 8 baseline entries matched nothing this run" \
+  "stale gate: a rotted baseline on a clean project still warns"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed: 8 of 8 entries" \
+  "stale gate: the gate fails the run on a rotted baseline with no findings"
+if [ "$STALE_EXIT" -eq 1 ]; then
+  pass "stale gate: a tripped gate exits 1"
+else
+  fail "stale gate: a tripped gate exits 1" "exit ${STALE_EXIT}"
+fi
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "issues=0" \
+  "stale gate: outputs are published before the gate fails"
+
+# 4. `fail-on-issues` is a different gate and does not switch this one off.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_FAIL_ON_ISSUES="false" INPUT_FAIL_ON_STALE_BASELINE="true"
+if [ "$STALE_EXIT" -eq 1 ]; then
+  pass "stale gate: fail-on-issues false does not disable the stale-baseline gate"
+else
+  fail "stale gate: fail-on-issues false does not disable the stale-baseline gate" "exit ${STALE_EXIT}"
+fi
+
+# 5. A pull-request run is narrowed, so the gate re-runs the comparison unscoped
+# and the second argv carries no narrowing and no writing flag.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_SAVE_BASELINE="baseline.json" INPUT_CHANGED_SINCE="abc123" \
+  INPUT_ISSUE_TYPES="unused-files" INPUT_FAIL_ON_STALE_BASELINE="true"
+GATE_ARGV=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | sed -n '2p')
+assert_contains "$STALE_ANALYSIS_LOG" "--changed-since abc123" \
+  "stale gate: the primary run keeps its PR scoping"
+assert_not_contains "$GATE_ARGV" "--changed-since" \
+  "stale gate: the unscoped re-run drops --changed-since"
+assert_not_contains "$GATE_ARGV" "--save-baseline" \
+  "stale gate: the unscoped re-run never rewrites the baseline"
+assert_not_contains "$GATE_ARGV" "--unused-files" \
+  "stale gate: the unscoped re-run drops the issue-type filter"
+assert_contains "$GATE_ARGV" "--baseline baseline.json" \
+  "stale gate: the unscoped re-run still loads the baseline"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed" \
+  "stale gate: the re-run's verdict fails the pull-request job"
+
+# 6. Without the gate there is no second run to pay for.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123"
+STALE_RUN_COUNT=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^analysis ' || true)
+if [ "$STALE_RUN_COUNT" = "1" ]; then
+  pass "stale gate: a run without the gate analyzes exactly once"
+else
+  fail "stale gate: a run without the gate analyzes exactly once" "ran ${STALE_RUN_COUNT} times"
+fi
+
+# 7. Production mode narrows discovery itself, so no re-run can fix it.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_PRODUCTION="true" \
+  INPUT_FAIL_ON_STALE_BASELINE="true"
+STALE_RUN_COUNT=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^analysis ' || true)
+if [ "$STALE_RUN_COUNT" = "1" ]; then
+  pass "stale gate: production mode skips the re-run instead of paying for it"
+else
+  fail "stale gate: production mode skips the re-run instead of paying for it" "ran ${STALE_RUN_COUNT} times"
+fi
+assert_contains "$STALE_STDOUT" "::warning::fallow: fail-on-stale-baseline stood down" \
+  "stale gate: a stand-down is a warning, never a debug line"
+assert_not_contains "$STALE_STDOUT" "::debug::fallow: fail-on-stale-baseline" \
+  "stale gate: the stand-down never hides in ::debug::"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "stale gate: a stand-down does not fail the run"
+else
+  fail "stale gate: a stand-down does not fail the run" "exit ${STALE_EXIT}"
+fi
+
+# 8. The re-run exits 1 on findings, which is not an error here.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_FAIL_ON_STALE_BASELINE="true" \
+  MOCK_EXIT_ONE="1" MOCK_TOTAL_ISSUES="4"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed" \
+  "stale gate: a re-run that exits 1 on findings still yields its verdict"
+
+# 9. A re-run that produces nothing readable warns and leaves the job green.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_FAIL_ON_STALE_BASELINE="true" \
+  MOCK_GATE_RUN_BROKEN="1"
+assert_contains "$STALE_STDOUT" "did not produce a readable result" \
+  "stale gate: a broken re-run warns"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "stale gate: a broken re-run fails open"
+else
+  fail "stale gate: a broken re-run fails open" "exit ${STALE_EXIT}"
+fi
+
+# 10. A pinned binary older than the envelope field must not fail the job.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_FAIL_ON_STALE_BASELINE="true" MOCK_NO_STALENESS="1"
+assert_contains "$STALE_STDOUT" "A fallow older than 3.27.0 cannot report it" \
+  "stale gate: an old binary warns instead of failing silently"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "stale gate: an old binary fails open"
+else
+  fail "stale gate: an old binary fails open" "exit ${STALE_EXIT}"
+fi
+
+# 11. Commands that report no staleness are rejected at validation time.
+run_stale_analyze INPUT_COMMAND="fix" INPUT_BASELINE="baseline.json" \
+  INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" "reports no baseline staleness" \
+  "stale gate: fix plus the gate is rejected with a reason"
+if [ "$STALE_EXIT" -eq 2 ]; then
+  pass "stale gate: an invalid combination exits 2"
+else
+  fail "stale gate: an invalid combination exits 2" "exit ${STALE_EXIT}"
+fi
+
+# 12. The gate with no baseline to judge is rejected too.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" "has no baseline to judge" \
+  "stale gate: the gate without a baseline is rejected"
+
+# 13. `fix` with a baseline and the gate off stays green and silent.
+run_stale_analyze INPUT_COMMAND="fix" INPUT_BASELINE="baseline.json" \
+  MOCK_NO_STALENESS="1"
+assert_not_contains "$STALE_STDOUT" "baseline" \
+  "stale gate: a command without staleness says nothing about baselines"
+
+# 14. The step summary carries the advisory on every render path, because both
+# preferred paths return early and would otherwise drop it.
+run_stale_summary() {
+  local label=$1
+  shift
+  local run_dir
+  run_dir=$(mktemp -d "$STALE_WORK/summary.XXXXXX")
+  printf '{"schema_version":9,"total_issues":0}\n' > "$run_dir/fallow-results.json"
+  printf '{"body":"### typed body"}\n' > "$run_dir/envelope.json"
+  set +e
+  (
+    cd "$run_dir" \
+      && PATH="$STALE_BIN:$PATH" \
+      MOCK_ANALYSIS_LOG="$run_dir/analysis.log" \
+      GITHUB_STEP_SUMMARY="$run_dir/step_summary" \
+      ACTION_JQ_DIR="$JQ_DIR" \
+      FALLOW_COMMAND="dead-code" \
+      FALLOW_RESULTS_FILE="$run_dir/fallow-results.json" \
+      FALLOW_BASELINE_ENTRIES="8" \
+      FALLOW_BASELINE_STALE_ENTRIES="5" \
+      FALLOW_BASELINE_ADVISORY="partial" \
+      FALLOW_BASELINE_GATE_TRIPS="true" \
+      env "$@" bash "$SCRIPTS_DIR/summary.sh" > /dev/null 2>&1
+  )
+  set -e
+  assert_contains "$(cat "$run_dir/step_summary")" "Baseline is partially stale" \
+    "stale gate: the step summary carries the advisory on the ${label} path"
+}
+
+run_stale_summary "native" HAS_NATIVE_REPORT="true"
+run_stale_summary "typed" HAS_NATIVE_REPORT="false" \
+  FALLOW_PR_COMMENT_ENVELOPE_FILE="envelope.json"
+run_stale_summary "jq fallback" HAS_NATIVE_REPORT="false"
+
+rm -rf "$STALE_WORK"
+
 # --- Summary ---
 
 echo ""

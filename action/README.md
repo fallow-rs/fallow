@@ -16,6 +16,16 @@ GitHub Check Runs are posted from the typed PR decision sidecar against the PR h
 
 Set `comment-layout: gate-only` when the native Check Run is the primary review surface and the PR timeline should stay compact.
 
+### Baselines
+
+A run that loads the `baseline` input reports how much of that baseline still matches. When entries have gone stale the action emits a `::warning::` and repeats it in the job summary, so a baseline cannot rot unnoticed the way it could before 3.27.0, when the same verdict existed on stderr only and `--quiet` removed it.
+
+Set `fail-on-stale-baseline: true` to turn that into a failing job. It is independent of `fail-on-issues`: a baseline whose entries all match nothing while the project itself is clean reports zero issues, which is exactly the case the gate exists for. The verdict comes from the analysis envelope's `baseline_staleness.gate_trips`, not from the CLI exit code, so a findings exit and a gate exit cannot be confused.
+
+On a pull request `auto-changed-since` narrows the analysis, and a narrowed run cannot judge a whole-project baseline. With the gate on, the action then re-runs the baseline comparison once over the whole project, on a warm cache, reading nothing but the staleness verdict from it: that run writes no baseline, no snapshot and no SARIF, and feeds no comment, annotation or summary. When the run is narrowed by something the action cannot remove, such as `production: true`, `workspace`, or scoping passed through `args`, the gate warns that it stood down instead of passing in silence.
+
+The PR comment and inline review do not carry the advisory yet.
+
 ### Bot identity
 
 The markdown comment keeps fallow branding intentionally light. Repository-visible identity such as avatar, bot name, checks, and richer app affordances should come from the GitHub App installation rather than from decorative markdown inside each comment.

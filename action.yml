@@ -43,7 +43,7 @@ inputs:
     required: false
     default: 'false'
   fail-on-issues:
-    description: 'Exit with code 1 if issues are found'
+    description: 'Exit with code 1 if issues are found. This gates on the issue count only: type-aware-require, security-gate and fail-on-stale-baseline each fail the job independently of it.'
     required: false
     default: 'true'
   changed-since:
@@ -59,6 +59,10 @@ inputs:
   save-baseline:
     description: 'Save current results as a baseline file'
     required: false
+  fail-on-stale-baseline:
+    description: 'Fail the job when the loaded baseline has entries that match nothing this run, so a baseline cannot rot unnoticed. On a pull request the action re-runs the baseline comparison unscoped so the gate can still apply; when the run cannot judge the baseline at all (production mode, workspace scoping, issue-type filters) it warns and stands down instead of passing silently. Independent of fail-on-issues.'
+    required: false
+    default: 'false'
   version:
     description: 'Fallow version override. When omitted, the action uses the project package.json fallow dependency spec if present, otherwise latest. The action ref (uses: fallow-rs/fallow@...) and this CLI version are independent; see the README CI section (https://github.com/fallow-rs/fallow#ci) for the resolution order. Pin a current fallow version so Ed25519 + SHA-256 binary verification can run.'
     required: false
@@ -408,6 +412,7 @@ runs:
         GH_REPO: ${{ github.repository }}
         INPUT_BASELINE: ${{ inputs.baseline }}
         INPUT_SAVE_BASELINE: ${{ inputs.save-baseline }}
+        INPUT_FAIL_ON_STALE_BASELINE: ${{ inputs.fail-on-stale-baseline }}
         INPUT_ARGS: ${{ inputs.args }}
         INPUT_DUPES_MODE: ${{ inputs.dupes-mode }}
         INPUT_MIN_TOKENS: ${{ inputs.min-tokens }}
@@ -562,6 +567,10 @@ runs:
         FALLOW_SCOPED_RESULTS_FILE: ${{ inputs.artifacts-dir }}/fallow-results-scoped.json
         FALLOW_CHANGED_FILES_FILE: ${{ inputs.artifacts-dir }}/fallow-changed-files.json
         FALLOW_PR_COMMENT_ENVELOPE_FILE: ${{ inputs.artifacts-dir }}/fallow-pr-comment-envelope.json
+        FALLOW_BASELINE_ADVISORY: ${{ steps.analyze.outputs.baseline_advisory }}
+        FALLOW_BASELINE_STALE_ENTRIES: ${{ steps.analyze.outputs.baseline_stale_entries }}
+        FALLOW_BASELINE_ENTRIES: ${{ steps.analyze.outputs.baseline_entries }}
+        FALLOW_BASELINE_GATE_TRIPS: ${{ steps.analyze.outputs.baseline_gate_trips }}
       run: bash ${{ github.action_path }}/action/scripts/summary.sh
 
     - name: Post review comments

@@ -17,7 +17,9 @@ set -eo pipefail
 # Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
 #   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE,
 #   FALLOW_PR_COMMENT_ENVELOPE_FILE, HAS_NATIVE_REPORT, FALLOW_BIN,
-#   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX
+#   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX,
+#   FALLOW_BASELINE_ENTRIES, FALLOW_BASELINE_STALE_ENTRIES,
+#   FALLOW_BASELINE_ADVISORY, FALLOW_BASELINE_GATE_TRIPS
 
 select_summary_script() {
   case "$FALLOW_COMMAND" in
@@ -121,6 +123,33 @@ append_typed_summary_if_available() {
   echo "$body" >> "$GITHUB_STEP_SUMMARY"
   return 0
 }
+
+# The baseline advisory is written before the render dispatch below, because
+# all three render paths return early and the line must appear on every one of
+# them. Driven by the analyze step's outputs, not by re-reading the envelope,
+# so the two surfaces cannot disagree.
+append_baseline_advisory() {
+  [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
+  [ -n "${FALLOW_BASELINE_ENTRIES:-}" ] || return 0
+  local line=""
+  case "${FALLOW_BASELINE_ADVISORY:-}" in
+    partial)
+      line="> **Baseline is partially stale.** ${FALLOW_BASELINE_STALE_ENTRIES} of ${FALLOW_BASELINE_ENTRIES} saved entries matched nothing this run, so the baseline protects less than what was saved. Re-save it with the \`save-baseline\` input."
+      ;;
+    zero-overlap)
+      line="> **Baseline matched nothing.** All ${FALLOW_BASELINE_ENTRIES} saved entries went unmatched. Paths may have changed, or the baseline was saved elsewhere. Re-save it with the \`save-baseline\` input."
+      ;;
+    *)
+      if [ "${FALLOW_BASELINE_GATE_TRIPS:-}" = "true" ]; then
+        line="> **Baseline has stale entries.** ${FALLOW_BASELINE_STALE_ENTRIES} of ${FALLOW_BASELINE_ENTRIES} saved entries matched nothing this run. The project may be clean, or the baseline may no longer describe it."
+      fi
+      ;;
+  esac
+  [ -n "$line" ] || return 0
+  printf '%s\n\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+}
+
+append_baseline_advisory
 
 if emit_native_summary_if_available; then
   exit 0
