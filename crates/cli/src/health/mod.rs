@@ -628,26 +628,22 @@ fn health_report_context<'a>(
     }
 }
 
-/// The OR of every health exit gate, with each one evaluated before the verdict
-/// is combined so that none of them can swallow another's stderr line.
-///
-/// The baseline gate is why this is not a short-circuiting chain: the score and
-/// findings gates have their condition printed in the report, a stale baseline
-/// has it nowhere, so a run that already fails the findings gate would exit 1
-/// with nothing about the baseline the user explicitly gated on.
-/// The gates a health run evaluated, for the envelope's `gate_outcomes`.
+/// The gates a health run armed, for the envelope's `gate_outcomes`.
 ///
 /// Every entry reads the same predicate the exit path reads, so the published
-/// verdict and the process status cannot disagree. `--report-only` is an
-/// explicit request never to fail, so it leaves each verdict in place and only
-/// clears `enforced`; that is the case a boolean-only shape could not express.
+/// verdict and the process status cannot disagree. `--report-only` returns
+/// `ExitCode::SUCCESS` before any gate is consulted, so it clamps `enforced` to
+/// false on every entry while leaving each verdict in place; that is the case a
+/// boolean-only shape could not express, and the stale-baseline entry is
+/// clamped with the rest rather than reporting the flag it was armed with.
 ///
-/// The object appears only once at least one gate was ARMED by a flag or by
-/// config. A plain `fallow health` run fails on any finding, which is the
-/// command's default rather than a gate a repository asked for, so such a run
-/// stays byte-identical to one produced before this object existed. Once the
-/// object exists it lists every gate the run evaluated, the always-evaluated
-/// ones included, so "which gate failed this run" has a complete answer.
+/// A gate armed by an explicit flag or by config always produces an entry. The
+/// two DEFAULT-rule gates are the exception: `health-findings` fails a plain
+/// `fallow health` run on any finding, which is the command's default rather
+/// than a gate a repository asked for, so it appears only once something else
+/// armed. That keeps an ungated run byte-identical to one produced before this
+/// object existed, and it is why an absent object must be read as "no gate was
+/// asked for" rather than "nothing failed".
 fn health_gate_outcomes(
     result: &HealthResult,
     options: HealthPrintOptions<'_>,
@@ -657,16 +653,23 @@ fn health_gate_outcomes(
     let enforced = !options.gates.report_only;
     let mut gates = fallow_output::GateOutcomes::new();
 
-    if let Some(threshold) = options.gates.min_score
-        && let Some(score) = result.report.health_score.as_ref()
-    {
+    if let Some(threshold) = options.gates.min_score {
+        // `--min-score` implies `--score`, so a missing score means the caller
+        // is a programmatic one that requested the gate without computing what
+        // it compares. Report the stand-down rather than nothing, or "armed"
+        // and "not armed" read identically.
         gates.insert(
             GateName::HealthMinScore,
-            GateOutcome::measured(
-                crate::gates::status_of(score.score < threshold),
-                enforced,
-                score.score,
-                threshold,
+            result.report.health_score.as_ref().map_or_else(
+                || GateOutcome::new(GateStatus::Skipped, false),
+                |score| {
+                    GateOutcome::measured(
+                        crate::gates::status_of(score.score < threshold),
+                        enforced,
+                        score.score,
+                        threshold,
+                    )
+                },
             ),
         );
     }
@@ -680,16 +683,18 @@ fn health_gate_outcomes(
             .count();
         gates.insert(
             GateName::HealthMinSeverity,
-            GateOutcome {
-                status: crate::gates::status_of(reached > 0),
+            GateOutcome::counted(
+                crate::gates::status_of(reached > 0),
                 enforced,
                 #[expect(
                     clippy::cast_precision_loss,
                     reason = "a finding count never approaches the f64 integer limit"
                 )]
-                observed: Some(reached as f64),
-                threshold: None,
-            },
+                {
+                    reached as f64
+                },
+                severity_floor_label(min_sev),
+            ),
         );
     }
 
@@ -703,21 +708,9 @@ fn health_gate_outcomes(
         );
     }
 
-    gates.insert_if(
-        GateName::StaleBaseline,
-        crate::gates::stale_baseline_outcome(
-            result.report.summary.baseline_staleness.as_ref(),
-            options.gates.fail_on_stale_baseline,
-        ),
-    );
-
-    if gates.is_empty() {
-        return None;
-    }
-
-    // Reached only once a gate was armed, so these two never add a key to an
-    // otherwise byte-identical run while still completing the answer for a run
-    // that has the object at all.
+    // Armed by `--runtime-coverage`, so it belongs with the flag-armed gates
+    // rather than behind the default-rule guard below: without this a run whose
+    // only gate is runtime coverage exits 1 and publishes nothing.
     if result.report.runtime_coverage.is_some() {
         gates.insert(
             GateName::HealthRuntimeCoverage,
@@ -727,26 +720,55 @@ fn health_gate_outcomes(
             ),
         );
     }
-    if options.gates.min_severity.is_none() && options.gates.min_score.is_none() {
+
+    gates.insert_if(
+        GateName::StaleBaseline,
+        crate::gates::stale_baseline_outcome(
+            result.report.summary.baseline_staleness.as_ref(),
+            options.gates.fail_on_stale_baseline && enforced,
+        ),
+    );
+
+    if gates.is_empty() {
+        return None;
+    }
+
+    // The default findings rule, reached only once a gate was armed.
+    if options.gates.min_severity.is_none() {
         gates.insert(
             GateName::HealthFindings,
-            GateOutcome::new(
-                crate::gates::status_of(!result.report.findings.is_empty()),
-                enforced,
-            ),
-        );
-    } else if options.gates.min_severity.is_none() {
-        // `--min-score` alone turns the findings branch off, which is what
-        // "complexity findings become informational" means.
-        gates.insert(
-            GateName::HealthFindings,
-            GateOutcome::new(GateStatus::Skipped, false),
+            if options.gates.min_score.is_some() {
+                // `--min-score` alone turns the findings branch off, which is
+                // what "complexity findings become informational" means.
+                GateOutcome::new(GateStatus::Skipped, false)
+            } else {
+                GateOutcome::new(
+                    crate::gates::status_of(!result.report.findings.is_empty()),
+                    enforced,
+                )
+            },
         );
     }
 
     gates.into_option()
 }
 
+/// The wire spelling of a severity floor, for `threshold_label`.
+const fn severity_floor_label(severity: fallow_output::FindingSeverity) -> &'static str {
+    match severity {
+        fallow_output::FindingSeverity::Moderate => "moderate",
+        fallow_output::FindingSeverity::High => "high",
+        fallow_output::FindingSeverity::Critical => "critical",
+    }
+}
+
+/// The OR of every health exit gate, with each one evaluated before the verdict
+/// is combined so that none of them can swallow another's stderr line.
+///
+/// The baseline gate is why this is not a short-circuiting chain: the score and
+/// findings gates have their condition printed in the report, a stale baseline
+/// has it nowhere, so a run that already fails the findings gate would exit 1
+/// with nothing about the baseline the user explicitly gated on.
 fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
     let score = score_gate_failed(result, options);
     let findings = findings_gate_failed(result, options);

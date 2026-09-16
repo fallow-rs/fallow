@@ -251,19 +251,7 @@ fn finish_combined_run(
         Err(code) => return code,
     };
 
-    let require_complete = check_result
-        .map(|result| result.config.type_aware.require)
-        .or_else(|| health_result.map(|result| result.config.type_aware.require))
-        == Some(fallow_config::TypeAwareRequire::Complete);
-    if require_complete
-        && check_result
-            .and_then(|result| result.type_aware_meta.as_ref())
-            .or_else(|| health_result.and_then(|result| result.type_aware_meta.as_ref()))
-            .and_then(|meta| meta.identity.as_ref())
-            .is_some_and(|identity| {
-                identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
-            })
-    {
+    if super::combined::output::combined_type_aware_gate_failed(check_result, health_result) {
         max_exit = max_exit.max(1);
     }
 

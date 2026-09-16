@@ -192,7 +192,10 @@ fn build_dupes_config(
 /// Check whether duplication percentage exceeds the configured threshold.
 ///
 /// Returns `true` if the threshold is positive and the duplication percentage exceeds it.
-fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
+/// The duplication threshold rule, shared by the standalone exit path, the
+/// combined exit path and the `gate_outcomes` entry, so one comparison decides
+/// all three. A threshold of zero is the CLI's spelling of "no limit".
+pub fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
     threshold > 0.0 && duplication_percentage > threshold
 }
 

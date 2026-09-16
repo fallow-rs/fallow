@@ -938,20 +938,80 @@ fn emit_combined_json_output(
     }
 }
 
-/// The gates a combined run evaluated, merged into one root-level object.
+/// The combined run's type-aware completeness rule, shared by the exit path and
+/// the `gate_outcomes` entry.
+///
+/// Deliberately not [`crate::report::ci::required_type_aware_incomplete`], which
+/// the standalone commands use: that one keys on `meta.required_completeness`
+/// and also fails on a degraded query, while combined mode keys on the resolved
+/// config and only on `identity.completeness`. Two rules under one gate name
+/// was the drift this object exists to remove, so combined mode gets one
+/// function and both of its callers read it.
+///
+/// The meta is selected `check` first and `health` second on both sides, so a
+/// combined run whose check section is absent cannot enforce a gate it
+/// publishes nothing for.
+pub fn combined_type_aware_gate_failed(
+    check_result: Option<&CheckResult>,
+    health_result: Option<&crate::health::HealthResult>,
+) -> bool {
+    let require_complete = check_result
+        .map(|result| result.config.type_aware.require)
+        .or_else(|| health_result.map(|result| result.config.type_aware.require))
+        == Some(fallow_config::TypeAwareRequire::Complete);
+    require_complete
+        && check_result
+            .and_then(|result| result.type_aware_meta.as_ref())
+            .or_else(|| health_result.and_then(|result| result.type_aware_meta.as_ref()))
+            .and_then(|meta| meta.identity.as_ref())
+            .is_some_and(|identity| {
+                identity.completeness != fallow_types::semantic::SemanticCompleteness::Complete
+            })
+}
+
+/// The gates a combined run armed, merged into one root-level object.
 ///
 /// Root rather than per-section, matching where the combined envelope already
 /// carries `workspace_diagnostics`, so a consumer reads one place instead of
 /// three and the `.check.regression` versus `.regression` split stops mattering
 /// for the verdict.
+///
+/// `enforced` is not the standalone commands' answer. The combined machine
+/// renderers collapse every gate to exit 0 except the stale-baseline gate and
+/// the regression gate, which is stated in
+/// [`machine_combined_code_with_stale_baseline_gate`] and holds in `--format
+/// json`, `sarif`, `codeclimate` and the GitHub formats. This object is emitted
+/// on the JSON path only, so every other gate here publishes its verdict with
+/// `enforced: false` rather than claiming an exit it cannot produce.
+///
+/// Combined mode accepts none of the health gate flags (`--min-score`,
+/// `--min-severity`, `--threshold`), so the health sub-analysis arms nothing
+/// here; the gates below are the ones combined mode can actually arm.
 fn combined_gate_outcomes(
     input: &CombinedJsonPrintInput<'_>,
 ) -> Option<fallow_output::GateOutcomes> {
     let mut gates = fallow_output::GateOutcomes::new();
     if let Some(result) = input.check_result {
         gates.insert_if(
+            fallow_output::GateName::ErrorSeverityFindings,
+            crate::gates::error_severity_outcome(
+                result.fail_on_issues,
+                result.fail_on_issues
+                    && crate::check::rules::has_error_severity_issues(
+                        &result.results,
+                        &crate::check::effective_check_rules(result),
+                        Some(&result.config),
+                        result.fail_on_issues,
+                    ),
+            )
+            .map(|outcome| fallow_output::GateOutcome {
+                enforced: false,
+                ..outcome
+            }),
+        );
+        gates.insert_if(
             fallow_output::GateName::Regression,
-            crate::gates::regression_outcome(result.regression.as_ref()),
+            crate::gates::regression_outcome(result.regression.as_ref(), true),
         );
         gates.insert_if(
             fallow_output::GateName::StaleBaseline,
@@ -964,11 +1024,16 @@ fn combined_gate_outcomes(
                 result.fail_on_stale_baseline,
             ),
         );
-        gates.insert_if(
+    }
+    if combined_type_aware_requested(input) {
+        gates.insert(
             fallow_output::GateName::TypeAwareRequire,
-            crate::gates::type_aware_outcome(
-                result.config.type_aware.require,
-                result.type_aware_meta.as_ref(),
+            fallow_output::GateOutcome::new(
+                crate::gates::status_of(combined_type_aware_gate_failed(
+                    input.check_result,
+                    input.health_result,
+                )),
+                true,
             ),
         );
     }
@@ -978,12 +1043,25 @@ fn combined_gate_outcomes(
             crate::gates::duplication_threshold_outcome(
                 result.threshold,
                 result.report.stats.duplication_percentage,
-                result.threshold > 0.0
-                    && result.report.stats.duplication_percentage > result.threshold,
+                false,
             ),
         );
     }
     gates.into_option()
+}
+
+/// Whether the combined run asked for the type-aware completeness gate at all,
+/// read from the same config the exit path resolves it from.
+fn combined_type_aware_requested(input: &CombinedJsonPrintInput<'_>) -> bool {
+    input
+        .check_result
+        .map(|result| result.config.type_aware.require)
+        .or_else(|| {
+            input
+                .health_result
+                .map(|result| result.config.type_aware.require)
+        })
+        == Some(fallow_config::TypeAwareRequire::Complete)
 }
 
 fn check_json_extras_for_combined(result: &CheckResult) -> fallow_api::CheckJsonExtraOutputs {

@@ -510,9 +510,11 @@ struct Cli {
     /// Exit with code 1 if a loaded --baseline has entries that match nothing in this run.
     ///
     /// Stricter than the default advisory warning: any stale entry fails, not
-    /// just a quarter of the baseline. Applies in every output format, because
-    /// the verdict is the exit code plus one stderr line and no report envelope
-    /// changes. Inert when no baseline is loaded, on runs narrowed to part of
+    /// just a quarter of the baseline. Applies in every output format. The
+    /// verdict reaches a machine consumer as `gate_outcomes["stale-baseline"]`,
+    /// which is published with or without this flag; the flag decides only
+    /// whether that entry is `enforced`, and the exit code plus one stderr
+    /// line. Inert when no baseline is loaded, on runs narrowed to part of
     /// the project (including production mode), which cannot judge a
     /// whole-project baseline, and under `health --report-only`, which never
     /// fails a run; such a run prints why it stood down instead of passing

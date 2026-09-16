@@ -8,6 +8,22 @@ pub enum Tolerance {
 }
 
 impl Tolerance {
+    /// The tolerance as a plain number, in whatever unit the variant names.
+    ///
+    /// The unit lives beside it as `regression.tolerance_kind`, so a consumer
+    /// reading the number alone must not assume percent or count.
+    #[must_use]
+    pub fn as_f64(&self) -> f64 {
+        match *self {
+            Self::Percentage(percent) => percent,
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "an issue-count tolerance never approaches the f64 integer limit"
+            )]
+            Self::Absolute(count) => count as f64,
+        }
+    }
+
     /// Parse a tolerance string: `"2%"` for percentage, `"5"` for absolute.
     /// Default when no value is given: `Absolute(0)` (zero tolerance).
     ///

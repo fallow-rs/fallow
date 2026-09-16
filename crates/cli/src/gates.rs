@@ -40,14 +40,45 @@ pub const fn status_of(failed: bool) -> GateStatus {
 /// as a pass would assert a judgement nothing made.
 pub fn regression_outcome(
     outcome: Option<&crate::regression::RegressionOutcome>,
+    enforced: bool,
 ) -> Option<GateOutcome> {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "issue counts never approach the f64 integer limit"
+    )]
+    fn delta(baseline: usize, current: usize) -> f64 {
+        current as f64 - baseline as f64
+    }
+
     let outcome = outcome?;
-    let status = match outcome {
-        crate::regression::RegressionOutcome::Pass { .. } => GateStatus::Pass,
-        crate::regression::RegressionOutcome::Exceeded { .. } => GateStatus::Fail,
-        crate::regression::RegressionOutcome::Skipped { .. } => GateStatus::Skipped,
-    };
-    Some(GateOutcome::new(status, true))
+    Some(match outcome {
+        crate::regression::RegressionOutcome::Pass {
+            baseline_total,
+            current_total,
+        } => GateOutcome {
+            status: GateStatus::Pass,
+            enforced,
+            observed: Some(delta(*baseline_total, *current_total)),
+            // A pass records no tolerance, matching `regression.tolerance`,
+            // which is null on the same outcome.
+            threshold: None,
+            threshold_label: None,
+        },
+        crate::regression::RegressionOutcome::Exceeded {
+            baseline_total,
+            current_total,
+            tolerance,
+            ..
+        } => GateOutcome::measured(
+            GateStatus::Fail,
+            enforced,
+            delta(*baseline_total, *current_total),
+            tolerance.as_f64(),
+        ),
+        crate::regression::RegressionOutcome::Skipped { .. } => {
+            GateOutcome::new(GateStatus::Skipped, enforced)
+        }
+    })
 }
 
 /// The stale-baseline gate's outcome, `None` when no baseline was loaded.
@@ -106,14 +137,17 @@ pub const fn error_severity_outcome(
 pub fn duplication_threshold_outcome(
     threshold: f64,
     duplication_percentage: f64,
-    exceeded: bool,
+    enforced: bool,
 ) -> Option<GateOutcome> {
     if threshold <= 0.0 {
         return None;
     }
     Some(GateOutcome::measured(
-        status_of(exceeded),
-        true,
+        status_of(crate::dupes::exceeds_threshold(
+            threshold,
+            duplication_percentage,
+        )),
+        enforced,
         duplication_percentage,
         threshold,
     ))
@@ -137,7 +171,10 @@ pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> 
         GateName::ErrorSeverityFindings,
         error_severity_outcome(input.fail_on_issues, input.has_error_severity),
     );
-    gates.insert_if(GateName::Regression, regression_outcome(input.regression));
+    gates.insert_if(
+        GateName::Regression,
+        regression_outcome(input.regression, true),
+    );
     gates.insert_if(
         GateName::StaleBaseline,
         stale_baseline_outcome(input.baseline_staleness, input.fail_on_stale_baseline),
@@ -228,7 +265,7 @@ mod tests {
 
     #[test]
     fn a_zero_threshold_arms_no_duplication_gate() {
-        assert!(duplication_threshold_outcome(0.0, 100.0, false).is_none());
+        assert!(duplication_threshold_outcome(0.0, 100.0, true).is_none());
         let outcome = duplication_threshold_outcome(5.0, 100.0, true).expect("gate armed");
         assert_eq!(outcome.status, GateStatus::Fail);
         assert_eq!(outcome.observed, Some(100.0));
@@ -237,9 +274,12 @@ mod tests {
 
     #[test]
     fn a_skipped_regression_comparison_is_not_a_pass() {
-        let outcome = regression_outcome(Some(&crate::regression::RegressionOutcome::Skipped {
-            reason: "changed-since",
-        }))
+        let outcome = regression_outcome(
+            Some(&crate::regression::RegressionOutcome::Skipped {
+                reason: "changed-since",
+            }),
+            true,
+        )
         .expect("comparison ran");
         assert_eq!(outcome.status, GateStatus::Skipped);
     }

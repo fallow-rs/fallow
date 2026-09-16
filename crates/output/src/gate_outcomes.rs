@@ -112,13 +112,18 @@ pub enum GateStatus {
 /// One gate's verdict on one run.
 ///
 /// `status` and `enforced` answer different questions and legitimately
-/// disagree. `status` is what the rule concluded; `enforced` is whether this
-/// run would exit non-zero because of it. A `health --report-only` run is an
-/// explicit request never to fail, so a failing gate there reports
-/// `status: fail` with `enforced: false`, and a stale-baseline verdict
-/// published without `--fail-on-stale-baseline` reports the same pair. Gate on
-/// `enforced` to decide whether a build should fail; read `status` to decide
-/// what to say about it.
+/// disagree. `status` is what the rule concluded; `enforced` is whether a
+/// `fail` from this gate would make the run exit non-zero. A
+/// `health --report-only` run is an explicit request never to fail, so a
+/// failing gate there reports `status: fail` with `enforced: false`, and a
+/// stale-baseline verdict published without `--fail-on-stale-baseline` reports
+/// the same pair.
+///
+/// **A gate fails the build when `status` is `fail` AND `enforced` is true.**
+/// Neither member decides it alone: `enforced` is true on every armed gate,
+/// including the ones that passed, so gating on it by itself fails every run
+/// that armed anything. Read `status` on its own to decide what to say, and
+/// remember that `warn` and `skipped` are neither a pass nor a failure.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GateOutcome {
@@ -138,6 +143,12 @@ pub struct GateOutcome {
     /// Absent for gates that compare no number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f64>,
+    /// The named limit the gate compared against, for a gate whose threshold is
+    /// not a number. `health-min-severity` sets it to the severity floor
+    /// (`moderate`, `high` or `critical`) so its `observed` count is
+    /// recoverable from the entry alone; every other gate leaves it absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_label: Option<&'static str>,
 }
 
 impl GateOutcome {
@@ -149,6 +160,7 @@ impl GateOutcome {
             enforced,
             observed: None,
             threshold: None,
+            threshold_label: None,
         }
     }
 
@@ -165,6 +177,24 @@ impl GateOutcome {
             enforced,
             observed: Some(observed),
             threshold: Some(threshold),
+            threshold_label: None,
+        }
+    }
+
+    /// A gate that counted `observed` items at or above a named floor.
+    #[must_use]
+    pub const fn counted(
+        status: GateStatus,
+        enforced: bool,
+        observed: f64,
+        threshold_label: &'static str,
+    ) -> Self {
+        Self {
+            status,
+            enforced,
+            observed: Some(observed),
+            threshold: None,
+            threshold_label: Some(threshold_label),
         }
     }
 
@@ -175,12 +205,25 @@ impl GateOutcome {
     }
 }
 
-/// Every gate a run evaluated, keyed by name.
+/// Every gate a run ARMED, keyed by name.
 ///
-/// Absent from an envelope whenever it is empty, so a run that evaluated no
-/// gate is byte-identical to one produced before this object existed. An empty
-/// object is never emitted: it would assert that gates were evaluated and none
-/// tripped, which is a different and false claim.
+/// Armed, not evaluated: a gate is armed by a flag or by config, never merely
+/// because the rule behind it exists. Fallow's default severity rules fail a
+/// run with no flag at all, so a `dead-code` run can exit 1 carrying no object
+/// whatsoever. Read an absent object as "no gate was asked for", never as
+/// "nothing failed".
+///
+/// Absent from an envelope whenever it is empty, so a run that armed no gate is
+/// byte-identical to one produced before this object existed. An empty object
+/// is never emitted: it would assert that gates were armed and none tripped,
+/// which is a different and false claim.
+///
+/// The names this build can emit are `error-severity-findings`, `regression`,
+/// `stale-baseline`, `duplication-threshold`, `health-min-score`,
+/// `health-min-severity`, `health-findings`, `health-coverage-gaps`,
+/// `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`
+/// and `type-aware-require`. The set is OPEN: a name a consumer does not
+/// recognise means "some gate", not an error.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]

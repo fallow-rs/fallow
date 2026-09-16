@@ -193,6 +193,12 @@ fn the_regression_entry_agrees_with_the_regression_object_and_the_exit_code() {
     let exceeded = envelope["regression"]["exceeded"]
         .as_bool()
         .expect("the regression object is published");
+    assert!(
+        exceeded,
+        "the fixture grew from 1 unused file to 5, so the gate must have tripped: {}",
+        envelope["regression"]
+    );
+    assert_eq!(output.code, 1, "and the run must fail: {}", output.stderr);
     let entry = gate(&envelope, "regression");
     assert_eq!(
         entry["status"],
@@ -311,46 +317,104 @@ fn the_health_severity_entry_appears_and_agrees_with_the_exit_code() {
     ]);
     let envelope = parse_json(&output);
     let entry = gate(&envelope, "health-min-severity");
-    let failed = entry["status"] == "fail";
     assert_eq!(
-        output.code,
-        i32::from(failed),
+        entry["status"], "fail",
+        "the fixture holds a critical-severity finding: {}",
+        envelope["summary"]
+    );
+    assert_eq!(
+        output.code, 1,
         "the published verdict and the process status agree: {}",
         output.stderr
     );
+    assert_eq!(
+        entry["threshold_label"], "critical",
+        "the floor is recoverable from the entry alone"
+    );
     assert!(
-        entry["observed"].is_number(),
+        entry["observed"].as_f64().is_some_and(|count| count >= 1.0),
         "the entry reports how many findings reached the floor"
     );
 }
 
-/// `--report-only` is an explicit request never to fail. The verdict still has
-/// to be published, or the flag silently removes the only channel a consumer
-/// has; `enforced` is what keeps the two facts apart.
+/// `--report-only` is an explicit request never to fail, and it returns before
+/// any gate is consulted. The verdict still has to be published, or the flag
+/// silently removes the only channel a consumer has, and every entry has to be
+/// unenforced, or a job following the published contract fails a green build
+/// whose own stderr says the gate stood down.
+///
+/// The gate has to be ARMED for this to mean anything: `--report-only` is
+/// mutually exclusive with `--min-score` and `--min-severity`, so a bare
+/// `--report-only` run arms nothing and emits no object at all. A rotted
+/// baseline is the one gate that composes with it.
 #[test]
-fn report_only_publishes_the_verdict_and_enforces_nothing() {
+fn report_only_publishes_every_verdict_and_enforces_none() {
     let project = complex_project();
-    let root = root_arg(&project);
-    let output = run(&[
+    let root = project.path();
+    let baseline = root.join("health-baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
         "health",
         "--root",
-        root,
+        root.to_str().expect("utf8"),
         "--format",
         "json",
         "--quiet",
+        "--complexity",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a health baseline should not error: {}",
+        saved.stderr
+    );
+
+    // Remove the findings the baseline recorded, so every entry goes stale.
+    std::fs::write(
+        root.join("src/complex.ts"),
+        "export const classify = (): string => 'none';\n",
+    )
+    .expect("simplify the project");
+
+    let output = run(&[
+        "health",
+        "--root",
+        root.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+        "--complexity",
+        "--baseline",
+        baseline_arg,
+        "--fail-on-stale-baseline",
         "--report-only",
     ]);
     assert_eq!(
         output.code, 0,
-        "--report-only never fails: {}",
+        "--report-only never fails, whatever the gate concluded: {}",
         output.stderr
     );
     let envelope = parse_json(&output);
-    if let Some(entry) = envelope["gate_outcomes"].get("health-findings") {
+    let entry = gate(&envelope, "stale-baseline");
+    assert_eq!(
+        entry["status"], "fail",
+        "the verdict is published rather than hidden"
+    );
+    assert_eq!(
+        entry["enforced"],
+        Value::Bool(false),
+        "a run told never to fail enforces nothing, so a consumer gating on \
+         `status == fail && enforced` cannot fail this green build"
+    );
+    for (name, outcome) in envelope["gate_outcomes"]
+        .as_object()
+        .expect("the object is present")
+    {
         assert_eq!(
-            entry["enforced"],
+            outcome["enforced"],
             Value::Bool(false),
-            "a run told never to fail enforces nothing"
+            "no entry escapes the --report-only clamp: {name}"
         );
     }
 }
@@ -632,4 +696,157 @@ fn report_from_states_the_verdict_and_still_exits_zero() {
             rendered.stdout
         );
     }
+}
+
+/// The combined machine renderers collapse every gate but stale-baseline and
+/// regression to exit 0. An entry claiming `enforced: true` on that path states
+/// an exit the run cannot produce, which is the exact disagreement this object
+/// was added to remove.
+#[test]
+fn the_combined_json_path_does_not_claim_an_exit_it_cannot_produce() {
+    let project = cloned_project();
+    let root = root_arg(&project);
+    let output = run(&[
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--dupes-threshold",
+        "1",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "the combined JSON path has never exited non-zero for duplication: {}",
+        output.stderr
+    );
+    let combined = parse_json(&output);
+    let entry = gate(&combined, "duplication-threshold");
+    assert_eq!(entry["status"], "fail", "the threshold was still exceeded");
+    assert_eq!(
+        entry["enforced"],
+        Value::Bool(false),
+        "and the entry says so, so a consumer gating on `status == fail && enforced` \
+         cannot fail this passing run"
+    );
+
+    // The standalone command does enforce the same gate, so the two differ in
+    // `enforced` and agree on `status`.
+    let standalone = run(&[
+        "dupes",
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--threshold",
+        "1",
+    ]);
+    assert_eq!(standalone.code, 1, "{}", standalone.stderr);
+    let standalone_envelope = parse_json(&standalone);
+    let standalone_entry = gate(&standalone_envelope, "duplication-threshold");
+    assert_eq!(standalone_entry["status"], entry["status"]);
+    assert_eq!(standalone_entry["enforced"], Value::Bool(true));
+}
+
+/// One envelope must not produce two surfaces that state opposite verdicts. The
+/// pull-request comment is the one a reviewer reads, and it used to assert a
+/// passing quality gate while the job summary rendered from the same file said
+/// a gate had failed.
+#[test]
+fn the_pull_request_comment_carries_the_same_verdict_as_the_job_summary() {
+    let project = orphan_project(1);
+    let root = project.path();
+    let baseline = root.join("regression.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    save_regression_baseline(root, baseline_arg);
+    for index in 1..5 {
+        std::fs::write(
+            root.join(format!("src/orphan{index}.ts")),
+            format!("export const orphan{index} = (): number => {index};\n"),
+        )
+        .expect("more orphans");
+    }
+    let produced = run(&[
+        "dead-code",
+        "--root",
+        root.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+        "--fail-on-regression",
+        "--tolerance",
+        "0",
+        "--regression-baseline",
+        baseline_arg,
+    ]);
+    let saved = root.join("results.json");
+    std::fs::write(&saved, &produced.stdout).expect("save the envelope");
+
+    for format in [
+        "github-summary",
+        "github-annotations",
+        "pr-comment-github",
+        "pr-comment-gitlab",
+    ] {
+        let rendered = run(&[
+            "report",
+            "--from",
+            saved.to_str().expect("utf8"),
+            "--root",
+            root.to_str().expect("utf8"),
+            "--quiet",
+            "--format",
+            format,
+        ]);
+        assert_eq!(
+            rendered.code, 0,
+            "every render exits 0: {}",
+            rendered.stderr
+        );
+        assert!(
+            rendered.stdout.contains("Gates failed: regression"),
+            "{format} states the verdict the producing run reached: {}",
+            rendered.stdout
+        );
+    }
+}
+
+/// The annotations stream is capped by the consumer (`head -n "$MAX"` in the
+/// action), so a verdict appended after the findings is the first thing a noisy
+/// run drops.
+#[test]
+fn the_annotation_verdict_comes_before_the_findings() {
+    let project = orphan_project(6);
+    let root = project.path();
+    let output = run(&[
+        "dead-code",
+        "--root",
+        root.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+        "--fail-on-issues",
+    ]);
+    let saved = root.join("results.json");
+    std::fs::write(&saved, &output.stdout).expect("save the envelope");
+    let rendered = run(&[
+        "report",
+        "--from",
+        saved.to_str().expect("utf8"),
+        "--root",
+        root.to_str().expect("utf8"),
+        "--quiet",
+        "--format",
+        "github-annotations",
+    ]);
+    let first = rendered
+        .stdout
+        .lines()
+        .next()
+        .expect("annotations rendered");
+    assert!(
+        first.starts_with("::notice::Fallow: Gates"),
+        "the verdict is the first line, so a cap cannot drop it: {first}"
+    );
 }

@@ -205,10 +205,13 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
     pub summary: Summary,
     /// New-vs-inherited attribution of findings against the base.
     pub attribution: Attribution,
-    /// Every gate this run evaluated, keyed by name, absent when it evaluated
-    /// none. Each entry is the same rule that decides the exit code, so a CI
-    /// integration reads `enforced` plus `status` instead of guessing from a
-    /// process status it usually cannot see. See [`crate::GateOutcomes`].
+    /// Every gate this run ARMED, keyed by name, absent when it armed none.
+    /// Each entry is the same rule that decides the exit code, so a CI
+    /// integration reads the verdict instead of guessing from a process status
+    /// it usually cannot see. A gate fails the build when `status` is `fail`
+    /// AND `enforced` is true. Armed, not evaluated: fallow's default severity
+    /// rules fail a run with no flag at all, so an absent object means "no gate
+    /// was asked for", never "nothing failed". See [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
     /// `_meta` block with metric / rule definitions, when `--explain` was
@@ -254,10 +257,13 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     pub version: ToolVersion,
     /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
-    /// Every gate this run evaluated, keyed by name, absent when it evaluated
-    /// none. Each entry is the same rule that decides the exit code, so a CI
-    /// integration reads `enforced` plus `status` instead of guessing from a
-    /// process status it usually cannot see. See [`crate::GateOutcomes`].
+    /// Every gate this run ARMED, keyed by name, absent when it armed none.
+    /// Each entry is the same rule that decides the exit code, so a CI
+    /// integration reads the verdict instead of guessing from a process status
+    /// it usually cannot see. A gate fails the build when `status` is `fail`
+    /// AND `enforced` is true. Armed, not evaluated: fallow's default severity
+    /// rules fail a run with no flag at all, so an absent object means "no gate
+    /// was asked for", never "nothing failed". See [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
     /// Per-section `_meta` blocks, when `--explain` was passed.
