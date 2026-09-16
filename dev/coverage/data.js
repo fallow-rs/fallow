@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789507822119,
+  "lastUpdate": 1789517782267,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "4e21f86a386ceae6a2a9dce0ebdd0607e7c2e33d",
-          "message": "fix(health): stop a coverage map from lowering scores it never measured (#2458)\n\nA function whose file tests reach, and which no record in the coverage map\ncould be attributed to, scored as though it were fully covered, while the same\nfunction without a coverage map kept the static estimate. Passing real coverage\ndata could take a function under `--max-crap` that failed the gate without it.\nBoth paths now use the same estimate, so a map only moves a score for a\nfunction it actually measured.\n\nThe summary also reports how much of the coverage file joined. A map written\nfor a different root, a container path prefix, or an older checkout used to\nread exactly like code with no tests. `istanbul_files_matched` and\n`istanbul_files_total` separate the two, and the human report adds one line\nwhen they differ.\n\nCloses #2453\nCloses #2455",
-          "timestamp": "2026-08-30T10:40:07+02:00",
-          "tree_id": "71a6cbf7cc170e0f2a026b3ddb58282a0f31a86c",
-          "url": "https://github.com/fallow-rs/fallow/commit/4e21f86a386ceae6a2a9dce0ebdd0607e7c2e33d"
-        },
-        "date": 1788079777847,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/4f3bd9720ca6b22c8547adb7f1d225f57fc502d4"
         },
         "date": 1789507817857,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "601d8ee39a0f0211a85dc522101058f60cda1484",
+          "message": "chore: advance the schema policy baseline to v3.26.0",
+          "timestamp": "2026-09-16T02:09:30+02:00",
+          "tree_id": "96f2462287f3c7ac8efa8097502153e3febd26cf",
+          "url": "https://github.com/fallow-rs/fallow/commit/601d8ee39a0f0211a85dc522101058f60cda1484"
+        },
+        "date": 1789517777277,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
