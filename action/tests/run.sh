@@ -3251,6 +3251,9 @@ if [ "${1:-}" = "report" ]; then
   exit 0
 fi
 printf 'analysis %s\n' "$*" >> "$MOCK_ANALYSIS_LOG"
+if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
+  printf 'diff_file=set\n' >> "$MOCK_ANALYSIS_LOG"
+fi
 scoped=false
 for arg in "$@"; do
   case "$arg" in
@@ -3369,7 +3372,7 @@ fi
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
   INPUT_SAVE_BASELINE="baseline.json" INPUT_CHANGED_SINCE="abc123" \
   INPUT_ISSUE_TYPES="unused-files" INPUT_FAIL_ON_STALE_BASELINE="true"
-GATE_ARGV=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | sed -n '2p')
+GATE_ARGV=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep '^analysis ' | sed -n '2p')
 assert_contains "$STALE_ANALYSIS_LOG" "--changed-since abc123" \
   "stale gate: the primary run keeps its PR scoping"
 assert_not_contains "$GATE_ARGV" "--changed-since" \
@@ -3383,14 +3386,30 @@ assert_contains "$GATE_ARGV" "--baseline baseline.json" \
 assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed" \
   "stale gate: the re-run's verdict fails the pull-request job"
 
-# 6. Without the gate there is no second run to pay for.
+# 6. The advisory is not gated behind the input: a pull-request run re-reads the
+# baseline unscoped so the warning reaches a job that asked for no gate. This is
+# the #2627 complaint, which a gate-conditional re-read would have left open for
+# every repository that runs the action on pull requests only.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
   INPUT_CHANGED_SINCE="abc123"
 STALE_RUN_COUNT=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^analysis ' || true)
-if [ "$STALE_RUN_COUNT" = "1" ]; then
-  pass "stale gate: a run without the gate analyzes exactly once"
+if [ "$STALE_RUN_COUNT" = "2" ]; then
+  pass "stale gate: a scoped run re-reads the baseline even with the gate off"
 else
-  fail "stale gate: a run without the gate analyzes exactly once" "ran ${STALE_RUN_COUNT} times"
+  fail "stale gate: a scoped run re-reads the baseline even with the gate off" "ran ${STALE_RUN_COUNT} times"
+fi
+assert_contains "$STALE_STDOUT" "::warning::fallow: baseline is partially stale: 5 of 8 entries" \
+  "stale gate: the advisory reaches a pull-request run with no gate"
+assert_not_contains "$STALE_STDOUT" "::error::" \
+  "stale gate: with the gate off the advisory never fails the job"
+
+# 6b. An unscoped run has nothing to re-read, so it still analyzes once.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json"
+STALE_RUN_COUNT=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^analysis ' || true)
+if [ "$STALE_RUN_COUNT" = "1" ]; then
+  pass "stale gate: an unscoped run analyzes exactly once"
+else
+  fail "stale gate: an unscoped run analyzes exactly once" "ran ${STALE_RUN_COUNT} times"
 fi
 
 # 7. Production mode narrows discovery itself, so no re-run can fix it.
@@ -3403,9 +3422,11 @@ if [ "$STALE_RUN_COUNT" = "1" ]; then
 else
   fail "stale gate: production mode skips the re-run instead of paying for it" "ran ${STALE_RUN_COUNT} times"
 fi
-assert_contains "$STALE_STDOUT" "::warning::fallow: fail-on-stale-baseline stood down" \
+assert_contains "$STALE_STDOUT" "::warning::fallow: baseline staleness could not be judged" \
   "stale gate: a stand-down is a warning, never a debug line"
-assert_not_contains "$STALE_STDOUT" "::debug::fallow: fail-on-stale-baseline" \
+assert_contains "$STALE_STDOUT" "fail-on-stale-baseline stood down." \
+  "stale gate: the stand-down names the gate when the gate was asked for"
+assert_not_contains "$STALE_STDOUT" "::debug::fallow: baseline staleness" \
   "stale gate: the stand-down never hides in ::debug::"
 if [ "$STALE_EXIT" -eq 0 ]; then
   pass "stale gate: a stand-down does not fail the run"
@@ -3424,8 +3445,8 @@ assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed" \
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
   INPUT_CHANGED_SINCE="abc123" INPUT_FAIL_ON_STALE_BASELINE="true" \
   MOCK_GATE_RUN_BROKEN="1"
-assert_contains "$STALE_STDOUT" "did not produce a readable result" \
-  "stale gate: a broken re-run warns"
+assert_contains "$STALE_STDOUT" "produced no readable result" \
+  "stale gate: a broken re-read warns"
 if [ "$STALE_EXIT" -eq 0 ]; then
   pass "stale gate: a broken re-run fails open"
 else
@@ -3435,7 +3456,7 @@ fi
 # 10. A pinned binary older than the envelope field must not fail the job.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
   INPUT_FAIL_ON_STALE_BASELINE="true" MOCK_NO_STALENESS="1"
-assert_contains "$STALE_STDOUT" "A fallow older than 3.27.0 cannot report it" \
+assert_contains "$STALE_STDOUT" "A fallow that predates this feature cannot report it" \
   "stale gate: an old binary warns instead of failing silently"
 if [ "$STALE_EXIT" -eq 0 ]; then
   pass "stale gate: an old binary fails open"
@@ -3464,6 +3485,42 @@ run_stale_analyze INPUT_COMMAND="fix" INPUT_BASELINE="baseline.json" \
   MOCK_NO_STALENESS="1"
 assert_not_contains "$STALE_STDOUT" "baseline" \
   "stale gate: a command without staleness says nothing about baselines"
+
+# 13b. Diff scoping reaches the CLI through FALLOW_DIFF_FILE, not argv, so the
+# re-read must clear it from the child environment. Without this pin every other
+# assertion would still pass if `env -u` were dropped.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_FAIL_ON_STALE_BASELINE="true" FALLOW_DIFF_FILE="/tmp/does-not-matter.diff"
+STALE_DIFF_LINES=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^diff_file=set' || true)
+assert_contains "$STALE_ANALYSIS_LOG" "diff_file=set" \
+  "stale gate: the primary run keeps the diff scoping it was given"
+if [ "$STALE_DIFF_LINES" = "1" ]; then
+  pass "stale gate: the unscoped re-read runs with FALLOW_DIFF_FILE cleared"
+else
+  fail "stale gate: the unscoped re-read runs with FALLOW_DIFF_FILE cleared" \
+    "saw ${STALE_DIFF_LINES} invocations with the variable set"
+fi
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed" \
+  "stale gate: clearing the diff file lets the re-read judge the baseline"
+
+# 13c. `--save-snapshot` takes an optional value, so the strip must not swallow
+# the following flag when the bare form is used.
+run_stale_analyze INPUT_COMMAND="health" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_FAIL_ON_STALE_BASELINE="true" \
+  INPUT_SAVE_SNAPSHOT="true" INPUT_TREND="true"
+GATE_ARGV=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep '^analysis ' | sed -n '2p')
+assert_not_contains "$GATE_ARGV" "--save-snapshot" \
+  "stale gate: the re-read never writes a snapshot"
+assert_contains "$GATE_ARGV" "--trend" \
+  "stale gate: a bare --save-snapshot does not swallow the next flag"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed" \
+  "stale gate: the re-read still judges the baseline after the strip"
+
+# 13d. A baseline re-saved to the path it is read from can never be stale.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_SAVE_BASELINE="baseline.json"
+assert_contains "$STALE_STDOUT" "baseline and save-baseline name the same file" \
+  "stale gate: a self-healing baseline is called out"
 
 # 14. The step summary carries the advisory on every render path, because both
 # preferred paths return early and would otherwise drop it.

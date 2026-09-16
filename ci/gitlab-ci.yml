@@ -118,7 +118,7 @@ variables:
   FALLOW_CHANGED_SINCE: ""      # Git ref for incremental analysis (auto-set in MR context)
   FALLOW_BASELINE: ""           # Path to a baseline file; only findings absent from it are reported
   FALLOW_SAVE_BASELINE: ""      # Save this run's findings as a baseline file for future comparisons
-  FALLOW_FAIL_ON_STALE_BASELINE: "false"  # Fail the pipeline when FALLOW_BASELINE has entries that match nothing this run. In MR pipelines the template re-runs the baseline comparison unscoped so the gate can still apply. Independent of FALLOW_FAIL_ON_ISSUES.
+  FALLOW_FAIL_ON_STALE_BASELINE: "false"  # Fail the pipeline when FALLOW_BASELINE has entries that match nothing this run. The staleness warning needs no variable: any run that loads a baseline reports it, and a run scoped to changed files re-reads the baseline over the whole project first, because a scoped run cannot judge a whole-project baseline. This variable only decides whether that verdict fails the pipeline. Independent of FALLOW_FAIL_ON_ISSUES.
 
   # Workspace / monorepo
   FALLOW_WORKSPACE: ""
@@ -421,6 +421,12 @@ variables:
             ;;
         esac
       fi
+      # FALLOW_SAVE_BASELINE runs before the comparison, so a baseline re-saved
+      # to the path it is loaded from can never be stale and no gate on it can
+      # ever fire.
+      if [ -n "$FALLOW_BASELINE" ] && [ "$FALLOW_BASELINE" = "$FALLOW_SAVE_BASELINE" ]; then
+        echo "WARNING: FALLOW_BASELINE and FALLOW_SAVE_BASELINE name the same file (${FALLOW_BASELINE}). The run saves before it compares, so the baseline is rewritten from this run and can never report stale entries. Save to a different path, or drop FALLOW_SAVE_BASELINE from the job that reads the baseline."
+      fi
       if [ -n "$FALLOW_AUDIT_GATE" ] && [ "$FALLOW_AUDIT_GATE" != "new-only" ] && [ "$FALLOW_AUDIT_GATE" != "all" ]; then
         echo "ERROR: FALLOW_AUDIT_GATE must be 'new-only' or 'all', got: ${FALLOW_AUDIT_GATE}"; exit 2
       fi
@@ -699,9 +705,15 @@ variables:
       # The CLI reports both on stderr only, which --quiet removes, so neither
       # reached a template user (issue #2673). Read them from the envelope:
       # gate_trips is the same boolean --fail-on-stale-baseline exits on, so
-      # the rule stays in Rust instead of being restated in jq here. Every
-      # branch fails open, and none of them looks at $FALLOW_EXIT_CODE: the
-      # case this gate exists for exits 0.
+      # the rule stays in Rust instead of being restated in jq here.
+      #
+      # Reading the advisory is independent of the gate. A merge-request
+      # pipeline is scoped and a scoped run cannot judge a whole-project
+      # baseline, so the unscoped re-read below happens for any run that loaded
+      # one; FALLOW_FAIL_ON_STALE_BASELINE only decides whether the verdict
+      # fails the pipeline. Every branch that cannot read an answer warns and
+      # continues, and none of them looks at $FALLOW_EXIT_CODE: the case this
+      # gate exists for exits 0.
       STALE_BASELINE_GATE_FAILED=false
       BASELINE_STALENESS_JQ='.baseline_staleness // .summary.baseline_staleness // .check.baseline_staleness // empty'
 
@@ -743,11 +755,20 @@ variables:
       # re-splitting user input would reintroduce word splitting.
       build_stale_gate_args() {
         GATE_ARGS=()
-        local skip_next=false arg dropped flag
+        local skip_next=false skip_next_if_value=false arg dropped flag
         for arg in "${RUN_ARGS[@]}"; do
           if [ "$skip_next" = "true" ]; then
             skip_next=false
             continue
+          fi
+          # --save-snapshot takes an optional value, so its argument is only
+          # the next element when that element is not itself a flag.
+          if [ "$skip_next_if_value" = "true" ]; then
+            skip_next_if_value=false
+            case "$arg" in
+              --*) ;;
+              *) continue ;;
+            esac
           fi
           case "$arg" in
             --changed-since|--scope|--file)
@@ -757,14 +778,18 @@ variables:
             --changed-since=*|--scope=*|--file=*)
               continue
               ;;
-            --save-baseline|--save-regression-baseline|--save-snapshot)
+            --save-baseline|--save-regression-baseline)
               skip_next=true
               continue
               ;;
             --save-baseline=*|--save-regression-baseline=*|--save-snapshot=*)
               continue
               ;;
-            --yes)
+            --save-snapshot)
+              skip_next_if_value=true
+              continue
+              ;;
+            --fail-on-regression|--yes)
               continue
               ;;
           esac
@@ -787,7 +812,7 @@ variables:
       # no consumer can mistake it for the run the MR note was built from.
       run_stale_gate_analysis() {
         build_stale_gate_args
-        echo "Re-running the baseline comparison unscoped for FALLOW_FAIL_ON_STALE_BASELINE"
+        echo "Re-reading the baseline over the whole project, which a scoped run cannot judge"
         local started ended
         started=$SECONDS
         set +e
@@ -795,7 +820,12 @@ variables:
           > fallow-stale-baseline-gate-raw.json 2> fallow-stale-baseline-gate-stderr.log
         set -e
         ended=$SECONDS
-        echo "Unscoped baseline comparison finished in $((ended - started))s"
+        echo "Unscoped baseline re-read finished in $((ended - started))s"
+        if [ -s fallow-stale-baseline-gate-stderr.log ]; then
+          echo "--- baseline re-read stderr ---"
+          cat fallow-stale-baseline-gate-stderr.log
+          echo "---"
+        fi
         if [ ! -s fallow-stale-baseline-gate-raw.json ] \
             || ! jq -e '.' fallow-stale-baseline-gate-raw.json > /dev/null 2>&1; then
           return 1
@@ -807,21 +837,33 @@ variables:
         return 0
       }
 
-      if [ "$FALLOW_FAIL_ON_STALE_BASELINE" = "true" ] && [ -z "$BASELINE_ENTRIES" ]; then
-        echo "WARNING: FALLOW_FAIL_ON_STALE_BASELINE stood down: this run reported no baseline staleness. A fallow older than 3.27.0 cannot report it; pin a current version, or run the gate on dead-code, dupes or health."
-      elif [ "$FALLOW_FAIL_ON_STALE_BASELINE" = "true" ] && [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
+      # Name the gate only when it was asked for, so a pipeline that wanted no
+      # gate does not read as if one failed.
+      stale_baseline_stand_down() {
+        local gate=""
+        if [ "$FALLOW_FAIL_ON_STALE_BASELINE" = "true" ]; then
+          gate=" FALLOW_FAIL_ON_STALE_BASELINE stood down."
+        fi
+        echo "WARNING: baseline staleness could not be judged on this run because ${1}.${gate} ${2}"
+      }
+
+      if [ -n "$FALLOW_BASELINE" ] && [ -z "$BASELINE_ENTRIES" ]; then
+        if [ "$FALLOW_FAIL_ON_STALE_BASELINE" = "true" ]; then
+          stale_baseline_stand_down "it reported no baseline staleness" "A fallow that predates this feature cannot report it: pin a current version, or run the gate on dead-code, dupes or health."
+        fi
+      elif [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
         if template_can_rerun_unscoped; then
           if run_stale_gate_analysis; then
             read_all_staleness_fields fallow-stale-baseline-gate.json
             if [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
-              echo "WARNING: FALLOW_FAIL_ON_STALE_BASELINE stood down: the unscoped re-run was still narrowed to part of the project. Remove the scoping from FALLOW_ARGS to gate on it."
+              stale_baseline_stand_down "the unscoped re-read was still narrowed to part of the project" "Remove the positional path from FALLOW_ARGS to judge the baseline."
             fi
           else
-            echo "WARNING: FALLOW_FAIL_ON_STALE_BASELINE stood down: the unscoped baseline comparison did not produce a readable result. The primary analysis is unaffected."
+            stale_baseline_stand_down "the unscoped baseline re-read produced no readable result" "The primary analysis is unaffected; its stderr is printed above."
           fi
           rm -f fallow-stale-baseline-gate-raw.json fallow-stale-baseline-gate.json fallow-stale-baseline-gate-stderr.log
         else
-          echo "WARNING: FALLOW_FAIL_ON_STALE_BASELINE stood down: this run analyzed only part of the project (production mode or workspace scoping), which cannot judge a whole-project baseline. Run the gate on an unscoped job."
+          stale_baseline_stand_down "it analyzed only part of the project (production mode or workspace scoping)" "Run an unscoped pipeline to judge the baseline."
         fi
       fi
 

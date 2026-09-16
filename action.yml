@@ -60,7 +60,7 @@ inputs:
     description: 'Save current results as a baseline file'
     required: false
   fail-on-stale-baseline:
-    description: 'Fail the job when the loaded baseline has entries that match nothing this run, so a baseline cannot rot unnoticed. On a pull request the action re-runs the baseline comparison unscoped so the gate can still apply; when the run cannot judge the baseline at all (production mode, workspace scoping, issue-type filters) it warns and stands down instead of passing silently. Independent of fail-on-issues.'
+    description: 'Fail the job when the loaded baseline has entries that match nothing this run. The staleness warning itself needs no input: any run that loads a baseline reports it, and a run scoped to changed files re-reads the baseline over the whole project first, because a scoped run cannot judge a whole-project baseline. This input only decides whether that verdict fails the job. When the run still cannot judge the baseline (`production`, `workspace`, `changed-workspaces`, or a positional path passed through `args`) it warns and stands down instead of passing silently. Independent of `fail-on-issues`.'
     required: false
     default: 'false'
   version:
@@ -336,6 +336,24 @@ outputs:
   changed-files-unavailable:
     description: 'true when the analyze step could not enumerate PR-changed files (transient GitHub API failure, expired token, missing permissions); false on the happy path. Always emitted, regardless of whether changed-since was requested. Gate on this in downstream workflow steps to detect when analysis ran unscoped vs scoped.'
     value: ${{ steps.analyze.outputs.changed_files_unavailable }}
+  baseline-entries:
+    description: 'Entries in the loaded baseline. Empty when no baseline was loaded or the fallow version predates the staleness envelope. On a pull request these six outputs describe the unscoped baseline re-read, not the scoped analysis, because a scoped run cannot judge a whole-project baseline.'
+    value: ${{ steps.analyze.outputs.baseline_entries }}
+  baseline-matched:
+    description: 'Baseline entries that matched a current finding. Empty when no baseline was loaded.'
+    value: ${{ steps.analyze.outputs.baseline_matched }}
+  baseline-stale-entries:
+    description: 'Baseline entries that matched nothing this run. Empty when no baseline was loaded.'
+    value: ${{ steps.analyze.outputs.baseline_stale_entries }}
+  baseline-advisory:
+    description: 'Which staleness advisory the baseline earned: none, partial, or zero-overlap. Empty when no baseline was loaded.'
+    value: ${{ steps.analyze.outputs.baseline_advisory }}
+  baseline-change-scoped:
+    description: 'true when the run behind these numbers analyzed only part of the project, so the baseline could not be judged. Read this before dividing baseline-matched by baseline-entries.'
+    value: ${{ steps.analyze.outputs.baseline_change_scoped }}
+  baseline-gate-trips:
+    description: 'true when the baseline has entries that match nothing and the run could judge it, which is what fail-on-stale-baseline exits on. Gate on this in a downstream step to report staleness without failing the job.'
+    value: ${{ steps.analyze.outputs.baseline_gate_trips }}
   post-skipped-reason:
     description: 'Reason the Post review comments step skipped posting (pagination_failure / none). Set to pagination_failure only when the inline-review POST was actually aborted to avoid duplicate threads (multi-comment dedup lookup failed). Empty when the Post review comments step did not run.'
     value: ${{ steps.review.outputs.post_skipped_reason }}

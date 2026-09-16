@@ -344,6 +344,13 @@ if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ]; then
   esac
 fi
 
+# `--save-baseline` runs before the comparison, so a baseline that is re-saved
+# to the path it is loaded from can never be stale and no gate on it can ever
+# fire. Cheap to configure by accident, and silent without this line.
+if [ -n "${INPUT_BASELINE:-}" ] && [ "${INPUT_BASELINE:-}" = "${INPUT_SAVE_BASELINE:-}" ]; then
+  echo "::warning::fallow: baseline and save-baseline name the same file (${INPUT_BASELINE}). The run saves before it compares, so the baseline is rewritten from this run and can never report stale entries. Save to a different path, or drop save-baseline from the job that reads the baseline."
+fi
+
 if [ -n "${INPUT_GATE:-}" ] && [ "$INPUT_GATE" != "new-only" ] && [ "$INPUT_GATE" != "all" ]; then
   echo "::error::gate must be 'new-only' or 'all', got: ${INPUT_GATE}"; exit 2
 fi
@@ -709,9 +716,16 @@ fi
 # `baseline_staleness` whenever a baseline was loaded, and `gate_trips` is the
 # same boolean `--fail-on-stale-baseline` exits on, so the rule stays in Rust.
 #
-# Every branch here fails OPEN. A pinned older binary, or a command that reports
-# no staleness, must produce a warning and a green run, never a failure: a gate
-# that fires because it could not read its input is worse than no gate.
+# Reading the advisory is independent of the gate. A pull-request run is scoped
+# and a scoped run cannot judge a whole-project baseline, so the unscoped
+# re-read below happens for any run that loaded one; the gate input only decides
+# whether a stale baseline fails the job.
+#
+# Every branch that cannot read an answer fails OPEN. A pinned older binary, or
+# a command that reports no staleness, produces a warning and a green run: a
+# gate that fires because it could not read its input is worse than no gate.
+# Combinations that cannot work at all are rejected earlier, at input
+# validation, with exit 2.
 
 STALE_BASELINE_GATE_FAILED=false
 BASELINE_STALENESS_JQ='.baseline_staleness // .summary.baseline_staleness // .check.baseline_staleness // empty'
@@ -727,12 +741,17 @@ read_staleness_field() {
     "$file" 2>/dev/null || true
 }
 
-BASELINE_ENTRIES=$(read_staleness_field "$RESULTS_FILE" baseline_entries)
-BASELINE_MATCHED=$(read_staleness_field "$RESULTS_FILE" matched_entries)
-BASELINE_STALE_ENTRIES=$(read_staleness_field "$RESULTS_FILE" stale_entries)
-BASELINE_ADVISORY=$(read_staleness_field "$RESULTS_FILE" warning)
-BASELINE_GATE_TRIPS=$(read_staleness_field "$RESULTS_FILE" gate_trips)
-BASELINE_CHANGE_SCOPED=$(read_staleness_field "$RESULTS_FILE" change_scoped)
+read_all_staleness_fields() {
+  local file=$1
+  BASELINE_ENTRIES=$(read_staleness_field "$file" baseline_entries)
+  BASELINE_MATCHED=$(read_staleness_field "$file" matched_entries)
+  BASELINE_STALE_ENTRIES=$(read_staleness_field "$file" stale_entries)
+  BASELINE_ADVISORY=$(read_staleness_field "$file" warning)
+  BASELINE_GATE_TRIPS=$(read_staleness_field "$file" gate_trips)
+  BASELINE_CHANGE_SCOPED=$(read_staleness_field "$file" change_scoped)
+}
+
+read_all_staleness_fields "$RESULTS_FILE"
 
 # True when this script is the reason the run was narrowed, so removing what it
 # added can produce a run that CAN judge the baseline. Production mode and
@@ -748,16 +767,26 @@ action_can_rerun_unscoped() {
   return 0
 }
 
-# Build the gate run's argv as an element-wise copy of the analysis argv with
+# Build the re-read's argv as an element-wise copy of the analysis argv with
 # every narrowing flag and every workspace-writing flag removed. Never rebuilt
 # from $INPUT_ARGS: re-splitting user input would reintroduce word splitting.
 build_stale_gate_args() {
   GATE_ARGS=()
-  local skip_next=false arg
+  local skip_next=false skip_next_if_value=false arg
   for arg in "${ARGS[@]}" "${EXTRA_ARGS[@]}"; do
     if [ "$skip_next" = "true" ]; then
       skip_next=false
       continue
+    fi
+    # `--save-snapshot` takes an optional value, so its argument is only the
+    # next element when that element is not itself a flag. Skipping
+    # unconditionally would eat whatever followed the bare form.
+    if [ "$skip_next_if_value" = "true" ]; then
+      skip_next_if_value=false
+      case "$arg" in
+        --*) ;;
+        *) continue ;;
+      esac
     fi
     case "$arg" in
       # Narrowing channels the action added.
@@ -768,16 +797,20 @@ build_stale_gate_args() {
       --changed-since=*|--scope=*|--file=*)
         continue
         ;;
-      # Writing flags: a second run must not rewrite a baseline, a regression
-      # baseline, a snapshot, the uploaded SARIF, or apply fixes.
-      --save-baseline|--save-regression-baseline|--save-snapshot|--sarif-file)
+      # Writing flags: a re-read must not rewrite a baseline, a regression
+      # baseline, the uploaded SARIF, or apply fixes.
+      --save-baseline|--save-regression-baseline|--sarif-file)
         skip_next=true
         continue
         ;;
-      --save-baseline=*|--save-regression-baseline=*|--save-snapshot=*|--sarif-file=*)
+      --save-baseline=*|--save-regression-baseline=*|--sarif-file=*|--save-snapshot=*)
         continue
         ;;
-      --yes)
+      --save-snapshot)
+        skip_next_if_value=true
+        continue
+        ;;
+      --fail-on-regression|--yes)
         continue
         ;;
     esac
@@ -795,22 +828,26 @@ build_stale_gate_args() {
   done
 }
 
-# Re-read the baseline over the whole project so the gate has something it can
-# judge. Report-discarding: its envelope feeds nothing but the staleness read.
+# Re-read the baseline over the whole project so the advisory and the gate have
+# something they can judge. Report-discarding: its envelope feeds nothing but
+# the staleness read.
 run_stale_gate_analysis() {
   build_stale_gate_args
   local started ended
   started=$SECONDS
-  echo "fallow: re-running the baseline comparison unscoped for fail-on-stale-baseline" >&2
-  # `set -e` is active and this run exits 1 on findings, which is not an error
-  # here. FALLOW_DIFF_FILE is cleared because diff scoping reaches the CLI
-  # through the environment, not through argv.
-  set +e
+  echo "fallow: re-reading the baseline over the whole project, which a scoped run cannot judge" >&2
+  # This run exits 1 on findings, which is not an error here, so its status is
+  # discarded and the file is validated instead. FALLOW_DIFF_FILE is cleared
+  # because diff scoping reaches the CLI through the environment, not argv.
   env -u FALLOW_DIFF_FILE fallow "${GATE_ARGS[@]}" \
-    > "$GATE_RESULTS_RAW_FILE" 2> "$GATE_STDERR_FILE"
-  set -e
+    > "$GATE_RESULTS_RAW_FILE" 2> "$GATE_STDERR_FILE" || true
   ended=$SECONDS
-  echo "fallow: unscoped baseline comparison finished in $((ended - started))s" >&2
+  echo "fallow: unscoped baseline re-read finished in $((ended - started))s" >&2
+  if [ -s "$GATE_STDERR_FILE" ]; then
+    while IFS= read -r line; do
+      echo "::debug::baseline re-read: ${line}"
+    done < "$GATE_STDERR_FILE"
+  fi
   if [ ! -s "$GATE_RESULTS_RAW_FILE" ] || ! jq -e '.' "$GATE_RESULTS_RAW_FILE" > /dev/null 2>&1; then
     return 1
   fi
@@ -821,29 +858,36 @@ run_stale_gate_analysis() {
   return 0
 }
 
-if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ] && [ -z "$BASELINE_ENTRIES" ]; then
-  echo "::warning::fallow: fail-on-stale-baseline stood down: this run reported no baseline staleness. A fallow older than 3.27.0 cannot report it; pin a current version, or run the gate on dead-code, dupes or health."
-elif [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ] && [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
+# Name the gate only when it was asked for, so a run that wanted no gate does
+# not read as if one failed.
+stale_baseline_stand_down() {
+  local reason=$1 remedy=$2 gate=""
+  if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ]; then
+    gate=" fail-on-stale-baseline stood down."
+  fi
+  echo "::warning::fallow: baseline staleness could not be judged on this run because ${reason}.${gate} ${remedy}"
+}
+
+if [ -n "${INPUT_BASELINE:-}" ] && [ -z "$BASELINE_ENTRIES" ]; then
+  if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ]; then
+    stale_baseline_stand_down "it reported no baseline staleness" "A fallow that predates this feature cannot report it: pin a current version, or run the gate on dead-code, dupes or health."
+  fi
+elif [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
   if action_can_rerun_unscoped; then
     GATE_RESULTS_RAW_FILE="${ARTIFACTS_DIR}/fallow-stale-baseline-gate-raw.json"
     GATE_RESULTS_FILE="${ARTIFACTS_DIR}/fallow-stale-baseline-gate.json"
     GATE_STDERR_FILE="${ARTIFACTS_DIR}/fallow-stale-baseline-gate-stderr.log"
     if run_stale_gate_analysis; then
-      BASELINE_ENTRIES=$(read_staleness_field "$GATE_RESULTS_FILE" baseline_entries)
-      BASELINE_MATCHED=$(read_staleness_field "$GATE_RESULTS_FILE" matched_entries)
-      BASELINE_STALE_ENTRIES=$(read_staleness_field "$GATE_RESULTS_FILE" stale_entries)
-      BASELINE_ADVISORY=$(read_staleness_field "$GATE_RESULTS_FILE" warning)
-      BASELINE_GATE_TRIPS=$(read_staleness_field "$GATE_RESULTS_FILE" gate_trips)
-      BASELINE_CHANGE_SCOPED=$(read_staleness_field "$GATE_RESULTS_FILE" change_scoped)
+      read_all_staleness_fields "$GATE_RESULTS_FILE"
       if [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
-        echo "::warning::fallow: fail-on-stale-baseline stood down: the unscoped re-run was still narrowed to part of the project, which cannot judge a whole-project baseline. Remove the scoping from the 'args' input to gate on it."
+        stale_baseline_stand_down "the unscoped re-read was still narrowed to part of the project" "Remove the positional path from the 'args' input to judge the baseline."
       fi
     else
-      echo "::warning::fallow: fail-on-stale-baseline stood down: the unscoped baseline comparison did not produce a readable result. The primary analysis is unaffected."
+      stale_baseline_stand_down "the unscoped baseline re-read produced no readable result" "The primary analysis is unaffected; the step debug log carries its stderr."
     fi
     rm -f "$GATE_RESULTS_RAW_FILE" "$GATE_RESULTS_FILE" "$GATE_STDERR_FILE"
   else
-    echo "::warning::fallow: fail-on-stale-baseline stood down: this run analyzed only part of the project (production mode or workspace scoping), which cannot judge a whole-project baseline. Run the gate on an unscoped job."
+    stale_baseline_stand_down "it analyzed only part of the project (production mode or workspace scoping)" "Run an unscoped job to judge the baseline."
   fi
 fi
 

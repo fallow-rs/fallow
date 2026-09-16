@@ -252,6 +252,9 @@ if [ "${MOCK_TYPE_AWARE_INCOMPLETE:-}" = "1" ]; then
   exit 1
 fi
 if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
+  if [ -n "${FALLOW_TEST_LOG:-}" ] && [ -n "${FALLOW_DIFF_FILE:-}" ]; then
+    printf 'diff_file=set\n' >> "$FALLOW_TEST_LOG"
+  fi
   scoped=false
   for arg in "$@"; do
     case "$arg" in
@@ -264,6 +267,10 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
   if [ "$scoped" = "true" ]; then
     printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":0,"stale_entries":8,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}'
     exit 0
+  fi
+  if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ]; then
+    printf 'not json at all\n'
+    exit 2
   fi
   printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":3,"stale_entries":5,"current_findings":3,"change_scoped":false,"stale":true,"warning":"partial","gate_trips":true}}'
   exit 0
@@ -453,6 +460,9 @@ else
   fail "stale gate: the merge-request re-run can fail the pipeline" "exit $cmd_status"
 fi
 
+# The advisory is not gated behind the variable: a merge-request pipeline
+# re-reads the baseline unscoped so the warning reaches a job that asked for no
+# gate.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
 STALE_LOG="$STALE_WORK/fallow.log"
 OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
@@ -461,11 +471,75 @@ OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
   FALLOW_BASELINE=baseline.json \
   FALLOW_CHANGED_SINCE=abc123)
 STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
-if [ "$STALE_RUNS" = "1" ]; then
-  pass "stale gate: a pipeline without the gate analyzes exactly once"
+if [ "$STALE_RUNS" = "2" ]; then
+  pass "stale gate: a scoped pipeline re-reads the baseline even with the gate off"
 else
-  fail "stale gate: a pipeline without the gate analyzes exactly once" "ran $STALE_RUNS times"
+  fail "stale gate: a scoped pipeline re-reads the baseline even with the gate off" "ran $STALE_RUNS times"
 fi
+assert_contains "$OUT" "WARNING: baseline is partially stale: 5 of 8 entries" \
+  "stale gate: the advisory reaches a merge-request pipeline with no gate"
+assert_not_contains "$OUT" "ERROR: Fallow baseline gate failed" \
+  "stale gate: with the gate off the advisory never fails the pipeline"
+
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json)
+STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
+if [ "$STALE_RUNS" = "1" ]; then
+  pass "stale gate: an unscoped pipeline analyzes exactly once"
+else
+  fail "stale gate: an unscoped pipeline analyzes exactly once" "ran $STALE_RUNS times"
+fi
+
+# Diff scoping reaches the CLI through FALLOW_DIFF_FILE, not argv.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_DIFF_FILE=/tmp/does-not-matter.diff \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+STALE_DIFF_LINES=$(grep -c '^diff_file=set' "$STALE_LOG" || true)
+if [ "$STALE_DIFF_LINES" = "1" ]; then
+  pass "stale gate: the unscoped re-read runs with FALLOW_DIFF_FILE cleared"
+else
+  fail "stale gate: the unscoped re-read runs with FALLOW_DIFF_FILE cleared" \
+    "saw $STALE_DIFF_LINES invocations with the variable set"
+fi
+assert_contains "$OUT" "ERROR: Fallow baseline gate failed" \
+  "stale gate: clearing the diff file lets the re-read judge the baseline"
+
+# `--save-snapshot` takes an optional value: the strip must not swallow the flag
+# that follows the bare form.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_COMMAND=health \
+  FALLOW_CHANGED_SINCE=abc123 \
+  FALLOW_SAVE_SNAPSHOT=true \
+  FALLOW_TREND=true \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+GATE_ARGV=$(grep '^fallow ' "$STALE_LOG" | sed -n '2p')
+assert_not_contains "$GATE_ARGV" "--save-snapshot" \
+  "stale gate: the re-read never writes a snapshot"
+assert_contains "$GATE_ARGV" "--trend" \
+  "stale gate: a bare --save-snapshot does not swallow the next flag"
+
+# A baseline re-saved to the path it is read from can never be stale.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_SAVE_BASELINE=baseline.json)
+assert_contains "$OUT" "name the same file" \
+  "stale gate: a self-healing baseline is called out"
 
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
 STALE_LOG="$STALE_WORK/fallow.log"
@@ -483,12 +557,31 @@ if [ "$STALE_RUNS" = "1" ]; then
 else
   fail "stale gate: production mode skips the re-run instead of paying for it" "ran $STALE_RUNS times"
 fi
-assert_contains "$OUT" "WARNING: FALLOW_FAIL_ON_STALE_BASELINE stood down" \
+assert_contains "$OUT" "WARNING: baseline staleness could not be judged" \
   "stale gate: a stand-down is stated, never silent"
+assert_contains "$OUT" "FALLOW_FAIL_ON_STALE_BASELINE stood down." \
+  "stale gate: the stand-down names the gate when the gate was asked for"
 if [ "$cmd_status" -eq 0 ]; then
   pass "stale gate: a stand-down does not fail the pipeline"
 else
   fail "stale gate: a stand-down does not fail the pipeline" "exit $cmd_status"
+fi
+
+# A re-read that produces nothing readable warns and leaves the pipeline green.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_GATE_RUN_BROKEN=1 \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_CHANGED_SINCE=abc123 \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+cmd_status=$?
+assert_contains "$OUT" "produced no readable result" \
+  "stale gate: a broken re-read warns"
+if [ "$cmd_status" -eq 0 ]; then
+  pass "stale gate: a broken re-read fails open"
+else
+  fail "stale gate: a broken re-read fails open" "exit $cmd_status"
 fi
 
 # A binary older than the envelope field must warn, not fail.
@@ -497,7 +590,7 @@ OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
   FALLOW_BASELINE=baseline.json \
   FALLOW_FAIL_ON_STALE_BASELINE=true)
 cmd_status=$?
-assert_contains "$OUT" "A fallow older than 3.27.0 cannot report it" \
+assert_contains "$OUT" "A fallow that predates this feature cannot report it" \
   "stale gate: an old binary warns instead of failing silently"
 if [ "$cmd_status" -eq 0 ]; then
   pass "stale gate: an old binary fails open"
