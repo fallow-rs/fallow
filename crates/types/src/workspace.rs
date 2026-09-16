@@ -277,6 +277,29 @@ pub enum WorkspaceDiagnosticKind {
         /// one matched location out of several.
         directory_count: u32,
     },
+    /// The walk finished with no source file to analyze at all, so every
+    /// finding count this run reports is zero because nothing was measured
+    /// rather than because the project is clean (issue #2686).
+    ///
+    /// Distinct from [`Self::ExcludedByDefaultIgnore`], which reports one
+    /// pattern's exclusions and is designed behavior on generated output. The
+    /// alarm is not the exclusion, it is having nothing left afterwards, and
+    /// that condition also fires with no exclusion at all: a docs-only
+    /// repository, a workspace member with no TypeScript, or a path filter that
+    /// matched nothing. `excluded_file_count` names the built-in-ignore
+    /// contribution so the common cause is still attributable, and is `0` when
+    /// no built-in pattern took part.
+    ///
+    /// This is the kind a CI consumer reads to tell "measured zero" from
+    /// "measured nothing": the human report has said so since 3.26.0, but only
+    /// in human format and only under the built-in-ignore cause, so `--quiet
+    /// --format json` saw a clean green either way.
+    NoSourceFilesAnalyzed {
+        /// Candidate source files the built-in ignore patterns removed from
+        /// this walk, summed across every pattern. `0` when the walk found no
+        /// candidate to exclude in the first place.
+        excluded_file_count: u32,
+    },
 }
 
 impl WorkspaceDiagnosticKind {
@@ -302,6 +325,7 @@ impl WorkspaceDiagnosticKind {
             Self::BoundariesNotConfigured => "boundaries-not-configured",
             Self::RulePacksNotConfigured => "rule-packs-not-configured",
             Self::ExcludedByDefaultIgnore { .. } => "excluded-by-default-ignore",
+            Self::NoSourceFilesAnalyzed { .. } => "no-source-files-analyzed",
         }
     }
 
@@ -338,7 +362,8 @@ impl WorkspaceDiagnosticKind {
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::BunResolutionsShadowedByOverrides
-            | Self::NodeModulesMissing => true,
+            | Self::NodeModulesMissing
+            | Self::NoSourceFilesAnalyzed { .. } => true,
         }
     }
 
@@ -361,6 +386,7 @@ impl WorkspaceDiagnosticKind {
                 | Self::SourceParseDegraded { .. }
                 | Self::NodeModulesMissing
                 | Self::ExcludedByDefaultIgnore { .. }
+                | Self::NoSourceFilesAnalyzed { .. }
         )
     }
 
@@ -385,6 +411,7 @@ impl WorkspaceDiagnosticKind {
                 | Self::SkippedSourceDotdir
                 | Self::NodeModulesMissing
                 | Self::ExcludedByDefaultIgnore { .. }
+                | Self::NoSourceFilesAnalyzed { .. }
         )
     }
 
@@ -448,7 +475,8 @@ impl WorkspaceDiagnosticKind {
             | Self::NodeModulesMissing
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
-            | Self::ExcludedByDefaultIgnore { .. } => false,
+            | Self::ExcludedByDefaultIgnore { .. }
+            | Self::NoSourceFilesAnalyzed { .. } => false,
         }
     }
 
@@ -486,7 +514,8 @@ impl WorkspaceDiagnosticKind {
             | Self::SourceReadFailure { .. }
             | Self::SourceParseDegraded { .. }
             | Self::NodeModulesMissing
-            | Self::ExcludedByDefaultIgnore { .. } => false,
+            | Self::ExcludedByDefaultIgnore { .. }
+            | Self::NoSourceFilesAnalyzed { .. } => false,
         }
     }
 }
@@ -521,6 +550,24 @@ pub struct WorkspaceDiagnostic {
     /// Human-readable rendering derived from `kind` + `path`. Always ends
     /// with a next-step hint.
     pub message: String,
+    /// True when this diagnostic reports a run whose RESULTS are degraded:
+    /// something the user installed, wrote, or expected did not reach the
+    /// analysis. Projected from [`WorkspaceDiagnosticKind::warns_on_stderr`],
+    /// which is the same classification that decides whether the CLI prints a
+    /// stderr line, so a CI log built from this field and a local non-quiet run
+    /// say the same thing.
+    ///
+    /// Omitted when false, which is what keeps every clean run byte-identical.
+    /// The two unconfigured-check kinds answer false on purpose: they fire in
+    /// the product's default state on every project that never opted into
+    /// boundaries or rule packs, so warning on them would warn forever. So does
+    /// `excluded-by-default-ignore`, which is designed behavior on generated
+    /// output; the alarm for that case is `no-source-files-analyzed`.
+    ///
+    /// Read this instead of hardcoding a kind allowlist: a degrading kind added
+    /// in a later release then reaches an unchanged consumer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub degrades_analysis: bool,
 }
 
 impl WorkspaceDiagnostic {
@@ -546,10 +593,12 @@ impl WorkspaceDiagnostic {
         let path = normalise_diagnostic_path(path);
         let kind = normalise_payload_paths(root, kind);
         let message = render_message(root, &path, &kind);
+        let degrades_analysis = kind.warns_on_stderr();
         Self {
             path,
             kind,
             message,
+            degrades_analysis,
         }
     }
 
@@ -862,6 +911,23 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              counts are zero because nothing was measured. Add `rulePacks` to the config, or set \
              `policy-violation` to off to state that the check is not wanted."
                 .to_string()
+        }
+        WorkspaceDiagnosticKind::NoSourceFilesAnalyzed {
+            excluded_file_count,
+        } => {
+            if *excluded_file_count == 0 {
+                "No source files were analyzed, so every finding count this run reports is zero \
+                 because nothing was measured. Check the analysis root, ignorePatterns, and any \
+                 path or workspace filter this run applied."
+                    .to_owned()
+            } else {
+                format!(
+                    "No source files were analyzed. Fallow's built-in ignore patterns excluded \
+                     {excluded_file_count} candidate files, so every finding count this run \
+                     reports is zero because nothing was measured; run with --explain-skipped \
+                     for the breakdown."
+                )
+            }
         }
         WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
             pattern,

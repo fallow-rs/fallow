@@ -685,6 +685,39 @@ fn report_default_ignore_exclusions(
         .collect()
 }
 
+/// Report that the walk finished with nothing to analyze (issue #2686).
+///
+/// The condition is the file list being empty, not any particular exclusion,
+/// so it also covers a docs-only repository, a workspace member with no
+/// TypeScript and a path filter that matched nothing. The built-in-ignore
+/// tally rides along as `excluded_file_count` so the common cause stays
+/// attributable without making it the trigger.
+///
+/// Recorded by discovery rather than by the CLI's human note, so every envelope
+/// built from a diagnostics snapshot carries it: the MCP tools and the
+/// programmatic routes share this list, and a kind that existed on the CLI path
+/// alone would break that.
+fn report_no_source_files_analyzed(
+    config: &ResolvedConfig,
+    analyzed_file_count: usize,
+    tally: &ExclusionTally,
+) -> Vec<WorkspaceDiagnostic> {
+    if analyzed_file_count > 0 {
+        return Vec::new();
+    }
+    let excluded_file_count = tally.values().map(|excluded| excluded.file_count).sum();
+    vec![
+        WorkspaceDiagnostic::new(
+            &config.root,
+            config.root.clone(),
+            WorkspaceDiagnosticKind::NoSourceFilesAnalyzed {
+                excluded_file_count,
+            },
+        )
+        .into_root_relative(&config.root),
+    ]
+}
+
 /// Build the typed diagnostics for the dot-prefixed directories this walk
 /// dropped that hold source files the project has not excluded, and emit one
 /// aggregated `tracing::warn!` so the otherwise silent skip is visible on
@@ -1493,6 +1526,11 @@ pub fn discover_files_config_candidates_and_diagnostics(
                 &excluded_by_default_ignore,
             ))
             .chain(report_missing_node_modules(config))
+            .chain(report_no_source_files_analyzed(
+                config,
+                kept.len(),
+                &excluded_by_default_ignore,
+            ))
             .collect(),
     );
 
