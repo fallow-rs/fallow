@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789502377039,
+  "lastUpdate": 1789518467025,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "7a28a05378a747cb78c3bd5e95fd59618eabb1e4",
-          "message": "fix(dead-code): collapse React Native platform families in duplicate-exports (#2416)\n\nWith the react-native or expo plugin active, an import of ./UserMenu credits every Metro platform-extension member, so UserMenu.tsx and UserMenu.ios.tsx shared an importer and surfaced as a duplicate pair. Each family now folds into one representative (the base file, otherwise the lowest path) before the importer partition. A genuine duplicate in an unrelated file is still reported against that representative. Without those plugins the output is unchanged.\n\nCloses #2407",
-          "timestamp": "2026-08-25T14:06:16+02:00",
-          "tree_id": "d72f29057e2625beedc7a9b33edc6364b35e7cbf",
-          "url": "https://github.com/fallow-rs/fallow/commit/7a28a05378a747cb78c3bd5e95fd59618eabb1e4"
-        },
-        "date": 1787661007380,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 517770688,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20323104,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25765496,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 39117816,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/8102e22e0afcc70fb518cd26ea1a2f18f5d710ff"
         },
         "date": 1789502373578,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 572454104,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21584392,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28613640,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43419288,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "5e509d0ce7a9c3ec63c07f73e7d00cf7ef17f8ba",
+          "message": "chore(napi): sync package.json / package-lock / index.js to v3.26.0",
+          "timestamp": "2026-09-16T02:08:38+02:00",
+          "tree_id": "8159bceec3d91f5b09e92b3d0bf220c9fae7de69",
+          "url": "https://github.com/fallow-rs/fallow/commit/5e509d0ce7a9c3ec63c07f73e7d00cf7ef17f8ba"
+        },
+        "date": 1789518463246,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
