@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789475778934,
+  "lastUpdate": 1789561990046,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "b6abad014ce375ed88a80cb57b0479dea588fa41",
-          "message": "fix(security): keep source reachability diff matches\n\nShared diff filtering already retained security candidates when the sink anchor or detector trace matched the changed lines. Source reachability added a second trace under reachability, but that trace was not included in the diff predicate, so diff-scoped runs could hide a candidate introduced by an untrusted-source path change.\n\nInclude reachability.untrusted_source_trace in the shared diff filter, add regression coverage for that path, and update nearby comments so the ranking and SARIF docs describe the current source-reachability contract.\n\nFollow-up to #1050.",
-          "timestamp": "2026-06-08T10:03:23Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/b6abad014ce375ed88a80cb57b0479dea588fa41"
-        },
-        "date": 1780919967278,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 162,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 158,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 369,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 316,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 185,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 162,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 613,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 556,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1156,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1009,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 898,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 897,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 757,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 685,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 8180,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7550,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9309,6 +9207,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1122,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "1080fe084b5a0fbd61e05f808664c82290427cd2",
+          "message": "chore(deps-dev): bump rolldown to 1.2.7 in viz-frontend (#2671)\n\nThe viz bundle is checked in and byte-compared in CI, so the bundler bump\ncarries the rebuilt crates/cli/viz-assets/viz.js with it.",
+          "timestamp": "2026-09-16T05:30:04Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/1080fe084b5a0fbd61e05f808664c82290427cd2"
+        },
+        "date": 1789561985002,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 306,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 309,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 616,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 410,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1643,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1223,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1227,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1019,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1327,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1019,
             "unit": "ms"
           }
         ]
