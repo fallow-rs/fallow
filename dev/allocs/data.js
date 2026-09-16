@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789517652311,
+  "lastUpdate": 1789536901409,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "Patrick.Leong.Shaw@gmail.com",
-            "name": "Patrick Shaw",
-            "username": "PatrickShaw"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8c3c5b7d9a26ff5e0a6c7393edcde3aaeab1397f",
-          "message": "perf(graph): cut tsconfig cache lock contention on large monorepos (#2437)\n\nImport resolution on large project-reference monorepos is faster: the per-run tsconfig and canonicalize caches no longer serialize every lookup behind a single lock or deep-copy the parsed document on every hit. Cached entries are handed back as Arc values, so a hit costs a refcount bump instead of cloning the whole parsed tsconfig on each hop of a chain that is walked several times per import specifier.\n\nThanks to @PatrickShaw for the contribution.",
-          "timestamp": "2026-08-27T21:49:35+02:00",
-          "tree_id": "c0afb4d8d82e1cf3503e5d52ea9af25403799106",
-          "url": "https://github.com/fallow-rs/fallow/commit/8c3c5b7d9a26ff5e0a6c7393edcde3aaeab1397f"
-        },
-        "date": 1787860505779,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9705227,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49271,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1168106,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8347,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8384,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1080fe084b5a0fbd61e05f808664c82290427cd2",
+          "message": "chore(deps-dev): bump rolldown to 1.2.7 in viz-frontend (#2671)\n\nThe viz bundle is checked in and byte-compared in CI, so the bundler bump\ncarries the rebuilt crates/cli/viz-assets/viz.js with it.",
+          "timestamp": "2026-09-16T07:30:04+02:00",
+          "tree_id": "99601523abb138f4109ab7329fb19cd109438a60",
+          "url": "https://github.com/fallow-rs/fallow/commit/1080fe084b5a0fbd61e05f808664c82290427cd2"
+        },
+        "date": 1789536897200,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9915644,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51220,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1194903,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8396,
             "unit": "allocations"
           }
         ]
