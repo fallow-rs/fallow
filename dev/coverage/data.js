@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789534346087,
+  "lastUpdate": 1789536568446,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "900d29a76e7cb1488930b2fa71f7053ead69b187",
-          "message": "docs(quality-gates): list the install the NAPI gate step needs (#2462)\n\n`verify:full` ends with a local NAPI build whose `napi` binary comes from\n`crates/napi`'s own devDependencies. The documented setup covered the root, the\ntype-aware sidecar, and the VS Code extension, so a checkout that followed it\npassed every earlier gate and stopped at the last step with\n`napi: command not found`.",
-          "timestamp": "2026-08-30T11:54:02+02:00",
-          "tree_id": "116cd580785df3014b43bf7f2bff88f9355d5508",
-          "url": "https://github.com/fallow-rs/fallow/commit/900d29a76e7cb1488930b2fa71f7053ead69b187"
-        },
-        "date": 1788083995788,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/4528f4c94c92e9f98fd9d1606a4d886e6ab4ab39"
         },
         "date": 1789534342290,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9c6910da437645531da221119494b32313165ca9",
+          "message": "chore(deps): bump @tanstack/intent to 0.4.0 (#2670)\n\nMove the root and npm/fallow devDependency together so the bundled skill\nvalidation keeps resolving from the root lockfile, and advance the pinned\nversion the workflow policy test asserts.",
+          "timestamp": "2026-09-16T07:21:27+02:00",
+          "tree_id": "4746e8c8e2926ea81934160c15c9896ae3536b36",
+          "url": "https://github.com/fallow-rs/fallow/commit/9c6910da437645531da221119494b32313165ca9"
+        },
+        "date": 1789536564058,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
