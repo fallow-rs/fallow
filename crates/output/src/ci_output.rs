@@ -611,8 +611,11 @@ pub fn markdown_table_text(value: &str) -> String {
 
 /// Render a provider-specific review envelope from typed CI issues.
 #[must_use]
-pub fn render_review_envelope(input: &ReviewEnvelopeRenderInput<'_>) -> ReviewEnvelopeRenderResult {
-    render_review_envelope_with_id(input, None, None, None)
+pub fn render_review_envelope(
+    input: &ReviewEnvelopeRenderInput<'_>,
+    status_message: Option<&str>,
+) -> ReviewEnvelopeRenderResult {
+    render_review_envelope_with_id(input, None, None, status_message)
 }
 
 /// Render a review envelope with an explicit gate conclusion and status.
@@ -630,8 +633,9 @@ pub fn render_review_envelope_with_conclusion(
 pub fn render_scoped_review_envelope(
     input: &ReviewEnvelopeRenderInput<'_>,
     review_id: &ReviewId,
+    status_message: Option<&str>,
 ) -> ReviewEnvelopeRenderResult {
-    render_review_envelope_with_id(input, Some(review_id), None, None)
+    render_review_envelope_with_id(input, Some(review_id), None, status_message)
 }
 
 /// Render a scoped review envelope with an explicit gate conclusion and status.

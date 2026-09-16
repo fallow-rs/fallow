@@ -69,12 +69,21 @@ pub fn regression_outcome(
             current_total,
             tolerance,
             ..
-        } => GateOutcome::measured(
-            GateStatus::Fail,
+        } => GateOutcome {
+            status: GateStatus::Fail,
             enforced,
-            delta(*baseline_total, *current_total),
-            tolerance.as_f64(),
-        ),
+            observed: Some(delta(*baseline_total, *current_total)),
+            // The allowance rather than the tolerance's own number: a
+            // percentage tolerance beside an absolute delta renders "12 against
+            // 50" for a 50% allowance on a baseline of 3, which is a comparison
+            // the reader cannot make. `allowed_delta` mirrors the gate's own
+            // rule, so the two numbers are the ones the gate compared.
+            threshold: Some(tolerance.allowed_delta(*baseline_total)),
+            // The spelling the user passed, so the unit survives onto the
+            // grouped envelope, which carries no `regression` object to read
+            // `tolerance_kind` from.
+            threshold_label: Some(tolerance.label()),
+        },
         crate::regression::RegressionOutcome::Skipped { .. } => {
             GateOutcome::new(GateStatus::Skipped, enforced)
         }
@@ -115,19 +124,22 @@ pub fn type_aware_outcome(
     Some(GateOutcome::new(status_of(incomplete), true))
 }
 
-/// The severity gate `--fail-on-issues` arms.
+/// The severity rule that decides a dead-code, check or combined run's exit
+/// code, whether or not `--fail-on-issues` was passed.
 ///
-/// Absent unless the flag was passed. The rule is severity-aware rather than a
-/// count, so a project with a rule set to `warn` reports findings and still
-/// passes; `--fail-on-issues` is what promotes those warns into the rule.
-pub const fn error_severity_outcome(
-    fail_on_issues: bool,
-    has_error_severity: bool,
-) -> Option<GateOutcome> {
-    if !fail_on_issues {
-        return None;
-    }
-    Some(GateOutcome::new(status_of(has_error_severity), true))
+/// Severity-aware rather than a count: a project with a rule set to `warn`
+/// reports findings and still passes, and `--fail-on-issues` is what promotes
+/// those warns into the rule. It is always `enforced`, because this rule always
+/// decides the exit code.
+///
+/// `--fail-on-issues` arms it, and it is ALSO emitted whenever the object
+/// exists for any other reason. Without the second half, a run gated only on
+/// `--fail-on-regression` could exit 1 for an error-severity finding while
+/// every entry in its object reported a pass, leaving the object unable to
+/// explain the exit code it sits beside. A run that arms nothing still
+/// publishes no object, so nothing on the wire moves for it.
+pub const fn error_severity_outcome(has_error_severity: bool) -> GateOutcome {
+    GateOutcome::new(status_of(has_error_severity), true)
 }
 
 /// The duplication threshold gate, `None` when no threshold was configured.
@@ -147,6 +159,9 @@ pub fn duplication_threshold_outcome(
             threshold,
             duplication_percentage,
         )),
+        // Arming, not the verdict: `enforced` answers "would a failure here
+        // fail the run", so a passing threshold gate on a command that exits
+        // on it still reports true, exactly as the stale-baseline gate does.
         enforced,
         duplication_percentage,
         threshold,
@@ -168,10 +183,6 @@ pub struct CheckGateInputs<'a> {
 pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> {
     let mut gates = GateOutcomes::new();
     gates.insert_if(
-        GateName::ErrorSeverityFindings,
-        error_severity_outcome(input.fail_on_issues, input.has_error_severity),
-    );
-    gates.insert_if(
         GateName::Regression,
         regression_outcome(input.regression, true),
     );
@@ -183,6 +194,12 @@ pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> 
         GateName::TypeAwareRequire,
         type_aware_outcome(input.type_aware_require, input.type_aware_meta),
     );
+    if input.fail_on_issues || !gates.is_empty() {
+        gates.insert(
+            GateName::ErrorSeverityFindings,
+            error_severity_outcome(input.has_error_severity),
+        );
+    }
     gates.into_option()
 }
 
@@ -201,24 +218,36 @@ mod tests {
             type_aware_require: fallow_config::TypeAwareRequire::BestEffort,
             type_aware_meta: None,
         });
-        assert!(gates.is_none());
+        assert!(
+            gates.is_none(),
+            "an ungated run stays byte-identical, even one the severity rule fails"
+        );
     }
 
+    /// The object has to explain the exit code it sits beside, so once it
+    /// exists the rule that actually decides that exit code is in it.
     #[test]
-    fn fail_on_issues_arms_the_severity_gate() {
+    fn the_object_always_carries_the_rule_that_decides_the_exit_code() {
         let gates = check_gate_outcomes(&CheckGateInputs {
-            fail_on_issues: true,
+            fail_on_issues: false,
             has_error_severity: true,
-            regression: None,
+            regression: Some(&crate::regression::RegressionOutcome::Pass {
+                baseline_total: 1,
+                current_total: 1,
+            }),
             baseline_staleness: None,
             fail_on_stale_baseline: false,
             type_aware_require: fallow_config::TypeAwareRequire::BestEffort,
             type_aware_meta: None,
         })
-        .expect("severity gate armed");
+        .expect("the regression gate armed the object");
+        assert_eq!(
+            gates.get(GateName::Regression).expect("armed").status,
+            GateStatus::Pass
+        );
         let outcome = gates
             .get(GateName::ErrorSeverityFindings)
-            .expect("entry present");
+            .expect("the default exit rule joins the object");
         assert_eq!(outcome.status, GateStatus::Fail);
         assert!(outcome.enforced);
     }

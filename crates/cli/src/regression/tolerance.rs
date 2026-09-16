@@ -8,19 +8,46 @@ pub enum Tolerance {
 }
 
 impl Tolerance {
-    /// The tolerance as a plain number, in whatever unit the variant names.
+    /// The largest issue-count increase this tolerance allows, in the same unit
+    /// as the delta it is compared against.
     ///
-    /// The unit lives beside it as `regression.tolerance_kind`, so a consumer
-    /// reading the number alone must not assume percent or count.
+    /// Mirrors [`Self::exceeded`] exactly, floor included, so a consumer
+    /// comparing a published delta against a published allowance reaches the
+    /// same verdict the gate did. A percentage tolerance against an empty
+    /// baseline allows nothing, which is the branch `exceeded` takes when
+    /// `baseline_total` is zero.
     #[must_use]
-    pub fn as_f64(&self) -> f64 {
+    pub fn allowed_delta(&self, baseline_total: usize) -> f64 {
         match *self {
-            Self::Percentage(percent) => percent,
+            Self::Percentage(pct) => {
+                if baseline_total == 0 {
+                    return 0.0;
+                }
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "an issue count never approaches the f64 integer limit"
+                )]
+                let baseline = baseline_total as f64;
+                (baseline * pct / 100.0).floor()
+            }
             #[expect(
                 clippy::cast_precision_loss,
                 reason = "an issue-count tolerance never approaches the f64 integer limit"
             )]
             Self::Absolute(count) => count as f64,
+        }
+    }
+
+    /// The tolerance as the user spelled it: `"50%"` or `"5"`.
+    ///
+    /// Published beside the allowance so the unit is recoverable from the entry
+    /// alone, which the grouped envelope needs because it carries no
+    /// `regression` object to read `tolerance_kind` from.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match *self {
+            Self::Percentage(percent) => format!("{percent}%"),
+            Self::Absolute(count) => count.to_string(),
         }
     }
 
@@ -79,6 +106,46 @@ impl Tolerance {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The allowance must be in the delta's unit, or a percentage tolerance
+    /// renders as a count on every surface that shows the two side by side.
+    #[test]
+    fn allowed_delta_is_in_the_same_unit_as_the_delta() {
+        assert!((Tolerance::Absolute(5).allowed_delta(100) - 5.0).abs() < f64::EPSILON);
+        assert!((Tolerance::Percentage(50.0).allowed_delta(100) - 50.0).abs() < f64::EPSILON);
+        assert!((Tolerance::Percentage(50.0).allowed_delta(3) - 1.0).abs() < f64::EPSILON);
+        assert!((Tolerance::Percentage(50.0).allowed_delta(0) - 0.0).abs() < f64::EPSILON);
+    }
+
+    /// The published allowance and the gate must agree at the boundary.
+    #[test]
+    fn allowed_delta_agrees_with_exceeded() {
+        for tolerance in [
+            Tolerance::Absolute(0),
+            Tolerance::Absolute(5),
+            Tolerance::Percentage(50.0),
+            Tolerance::Percentage(10.0),
+        ] {
+            for baseline in [0_usize, 1, 3, 10, 100] {
+                for delta in 0_usize..12 {
+                    let current = baseline + delta;
+                    #[expect(clippy::cast_precision_loss, reason = "small test values")]
+                    let delta_f = delta as f64;
+                    assert_eq!(
+                        tolerance.exceeded(baseline, current),
+                        delta_f > tolerance.allowed_delta(baseline),
+                        "{tolerance:?} baseline {baseline} delta {delta}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_label_is_the_spelling_the_user_used() {
+        assert_eq!(Tolerance::Percentage(50.0).label(), "50%");
+        assert_eq!(Tolerance::Absolute(5).label(), "5");
+    }
 
     #[test]
     fn parse_percentage_tolerance() {

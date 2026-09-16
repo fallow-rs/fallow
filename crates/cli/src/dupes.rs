@@ -213,7 +213,9 @@ fn dupes_gate_outcomes(
         crate::gates::duplication_threshold_outcome(
             result.threshold,
             result.report.stats.duplication_percentage,
-            exceeds_threshold(result.threshold, result.report.stats.duplication_percentage),
+            // Armed, not the verdict: the standalone command exits on this
+            // gate, so a passing threshold still reports `enforced: true`.
+            true,
         ),
     );
     gates.insert_if(

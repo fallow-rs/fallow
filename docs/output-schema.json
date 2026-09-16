@@ -26109,7 +26109,7 @@
             "string",
             "null"
           ],
-          "description": "The named limit the gate compared against, for a gate whose threshold is\nnot a number. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`) so its `observed` count is\nrecoverable from the entry alone; every other gate leaves it absent."
+          "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its own unit. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`); `regression` sets it to the\ntolerance as the user wrote it (`\"50%\"` or `\"5\"`), because `threshold`\nthere is the allowance in issues and the percentage would otherwise be\nunrecoverable on the grouped envelope, which carries no `regression`\nobject. Absent for gates whose numbers speak for themselves."
         }
       },
       "required": [

@@ -1510,10 +1510,13 @@ observed?: (number | null)
  */
 threshold?: (number | null)
 /**
- * The named limit the gate compared against, for a gate whose threshold is
- * not a number. `health-min-severity` sets it to the severity floor
- * (`moderate`, `high` or `critical`) so its `observed` count is
- * recoverable from the entry alone; every other gate leaves it absent.
+ * How the limit was spelled, for a gate whose `threshold` number does not
+ * carry its own unit. `health-min-severity` sets it to the severity floor
+ * (`moderate`, `high` or `critical`); `regression` sets it to the
+ * tolerance as the user wrote it (`"50%"` or `"5"`), because `threshold`
+ * there is the allowance in issues and the percentage would otherwise be
+ * unrecoverable on the grouped envelope, which carries no `regression`
+ * object. Absent for gates whose numbers speak for themselves.
  */
 threshold_label?: (string | null)
 }

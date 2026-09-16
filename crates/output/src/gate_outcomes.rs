@@ -124,7 +124,7 @@ pub enum GateStatus {
 /// including the ones that passed, so gating on it by itself fails every run
 /// that armed anything. Read `status` on its own to decide what to say, and
 /// remember that `warn` and `skipped` are neither a pass nor a failure.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GateOutcome {
     /// What the rule concluded.
@@ -143,12 +143,15 @@ pub struct GateOutcome {
     /// Absent for gates that compare no number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f64>,
-    /// The named limit the gate compared against, for a gate whose threshold is
-    /// not a number. `health-min-severity` sets it to the severity floor
-    /// (`moderate`, `high` or `critical`) so its `observed` count is
-    /// recoverable from the entry alone; every other gate leaves it absent.
+    /// How the limit was spelled, for a gate whose `threshold` number does not
+    /// carry its own unit. `health-min-severity` sets it to the severity floor
+    /// (`moderate`, `high` or `critical`); `regression` sets it to the
+    /// tolerance as the user wrote it (`"50%"` or `"5"`), because `threshold`
+    /// there is the allowance in issues and the percentage would otherwise be
+    /// unrecoverable on the grouped envelope, which carries no `regression`
+    /// object. Absent for gates whose numbers speak for themselves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub threshold_label: Option<&'static str>,
+    pub threshold_label: Option<String>,
 }
 
 impl GateOutcome {
@@ -183,18 +186,18 @@ impl GateOutcome {
 
     /// A gate that counted `observed` items at or above a named floor.
     #[must_use]
-    pub const fn counted(
+    pub fn counted(
         status: GateStatus,
         enforced: bool,
         observed: f64,
-        threshold_label: &'static str,
+        threshold_label: &str,
     ) -> Self {
         Self {
             status,
             enforced,
             observed: Some(observed),
             threshold: None,
-            threshold_label: Some(threshold_label),
+            threshold_label: Some(threshold_label.to_owned()),
         }
     }
 

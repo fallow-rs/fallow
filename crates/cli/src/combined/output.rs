@@ -490,6 +490,7 @@ fn print_combined_review(
         "combined",
         combined_provider(github),
         &issues,
+        None,
     );
     combined_machine_success(code)
 }
@@ -993,23 +994,6 @@ fn combined_gate_outcomes(
     let mut gates = fallow_output::GateOutcomes::new();
     if let Some(result) = input.check_result {
         gates.insert_if(
-            fallow_output::GateName::ErrorSeverityFindings,
-            crate::gates::error_severity_outcome(
-                result.fail_on_issues,
-                result.fail_on_issues
-                    && crate::check::rules::has_error_severity_issues(
-                        &result.results,
-                        &crate::check::effective_check_rules(result),
-                        Some(&result.config),
-                        result.fail_on_issues,
-                    ),
-            )
-            .map(|outcome| fallow_output::GateOutcome {
-                enforced: false,
-                ..outcome
-            }),
-        );
-        gates.insert_if(
             fallow_output::GateName::Regression,
             crate::gates::regression_outcome(result.regression.as_ref(), true),
         );
@@ -1047,6 +1031,34 @@ fn combined_gate_outcomes(
             ),
         );
     }
+    let armed_by_flag = input
+        .check_result
+        .is_some_and(|result| result.fail_on_issues);
+    if gates.is_empty() && !armed_by_flag {
+        return None;
+    }
+
+    // The rule that decides this run's exit code, so the object can explain the
+    // status beside it. Evaluated only once a gate armed the object, because
+    // it walks every findings array and an unarmed run publishes nothing.
+    if let Some(result) = input.check_result {
+        let has_error_severity = crate::check::rules::has_error_severity_issues(
+            &result.results,
+            &crate::check::effective_check_rules(result),
+            Some(&result.config),
+            result.fail_on_issues,
+        );
+        gates.insert(
+            fallow_output::GateName::ErrorSeverityFindings,
+            fallow_output::GateOutcome::new(
+                crate::gates::status_of(has_error_severity),
+                // The combined machine renderers collapse this one to exit 0
+                // like the rest; see the doc comment above.
+                false,
+            ),
+        );
+    }
+
     gates.into_option()
 }
 
