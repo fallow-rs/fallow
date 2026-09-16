@@ -52,6 +52,7 @@ pub fn serialize_combined_programmatic_json(
     let workspace_diagnostics =
         combined_workspace_diagnostics(dead_code.as_ref(), health.as_ref(), duplication.as_ref());
     crate::serialize_combined_json(crate::CombinedJsonOutputInput {
+        gate_outcomes: None,
         check: dead_code
             .as_ref()
             .map(|dead_code| crate::CombinedCheckJsonSection {
@@ -168,6 +169,7 @@ pub fn serialize_audit_programmatic_json(
 
     crate::serialize_audit_json(
         crate::AuditJsonOutputInput {
+            gate_outcomes: None,
             header: crate::AuditJsonHeaderInput {
                 schema_version: SchemaVersion(AUDIT_SCHEMA_VERSION),
                 version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
@@ -596,6 +598,7 @@ pub fn serialize_health_programmatic_json(
         )
     });
     serialize_health_report_json(HealthJsonReportInput {
+        gate_outcomes: None,
         report,
         root: &root,
         elapsed,
@@ -722,6 +725,7 @@ mod tests {
     ) -> DuplicationProgrammaticOutput {
         DuplicationProgrammaticOutput {
             output: build_dupes_output(DupesOutputInput {
+                gate_outcomes: None,
                 baseline_staleness: None,
                 schema_version: DUPES_SCHEMA_VERSION,
                 version: "0.0.0-test".to_owned(),

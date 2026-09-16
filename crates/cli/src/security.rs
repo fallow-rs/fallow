@@ -412,6 +412,7 @@ pub fn benchmark_security_blind_spots_json(
 ) -> SecurityBlindSpotsBenchmarkResult {
     let normalized = unresolved_callee_diagnostics(diagnostics, root);
     let output = SecurityOutput {
+        gate_outcomes: None,
         schema_version: SecuritySchemaVersion::V8,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_owned()),
         elapsed_ms: ElapsedMs(0),
@@ -516,6 +517,8 @@ fn build_security_command_output(
         unresolved_callee_diagnostics,
         workspace_diagnostics,
     });
+    let mut output = output;
+    output.gate_outcomes = security_gate_outcomes(opts, &output, effective_severities);
     Ok((output, effective_severities))
 }
 
@@ -774,6 +777,7 @@ fn security_rule_severities(config: &fallow_config::ResolvedConfig) -> SecurityR
 
 fn build_security_output(input: SecurityOutputInput<'_, '_>) -> SecurityOutput {
     SecurityOutput {
+        gate_outcomes: None,
         schema_version: SecuritySchemaVersion::V8,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(input.started.elapsed().as_millis() as u64),
@@ -866,6 +870,53 @@ fn render_security_github(opts: &SecurityOptions<'_>, output: &SecurityOutput) -
             &options,
         )
     }
+}
+
+/// The gates a security run evaluated, for the envelope's `gate_outcomes`.
+///
+/// Projects [`security_exit_code`]'s two branches. A configured `--gate`
+/// returns before the advisory, so the advisory is recorded as `skipped` there
+/// rather than left to be inferred from silence: a passing gate suppressing an
+/// advisory-tier backlog is exactly the shadowing a consumer cannot see today.
+fn security_gate_outcomes(
+    opts: &SecurityOptions<'_>,
+    output: &SecurityOutput,
+    effective_severities: SecurityRuleSeverities,
+) -> Option<fallow_output::GateOutcomes> {
+    use fallow_output::{GateName, GateOutcome, GateStatus};
+
+    let mut gates = fallow_output::GateOutcomes::new();
+    if let Some(gate) = &output.gate {
+        gates.insert(
+            GateName::Security,
+            GateOutcome::new(
+                crate::gates::status_of(gate.verdict == SecurityGateVerdict::Fail),
+                true,
+            ),
+        );
+        gates.insert(
+            GateName::SecurityAdvisory,
+            GateOutcome::new(GateStatus::Skipped, false),
+        );
+        return gates.into_option();
+    }
+    if opts.fail_on_issues
+        || effective_severities.leak == Severity::Error
+        || effective_severities.sink == Severity::Error
+    {
+        gates.insert(
+            GateName::SecurityAdvisory,
+            GateOutcome::new(
+                crate::gates::status_of(security_advisory_failed(
+                    opts,
+                    output,
+                    effective_severities,
+                )),
+                true,
+            ),
+        );
+    }
+    gates.into_option()
 }
 
 fn security_exit_code(
@@ -3228,6 +3279,7 @@ mod tests {
 
     fn output_with(findings: Vec<SecurityFinding>, unresolved_edge_files: usize) -> SecurityOutput {
         SecurityOutput {
+            gate_outcomes: None,
             schema_version: SecuritySchemaVersion::V8,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),
@@ -3245,6 +3297,7 @@ mod tests {
 
     fn output_with_gate(verdict: SecurityGateVerdict, new_count: usize) -> SecurityOutput {
         SecurityOutput {
+            gate_outcomes: None,
             schema_version: SecuritySchemaVersion::V8,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),

@@ -35,6 +35,7 @@ pub(super) struct PrintJsonInput<'a> {
     pub(super) baseline_matched: Option<(usize, usize)>,
     pub(super) config_fixable: bool,
     pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    pub(super) gate_outcomes: Option<fallow_output::GateOutcomes>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
 }
@@ -59,11 +60,12 @@ pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_js
         input.elapsed,
         input.config_fixable,
         check_output_meta(input.explain, input.type_aware),
-        check_json_extras(
+        check_json_extras_with_gates(
             input.regression,
             None,
             input.baseline_matched,
             input.baseline_staleness,
+            input.gate_outcomes.clone(),
         ),
         input.workspace_diagnostics,
     )?;
@@ -81,12 +83,14 @@ pub(super) struct PrintGroupedJsonInput<'a> {
     pub(super) resolver: &'a OwnershipResolver,
     pub(super) config_fixable: bool,
     pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    pub(super) gate_outcomes: Option<fallow_output::GateOutcomes>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
 }
 
 pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
     let output = match fallow_api::serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+        gate_outcomes: input.gate_outcomes.clone(),
         groups: input.groups,
         original: input.original,
         root: input.root,
@@ -596,7 +600,27 @@ pub fn check_json_extras(
     baseline_matched: Option<(usize, usize)>,
     baseline_staleness: Option<fallow_output::BaselineStaleness>,
 ) -> CheckJsonExtraOutputs {
+    check_json_extras_with_gates(
+        regression,
+        baseline_deltas,
+        baseline_matched,
+        baseline_staleness,
+        None,
+    )
+}
+
+/// [`check_json_extras`] plus the run's gate outcomes, for the callers that
+/// evaluated gates. Kept separate so the many callers that evaluate none do not
+/// each have to pass `None`.
+pub fn check_json_extras_with_gates(
+    regression: Option<&crate::regression::RegressionOutcome>,
+    baseline_deltas: Option<BaselineDeltas>,
+    baseline_matched: Option<(usize, usize)>,
+    baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    gate_outcomes: Option<fallow_output::GateOutcomes>,
+) -> CheckJsonExtraOutputs {
     CheckJsonExtraOutputs {
+        gate_outcomes,
         regression: regression.map(regression_output),
         baseline_deltas,
         baseline: baseline_matched.map(|(entries, matched)| BaselineMatch { entries, matched }),
@@ -701,6 +725,10 @@ fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "health output keeps render options, diagnostics and gate verdicts explicit"
+)]
 pub(super) fn api_health_json_document(
     report: &fallow_output::HealthReport,
     root: &Path,
@@ -708,8 +736,10 @@ pub(super) fn api_health_json_document(
     explain: bool,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
     workspace_diagnostics: &[WorkspaceDiagnostic],
+    gate_outcomes: Option<fallow_output::GateOutcomes>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let output = fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
+        gate_outcomes,
         report: report.clone(),
         root,
         elapsed,
@@ -744,8 +774,10 @@ fn api_grouped_health_json_document(
     explain: bool,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
     workspace_diagnostics: &[WorkspaceDiagnostic],
+    gate_outcomes: Option<fallow_output::GateOutcomes>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
+        gate_outcomes,
         report: report.clone(),
         root,
         elapsed,
@@ -779,6 +811,7 @@ pub(super) fn print_health_json(
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
     workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
+    gate_outcomes: Option<fallow_output::GateOutcomes>,
 ) -> ExitCode {
     match api_health_json_document(
         report,
@@ -787,6 +820,7 @@ pub(super) fn print_health_json(
         explain,
         type_aware,
         workspace_diagnostics,
+        gate_outcomes,
     ) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
@@ -809,6 +843,7 @@ pub(super) fn print_grouped_health_json(
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
     workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
+    gate_outcomes: Option<fallow_output::GateOutcomes>,
 ) -> ExitCode {
     match api_grouped_health_json_document(
         report,
@@ -818,6 +853,7 @@ pub(super) fn print_grouped_health_json(
         explain,
         type_aware,
         workspace_diagnostics,
+        gate_outcomes,
     ) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
@@ -829,10 +865,12 @@ pub(super) fn print_grouped_health_json(
 
 /// The two presentation switches the duplication JSON path carries, paired so
 /// they travel as one argument through the render chain.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) struct DuplicationJsonRender {
     /// This run's view of the loaded duplication baseline, for baseline runs.
     pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    /// Every gate this run evaluated, for the envelope's `gate_outcomes`.
+    pub(super) gate_outcomes: Option<fallow_output::GateOutcomes>,
     /// Attach the `_meta` explain block.
     pub(super) explain: bool,
     /// Serialize `instances[].fragment`. Off for a location-only payload.
@@ -843,7 +881,7 @@ pub(super) fn api_duplication_json_document(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
-    render: DuplicationJsonRender,
+    render: &DuplicationJsonRender,
     workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     let payload = DupesReportPayload::from_report(report);
@@ -854,6 +892,7 @@ pub(super) fn api_duplication_json_document(
         crate::report::suggestions::due_impact_digest(root),
     );
     fallow_api::serialize_duplication_json(DuplicationJsonOutputInput {
+        gate_outcomes: render.gate_outcomes.clone(),
         report,
         root,
         elapsed,
@@ -871,7 +910,7 @@ pub(super) fn print_duplication_json(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
-    render: DuplicationJsonRender,
+    render: &DuplicationJsonRender,
     workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
@@ -889,7 +928,7 @@ fn api_grouped_duplication_json_document(
     grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
-    render: DuplicationJsonRender,
+    render: &DuplicationJsonRender,
     workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     let payload = DupesReportPayload::from_report(report);
@@ -900,6 +939,7 @@ fn api_grouped_duplication_json_document(
         crate::report::suggestions::due_impact_digest(root),
     );
     fallow_api::serialize_grouped_duplication_json(GroupedDuplicationJsonOutputInput {
+        gate_outcomes: render.gate_outcomes.clone(),
         report,
         grouping,
         root,
@@ -932,7 +972,7 @@ pub(super) fn print_grouped_duplication_json(
     grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
-    render: DuplicationJsonRender,
+    render: &DuplicationJsonRender,
     workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
@@ -1293,6 +1333,7 @@ mod tests {
             fallow_output::HealthReport,
             fallow_output::HealthGroup,
         > = fallow_output::HealthOutput {
+            gate_outcomes: None,
             schema_version: SchemaVersion(fallow_output::HEALTH_SCHEMA_VERSION),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
             elapsed_ms: ElapsedMs(7),
@@ -1376,6 +1417,7 @@ mod tests {
             false,
             None,
             &[],
+            None,
         )
         .expect("grouped health JSON should serialize");
 

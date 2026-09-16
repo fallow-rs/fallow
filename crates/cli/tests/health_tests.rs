@@ -8,8 +8,8 @@
 mod common;
 
 use common::{
-    canonical_report, fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined,
-    run_fallow_in_root, run_fallow_raw, run_fallow_raw_with_env,
+    canonical_report_without_gate_outcomes, fixture_path, parse_json, redact_all, run_fallow,
+    run_fallow_combined, run_fallow_in_root, run_fallow_raw, run_fallow_raw_with_env,
 };
 use std::fmt::Write as _;
 use std::path::Path;
@@ -2771,9 +2771,14 @@ fn health_stale_baseline_gate_leaves_json_output_unchanged() {
         redact_all(&with.stderr, project.path())
     );
     assert_eq!(
-        canonical_report(&without),
-        canonical_report(&with),
-        "the gate changes the exit code and stderr, never the health envelope"
+        canonical_report_without_gate_outcomes(&without),
+        canonical_report_without_gate_outcomes(&with),
+        "the gate moves nothing in the health envelope but its own armed-ness"
+    );
+    assert_eq!(
+        parse_json(&without)["summary"]["baseline_staleness"],
+        parse_json(&with)["summary"]["baseline_staleness"],
+        "the staleness object stays flag-independent"
     );
 }
 

@@ -55,6 +55,24 @@ pub fn print_audit_result_with_style(
     }
 }
 
+/// The audit run's rule-severity verdict, for the envelope's `gate_outcomes`.
+///
+/// The only three-valued gate fallow has: the warn tier reports `warn` rather
+/// than collapsing onto `pass`, which is why the status is an enum. Always
+/// present, because `fallow audit` always reaches a verdict.
+fn audit_gate_outcomes(result: &AuditResult) -> Option<fallow_output::GateOutcomes> {
+    use fallow_output::{GateName, GateOutcome, GateStatus};
+
+    let status = match result.verdict {
+        AuditVerdict::Pass => GateStatus::Pass,
+        AuditVerdict::Warn => GateStatus::Warn,
+        AuditVerdict::Fail => GateStatus::Fail,
+    };
+    let mut gates = fallow_output::GateOutcomes::new();
+    gates.insert(GateName::AuditVerdict, GateOutcome::new(status, true));
+    gates.into_option()
+}
+
 fn audit_decision_conclusion(verdict: AuditVerdict) -> PrDecisionConclusion {
     match verdict {
         AuditVerdict::Pass => PrDecisionConclusion::Success,
@@ -892,6 +910,7 @@ pub(super) fn build_audit_json_output(result: &AuditResult) -> Result<serde_json
 
     fallow_api::serialize_audit_json(
         AuditJsonOutputInput {
+            gate_outcomes: audit_gate_outcomes(result),
             header: audit_json_header_input(result),
             meta: result
                 .check

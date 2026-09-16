@@ -90,6 +90,10 @@ pub struct AuditJsonHeaderInput {
 
 /// Typed audit JSON assembly input.
 pub struct AuditJsonOutputInput<DeadCode, Duplication, Complexity> {
+    /// Every gate this run evaluated, absent when it evaluated none. The
+    /// programmatic route runs no CLI-layer gate and leaves this `None`.
+    pub gate_outcomes: Option<fallow_output::GateOutcomes>,
+
     /// Envelope header fields.
     pub header: AuditJsonHeaderInput,
     /// Optional explain metadata block.
@@ -241,6 +245,7 @@ where
         base_snapshot_skipped: header.base_snapshot_skipped,
         summary: header.summary,
         attribution: header.attribution,
+        gate_outcomes: input.gate_outcomes,
         meta: input.meta,
         dead_code: input.dead_code,
         duplication: input.duplication,
@@ -467,6 +472,7 @@ mod tests {
     fn audit_json_serializer_applies_root_kind_and_sections() {
         let value = serialize_audit_json(
             AuditJsonOutputInput {
+                gate_outcomes: None,
                 header: header_input(),
                 meta: None,
                 dead_code: Some(serde_json::json!({"total_issues": 0})),

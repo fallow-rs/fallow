@@ -234,6 +234,36 @@ pub fn canonical_report(output: &CommandOutput) -> String {
     serde_json::to_string(&value).expect("re-serialize canonical report")
 }
 
+/// [`canonical_report`] with `gate_outcomes` removed, at the root and inside
+/// each combined section.
+///
+/// For the comparisons that ask whether an opt-in gate flag changed the report.
+/// `gate_outcomes[g].enforced` records whether a verdict is armed, so it is the
+/// one member such a flag is meant to move; everything else must stay put.
+pub fn canonical_report_without_gate_outcomes(output: &CommandOutput) -> String {
+    let mut value = parse_json(output);
+    strip_volatile_fields(&mut value);
+    strip_gate_outcomes(&mut value);
+    serde_json::to_string(&value).expect("re-serialize canonical report")
+}
+
+fn strip_gate_outcomes(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("gate_outcomes");
+            for nested in map.values_mut() {
+                strip_gate_outcomes(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                strip_gate_outcomes(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Replace absolute fixture paths with `[ROOT]` and normalize separators.
 pub fn redact_paths(s: &str, root: &Path) -> String {
     let root_str = root.to_string_lossy();

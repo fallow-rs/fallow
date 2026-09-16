@@ -616,6 +616,7 @@ fn run_health_with_session_artifacts_accepts_retained_dead_code_analysis() {
 fn serialize_health_report_json_tags_meta_and_strips_paths() {
     let root = Path::new("/repo");
     let json = serialize_health_report_json(HealthJsonReportInput {
+        gate_outcomes: None,
         report: HealthReport::default(),
         root,
         elapsed: std::time::Duration::ZERO,

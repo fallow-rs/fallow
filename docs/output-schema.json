@@ -29,6 +29,17 @@
           "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every gate this run evaluated, keyed by name, absent when it evaluated\nnone. Each entry is the same rule that decides the exit code, so a CI\nintegration reads `enforced` plus `status` instead of guessing from a\nprocess status it usually cannot see. See [`crate::GateOutcomes`]."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -155,6 +166,17 @@
         "attribution": {
           "description": "New-vs-inherited attribution of findings against the base.",
           "$ref": "#/definitions/AuditAttribution"
+        },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every gate this run evaluated, keyed by name, absent when it evaluated\nnone. Each entry is the same rule that decides the exit code, so a CI\nintegration reads `enforced` plus `status` instead of guessing from a\nprocess status it usually cannot see. See [`crate::GateOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -880,6 +902,17 @@
           ],
           "description": "Regression verdict against the baseline, in `--fail-on-regression` runs."
         },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every gate this run evaluated, keyed by name, absent when it evaluated\nnone. Each entry is the same rule that decides the exit code, so a CI\nintegration reads `enforced` plus `status` instead of guessing from a\nprocess status it usually cannot see. See [`crate::GateOutcomes`]."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -970,6 +1003,17 @@
             }
           ],
           "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. Read `change_scoped`\nbefore dividing `matched_entries` by `baseline_entries`: a narrowed run\ncan report `matched_entries: 0` on a healthy baseline."
+        },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every gate this run evaluated, keyed by name, absent when it evaluated\nnone. Each entry is the same rule that decides the exit code, so a CI\nintegration reads `enforced` plus `status` instead of guessing from a\nprocess status it usually cannot see. See [`crate::GateOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -1596,6 +1640,17 @@
             "$ref": "#/definitions/HealthGroup"
           },
           "description": "Per-bucket recomputed metrics; present only in grouped output."
+        },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every gate this run evaluated, keyed by name, absent when it evaluated\nnone. Each entry is the same rule that decides the exit code, so a CI\nintegration reads `enforced` plus `status` instead of guessing from a\nprocess status it usually cannot see. See [`crate::GateOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -2822,6 +2877,17 @@
             }
           ],
           "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. Read `change_scoped`\nbefore dividing `matched_entries` by `baseline_entries`: a narrowed run\ncan report `matched_entries: 0` on a healthy baseline."
+        },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every gate this run evaluated, keyed by name, absent when it evaluated\nnone. Each entry is the same rule that decides the exit code, so a CI\nintegration reads `enforced` plus `status` instead of guessing from a\nprocess status it usually cannot see. See [`crate::GateOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -11469,6 +11535,10 @@
         "message": {
           "type": "string",
           "description": "Human-readable rendering derived from `kind` + `path`. Always ends\nwith a next-step hint."
+        },
+        "degrades_analysis": {
+          "type": "boolean",
+          "description": "True when this diagnostic reports a run whose RESULTS are degraded:\nsomething the user installed, wrote, or expected did not reach the\nanalysis. Projected from [`WorkspaceDiagnosticKind::warns_on_stderr`],\nwhich is the same classification that decides whether the CLI prints a\nstderr line, so a CI log built from this field and a local non-quiet run\nsay the same thing.\n\nOmitted when false, which is what keeps every clean run byte-identical.\nThe two unconfigured-check kinds answer false on purpose: they fire in\nthe product's default state on every project that never opted into\nboundaries or rule packs, so warning on them would warn forever. So does\n`excluded-by-default-ignore`, which is designed behavior on generated\noutput; the alarm for that case is `no-source-files-analyzed`.\n\nRead this instead of hardcoding a kind allowlist: a degrading kind added\nin a later release then reaches an unchanged consumer."
         }
       },
       "required": [
@@ -11769,6 +11839,24 @@
             "directory_count"
           ],
           "description": "One of fallow's built-in discovery ignore patterns (`**/dist/**`,\n`**/build/**`, `**/coverage/**`, and the four minified-bundle globs)\nremoved at least one candidate source file from this walk. The files\nare never read, so their imports and exports are invisible to every\nanalysis, and until issue #2638 the drop was completely silent:\npointing fallow at a directory a built-in pattern matches returned a\nclean report with exit 0 and nothing said why.\n\n`**/node_modules/**` is carved out and never appears in `pattern`:\ninstalled dependencies are not the first-party source this diagnostic\nis about, and a project that does not gitignore them would get a\nfive-figure count with no useful remedy. `**/.git/**` cannot fire,\nbecause hidden directories are not traversed.\n\nOne entry per pattern, never per file or per directory, so the array\ngrows by at most the number of built-in patterns on a project of any\nsize. `path` anchors at the matched directory holding the most excluded\nfiles for that pattern, ties broken by the lexicographically first\npath, so two runs on one tree report the same location. On a nested\nmatch it is the DEEPEST segment the pattern matched\n(`build/tools/build`, not `build`), because that is the directory the\n`--root` remedy names and re-rooting at a shallower one would leave a\nmatching segment behind. That directory is the\nlargest group and not a majority: a flat monorepo can spread ten\nexcluded files over ten sibling `dist/` directories and every one of\nthem is then \"the largest\". `file_count` spans all of them, and\n`directory_count` says how many there were, so a reader can tell a\nsingle tree from a scattered one without a directory list in the\npayload.\n\nThree properties of the population are load-bearing and easy to\nmisread:\n\n- **Gitignored trees count zero.** Source discovery honors\n  `.gitignore`, `.git/info/exclude`, and the global gitignore, and\n  prunes those directories before this check runs. The honest reading\n  is \"candidate source files git did not already hide and a built-in\n  pattern then dropped\", which is why a repository that gitignores its\n  own `dist/` never sees this diagnostic.\n- **A user `ignorePatterns` entry is not a surprise.** The compiled\n  ignore set is the union of `ignorePatterns` and the built-ins, so a\n  file both matched was an explicit project choice and is attributed to\n  no pattern here. The union also only ever adds: `ignorePatterns`\n  cannot negate a built-in, so a config edit is never the remedy.\n- **The remedy depends on the pattern's shape.** A directory-shaped\n  built-in (`**/dist/**`) is matched against the path relative to the\n  run root, so re-rooting inside the matched directory removes the\n  matched segment and the files become visible: the message advertises\n  `fallow --root <dir>`. A file-shaped built-in (`**/*.min.js` and the\n  three other bundle globs) matches on the file name and keeps matching\n  at any root, so the message says so and points at renaming instead of\n  handing out a command that provably does nothing.\n\nDeliberately NOT one of the [`Self::source_never_analyzed`] kinds. These\nexclusions are the product's designed behavior on generated output, not\na degraded run: answering `true` would attach `IncompleteFileAnalysis`\nand `IncompleteImportGraph` caveats to findings on nearly every project\nthat keeps a non-gitignored `dist/` or `coverage/`, and make `fallow\nfix` withhold `delete-file` and `remove-export` actions project-wide."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "excluded_file_count": {
+              "type": "integer",
+              "description": "Candidate source files the built-in ignore patterns removed from\nthis walk, summed across every pattern. `0` when the walk found no\ncandidate to exclude in the first place."
+            },
+            "kind": {
+              "type": "string",
+              "const": "no-source-files-analyzed"
+            }
+          },
+          "required": [
+            "kind",
+            "excluded_file_count"
+          ],
+          "description": "The walk finished with no source file to analyze at all, so every\nfinding count this run reports is zero because nothing was measured\nrather than because the project is clean (issue #2686).\n\nDistinct from [`Self::ExcludedByDefaultIgnore`], which reports one\npattern's exclusions and is designed behavior on generated output. The\nalarm is not the exclusion, it is having nothing left afterwards, and\nthat condition also fires with no exclusion at all: a docs-only\nrepository, a workspace member with no TypeScript, or a path filter that\nmatched nothing. `excluded_file_count` names the built-in-ignore\ncontribution so the common cause is still attributable, and is `0` when\nno built-in pattern took part.\n\nThis is the kind a CI consumer reads to tell \"measured zero\" from\n\"measured nothing\": the human report has said so since 3.26.0, but only\nin human format and only under the built-in-ignore cause, so `--quiet\n--format json` saw a clean green either way."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
@@ -12663,6 +12751,17 @@
         "config": {
           "description": "Privacy-safe config context relevant to security candidate generation.",
           "$ref": "#/definitions/SecurityOutputConfig"
+        },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every gate this run evaluated, keyed by name, absent when it evaluated\nnone. Each entry is the same rule that decides the exit code, so a CI\nintegration reads `enforced` plus `status` instead of guessing from a\nprocess status it usually cannot see. See [`crate::GateOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -13968,6 +14067,17 @@
         "config": {
           "description": "Privacy-safe config context relevant to security candidate generation.",
           "$ref": "#/definitions/SecurityOutputConfig"
+        },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every gate this run evaluated, keyed by name, absent when it evaluated\nnone. Each entry is the same rule that decides the exit code, so a CI\nintegration reads `enforced` plus `status` instead of guessing from a\nprocess status it usually cannot see. See [`crate::GateOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -25968,6 +26078,140 @@
         }
       ],
       "description": "Which advisory a loaded baseline earned on this run.\n\nMirrors `fallow_engine::baseline::BaselineStalenessWarning` so a consumer can\nrender the same distinction the stderr warning makes, instead of inferring it\nfrom counts."
+    },
+    "GateOutcome": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "What the rule concluded.",
+          "$ref": "#/definitions/GateStatus"
+        },
+        "enforced": {
+          "type": "boolean",
+          "description": "True when a `fail` from this gate makes the run exit non-zero. False\nwhen the verdict is published for information only, because the gate was\nnever armed or because the run was told never to fail."
+        },
+        "observed": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, or the number of findings at or above the\nseverity floor. Whole numbers are carried as JSON numbers, so a count of\nthree reads as `3.0`. Absent for gates that compare no number."
+        },
+        "threshold": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "The configured limit `observed` was compared against, when there is one.\nAbsent for gates that compare no number."
+        }
+      },
+      "required": [
+        "status",
+        "enforced"
+      ],
+      "description": "One gate's verdict on one run.\n\n`status` and `enforced` answer different questions and legitimately\ndisagree. `status` is what the rule concluded; `enforced` is whether this\nrun would exit non-zero because of it. A `health --report-only` run is an\nexplicit request never to fail, so a failing gate there reports\n`status: fail` with `enforced: false`, and a stale-baseline verdict\npublished without `--fail-on-stale-baseline` reports the same pair. Gate on\n`enforced` to decide whether a build should fail; read `status` to decide\nwhat to say about it."
+    },
+    "GateStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "pass",
+          "description": "The gate ran and its condition did not hold."
+        },
+        {
+          "type": "string",
+          "const": "warn",
+          "description": "The gate ran and reached a warn tier that does not fail the run. Only\n`audit-verdict` can report this today."
+        },
+        {
+          "type": "string",
+          "const": "fail",
+          "description": "The gate ran and its condition held."
+        },
+        {
+          "type": "string",
+          "const": "skipped",
+          "description": "The gate could not judge this run and deliberately stood down: a\nchange-scoped baseline comparison, `health --report-only`, or a security\nadvisory shadowed by a configured gate. Distinct from `pass`, which\nasserts the condition was evaluated and did not hold."
+        }
+      ],
+      "description": "What a gate concluded on this run.\n\nFour-valued rather than a boolean because audit's verdict has a warn tier\n(`crates/cli/src/cli_report.rs` maps it onto three conclusions) and because\na gate can stand down without passing. Widening a published boolean later\nwould retype a required field and bump every carrying envelope, so the width\nis decided here."
+    },
+    "GateName": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "error-severity-findings",
+          "description": "The CLI's own severity rule: any finding whose effective severity is\n`error` fails the run. This is NOT a count rule, and `--fail-on-issues`\nonly promotes warn-tier rules into it, so a project with a rule set to\n`warn` can report findings and still exit 0."
+        },
+        {
+          "type": "string",
+          "const": "regression",
+          "description": "`--fail-on-regression`: issue counts grew past `--tolerance` compared\nwith the regression baseline."
+        },
+        {
+          "type": "string",
+          "const": "stale-baseline",
+          "description": "`--fail-on-stale-baseline`: the loaded baseline has entries that matched\nnothing this run."
+        },
+        {
+          "type": "string",
+          "const": "duplication-threshold",
+          "description": "`--threshold`: duplication exceeded the configured percentage."
+        },
+        {
+          "type": "string",
+          "const": "health-min-score",
+          "description": "`--min-score`: the health score fell below the configured minimum."
+        },
+        {
+          "type": "string",
+          "const": "health-min-severity",
+          "description": "`--min-severity`: at least one complexity finding reached the configured\nseverity. One branch of the findings gate; see [`Self::HealthFindings`]."
+        },
+        {
+          "type": "string",
+          "const": "health-findings",
+          "description": "The health findings gate with no severity floor: any complexity finding\nfails the run. Inert when `--min-score` is set alone, which is what\n\"complexity findings become informational\" means."
+        },
+        {
+          "type": "string",
+          "const": "health-coverage-gaps",
+          "description": "The coverage-gap gate, configured through `rules.coverage-gaps`."
+        },
+        {
+          "type": "string",
+          "const": "health-runtime-coverage",
+          "description": "A runtime-coverage finding whose verdict is `safe_to_delete`,\n`review_required` or `low_traffic`."
+        },
+        {
+          "type": "string",
+          "const": "security",
+          "description": "`security --gate`: the change introduced a new security-sink candidate.\nThe only gate that exits 8 rather than 1."
+        },
+        {
+          "type": "string",
+          "const": "security-advisory",
+          "description": "The security advisory exit, which fails on the candidate backlog rather\nthan on what the change introduced. A configured `--gate` returns before\nit, so this reports `skipped` on any run that set one."
+        },
+        {
+          "type": "string",
+          "const": "audit-verdict",
+          "description": "`fallow audit`'s rule-severity verdict, the only three-valued gate."
+        },
+        {
+          "type": "string",
+          "const": "type-aware-require",
+          "description": "`--type-aware-require complete`: semantic analysis was partial or\nunavailable."
+        }
+      ],
+      "description": "Which gate an outcome describes.\n\nTaken from the exit-code sites rather than from any integration's input\nlist, because a gate a consumer cannot name is exactly the one whose verdict\ngoes missing. Serialized as kebab-case and published as an open set."
+    },
+    "GateOutcomes": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/GateOutcome"
+      },
+      "description": "Every gate a run evaluated, keyed by name.\n\nAbsent from an envelope whenever it is empty, so a run that evaluated no\ngate is byte-identical to one produced before this object existed. An empty\nobject is never emitted: it would assert that gates were evaluated and none\ntripped, which is a different and false claim."
     }
   }
 }

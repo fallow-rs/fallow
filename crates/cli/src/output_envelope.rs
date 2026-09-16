@@ -48,6 +48,7 @@ mod tests {
 
     fn combined_output() -> CombinedOutput {
         CombinedOutput {
+            gate_outcomes: None,
             schema_version: SchemaVersion(COMBINED_SCHEMA_VERSION),
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),

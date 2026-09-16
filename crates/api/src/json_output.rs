@@ -77,6 +77,11 @@ pub struct CheckJsonExtraOutputs {
     pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
     /// Outcome of the regression gate against the baseline.
     pub regression: Option<RegressionResult>,
+    /// Every gate this run evaluated. The programmatic route runs no CLI-layer
+    /// gate, so a caller that computes none leaves this `None` and the envelope
+    /// key stays absent. An empty set is never emitted: it would assert that
+    /// gates were evaluated and none tripped, which is a different claim.
+    pub gate_outcomes: Option<fallow_output::GateOutcomes>,
 }
 
 struct CheckJsonEnvelopeInput<'a> {
@@ -93,6 +98,11 @@ struct CheckJsonEnvelopeInput<'a> {
 pub struct GroupedCheckJsonOutputInput<'a> {
     /// This run's view of the loaded baseline, for baseline runs.
     pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    /// Every gate this run evaluated. The programmatic route runs no CLI-layer
+    /// gate, so a caller that computes none leaves this `None` and the envelope
+    /// key stays absent. An empty set is never emitted: it would assert that
+    /// gates were evaluated and none tripped, which is a different claim.
+    pub gate_outcomes: Option<fallow_output::GateOutcomes>,
 
     /// Results already partitioned into groups, in output order.
     pub groups: &'a [ResultGroup],
@@ -123,6 +133,11 @@ pub struct GroupedCheckJsonOutputInput<'a> {
 pub struct DuplicationJsonOutputInput<'a> {
     /// This run's view of the loaded duplication baseline, for baseline runs.
     pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    /// Every gate this run evaluated. The programmatic route runs no CLI-layer
+    /// gate, so a caller that computes none leaves this `None` and the envelope
+    /// key stays absent. An empty set is never emitted: it would assert that
+    /// gates were evaluated and none tripped, which is a different claim.
+    pub gate_outcomes: Option<fallow_output::GateOutcomes>,
 
     /// Typed duplication report to serialize.
     pub report: &'a DuplicationReport,
@@ -148,6 +163,11 @@ pub struct DuplicationJsonOutputInput<'a> {
 pub struct GroupedDuplicationJsonOutputInput<'a> {
     /// This run's view of the loaded duplication baseline, for baseline runs.
     pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    /// Every gate this run evaluated. The programmatic route runs no CLI-layer
+    /// gate, so a caller that computes none leaves this `None` and the envelope
+    /// key stays absent. An empty set is never emitted: it would assert that
+    /// gates were evaluated and none tripped, which is a different claim.
+    pub gate_outcomes: Option<fallow_output::GateOutcomes>,
 
     /// Typed duplication report to serialize.
     pub report: &'a DuplicationReport,
@@ -251,6 +271,7 @@ pub fn serialize_grouped_check_json(
         total_issues: input.original.total_issues(),
         groups: entries,
         baseline_staleness: input.baseline_staleness,
+        gate_outcomes: input.gate_outcomes,
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
@@ -277,6 +298,7 @@ pub fn serialize_duplication_json(
         DupesReportPayload::from_report_with_fragments(input.report, input.include_fragments);
     let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
+            gate_outcomes: input.gate_outcomes,
             schema_version: DUPES_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,
@@ -316,6 +338,7 @@ pub fn serialize_grouped_duplication_json(
         DupesReportPayload::from_report_with_fragments(input.report, input.include_fragments);
     let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
+            gate_outcomes: input.gate_outcomes,
             schema_version: DUPES_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,
@@ -378,6 +401,7 @@ fn build_check_json_envelope(input: CheckJsonEnvelopeInput<'_>) -> CheckOutput {
     output.baseline = input.extras.baseline;
     output.baseline_staleness = input.extras.baseline_staleness;
     output.regression = input.extras.regression;
+    output.gate_outcomes = input.extras.gate_outcomes;
     output
 }
 
@@ -404,6 +428,7 @@ mod tests {
     fn grouped_check_json_carries_workspace_diagnostics_with_relative_paths() {
         let root = Path::new("/project");
         let output = serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+            gate_outcomes: None,
             baseline_staleness: None,
             groups: &[],
             original: &AnalysisResults::default(),

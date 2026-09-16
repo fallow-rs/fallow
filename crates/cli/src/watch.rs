@@ -414,6 +414,8 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         show_explain_tip: true,
         baseline_matched: None,
         baseline_staleness: None,
+        // `watch` is the interactive loop; it arms no CI gate.
+        gate_outcomes: None,
         config_fixable: crate::fix::is_config_fixable(&config.root, opts.config_path.as_ref()),
         skip_score_and_trend: false,
         css_requested: false,

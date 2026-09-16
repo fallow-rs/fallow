@@ -74,6 +74,9 @@ pub type TraceErrorOutput = fallow_types::trace_error::ErrorTrace;
 
 /// Inputs for serializing health JSON output through the API boundary.
 pub struct HealthJsonReportInput<'a> {
+    /// Every gate this run evaluated, absent when it evaluated none. The
+    /// programmatic route runs no CLI-layer gate and leaves this `None`.
+    pub gate_outcomes: Option<fallow_output::GateOutcomes>,
     /// Typed health report to serialize.
     pub report: HealthReport,
     /// Project root; its prefix is stripped from every path in the output.
@@ -538,6 +541,7 @@ pub fn serialize_health_report_json(
     };
     fallow_output::serialize_health_json_output(HealthJsonOutputInput {
         output: HealthOutputInput {
+            gate_outcomes: input.gate_outcomes,
             schema_version: HEALTH_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,

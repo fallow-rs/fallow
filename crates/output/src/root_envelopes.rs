@@ -205,6 +205,12 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
     pub summary: Summary,
     /// New-vs-inherited attribution of findings against the base.
     pub attribution: Attribution,
+    /// Every gate this run evaluated, keyed by name, absent when it evaluated
+    /// none. Each entry is the same rule that decides the exit code, so a CI
+    /// integration reads `enforced` plus `status` instead of guessing from a
+    /// process status it usually cannot see. See [`crate::GateOutcomes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_outcomes: Option<crate::GateOutcomes>,
     /// `_meta` block with metric / rule definitions, when `--explain` was
     /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
@@ -248,6 +254,12 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     pub version: ToolVersion,
     /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// Every gate this run evaluated, keyed by name, absent when it evaluated
+    /// none. Each entry is the same rule that decides the exit code, so a CI
+    /// integration reads `enforced` plus `status` instead of guessing from a
+    /// process status it usually cannot see. See [`crate::GateOutcomes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_outcomes: Option<crate::GateOutcomes>,
     /// Per-section `_meta` blocks, when `--explain` was passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<CombinedMeta>,
@@ -548,6 +560,7 @@ mod tests {
     fn serialize_audit_json_output_applies_audit_kind() {
         let value = serialize_audit_json_output(
             AuditOutput {
+                gate_outcomes: None,
                 schema_version: SchemaVersion(7),
                 version: ToolVersion("1.2.3".to_string()),
                 command: AuditCommand::Audit,
@@ -581,6 +594,7 @@ mod tests {
     fn serialize_combined_json_output_applies_combined_kind() {
         let value = serialize_combined_json_output(
             CombinedOutput {
+                gate_outcomes: None,
                 schema_version: SchemaVersion(7),
                 version: ToolVersion("1.2.3".to_string()),
                 elapsed_ms: ElapsedMs(42),

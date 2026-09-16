@@ -125,6 +125,12 @@ pub struct SecurityOutput<Config, Gate> {
     pub elapsed_ms: ElapsedMs,
     /// Privacy-safe config context relevant to security candidate generation.
     pub config: Config,
+    /// Every gate this run evaluated, keyed by name, absent when it evaluated
+    /// none. Each entry is the same rule that decides the exit code, so a CI
+    /// integration reads `enforced` plus `status` instead of guessing from a
+    /// process status it usually cannot see. See [`crate::GateOutcomes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_outcomes: Option<crate::GateOutcomes>,
     /// Security-specific rule and field metadata, emitted with `--explain`.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
@@ -223,6 +229,12 @@ pub struct SecuritySummaryOutput<Config, Gate> {
     pub elapsed_ms: ElapsedMs,
     /// Privacy-safe config context relevant to security candidate generation.
     pub config: Config,
+    /// Every gate this run evaluated, keyed by name, absent when it evaluated
+    /// none. Each entry is the same rule that decides the exit code, so a CI
+    /// integration reads `enforced` plus `status` instead of guessing from a
+    /// process status it usually cannot see. See [`crate::GateOutcomes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_outcomes: Option<crate::GateOutcomes>,
     /// Security-specific rule and field metadata, emitted with `--explain`.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
@@ -478,6 +490,7 @@ where
         version: output.version.clone(),
         elapsed_ms: output.elapsed_ms,
         config: output.config.clone(),
+        gate_outcomes: output.gate_outcomes.clone(),
         meta: output.meta.clone(),
         gate: output.gate,
         workspace_diagnostics: output.workspace_diagnostics.clone(),
@@ -800,6 +813,7 @@ mod tests {
     #[test]
     fn security_summary_json_output_uses_security_root_contract() {
         let output = SecurityOutput {
+            gate_outcomes: None,
             schema_version: SecuritySchemaVersion::V8,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(12),

@@ -8,9 +8,9 @@
 mod common;
 
 use common::{
-    canonical_report, fixture_path, parse_json, redact_all, redact_paths, run_fallow,
-    run_fallow_combined, run_fallow_in_root, run_fallow_raw, run_fallow_raw_with_env,
-    run_fallow_raw_with_type_aware_sidecar,
+    canonical_report, canonical_report_without_gate_outcomes, fixture_path, parse_json, redact_all,
+    redact_paths, run_fallow, run_fallow_combined, run_fallow_in_root, run_fallow_raw,
+    run_fallow_raw_with_env, run_fallow_raw_with_type_aware_sidecar,
 };
 
 #[test]
@@ -2704,9 +2704,28 @@ fn fail_on_stale_baseline_leaves_json_output_unchanged() {
         &["--format", "json", "--quiet", "--fail-on-stale-baseline"],
     );
     assert_eq!(
-        canonical_report(&without),
-        canonical_report(&with),
-        "the gate changes the exit code and stderr, never the JSON envelope"
+        canonical_report_without_gate_outcomes(&without),
+        canonical_report_without_gate_outcomes(&with),
+        "the gate moves nothing in the report but its own armed-ness"
+    );
+    // 3.26.0 promised the flag changed nothing but the exit code and one stderr
+    // line, because no envelope carried a gate verdict then. `gate_outcomes`
+    // carries one now, and whether a verdict is armed is part of it, so exactly
+    // one member moves and `baseline_staleness` itself still does not.
+    assert_eq!(
+        parse_json(&without)["baseline_staleness"],
+        parse_json(&with)["baseline_staleness"],
+        "the staleness object stays flag-independent"
+    );
+    assert_eq!(
+        parse_json(&without)["gate_outcomes"]["stale-baseline"]["enforced"],
+        serde_json::json!(false),
+        "the verdict is published unarmed without the flag"
+    );
+    assert_eq!(
+        parse_json(&with)["gate_outcomes"]["stale-baseline"]["enforced"],
+        serde_json::json!(true),
+        "the flag arms it"
     );
     assert_eq!(without.code, 0, "the run is green without the flag");
     assert_eq!(with.code, 1, "the run fails with the flag");
@@ -2800,9 +2819,14 @@ fn fail_on_stale_baseline_gates_the_bare_run_in_json() {
         with.stderr
     );
     assert_eq!(
-        canonical_report(&without),
-        canonical_report(&with),
-        "the gate changes the exit code and stderr, never the combined envelope"
+        canonical_report_without_gate_outcomes(&without),
+        canonical_report_without_gate_outcomes(&with),
+        "the gate moves nothing in the combined envelope but its own armed-ness"
+    );
+    assert_eq!(
+        parse_json(&without)["check"]["baseline_staleness"],
+        parse_json(&with)["check"]["baseline_staleness"],
+        "the staleness object stays flag-independent"
     );
 }
 
@@ -3571,9 +3595,18 @@ fn baseline_staleness_does_not_depend_on_the_gate_flag() {
         &["--format", "json", "--quiet", "--fail-on-stale-baseline"],
     );
     assert_eq!(
-        canonical_report(&without),
-        canonical_report(&with),
-        "the gate changes the exit code and stderr, never the JSON envelope"
+        canonical_report_without_gate_outcomes(&without),
+        canonical_report_without_gate_outcomes(&with),
+        "the gate moves nothing in the report but its own armed-ness"
+    );
+    // 3.26.0 promised the flag changed nothing but the exit code and one stderr
+    // line, because no envelope carried a gate verdict then. `gate_outcomes`
+    // carries one now, and whether a verdict is armed is part of it, so exactly
+    // one member moves and `baseline_staleness` itself still does not.
+    assert_eq!(
+        parse_json(&without)["baseline_staleness"],
+        parse_json(&with)["baseline_staleness"],
+        "the staleness object stays flag-independent"
     );
     assert_eq!(without.code, 0);
     assert_eq!(with.code, 1);

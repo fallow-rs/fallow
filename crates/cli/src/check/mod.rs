@@ -1277,6 +1277,7 @@ pub fn benchmark_dead_code_json(
         regression: result.regression.as_ref(),
         baseline_matched: result.baseline_matched,
         baseline_staleness: envelope_baseline_staleness(&result),
+        gate_outcomes: None,
         config_fixable: result.config_fixable,
         workspace_diagnostics: &result.workspace_diagnostics,
         json_style: crate::json_style::JsonStyle::Compact,
@@ -1334,8 +1335,25 @@ struct PreparedPrintCheck<'a> {
 }
 
 fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> PreparedPrintCheck<'_> {
+    let effective_rules = effective_check_rules(result);
+    let baseline_staleness = envelope_baseline_staleness(result);
+    let gate_outcomes = crate::gates::check_gate_outcomes(&crate::gates::CheckGateInputs {
+        fail_on_issues: result.fail_on_issues,
+        has_error_severity: result.fail_on_issues
+            && rules::has_error_severity_issues(
+                &result.results,
+                &effective_rules,
+                Some(&result.config),
+                result.fail_on_issues,
+            ),
+        regression: result.regression.as_ref(),
+        baseline_staleness: baseline_staleness.as_ref(),
+        fail_on_stale_baseline: result.fail_on_stale_baseline,
+        type_aware_require: result.config.type_aware.require,
+        type_aware_meta: result.type_aware_meta.as_ref(),
+    });
     PreparedPrintCheck {
-        effective_rules: effective_check_rules(result),
+        effective_rules,
         report_ctx: report::ReportContext {
             root: &result.config.root,
             rules: &result.config.rules,
@@ -1351,7 +1369,8 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             summary_heading: opts.summary_heading,
             show_explain_tip: opts.show_explain_tip,
             baseline_matched: result.baseline_matched,
-            baseline_staleness: envelope_baseline_staleness(result),
+            baseline_staleness,
+            gate_outcomes,
             config_fixable: result.config_fixable,
             skip_score_and_trend: false,
             css_requested: false,

@@ -881,6 +881,7 @@ fn build_combined_json_output(
     let workspace_diagnostics = combined_workspace_diagnostics(&input);
 
     fallow_api::serialize_combined_json(CombinedJsonOutputInput {
+        gate_outcomes: combined_gate_outcomes(&input),
         check: input.check_result.map(|result| CombinedCheckJsonSection {
             results: &result.results,
             root: &result.config.root,
@@ -935,6 +936,54 @@ fn emit_combined_json_output(
             OutputFormat::Json,
         ),
     }
+}
+
+/// The gates a combined run evaluated, merged into one root-level object.
+///
+/// Root rather than per-section, matching where the combined envelope already
+/// carries `workspace_diagnostics`, so a consumer reads one place instead of
+/// three and the `.check.regression` versus `.regression` split stops mattering
+/// for the verdict.
+fn combined_gate_outcomes(
+    input: &CombinedJsonPrintInput<'_>,
+) -> Option<fallow_output::GateOutcomes> {
+    let mut gates = fallow_output::GateOutcomes::new();
+    if let Some(result) = input.check_result {
+        gates.insert_if(
+            fallow_output::GateName::Regression,
+            crate::gates::regression_outcome(result.regression.as_ref()),
+        );
+        gates.insert_if(
+            fallow_output::GateName::StaleBaseline,
+            crate::gates::stale_baseline_outcome(
+                result
+                    .baseline_staleness
+                    .as_ref()
+                    .map(|loaded| loaded.staleness.to_envelope(0))
+                    .as_ref(),
+                result.fail_on_stale_baseline,
+            ),
+        );
+        gates.insert_if(
+            fallow_output::GateName::TypeAwareRequire,
+            crate::gates::type_aware_outcome(
+                result.config.type_aware.require,
+                result.type_aware_meta.as_ref(),
+            ),
+        );
+    }
+    if let Some(result) = input.dupes_result {
+        gates.insert_if(
+            fallow_output::GateName::DuplicationThreshold,
+            crate::gates::duplication_threshold_outcome(
+                result.threshold,
+                result.report.stats.duplication_percentage,
+                result.threshold > 0.0
+                    && result.report.stats.duplication_percentage > result.threshold,
+            ),
+        );
+    }
+    gates.into_option()
 }
 
 fn check_json_extras_for_combined(result: &CheckResult) -> fallow_api::CheckJsonExtraOutputs {

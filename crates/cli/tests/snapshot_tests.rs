@@ -83,6 +83,7 @@ fn api_health_json_document(
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
+        gate_outcomes: None,
         report: report.clone(),
         root,
         elapsed,
@@ -113,6 +114,7 @@ fn api_grouped_duplication_json_document(
         .map(|group| group.fingerprint.as_str())
         .collect();
     fallow_api::serialize_grouped_duplication_json(fallow_api::GroupedDuplicationJsonOutputInput {
+        gate_outcomes: None,
         baseline_staleness: None,
         report,
         grouping,

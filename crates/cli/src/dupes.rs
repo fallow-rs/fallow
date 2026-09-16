@@ -196,6 +196,30 @@ fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
     threshold > 0.0 && duplication_percentage > threshold
 }
 
+/// The gates a duplication run evaluated, for the envelope's `gate_outcomes`.
+///
+/// The threshold verdict is the same [`exceeds_threshold`] call the exit path
+/// makes, so the published boolean and the process status cannot disagree.
+fn dupes_gate_outcomes(
+    result: &DupesResult,
+    baseline_staleness: Option<&fallow_output::BaselineStaleness>,
+) -> Option<fallow_output::GateOutcomes> {
+    let mut gates = fallow_output::GateOutcomes::new();
+    gates.insert_if(
+        fallow_output::GateName::DuplicationThreshold,
+        crate::gates::duplication_threshold_outcome(
+            result.threshold,
+            result.report.stats.duplication_percentage,
+            exceeds_threshold(result.threshold, result.report.stats.duplication_percentage),
+        ),
+    );
+    gates.insert_if(
+        fallow_output::GateName::StaleBaseline,
+        crate::gates::stale_baseline_outcome(baseline_staleness, result.fail_on_stale_baseline),
+    );
+    gates.into_option()
+}
+
 use fallow_engine::changed_files::filter_duplication_by_changed_files as filter_by_changed_files;
 
 /// Filter a duplication report to only retain clone groups where at least one
@@ -852,6 +876,11 @@ struct DupesResultGroupingInput<'a> {
 
 fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> ExitCode {
     let result = input.result;
+    let baseline_staleness = result
+        .baseline_staleness
+        .as_ref()
+        .map(|loaded| loaded.staleness.to_envelope(0));
+    let gate_outcomes = dupes_gate_outcomes(result, baseline_staleness.as_ref());
     let ctx = report::ReportContext {
         root: &result.config.root,
         rules: &result.config.rules,
@@ -867,10 +896,8 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         summary_heading: input.summary_heading,
         show_explain_tip: input.show_explain_tip,
         baseline_matched: None,
-        baseline_staleness: result
-            .baseline_staleness
-            .as_ref()
-            .map(|loaded| loaded.staleness.to_envelope(0)),
+        baseline_staleness,
+        gate_outcomes,
         config_fixable: false,
         skip_score_and_trend: false,
         css_requested: false,

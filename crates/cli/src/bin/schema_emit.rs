@@ -46,11 +46,11 @@ use fallow_output::{
     DecisionSurfaceSchemaVersion, DecisionWithActions, DiffTriage, DirectionUnit, DoctorCheck,
     DoctorCheckCategory, DoctorCheckId, DoctorCheckStatus, DoctorOutput, DoctorRemediation,
     DoctorStatus, DoctorSummary, DupesOutput, EnabledSource, ExceededThreshold, ExplainOutput,
-    FileHealthScore, FindingSeverity, FocusLabel, FocusMap, FocusScore, FocusUnit,
-    GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
-    GitLabReviewPositionType, GraphFacts, GroupByMode, HealthActionsMeta, HealthGroup,
-    HealthOutput, HealthReport, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend,
-    HotspotEntry, HotspotFinding, HotspotSummary, ImpactCounts, ImpactReport,
+    FileHealthScore, FindingSeverity, FocusLabel, FocusMap, FocusScore, FocusUnit, GateName,
+    GateOutcome, GateStatus, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
+    GitLabReviewPosition, GitLabReviewPositionType, GraphFacts, GroupByMode, HealthActionsMeta,
+    HealthGroup, HealthOutput, HealthReport, HealthScore, HealthScorePenalties, HealthSummary,
+    HealthTrend, HotspotEntry, HotspotFinding, HotspotSummary, ImpactCounts, ImpactReport,
     ImpactReportSchemaVersion, ImpactTrendDirection, InspectEvidence, InspectEvidenceScope,
     InspectEvidenceSection, InspectFileIdentity, InspectIdentity, InspectOutput,
     InspectSectionStatus, InspectSymbolIdentity, InspectTargetDescriptor, LargeFunctionEntry,
@@ -783,6 +783,12 @@ fn register_meta_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<MetaMetric>();
     let _ = generator.subschema_for::<MetaRule>();
     let _ = generator.subschema_for::<TelemetryMeta>();
+    // Registered explicitly: the shared gate type is reachable from every
+    // analysis envelope, and the orphan check rejects a committed definition
+    // `derived_definitions` does not produce.
+    let _ = generator.subschema_for::<GateOutcome>();
+    let _ = generator.subschema_for::<GateName>();
+    let _ = generator.subschema_for::<GateStatus>();
 }
 
 /// Register the `fallow audit --brief --format json` envelope.
