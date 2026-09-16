@@ -69,6 +69,13 @@ pub(crate) fn print_summary(kind: EnvelopeKind, envelope: &Value, root: &Path) -
     let options = resolve_render_options(root);
     let links = LinkContext::from_env(&options.rebase);
     outln!("{}", render_summary(kind, envelope, &links));
+    // Appended rather than folded into each per-kind renderer: the verdict is
+    // one fact about the run, not a section of the report, and every kind
+    // reports it the same way.
+    if let Some(line) = crate::report::gate_outcome_text::summary_line(envelope) {
+        outln!("");
+        outln!("{line}");
+    }
     ExitCode::SUCCESS
 }
 

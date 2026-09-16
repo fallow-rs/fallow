@@ -47,6 +47,11 @@ pub(crate) fn print_annotations(kind: EnvelopeKind, envelope: &Value, root: &Pat
     if !rendered.is_empty() {
         outln!("{rendered}");
     }
+    // After the findings, so a reader who scrolls to the end sees why the run
+    // failed rather than having to infer it from a count.
+    if let Some(line) = crate::report::gate_outcome_text::annotation_line(envelope) {
+        outln!("{line}");
+    }
     ExitCode::SUCCESS
 }
 
