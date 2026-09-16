@@ -77,13 +77,15 @@ fn render_review_envelope_with_diff(
                 status_message,
             )
         }
-        (Some(review_id), None) => fallow_output::render_scoped_review_envelope(&input, review_id),
+        (Some(review_id), None) => {
+            fallow_output::render_scoped_review_envelope(&input, review_id, status_message)
+        }
         (None, Some(conclusion)) => fallow_output::render_review_envelope_with_conclusion(
             &input,
             conclusion,
             status_message,
         ),
-        (None, None) => fallow_output::render_review_envelope(&input),
+        (None, None) => fallow_output::render_review_envelope(&input, status_message),
     };
     note_review_truncation(rendered.truncation);
     rendered.envelope
@@ -147,10 +149,11 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues(
     command: &str,
     provider: Provider,
     codeclimate: &[CodeClimateIssue],
+    status_message: Option<&str>,
 ) -> ExitCode {
     let issues =
         super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
-    print_review_envelope_from_ci_issues(command, provider, &issues, None, None)
+    print_review_envelope_from_ci_issues(command, provider, &issues, None, status_message)
 }
 
 #[must_use]

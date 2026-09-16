@@ -221,7 +221,10 @@ fn render_saved_ci_target(
                 )
             }
             None => crate::report::ci::review::print_review_envelope_from_codeclimate_issues(
-                command, provider, &issues,
+                command,
+                provider,
+                &issues,
+                status_message,
             ),
         },
         _ => unreachable!("saved CI target dispatch only accepts comment and review targets"),

@@ -788,6 +788,10 @@ fn the_pull_request_comment_carries_the_same_verdict_as_the_job_summary() {
         "github-annotations",
         "pr-comment-github",
         "pr-comment-gitlab",
+        // Both review targets reach the conclusion-less arm on a dead-code
+        // envelope, which used to drop the line entirely.
+        "review-github",
+        "review-gitlab",
     ] {
         let rendered = run(&[
             "report",
@@ -805,8 +809,8 @@ fn the_pull_request_comment_carries_the_same_verdict_as_the_job_summary() {
             rendered.stderr
         );
         assert!(
-            rendered.stdout.contains("Gates failed: regression"),
-            "{format} states the verdict the producing run reached: {}",
+            rendered.stdout.contains("Gate outcomes:") && rendered.stdout.contains("regression"),
+            "{format} states the outcome the producing run reached: {}",
             rendered.stdout
         );
     }
@@ -846,7 +850,7 @@ fn the_annotation_verdict_comes_before_the_findings() {
         .next()
         .expect("annotations rendered");
     assert!(
-        first.starts_with("::notice::Fallow: Gates"),
+        first.starts_with("::notice::Fallow Gate outcomes:"),
         "the verdict is the first line, so a cap cannot drop it: {first}"
     );
 }
