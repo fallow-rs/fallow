@@ -19,59 +19,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rotted for months and every run stayed green and silent. `fail-on-issues` did
   not recover it either, because a baseline whose entries all match nothing
   while the project itself is clean reports zero issues, which is the case the
-  gate exists for.
+  gate exists for. This supersedes 3.26.0's statement that no envelope gains a
+  field: reaching a consumer that reads JSON is exactly what that decision made
+  impossible.
 
-  Every command that accepts `--baseline` now publishes one `baseline_staleness`
-  object in its JSON envelope: the counts, how many findings there were to match
-  against, whether the run was narrowed, the advisory verdict, and `gate_trips`,
-  the same boolean `--fail-on-stale-baseline` exits on. `dupes` carried nothing
-  about a loaded baseline before; `health` keeps the object it has had since
-  3.12.0 and gains the verdict. The object is absent when no baseline was
-  loaded, and emitted with or without the flag, so no envelope schema version
-  moved and the flag still changes nothing but the exit code and the stderr
-  line. Read `change_scoped` before dividing the counts: a run narrowed to part
-  of the project can report `matched_entries: 0` on a perfectly healthy
-  baseline, which is why deriving staleness from `baseline.entries` and
-  `baseline.matched` alone was never safe.
+  `dead-code` / `check`, the bare combined run, `dupes` and `health` now publish
+  one `baseline_staleness` object in their JSON envelopes, grouped output
+  included: the counts, how many findings there were to match against, whether
+  the run was narrowed, the advisory verdict, and `gate_trips`, the same rule
+  `--fail-on-stale-baseline` exits on. `dupes` carried nothing about a loaded
+  baseline before; `health` keeps the object it has had since 3.12.0 and gains
+  the verdict. `fix` and `security` take no baseline staleness and carry no
+  object, and `fallow audit` publishes only the health one. The object is absent
+  when no baseline was loaded, and emitted with or without the flag, so no
+  envelope schema version moved and the flag still changes nothing but the exit
+  code and the stderr line. Read `change_scoped` before dividing the counts: a
+  run narrowed to part of the project can report `matched_entries: 0` on a
+  perfectly healthy baseline, which is why deriving staleness from
+  `baseline.entries` and `baseline.matched` alone was never safe.
+
+  TypeScript consumers of `npm/fallow/types`: the `HealthBaselineStaleness`
+  interface is renamed to `BaselineStaleness` now that three commands share the
+  shape, and the old name ships as a deprecated alias so existing imports keep
+  compiling.
 
   The GitHub Action and the GitLab template read that object. A stale baseline
-  now surfaces as a `::warning::` (GitHub) or a warning line (GitLab) and in the
-  job summary, on any run that loads a baseline, whether or not the gate is
-  asked for. The new `fail-on-stale-baseline` input and
-  `FALLOW_FAIL_ON_STALE_BASELINE` variable turn it into a failing job. They are
-  independent of `fail-on-issues` / `FALLOW_FAIL_ON_ISSUES`, like
-  `type-aware-require` and the security gate already were, and the verdict comes
-  from the envelope rather than the exit code, so a findings exit and a gate
-  exit cannot be confused. Every branch fails open: a pinned fallow older than
-  this release, or a command that reports no staleness, warns and leaves the job
-  green.
+  surfaces as a `::warning::` (GitHub) or a warning line (GitLab) and in the job
+  summary, on any run that can judge the baseline. A run scoped to changed files
+  cannot judge a whole-project baseline, so on a pull request the integration
+  first re-reads the baseline once over the whole project; that re-read is not
+  behind the new input, because the advisory a repository never asked for is the
+  half that #2627 was about. The new `fail-on-stale-baseline` input and
+  `FALLOW_FAIL_ON_STALE_BASELINE` variable only decide whether that verdict
+  fails the job. They are independent of `fail-on-issues` /
+  `FALLOW_FAIL_ON_ISSUES`, like `type-aware-require` and the security gate
+  already were, and the verdict comes from the envelope rather than the exit
+  code, so a findings exit and a gate exit cannot be confused. The action also
+  exposes the counts and the verdict as step outputs, so a workflow can report
+  on staleness without failing on it.
 
-  Pull requests are the case that made a plain input pointless. Both integrations
-  scope the analysis to the changed files there, and a narrowed run cannot judge
-  a whole-project baseline, so the gate correctly stands down and would only ever
-  have fired on `push`. With the gate on, the run now re-reads the baseline once
-  over the whole project, with every narrowing flag and every writing flag
-  removed and the diff scoping cleared, and reads nothing from it but the
-  verdict: it writes no baseline, no snapshot and no SARIF, and feeds no comment,
-  annotation or summary. Measured on an 870-file TypeScript project that second
-  read costs 0.11s on a warm cache and 0.11s on a cold one (the first run
-  populates the cache), 0.15s with caching disabled, and 0.24s with type-aware
-  analysis on, in every case less than the run it follows. When the narrowing is
-  something the integration cannot remove, such as production mode or workspace
-  scoping, the gate says it stood down instead of passing in silence.
+  What the integrations cannot read at runtime fails open: a pinned fallow older
+  than this release, a command that reports no staleness, or a re-read that
+  returns nothing usable all produce a warning and a green job. Combinations
+  that cannot work at all are rejected up front instead, with exit 2: the gate
+  with no `baseline` set, or the gate on `fix` or `security`.
 
-  Two notes for existing configurations. A repository that already passes
+  The unscoped re-read carries no narrowing flag and no writing flag, so it
+  writes no baseline, no snapshot and no SARIF, and it feeds no comment,
+  annotation or summary. Measured on an 870-file TypeScript project it costs
+  0.11s on a warm cache and 0.11s on a cold one (the first run populates the
+  cache), 0.15s with caching disabled, and 0.24s with type-aware analysis on, in
+  every case less than the run it follows. When the run still cannot be widened,
+  because of production mode, workspace scoping, or a positional path passed
+  through `args`, the integration says the baseline could not be judged instead
+  of passing in silence.
+
+  Three notes for existing configurations. A repository that already passes
   `--fail-on-stale-baseline` through the `args` input or `FALLOW_ARGS` should
-  move to the input: on GitHub that flag never failed the job, and on GitLab it
-  printed a verdict the pipeline ignored, so moving to the input turns an
-  informational line into a real gate. And a repository that uses a baseline
-  without asking for any gate will start seeing the advisory warning on runs
-  where a quarter or more of the baseline has gone stale; that is the point of
-  the change, and re-saving the baseline clears it. The PR comment and the
-  GitLab MR note do not carry the advisory yet
+  remove it, and delete the separate unscoped gate step the issue suggested as a
+  workaround: keeping either means a pull request runs three analyses instead of
+  two, and on GitHub that flag never failed the job anyway while on GitLab it
+  printed a verdict the pipeline ignored. A repository that uses a baseline
+  without asking for any gate will start seeing the advisory on runs where the
+  baseline has gone stale; that is the point of the change, and re-saving the
+  baseline clears it. And pointing `baseline` and `save-baseline` at the same
+  file defeats the whole thing, because the run saves before it compares, so the
+  baseline can never report a stale entry; the integrations now say so. The PR
+  comment and the GitLab MR note do not carry the advisory yet
   (Closes [#2673](https://github.com/fallow-rs/fallow/issues/2673)). Thanks to
   the reporter for tracing it through the action scripts line by line.
-
 
 ## [3.26.0] - 2026-09-15
 
