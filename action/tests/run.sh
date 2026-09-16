@@ -3434,6 +3434,18 @@ else
   fail "stale gate: a stand-down does not fail the run" "exit ${STALE_EXIT}"
 fi
 
+# 7b. The same stand-down with no gate asked for is a notice, not a warning.
+# Production mode plus a baseline is an ordinary configuration, and a warning
+# nobody can turn off on every pull request is noise.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_PRODUCTION="true"
+assert_contains "$STALE_STDOUT" "::notice::fallow: baseline staleness could not be judged" \
+  "stale gate: a stand-down with no gate asked for is a notice"
+assert_not_contains "$STALE_STDOUT" "::warning::fallow: baseline staleness could not be judged" \
+  "stale gate: a run that asked for nothing is not warned at"
+assert_not_contains "$STALE_STDOUT" "stood down" \
+  "stale gate: the notice does not name a gate that was never requested"
+
 # 8. The re-run exits 1 on findings, which is not an error here.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
   INPUT_CHANGED_SINCE="abc123" INPUT_FAIL_ON_STALE_BASELINE="true" \

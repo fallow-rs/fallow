@@ -567,6 +567,18 @@ else
   fail "stale gate: a stand-down does not fail the pipeline" "exit $cmd_status"
 fi
 
+# The same stand-down with no gate asked for is a note, not a warning.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_CHANGED_SINCE=abc123 \
+  FALLOW_PRODUCTION=true)
+assert_contains "$OUT" "NOTE: baseline staleness could not be judged" \
+  "stale gate: a stand-down with no gate asked for is a note"
+assert_not_contains "$OUT" "WARNING: baseline staleness could not be judged" \
+  "stale gate: a pipeline that asked for nothing is not warned at"
+
 # A re-read that produces nothing readable warns and leaves the pipeline green.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
 OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \

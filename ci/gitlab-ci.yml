@@ -839,12 +839,17 @@ variables:
 
       # Name the gate only when it was asked for, so a pipeline that wanted no
       # gate does not read as if one failed.
+      # A run that asked for the gate and did not get one has a problem worth a
+      # warning. A run that asked for nothing does not: production mode plus a
+      # baseline is an ordinary configuration, and warning on every merge
+      # request about a judgement nobody requested is noise the project cannot
+      # turn off. The CLI itself is silent there, so the level matches it.
       stale_baseline_stand_down() {
-        local gate=""
         if [ "$FALLOW_FAIL_ON_STALE_BASELINE" = "true" ]; then
-          gate=" FALLOW_FAIL_ON_STALE_BASELINE stood down."
+          echo "WARNING: baseline staleness could not be judged on this run because ${1}. FALLOW_FAIL_ON_STALE_BASELINE stood down. ${2}"
+        else
+          echo "NOTE: baseline staleness could not be judged on this run because ${1}. ${2}"
         fi
-        echo "WARNING: baseline staleness could not be judged on this run because ${1}.${gate} ${2}"
       }
 
       if [ -n "$FALLOW_BASELINE" ] && [ -z "$BASELINE_ENTRIES" ]; then

@@ -214,7 +214,7 @@ function appendRenamedTypeAliases(contents) {
         `renamed-type alias ${from} -> ${to}: ${from} is still generated, so the alias would collide`,
       );
     }
-    output += `\n\n/**\n * @deprecated ${note}\n */\nexport type ${from} = ${to};`;
+    output += `\n/**\n * @deprecated ${note}\n */\nexport type ${from} = ${to};\n`;
   }
   return output;
 }

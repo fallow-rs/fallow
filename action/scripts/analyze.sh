@@ -860,12 +860,18 @@ run_stale_gate_analysis() {
 
 # Name the gate only when it was asked for, so a run that wanted no gate does
 # not read as if one failed.
+# A run that asked for the gate and did not get one has a problem worth a
+# warning. A run that asked for nothing does not: production mode plus a
+# baseline is an ordinary configuration, and warning on every pull request about
+# a judgement nobody requested is noise the repository cannot turn off. The CLI
+# itself is silent there, so the notice level matches it.
 stale_baseline_stand_down() {
-  local reason=$1 remedy=$2 gate=""
+  local reason=$1 remedy=$2
   if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ]; then
-    gate=" fail-on-stale-baseline stood down."
+    echo "::warning::fallow: baseline staleness could not be judged on this run because ${reason}. fail-on-stale-baseline stood down. ${remedy}"
+  else
+    echo "::notice::fallow: baseline staleness could not be judged on this run because ${reason}. ${remedy}"
   fi
-  echo "::warning::fallow: baseline staleness could not be judged on this run because ${reason}.${gate} ${remedy}"
 }
 
 if [ -n "${INPUT_BASELINE:-}" ] && [ -z "$BASELINE_ENTRIES" ]; then

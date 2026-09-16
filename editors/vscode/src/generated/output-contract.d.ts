@@ -15355,7 +15355,6 @@ export type UnusedDependency = UnusedDependencyFinding | UnusedDevDependencyFind
  */
 export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedStoreMemberFinding;
 
-
 /**
  * @deprecated Renamed to BaselineStaleness in 3.27.0, when dead-code and dupes started carrying the same shape. The members are unchanged.
  */

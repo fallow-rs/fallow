@@ -72,7 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every case less than the run it follows. When the run still cannot be widened,
   because of production mode, workspace scoping, or a positional path passed
   through `args`, the integration says the baseline could not be judged instead
-  of passing in silence.
+  of passing in silence: a warning when a gate was asked for and did not get
+  one, a notice otherwise, because production mode alongside a baseline is an
+  ordinary configuration and the CLI is silent there too.
 
   Three notes for existing configurations. A repository that already passes
   `--fail-on-stale-baseline` through the `args` input or `FALLOW_ARGS` should
