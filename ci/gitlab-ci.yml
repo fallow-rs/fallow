@@ -85,7 +85,18 @@ variables:
   FALLOW_PRODUCTION_HEALTH: ""         # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for health. Empty defers to it.
   FALLOW_PRODUCTION_DUPES: ""          # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for duplication. Empty defers to it.
   FALLOW_FAIL_ON_ISSUES: "true"
-  FALLOW_MIN_SEVERITY: ""       # Only fail at or above this complexity severity ('moderate'|'high'|'critical'); empty applies all severities
+  # health command only: fail when a complexity finding reaches this severity
+  # ('moderate'|'high'|'critical'). FALLOW_FAIL_ON_ISSUES is a separate count
+  # gate and still counts every finding.
+  FALLOW_MIN_SEVERITY: ""
+  # health command only: fail when the health score drops below this threshold
+  # (0-100). Implies --score, so the template also passes --complexity unless a
+  # health section variable is set, keeping the Code Quality report populated.
+  FALLOW_MIN_SCORE: ""
+  # Fail the pipeline when the run analyzed no source file at all, so every
+  # count it reports is zero because nothing was measured. Warns and passes by
+  # default, because a scope that legitimately holds no source should not break.
+  FALLOW_FAIL_ON_EMPTY_ANALYSIS: "false"
   FALLOW_INCLUDE_ENTRY_EXPORTS: "false"  # Report unused exports in entry files instead of auto-marking them as used; mirrors --include-entry-exports
   FALLOW_TYPE_AWARE: ""                  # true/false overrides repository typeAware.enabled; empty defers to config
   FALLOW_TYPE_AWARE_PROJECTS: ""         # Comma-separated tsconfig paths; empty uses automatic project discovery
@@ -1131,11 +1142,13 @@ variables:
             GATE_FAILED_NAMES="${GATE_FAILED_NAMES:+${GATE_FAILED_NAMES},}${gate}"
             if gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
               record_gate_failure "$gate"
-            elif [ "$gate" = "error-severity-findings" ]; then
-              # The CLI's own severity rule, which every run evaluates. The
-              # template gates on its own count through FALLOW_FAIL_ON_ISSUES,
-              # and the two legitimately disagree on a project that sets a rule
-              # to warn, so this one is reported in dotenv and never in the log.
+            elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "audit-verdict" ]; then
+              # Both are governed by FALLOW_FAIL_ON_ISSUES rather than by a
+              # variable of their own. The severity rule is the CLI's, which the
+              # count gate deliberately does not follow; the audit verdict is
+              # already applied by the count gate below, and an audit pipeline
+              # with FALLOW_FAIL_ON_ISSUES false is a deliberate reporting
+              # configuration. Both reach dotenv and never the log.
               :
             elif gate_is_owned "$gate"; then
               # The variable asked for the gate and the CLI still reports it
@@ -1165,6 +1178,12 @@ variables:
           pass)
             GATE_PASSED_NAMES="${GATE_PASSED_NAMES:+${GATE_PASSED_NAMES},}${gate}"
             ;;
+          *)
+            # The status set is open. A value this template does not recognise
+            # is reported rather than silently counted as a pass.
+            GATE_WARNED_NAMES="${GATE_WARNED_NAMES:+${GATE_WARNED_NAMES},}${gate}"
+            echo "WARNING: Fallow ${gate} gate reported an unrecognised status '${status}'. Upgrade the template, or read gate_outcomes directly."
+            ;;
         esac
       }
 
@@ -1174,13 +1193,21 @@ variables:
       fi
 
       if [ "$HAS_GATE_OUTCOMES" = "true" ]; then
-        GATE_KEYS=$(jq -r '(.gate_outcomes // {}) | keys[]?' fallow-results.json 2>/dev/null || true)
-        for gate_key in $GATE_KEYS; do
+        while IFS= read -r gate_key; do
+          [ -z "$gate_key" ] && continue
           case "$gate_key" in
             *[!a-z0-9-]*) continue ;;
           esac
+          # The stale-baseline gate is owned by the #2674 machinery below, which
+          # judges the unscoped re-read rather than this envelope. A
+          # merge-request pipeline is change-scoped, so this envelope reports
+          # `skipped` and classifying it here would print a stand-down beside
+          # that block's own error.
+          if [ "$gate_key" = "stale-baseline" ] && [ -n "$FALLOW_BASELINE" ]; then
+            continue
+          fi
           classify_gate "$gate_key" "$(read_gate_member "$gate_key" status)" "$(read_gate_member "$gate_key" enforced)"
-        done
+        done < <(jq -r '(.gate_outcomes // {}) | keys[]?' fallow-results.json 2>/dev/null || true)
       else
         # A pinned binary older than the gate index. Read the feature-local
         # field each gate already published, and fail OPEN for the three that
@@ -1222,7 +1249,7 @@ variables:
       # ── Degraded analysis ────────────────────────────────────────────
       ANALYSIS_DEGRADED=false
       DEGRADED_SUMMARY=$(jq -r '
-        [ (.workspace_diagnostics // [])[] | select(.degrades_analysis == true) ]
+        [ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.degrades_analysis == true) ]
         | group_by(.kind)
         | map("\(.[0].kind) (\(length))")
         | join(", ")
@@ -1231,7 +1258,7 @@ variables:
         ANALYSIS_DEGRADED=true
         echo "WARNING: Fallow analyzed a degraded file set: ${DEGRADED_SUMMARY}. Findings were computed over less than the whole project."
       fi
-      if jq -e '[ (.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' fallow-results.json > /dev/null 2>&1; then
+      if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' fallow-results.json > /dev/null 2>&1; then
         EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check FALLOW_ROOT, ignorePatterns, and any path or workspace filter."
         if [ "$FALLOW_FAIL_ON_EMPTY_ANALYSIS" = "true" ]; then
           GATE_FAILURES+=("$EMPTY_ANALYSIS_MESSAGE")
@@ -1253,7 +1280,10 @@ variables:
           if [ "$VERDICT" = "fail" ]; then
             GATE_FAILURES+=("Fallow audit failed (gate: ${AUDIT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files)")
           fi
-        elif [ "$ISSUES" -gt 0 ]; then
+        elif [ "$ISSUES" -gt 0 ] && [ "$(read_gate_member health-findings status)" != "skipped" ]; then
+          # FALLOW_MIN_SCORE turns the CLI's findings rule off, and the envelope
+          # says so with `health-findings: skipped`. Counting them here would
+          # fail a run the CLI deliberately passed.
           case "$FALLOW_COMMAND" in
             dead-code|check) GATE_FAILURES+=("Fallow found ${ISSUES} unused code issues") ;;
             dupes)           GATE_FAILURES+=("Fallow found ${ISSUES} clone groups") ;;

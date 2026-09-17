@@ -2104,6 +2104,44 @@ assert_issuekind_summary_coverage "gitlab summary-combined" "$CI_JQ_DIR/summary-
 assert_issuekind_summary_coverage "gitlab summary-audit"    "$CI_JQ_DIR/summary-audit.jq"
 
 
+
+# --- Every variable the script reads is declared (issue #2693 review) ---
+#
+# The generated script runs under `set -euo pipefail`, so a `$FALLOW_X` that is
+# not in the template's `variables:` block is unbound and kills the job on the
+# first read. The rest of this suite cannot catch that: the fixture runner seeds
+# every scraped name to empty, which is exactly the safety net production does
+# not have.
+
+echo ""
+echo "Variable declarations"
+
+UNDECLARED=""
+DECLARED=$(awk '/^variables:/{f=1;next} /^[^ #]/{f=0} f' "$DIR/../gitlab-ci.yml" \
+  | grep -oE '^  FALLOW_[A-Z0-9_]+' | tr -d ' ' | sort -u)
+while IFS= read -r used; do
+  [ -z "$used" ] && continue
+  case "$used" in
+    # Set by the script itself or by GitLab, never declared as an input.
+    FALLOW_EXIT_CODE|FALLOW_RENDER_PATH_PREFIX_SET|FALLOW_SCRIPT_EOF|FALLOW_RUN_WRITER_EOF|FALLOW_TEST_LOG|FALLOW_TEST_ENV_FILE) continue ;;
+  esac
+  case "
+$DECLARED
+" in
+    *"
+$used
+"*) ;;
+    *) UNDECLARED="${UNDECLARED:+${UNDECLARED} }${used}" ;;
+  esac
+done < <(grep -oE '\$FALLOW_[A-Z0-9_]+' /tmp/fallow-run.sh | tr -d '$' | sort -u)
+
+if [ -z "$UNDECLARED" ]; then
+  pass "every \$FALLOW_* the generated script reads is declared in variables:"
+else
+  fail "every \$FALLOW_* the generated script reads is declared in variables:" \
+    "undeclared, so set -u kills the job: $UNDECLARED"
+fi
+
 # --- Gate verdicts (issues #2680, #2681, #2683, #2685, #2686) ---
 
 echo ""
