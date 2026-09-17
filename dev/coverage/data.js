@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789677678325,
+  "lastUpdate": 1789678066799,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "a67216a0461decae46b5f3a9c59ed4a4ca7c3e8e",
-          "message": "test(cli): give each migrate test its own directory (#2490)\n\nTwenty-nine tests built their working directory from a fixed name under the\nsystem temp dir, and several deleted that directory on the way in, so two\nprocesses running the suite at once shared the same paths and one removed the\nfixture another was reading.\n\nMeasured with eight concurrent instances of the lib test binary filtered to\n`migrate::`: 8 of 8 runs failed before, 0 of 8 after, with the same tests\nfailing repeatedly rather than randomly. Deterministic given overlap, not load.\n\nEach test now takes a unique directory from `tempfile::tempdir()`, which\nremoves itself on drop and retires 35 hand-written cleanup calls.\n\nRefs #2460",
-          "timestamp": "2026-08-31T14:38:38+02:00",
-          "tree_id": "c563a4b1c288c6cd671f8013f15ec8453c6ba60b",
-          "url": "https://github.com/fallow-rs/fallow/commit/a67216a0461decae46b5f3a9c59ed4a4ca7c3e8e"
-        },
-        "date": 1788180723562,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/85b12cdaf782632837d02a892499d9e91e8b91b3"
         },
         "date": 1789677673747,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cec24ab14159ebd56b10fb6f569280d9a845f9b0",
+          "message": "ci(release): retry transient VS Code registry failures per pass (#2697)\n\nBoth VSIX publish jobs looped over the seven targets with a single publish call per target and no retry, so one intermittent registry error failed the whole job. The v3.26.0 and v3.27.0 release runs needed repeated manual reruns on Marketplace gallery timeouts and Open VSX 503 responses, including 503s on the duplicate check after every target was already published.\n\n- Both steps now retry per pass: attempt all seven targets, collect the failed set, sleep, and retry only that set, up to six passes on a 20/40/60/90/120 second schedule. Total sleeping is capped at 330 seconds per step however many targets fail, so a sustained outage still ends through the step's own exit instead of the job timeout.\n- One warning per pass names the targets still failing; the error per target is printed only after the last pass. `--skip-duplicate` is what makes every retry safe.\n- Inventory validation, the exact target list, `--no-dependencies`, the pinned tool versions and the tag-last invariants are unchanged. The release security document states the retry budget, and the workflow policy tests assert the pass loop and its schedule.",
+          "timestamp": "2026-09-17T22:41:14+02:00",
+          "tree_id": "bfb05e10e7f41c7f98c8db934627b202fca15b86",
+          "url": "https://github.com/fallow-rs/fallow/commit/cec24ab14159ebd56b10fb6f569280d9a845f9b0"
+        },
+        "date": 1789678063213,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
