@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789610547145,
+  "lastUpdate": 1789613992459,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "5a2a685eb56790043daaf15245ecad2ab5901387",
-          "message": "chore: release v3.20.0",
-          "timestamp": "2026-08-28T02:21:21+02:00",
-          "tree_id": "d12b08d634a7b9adc277279b0efd4614b43f99f0",
-          "url": "https://github.com/fallow-rs/fallow/commit/5a2a685eb56790043daaf15245ecad2ab5901387"
-        },
-        "date": 1787876852848,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9708667,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49333,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1177786,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8358,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8427,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b846e626b559c75e021e61df59857b51e09b7f9a",
+          "message": "feat(mcp): state the run's gate and baseline verdicts in the tool result (#2694)\n\nMCP tool results now state the run's verdicts that the CLI expressed only on stderr or through an exit code the server converts into a success result.\n\n- The envelope's root `warnings` array gains plain sentences: the baseline staleness advisory or a tripped stale-baseline gate with the re-save remedy, one entry per `gate_outcomes` entry reporting `fail` or `warn` with its numbers and whether it was enforced, and one aggregated entry for workspace diagnostics that degrade analysis.\n- Applied on the subprocess route, the Code Mode route and the typed API route, with sectioned lookups for `audit`, whose staleness and diagnostics live under `complexity.summary` and `dead_code`.\n- No envelope member moves, the result body stays JSON, a clean run is byte-identical to CLI stdout, and the `isError` policy for exit codes 2 and above is unchanged. `structured_content` is left unpopulated until a tool declares an output schema for it.\n\nFixes #2676\nRefs #2682 #2692 #2693",
+          "timestamp": "2026-09-17T04:54:03+02:00",
+          "tree_id": "891cc8b71330e699dfd9f65d4ede85eb706051ca",
+          "url": "https://github.com/fallow-rs/fallow/commit/b846e626b559c75e021e61df59857b51e09b7f9a"
+        },
+        "date": 1789613987829,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9914532,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51220,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1200408,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8455,
             "unit": "allocations"
           }
         ]
