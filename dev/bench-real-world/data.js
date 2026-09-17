@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789561990046,
+  "lastUpdate": 1789648434648,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "aceeecd930028947fd21302a3fa83b59cfb671c0",
-          "message": "feat(telemetry): add outcome buckets\n\nRecord coarse result-count buckets and review/report truncation fields in workflow telemetry without exposing exact counts, paths, rule ids, finding names, or snippets.\n\nWire the bucket helpers from final command results, preserve the existing findings_present and failure_reason contracts, and document the inspect-mode payload.\n\nFixes #1080.",
-          "timestamp": "2026-06-09T10:27:46Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/aceeecd930028947fd21302a3fa83b59cfb671c0"
-        },
-        "date": 1781001613723,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 182,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 175,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 282,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 257,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 162,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 144,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 500,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 397,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1383,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1218,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 977,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 959,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 904,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 818,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7697,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7229,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9299,6 +9197,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1019,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "ca7c3f6ed8b87d43033168d979ad6b92f4e22329",
+          "message": "ci: soft-fail the cargo-modules install in the coupling workflow (#2696)\n\nThe coupling job is a metric tracker and its collect step already degrades to a warning, but the install step was not covered: an unlocked cargo install resolved unicode-ident 1.0.25 against unicode-properties 0.1.4, which trips a const assertion in ra-ap-rustc_lexer 0.166.0 and turned the check red with exit 101.\n\nKeep the unlocked install first so a cargo_metadata fix can still land ahead of a cargo-modules release, retry with the packaged lockfile (pins unicode-ident 1.0.24), and mark the step continue-on-error. When neither install succeeds, the collect step emits a warning, writes the coupling metrics skipped summary, and sets collected=false so the analyze and store steps skip.",
+          "timestamp": "2026-09-17T06:13:19Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/ca7c3f6ed8b87d43033168d979ad6b92f4e22329"
+        },
+        "date": 1789648429272,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 206,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 306,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 510,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 408,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1537,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1122,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1120,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 915,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1020,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 817,
             "unit": "ms"
           }
         ]
