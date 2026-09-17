@@ -231,6 +231,17 @@ build_command_args() {
       [ -n "${INPUT_SINCE:-}" ] && ARGS+=(--since "$INPUT_SINCE")
       [ -n "${INPUT_MIN_COMMITS:-}" ] && ARGS+=(--min-commits "$INPUT_MIN_COMMITS")
       [ -n "${INPUT_MIN_SEVERITY:-}" ] && ARGS+=(--min-severity "$INPUT_MIN_SEVERITY")
+      if [ -n "${INPUT_MIN_SCORE:-}" ]; then
+        ARGS+=(--min-score "$INPUT_MIN_SCORE")
+        # `--min-score` implies `--score`, which is a section selector: without
+        # this the envelope carries the score and nothing else, and the
+        # annotations, the SARIF upload and the pull-request comment all render
+        # empty. Only when the caller selected no health section of their own.
+        if [ "${INPUT_COMPLEXITY:-}" != "true" ] && [ "${INPUT_FILE_SCORES:-}" != "true" ] \
+          && [ "${INPUT_HOTSPOTS:-}" != "true" ] && [ "${INPUT_TARGETS:-}" != "true" ]; then
+          ARGS+=(--complexity)
+        fi
+      fi
       if [ -n "${INPUT_SAVE_SNAPSHOT:-}" ]; then
         if [ "$INPUT_SAVE_SNAPSHOT" = "true" ]; then
           ARGS+=(--save-snapshot)
@@ -267,6 +278,10 @@ build_command_args() {
       if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "${HAS_SARIF_FILE:-false}" = "true" ]; then
         ARGS+=(--sarif-file "$SARIF_FILE")
       fi
+      # The bare run never forwarded the threshold, so `duplication-threshold`
+      # could not appear in its envelope and the input was inert on the default
+      # command (issue #2681). GitLab already forwards it here.
+      [ -n "${INPUT_THRESHOLD:-}" ] && ARGS+=(--dupes-threshold "$INPUT_THRESHOLD")
       [ "${INPUT_SCORE:-}" = "true" ] && ARGS+=(--score)
       [ "${INPUT_TREND:-}" = "true" ] && ARGS+=(--trend)
       if [ -n "${INPUT_SAVE_SNAPSHOT:-}" ]; then
@@ -326,6 +341,26 @@ esac
 
 if [ "$INPUT_COMMAND" = "audit" ] && { [ -n "${INPUT_BASELINE:-}" ] || [ -n "${INPUT_SAVE_BASELINE:-}" ]; }; then
   echo "::error::The audit command does not support the generic baseline/save-baseline inputs. Use dead-code-baseline, health-baseline, or dupes-baseline instead."
+  exit 2
+fi
+
+# `--min-score` and `--min-severity` exist on `fallow health` only, so a gate
+# configured on any other command would arm nothing and pass in silence. Reject
+# it up front rather than after the run.
+if [ -n "${INPUT_MIN_SCORE:-}" ] && [ "$INPUT_COMMAND" != "health" ]; then
+  echo "::error::The min-score input applies to command: health only, and this run is '${INPUT_COMMAND:-the combined run}'. Remove it, or set command: health."
+  exit 2
+fi
+if [ -n "${INPUT_MIN_SEVERITY:-}" ] && [ "$INPUT_COMMAND" != "health" ]; then
+  echo "::error::The min-severity input applies to command: health only, and this run is '${INPUT_COMMAND:-the combined run}'. Remove it, or set command: health."
+  exit 2
+fi
+
+# `--report-only` is mutually exclusive with both health gate flags, and a user
+# reaching for it through args: would otherwise get a bare CLI usage error.
+if [ -n "${INPUT_MIN_SCORE:-}${INPUT_MIN_SEVERITY:-}" ] \
+  && printf '%s' "${INPUT_ARGS:-}" | grep -q -- '--report-only'; then
+  echo "::error::--report-only in args: cannot be combined with the min-score or min-severity inputs; the CLI rejects the pair. Drop one."
   exit 2
 fi
 
@@ -810,6 +845,16 @@ build_stale_gate_args() {
         skip_next_if_value=true
         continue
         ;;
+      # `--min-score` is a section selector, so a score-only envelope may carry
+      # no `baseline_staleness` and the #2674 gate would go silent with no
+      # message at all. Stripping is free: this run's status is discarded and
+      # only the staleness object is read from it. `--complexity` rides along
+      # because the action only added it to keep that envelope populated.
+      --min-score)
+        skip_next=true
+        ;;
+      --min-score=*|--complexity)
+        ;;
       --fail-on-regression|--yes)
         continue
         ;;
@@ -945,6 +990,320 @@ if ! jq -e --arg requested "${INPUT_TYPE_AWARE_REQUIRE:-}" '
   TYPE_AWARE_COMPLETENESS_FAILED=true
 fi
 
+# --- Gate verdicts (issues #2680, #2681, #2683, #2685) ---
+#
+# Every gate the run armed publishes `status` and `enforced` in
+# `gate_outcomes` at the envelope root, computed by the same Rust rule that
+# decides the exit code. The action reads that instead of the process status,
+# which it deliberately discards whenever stdout parses as JSON.
+#
+# A gate fails the job only when all three hold: the input that owns it asked
+# for it, its status is `fail`, and the CLI marked it `enforced`. The first
+# condition is what keeps `fail-on-issues: false` authoritative: a flag that
+# arrived through `args:` produces a warning, never a failure.
+GATE_FAILURES=()
+GATE_FAILED_NAMES=()
+GATE_WARNED_NAMES=()
+GATE_SKIPPED_NAMES=()
+GATE_PASSED_NAMES=()
+SECURITY_GATE_FAILED=false
+
+HAS_GATE_OUTCOMES=false
+if jq -e 'has("gate_outcomes")' "$RESULTS_FILE" > /dev/null 2>&1; then
+  HAS_GATE_OUTCOMES=true
+fi
+
+# A gate name reaches both `$GITHUB_OUTPUT` and a workflow command, so anything
+# that is not a plain kebab-case identifier is dropped rather than echoed.
+gate_name_is_safe() {
+  case "$1" in
+    *[!a-z0-9-]*) return 1 ;;
+    "") return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# `has()` rather than `// empty`: jq treats a `false` value as absent under the
+# alternative operator, which would blank every `enforced: false`.
+read_gate_member() {
+  jq -r --arg gate "$1" --arg member "$2" '
+    (.gate_outcomes // {}) as $gates
+    | if ($gates | has($gate)) and ($gates[$gate] | has($member))
+      then ($gates[$gate][$member] | tostring)
+      else "" end
+  ' "$RESULTS_FILE" 2>/dev/null || true
+}
+
+# Which input owns which gate. A gate with no owning input set is reported and
+# never fails the job.
+gate_input_value() {
+  case "$1" in
+    regression)            printf '%s' "${INPUT_FAIL_ON_REGRESSION:-}" ;;
+    duplication-threshold) printf '%s' "${INPUT_THRESHOLD:-}" ;;
+    health-min-severity)   printf '%s' "${INPUT_MIN_SEVERITY:-}" ;;
+    health-min-score)      printf '%s' "${INPUT_MIN_SCORE:-}" ;;
+    security)              printf '%s' "${INPUT_SECURITY_GATE:-}" ;;
+    stale-baseline)        printf '%s' "${INPUT_FAIL_ON_STALE_BASELINE:-}" ;;
+    type-aware-require)    printf '%s' "${INPUT_TYPE_AWARE_REQUIRE:-}" ;;
+    *)                     printf '%s' "" ;;
+  esac
+}
+
+gate_is_owned() {
+  local value
+  value=$(gate_input_value "$1")
+  # `false` and `0` are the documented off switches for the boolean inputs, so
+  # a gate whose input is explicitly disabled is not owned either.
+  case "$value" in
+    ""|false|0) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# The envelope carries these as JSON numbers, so a whole value arrives as
+# "3.0". Trim it for prose; the wire keeps the number.
+trim_gate_number() {
+  case "$1" in
+    *.0) printf '%s' "${1%.0}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+gate_detail() {
+  case "$1" in
+    regression)
+      local baseline current delta
+      baseline=$(jq -r '(.regression.baseline_total // .check.regression.baseline_total // "") | tostring' "$RESULTS_FILE" 2>/dev/null || true)
+      current=$(jq -r '(.regression.current_total // .check.regression.current_total // "") | tostring' "$RESULTS_FILE" 2>/dev/null || true)
+      delta=$(jq -r '(.regression.delta // .check.regression.delta // "") | tostring' "$RESULTS_FILE" 2>/dev/null || true)
+      if [ -n "$delta" ]; then
+        printf 'issue count rose from %s to %s (delta %s, tolerance %s)' \
+          "${baseline:-?}" "${current:-?}" "$delta" "${INPUT_TOLERANCE:-0}"
+      fi
+      ;;
+    duplication-threshold)
+      local observed threshold
+      observed=$(read_gate_member duplication-threshold observed)
+      threshold=$(read_gate_member duplication-threshold threshold)
+      [ -n "$observed" ] && printf 'duplication %s%% exceeds the %s%% threshold' "$(trim_gate_number "$observed")" "$(trim_gate_number "$threshold")"
+      ;;
+    health-min-score)
+      local observed threshold
+      observed=$(read_gate_member health-min-score observed)
+      threshold=$(read_gate_member health-min-score threshold)
+      [ -n "$observed" ] && printf 'health score %s is below the minimum %s' "$(trim_gate_number "$observed")" "$(trim_gate_number "$threshold")"
+      ;;
+    health-min-severity)
+      local observed floor
+      observed=$(read_gate_member health-min-severity observed)
+      floor=$(read_gate_member health-min-severity threshold_label)
+      [ -n "$observed" ] && printf '%s finding(s) at or above %s' "$(trim_gate_number "$observed")" "${floor:-${INPUT_MIN_SEVERITY:-the configured floor}}"
+      ;;
+    security)
+      local new_count
+      new_count=$(jq -r '(.gate.new_count // "") | tostring' "$RESULTS_FILE" 2>/dev/null || true)
+      [ -n "$new_count" ] && printf '%s new security candidate(s) on changed lines (gate: %s)' "$new_count" "${INPUT_SECURITY_GATE:-}"
+      ;;
+    stale-baseline)
+      printf '%s of %s entries in %s matched nothing this run' \
+        "${BASELINE_STALE_ENTRIES:-?}" "${BASELINE_ENTRIES:-?}" "${INPUT_BASELINE:-the baseline}"
+      ;;
+    type-aware-require)
+      printf 'semantic analysis was unavailable or partial'
+      ;;
+  esac
+  # An empty detail must not make this function return non-zero: the case
+  # branches end in `&&` lists, and the caller assigns the result under
+  # errexit.
+  return 0
+}
+
+gate_remedy() {
+  case "$1" in
+    regression)            printf 'Re-save the regression baseline, raise tolerance, or set fail-on-regression: false.' ;;
+    duplication-threshold) printf 'Reduce duplication or raise the threshold input.' ;;
+    health-min-score)      printf 'Improve the health score or lower the min-score input.' ;;
+    health-min-severity)   printf 'Fix the findings or raise the min-severity input.' ;;
+    security)              printf 'Review the introduced candidates, or unset security-gate.' ;;
+    stale-baseline)        printf 'Re-save the baseline, or set fail-on-stale-baseline: false.' ;;
+    type-aware-require)    printf 'Install the semantic sidecar, or set type-aware-require: best-effort.' ;;
+  esac
+}
+
+# Comma-separated, and empty rather than a stray comma when nothing qualified.
+join_gate_names() {
+  local out=""
+  for name in "$@"; do
+    [ -z "$name" ] && continue
+    out="${out:+${out},}${name}"
+  done
+  printf '%s' "$out"
+}
+
+record_gate_failure() {
+  local gate=$1 detail remedy line
+  # The two gates that shipped before the index keep their exact wording: both
+  # are user-facing strings a repository may already match on.
+  case "$gate" in
+    stale-baseline)
+      GATE_FAILURES+=("Fallow baseline gate failed: ${BASELINE_STALE_ENTRIES} of ${BASELINE_ENTRIES} entries in ${INPUT_BASELINE} matched nothing this run. Re-save the baseline, or set fail-on-stale-baseline: false.")
+      return
+      ;;
+    type-aware-require)
+      GATE_FAILURES+=("Type-aware completeness gate failed because semantic analysis was unavailable or partial.")
+      return
+      ;;
+  esac
+  detail=$(gate_detail "$gate")
+  remedy=$(gate_remedy "$gate")
+  line="Fallow ${gate} gate failed"
+  [ -n "$detail" ] && line="${line}: ${detail}"
+  line="${line}."
+  [ -n "$remedy" ] && line="${line} ${remedy}"
+  GATE_FAILURES+=("$line")
+  if [ "$gate" = "security" ]; then
+    SECURITY_GATE_FAILED=true
+  fi
+}
+
+# Classify every gate the envelope reports. `skipped` is neither a pass nor a
+# failure: the gate stood down (a change-scoped baseline, `--report-only`, a
+# security advisory shadowed by a configured gate), and #2674 established that
+# a gate a repository asked for and did not get is worth a warning.
+classify_gate() {
+  local gate=$1 status=$2 enforced=$3
+  case "$status" in
+    fail)
+      GATE_FAILED_NAMES+=("$gate")
+      if gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
+        record_gate_failure "$gate"
+      elif [ "$gate" = "error-severity-findings" ]; then
+        # The CLI's own severity rule, which every run evaluates. The action
+        # gates on its own count through fail-on-issues, and the two
+        # legitimately disagree on a project that sets a rule to warn, so this
+        # one is reported in the outputs and never in the log.
+        :
+      elif gate_is_owned "$gate"; then
+        # The input asked for the gate, and the CLI still reports the verdict
+        # as unenforced. That is the CLI saying this run could not have exited
+        # on it: `health --report-only` clamps every gate, and combined mode
+        # collapses every gate but the baseline and regression ones. Honour it,
+        # and say which it was rather than blaming the input.
+        local detail
+        detail=$(gate_detail "$gate")
+        echo "::warning::Fallow ${gate} gate reports a failure${detail:+: ${detail}}. It does not fail this job: this run does not enforce that gate (combined mode and --report-only both report without enforcing). Run the dedicated command to gate on it."
+      else
+        local detail
+        detail=$(gate_detail "$gate")
+        echo "::warning::Fallow ${gate} gate reports a failure${detail:+: ${detail}}. It does not fail this job, because its input is not set."
+      fi
+      ;;
+    warn)
+      GATE_WARNED_NAMES+=("$gate")
+      echo "::warning::Fallow ${gate} gate reports a warning."
+      ;;
+    skipped)
+      GATE_SKIPPED_NAMES+=("$gate")
+      if gate_is_owned "$gate"; then
+        echo "::warning::Fallow ${gate} gate stood down, so the run it was asked to judge was not judged."
+      else
+        echo "::notice::Fallow ${gate} gate stood down."
+      fi
+      ;;
+    pass)
+      GATE_PASSED_NAMES+=("$gate")
+      ;;
+  esac
+}
+
+if [ "$HAS_GATE_OUTCOMES" = "true" ]; then
+  while IFS= read -r gate_entry; do
+    [ -z "$gate_entry" ] && continue
+    gate_key=${gate_entry%% *}
+    gate_name_is_safe "$gate_key" || continue
+    classify_gate "$gate_key" "$(read_gate_member "$gate_key" status)" "$(read_gate_member "$gate_key" enforced)"
+  done < <(jq -r '(.gate_outcomes // {}) | keys[]?' "$RESULTS_FILE" 2>/dev/null || true)
+else
+  # A pinned binary older than the gate index. Read the feature-local field each
+  # gate already published, and fail OPEN for the three that never had one. The
+  # fallback warning is scoped to gates whose input was actually set, so a
+  # pinned user configuring nothing sees nothing.
+  FALLBACK_UNAVAILABLE=()
+  if gate_is_owned regression; then
+    if jq -e '(.regression.exceeded // .check.regression.exceeded) == true' "$RESULTS_FILE" > /dev/null 2>&1; then
+      classify_gate regression fail true
+    fi
+  fi
+  if gate_is_owned security; then
+    if jq -e '.gate.verdict == "fail"' "$RESULTS_FILE" > /dev/null 2>&1; then
+      classify_gate security fail true
+    fi
+  fi
+  for fallback_gate in duplication-threshold health-min-score health-min-severity; do
+    if gate_is_owned "$fallback_gate"; then
+      FALLBACK_UNAVAILABLE+=("$fallback_gate")
+    fi
+  done
+  if [ ${#FALLBACK_UNAVAILABLE[@]} -gt 0 ]; then
+    echo "::warning::Fallow did not publish gate verdicts, so $(IFS=', '; echo "${FALLBACK_UNAVAILABLE[*]}") could not be checked. Upgrade the version input to 3.27.0 or later."
+  fi
+fi
+
+# The stale-baseline gate keeps its own #2674 derivation, because on a pull
+# request it reads the unscoped re-read's envelope rather than the primary one.
+if [ "$STALE_BASELINE_GATE_FAILED" = "true" ]; then
+  case " ${GATE_FAILED_NAMES[*]:-} " in
+    *" stale-baseline "*) ;;
+    *) GATE_FAILED_NAMES+=("stale-baseline") ;;
+  esac
+  gate_already_recorded=false
+  for existing in "${GATE_FAILURES[@]:-}"; do
+    case "$existing" in
+      "Fallow baseline gate failed"*) gate_already_recorded=true ;;
+    esac
+  done
+  if [ "$gate_already_recorded" = "false" ]; then
+    record_gate_failure stale-baseline
+  fi
+fi
+
+if [ "$TYPE_AWARE_COMPLETENESS_FAILED" = "true" ]; then
+  case " ${GATE_FAILED_NAMES[*]:-} " in
+    *" type-aware-require "*) ;;
+    *)
+      GATE_FAILED_NAMES+=("type-aware-require")
+      record_gate_failure type-aware-require
+      ;;
+  esac
+fi
+
+# --- Degraded analysis (issue #2686) ---
+#
+# One aggregated warning rather than one per kind: GitHub caps annotations at
+# ten per level per step, and thirteen kinds would silently drop the tail while
+# competing with the baseline advisory for the same budget.
+ANALYSIS_DEGRADED=false
+EMPTY_ANALYSIS=false
+DEGRADED_SUMMARY=$(jq -r '
+  [ (.workspace_diagnostics // [])[] | select(.degrades_analysis == true) ]
+  | group_by(.kind)
+  | map("\(.[0].kind) (\(length))")
+  | join(", ")
+' "$RESULTS_FILE" 2>/dev/null || true)
+if [ -n "$DEGRADED_SUMMARY" ]; then
+  ANALYSIS_DEGRADED=true
+  echo "::warning::Fallow analyzed a degraded file set: ${DEGRADED_SUMMARY}. Findings were computed over less than the whole project."
+fi
+if jq -e '[ (.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' "$RESULTS_FILE" > /dev/null 2>&1; then
+  EMPTY_ANALYSIS=true
+  EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check the analysis root, ignorePatterns, and any path or workspace filter."
+  if [ "${INPUT_FAIL_ON_EMPTY_ANALYSIS:-}" = "true" ]; then
+    GATE_FAILURES+=("$EMPTY_ANALYSIS_MESSAGE")
+  else
+    echo "::warning::${EMPTY_ANALYSIS_MESSAGE} Set fail-on-empty-analysis: true to fail the job on this."
+  fi
+fi
+
 # --- Analyze-once SARIF generation ---
 
 valid_sarif() {
@@ -1048,7 +1407,12 @@ fi
     "baseline_stale_entries=${BASELINE_STALE_ENTRIES}" \
     "baseline_advisory=${BASELINE_ADVISORY}" \
     "baseline_change_scoped=${BASELINE_CHANGE_SCOPED}" \
-    "baseline_gate_trips=${BASELINE_GATE_TRIPS}"
+    "baseline_gate_trips=${BASELINE_GATE_TRIPS}" \
+    "gates_failed=$(join_gate_names "${GATE_FAILED_NAMES[@]:-}")" \
+    "gates_warned=$(join_gate_names "${GATE_WARNED_NAMES[@]:-}")" \
+    "gates_skipped=$(join_gate_names "${GATE_SKIPPED_NAMES[@]:-}")" \
+    "gates_passed=$(join_gate_names "${GATE_PASSED_NAMES[@]:-}")" \
+    "analysis_degraded=${ANALYSIS_DEGRADED}"
   if [ -f "$SARIF_FILE" ]; then
     printf '%s\n' "sarif=${SARIF_FILE}"
   fi
@@ -1066,14 +1430,45 @@ if [ "$ISSUES" -gt 0 ]; then
   esac
 fi
 
-# Both gates print before either exits, so one cannot hide the other, and both
-# land after every output and artifact above so the downstream steps still run.
-if [ "$TYPE_AWARE_COMPLETENESS_FAILED" = "true" ]; then
-  echo "::error::Type-aware completeness gate failed because semantic analysis was unavailable or partial."
+# One accumulator for every failure reason, so none can hide another and the
+# documented exit 8 cannot be downgraded by a later step. Everything above has
+# already published its outputs and artifacts, so the downstream steps still
+# run; this is the last thing the script does.
+#
+# The count gate lives here too. It used to sit in an inline `run:` block in
+# action.yml whose first line returned when `fail-on-issues` was not true,
+# which is what made the security gate unreachable for anyone who set
+# `fail-on-issues: false` (issue #2685).
+if [ "${INPUT_FAIL_ON_ISSUES:-}" = "true" ]; then
+  if [ "$INPUT_COMMAND" = "audit" ]; then
+    # Audit gates on rule severity. The verdict already encodes the gate
+    # decision: pass means no issues, warn means warn-tier only and does not
+    # fail, fail means error-tier. Counting introduced findings instead would
+    # re-introduce the bug issue #302 was filed to fix.
+    if [ "$VERDICT" = "fail" ]; then
+      GATE_FAILURES+=("Fallow audit failed (gate: ${INPUT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files).")
+    fi
+  elif [ "$ISSUES" -gt 0 ]; then
+    case "$INPUT_COMMAND" in
+      dead-code|check) GATE_FAILURES+=("Fallow found ${ISSUES} unused code issues.") ;;
+      dupes)           GATE_FAILURES+=("Fallow found ${ISSUES} clone groups.") ;;
+      health)          GATE_FAILURES+=("Fallow found ${ISSUES} health findings.") ;;
+      security)        GATE_FAILURES+=("Fallow found ${ISSUES} security candidates.") ;;
+      fix)             GATE_FAILURES+=("Fallow found ${ISSUES} fixable issues.") ;;
+      "")              GATE_FAILURES+=("Fallow found ${ISSUES} issues.") ;;
+    esac
+  fi
 fi
-if [ "$STALE_BASELINE_GATE_FAILED" = "true" ]; then
-  echo "::error::Fallow baseline gate failed: ${BASELINE_STALE_ENTRIES} of ${BASELINE_ENTRIES} entries in ${INPUT_BASELINE} matched nothing this run. Re-save the baseline, or set fail-on-stale-baseline: false."
-fi
-if [ "$TYPE_AWARE_COMPLETENESS_FAILED" = "true" ] || [ "$STALE_BASELINE_GATE_FAILED" = "true" ]; then
+
+if [ ${#GATE_FAILURES[@]} -gt 0 ]; then
+  for failure in "${GATE_FAILURES[@]}"; do
+    echo "::error::${failure}"
+  done
+  # 8 is the documented security-gate exit and outranks the generic 1, so a run
+  # that trips the security gate keeps reporting 8 however many other gates
+  # tripped alongside it.
+  if [ "$SECURITY_GATE_FAILED" = "true" ]; then
+    exit 8
+  fi
   exit 1
 fi

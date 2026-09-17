@@ -3570,6 +3570,252 @@ run_stale_summary "jq fallback" HAS_NATIVE_REPORT="false"
 
 rm -rf "$STALE_WORK"
 
+# --- Gate verdicts (issues #2680, #2681, #2683, #2685, #2686) ---
+#
+# The mock emits a caller-supplied envelope, so each case pins one gate shape.
+# The gate decision lives in analyze.sh rather than in an inline action.yml
+# `run:` block precisely so it can be driven here.
+
+echo ""
+echo "Gate verdicts"
+
+GATE_WORK=$(mktemp -d)
+GATE_BIN="$GATE_WORK/bin"
+mkdir -p "$GATE_BIN"
+cat > "$GATE_BIN/fallow" <<'GATE_MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${MOCK_ANALYSIS_LOG:-/dev/null}"
+case "$*" in
+  *--help*) echo "--sarif-file --format json"; exit 0 ;;
+  *report*) exit 0 ;;
+esac
+cat "$MOCK_GATE_ENVELOPE"
+exit "${MOCK_GATE_EXIT:-0}"
+GATE_MOCK
+chmod +x "$GATE_BIN/fallow"
+
+# Every fixture is a minimally valid dead-code envelope plus the gate shape
+# under test, so the surrounding script behaves exactly as it does in production.
+gate_envelope() {
+  local gates=$1 extra=${2:-} body
+  body='"kind":"dead-code","schema_version":9,"version":"3.27.0","total_issues":0,"summary":{"total_issues":0},"unused_files":[],"unused_exports":[]'
+  [ -n "$gates" ] && body="${body},\"gate_outcomes\":${gates}"
+  [ -n "$extra" ] && body="${body},${extra}"
+  printf '{%s}\n' "$body"
+}
+
+run_gate_analyze() {
+  local envelope=$1; shift
+  local run_dir
+  run_dir=$(mktemp -d "$GATE_WORK/run.XXXXXX")
+  printf '%s' "$envelope" > "$run_dir/envelope.json"
+  GATE_OUTPUT_FILE="$run_dir/github_output"
+  : > "$GATE_OUTPUT_FILE"
+  : > "$run_dir/analysis.log"
+  set +e
+  GATE_STDOUT=$(
+    cd "$run_dir" \
+      && PATH="$GATE_BIN:$PATH" \
+      MOCK_GATE_ENVELOPE="$run_dir/envelope.json" \
+      MOCK_ANALYSIS_LOG="$run_dir/analysis.log" \
+      GITHUB_OUTPUT="$GATE_OUTPUT_FILE" \
+      GITHUB_ENV="$run_dir/github_env" \
+      GITHUB_STEP_SUMMARY="$run_dir/step_summary" \
+      INPUT_ROOT="." \
+      INPUT_FORMAT="json" \
+      INPUT_ARTIFACTS_DIR="." \
+      env "$@" bash "$SCRIPTS_DIR/analyze.sh" 2>&1
+  )
+  GATE_EXIT=$?
+  set -e
+  GATE_OUTPUTS=$(cat "$GATE_OUTPUT_FILE")
+  GATE_ARGV=$(cat "$run_dir/analysis.log")
+}
+
+# The headline of every issue in this batch: the gate fails the job even though
+# fail-on-issues is false, because the two are independent.
+for gate_case in \
+  'regression|INPUT_FAIL_ON_REGRESSION=true|Fallow regression gate failed' \
+  'duplication-threshold|INPUT_THRESHOLD=5|Fallow duplication-threshold gate failed' \
+  'health-min-score|INPUT_MIN_SCORE=90|Fallow health-min-score gate failed' \
+  'health-min-severity|INPUT_MIN_SEVERITY=critical|Fallow health-min-severity gate failed' \
+  ; do
+  IFS='|' read -r gate_name gate_input expected <<< "$gate_case"
+  command_for_gate="dead-code"
+  extra_for_gate=""
+  case "$gate_name" in
+    health-*) command_for_gate="health"; extra_for_gate='"summary":{"functions_above_threshold":0}' ;;
+    duplication-*) command_for_gate="dupes"; extra_for_gate='"stats":{"clone_groups":0}' ;;
+  esac
+  run_gate_analyze "$(gate_envelope "{\"$gate_name\":{\"status\":\"fail\",\"enforced\":true}}" "$extra_for_gate")" \
+    INPUT_COMMAND="$command_for_gate" INPUT_FAIL_ON_ISSUES="false" "$gate_input"
+  assert_contains "$GATE_STDOUT" "::error::$expected" \
+    "gate: $gate_name fails the job with fail-on-issues false"
+  if [ "$GATE_EXIT" = "1" ]; then
+    pass "gate: $gate_name exits 1"
+  else
+    fail "gate: $gate_name exits 1" "got $GATE_EXIT: $GATE_STDOUT"
+  fi
+done
+
+# #2685: the security gate keeps its documented exit 8, and it used to be
+# unreachable because the whole branch sat inside the fail-on-issues conditional.
+run_gate_analyze "$(gate_envelope '{"security":{"status":"fail","enforced":true}}' '"gate":{"mode":"new","verdict":"fail","new_count":2}')" \
+  INPUT_COMMAND="security" INPUT_FAIL_ON_ISSUES="false" INPUT_SECURITY_GATE="new"
+assert_contains "$GATE_STDOUT" "::error::Fallow security gate failed" \
+  "gate: security fails with fail-on-issues false"
+if [ "$GATE_EXIT" = "8" ]; then
+  pass "gate: security keeps exit 8"
+else
+  fail "gate: security keeps exit 8" "got $GATE_EXIT"
+fi
+
+# #2685's second criterion: the verdict wins over the count.
+run_gate_analyze "$(gate_envelope '{"security":{"status":"fail","enforced":true}}' '"gate":{"mode":"new","verdict":"fail","new_count":0}')" \
+  INPUT_COMMAND="security" INPUT_FAIL_ON_ISSUES="false" INPUT_SECURITY_GATE="new"
+if [ "$GATE_EXIT" = "8" ]; then
+  pass "gate: a fail verdict with new_count 0 still exits 8"
+else
+  fail "gate: a fail verdict with new_count 0 still exits 8" "got $GATE_EXIT"
+fi
+
+# A gate the repository did not ask for reports and never fails, so
+# fail-on-issues: false stays authoritative for a flag passed through args:.
+run_gate_analyze "$(gate_envelope '{"regression":{"status":"fail","enforced":true}}')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "::warning::Fallow regression gate reports a failure" \
+  "gate: an unowned failure warns"
+assert_not_contains "$GATE_STDOUT" "::error::Fallow regression gate failed" \
+  "gate: an unowned failure prints no error"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "gate: an unowned failure leaves the job green"
+else
+  fail "gate: an unowned failure leaves the job green" "got $GATE_EXIT"
+fi
+
+# A gate the CLI reports as unenforced (combined mode, --report-only) is
+# honoured rather than overridden, and says which it was.
+run_gate_analyze "$(gate_envelope '{"duplication-threshold":{"status":"fail","enforced":false,"observed":100.0,"threshold":5.0}}' '"stats":{"clone_groups":1}')" \
+  INPUT_COMMAND="dupes" INPUT_FAIL_ON_ISSUES="false" INPUT_THRESHOLD="5"
+assert_contains "$GATE_STDOUT" "this run does not enforce that gate" \
+  "gate: an unenforced verdict names the reason"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "gate: an unenforced verdict leaves the job green"
+else
+  fail "gate: an unenforced verdict leaves the job green" "got $GATE_EXIT"
+fi
+
+# skipped is neither a pass nor a failure, and a gate the repository asked for
+# and did not get is worth a warning (the #2674 stand-down rule).
+run_gate_analyze "$(gate_envelope '{"regression":{"status":"skipped","enforced":false}}')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false" INPUT_FAIL_ON_REGRESSION="true"
+assert_contains "$GATE_STDOUT" "::warning::Fallow regression gate stood down" \
+  "gate: a requested gate that stood down warns"
+run_gate_analyze "$(gate_envelope '{"regression":{"status":"skipped","enforced":false}}')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "::notice::Fallow regression gate stood down" \
+  "gate: an unrequested gate that stood down is a notice"
+
+# Three gates at once: every line prints and the step exits once.
+run_gate_analyze "$(gate_envelope '{"regression":{"status":"fail","enforced":true},"security":{"status":"fail","enforced":true},"health-min-score":{"status":"fail","enforced":true}}')" \
+  INPUT_COMMAND="security" INPUT_FAIL_ON_ISSUES="false" INPUT_FAIL_ON_REGRESSION="true" INPUT_SECURITY_GATE="new"
+assert_contains "$GATE_STDOUT" "::error::Fallow regression gate failed" "gate: multi-failure prints regression"
+assert_contains "$GATE_STDOUT" "::error::Fallow security gate failed" "gate: multi-failure prints security"
+if [ "$GATE_EXIT" = "8" ]; then
+  pass "gate: security outranks the generic exit 1"
+else
+  fail "gate: security outranks the generic exit 1" "got $GATE_EXIT"
+fi
+
+# Outputs and the step summary are written before the failing exit, so the
+# downstream steps still have something to read.
+assert_contains "$GATE_OUTPUTS" "gates_failed=" "gate: outputs are written before the exit"
+assert_contains "$GATE_OUTPUTS" "results=" "gate: the results output survives a failing gate"
+
+# Audit stays governed by fail-on-issues, so a reporting configuration keeps
+# reporting.
+run_gate_analyze "$(gate_envelope '{"audit-verdict":{"status":"fail","enforced":true}}' '"verdict":"fail","attribution":{"gate":"all"}')" \
+  INPUT_COMMAND="audit" INPUT_FAIL_ON_ISSUES="false" INPUT_GATE="all"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "gate: audit with fail-on-issues false stays a reporting configuration"
+else
+  fail "gate: audit with fail-on-issues false stays a reporting configuration" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+
+# A pinned binary older than the index: the gates that already published a
+# feature-local field still work, and only the three that never had one warn.
+run_gate_analyze "$(gate_envelope '' '"regression":{"exceeded":true,"delta":4,"baseline_total":1,"current_total":5}')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false" INPUT_FAIL_ON_REGRESSION="true"
+assert_contains "$GATE_STDOUT" "::error::Fallow regression gate failed" \
+  "gate: the regression fallback reads .regression.exceeded"
+run_gate_analyze "$(gate_envelope '' '"stats":{"clone_groups":0}')" \
+  INPUT_COMMAND="dupes" INPUT_FAIL_ON_ISSUES="false" INPUT_THRESHOLD="5"
+assert_contains "$GATE_STDOUT" "could not be checked" \
+  "gate: a gate with no fallback fails open with one warning"
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not be checked" \
+  "gate: a pinned binary warns about nothing the repository did not configure"
+
+# #2686: one aggregated warning, not one per kind, and the empty case is its own
+# sentence behind its own input.
+DEGRADED='"workspace_diagnostics":[{"path":"a","kind":"skipped-large-file","message":"m","degrades_analysis":true},{"path":"b","kind":"skipped-large-file","message":"m","degrades_analysis":true},{"path":"c","kind":"node-modules-missing","message":"m","degrades_analysis":true},{"path":".","kind":"boundaries-not-configured","message":"m"}]'
+run_gate_analyze "$(gate_envelope '' "$DEGRADED")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "node-modules-missing (1), skipped-large-file (2)" \
+  "degraded: kinds and counts are aggregated into one warning"
+assert_not_contains "$GATE_STDOUT" "boundaries-not-configured" \
+  "degraded: the unconfigured-check kinds are not reported"
+assert_contains "$GATE_OUTPUTS" "analysis_degraded=true" "degraded: the output is set"
+
+EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
+run_gate_analyze "$(gate_envelope '' "$EMPTY")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$GATE_STDOUT" "::warning::Fallow analyzed no source file at all" \
+  "empty analysis: warns by default"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "empty analysis: passes by default"
+else
+  fail "empty analysis: passes by default" "got $GATE_EXIT"
+fi
+run_gate_analyze "$(gate_envelope '' "$EMPTY")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true" INPUT_FAIL_ON_EMPTY_ANALYSIS="true"
+assert_contains "$GATE_STDOUT" "::error::Fallow analyzed no source file at all" \
+  "empty analysis: fails behind the input"
+if [ "$GATE_EXIT" = "1" ]; then
+  pass "empty analysis: exits 1 behind the input"
+else
+  fail "empty analysis: exits 1 behind the input" "got $GATE_EXIT"
+fi
+
+# A gate name that is not a plain identifier never reaches an output or a
+# workflow command.
+run_gate_analyze "$(gate_envelope '{"evil\ninjected=1":{"status":"fail","enforced":true}}')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_OUTPUTS" "injected=1" "gate: a malformed gate name is dropped"
+
+# #2681 C11: the bare command never forwarded the threshold, so the gate could
+# not appear in its envelope at all.
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="" INPUT_THRESHOLD="7" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_ARGV" "--dupes-threshold 7" "gate: the bare command forwards the threshold"
+
+# #2682: --min-score implies --score, so the action keeps the reporting
+# surfaces populated unless the caller selected a section itself.
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="health" INPUT_MIN_SCORE="90" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_ARGV" "--min-score 90" "gate: min-score reaches the CLI"
+assert_contains "$GATE_ARGV" "--complexity" "gate: min-score adds --complexity"
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="health" INPUT_MIN_SCORE="90" INPUT_COMPLEXITY="true" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_ARGV" "--complexity" "gate: an explicit section input is not doubled"
+
+# Health-only inputs are rejected on other commands rather than arming nothing.
+run_gate_analyze "$(gate_envelope '' '"stats":{"clone_groups":0}')" INPUT_COMMAND="dupes" INPUT_MIN_SCORE="90"
+assert_contains "$GATE_STDOUT" "applies to command: health only" "gate: min-score is rejected off health"
+if [ "$GATE_EXIT" = "2" ]; then
+  pass "gate: min-score off health exits 2"
+else
+  fail "gate: min-score off health exits 2" "got $GATE_EXIT"
+fi
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="health" INPUT_MIN_SCORE="90" INPUT_ARGS="--report-only"
+assert_contains "$GATE_STDOUT" "cannot be combined with the min-score" "gate: report-only plus min-score is rejected"
+
+rm -rf "$GATE_WORK"
+
 # --- Summary ---
 
 echo ""

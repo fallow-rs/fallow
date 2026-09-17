@@ -43,7 +43,7 @@ inputs:
     required: false
     default: 'false'
   fail-on-issues:
-    description: 'Exit with code 1 if issues are found. This gates on the issue count only: type-aware-require, security-gate and fail-on-stale-baseline each fail the job independently of it.'
+    description: 'Exit with code 1 if issues are found. This gates on the issue count only. Every other gate fails the job independently of it, through the input that owns it: fail-on-regression, threshold, min-severity, min-score, security-gate, fail-on-stale-baseline, type-aware-require and fail-on-empty-analysis. Audit is the exception: command: audit gates on its verdict through this input, so audit with fail-on-issues: false stays a reporting configuration.'
     required: false
     default: 'true'
   changed-since:
@@ -237,8 +237,15 @@ inputs:
     required: false
     default: 'false'
   min-severity:
-    description: 'Only fail for findings at or above this severity (moderate, high, critical). Use "critical" to only fail on critical complexity findings.'
+    description: 'health command only: fail when a complexity finding reaches this severity (moderate, high, critical). The fail-on-issues count gate is separate and still counts every finding; set fail-on-issues: false to gate on severity alone.'
     required: false
+  min-score:
+    description: 'health command only: fail when the health score drops below this threshold (0-100). Implies --score, so the action also passes --complexity unless a health section input is set, keeping findings, annotations and SARIF populated; target_thresholds and hotspot_summary are not restored. The fail-on-issues count gate is separate and still counts every finding.'
+    required: false
+  fail-on-empty-analysis:
+    description: 'Fail the job when the run analyzed no source file at all, so every count it reports is zero because nothing was measured. Warns and passes by default, because a repository whose scope legitimately holds no source should keep passing.'
+    required: false
+    default: 'false'
   save-snapshot:
     description: 'Save vital signs snapshot to .fallow/snapshots/ for trend tracking. Use actions/cache to persist across runs. Provide a path or leave empty for default. Works with health and bare command.'
     required: false
@@ -354,6 +361,21 @@ outputs:
   baseline-gate-trips:
     description: 'true when the baseline has entries that match nothing and the run could judge it, which is what fail-on-stale-baseline exits on. Gate on this in a downstream step to report staleness without failing the job.'
     value: ${{ steps.analyze.outputs.baseline_gate_trips }}
+  gates-failed:
+    description: 'Comma-separated names of the gates whose status is fail. A gate appears here whether or not its owning input made it fail the job.'
+    value: ${{ steps.analyze.outputs.gates_failed }}
+  gates-warned:
+    description: 'Comma-separated names of the gates whose status is warn.'
+    value: ${{ steps.analyze.outputs.gates_warned }}
+  gates-skipped:
+    description: 'Comma-separated names of the gates that stood down without judging the run.'
+    value: ${{ steps.analyze.outputs.gates_skipped }}
+  gates-passed:
+    description: 'Comma-separated names of the gates that ran and passed.'
+    value: ${{ steps.analyze.outputs.gates_passed }}
+  analysis-degraded:
+    description: 'true when the run recorded a diagnostic meaning its findings were computed over less than the whole project.'
+    value: ${{ steps.analyze.outputs.analysis_degraded }}
   post-skipped-reason:
     description: 'Reason the Post review comments step skipped posting (pagination_failure / none). Set to pagination_failure only when the inline-review POST was actually aborted to avoid duplicate threads (multi-comment dedup lookup failed). Empty when the Post review comments step did not run.'
     value: ${{ steps.review.outputs.post_skipped_reason }}
@@ -461,6 +483,9 @@ runs:
         INPUT_MIN_COMMITS: ${{ inputs.min-commits }}
         INPUT_SCORE: ${{ inputs.score }}
         INPUT_MIN_SEVERITY: ${{ inputs.min-severity }}
+        INPUT_MIN_SCORE: ${{ inputs.min-score }}
+        INPUT_FAIL_ON_EMPTY_ANALYSIS: ${{ inputs.fail-on-empty-analysis }}
+        INPUT_FAIL_ON_ISSUES: ${{ inputs.fail-on-issues }}
         INPUT_SAVE_SNAPSHOT: ${{ inputs.save-snapshot }}
         INPUT_TREND: ${{ inputs.trend }}
         INPUT_ISSUE_TYPES: ${{ inputs.issue-types }}
@@ -589,6 +614,11 @@ runs:
         FALLOW_BASELINE_STALE_ENTRIES: ${{ steps.analyze.outputs.baseline_stale_entries }}
         FALLOW_BASELINE_ENTRIES: ${{ steps.analyze.outputs.baseline_entries }}
         FALLOW_BASELINE_GATE_TRIPS: ${{ steps.analyze.outputs.baseline_gate_trips }}
+        FALLOW_GATES_FAILED: ${{ steps.analyze.outputs.gates_failed }}
+        FALLOW_GATES_WARNED: ${{ steps.analyze.outputs.gates_warned }}
+        FALLOW_GATES_SKIPPED: ${{ steps.analyze.outputs.gates_skipped }}
+        FALLOW_GATES_PASSED: ${{ steps.analyze.outputs.gates_passed }}
+        FALLOW_ANALYSIS_DEGRADED: ${{ steps.analyze.outputs.analysis_degraded }}
       run: bash ${{ github.action_path }}/action/scripts/summary.sh
 
     - name: Post review comments
@@ -623,44 +653,3 @@ runs:
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}
         FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/review.sh
-
-    - name: Check threshold
-      if: always() && steps.analyze.outputs.issues != ''
-      shell: bash
-      env:
-        INPUT_COMMAND: ${{ inputs.command }}
-        INPUT_FAIL_ON_ISSUES: ${{ inputs.fail-on-issues }}
-        INPUT_GATE: ${{ inputs.gate }}
-        INPUT_SECURITY_GATE: ${{ inputs.security-gate }}
-        ISSUES: ${{ steps.analyze.outputs.issues }}
-        VERDICT: ${{ steps.analyze.outputs.verdict }}
-      run: |
-        if [ "$INPUT_FAIL_ON_ISSUES" != "true" ]; then exit 0; fi
-        if [ "$INPUT_COMMAND" = "audit" ]; then
-          # Audit gates on rule severity. Verdict already encodes the gate
-          # decision: pass -> no issues, warn -> warn-tier only (do not fail),
-          # fail -> error-tier (fail). Counting introduced findings instead
-          # would re-introduce the bug issue #302 was filed to fix.
-          if [ "$VERDICT" = "fail" ]; then
-            echo "::error::Fallow audit failed (gate: ${INPUT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files)"
-            exit 1
-          fi
-          exit 0
-        fi
-        if [ "$ISSUES" -gt 0 ]; then
-          case "$INPUT_COMMAND" in
-            dead-code|check) echo "::error::Fallow found ${ISSUES} unused code issues" ;;
-            dupes)           echo "::error::Fallow found ${ISSUES} clone groups" ;;
-            health)          echo "::error::Fallow found ${ISSUES} health findings" ;;
-            security)
-              if [ -n "$INPUT_SECURITY_GATE" ]; then
-                echo "::error::Fallow security gate failed (gate: ${INPUT_SECURITY_GATE}, ${ISSUES} candidate(s))"
-                exit 8
-              fi
-              echo "::error::Fallow found ${ISSUES} security candidates"
-              ;;
-            fix)             echo "::error::Fallow found ${ISSUES} fixable issues" ;;
-            "")              echo "::error::Fallow found ${ISSUES} issues" ;;
-          esac
-          exit 1
-        fi

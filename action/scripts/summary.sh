@@ -149,7 +149,32 @@ append_baseline_advisory() {
   printf '%s\n\n' "$line" >> "$GITHUB_STEP_SUMMARY"
 }
 
+# The gate inventory, from the same step outputs. `fallow report` renders its
+# own neutral "Gate outcomes:" line into the body below, so this says only what
+# the action itself decided: which gates failed the job and which merely
+# reported. Without it a repository that armed a gate and passed it has no
+# confirmation the input did anything.
+append_gate_summary() {
+  [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
+  local parts=()
+  [ -n "${FALLOW_GATES_FAILED:-}" ] && parts+=("failed ${FALLOW_GATES_FAILED}")
+  [ -n "${FALLOW_GATES_WARNED:-}" ] && parts+=("warned ${FALLOW_GATES_WARNED}")
+  [ -n "${FALLOW_GATES_SKIPPED:-}" ] && parts+=("stood down ${FALLOW_GATES_SKIPPED}")
+  [ -n "${FALLOW_GATES_PASSED:-}" ] && parts+=("passed ${FALLOW_GATES_PASSED}")
+  if [ ${#parts[@]} -gt 0 ]; then
+    local joined=""
+    for part in "${parts[@]}"; do
+      joined="${joined:+${joined}; }${part}"
+    done
+    printf '%s\n\n' "> **Gates:** ${joined}." >> "$GITHUB_STEP_SUMMARY"
+  fi
+  if [ "${FALLOW_ANALYSIS_DEGRADED:-}" = "true" ]; then
+    printf '%s\n\n' "> **Analysis was degraded.** Some files never reached the analysis, so these findings were computed over less than the whole project." >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
 append_baseline_advisory
+append_gate_summary
 
 if emit_native_summary_if_available; then
   exit 0
