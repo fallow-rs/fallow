@@ -120,9 +120,10 @@ Contract rules:
   way, because every audit computes one and forcing the CLI would retire the
   typed route; its absence is stated in the server instructions instead.
   The lookup tables name each envelope
-  shape's sites, because `audit` nests both the staleness object and the
-  diagnostics inside its `dead_code` / `duplication` / `complexity` sections
-  while every other command publishes them at the root. It adds no verdict of
+  shape's sites, because `audit` nests its diagnostics inside its `dead_code` /
+  `duplication` / `complexity` sections and publishes its only staleness object
+  under `complexity.summary`, while every other command publishes both at the
+  root. It adds no verdict of
   its own and moves no existing member, a response with nothing to state is not
   re-serialized at all, and no result changes its `isError`: an exit-1 gate
   stays a success carrying findings and an exit-8 security gate stays an error
