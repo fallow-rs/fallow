@@ -1444,20 +1444,6 @@ fi
   fi
 } >> "$GITHUB_OUTPUT"
 
-# The advisory count line, for runs the count gate will not fail. When it will,
-# the gate prints the same fact as an error below and this would be a duplicate.
-if [ "$ISSUES" -gt 0 ] && [ "${INPUT_FAIL_ON_ISSUES:-}" != "true" ]; then
-  case "$INPUT_COMMAND" in
-    dead-code|check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
-    dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
-    health)          echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
-    audit)           echo "::warning::Fallow audit found ${ISSUES} introduced issues in changed files" ;;
-    security)        echo "::warning::Fallow found ${ISSUES} security candidates" ;;
-    fix)             echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
-    "")              echo "::warning::Fallow found ${ISSUES} issues" ;;
-  esac
-fi
-
 # One accumulator for every failure reason, so none can hide another and the
 # documented exit 8 cannot be downgraded by a later step. Everything above has
 # already published its outputs and artifacts, so the downstream steps still
@@ -1467,6 +1453,7 @@ fi
 # action.yml whose first line returned when `fail-on-issues` was not true,
 # which is what made the security gate unreachable for anyone who set
 # `fail-on-issues: false` (issue #2685).
+COUNT_FAILURES_BEFORE=${#GATE_FAILURES[@]}
 if [ "${INPUT_FAIL_ON_ISSUES:-}" = "true" ]; then
   if [ "$INPUT_COMMAND" = "audit" ]; then
     # Audit gates on rule severity. The verdict already encodes the gate
@@ -1490,6 +1477,23 @@ if [ "${INPUT_FAIL_ON_ISSUES:-}" = "true" ]; then
       "")              GATE_FAILURES+=("Fallow found ${ISSUES} issues.") ;;
     esac
   fi
+fi
+
+# The advisory count line, for runs whose count produced no error. Keying on
+# `fail-on-issues` alone left two paths reporting the count neither way: a
+# health run with `min-score` set, where the count gate stands down because the
+# CLI turned its own findings rule off, and an audit run whose verdict is `warn`,
+# which the count gate deliberately does not fail on.
+if [ "$ISSUES" -gt 0 ] && [ ${#GATE_FAILURES[@]} -eq "$COUNT_FAILURES_BEFORE" ]; then
+  case "$INPUT_COMMAND" in
+    dead-code|check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
+    dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
+    health)          echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
+    audit)           echo "::warning::Fallow audit found ${ISSUES} introduced issues in changed files" ;;
+    security)        echo "::warning::Fallow found ${ISSUES} security candidates" ;;
+    fix)             echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
+    "")              echo "::warning::Fallow found ${ISSUES} issues" ;;
+  esac
 fi
 
 if [ ${#GATE_FAILURES[@]} -gt 0 ]; then

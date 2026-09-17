@@ -3814,6 +3814,34 @@ fi
 run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="health" INPUT_MIN_SCORE="90" INPUT_ARGS="--report-only"
 assert_contains "$GATE_STDOUT" "cannot be combined with the min-score" "gate: report-only plus min-score is rejected"
 
+# N8: two paths record no error for the count, so the advisory must still
+# print. Keying it on `fail-on-issues` alone left both silent about the count.
+run_gate_analyze "$(gate_envelope '{"health-min-score":{"status":"pass","enforced":true},"health-findings":{"status":"skipped","enforced":false}}' '"summary":{"functions_above_threshold":3}')" \
+  INPUT_COMMAND="health" INPUT_FAIL_ON_ISSUES="true" INPUT_MIN_SCORE="1"
+assert_contains "$GATE_STDOUT" "::warning::Fallow found 3 high complexity functions" \
+  "count: a health run whose count gate stood down still reports the count"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "count: that run still passes"
+else
+  fail "count: that run still passes" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+
+run_gate_analyze "$(gate_envelope '{"audit-verdict":{"status":"warn","enforced":true}}' '"verdict":"warn","attribution":{"gate":"new-only","dead_code_introduced":2,"complexity_introduced":0,"duplication_introduced":0,"styling_introduced":0}')" \
+  INPUT_COMMAND="audit" INPUT_FAIL_ON_ISSUES="true" INPUT_GATE="new-only"
+assert_contains "$GATE_STDOUT" "::warning::Fallow audit found 2 introduced issues in changed files" \
+  "count: an audit warn verdict still reports the count"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "count: an audit warn verdict still passes"
+else
+  fail "count: an audit warn verdict still passes" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+
+# And the duplicate the advisory was moved to avoid stays avoided.
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true" \
+  MOCK_GATE_EXIT=1
+assert_not_contains "$GATE_STDOUT" "::warning::Fallow found" \
+  "count: a failing count gate still prints the fact once"
+
 # T1: the #2674 unscoped re-read must not inherit the health gate flags.
 # `--min-score` is a section selector, so a score-only envelope may carry no
 # baseline_staleness at all and the gate would go silent with no message.
