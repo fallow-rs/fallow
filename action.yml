@@ -240,7 +240,7 @@ inputs:
     description: 'health command only: fail when a complexity finding reaches this severity (moderate, high, critical). The fail-on-issues count gate is separate and still counts every finding; set fail-on-issues: false to gate on severity alone.'
     required: false
   min-score:
-    description: 'health command only: fail when the health score drops below this threshold (0-100). Implies --score, so the action also passes --complexity unless a health section input is set, keeping findings, annotations and SARIF populated; target_thresholds and hotspot_summary are not restored. The fail-on-issues count gate is separate and still counts every finding.'
+    description: 'health command only: fail when the health score drops below this threshold (0-100). Implies --score, so the action also passes --complexity unless a health section input is set, keeping findings, annotations and SARIF populated; target_thresholds and hotspot_summary are not restored. When this is set the CLI turns its own findings rule off and the fail-on-issues count gate stands down with it, so the score alone decides the run.'
     required: false
   fail-on-empty-analysis:
     description: 'Fail the job when the run analyzed no source file at all, so every count it reports is zero because nothing was measured. Warns and passes by default, because a repository whose scope legitimately holds no source should keep passing.'
@@ -374,7 +374,7 @@ outputs:
     description: 'Comma-separated names of the gates that ran and passed.'
     value: ${{ steps.analyze.outputs.gates_passed }}
   analysis-degraded:
-    description: 'true when the run recorded a diagnostic meaning its findings were computed over less than the whole project.'
+    description: 'true when the run recorded a diagnostic meaning its findings were computed over less than the whole project. Read from the envelope root, or from the dead_code section on command: audit.'
     value: ${{ steps.analyze.outputs.analysis_degraded }}
   post-skipped-reason:
     description: 'Reason the Post review comments step skipped posting (pagination_failure / none). Set to pagination_failure only when the inline-review POST was actually aborted to avoid duplicate threads (multi-comment dedup lookup failed). Empty when the Post review comments step did not run.'

@@ -160,10 +160,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the score only; the action and the template add `--complexity` when no health
   section input is set, keeping the annotations, the SARIF upload and the
   pull-request comment populated. `target_thresholds` and `hotspot_summary` are
-  not restored by that. `min-score` and `min-severity` apply to
+  not restored by that. When it is set the CLI turns its own findings rule off,
+  and both integrations follow: the count gate stands down for that run, so the
+  score alone decides it. `min-score` and `min-severity` apply to
   `command: health` only and are rejected with exit 2 elsewhere.
 
-- **The `fail-on-issues` count gate is unchanged** and still counts findings.
+- **The action's inline `Check threshold` step is gone.** Its logic moved into
+  the analyze step, which is what lets the gates be tested and what makes them
+  independent of `fail-on-issues`. A workflow that referenced that step by name,
+  through `continue-on-error` on it or `steps.*.outcome`, has nothing to
+  reference any more; the verdict is on the analyze step and the `gates-failed`
+  output carries which gates decided it.
+
+- **One stale baseline now produces two lines**, and they describe different
+  runs. The action's own advisory comes from the unscoped re-read it performs on
+  a pull request and judges the whole project; the neutral gate line
+  `fallow report` renders comes from the primary envelope and reports what the
+  scoped run concluded, which on a pull request is that the gate stood down.
+  Both exist because neither answers the other's question.
+
+- **The `fail-on-issues` count gate is otherwise unchanged** and still counts
+  findings.
   The CLI's own rule is severity-aware and is published separately as
   `error-severity-findings`, so the two can disagree on a project that sets a
   rule to `warn`. `command: audit` still gates on its verdict through

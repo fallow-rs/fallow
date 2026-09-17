@@ -850,7 +850,7 @@ fn the_annotation_verdict_comes_before_the_findings() {
         .next()
         .expect("annotations rendered");
     assert!(
-        first.starts_with("::notice::Fallow Gate outcomes:"),
+        first.starts_with("::notice::Fallow: Gate outcomes:"),
         "the verdict is the first line, so a cap cannot drop it: {first}"
     );
 }

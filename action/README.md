@@ -47,6 +47,8 @@ verdict enforced.
 | `security` | `security-gate` |
 | `stale-baseline` | `fail-on-stale-baseline` |
 | `type-aware-require` | `type-aware-require` |
+| `error-severity-findings` | none: it is the CLI's own severity rule, reported in the outputs and never in the log |
+| `audit-verdict` | `fail-on-issues`, through the count gate |
 
 Each is independent of `fail-on-issues`, which keeps its own job: it gates on
 the issue count and nothing else. `command: audit` is the exception and still
@@ -71,8 +73,10 @@ with exit 2 elsewhere. `--min-score` implies `--score`, which is a section
 selector, so the action adds `--complexity` unless you selected a health section
 yourself; without that the annotations, the SARIF upload and the pull-request
 comment would all render empty. `target_thresholds` and `hotspot_summary` are
-not restored by that, and the `fail-on-issues` count gate still counts every
-finding, so set `fail-on-issues: false` to gate on the score alone.
+not restored by that. When `min-score` is set the CLI turns its own findings
+rule off, and the action follows: the `fail-on-issues` count gate stands down
+for that run, so the score is the only thing that decides it. That is what
+`--min-score` means by "complexity findings become informational".
 
 In combined mode (no `command`) the CLI does not enforce the duplication
 threshold, and says so in the envelope. The action honours that and warns rather
@@ -88,10 +92,27 @@ read. That warning appears only when the matching input is set.
 
 A run whose findings were computed over less than the whole project reports one
 `::warning::` listing the diagnostic kinds and their counts, and sets the
-`analysis-degraded` output. A run that analyzed no source file at all gets its
+`analysis-degraded` output, read from the envelope root or, on `audit`, from its
+`dead_code` section. A run that analyzed no source file at all gets its
 own sentence, because its clean result means nothing was measured rather than
 that nothing was found. It warns and passes by default; set
 `fail-on-empty-analysis: true` to fail instead.
+
+### Upgrading from an earlier action
+
+The inline `Check threshold` step is gone. Its logic moved into the analyze
+step, which is what lets the gates be tested and what makes them independent of
+`fail-on-issues`. A workflow that referenced that step by name, through
+`continue-on-error` on it or `steps.*.outcome`, has nothing to reference any
+more: the verdict is now on the analyze step, and the `gates-failed` output
+carries which gates decided it.
+
+One stale baseline now produces two lines: the action's own advisory, from the
+unscoped re-read it performs on a pull request, and the neutral gate line
+`fallow report` renders into the summary and the comment from the primary
+envelope. They describe different runs, which is why both exist: the advisory
+judges the whole project, and the gate line reports what the scoped run
+concluded, which on a pull request is that it stood down.
 
 ### Bot identity
 

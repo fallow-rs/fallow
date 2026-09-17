@@ -200,7 +200,7 @@ pub fn summary_line_for_gates(gates: Option<&fallow_output::GateOutcomes>) -> Op
 /// failing exit; this line owns the fact.
 pub fn annotation_line(envelope: &Value) -> Option<String> {
     let line = summary_line(envelope)?;
-    Some(format!("::notice::Fallow {line}"))
+    Some(format!("::notice::Fallow: {line}"))
 }
 
 #[cfg(test)]
@@ -333,7 +333,7 @@ mod tests {
         }));
         assert_eq!(
             annotation_line(&value).expect("a gate ran"),
-            "::notice::Fallow Gate outcomes: failed some-future-gate."
+            "::notice::Fallow: Gate outcomes: failed some-future-gate."
         );
     }
 

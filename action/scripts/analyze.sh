@@ -405,6 +405,13 @@ done
 if [ -n "${INPUT_THRESHOLD:-}" ] && ! [[ "$INPUT_THRESHOLD" =~ ^[0-9]+\.?[0-9]*$ ]]; then
   echo "::error::threshold must be a number, got: ${INPUT_THRESHOLD}"; exit 2
 fi
+
+# The score is a 0-100 threshold, so the same numeric shape as the duplication
+# one; a typo'd value would otherwise reach the CLI as a usage error late.
+if [ -n "${INPUT_MIN_SCORE:-}" ] && ! [[ "$INPUT_MIN_SCORE" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+  echo "::error::min-score must be a number between 0 and 100, got: ${INPUT_MIN_SCORE}"
+  exit 2
+fi
 # max-crap accepts floating-point values (e.g. 30.0, 45.5) because CRAP scores
 # are non-integer. Use the same numeric regex as threshold.
 if [ -n "${INPUT_MAX_CRAP:-}" ] && ! [[ "$INPUT_MAX_CRAP" =~ ^[0-9]+\.?[0-9]*$ ]]; then
@@ -852,8 +859,10 @@ build_stale_gate_args() {
       # because the action only added it to keep that envelope populated.
       --min-score)
         skip_next=true
+        continue
         ;;
       --min-score=*|--complexity)
+        continue
         ;;
       --fail-on-regression|--yes)
         continue
@@ -1177,11 +1186,13 @@ classify_gate() {
       GATE_FAILED_NAMES+=("$gate")
       if gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
         record_gate_failure "$gate"
-      elif [ "$gate" = "error-severity-findings" ]; then
-        # The CLI's own severity rule, which every run evaluates. The action
-        # gates on its own count through fail-on-issues, and the two
-        # legitimately disagree on a project that sets a rule to warn, so this
-        # one is reported in the outputs and never in the log.
+      elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "audit-verdict" ]; then
+        # Both are governed by fail-on-issues rather than by an input of their
+        # own. `error-severity-findings` is the CLI's own severity rule, which
+        # the action's count gate deliberately does not follow; `audit-verdict`
+        # is already applied by the count gate below, and an audit job with
+        # fail-on-issues: false is a deliberate reporting configuration. Both
+        # are reported in the outputs and never in the log.
         :
       elif gate_is_owned "$gate"; then
         # The input asked for the gate, and the CLI still reports the verdict
@@ -1213,6 +1224,13 @@ classify_gate() {
     pass)
       GATE_PASSED_NAMES+=("$gate")
       ;;
+    *)
+      # The status set is open. A value this build does not recognise is
+      # reported rather than silently counted as a pass, matching what
+      # `fallow report` does with the same envelope.
+      GATE_WARNED_NAMES+=("$gate")
+      echo "::warning::Fallow ${gate} gate reported an unrecognised status '${status}'. Upgrade the action, or read gate_outcomes directly."
+      ;;
   esac
 }
 
@@ -1221,6 +1239,14 @@ if [ "$HAS_GATE_OUTCOMES" = "true" ]; then
     [ -z "$gate_entry" ] && continue
     gate_key=${gate_entry%% *}
     gate_name_is_safe "$gate_key" || continue
+    # The stale-baseline gate is owned by the #2674 machinery below, which
+    # judges the unscoped re-read rather than this envelope. On a pull request
+    # the primary run is change-scoped and reports `skipped`, so classifying it
+    # here would print a stand-down beside that block's own error and list the
+    # gate in both gates_skipped and gates_failed.
+    if [ "$gate_key" = "stale-baseline" ] && [ -n "${INPUT_BASELINE:-}" ]; then
+      continue
+    fi
     classify_gate "$gate_key" "$(read_gate_member "$gate_key" status)" "$(read_gate_member "$gate_key" enforced)"
   done < <(jq -r '(.gate_outcomes // {}) | keys[]?' "$RESULTS_FILE" 2>/dev/null || true)
 else
@@ -1285,7 +1311,7 @@ fi
 ANALYSIS_DEGRADED=false
 EMPTY_ANALYSIS=false
 DEGRADED_SUMMARY=$(jq -r '
-  [ (.workspace_diagnostics // [])[] | select(.degrades_analysis == true) ]
+  [ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.degrades_analysis == true) ]
   | group_by(.kind)
   | map("\(.[0].kind) (\(length))")
   | join(", ")
@@ -1294,7 +1320,7 @@ if [ -n "$DEGRADED_SUMMARY" ]; then
   ANALYSIS_DEGRADED=true
   echo "::warning::Fallow analyzed a degraded file set: ${DEGRADED_SUMMARY}. Findings were computed over less than the whole project."
 fi
-if jq -e '[ (.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' "$RESULTS_FILE" > /dev/null 2>&1; then
+if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' "$RESULTS_FILE" > /dev/null 2>&1; then
   EMPTY_ANALYSIS=true
   EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check the analysis root, ignorePatterns, and any path or workspace filter."
   if [ "${INPUT_FAIL_ON_EMPTY_ANALYSIS:-}" = "true" ]; then
@@ -1418,7 +1444,9 @@ fi
   fi
 } >> "$GITHUB_OUTPUT"
 
-if [ "$ISSUES" -gt 0 ]; then
+# The advisory count line, for runs the count gate will not fail. When it will,
+# the gate prints the same fact as an error below and this would be a duplicate.
+if [ "$ISSUES" -gt 0 ] && [ "${INPUT_FAIL_ON_ISSUES:-}" != "true" ]; then
   case "$INPUT_COMMAND" in
     dead-code|check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
     dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
@@ -1448,7 +1476,11 @@ if [ "${INPUT_FAIL_ON_ISSUES:-}" = "true" ]; then
     if [ "$VERDICT" = "fail" ]; then
       GATE_FAILURES+=("Fallow audit failed (gate: ${INPUT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files).")
     fi
-  elif [ "$ISSUES" -gt 0 ]; then
+  elif [ "$ISSUES" -gt 0 ] && [ "$(read_gate_member health-findings status)" != "skipped" ]; then
+    # `--min-score` turns the CLI's findings rule off ("complexity findings
+    # become informational"), and the envelope says so with
+    # `health-findings: skipped`. Counting them here would fail a run the CLI
+    # deliberately passed, which is the inversion issue #2682 describes.
     case "$INPUT_COMMAND" in
       dead-code|check) GATE_FAILURES+=("Fallow found ${ISSUES} unused code issues.") ;;
       dupes)           GATE_FAILURES+=("Fallow found ${ISSUES} clone groups.") ;;

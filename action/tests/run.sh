@@ -3814,6 +3814,21 @@ fi
 run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="health" INPUT_MIN_SCORE="90" INPUT_ARGS="--report-only"
 assert_contains "$GATE_STDOUT" "cannot be combined with the min-score" "gate: report-only plus min-score is rejected"
 
+# T1: the #2674 unscoped re-read must not inherit the health gate flags.
+# `--min-score` is a section selector, so a score-only envelope may carry no
+# baseline_staleness at all and the gate would go silent with no message.
+STRIP_ARGS=$(
+  eval "$(sed -n '/^build_stale_gate_args()/,/^}/p' "$SCRIPTS_DIR/analyze.sh")"
+  ARGS=(dead-code --root . --quiet --format json --baseline baseline.json --min-score 90 --complexity --changed-since abc123)
+  EXTRA_ARGS=()
+  build_stale_gate_args
+  printf '%s ' "${GATE_ARGS[@]}"
+)
+assert_not_contains "$STRIP_ARGS" "--min-score" "re-read: --min-score is stripped"
+assert_not_contains "$STRIP_ARGS" "--complexity" "re-read: --complexity is stripped"
+assert_not_contains "$STRIP_ARGS" "--changed-since" "re-read: the narrowing flag is still stripped"
+assert_contains "$STRIP_ARGS" "--baseline" "re-read: the baseline is still passed"
+
 rm -rf "$GATE_WORK"
 
 # --- Summary ---
