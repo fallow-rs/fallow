@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789606151261,
+  "lastUpdate": 1789611011055,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "dfa135e5a59103dab969e063789ff8ebd5533be9",
-          "message": "Merge pull request #2439 from fallow-rs/feat/stylex-theme-styling\n\nfeat: complete StyleX theme styling support",
-          "timestamp": "2026-08-26T12:26:06+02:00",
-          "tree_id": "ead5dcae2432185db584b5bfe74b6a93afe024a6",
-          "url": "https://github.com/fallow-rs/fallow/commit/dfa135e5a59103dab969e063789ff8ebd5533be9"
-        },
-        "date": 1787740810595,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 531736760,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20304000,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 26195960,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 40191576,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43482328,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1645a5ee564500e38a37e774748c0f4d66c93bac",
+          "message": "fix(action): read every gate verdict from the envelope and fail the job the inputs asked for (#2693)\n\nThe GitHub Action and the GitLab template read every gate verdict from the envelope's `gate_outcomes` object instead of the CLI exit code, which both dropped whenever stdout parsed as JSON. Each gate fails the job only when the input that owns it asked for it and the CLI reports the gate as failed and enforced; a gate that tripped through `args` alone warns instead, so `fail-on-issues: false` stays authoritative.\n\n- `fail-on-regression`, `threshold`, `min-severity` and the security gate inputs now deliver the verdict they promised; a new `min-score` input runs health with `--complexity` so findings, annotations and the comment are not emptied; `--dupes-threshold` reaches the bare command.\n- One failure accumulator prints every failing gate and exits once, after outputs, artifacts and the summary are written; the inline `Check threshold` step and the early return before the security check are gone, so both paths are covered by tests.\n- Behaviour change: a repository with a security gate configured and `fail-on-issues: false` now fails on a tripped gate; not configuring the gate is the opt-out. `command: audit` with `gate: all` and `fail-on-issues: false` stays a reporting configuration.\n- A binary without `gate_outcomes` falls back to `regression.exceeded`, `gate.verdict`, `baseline_staleness.gate_trips` and the type-aware meta; gates with no older field fail open with one warning, only when their input asked for them.\n- Workspace diagnostics that degrade analysis land as one aggregated warning, an empty analysis warns by default and fails behind `fail-on-empty-analysis` (`FALLOW_FAIL_ON_EMPTY_ANALYSIS` on GitLab), and gate outcomes are exposed as step outputs and a GitLab dotenv report.\n\nFixes #2680 #2681 #2683 #2684 #2685 #2686\nRefs #2682 #2692",
+          "timestamp": "2026-09-17T03:57:56+02:00",
+          "tree_id": "adc91d7a23a127af177427766993f17e444c98cd",
+          "url": "https://github.com/fallow-rs/fallow/commit/1645a5ee564500e38a37e774748c0f4d66c93bac"
+        },
+        "date": 1789611006894,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 573460632,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21588296,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28635016,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43498712,
             "unit": "bytes"
           }
         ]
