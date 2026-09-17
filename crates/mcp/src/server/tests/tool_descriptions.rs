@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use rmcp::ServerHandler;
+
 use super::super::FallowMcp;
 
 const DESCRIPTION_FIXTURE: &str = include_str!("fixtures/tool-descriptions.json");
@@ -340,6 +342,57 @@ fn total_tool_schema_budget_keeps_no_stale_headroom() {
         "tools/list is down to {total} input-schema bytes but the ratchet still records \
          {RECORDED_TOTAL_SCHEMA_BYTES}; bank the win by setting RECORDED_TOTAL_SCHEMA_BYTES \
          to {total}, so the freed bytes are not spendable by the next parameter"
+    );
+}
+
+/// Server `instructions` bytes, as printed by this gate the last time it was
+/// re-pinned.
+///
+/// Budgeted for the same reason the two totals above are: `instructions` is
+/// resident in every session that connects, whether or not any tool is called,
+/// and it is the one surface with no per-item ceiling to hold it back. It
+/// earns its size by reaching every tool at one session-level cost, which is
+/// exactly why an unbudgeted one grows: each sentence is cheaper here than in
+/// a description, and the bill still arrives once per session. Re-pin it by
+/// running `cargo test -p fallow-mcp server_instructions_stay_within_budget`
+/// and copying the live total out of the failure message.
+const RECORDED_INSTRUCTION_BYTES: usize = 1_165;
+
+/// Deliberate headroom over [`RECORDED_INSTRUCTION_BYTES`], sized like
+/// [`TOTAL_DESCRIPTION_SLACK_BYTES`]: enough to reword a routing sentence,
+/// not enough to add a paragraph.
+const INSTRUCTION_SLACK_BYTES: usize = 512;
+
+const MAX_INSTRUCTION_BYTES: usize = RECORDED_INSTRUCTION_BYTES + INSTRUCTION_SLACK_BYTES;
+
+fn instruction_bytes() -> usize {
+    let server = FallowMcp::new();
+    ServerHandler::get_info(&server)
+        .instructions
+        .as_deref()
+        .map_or(0, str::len)
+}
+
+#[test]
+fn server_instructions_stay_within_budget() {
+    let total = instruction_bytes();
+    assert!(
+        total <= MAX_INSTRUCTION_BYTES,
+        "server instructions carry {total} bytes, over the {MAX_INSTRUCTION_BYTES}-byte \
+         budget every agent session pays on connect ({RECORDED_INSTRUCTION_BYTES} recorded \
+         plus {INSTRUCTION_SLACK_BYTES} slack); route the detail to a tool guide or a \
+         fallow:// resource instead"
+    );
+}
+
+#[test]
+fn server_instruction_budget_keeps_no_stale_headroom() {
+    let total = instruction_bytes();
+    assert!(
+        RECORDED_INSTRUCTION_BYTES.saturating_sub(total) <= DESCRIPTION_REPIN_BYTES,
+        "server instructions are down to {total} bytes but the ratchet still records \
+         {RECORDED_INSTRUCTION_BYTES}; bank the win by setting RECORDED_INSTRUCTION_BYTES \
+         to {total}, so the freed bytes are not spendable by the next sentence"
     );
 }
 

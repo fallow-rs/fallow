@@ -64,13 +64,15 @@ use serde_json::{Map, Value};
 /// preserved, because whether a run failed is decided by the exit code the
 /// caller already translated, never by what a gate says here.
 pub(super) fn annotate_gate_verdicts(mut result: CallToolResult) -> CallToolResult {
-    let Some(ContentBlock::Text(text)) = result.content.first() else {
+    let Some(ContentBlock::Text(text)) = result.content.first_mut() else {
         return result;
     };
     let Some(annotated) = annotate_envelope(&text.text) else {
         return result;
     };
-    result.content = vec![ContentBlock::text(annotated)];
+    // Replace the text, not the block and not the vector: annotations, `_meta`
+    // and any sibling block belong to whoever put them there.
+    text.text = annotated;
     result
 }
 
@@ -167,28 +169,34 @@ fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
 /// Where a loaded baseline's staleness sits on each envelope shape, and which
 /// analysis it belongs to on the shapes that carry more than one.
 ///
+/// Every row is a path a run actually emits, measured rather than inferred.
 /// `dead-code` and `dupes` publish it at the root and `health` inside
 /// `summary`; the combined envelope repeats those under `check`, `dupes` and
-/// `health`; `audit` names its sections `dead_code`, `duplication` and
-/// `complexity` instead, and puts the health one under that section's own
-/// `summary`. Naming the sites is what keeps the multi-section shapes from
-/// reporting one baseline's rot against another's counts, and a shape that
-/// carries none of them contributes nothing.
+/// `health`. `audit` publishes exactly one, under its `complexity` section's
+/// own `summary`, and none for its dead-code or duplication baselines, so
+/// there are no rows for those. Naming the sites is what keeps the
+/// multi-section shapes from reporting one baseline's rot against another's
+/// counts, and a shape that carries none of them contributes nothing.
 ///
-/// `audit` resolves its three baselines from config as well as from
-/// parameters, which is why the rows are keyed on the envelope rather than on
-/// what the caller passed.
+/// The label is the section the envelope actually uses, not the command the
+/// baseline came from, because that is what an agent reading the sentence goes
+/// looking for. Audit's row is quiet today for a reason of its own: every audit
+/// is change-scoped, so its staleness object always reports
+/// `change_scoped: true`, which makes both the advisory and `gate_trips` false
+/// by construction.
+///
+/// `audit` resolves its baselines from config as well as from parameters,
+/// which is why the rows are keyed on the envelope rather than on what the
+/// caller passed.
 const BASELINE_SITES: &[(&[&str], Option<&str>)] = &[
     (&["baseline_staleness"], None),
     (&["summary", "baseline_staleness"], None),
     (&["check", "baseline_staleness"], Some("dead-code")),
     (&["dupes", "baseline_staleness"], Some("duplication")),
     (&["health", "summary", "baseline_staleness"], Some("health")),
-    (&["dead_code", "baseline_staleness"], Some("dead-code")),
-    (&["duplication", "baseline_staleness"], Some("duplication")),
     (
         &["complexity", "summary", "baseline_staleness"],
-        Some("health"),
+        Some("complexity"),
     ),
 ];
 
@@ -370,14 +378,23 @@ fn gate_measurement(outcome: &Value) -> String {
     format!(" ({})", parts.join(", "))
 }
 
-/// Render a gate number the way the gate meant it. Counts arrive as JSON
-/// numbers with a zero fraction, and `observed 3` reads as a count where
-/// `observed 3.0` reads as a measurement.
+/// Render a gate number the way the gate meant it.
+///
+/// Counts arrive as JSON numbers with a zero fraction, and `observed 3` reads
+/// as a count where `observed 3.0` reads as a measurement. A measured
+/// percentage arrives at full `f64` precision, which is a number for computing
+/// with and not for reading: `97.82608695652172` in a sentence is noise around
+/// the two digits that carry the verdict. The sentence rounds; the envelope's
+/// own `observed` keeps every digit for anything that computes on it.
 fn number(value: f64) -> String {
     if value.fract() == 0.0 {
         return format!("{value:.0}");
     }
-    format!("{value}")
+    let rounded = format!("{value:.2}");
+    rounded
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
 }
 
 /// One sentence for every degrading diagnostic together, never one per kind.
@@ -583,6 +600,28 @@ mod tests {
         );
     }
 
+    /// A measured percentage reaches the envelope at full `f64` precision.
+    /// The sentence carries the two digits that decide the verdict, and the
+    /// envelope keeps the rest.
+    #[test]
+    fn a_measured_percentage_is_rounded_for_the_sentence() {
+        let warnings = warnings_of(&serde_json::json!({
+            "gate_outcomes": {
+                "duplication-threshold": {
+                    "status": "fail",
+                    "enforced": true,
+                    "observed": 97.826_086_956_521_72,
+                    "threshold": 0.1,
+                },
+            },
+        }));
+
+        assert!(
+            warnings[0].contains("observed 97.83, threshold 0.1"),
+            "{warnings:?}"
+        );
+    }
+
     #[test]
     fn a_warn_tier_gate_reports_its_tier_and_its_spelled_threshold() {
         let warnings = warnings_of(&serde_json::json!({
@@ -663,29 +702,62 @@ mod tests {
         assert!(warnings[1].contains("the health baseline"), "{warnings:?}");
     }
 
-    /// `audit` names its sections `dead_code` / `duplication` / `complexity`
-    /// and nests its diagnostics inside them, so both lookups need that shape
-    /// or the one command whose whole output is a verdict reports nothing.
+    /// The shape below is the one `fallow audit --base <ref> --format json
+    /// --quiet --health-baseline <file>` emits, measured against the binary:
+    /// the diagnostics sit under `dead_code` and the only staleness object
+    /// audit publishes sits under `complexity.summary`, with
+    /// `change_scoped: true` because every audit is change-scoped. So a real
+    /// audit reports its degraded run and stays silent about its baseline, and
+    /// that silence is the contract rather than a miss: a change-scoped run
+    /// cannot judge a whole-project baseline.
     #[test]
-    fn an_audit_envelope_reaches_its_sectioned_baseline_and_diagnostics() {
+    fn an_audit_envelope_reports_its_degraded_run_and_not_its_scoped_baseline() {
         let warnings = warnings_of(&serde_json::json!({
             "kind": "audit",
-            "verdict": "fail",
-            "summary": { "total_issues": 3 },
+            "verdict": "pass",
             "dead_code": {
                 "workspace_diagnostics": [
                     { "kind": "node-modules-missing", "degrades_analysis": true },
                 ],
             },
             "complexity": {
+                "summary": {
+                    "baseline_staleness": {
+                        "baseline_entries": 1,
+                        "matched_entries": 1,
+                        "stale_entries": 0,
+                        "current_findings": 1,
+                        "change_scoped": true,
+                        "stale": false,
+                        "warning": "none",
+                        "gate_trips": false,
+                        "moved_entries": 0,
+                    },
+                },
+            },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("node-modules-missing (1)"),
+            "{warnings:?}"
+        );
+    }
+
+    /// Should a whole-project audit ever publish that object, the sentence has
+    /// to name the section an agent can go and read, which is `complexity`.
+    #[test]
+    fn the_audit_complexity_baseline_is_named_by_its_section() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "audit",
+            "complexity": {
                 "summary": { "baseline_staleness": staleness("zero-overlap", 5, 0, true) },
             },
         }));
 
-        assert_eq!(warnings.len(), 2, "{warnings:?}");
-        assert!(warnings[0].contains("the health baseline"), "{warnings:?}");
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            warnings[1].contains("node-modules-missing (1)"),
+            warnings[0].contains("the complexity baseline"),
             "{warnings:?}"
         );
     }

@@ -89,8 +89,15 @@ fn requires_cli_fallback(params: &FindDupesParams) -> bool {
 }
 
 fn cli_fallback_reason(params: &FindDupesParams) -> Option<CliFallbackReason> {
-    baseline_fallback_reason(params.baseline.as_deref(), params.save_baseline.as_deref())
-        .or_else(|| duplication_fallback_reason(params.group_by.as_deref(), params.explain_skipped))
+    baseline_fallback_reason(params.baseline.as_deref(), params.save_baseline.as_deref()).or_else(
+        || {
+            duplication_fallback_reason(
+                params.group_by.as_deref(),
+                params.explain_skipped,
+                params.threshold,
+            )
+        },
+    )
 }
 
 fn duplication_options_from_params(params: &FindDupesParams) -> Result<DuplicationOptions, String> {
@@ -218,6 +225,24 @@ mod tests {
 
     use super::*;
 
+    /// `threshold` is not a pure analysis parameter: it arms the duplication
+    /// gate, and the programmatic route has no gate to arm. A typed call would
+    /// compare nothing, publish no `gate_outcomes`, and read as a pass.
+    #[test]
+    fn a_threshold_takes_the_cli_because_the_api_evaluates_no_gate() {
+        let params = FindDupesParams {
+            threshold: Some(0.1),
+            ..FindDupesParams::default()
+        };
+
+        assert!(requires_cli_fallback(&params));
+        let args = build_find_dupes_args(&params).expect("args build");
+        assert!(
+            args.windows(2).any(|pair| pair == ["--threshold", "0.1"]),
+            "{args:?}"
+        );
+    }
+
     #[test]
     fn api_path_accepts_pure_analysis_params() {
         let params = FindDupesParams {
@@ -229,7 +254,6 @@ mod tests {
             min_tokens: Some(12),
             min_lines: Some(3),
             min_occurrences: Some(4),
-            threshold: Some(5.5),
             skip_local: Some(true),
             cross_language: Some(true),
             ignore_imports: Some(false),
@@ -256,7 +280,6 @@ mod tests {
         assert_eq!(options.min_tokens, Some(12));
         assert_eq!(options.min_lines, Some(3));
         assert_eq!(options.min_occurrences, Some(4));
-        assert_eq!(options.threshold, Some(5.5));
         assert_eq!(options.skip_local, Some(true));
         assert_eq!(options.cross_language, Some(true));
         assert_eq!(options.ignore_imports, Some(false));

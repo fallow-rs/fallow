@@ -12,8 +12,8 @@ use crate::tools::{
     build_analyze_args, build_health_args, build_impact_closure_args, build_project_info_args,
     build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
     build_trace_export_args, build_trace_file_args, execute_code_mode, inspect_target, run_analyze,
-    run_fallow, run_fix_apply, run_fix_preview, run_trace_clone_tool, run_trace_error_tool,
-    run_trace_export_tool,
+    run_fallow, run_find_dupes, run_fix_apply, run_fix_preview, run_trace_clone_tool,
+    run_trace_error_tool, run_trace_export_tool,
 };
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
@@ -918,4 +918,51 @@ async fn e2e_analyze_warns_when_the_loaded_baseline_matched_nothing() {
         "{staleness}"
     );
     assert!(staleness.contains("save_baseline"), "{staleness}");
+}
+
+/// A failing duplication threshold is a gate, and a gate an agent cannot see is
+/// the defect this change exists to remove. The programmatic duplication route
+/// has no threshold comparison, so a direct `find_dupes` call used to answer
+/// with no verdict at all while the same call with an unrelated `group_by`
+/// beside it reported one. Both surfaces must now say the same thing.
+#[tokio::test]
+async fn e2e_find_dupes_reports_a_failing_threshold_on_both_routes() {
+    let bin = fallow_binary();
+    let root = fixture_path("duplicate-code");
+
+    let direct = crate::params::FindDupesParams {
+        root: Some(root.to_string_lossy().to_string()),
+        threshold: Some(0.1),
+        ..Default::default()
+    };
+    let grouped = crate::params::FindDupesParams {
+        root: Some(root.to_string_lossy().to_string()),
+        threshold: Some(0.1),
+        group_by: Some("directory".to_string()),
+        ..Default::default()
+    };
+
+    for (label, params) in [("direct", direct), ("grouped", grouped)] {
+        let result = run_find_dupes(&bin, params).await.expect("find_dupes runs");
+        assert_eq!(result.is_error, Some(false), "{label}");
+
+        let text = extract_text(&result);
+        let json: serde_json::Value = serde_json::from_str(text)
+            .unwrap_or_else(|e| panic!("{label} must stay parseable: {e}\ntext: {text}"));
+
+        assert_eq!(
+            json["gate_outcomes"]["duplication-threshold"]["status"], "fail",
+            "{label} should carry the gate it armed\n{json}"
+        );
+        let warnings = json["warnings"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{label} should carry warnings\n{json}"));
+        let gate = warnings
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .find(|entry| entry.starts_with("Gate duplication-threshold failed"))
+            .unwrap_or_else(|| panic!("{label}: no gate warning in {warnings:?}"));
+        assert!(gate.contains("threshold 0.1"), "{label}: {gate}");
+        assert!(gate.contains("enforced"), "{label}: {gate}");
+    }
 }

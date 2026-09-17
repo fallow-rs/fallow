@@ -4,6 +4,7 @@ pub(super) enum CliFallbackReason {
     Regression,
     GroupedOutput,
     DuplicationExplainSkipped,
+    DuplicationThresholdGate,
     HealthMinScoreGate,
     HealthMinSeverity,
     HealthChurnFile,
@@ -37,10 +38,20 @@ pub(super) fn grouped_fallback_reason(group_by: Option<&str>) -> Option<CliFallb
     filled(group_by).then_some(CliFallbackReason::GroupedOutput)
 }
 
+/// `threshold` is checked first for the reason
+/// [`CliFallbackReason::HealthMinScoreGate`] exists: the programmatic
+/// duplication route has no threshold gate, so a typed call would compare
+/// nothing, publish no `gate_outcomes`, and hand back a result an agent reads
+/// as a pass. The CLI owns that comparison, so a call that arms it takes the
+/// CLI.
 pub(super) fn duplication_fallback_reason(
     group_by: Option<&str>,
     explain_skipped: Option<bool>,
+    threshold: Option<f64>,
 ) -> Option<CliFallbackReason> {
+    if threshold.is_some() {
+        return Some(CliFallbackReason::DuplicationThresholdGate);
+    }
     grouped_fallback_reason(group_by).or_else(|| {
         (explain_skipped == Some(true)).then_some(CliFallbackReason::DuplicationExplainSkipped)
     })
@@ -71,13 +82,28 @@ mod tests {
     #[test]
     fn duplication_reason_preserves_grouping_precedence() {
         assert_eq!(
-            duplication_fallback_reason(Some("owner"), Some(true)),
+            duplication_fallback_reason(Some("owner"), Some(true), None),
             Some(CliFallbackReason::GroupedOutput)
         );
         assert_eq!(
-            duplication_fallback_reason(None, Some(true)),
+            duplication_fallback_reason(None, Some(true), None),
             Some(CliFallbackReason::DuplicationExplainSkipped)
         );
+    }
+
+    /// The programmatic duplication route has no threshold gate, so a typed
+    /// call would compare nothing and hand back a result that reads as a pass.
+    #[test]
+    fn a_duplication_threshold_outranks_the_other_duplication_reasons() {
+        assert_eq!(
+            duplication_fallback_reason(None, None, Some(0.1)),
+            Some(CliFallbackReason::DuplicationThresholdGate)
+        );
+        assert_eq!(
+            duplication_fallback_reason(Some("owner"), Some(true), Some(0.1)),
+            Some(CliFallbackReason::DuplicationThresholdGate)
+        );
+        assert_eq!(duplication_fallback_reason(None, None, None), None);
     }
 
     #[test]

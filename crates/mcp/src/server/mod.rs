@@ -443,7 +443,7 @@ impl ServerHandler for FallowMcp {
                  Every tool description states what it returns and when to use it; read tools/list rather than guessing from names. \
                  Two routing rules: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want dead-in-production verdicts, and check_health for complexity, hotspot, and CRAP analysis without one; read a fallow:// resource instead of calling fallow_explain when you only need reference material. \
                  Resources are read-only, run no analysis, and are safe to cache per server version: fallow://tools, fallow://issue-types, fallow://explain and fallow://explain/{issue_type}, fallow://task-matrix, and fallow://schema/config, fallow://schema/plugin, fallow://schema/rule-pack, fallow://schema/similar-code-snapshot (JSON Schemas). \
-                 Every analysis result is JSON in a single text block: parse it. A run that armed a gate also carries gate_outcomes (per gate: status, whether it was enforced, and the numbers compared), a run given a baseline carries baseline_staleness, and both are restated with their remedy in the result's root warnings array, because the CLI's verdict line and its exit code do not cross this protocol.",
+                 Every analysis result is JSON in a single text block: parse it. The root warnings array restates this run's verdicts with their remedy: gate_outcomes entries, baseline staleness, and a degraded analysis. An absent gate_outcomes is not proof of a pass, because audit and the combined analyses publish none on the in-process route.",
             )
     }
 
