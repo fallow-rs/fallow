@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789577155619,
+  "lastUpdate": 1789625958985,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "fe3fdd2321d3445df6695126a3d29a77384ac533",
-          "message": "fix(health): match Istanbul coverage by body location and skip bodyless declarations (#2443)\n\nOverload signatures, abstract members, and `declare function` declarations no longer count as functions, so function counts drop for every file that carries them and its file score moves without any code change. A file whose declarations are all bodyless leaves the file-score table entirely.\n\nCoverage matching improves at the same time: each coverage-map function entry now contributes up to three candidate positions (the producer's own, the declaration start, and the body start), so a function whose only structural match was its body location scores against real coverage instead of a static estimate. Because an expression-bodied arrow's recorded body is the next arrow in a curried chain, a body-start candidate yields to a declaration at the same position, which keeps every arrow of a middleware chain, a higher-order component, or a curried class property matchable.\n\nRegression baselines are unaffected. Re-save health baselines if you run with `--coverage`, because a newly matched function can cross the CRAP ceiling.\n\nThanks to @PrinceD96 for the report and the contribution.\n\nCloses #2442",
-          "timestamp": "2026-08-28T01:18:22+02:00",
-          "tree_id": "f91a88e6e20b319d0ffef97e69fd76eea960cc70",
-          "url": "https://github.com/fallow-rs/fallow/commit/fe3fdd2321d3445df6695126a3d29a77384ac533"
-        },
-        "date": 1787873050004,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/de90d3109e5eee2bb7729f487c65476a3d0a2df2"
         },
         "date": 1789577151381,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 478,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1307,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ca7c3f6ed8b87d43033168d979ad6b92f4e22329",
+          "message": "ci: soft-fail the cargo-modules install in the coupling workflow (#2696)\n\nThe coupling job is a metric tracker and its collect step already degrades to a warning, but the install step was not covered: an unlocked cargo install resolved unicode-ident 1.0.25 against unicode-properties 0.1.4, which trips a const assertion in ra-ap-rustc_lexer 0.166.0 and turned the check red with exit 101.\n\nKeep the unlocked install first so a cargo_metadata fix can still land ahead of a cargo-modules release, retry with the packaged lockfile (pins unicode-ident 1.0.24), and mark the step continue-on-error. When neither install succeeds, the collect step emits a warning, writes the coupling metrics skipped summary, and sets collected=false so the analyze and store steps skip.",
+          "timestamp": "2026-09-17T08:13:19+02:00",
+          "tree_id": "95bd3553d77eb4f61c4b9dff41067e2f477a5e3e",
+          "url": "https://github.com/fallow-rs/fallow/commit/ca7c3f6ed8b87d43033168d979ad6b92f4e22329"
+        },
+        "date": 1789625954349,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
