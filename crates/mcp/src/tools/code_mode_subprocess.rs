@@ -206,6 +206,12 @@ fn with_structured_cleanup_errors(error: String, cleanup_errors: &[String]) -> S
     serde_json::to_string(&value).unwrap_or_else(|_| with_cleanup_errors(error, cleanup_errors))
 }
 
+/// Append the run's gate verdicts, or pass the original bytes through when
+/// there is nothing to state.
+fn annotate(body: String) -> String {
+    crate::tools::gate_verdicts::annotate_envelope(&body).unwrap_or(body)
+}
+
 fn file_len(file: &fs::File) -> Result<u64, String> {
     file.metadata()
         .map(|metadata| metadata.len())
@@ -229,6 +235,12 @@ fn read_limited_file(file: &mut fs::File, limit: usize) -> Result<Vec<u8>, Strin
     read_file(file, "stderr")
 }
 
+/// Translate one completed Code Mode subprocess into the host call's body.
+///
+/// Shares the exit-code policy of [`crate::tools::captured_output_result`], and
+/// shares its gate-verdict annotation too: a snippet reading a gated run must
+/// see the same warnings a direct tool call sees, or the two surfaces disagree
+/// about what the same analysis concluded.
 pub(super) fn normalize_output(
     exit_code: i32,
     stdout: &[u8],
@@ -241,10 +253,10 @@ pub(super) fn normalize_output(
         0 | 1 => Ok(if stdout.is_empty() {
             "{}".to_string()
         } else {
-            stdout
+            annotate(stdout)
         }),
         _ if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(&stdout).is_ok() => {
-            Err(stdout)
+            Err(annotate(stdout))
         }
         _ => Err(json!({
             "error": true,

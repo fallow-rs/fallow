@@ -11,8 +11,8 @@ use rmcp::model::ContentBlock;
 use crate::tools::{
     build_analyze_args, build_health_args, build_impact_closure_args, build_project_info_args,
     build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
-    build_trace_export_args, build_trace_file_args, execute_code_mode, inspect_target, run_fallow,
-    run_fix_apply, run_fix_preview, run_trace_clone_tool, run_trace_error_tool,
+    build_trace_export_args, build_trace_file_args, execute_code_mode, inspect_target, run_analyze,
+    run_fallow, run_fix_apply, run_fix_preview, run_trace_clone_tool, run_trace_error_tool,
     run_trace_export_tool,
 };
 
@@ -842,4 +842,80 @@ async fn e2e_fix_apply_inherits_the_withholding_and_writes_nothing() {
         before,
         "a withheld removal must not reach the file"
     );
+}
+
+/// A baseline whose entries no longer match anything is the run #2676 is
+/// about: the `baseline` parameter forces the CLI subprocess, the CLI's
+/// advisory goes to stderr where `--quiet` removes it, and its exit 1 becomes
+/// a success. Everything the agent could act on then lives in members it was
+/// never told to read.
+///
+/// This drives the real binary rather than a fixture envelope, because the
+/// claim is about what a tool call returns end to end, and because the
+/// staleness object only exists on a run that actually loaded a baseline.
+#[tokio::test]
+async fn e2e_analyze_warns_when_the_loaded_baseline_matched_nothing() {
+    let bin = fallow_binary();
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path().join("project");
+    let source = root.join("src");
+    std::fs::create_dir_all(&source).expect("create project");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "stale-baseline-probe", "version": "1.0.0", "private": true }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        source.join("library.ts"),
+        "export const first = (): number => 1;\nexport const second = (): number => 2;\n",
+    )
+    .expect("write library");
+
+    let baseline = dir.path().join("baseline.json");
+    let save = crate::params::AnalyzeParams {
+        root: Some(root.to_string_lossy().to_string()),
+        save_baseline: Some(baseline.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+    run_analyze(&bin, save).await.expect("baseline is saved");
+    assert!(baseline.is_file(), "the run should have written a baseline");
+
+    // Move the file the baseline recorded. Every entry now matches nothing,
+    // while the run still produces findings to compare against.
+    std::fs::rename(source.join("library.ts"), source.join("renamed.ts"))
+        .expect("rename the analyzed file");
+
+    let compare = crate::params::AnalyzeParams {
+        root: Some(root.to_string_lossy().to_string()),
+        baseline: Some(baseline.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+    let result = run_analyze(&bin, compare).await.expect("analyze runs");
+
+    assert_eq!(
+        result.is_error,
+        Some(false),
+        "a stale baseline is a verdict, not a tool failure"
+    );
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("the result must stay parseable: {e}\ntext: {text}"));
+
+    assert_eq!(
+        json["baseline_staleness"]["gate_trips"], true,
+        "fixture precondition: the baseline should have rotted\n{json}"
+    );
+    let warnings = json["warnings"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the result should carry warnings\n{json}"));
+    let staleness = warnings
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .find(|entry| entry.starts_with("Baseline staleness:"))
+        .unwrap_or_else(|| panic!("no baseline warning in {warnings:?}"));
+    assert!(
+        staleness.contains("--fail-on-stale-baseline"),
+        "{staleness}"
+    );
+    assert!(staleness.contains("save_baseline"), "{staleness}");
 }

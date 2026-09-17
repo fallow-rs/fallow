@@ -83,6 +83,11 @@ const CHECK_HEALTH_SECTIONS: &[ToolGuideSection] = &[
         summary: "How to read one `threshold_overrides` state row.",
         detail: r"Each state row carries a `dimension` (`complexity` or `crap`): one configured override produces one row per dimension it participates in, so group on `override_index` to count configured overrides rather than counting rows. A row's `outstanding[]` names every dimension on which the matched unit STILL produces a finding after the override applied, whether the entry leaves that ceiling unconfigured (the override reads `active` next to a surviving finding) or raises it to a value the unit still exceeds (the row reads `insufficient`).",
     },
+    ToolGuideSection {
+        topic: "gate_outcomes",
+        summary: "How a gated run reports its verdict when the exit code cannot.",
+        detail: r"A run that armed a gate carries `gate_outcomes` at the envelope root, keyed by gate name. `min_score` produces a `health-min-score` entry and `min_severity` a `health-min-severity` one; `health-findings` reports `skipped` when `min_score` made complexity findings informational. Each entry carries `status` (`pass`, `warn`, `fail`, `skipped`), `enforced` (whether a `fail` from it makes the CLI exit non-zero), and `observed` / `threshold` where the gate compared a number. A gate failed the run when `status` is `fail` AND `enforced` is true; `enforced` alone is true on every armed gate including the ones that passed. A baselined run carries `baseline_staleness` alongside it: read `gate_trips` for the `--fail-on-stale-baseline` rule and `change_scoped` before dividing `matched_entries` by `baseline_entries`. The MCP server converts the CLI's exit 1 into a successful result so the findings still reach you, so these two objects are the verdict; every entry that reported `fail` or `warn`, and a baseline that matched less than it was saved with, is also restated as a plain sentence in the result's root `warnings` array.",
+    },
 ];
 
 const GET_CLOUD_RUNTIME_CONTEXT_SECTIONS: &[ToolGuideSection] = &[

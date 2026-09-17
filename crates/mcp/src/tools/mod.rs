@@ -13,6 +13,7 @@ mod explain;
 mod fallback_policy;
 mod fix;
 mod flags;
+mod gate_verdicts;
 mod guard;
 mod health;
 mod impact;
@@ -582,6 +583,16 @@ fn cleanup_failure_result(cleanup_errors: &[String]) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(error_json.to_string())])
 }
 
+/// Translate one completed CLI run into the tool result.
+///
+/// `stderr` stays dropped on the paths that have a JSON envelope, and that is
+/// deliberate: `--quiet` removes most of what the CLI would have printed
+/// there anyway, and everything a gate says on stderr is also in the envelope.
+/// What the envelope does not do on its own is tell an agent to look, so both
+/// envelope-carrying paths run through
+/// [`gate_verdicts::annotate_gate_verdicts`] first. The exit code keeps its
+/// existing meaning: exit 1 is still a success carrying findings, exit 2 and
+/// above are still errors.
 fn captured_output_result(
     output: &CapturedOutput,
     max_output_bytes: usize,
@@ -595,19 +606,21 @@ fn captured_output_result(
     let stderr = String::from_utf8_lossy(&output.stderr.bytes);
 
     if !output.status.success() {
-        return non_success_result(
+        return gate_verdicts::annotate_gate_verdicts(non_success_result(
             output.status.code().unwrap_or(-1),
             &stdout,
             &stderr,
             exit_one_is_error,
-        );
+        ));
     }
 
     if stdout.is_empty() {
         return CallToolResult::success(vec![ContentBlock::text("{}".to_string())]);
     }
 
-    CallToolResult::success(vec![ContentBlock::text(stdout.to_string())])
+    gate_verdicts::annotate_gate_verdicts(CallToolResult::success(vec![ContentBlock::text(
+        stdout.to_string(),
+    )]))
 }
 
 struct CapturedOutput {
