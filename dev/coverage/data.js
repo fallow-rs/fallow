@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789605767117,
+  "lastUpdate": 1789610837240,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d69e459ad2b8f98a1d3fec3a59b3d3013262be76",
-          "message": "test(cli): stop copying a fixture's cache directory into the copy (#2483)\n\nTwo tests in the same binary share `tests/fixtures/coverage-gaps`. One runs the\nreal binary with that fixture as its root, so the binary writes and renames\ncache files under `.fallow/`. The other copies the fixture into a temp\ndirectory, walking every entry it finds, and fails with a not-found when the\nwriter renames a cache file mid-walk. It surfaced as an unrelated red check on\na dependabot pull request that only bumped a devDependency.\n\nA fixture's cache directory is not part of the fixture, and a copied project\nwants a cold cache anyway, so both copy helpers skip it.",
-          "timestamp": "2026-08-30T23:33:51+02:00",
-          "tree_id": "19c59e682f2491adf62e4f7a2cd1cbdbbe3886d7",
-          "url": "https://github.com/fallow-rs/fallow/commit/d69e459ad2b8f98a1d3fec3a59b3d3013262be76"
-        },
-        "date": 1788126102003,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/5cebdde102efc436f89b7fc9878990c1b3647e0e"
         },
         "date": 1789605762556,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1645a5ee564500e38a37e774748c0f4d66c93bac",
+          "message": "fix(action): read every gate verdict from the envelope and fail the job the inputs asked for (#2693)\n\nThe GitHub Action and the GitLab template read every gate verdict from the envelope's `gate_outcomes` object instead of the CLI exit code, which both dropped whenever stdout parsed as JSON. Each gate fails the job only when the input that owns it asked for it and the CLI reports the gate as failed and enforced; a gate that tripped through `args` alone warns instead, so `fail-on-issues: false` stays authoritative.\n\n- `fail-on-regression`, `threshold`, `min-severity` and the security gate inputs now deliver the verdict they promised; a new `min-score` input runs health with `--complexity` so findings, annotations and the comment are not emptied; `--dupes-threshold` reaches the bare command.\n- One failure accumulator prints every failing gate and exits once, after outputs, artifacts and the summary are written; the inline `Check threshold` step and the early return before the security check are gone, so both paths are covered by tests.\n- Behaviour change: a repository with a security gate configured and `fail-on-issues: false` now fails on a tripped gate; not configuring the gate is the opt-out. `command: audit` with `gate: all` and `fail-on-issues: false` stays a reporting configuration.\n- A binary without `gate_outcomes` falls back to `regression.exceeded`, `gate.verdict`, `baseline_staleness.gate_trips` and the type-aware meta; gates with no older field fail open with one warning, only when their input asked for them.\n- Workspace diagnostics that degrade analysis land as one aggregated warning, an empty analysis warns by default and fails behind `fail-on-empty-analysis` (`FALLOW_FAIL_ON_EMPTY_ANALYSIS` on GitLab), and gate outcomes are exposed as step outputs and a GitLab dotenv report.\n\nFixes #2680 #2681 #2683 #2684 #2685 #2686\nRefs #2682 #2692",
+          "timestamp": "2026-09-17T03:57:56+02:00",
+          "tree_id": "adc91d7a23a127af177427766993f17e444c98cd",
+          "url": "https://github.com/fallow-rs/fallow/commit/1645a5ee564500e38a37e774748c0f4d66c93bac"
+        },
+        "date": 1789610834114,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
