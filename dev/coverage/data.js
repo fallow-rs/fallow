@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789610837240,
+  "lastUpdate": 1789614069453,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "3446f413b252cf0950ac63782e0b0ff25a1162df",
-          "message": "chore: release v3.21.0",
-          "timestamp": "2026-08-31T00:42:39+02:00",
-          "tree_id": "e583367048294079d0a67e90746aefe8047d0ec9",
-          "url": "https://github.com/fallow-rs/fallow/commit/3446f413b252cf0950ac63782e0b0ff25a1162df"
-        },
-        "date": 1788130210713,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/1645a5ee564500e38a37e774748c0f4d66c93bac"
         },
         "date": 1789610834114,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b846e626b559c75e021e61df59857b51e09b7f9a",
+          "message": "feat(mcp): state the run's gate and baseline verdicts in the tool result (#2694)\n\nMCP tool results now state the run's verdicts that the CLI expressed only on stderr or through an exit code the server converts into a success result.\n\n- The envelope's root `warnings` array gains plain sentences: the baseline staleness advisory or a tripped stale-baseline gate with the re-save remedy, one entry per `gate_outcomes` entry reporting `fail` or `warn` with its numbers and whether it was enforced, and one aggregated entry for workspace diagnostics that degrade analysis.\n- Applied on the subprocess route, the Code Mode route and the typed API route, with sectioned lookups for `audit`, whose staleness and diagnostics live under `complexity.summary` and `dead_code`.\n- No envelope member moves, the result body stays JSON, a clean run is byte-identical to CLI stdout, and the `isError` policy for exit codes 2 and above is unchanged. `structured_content` is left unpopulated until a tool declares an output schema for it.\n\nFixes #2676\nRefs #2682 #2692 #2693",
+          "timestamp": "2026-09-17T04:54:03+02:00",
+          "tree_id": "891cc8b71330e699dfd9f65d4ede85eb706051ca",
+          "url": "https://github.com/fallow-rs/fallow/commit/b846e626b559c75e021e61df59857b51e09b7f9a"
+        },
+        "date": 1789614065949,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
