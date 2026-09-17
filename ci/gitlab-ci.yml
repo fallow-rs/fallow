@@ -596,6 +596,15 @@ variables:
           [ -n "$FALLOW_SINCE" ]              && ARGS+=(--since "$FALLOW_SINCE")
           [ -n "$FALLOW_MIN_COMMITS" ]        && ARGS+=(--min-commits "$FALLOW_MIN_COMMITS")
           [ -n "$FALLOW_MIN_SEVERITY" ]       && ARGS+=(--min-severity "$FALLOW_MIN_SEVERITY")
+          if [ -n "$FALLOW_MIN_SCORE" ]; then
+            ARGS+=(--min-score "$FALLOW_MIN_SCORE")
+            # --min-score implies --score, a section selector: without this the
+            # envelope carries the score and nothing else, and the Code Quality
+            # report and the merge-request note both render empty.
+            if [ "$FALLOW_COMPLEXITY" != "true" ] && [ "$FALLOW_FILE_SCORES" != "true" ]; then
+              ARGS+=(--complexity)
+            fi
+          fi
           if [ -n "$FALLOW_SAVE_SNAPSHOT" ]; then
             if [ "$FALLOW_SAVE_SNAPSHOT" = "true" ]; then
               ARGS+=(--save-snapshot)
@@ -995,18 +1004,246 @@ variables:
         fi
       fi
 
-      # Both gates print before either exits, so one cannot hide the other.
-      if [ "$TYPE_AWARE_COMPLETENESS_FAILED" = "true" ]; then
-        echo "ERROR: Type-aware completeness gate failed because semantic analysis was unavailable or partial."
+      # ── Gate verdicts ────────────────────────────────────────────────
+      #
+      # Every gate the run armed publishes status and enforced in
+      # gate_outcomes at the envelope root, computed by the same rule that
+      # decides the exit code. The template reads that instead of
+      # FALLOW_EXIT_CODE, which it deliberately discards whenever stdout
+      # parses as JSON: the case these gates exist for exits 0.
+      #
+      # A gate fails the pipeline only when the variable that owns it asked
+      # for it, its status is fail, and the CLI marked it enforced. That is
+      # what keeps FALLOW_FAIL_ON_ISSUES: "false" authoritative for a flag
+      # that arrived through FALLOW_ARGS.
+      GATE_FAILURES=()
+      GATE_FAILED_NAMES=""
+      GATE_WARNED_NAMES=""
+      GATE_SKIPPED_NAMES=""
+      GATE_PASSED_NAMES=""
+      SECURITY_GATE_FAILED=false
+
+      gate_owning_value() {
+        case "$1" in
+          regression)            printf '%s' "$FALLOW_FAIL_ON_REGRESSION" ;;
+          duplication-threshold) printf '%s' "$FALLOW_THRESHOLD" ;;
+          health-min-severity)   printf '%s' "$FALLOW_MIN_SEVERITY" ;;
+          health-min-score)      printf '%s' "$FALLOW_MIN_SCORE" ;;
+          security)              printf '%s' "$FALLOW_SECURITY_GATE" ;;
+          stale-baseline)        printf '%s' "$FALLOW_FAIL_ON_STALE_BASELINE" ;;
+          type-aware-require)    printf '%s' "$FALLOW_TYPE_AWARE_REQUIRE" ;;
+          *)                     printf '%s' "" ;;
+        esac
+      }
+
+      gate_is_owned() {
+        local value
+        value=$(gate_owning_value "$1")
+        case "$value" in
+          ""|false|0) return 1 ;;
+          *) return 0 ;;
+        esac
+      }
+
+      # has() rather than // empty, because jq treats a false value as absent
+      # under the alternative operator. Never a bare jq -e in an assignment:
+      # this script runs under set -euo pipefail.
+      read_gate_member() {
+        jq -r --arg gate "$1" --arg member "$2" '
+          (.gate_outcomes // {}) as $gates
+          | if ($gates | has($gate)) and ($gates[$gate] | has($member))
+            then ($gates[$gate][$member] | tostring)
+            else "" end
+        ' fallow-results.json 2>/dev/null || true
+      }
+
+      # The envelope carries these as JSON numbers, so a whole value arrives
+      # as "3.0". Trim it for prose; the wire keeps the number.
+      trim_gate_number() {
+        case "$1" in
+          *.0) printf '%s' "${1%.0}" ;;
+          *) printf '%s' "$1" ;;
+        esac
+      }
+
+      gate_detail() {
+        case "$1" in
+          regression)
+            local delta
+            delta=$(jq -r '(.regression.delta // .check.regression.delta // "") | tostring' fallow-results.json 2>/dev/null || true)
+            [ -n "$delta" ] && printf 'issue count rose by %s (tolerance %s)' "$delta" "$FALLOW_TOLERANCE"
+            ;;
+          duplication-threshold)
+            local observed threshold
+            observed=$(read_gate_member duplication-threshold observed)
+            threshold=$(read_gate_member duplication-threshold threshold)
+            [ -n "$observed" ] && printf 'duplication %s%% exceeds the %s%% threshold' "$(trim_gate_number "$observed")" "$(trim_gate_number "$threshold")"
+            ;;
+          health-min-score)
+            local observed threshold
+            observed=$(read_gate_member health-min-score observed)
+            threshold=$(read_gate_member health-min-score threshold)
+            [ -n "$observed" ] && printf 'health score %s is below the minimum %s' "$(trim_gate_number "$observed")" "$(trim_gate_number "$threshold")"
+            ;;
+          health-min-severity)
+            local observed floor
+            observed=$(read_gate_member health-min-severity observed)
+            floor=$(read_gate_member health-min-severity threshold_label)
+            [ -n "$observed" ] && printf '%s finding(s) at or above %s' "$(trim_gate_number "$observed")" "$floor"
+            ;;
+          security)
+            local new_count
+            new_count=$(jq -r '(.gate.new_count // "") | tostring' fallow-results.json 2>/dev/null || true)
+            [ -n "$new_count" ] && printf '%s new security candidate(s) on changed lines (gate: %s)' "$new_count" "$FALLOW_SECURITY_GATE"
+            ;;
+        esac
+        # An empty detail must not make this function return non-zero: the case
+        # branches end in `&&` lists, and the caller assigns the result under
+        # errexit.
+        return 0
+      }
+
+      record_gate_failure() {
+        local gate=$1 detail line
+        if [ "$gate" = "stale-baseline" ]; then
+          GATE_FAILURES+=("Fallow baseline gate failed: ${BASELINE_STALE_ENTRIES} of ${BASELINE_ENTRIES} entries in ${FALLOW_BASELINE} matched nothing this run. Re-save the baseline, or set FALLOW_FAIL_ON_STALE_BASELINE to false.")
+          return
+        fi
+        if [ "$gate" = "type-aware-require" ]; then
+          GATE_FAILURES+=("Type-aware completeness gate failed because semantic analysis was unavailable or partial.")
+          return
+        fi
+        detail=$(gate_detail "$gate")
+        line="Fallow ${gate} gate failed"
+        if [ -n "$detail" ]; then
+          line="${line}: ${detail}"
+        fi
+        GATE_FAILURES+=("${line}.")
+        if [ "$gate" = "security" ]; then
+          SECURITY_GATE_FAILED=true
+        fi
+      }
+
+      classify_gate() {
+        local gate=$1 status=$2 enforced=$3 detail
+        case "$status" in
+          fail)
+            GATE_FAILED_NAMES="${GATE_FAILED_NAMES:+${GATE_FAILED_NAMES},}${gate}"
+            if gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
+              record_gate_failure "$gate"
+            elif [ "$gate" = "error-severity-findings" ]; then
+              # The CLI's own severity rule, which every run evaluates. The
+              # template gates on its own count through FALLOW_FAIL_ON_ISSUES,
+              # and the two legitimately disagree on a project that sets a rule
+              # to warn, so this one is reported in dotenv and never in the log.
+              :
+            elif gate_is_owned "$gate"; then
+              # The variable asked for the gate and the CLI still reports it
+              # unenforced, which is the CLI saying this run could not have
+              # exited on it: combined mode collapses every gate but the
+              # baseline and regression ones. This is the default job, so say
+              # which it was rather than blaming the variable.
+              detail=$(gate_detail "$gate")
+              echo "WARNING: Fallow ${gate} gate reports a failure${detail:+: ${detail}}. It does not fail this pipeline: the combined run does not enforce that gate. Set FALLOW_COMMAND to the dedicated command to gate on it."
+            else
+              detail=$(gate_detail "$gate")
+              echo "WARNING: Fallow ${gate} gate reports a failure${detail:+: ${detail}}. It does not fail this pipeline, because its variable is not set."
+            fi
+            ;;
+          warn)
+            GATE_WARNED_NAMES="${GATE_WARNED_NAMES:+${GATE_WARNED_NAMES},}${gate}"
+            echo "WARNING: Fallow ${gate} gate reports a warning."
+            ;;
+          skipped)
+            GATE_SKIPPED_NAMES="${GATE_SKIPPED_NAMES:+${GATE_SKIPPED_NAMES},}${gate}"
+            if gate_is_owned "$gate"; then
+              echo "WARNING: Fallow ${gate} gate stood down, so the run it was asked to judge was not judged."
+            else
+              echo "NOTE: Fallow ${gate} gate stood down."
+            fi
+            ;;
+          pass)
+            GATE_PASSED_NAMES="${GATE_PASSED_NAMES:+${GATE_PASSED_NAMES},}${gate}"
+            ;;
+        esac
+      }
+
+      HAS_GATE_OUTCOMES=false
+      if jq -e 'has("gate_outcomes")' fallow-results.json > /dev/null 2>&1; then
+        HAS_GATE_OUTCOMES=true
       fi
+
+      if [ "$HAS_GATE_OUTCOMES" = "true" ]; then
+        GATE_KEYS=$(jq -r '(.gate_outcomes // {}) | keys[]?' fallow-results.json 2>/dev/null || true)
+        for gate_key in $GATE_KEYS; do
+          case "$gate_key" in
+            *[!a-z0-9-]*) continue ;;
+          esac
+          classify_gate "$gate_key" "$(read_gate_member "$gate_key" status)" "$(read_gate_member "$gate_key" enforced)"
+        done
+      else
+        # A pinned binary older than the gate index. Read the feature-local
+        # field each gate already published, and fail OPEN for the three that
+        # never had one, warning only when their variable was actually set.
+        if gate_is_owned regression; then
+          if jq -e '(.regression.exceeded // .check.regression.exceeded) == true' fallow-results.json > /dev/null 2>&1; then
+            classify_gate regression fail true
+          fi
+        fi
+        if gate_is_owned security; then
+          if jq -e '.gate.verdict == "fail"' fallow-results.json > /dev/null 2>&1; then
+            classify_gate security fail true
+          fi
+        fi
+        FALLBACK_UNAVAILABLE=""
+        for fallback_gate in duplication-threshold health-min-score health-min-severity; do
+          if gate_is_owned "$fallback_gate"; then
+            FALLBACK_UNAVAILABLE="${FALLBACK_UNAVAILABLE:+${FALLBACK_UNAVAILABLE}, }${fallback_gate}"
+          fi
+        done
+        if [ -n "$FALLBACK_UNAVAILABLE" ]; then
+          echo "WARNING: Fallow did not publish gate verdicts, so ${FALLBACK_UNAVAILABLE} could not be checked. Upgrade FALLOW_VERSION to 3.27.0 or later."
+        fi
+      fi
+
       if [ "$STALE_BASELINE_GATE_FAILED" = "true" ]; then
-        echo "ERROR: Fallow baseline gate failed: ${BASELINE_STALE_ENTRIES} of ${BASELINE_ENTRIES} entries in ${FALLOW_BASELINE} matched nothing this run. Re-save the baseline, or set FALLOW_FAIL_ON_STALE_BASELINE to false."
+        case ",${GATE_FAILED_NAMES}," in
+          *,stale-baseline,*) ;;
+          *) GATE_FAILED_NAMES="${GATE_FAILED_NAMES:+${GATE_FAILED_NAMES},}stale-baseline"; record_gate_failure stale-baseline ;;
+        esac
       fi
-      if [ "$TYPE_AWARE_COMPLETENESS_FAILED" = "true" ] || [ "$STALE_BASELINE_GATE_FAILED" = "true" ]; then
-        exit 1
+      if [ "$TYPE_AWARE_COMPLETENESS_FAILED" = "true" ]; then
+        case ",${GATE_FAILED_NAMES}," in
+          *,type-aware-require,*) ;;
+          *) GATE_FAILED_NAMES="${GATE_FAILED_NAMES:+${GATE_FAILED_NAMES},}type-aware-require"; record_gate_failure type-aware-require ;;
+        esac
+      fi
+
+      # ── Degraded analysis ────────────────────────────────────────────
+      ANALYSIS_DEGRADED=false
+      DEGRADED_SUMMARY=$(jq -r '
+        [ (.workspace_diagnostics // [])[] | select(.degrades_analysis == true) ]
+        | group_by(.kind)
+        | map("\(.[0].kind) (\(length))")
+        | join(", ")
+      ' fallow-results.json 2>/dev/null || true)
+      if [ -n "$DEGRADED_SUMMARY" ]; then
+        ANALYSIS_DEGRADED=true
+        echo "WARNING: Fallow analyzed a degraded file set: ${DEGRADED_SUMMARY}. Findings were computed over less than the whole project."
+      fi
+      if jq -e '[ (.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' fallow-results.json > /dev/null 2>&1; then
+        EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check FALLOW_ROOT, ignorePatterns, and any path or workspace filter."
+        if [ "$FALLOW_FAIL_ON_EMPTY_ANALYSIS" = "true" ]; then
+          GATE_FAILURES+=("$EMPTY_ANALYSIS_MESSAGE")
+        else
+          echo "WARNING: ${EMPTY_ANALYSIS_MESSAGE} Set FALLOW_FAIL_ON_EMPTY_ANALYSIS to true to fail the pipeline on this."
+        fi
       fi
 
       # ── Fail check ───────────────────────────────────────────────────
+      #
+      # The count gate joins the same accumulator, so a run with both a tripped
+      # gate and findings reports both rather than exiting on the first.
       if [ "$FALLOW_FAIL_ON_ISSUES" = "true" ]; then
         if [ "$FALLOW_COMMAND" = "audit" ]; then
           # Audit gates on rule severity. Verdict encodes the gate decision:
@@ -1014,26 +1251,39 @@ variables:
           # fail -> error-tier (fail). Counting introduced findings instead
           # would re-introduce the bug issue #302 was filed to fix.
           if [ "$VERDICT" = "fail" ]; then
-            echo "ERROR: Fallow audit failed (gate: ${AUDIT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files)"
-            exit 1
+            GATE_FAILURES+=("Fallow audit failed (gate: ${AUDIT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files)")
           fi
         elif [ "$ISSUES" -gt 0 ]; then
           case "$FALLOW_COMMAND" in
-            dead-code|check) echo "ERROR: Fallow found ${ISSUES} unused code issues" ;;
-            dupes)           echo "ERROR: Fallow found ${ISSUES} clone groups" ;;
-            health)          echo "ERROR: Fallow found ${ISSUES} health findings" ;;
-            security)
-              if [ -n "$FALLOW_SECURITY_GATE" ]; then
-                echo "ERROR: Fallow security gate failed (gate: ${FALLOW_SECURITY_GATE}, ${ISSUES} candidate(s))"
-                exit 8
-              fi
-              echo "ERROR: Fallow found ${ISSUES} security candidates"
-              ;;
-            fix)             echo "ERROR: Fallow found ${ISSUES} fixable issues" ;;
-            "")              echo "ERROR: Fallow found ${ISSUES} issues" ;;
+            dead-code|check) GATE_FAILURES+=("Fallow found ${ISSUES} unused code issues") ;;
+            dupes)           GATE_FAILURES+=("Fallow found ${ISSUES} clone groups") ;;
+            health)          GATE_FAILURES+=("Fallow found ${ISSUES} health findings") ;;
+            security)        GATE_FAILURES+=("Fallow found ${ISSUES} security candidates") ;;
+            fix)             GATE_FAILURES+=("Fallow found ${ISSUES} fixable issues") ;;
+            "")              GATE_FAILURES+=("Fallow found ${ISSUES} issues") ;;
           esac
-          exit 1
         fi
+      fi
+
+      # dotenv so a downstream job can branch on the verdict without re-reading
+      # the envelope.
+      {
+        echo "FALLOW_GATES_FAILED=${GATE_FAILED_NAMES}"
+        echo "FALLOW_GATES_WARNED=${GATE_WARNED_NAMES}"
+        echo "FALLOW_GATES_SKIPPED=${GATE_SKIPPED_NAMES}"
+        echo "FALLOW_GATES_PASSED=${GATE_PASSED_NAMES}"
+        echo "FALLOW_ANALYSIS_DEGRADED=${ANALYSIS_DEGRADED}"
+      } > fallow-gates.env
+
+      if [ ${#GATE_FAILURES[@]} -gt 0 ]; then
+        for failure in "${GATE_FAILURES[@]}"; do
+          echo "ERROR: ${failure}"
+        done
+        # 8 is the documented security-gate exit and outranks the generic 1.
+        if [ "$SECURITY_GATE_FAILED" = "true" ]; then
+          exit 8
+        fi
+        exit 1
       fi
       FALLOW_SCRIPT_EOF
       chmod +x /tmp/fallow-run.sh
@@ -1059,9 +1309,14 @@ variables:
       # `false` vs `true` for dedup-lookup-failed). See issue #470.
       - fallow-skip-reason.txt
       - fallow-dedup-lookup-failed.txt
+      - fallow-gates.env
     reports:
       codequality:
         - gl-code-quality-report.json
+      # The gate verdict as dotenv, so a downstream job can branch on
+      # FALLOW_GATES_FAILED without re-reading the envelope. Same names as the
+      # action's step outputs.
+      dotenv: fallow-gates.env
     expire_in: 30 days
 
   rules:

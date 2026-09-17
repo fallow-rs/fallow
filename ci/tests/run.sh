@@ -247,6 +247,10 @@ if [ "${1:-}" = "report" ]; then
   printf '[]\n'
   exit 0
 fi
+if [ -n "${MOCK_GATE_ENVELOPE:-}" ]; then
+  cat "$MOCK_GATE_ENVELOPE"
+  exit "${MOCK_GATE_EXIT:-0}"
+fi
 if [ "${MOCK_TYPE_AWARE_INCOMPLETE:-}" = "1" ]; then
   printf '%s\n' '{"kind":"dead-code","schema_version":9,"version":"test","total_issues":0,"_meta":{"type_aware":{"required_completeness":"complete","identity":{"completeness":"partial"},"queries":[]}}}'
   exit 1
@@ -2098,6 +2102,148 @@ assert_issuekind_summary_coverage "gitlab summary-check"    "$CI_JQ_DIR/summary-
 assert_issuekind_summary_table_contract "gitlab summary-check" "$CI_JQ_DIR/summary-check.jq"
 assert_issuekind_summary_coverage "gitlab summary-combined" "$CI_JQ_DIR/summary-combined.jq"
 assert_issuekind_summary_coverage "gitlab summary-audit"    "$CI_JQ_DIR/summary-audit.jq"
+
+
+# --- Gate verdicts (issues #2680, #2681, #2683, #2685, #2686) ---
+
+echo ""
+echo "Gate verdicts"
+
+GATE_WORK="$RUNNER_TMP/gate-verdicts"
+mkdir -p "$GATE_WORK"
+
+gitlab_gate_envelope() {
+  local gates=$1 extra=${2:-} body
+  body='"kind":"dead-code","schema_version":9,"version":"3.27.0","total_issues":0,"summary":{"total_issues":0},"unused_files":[],"unused_exports":[]'
+  [ -n "$gates" ] && body="${body},\"gate_outcomes\":${gates}"
+  [ -n "$extra" ] && body="${body},${extra}"
+  printf '{%s}\n' "$body" > "$GATE_WORK/envelope.json"
+  printf '%s' "$GATE_WORK/envelope.json"
+}
+
+# A gate the variable asked for fails the pipeline even with
+# FALLOW_FAIL_ON_ISSUES false, which is the whole point of every issue here.
+ENVELOPE=$(gitlab_gate_envelope '{"regression":{"status":"fail","enforced":true}}' '"regression":{"delta":4}')
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false \
+  FALLOW_FAIL_ON_REGRESSION=true \
+  FALLOW_TOLERANCE=0) || true
+assert_contains "$OUT" "ERROR: Fallow regression gate failed" \
+  "gitlab gate: regression fails with FALLOW_FAIL_ON_ISSUES false"
+
+# #2685: the security gate keeps exit 8 and used to sit inside the
+# FALLOW_FAIL_ON_ISSUES conditional, where it could not be reached.
+ENVELOPE=$(gitlab_gate_envelope '{"security":{"status":"fail","enforced":true}}' '"gate":{"mode":"new","verdict":"fail","new_count":2}')
+set +e
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=security \
+  FALLOW_FAIL_ON_ISSUES=false \
+  FALLOW_SECURITY_GATE=new)
+GATE_STATUS=$?
+set -e
+assert_contains "$OUT" "ERROR: Fallow security gate failed" \
+  "gitlab gate: security fails with FALLOW_FAIL_ON_ISSUES false"
+if [ "$GATE_STATUS" = "8" ]; then
+  pass "gitlab gate: security keeps exit 8"
+else
+  fail "gitlab gate: security keeps exit 8" "got $GATE_STATUS"
+fi
+
+# A gate nobody asked for reports and never fails.
+ENVELOPE=$(gitlab_gate_envelope '{"regression":{"status":"fail","enforced":true}}')
+set +e
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false)
+GATE_STATUS=$?
+set -e
+assert_contains "$OUT" "WARNING: Fallow regression gate reports a failure" \
+  "gitlab gate: an unowned failure warns"
+if [ "$GATE_STATUS" = "0" ]; then
+  pass "gitlab gate: an unowned failure leaves the pipeline green"
+else
+  fail "gitlab gate: an unowned failure leaves the pipeline green" "got $GATE_STATUS"
+fi
+
+# A pinned binary older than the index still delivers the verdicts that had a
+# feature-local field, and warns only about the gates that never had one.
+ENVELOPE=$(gitlab_gate_envelope '' '"regression":{"exceeded":true,"delta":4}')
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false \
+  FALLOW_FAIL_ON_REGRESSION=true \
+  FALLOW_TOLERANCE=0) || true
+assert_contains "$OUT" "ERROR: Fallow regression gate failed" \
+  "gitlab gate: the regression fallback reads .regression.exceeded"
+ENVELOPE=$(gitlab_gate_envelope '')
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "could not be checked" \
+  "gitlab gate: a pinned binary warns about nothing the pipeline did not configure"
+
+# #2686: one aggregated warning, and the empty case behind its own variable.
+DEGRADED='"workspace_diagnostics":[{"path":"a","kind":"skipped-large-file","message":"m","degrades_analysis":true},{"path":"b","kind":"skipped-large-file","message":"m","degrades_analysis":true},{"path":".","kind":"boundaries-not-configured","message":"m"}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$DEGRADED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "skipped-large-file (2)" "gitlab degraded: kinds and counts are aggregated"
+assert_not_contains "$OUT" "boundaries-not-configured" "gitlab degraded: unconfigured-check kinds are not reported"
+
+EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$EMPTY")
+set +e
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false)
+GATE_STATUS=$?
+set -e
+assert_contains "$OUT" "WARNING: Fallow analyzed no source file at all" "gitlab empty analysis: warns by default"
+if [ "$GATE_STATUS" = "0" ]; then
+  pass "gitlab empty analysis: passes by default"
+else
+  fail "gitlab empty analysis: passes by default" "got $GATE_STATUS"
+fi
+set +e
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false \
+  FALLOW_FAIL_ON_EMPTY_ANALYSIS=true)
+GATE_STATUS=$?
+set -e
+assert_contains "$OUT" "ERROR: Fallow analyzed no source file at all" "gitlab empty analysis: fails behind the variable"
+if [ "$GATE_STATUS" = "1" ]; then
+  pass "gitlab empty analysis: exits 1 behind the variable"
+else
+  fail "gitlab empty analysis: exits 1 behind the variable" "got $GATE_STATUS"
+fi
+
+# #2682: --min-score implies --score, so the template keeps the reporting
+# surfaces populated unless a health section variable is set.
+ENVELOPE=$(gitlab_gate_envelope '')
+FALLOW_TEST_LOG="$GATE_WORK/argv.log"
+: > "$FALLOW_TEST_LOG"
+run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_TEST_LOG="$FALLOW_TEST_LOG" \
+  FALLOW_COMMAND=health \
+  FALLOW_MIN_SCORE=90 \
+  FALLOW_FAIL_ON_ISSUES=false > /dev/null 2>&1 || true
+ARGV=$(cat "$FALLOW_TEST_LOG")
+assert_contains "$ARGV" "--min-score 90" "gitlab gate: min-score reaches the CLI"
+assert_contains "$ARGV" "--complexity" "gitlab gate: min-score adds --complexity"
+
+rm -rf "$GATE_WORK"
 
 # --- Summary ---
 
