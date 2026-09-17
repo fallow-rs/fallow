@@ -535,6 +535,10 @@ test("release publication waits for the aggregate verification gate", () => {
     assert.match(job, /\.entries\[\]\.file/u, registry);
     assert.match(job, /--skip-duplicate/u, registry);
     assert.match(job, /failed=1[\s\S]*exit "\$failed"/u, registry);
+    assert.match(job, /publish_with_retry\(\) \{[\s\S]*--skip-duplicate[\s\S]*^\s+\}$/mu, registry);
+    assert.match(job, /delays=\(20 40 60 90 120\)/u, registry);
+    assert.match(job, /if ! publish_with_retry "\$file"; then\n\s+echo "::error::/u, registry);
+    assert.match(job, /timeout-minutes: 45/u, registry);
   }
 
   assert.match(

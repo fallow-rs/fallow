@@ -1540,7 +1540,7 @@ jobs:
     name: Publish VS Code Marketplace targets
     needs: [vscode-prep, vscode-host-smoke, release-assets]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     permissions: {}
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
@@ -1576,6 +1576,29 @@ jobs:
               exit 1
             fi
           done
+          # The gallery endpoint times out intermittently per target, so retry
+          # with backoff. --skip-duplicate keeps every attempt idempotent.
+          publish_with_retry() {
+            local file="$1"
+            local delays=(20 40 60 90 120)
+            local attempt=1
+            local delay
+            while true; do
+              if vsce publish \
+                  --packagePath "vscode-targets/$file" \
+                  --no-dependencies \
+                  --skip-duplicate; then
+                return 0
+              fi
+              if [ "$attempt" -gt "${#delays[@]}" ]; then
+                return 1
+              fi
+              delay="${delays[$((attempt - 1))]}"
+              echo "::warning::VS Code Marketplace publication for $file failed on attempt $attempt of $(( ${#delays[@]} + 1 )); retrying in ${delay}s"
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
+          }
           failed=0
           for file in "${files[@]}"; do
             if [ ! -f "vscode-targets/$file" ]; then
@@ -1583,10 +1606,7 @@ jobs:
               failed=1
               continue
             fi
-            if ! vsce publish \
-              --packagePath "vscode-targets/$file" \
-              --no-dependencies \
-              --skip-duplicate; then
+            if ! publish_with_retry "$file"; then
               echo "::error::VS Code Marketplace publication failed for $file"
               failed=1
             fi
@@ -1597,7 +1617,7 @@ jobs:
     name: Publish Open VSX targets
     needs: [vscode-prep, vscode-host-smoke, release-assets]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     permissions: {}
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
@@ -1633,6 +1653,29 @@ jobs:
               exit 1
             fi
           done
+          # Open VSX answers 503 intermittently per target, so retry with
+          # backoff. --skip-duplicate keeps every attempt idempotent.
+          publish_with_retry() {
+            local file="$1"
+            local delays=(20 40 60 90 120)
+            local attempt=1
+            local delay
+            while true; do
+              if ovsx publish \
+                  "vscode-targets/$file" \
+                  --no-dependencies \
+                  --skip-duplicate; then
+                return 0
+              fi
+              if [ "$attempt" -gt "${#delays[@]}" ]; then
+                return 1
+              fi
+              delay="${delays[$((attempt - 1))]}"
+              echo "::warning::Open VSX publication for $file failed on attempt $attempt of $(( ${#delays[@]} + 1 )); retrying in ${delay}s"
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
+          }
           failed=0
           for file in "${files[@]}"; do
             if [ ! -f "vscode-targets/$file" ]; then
@@ -1640,10 +1683,7 @@ jobs:
               failed=1
               continue
             fi
-            if ! ovsx publish \
-              "vscode-targets/$file" \
-              --no-dependencies \
-              --skip-duplicate; then
+            if ! publish_with_retry "$file"; then
               echo "::error::Open VSX publication failed for $file"
               failed=1
             fi
