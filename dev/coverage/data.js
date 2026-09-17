@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789626126594,
+  "lastUpdate": 1789677678325,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "ca3b87e0cc7c080e855c30637bf3b96f69e88871",
-          "message": "fix(release): close the version-surface gaps that let a stale example ship\n\nThree surfaces drifted during the v3.21.0 release and had to be hand-fixed,\none of which had been wrong for four releases. Closes #2486.\n\n`scripts/sync-npm-versions.sh` gains `server.json`, whose two version fields\nwere bumped by nothing, and a `--skip-napi` mode (also `FALLOW_SYNC_SKIP_NAPI`).\nThe release commit must leave `crates/napi` at the previously published version\nbecause CI runs `npm ci` there before bumping from the tag, so until now the\nrelease flow could not call this script at all and maintained a parallel list\ninstead. That parallel list is what drifted: it predated the fallow-similar-code\nwrapper family and missed nine packages. The default path is unchanged for the\ncargo-release hook.\n\n`scripts/sync-emitted-versions.mjs` is a drift gate keyed to the WORKSPACE\nversion rather than the previous release. That distinction is the point: the\nJSON examples in the shipped skill reference were last refreshed at v3.16.0 and\nwere still claiming 3.16.0 at v3.21.0, so 3.17.0 through 3.20.0 each published\nan npm package with a stale example. A check keyed to the previous release\ncannot see that, and the vendored-vs-canonical byte comparison could not\neither, because both trees were wrong identically. It covers `version` and\n`fallow_version`, the two keys that made a single-key rewrite insufficient.\n\nPrecision matters more than reach here, because most `\"version\"` strings in\nthe docs and npm trees belong to third-party packages. A string counts only\nwhen the JSON object directly holding it also carries `schema_version`, and\nonly inside a fenced JSON block, with no anchor inheritance, so a dependency\nnested inside a fallow payload is ignored. Comments are skipped outright: the\nscanner accepts jsonc and json5, where a commented-out pin inside a real\nenvelope was rewritten and a comment merely quoting the anchor key anchored an\nobject that was not an envelope. Both are pinned by tests.\n\nWired into CI and both verify tiers rather than left as an unreferenced npm\nscript.",
-          "timestamp": "2026-08-31T13:54:14+02:00",
-          "tree_id": "bfca98c4a2834baddc6acb6d6e4e4525b808d6e0",
-          "url": "https://github.com/fallow-rs/fallow/commit/ca3b87e0cc7c080e855c30637bf3b96f69e88871"
-        },
-        "date": 1788178532648,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/ca7c3f6ed8b87d43033168d979ad6b92f4e22329"
         },
         "date": 1789626122863,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "85b12cdaf782632837d02a892499d9e91e8b91b3",
+          "message": "chore: advance the schema policy baseline to v3.27.0",
+          "timestamp": "2026-09-17T22:34:38+02:00",
+          "tree_id": "3c30f2b26fd2c496c37119a3d683c3794fbe16db",
+          "url": "https://github.com/fallow-rs/fallow/commit/85b12cdaf782632837d02a892499d9e91e8b91b3"
+        },
+        "date": 1789677673747,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
