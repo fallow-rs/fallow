@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789577337252,
+  "lastUpdate": 1789605553335,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8d53657a9e18fa00f8b8a83337428bf912de8c23",
-          "message": "fix(check): fail strict runs on findings the override path let through (#2447)\n\nWith any per-path `overrides` entry configured, the exit-code check switches to per-file severity resolution. That path never consulted import-direction boundary violations, so an error-severity `boundary-violation` was reported but the run exited 0. The same path started from unpromoted base rules, so the warn-to-error promotion of `--fail-on-issues` and `--ci` never reached it and a `warn` rule plus any override exited 0 as well.\n\nBoth now resolve per file and promote after override resolution. Because the override path handles every file once any `overrides` entry exists, this affects all warn-severity rules in a project that configures overrides, not only the rules set inside the override block: a strict run that previously exited 0 can now exit 1 on those findings. To keep the previous outcome, set the rule to `off` rather than `warn`, or drop the strict flag for that job. The findings themselves are unchanged; only the exit code is.\n\nThanks to @DeLuke84 for the precise repro.\n\nCloses #2445",
-          "timestamp": "2026-08-27T23:13:15+02:00",
-          "tree_id": "25ac228449682b492e8e57a9748a5966b4c37934",
-          "url": "https://github.com/fallow-rs/fallow/commit/8d53657a9e18fa00f8b8a83337428bf912de8c23"
-        },
-        "date": 1787865478876,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9741341,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49434,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1182171,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8404,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8465,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5cebdde102efc436f89b7fc9878990c1b3647e0e",
+          "message": "feat(output): publish gate_outcomes on every analysis envelope (#2692)\n\nEvery gate the CLI arms now publishes its outcome in the JSON envelope, computed once by the rule that decides the exit code, so a consumer that runs `--quiet --format json` and drops the exit code can still read the verdict.\n\n- Root optional `gate_outcomes` object keyed by gate name on dead-code, dupes, health, audit, security, combined and grouped envelopes, absent when no gate was armed. Each entry carries `status` (`pass`, `warn`, `fail`, `skipped`), `enforced` (whether the outcome affects the exit code on this run, false under `--report-only` and on combined machine output), and `observed`, `threshold` and `threshold_label` where a message needs numbers. The default exit rule of the command is always included when the object exists, so the object explains the exit code.\n- `workspace_diagnostics[].degrades_analysis` marks the diagnostics that mean the run analyzed less than the project, and a run that found no source files says so with its own diagnostic.\n- `fallow report --from` renders a neutral \"Gate outcomes\" line on the GitHub summary, annotations, PR comment and review targets, and the GitLab MR note, live and saved paths identical; the check-run conclusion and the exit code are unchanged.\n- No schema version moves; the gate name set is open on the wire. The 3.26.0 sentence that `--fail-on-stale-baseline` changes nothing but the exit code is superseded: it now also sets `enforced` on the stale-baseline entry.\n\nFixes #2682\nRefs #2680 #2681 #2683 #2684 #2685 #2686",
+          "timestamp": "2026-09-17T02:33:28+02:00",
+          "tree_id": "8433d161d981a823ae88dfb066c62a83aa25d36e",
+          "url": "https://github.com/fallow-rs/fallow/commit/5cebdde102efc436f89b7fc9878990c1b3647e0e"
+        },
+        "date": 1789605548349,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9858866,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51133,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1179682,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8362,
             "unit": "allocations"
           }
         ]
