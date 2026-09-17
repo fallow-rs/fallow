@@ -1576,40 +1576,46 @@ jobs:
               exit 1
             fi
           done
-          # The gallery endpoint times out intermittently per target, so retry
-          # with backoff. --skip-duplicate keeps every attempt idempotent.
-          publish_with_retry() {
-            local file="$1"
-            local delays=(20 40 60 90 120)
-            local attempt=1
-            local delay
-            while true; do
-              if vsce publish \
-                  --packagePath "vscode-targets/$file" \
-                  --no-dependencies \
-                  --skip-duplicate; then
-                return 0
-              fi
-              if [ "$attempt" -gt "${#delays[@]}" ]; then
-                return 1
-              fi
-              delay="${delays[$((attempt - 1))]}"
-              echo "::warning::VS Code Marketplace publication for $file failed on attempt $attempt of $(( ${#delays[@]} + 1 )); retrying in ${delay}s"
-              sleep "$delay"
-              attempt=$((attempt + 1))
-            done
-          }
+          # The gallery endpoint times out intermittently per target, so retry the
+          # failed set in later passes. --skip-duplicate makes a repeated attempt
+          # idempotent, and retrying per pass caps the total wait at one schedule.
+          delays=(20 40 60 90 120)
           failed=0
+          pending=()
           for file in "${files[@]}"; do
             if [ ! -f "vscode-targets/$file" ]; then
               echo "::error::Missing inventory file: $file"
               failed=1
               continue
             fi
-            if ! publish_with_retry "$file"; then
-              echo "::error::VS Code Marketplace publication failed for $file"
-              failed=1
+            pending+=("$file")
+          done
+          pass=1
+          while [ "${#pending[@]}" -ne 0 ]; do
+            remaining=()
+            for file in "${pending[@]}"; do
+              if ! vsce publish \
+                  --packagePath "vscode-targets/$file" \
+                  --no-dependencies \
+                  --skip-duplicate; then
+                remaining+=("$file")
+              fi
+            done
+            if [ "${#remaining[@]}" -eq 0 ]; then
+              break
             fi
+            if [ "$pass" -gt "${#delays[@]}" ]; then
+              for file in "${remaining[@]}"; do
+                echo "::error::VS Code Marketplace publication failed for $file"
+                failed=1
+              done
+              break
+            fi
+            delay="${delays[$((pass - 1))]}"
+            echo "::warning::VS Code Marketplace pass $pass of $(( ${#delays[@]} + 1 )) failed for ${remaining[*]}; retrying in ${delay}s"
+            sleep "$delay"
+            pending=("${remaining[@]}")
+            pass=$((pass + 1))
           done
           exit "$failed"
 
@@ -1653,40 +1659,46 @@ jobs:
               exit 1
             fi
           done
-          # Open VSX answers 503 intermittently per target, so retry with
-          # backoff. --skip-duplicate keeps every attempt idempotent.
-          publish_with_retry() {
-            local file="$1"
-            local delays=(20 40 60 90 120)
-            local attempt=1
-            local delay
-            while true; do
-              if ovsx publish \
-                  "vscode-targets/$file" \
-                  --no-dependencies \
-                  --skip-duplicate; then
-                return 0
-              fi
-              if [ "$attempt" -gt "${#delays[@]}" ]; then
-                return 1
-              fi
-              delay="${delays[$((attempt - 1))]}"
-              echo "::warning::Open VSX publication for $file failed on attempt $attempt of $(( ${#delays[@]} + 1 )); retrying in ${delay}s"
-              sleep "$delay"
-              attempt=$((attempt + 1))
-            done
-          }
+          # Open VSX answers 503 intermittently per target, so retry the failed set
+          # in later passes. --skip-duplicate makes a repeated attempt idempotent,
+          # and retrying per pass caps the total wait at one schedule.
+          delays=(20 40 60 90 120)
           failed=0
+          pending=()
           for file in "${files[@]}"; do
             if [ ! -f "vscode-targets/$file" ]; then
               echo "::error::Missing inventory file: $file"
               failed=1
               continue
             fi
-            if ! publish_with_retry "$file"; then
-              echo "::error::Open VSX publication failed for $file"
-              failed=1
+            pending+=("$file")
+          done
+          pass=1
+          while [ "${#pending[@]}" -ne 0 ]; do
+            remaining=()
+            for file in "${pending[@]}"; do
+              if ! ovsx publish \
+                  "vscode-targets/$file" \
+                  --no-dependencies \
+                  --skip-duplicate; then
+                remaining+=("$file")
+              fi
+            done
+            if [ "${#remaining[@]}" -eq 0 ]; then
+              break
             fi
+            if [ "$pass" -gt "${#delays[@]}" ]; then
+              for file in "${remaining[@]}"; do
+                echo "::error::Open VSX publication failed for $file"
+                failed=1
+              done
+              break
+            fi
+            delay="${delays[$((pass - 1))]}"
+            echo "::warning::Open VSX pass $pass of $(( ${#delays[@]} + 1 )) failed for ${remaining[*]}; retrying in ${delay}s"
+            sleep "$delay"
+            pending=("${remaining[@]}")
+            pass=$((pass + 1))
           done
           exit "$failed"
 

@@ -49,13 +49,16 @@ globally with `--ignore-scripts`.
   check out repository code or build packages. Publish every inventory entry
   with `--skip-duplicate`, attempt the remaining entries after an unexpected
   failure, and fail the job after the loop.
-- Retry each VSIX entry with bounded backoff before recording it as failed.
+- Retry the failed set in later passes before recording a VSIX entry as failed.
   Both registries return intermittent per-target failures, Marketplace as a
   gallery request timeout and Open VSX as HTTP 503, and `--skip-duplicate`
-  makes a repeated attempt idempotent. Keep the retry schedule finite, log each
-  retry as a warning naming the target and attempt, emit the error annotation
-  only after the last attempt, and keep the job timeout above the worst-case
-  retry budget.
+  makes a repeated attempt idempotent. Attempt every entry in the first pass,
+  then retry only the entries that failed, so the sleep budget is one finite
+  schedule for the whole step rather than one schedule per target: 330 seconds
+  of sleeping across six passes, plus the time the attempts themselves take.
+  Log at most one warning per pass naming the failed targets, emit the error
+  annotation once per target that never landed and only after the last pass,
+  and do not branch on registry error text.
 - Gate `release-ready` directly on `vscode-public-verify`. The verifier has no
   registry credentials. It waits for the exact version and target tuples with
   bounded retries, downloads each exact registry asset, and compares its
