@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 20
     # Soft-fail: cargo-modules (via cargo_metadata) occasionally lags new cargo
     # releases, e.g. the Rust 1.95 removal of `--lockfile-path`. This is a
-    # metric-tracking job, not a correctness gate — don't block main on it.
+    # metric-tracking job, not a correctness gate, so don't block main on it.
     continue-on-error: true
     permissions:
       contents: write
@@ -50,9 +50,16 @@ jobs:
           cache-key: coupling
 
       - name: Install cargo-modules
-        # Intentionally not `--locked`: lets cargo pick up any cargo_metadata
-        # fix that ships ahead of a new cargo-modules release.
-        run: cargo install cargo-modules
+        id: install
+        # Intentionally not `--locked` first: lets cargo pick up any
+        # cargo_metadata fix that ships ahead of a new cargo-modules release.
+        # The unlocked resolution can also drift into a set that no longer
+        # compiles (unicode-ident 1.0.25 against unicode-properties 0.1.4 broke
+        # ra-ap-rustc_lexer 0.166.0), so retry with the packaged lockfile. If
+        # both fail, the collect step skips the metrics instead of the job
+        # going red.
+        continue-on-error: true
+        run: cargo install cargo-modules || cargo install cargo-modules --locked
 
       - name: Collect module dependency graphs
         id: collect
@@ -60,7 +67,22 @@ jobs:
         # struct-to-method relationships (e.g. Foo -> Foo::bar) as circular
         # dependencies even with --no-fns, producing false positives.
         # Cycle detection is handled by fallow's own --circular-deps instead.
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
         run: |
+          skip_metrics() {
+            {
+              echo "## Module Coupling"
+              echo ""
+              echo "$1; coupling metrics skipped for this run."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "collected=false" >> "$GITHUB_OUTPUT"
+          }
+          if [ "$INSTALL_OUTCOME" != "success" ]; then
+            echo "::warning::cargo-modules install failed; coupling metrics skipped for this run"
+            skip_metrics "cargo-modules could not be installed"
+            exit 0
+          fi
           CARGO_MODULES_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-modules"
           : > coupling-dot.txt
           failures=0
@@ -75,12 +97,7 @@ jobs:
             failures=$((failures + 1))
           done
           if [ ! -s coupling-dot.txt ]; then
-            {
-              echo "## Module Coupling"
-              echo ""
-              echo "cargo-modules could not collect dependency graphs (failed for $failures crate(s)); coupling metrics skipped for this run."
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "collected=false" >> "$GITHUB_OUTPUT"
+            skip_metrics "cargo-modules could not collect dependency graphs (failed for $failures crate(s))"
           else
             echo "collected=true" >> "$GITHUB_OUTPUT"
           fi
