@@ -22,15 +22,29 @@
 //! house pattern for adding a fact to that block is to parse, mutate and
 //! re-serialize, which is what `super::ensure_top_level_warnings` already does.
 //!
+//! # Every route, not only the subprocess
+//!
+//! The three sources are envelope members, not process state, so the typed
+//! `fallow-api` route reads them too and is annotated at its one exit point.
+//! Without that a tool would answer differently depending on whether a
+//! parameter happened to force the CLI fallback, and an agent reading an empty
+//! `warnings` array on the typed route would conclude the run was clean.
+//!
 //! # What is deliberately not done
 //!
 //! Nothing here moves an existing member, so a consumer already reading
 //! `gate_outcomes`, `baseline_staleness` or `workspace_diagnostics` sees the
-//! same values in the same places. A response with nothing to report is not
-//! re-serialized at all, so an ungated run is byte for byte what it was. And
-//! no result changes its `isError`: an exit-1 gate stays a success carrying
-//! findings, and an exit 8 security gate stays an error, now carrying a
-//! sentence that says which gate produced it.
+//! same values in the same places. A response with nothing to state is not
+//! re-serialized at all and comes back byte for byte as the CLI wrote it.
+//! And no result changes its `isError`: an exit-1 gate stays a success
+//! carrying findings, and an exit 8 security gate stays an error, now carrying
+//! a sentence that says which gate produced it.
+//!
+//! One accounting note: `max_output_bytes` bounds what the CLI wrote, not what
+//! the tool returns, so an annotated body is the handful of bytes these
+//! sentences cost larger than the cap that admitted it. Code Mode charges its
+//! own output budget on the returned body, so there the sentences are paid
+//! for, as the agent reads them.
 
 use std::collections::BTreeMap;
 
@@ -63,30 +77,54 @@ pub(super) fn annotate_gate_verdicts(mut result: CallToolResult) -> CallToolResu
 /// `None` means "nothing to add", which the caller reads as "pass the original
 /// bytes through" rather than as a failure.
 pub(super) fn annotate_envelope(text: &str) -> Option<String> {
-    let mut value = serde_json::from_str::<Value>(text).ok()?;
-    let root = value.as_object_mut()?;
+    // Parsing is the expensive part and most tools can never carry any of
+    // these members, so rule those out on the raw bytes first: a key that is
+    // absent from the text cannot be present in the parse.
+    if !CARRIER_KEYS.iter().any(|key| text.contains(key)) {
+        return None;
+    }
+    let value = serde_json::from_str::<Value>(text).ok()?;
+    annotate_value(&value)
+}
+
+/// [`annotate_envelope`] for the typed route, which already holds the parsed
+/// envelope and must not pay for a round trip through text to reach it.
+pub(super) fn annotate_value(value: &Value) -> Option<String> {
+    let root = value.as_object()?;
     let warnings = verdict_warnings(root);
     if warnings.is_empty() {
         return None;
     }
 
+    let mut annotated = value.clone();
+    let root = annotated.as_object_mut()?;
     let existing = root
         .entry("warnings".to_string())
         .or_insert_with(|| Value::Array(Vec::new()));
     let array = existing.as_array_mut()?;
     array.extend(warnings.into_iter().map(Value::String));
 
-    serde_json::to_string(&value).ok()
+    serde_json::to_string(&annotated).ok()
 }
+
+/// The members that make an envelope worth parsing. Any absent from the raw
+/// text means this module has nothing to say about that response.
+const CARRIER_KEYS: &[&str] = &[
+    "gate_outcomes",
+    "baseline_staleness",
+    "workspace_diagnostics",
+];
 
 /// Every verdict this envelope states, in a fixed order so two identical runs
 /// produce identical responses.
 fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
+    let noun = noun(root);
     let mut warnings: Vec<String> = BASELINE_SITES
         .iter()
-        .filter_map(|(path, analysis)| baseline_warning(lookup(root, path)?, *analysis, noun(root)))
+        .filter_map(|(path, analysis)| baseline_warning(lookup(root, path)?, *analysis, noun))
         .collect();
-    warnings.extend(gate_warnings(root));
+    let baseline_reported = !warnings.is_empty();
+    warnings.extend(gate_warnings(root, baseline_reported));
     warnings.extend(degraded_analysis_warning(root));
     warnings
 }
@@ -94,16 +132,43 @@ fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
 /// Where a loaded baseline's staleness sits on each envelope shape, and which
 /// analysis it belongs to on the shapes that carry more than one.
 ///
-/// `dead-code` and `dupes` publish it at the root, `health` inside `summary`,
-/// and the combined envelope once per section. Naming the sites is what keeps
-/// the combined case from reporting one baseline's rot against another's
-/// counts; a shape that carries none of them simply contributes nothing.
+/// `dead-code` and `dupes` publish it at the root and `health` inside
+/// `summary`; the combined envelope repeats those under `check`, `dupes` and
+/// `health`; `audit` names its sections `dead_code`, `duplication` and
+/// `complexity` instead, and puts the health one under that section's own
+/// `summary`. Naming the sites is what keeps the multi-section shapes from
+/// reporting one baseline's rot against another's counts, and a shape that
+/// carries none of them contributes nothing.
+///
+/// `audit` resolves its three baselines from config as well as from
+/// parameters, which is why the rows are keyed on the envelope rather than on
+/// what the caller passed.
 const BASELINE_SITES: &[(&[&str], Option<&str>)] = &[
     (&["baseline_staleness"], None),
     (&["summary", "baseline_staleness"], None),
     (&["check", "baseline_staleness"], Some("dead-code")),
     (&["dupes", "baseline_staleness"], Some("duplication")),
     (&["health", "summary", "baseline_staleness"], Some("health")),
+    (&["dead_code", "baseline_staleness"], Some("dead-code")),
+    (&["duplication", "baseline_staleness"], Some("duplication")),
+    (
+        &["complexity", "summary", "baseline_staleness"],
+        Some("health"),
+    ),
+];
+
+/// Where a run publishes the diagnostics that say it was degraded, in the
+/// order they are looked for.
+///
+/// The single-analysis and combined envelopes carry them at the root; `audit`
+/// carries them inside its sub-analysis sections. First match wins rather than
+/// summing, because a run records its diagnostics once and adding up two
+/// views of the same walk would report every kind twice.
+const DIAGNOSTIC_SITES: &[&[&str]] = &[
+    &["workspace_diagnostics"],
+    &["dead_code", "workspace_diagnostics"],
+    &["duplication", "workspace_diagnostics"],
+    &["complexity", "workspace_diagnostics"],
 ];
 
 fn lookup<'a>(root: &'a Map<String, Value>, path: &[&str]) -> Option<&'a Value> {
@@ -117,7 +182,8 @@ fn lookup<'a>(root: &'a Map<String, Value>, path: &[&str]) -> Option<&'a Value> 
 
 /// What this command calls the things a baseline entry describes, matching the
 /// noun its own CLI advisory uses. Read from the envelope's `kind`, so a
-/// combined run keeps the generic noun rather than borrowing one section's.
+/// multi-section run keeps the generic noun rather than borrowing one
+/// section's; the entry names the analysis separately.
 fn noun(root: &Map<String, Value>) -> &'static str {
     match root.get("kind").and_then(Value::as_str) {
         Some("dead-code") => "issue",
@@ -149,7 +215,7 @@ fn baseline_warning(
         return None;
     }
 
-    let entries = count(staleness, "baseline_entries");
+    let total = entries(count(staleness, "baseline_entries"));
     let stale = count(staleness, "stale_entries");
     let subject = analysis.map_or_else(
         || "the loaded baseline".to_string(),
@@ -158,16 +224,15 @@ fn baseline_warning(
 
     let mut message = match advisory {
         "zero-overlap" => format!(
-            "Baseline staleness: {subject} has {entries} entries but matched 0 current {noun}s. \
+            "Baseline staleness: {subject} has {total} but matched 0 current {noun}s. \
              Paths may have changed, or the baseline was saved on a different machine."
         ),
         "partial" => format!(
-            "Baseline staleness: {stale} of {entries} entries in {subject} matched no current \
-             {noun}, so it protects less than what was saved."
+            "Baseline staleness: {stale} of {total} in {subject} matched no current {noun}, \
+             so it protects less than what was saved."
         ),
         _ => format!(
-            "Baseline staleness: {stale} of {entries} entries in {subject} matched no current \
-             {noun}."
+            "Baseline staleness: {stale} of {total} in {subject} matched no current {noun}."
         ),
     };
     if gate_trips {
@@ -181,18 +246,36 @@ fn count(value: &Value, key: &str) -> u64 {
     value.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
+fn entries(count: u64) -> String {
+    if count == 1 {
+        return "1 entry".to_string();
+    }
+    format!("{count} entries")
+}
+
 /// One sentence per gate that reported `fail` or `warn`.
 ///
 /// `pass` and `skipped` are left out on purpose: an agent acting on a result
-/// needs what stood in its way, and a gate that concluded nothing is
-/// still readable in `gate_outcomes` for a caller that wants the full
-/// inventory.
-fn gate_warnings(root: &Map<String, Value>) -> Vec<String> {
+/// needs what stood in its way, and a gate that concluded nothing is still
+/// readable in `gate_outcomes` for a caller that wants the full inventory.
+///
+/// `stale-baseline` is left out too when a baseline entry already spoke and
+/// the gate was not armed, which is every MCP run that loads a baseline: no
+/// tool passes `--fail-on-stale-baseline`, so the gate entry would add a
+/// second sentence saying the verdict changed nothing, next to one that
+/// carries the counts and the remedy. An armed gate still reports, because
+/// "this run exited non-zero for it" is not in the baseline sentence.
+fn gate_warnings(root: &Map<String, Value>, baseline_reported: bool) -> Vec<String> {
     let Some(gates) = root.get("gate_outcomes").and_then(Value::as_object) else {
         return Vec::new();
     };
     gates
         .iter()
+        .filter(|(name, outcome)| {
+            !(baseline_reported
+                && name.as_str() == "stale-baseline"
+                && outcome.get("enforced").and_then(Value::as_bool) != Some(true))
+        })
         .filter_map(|(name, outcome)| gate_warning(name, outcome))
         .collect()
 }
@@ -208,8 +291,13 @@ fn gate_warning(name: &str, outcome: &Value) -> Option<String> {
         .get("enforced")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    // An enforced failure is the sentence an agent is most likely to misread,
+    // because the result it arrives in reports success. Say why both are true.
     let enforcement = match (status, enforced) {
-        ("fail", true) => "enforced, so the analysis exited non-zero for it",
+        ("fail", true) => {
+            "enforced, so the CLI exited non-zero for it, and this result still \
+                           carries the full report"
+        }
         (_, true) => "armed, though a warn does not fail the run",
         _ => "not enforced on this run, so it did not change the exit code",
     };
@@ -264,9 +352,23 @@ fn number(value: f64) -> String {
 /// The classification stays in Rust: this reads `degrades_analysis` rather
 /// than matching a kind allowlist that a later release would silently outgrow.
 fn degraded_analysis_warning(root: &Map<String, Value>) -> Option<String> {
-    let diagnostics = root
-        .get("workspace_diagnostics")
-        .and_then(Value::as_array)?;
+    let counts = DIAGNOSTIC_SITES
+        .iter()
+        .filter_map(|path| lookup(root, path)?.as_array())
+        .map(|diagnostics| degrading_kinds(diagnostics))
+        .find(|counts| !counts.is_empty())?;
+    let kinds = counts
+        .iter()
+        .map(|(kind, count)| format!("{kind} ({count})"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "Analysis was degraded: {kinds}. Findings may be incomplete; read \
+         workspace_diagnostics for what each kind changes."
+    ))
+}
+
+fn degrading_kinds(diagnostics: &[Value]) -> BTreeMap<&str, usize> {
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for diagnostic in diagnostics {
         if diagnostic.get("degrades_analysis").and_then(Value::as_bool) != Some(true) {
@@ -278,18 +380,7 @@ fn degraded_analysis_warning(root: &Map<String, Value>) -> Option<String> {
             .unwrap_or("unknown");
         *counts.entry(kind).or_default() += 1;
     }
-    if counts.is_empty() {
-        return None;
-    }
-    let kinds = counts
-        .iter()
-        .map(|(kind, count)| format!("{kind} ({count})"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    Some(format!(
-        "Analysis was degraded: {kinds}. Findings may be incomplete; read \
-         workspace_diagnostics for what each kind changes."
-    ))
+    counts
 }
 
 #[cfg(test)]
@@ -335,6 +426,16 @@ mod tests {
     }
 
     #[test]
+    fn a_one_entry_baseline_is_not_reported_as_entries() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dead-code",
+            "baseline_staleness": staleness("zero-overlap", 1, 0, true),
+        }));
+
+        assert!(warnings[0].contains("has 1 entry but"), "{warnings:?}");
+    }
+
+    #[test]
     fn a_partially_stale_baseline_reports_the_fraction_that_went_unmatched() {
         let warnings = warnings_of(&serde_json::json!({
             "kind": "dead-code",
@@ -367,6 +468,45 @@ mod tests {
         assert!(warnings[0].contains("--fail-on-stale-baseline"));
     }
 
+    /// No MCP tool passes `--fail-on-stale-baseline`, so the gate entry on a
+    /// baselined run always reports an unarmed verdict the baseline sentence
+    /// has already covered in more detail.
+    #[test]
+    fn an_unarmed_stale_baseline_gate_does_not_repeat_the_baseline_sentence() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dead-code",
+            "baseline_staleness": staleness("zero-overlap", 2, 0, true),
+            "gate_outcomes": {
+                "stale-baseline": { "status": "fail", "enforced": false },
+            },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("Baseline staleness:"),
+            "{warnings:?}"
+        );
+    }
+
+    /// An armed one is kept: that it made the run exit non-zero is a fact the
+    /// baseline sentence does not carry.
+    #[test]
+    fn an_armed_stale_baseline_gate_is_reported_beside_the_baseline_sentence() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dead-code",
+            "baseline_staleness": staleness("zero-overlap", 2, 0, true),
+            "gate_outcomes": {
+                "stale-baseline": { "status": "fail", "enforced": true },
+            },
+        }));
+
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(
+            warnings[1].starts_with("Gate stale-baseline failed"),
+            "{warnings:?}"
+        );
+    }
+
     #[test]
     fn an_enforced_failing_gate_names_the_numbers_and_the_non_zero_exit() {
         let warnings = warnings_of(&serde_json::json!({
@@ -383,8 +523,8 @@ mod tests {
         assert_eq!(
             warnings,
             vec![
-                "Gate health-min-score failed (observed 86.7, threshold 99); enforced, so the \
-                 analysis exited non-zero for it."
+                "Gate health-min-score failed (observed 86.7, threshold 99); enforced, so the CLI \
+                 exited non-zero for it, and this result still carries the full report."
                     .to_string()
             ]
         );
@@ -394,15 +534,15 @@ mod tests {
     fn an_unenforced_failing_gate_says_the_exit_code_did_not_move() {
         let warnings = warnings_of(&serde_json::json!({
             "gate_outcomes": {
-                "stale-baseline": { "status": "fail", "enforced": false },
+                "duplication-threshold": { "status": "fail", "enforced": false },
             },
         }));
 
         assert_eq!(
             warnings,
             vec![
-                "Gate stale-baseline failed; not enforced on this run, so it did not change the \
-                 exit code."
+                "Gate duplication-threshold failed; not enforced on this run, so it did not \
+                 change the exit code."
                     .to_string()
             ]
         );
@@ -475,6 +615,7 @@ mod tests {
     #[test]
     fn a_combined_envelope_names_the_analysis_each_baseline_belongs_to() {
         let warnings = warnings_of(&serde_json::json!({
+            "kind": "combined",
             "check": { "baseline_staleness": staleness("zero-overlap", 2, 0, true) },
             "health": { "summary": { "baseline_staleness": staleness("partial", 4, 3, true) } },
         }));
@@ -485,6 +626,57 @@ mod tests {
             "{warnings:?}"
         );
         assert!(warnings[1].contains("the health baseline"), "{warnings:?}");
+    }
+
+    /// `audit` names its sections `dead_code` / `duplication` / `complexity`
+    /// and nests its diagnostics inside them, so both lookups need that shape
+    /// or the one command whose whole output is a verdict reports nothing.
+    #[test]
+    fn an_audit_envelope_reaches_its_sectioned_baseline_and_diagnostics() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "audit",
+            "verdict": "fail",
+            "summary": { "total_issues": 3 },
+            "dead_code": {
+                "workspace_diagnostics": [
+                    { "kind": "node-modules-missing", "degrades_analysis": true },
+                ],
+            },
+            "complexity": {
+                "summary": { "baseline_staleness": staleness("zero-overlap", 5, 0, true) },
+            },
+        }));
+
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings[0].contains("the health baseline"), "{warnings:?}");
+        assert!(
+            warnings[1].contains("node-modules-missing (1)"),
+            "{warnings:?}"
+        );
+    }
+
+    /// Two sections reporting the same walk must not be added together.
+    #[test]
+    fn sectioned_diagnostics_are_read_once_rather_than_summed() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "audit",
+            "dead_code": {
+                "workspace_diagnostics": [
+                    { "kind": "node-modules-missing", "degrades_analysis": true },
+                ],
+            },
+            "duplication": {
+                "workspace_diagnostics": [
+                    { "kind": "node-modules-missing", "degrades_analysis": true },
+                ],
+            },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("node-modules-missing (1)"),
+            "{warnings:?}"
+        );
     }
 
     #[test]
@@ -513,6 +705,16 @@ mod tests {
         .to_string();
 
         assert!(annotate_envelope(&older).is_none());
+    }
+
+    /// A body carrying none of the three members must not be parsed at all,
+    /// which is what keeps the annotation off the tools that can never report
+    /// a verdict.
+    #[test]
+    fn a_body_without_any_carrier_key_is_rejected_before_parsing() {
+        let unrelated = serde_json::json!({ "file_count": 12, "entry_points": [] }).to_string();
+
+        assert!(annotate_envelope(&unrelated).is_none());
     }
 
     #[test]
@@ -555,7 +757,7 @@ mod tests {
     #[test]
     fn a_body_that_is_not_a_json_object_is_left_alone() {
         assert!(annotate_envelope("not json").is_none());
-        assert!(annotate_envelope("[1, 2, 3]").is_none());
+        assert!(annotate_envelope("[\"gate_outcomes\"]").is_none());
     }
 
     #[test]
@@ -577,6 +779,29 @@ mod tests {
                 .as_str()
                 .is_some_and(|entry| entry.starts_with("Gate security failed")),
             "{value}"
+        );
+    }
+
+    /// The typed route holds the envelope already parsed, and must reach the
+    /// same sentences the subprocess route does.
+    #[test]
+    fn the_typed_route_reads_the_same_members_without_a_text_round_trip() {
+        let envelope = serde_json::json!({
+            "kind": "health",
+            "summary": { "baseline_staleness": staleness("partial", 4, 3, true) },
+        });
+
+        let annotated = annotate_value(&envelope).expect("envelope is annotated");
+        let value: Value = serde_json::from_str(&annotated).expect("annotated body parses");
+
+        assert_eq!(
+            value["warnings"].as_array().map(Vec::len),
+            Some(1),
+            "{value}"
+        );
+        assert!(
+            value["summary"]["baseline_staleness"]["gate_trips"] == Value::Bool(true),
+            "the envelope's own members must not move: {value}"
         );
     }
 }

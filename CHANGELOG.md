@@ -151,8 +151,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root `warnings` array: a baseline that matched less than it was saved with,
   together with the re-save remedy; every `gate_outcomes` entry that reported
   `fail` or `warn`, with the numbers it compared and whether it was enforced;
-  and one aggregated entry when the run was degraded. Existing members do not
-  move, a run that armed no gate is unchanged, and no result changes its
+  and one aggregated entry when the run was degraded. The typed in-process
+  route reports the same three, so a tool answers the same way whether or not a
+  parameter forced the CLI. Existing members do not move, a response with
+  nothing to report comes back exactly as before, and no result changes its
   `isError`
   (Closes [#2676](https://github.com/fallow-rs/fallow/issues/2676)).
 

@@ -2237,6 +2237,44 @@ mod tests {
         assert_eq!(result.unwrap(), "{}");
     }
 
+    /// A snippet reading a gated run must see what a direct tool call sees, or
+    /// the two surfaces disagree about what the same analysis concluded.
+    #[test]
+    fn a_gated_run_carries_its_verdict_into_the_snippet_body() {
+        let body = br#"{"gate_outcomes":{"health-min-score":{"status":"fail","enforced":true}}}"#;
+
+        let result = normalize_output(1, body, b"").expect("exit 1 stays a success body");
+        let value: serde_json::Value = serde_json::from_str(&result).expect("body parses");
+
+        assert!(
+            value["warnings"][0]
+                .as_str()
+                .is_some_and(|entry| entry.starts_with("Gate health-min-score failed")),
+            "{value}"
+        );
+        assert_eq!(
+            value["gate_outcomes"]["health-min-score"]["status"], "fail",
+            "the envelope's own members must not move: {value}"
+        );
+    }
+
+    /// The exit-8 security gate returns an error body, which must still name
+    /// the gate that produced it.
+    #[test]
+    fn a_gated_error_body_carries_its_verdict_too() {
+        let body = br#"{"gate_outcomes":{"security":{"status":"fail","enforced":true}}}"#;
+
+        let result = normalize_output(8, body, b"").expect_err("exit 8 is an error body");
+        let value: serde_json::Value = serde_json::from_str(&result).expect("body parses");
+
+        assert!(
+            value["warnings"][0]
+                .as_str()
+                .is_some_and(|entry| entry.starts_with("Gate security failed")),
+            "{value}"
+        );
+    }
+
     #[test]
     fn nonzero_exit_with_valid_json_stdout_returns_err_with_stdout() {
         let json_stdout = b"{ \"error\": true, \"message\": \"config error\" }";

@@ -140,8 +140,18 @@ pub(super) fn workspace_patterns_from_param(value: Option<&str>) -> Option<Vec<S
     (!patterns.is_empty()).then_some(patterns)
 }
 
+/// Render one typed-route result.
+///
+/// The verdict members (`gate_outcomes`, `baseline_staleness`,
+/// `workspace_diagnostics`) are envelope data, not process state, so they
+/// reach this route too and are restated here for the same reason the
+/// subprocess route restates them. Annotating at this single exit point is
+/// what keeps a tool from answering differently depending on whether a
+/// parameter happened to force the CLI fallback; it is a no-op on every
+/// envelope that carries none of them.
 pub(super) fn json_success(value: &serde_json::Value) -> CallToolResult {
-    CallToolResult::success(vec![ContentBlock::text(value.to_string())])
+    let text = super::gate_verdicts::annotate_value(value).unwrap_or_else(|| value.to_string());
+    CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
 pub(super) fn programmatic_error_body(error: &ProgrammaticError) -> String {
