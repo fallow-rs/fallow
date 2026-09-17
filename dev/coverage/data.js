@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789577468656,
+  "lastUpdate": 1789605767117,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "49699333+dependabot[bot]@users.noreply.github.com",
-            "name": "dependabot[bot]",
-            "username": "dependabot[bot]"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c0fdb70a25f132ec6a8491383ae32b8696fb4a63",
-          "message": "chore(deps): bump github/codeql-action/upload-sarif from 4.37.7 to 4.37.8 (#2482)\n\nBumps [github/codeql-action/upload-sarif](https://github.com/github/codeql-action) from 4.37.7 to 4.37.8.\n- [Release notes](https://github.com/github/codeql-action/releases)\n- [Changelog](https://github.com/github/codeql-action/blob/main/CHANGELOG.md)\n- [Commits](https://github.com/github/codeql-action/compare/ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd...db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28)\n\n---\nupdated-dependencies:\n- dependency-name: github/codeql-action/upload-sarif\n  dependency-version: 4.37.8\n  dependency-type: direct:production\n  update-type: version-update:semver-patch\n...\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
-          "timestamp": "2026-08-30T23:02:09+02:00",
-          "tree_id": "241fafe9c868214831e128c42220a3737da42de1",
-          "url": "https://github.com/fallow-rs/fallow/commit/c0fdb70a25f132ec6a8491383ae32b8696fb4a63"
-        },
-        "date": 1788124260640,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/de90d3109e5eee2bb7729f487c65476a3d0a2df2"
         },
         "date": 1789577465242,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5cebdde102efc436f89b7fc9878990c1b3647e0e",
+          "message": "feat(output): publish gate_outcomes on every analysis envelope (#2692)\n\nEvery gate the CLI arms now publishes its outcome in the JSON envelope, computed once by the rule that decides the exit code, so a consumer that runs `--quiet --format json` and drops the exit code can still read the verdict.\n\n- Root optional `gate_outcomes` object keyed by gate name on dead-code, dupes, health, audit, security, combined and grouped envelopes, absent when no gate was armed. Each entry carries `status` (`pass`, `warn`, `fail`, `skipped`), `enforced` (whether the outcome affects the exit code on this run, false under `--report-only` and on combined machine output), and `observed`, `threshold` and `threshold_label` where a message needs numbers. The default exit rule of the command is always included when the object exists, so the object explains the exit code.\n- `workspace_diagnostics[].degrades_analysis` marks the diagnostics that mean the run analyzed less than the project, and a run that found no source files says so with its own diagnostic.\n- `fallow report --from` renders a neutral \"Gate outcomes\" line on the GitHub summary, annotations, PR comment and review targets, and the GitLab MR note, live and saved paths identical; the check-run conclusion and the exit code are unchanged.\n- No schema version moves; the gate name set is open on the wire. The 3.26.0 sentence that `--fail-on-stale-baseline` changes nothing but the exit code is superseded: it now also sets `enforced` on the stale-baseline entry.\n\nFixes #2682\nRefs #2680 #2681 #2683 #2684 #2685 #2686",
+          "timestamp": "2026-09-17T02:33:28+02:00",
+          "tree_id": "8433d161d981a823ae88dfb066c62a83aa25d36e",
+          "url": "https://github.com/fallow-rs/fallow/commit/5cebdde102efc436f89b7fc9878990c1b3647e0e"
+        },
+        "date": 1789605762556,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
