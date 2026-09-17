@@ -143,6 +143,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Closes [#2673](https://github.com/fallow-rs/fallow/issues/2673)). Thanks to
   the reporter for tracing it through the action scripts line by line.
 
+- **MCP tool results say what the gates concluded.** Every CLI-backed tool runs
+  the CLI with `--quiet`, which removes the gate's stderr line, and converts its
+  exit 1 into a successful result so the findings still reach the agent. A gated
+  run therefore arrived looking exactly like an ungated one. Tool results now
+  restate the verdict the envelope already carries as plain sentences on the
+  root `warnings` array: a baseline that matched less than it was saved with,
+  together with the re-save remedy; every `gate_outcomes` entry that reported
+  `fail` or `warn`, with the numbers it compared and whether it was enforced;
+  and one aggregated entry when the run was degraded. Existing members do not
+  move, a run that armed no gate is unchanged, and no result changes its
+  `isError`
+  (Closes [#2676](https://github.com/fallow-rs/fallow/issues/2676)).
+
 ### Changed
 
 - **`security-gate` now fails the job independently of `fail-on-issues`.** If
