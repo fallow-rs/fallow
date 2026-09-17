@@ -42,9 +42,13 @@
 //!
 //! One accounting note: `max_output_bytes` bounds what the CLI wrote, not what
 //! the tool returns, so an annotated body is the handful of bytes these
-//! sentences cost larger than the cap that admitted it. Code Mode charges its
-//! own output budget on the returned body, so there the sentences are paid
-//! for, as the agent reads them.
+//! sentences cost larger than the cap that admitted it. Code Mode's two checks
+//! measure different bodies for the same reason: the pre-read comparison
+//! admits the raw file, while the host call is charged the annotated body,
+//! because that is what the snippet reads. A call landing in the last few
+//! hundred bytes of its budget can therefore be refused after the analysis
+//! ran, which is the correct side to err on: the alternative is charging an
+//! agent less than what enters its context.
 
 use std::collections::BTreeMap;
 
@@ -83,28 +87,59 @@ pub(super) fn annotate_envelope(text: &str) -> Option<String> {
     if !CARRIER_KEYS.iter().any(|key| text.contains(key)) {
         return None;
     }
-    let value = serde_json::from_str::<Value>(text).ok()?;
-    annotate_value(&value)
+    let mut value = serde_json::from_str::<Value>(text).ok()?;
+    if !annotate_in_place(&mut value) {
+        return None;
+    }
+    serde_json::to_string(&value).ok()
 }
 
 /// [`annotate_envelope`] for the typed route, which already holds the parsed
 /// envelope and must not pay for a round trip through text to reach it.
+///
+/// This one copies, because the route owns the value it is rendering and can
+/// only lend it out. The copy is paid only on a run that has something to say,
+/// which is why the check comes first.
 pub(super) fn annotate_value(value: &Value) -> Option<String> {
-    let root = value.as_object()?;
-    let warnings = verdict_warnings(root);
+    let warnings = verdict_warnings(value.as_object()?);
     if warnings.is_empty() {
         return None;
     }
-
     let mut annotated = value.clone();
-    let root = annotated.as_object_mut()?;
+    append_warnings(annotated.as_object_mut()?, warnings)?;
+    serde_json::to_string(&annotated).ok()
+}
+
+/// Append this run's verdicts to an owned envelope, reporting whether any were
+/// added. The text route parses into a value it owns, so it mutates that
+/// rather than copying it.
+fn annotate_in_place(value: &mut Value) -> bool {
+    let Some(root) = value.as_object() else {
+        return false;
+    };
+    let warnings = verdict_warnings(root);
+    if warnings.is_empty() {
+        return false;
+    }
+    let Some(root) = value.as_object_mut() else {
+        return false;
+    };
+    append_warnings(root, warnings).is_some()
+}
+
+/// Add the sentences to the root `warnings` array, creating it when absent.
+///
+/// `None` when `warnings` is present and is not an array, which leaves the
+/// envelope untouched: nothing was inserted, because the entry only fills an
+/// absent key.
+fn append_warnings(root: &mut Map<String, Value>, warnings: Vec<String>) -> Option<()> {
     let existing = root
         .entry("warnings".to_string())
         .or_insert_with(|| Value::Array(Vec::new()));
-    let array = existing.as_array_mut()?;
-    array.extend(warnings.into_iter().map(Value::String));
-
-    serde_json::to_string(&annotated).ok()
+    existing
+        .as_array_mut()?
+        .extend(warnings.into_iter().map(Value::String));
+    Some(())
 }
 
 /// The members that make an envelope worth parsing. Any absent from the raw

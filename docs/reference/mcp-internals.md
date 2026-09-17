@@ -107,8 +107,11 @@ Contract rules:
   aggregated entry when `workspace_diagnostics` carries `degrades_analysis`.
   It runs on every route that returns an envelope, the subprocess one in
   `captured_output_result`, Code Mode in `normalize_output`, and the typed one
-  in `api_runtime::json_success`, so a tool answers the same way whether or not
-  a parameter forced the CLI fallback. The lookup tables name each envelope
+  in `api_runtime::json_success`. The annotation is therefore route-complete;
+  the envelopes are not yet, because `fallow_api`'s audit serializer publishes
+  no `gate_outcomes` (`crates/api/src/runtime_json.rs`), so a typed `audit`
+  restates its diagnostics and its baseline but has no gate object to read.
+  The lookup tables name each envelope
   shape's sites, because `audit` nests both the staleness object and the
   diagnostics inside its `dead_code` / `duplication` / `complexity` sections
   while every other command publishes them at the root. It adds no verdict of
