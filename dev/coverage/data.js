@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789617842575,
+  "lastUpdate": 1789626126594,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "5ea3328cb815a8fe34ba2584d34f36d0c53cee7d",
-          "message": "ci(dependabot): stop reporting a refused auto-merge as a failure (#2484)\n\nEnabling auto-merge is refused when there is nothing left to wait for, which\nhappens whenever the helper job queues behind a burst of dependabot pull\nrequests: by the time it runs, every required context has reported and the pull\nrequest is already mergeable. The job then exited 1 and painted a red check on\na pull request whose own checks were green. It had done so 27 times since April.\n\nA refusal that means the work is already done, or that the pull request closed\nwhile the job waited, now logs and exits 0. Every other error still fails, and\nnothing about which pull requests merge, or when, changes.",
-          "timestamp": "2026-08-31T13:33:12+02:00",
-          "tree_id": "4fd086ea6db1dceb7a9647a2059f044559902d1a",
-          "url": "https://github.com/fallow-rs/fallow/commit/5ea3328cb815a8fe34ba2584d34f36d0c53cee7d"
-        },
-        "date": 1788176792460,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/adff2c9f20fe769e2e093b2e99ee09723f6310bd"
         },
         "date": 1789617838237,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ca7c3f6ed8b87d43033168d979ad6b92f4e22329",
+          "message": "ci: soft-fail the cargo-modules install in the coupling workflow (#2696)\n\nThe coupling job is a metric tracker and its collect step already degrades to a warning, but the install step was not covered: an unlocked cargo install resolved unicode-ident 1.0.25 against unicode-properties 0.1.4, which trips a const assertion in ra-ap-rustc_lexer 0.166.0 and turned the check red with exit 101.\n\nKeep the unlocked install first so a cargo_metadata fix can still land ahead of a cargo-modules release, retry with the packaged lockfile (pins unicode-ident 1.0.24), and mark the step continue-on-error. When neither install succeeds, the collect step emits a warning, writes the coupling metrics skipped summary, and sets collected=false so the analyze and store steps skip.",
+          "timestamp": "2026-09-17T08:13:19+02:00",
+          "tree_id": "95bd3553d77eb4f61c4b9dff41067e2f477a5e3e",
+          "url": "https://github.com/fallow-rs/fallow/commit/ca7c3f6ed8b87d43033168d979ad6b92f4e22329"
+        },
+        "date": 1789626122863,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
