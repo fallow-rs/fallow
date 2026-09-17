@@ -30,6 +30,69 @@ Two configurations defeat this. Pointing `baseline` and `save-baseline` at the s
 
 The PR comment and inline review do not carry the advisory yet.
 
+### Gates
+
+Every gate the run armed publishes a verdict in the analysis envelope, and the
+action reads that rather than the CLI's exit code, which it discards whenever
+stdout parses as JSON. A gate fails the job when three things hold: the input
+that owns it asked for it, the CLI concluded `fail`, and the CLI marked the
+verdict enforced.
+
+| Gate | Input that owns it |
+|---|---|
+| `regression` | `fail-on-regression` |
+| `duplication-threshold` | `threshold` |
+| `health-min-score` | `min-score` |
+| `health-min-severity` | `min-severity` |
+| `security` | `security-gate` |
+| `stale-baseline` | `fail-on-stale-baseline` |
+| `type-aware-require` | `type-aware-require` |
+
+Each is independent of `fail-on-issues`, which keeps its own job: it gates on
+the issue count and nothing else. `command: audit` is the exception and still
+gates on its verdict through `fail-on-issues`, so an audit job with
+`fail-on-issues: false` stays a reporting configuration.
+
+A gate that concluded `fail` without its input being set produces a
+`::warning::` and never fails the job, so a flag passed through `args:` cannot
+override `fail-on-issues: false`. A gate that stood down without judging the run
+produces a `::warning::` when its input asked for it and a `::notice::`
+otherwise. Every failing gate prints its own `::error::` and the step exits once
+at the end, after the outputs and artifacts are written, so the comment,
+annotation and summary steps still run. The security gate keeps its documented
+exit 8 and outranks the generic 1.
+
+The outputs `gates-failed`, `gates-warned`, `gates-skipped` and `gates-passed`
+carry the comma-separated names, so a downstream step can report on a gate
+without failing on it.
+
+`min-score` and `min-severity` apply to `command: health` only and are rejected
+with exit 2 elsewhere. `--min-score` implies `--score`, which is a section
+selector, so the action adds `--complexity` unless you selected a health section
+yourself; without that the annotations, the SARIF upload and the pull-request
+comment would all render empty. `target_thresholds` and `hotspot_summary` are
+not restored by that, and the `fail-on-issues` count gate still counts every
+finding, so set `fail-on-issues: false` to gate on the score alone.
+
+In combined mode (no `command`) the CLI does not enforce the duplication
+threshold, and says so in the envelope. The action honours that and warns rather
+than failing; run `command: dupes` to gate on it.
+
+On a fallow older than 3.27.0 the envelope carries no gate verdicts. The action
+falls back to the fields those releases already published for `regression`,
+`security`, `stale-baseline` and `type-aware-require`, and fails open with one
+warning for `threshold`, `min-score` and `min-severity`, which had no field to
+read. That warning appears only when the matching input is set.
+
+### Degraded and empty analysis
+
+A run whose findings were computed over less than the whole project reports one
+`::warning::` listing the diagnostic kinds and their counts, and sets the
+`analysis-degraded` output. A run that analyzed no source file at all gets its
+own sentence, because its clean result means nothing was measured rather than
+that nothing was found. It warns and passes by default; set
+`fail-on-empty-analysis: true` to fail instead.
+
 ### Bot identity
 
 The markdown comment keeps fallow branding intentionally light. Repository-visible identity such as avatar, bot name, checks, and richer app affordances should come from the GitHub App installation rather than from decorative markdown inside each comment.

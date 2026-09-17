@@ -9,6 +9,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every gate fallow documents now actually fails the job.** `fail-on-regression`,
+  `threshold`, `min-severity` and the security gate were each documented as
+  gates and each was silently inert: the CLI's verdict reached the consumer on
+  stderr, which `--quiet` removes, or on a process status both the GitHub Action
+  and the GitLab template discard whenever stdout parses as JSON. A repository
+  that set any of them and relied on the job passing will start seeing failures.
+
+  A run that arms a gate now publishes `gate_outcomes` in its JSON envelope, and
+  both integrations read the verdict from there rather than from the exit code.
+  A gate fails the build when its `status` is `fail` AND `enforced` is true;
+  neither member decides it alone, because `enforced` is true on every armed
+  gate including the ones that passed. Each gate is owned by the input that asks
+  for it (`regression` by `fail-on-regression`, `duplication-threshold` by
+  `threshold`, `health-min-score` by `min-score`, `health-min-severity` by
+  `min-severity`, `security` by `security-gate`, `stale-baseline` by
+  `fail-on-stale-baseline`, `type-aware-require` by `type-aware-require`), and
+  each is independent of `fail-on-issues`. A gate that tripped without its input
+  being set warns and never fails, so a flag passed through `args:` cannot
+  override `fail-on-issues: false`.
+
+  `gate_outcomes` lists the gates a run ARMED, not every rule that could fail
+  it. Fallow's default severity rules fail a run with no flag at all, so a
+  `dead-code` run can exit 1 with no object at all. Read an absent object as
+  "no gate was asked for", never as "nothing failed".
+
+- **`fallow report --from` states what each gate concluded.** Because both
+  integrations already re-render through it, repositories tracking the latest
+  CLI see a new `::notice::` annotation and a new line on the job summary, the
+  pull-request comment and the merge-request note without changing their
+  workflow. The line is informational on every surface and never fails a step by
+  itself; the integrations own the failing exit.
+
+- **A run that analyzed no source file now says so.** Its clean result means
+  nothing was measured rather than that nothing was found, and until now that
+  was invisible to every machine consumer. It warns and passes by default; set
+  `fail-on-empty-analysis: true` (`FALLOW_FAIL_ON_EMPTY_ANALYSIS` on GitLab) to
+  fail. A repository whose scope legitimately holds no source, a docs-only
+  repository or a workspace member with no TypeScript, keeps passing unless it
+  opts in. A run whose findings were computed over less than the whole project
+  reports one aggregated warning listing the diagnostic kinds and their counts.
+
+- **The duplication threshold reaches the bare command.** The action forwarded
+  `--threshold` on `command: dupes` only, so the input could never produce a
+  verdict on the default combined run. GitLab already forwarded it.
+
+- **Every failing gate reports before the step exits.** Both integrations
+  collected failures one at a time and exited on the first, so a run with a
+  tripped gate and findings reported only one of them. They now collect every
+  reason, print every line, and exit once after the outputs and artifacts are
+  written. The security gate keeps its documented exit 8 and outranks the
+  generic 1.
+
 - **Baseline staleness reaches CI again.** 3.26.0 shipped the advisory that a
   dead-code baseline has gone stale, and `--fail-on-stale-baseline` to turn that
   into a failing build, but both lived on stderr only. Every CI path fallow
@@ -90,6 +142,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comment and the GitLab MR note do not carry the advisory yet
   (Closes [#2673](https://github.com/fallow-rs/fallow/issues/2673)). Thanks to
   the reporter for tracing it through the action scripts line by line.
+
+### Changed
+
+- **`security-gate` now fails the job independently of `fail-on-issues`.** If
+  you set `security-gate` with `fail-on-issues: false`, your job will start
+  failing where it passed. The security branch previously sat inside the
+  `fail-on-issues` conditional in both integrations and could not be reached.
+  This is what the `fail-on-issues` input description has always claimed; to
+  keep the old behaviour, unset `security-gate`. The changelog entry that
+  shipped with the baseline staleness fix stated that `security-gate` was
+  already independent of `fail-on-issues`. That was not true; it is true now.
+
+- **`min-score` is a first-class input for the first time.** It was previously
+  reachable only through free-form `args:` / `FALLOW_ARGS`, which is how it came
+  to be silent. `--min-score` implies `--score`, so a gated health run reports
+  the score only; the action and the template add `--complexity` when no health
+  section input is set, keeping the annotations, the SARIF upload and the
+  pull-request comment populated. `target_thresholds` and `hotspot_summary` are
+  not restored by that. `min-score` and `min-severity` apply to
+  `command: health` only and are rejected with exit 2 elsewhere.
+
+- **The `fail-on-issues` count gate is unchanged** and still counts findings.
+  The CLI's own rule is severity-aware and is published separately as
+  `error-severity-findings`, so the two can disagree on a project that sets a
+  rule to `warn`. `command: audit` still gates on its verdict through
+  `fail-on-issues`, so an audit job with `fail-on-issues: false` stays a
+  reporting configuration.
+
+- **In combined mode the duplication threshold does not fail the run**, and the
+  envelope now says so with `enforced: false`. The standalone `dupes` command is
+  unchanged and still exits 1. This affects GitLab users on the default job,
+  because the template forwards the threshold in combined mode; the pipeline
+  warns and names the reason instead of failing.
+
+- **`--fail-on-stale-baseline` now moves exactly one wire member**,
+  `gate_outcomes["stale-baseline"].enforced`, because whether a verdict is armed
+  is part of the verdict. This supersedes the 3.26.0 statement that the flag
+  changes nothing but the exit code and the stderr line; that sentence is
+  amended in the compatibility policy. The `baseline_staleness` object itself,
+  `gate_trips` included, is unchanged and stays flag-independent.
+
+- **`health --report-only` reports `enforced: false` on every gate the run
+  evaluated**, so a report-only run is machine-readable as never failing rather
+  than only exiting 0.
+
+- **No envelope `schema_version` moved.** `gate_outcomes` and
+  `workspace_diagnostics[].degrades_analysis` are additive and optional, and the
+  `gate_outcomes` key set is open: a gate name a consumer does not recognise
+  means "some gate", not an error. On a fallow older than 3.27.0 both
+  integrations fall back to the fields those releases already published, and
+  fail open with one warning for the three gates that had none.
 
 ## [3.26.0] - 2026-09-15
 
