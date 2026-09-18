@@ -437,6 +437,21 @@ export type RegressionToleranceKind = ("absolute" | "percentage")
  */
 export type RequestStatus = ("applied" | "not-applied")
 /**
+ * What a request governs, and therefore what its failure means.
+ *
+ * Published on every entry so a consumer selects on the class rather than on
+ * a name list. Without it the one sentence a consumer can write for the whole
+ * object ("the report is wider than requested") is false for any request that
+ * does not narrow, which is how a failed `--sarif-file` write came to be
+ * reported as an unscoped run. A request name added later carries its own
+ * class, so a consumer written today keeps saying the right thing about it.
+ *
+ * The value set is OPEN, like the names and the statuses: read a class this
+ * build does not recognise as "some request", not as an error, and do not read
+ * it as `scope`.
+ */
+export type RequestEffect = ("scope" | "artifact")
+/**
  * A diagnostic about a workspace-discovery candidate.
  *
  * The `message` field is a human-readable rendering derived from `kind`. It
@@ -5429,10 +5444,14 @@ reason?: (string | null)
  * `serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer
  * does not recognise means "some request", not an error.
  *
- * `sarif-file` reports a SECONDARY artefact rather than the scope of the
+ * `sarif-file` reports a SECONDARY artifact rather than the scope of the
  * report it travels in, and it is in the same object for the same reason the
  * others are: the run was asked to do something and did something else, and
- * nothing in the primary report says so.
+ * nothing in the primary report says so. Which of the two an entry is, every
+ * entry says for itself: `affects` is `scope` for the narrowing requests and
+ * `artifact` for this one. Select on it. A consumer that instead assumes the
+ * whole object narrows the report tells its reader an unwritten SARIF file
+ * widened the analysis, which is what `affects` exists to prevent.
  *
  * `invalid-ref` is reachable only through the programmatic API. The
  * `--changed-since` flag validates its value before a run starts and fails
@@ -5451,11 +5470,14 @@ export interface RequestOutcomes {
  */
 export interface RequestOutcome {
 status: RequestStatus
+affects: RequestEffect
 /**
  * What was asked, as the user spelled it: the git ref for
  * `changed-since`, the diff source label (`--diff-file pr.diff`,
  * `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`,
- * the target path for `sarif-file`.
+ * the target path for `sarif-file`. Echoed rather than normalised, so a
+ * consumer must not join it to the project root the way it joins every
+ * other path-shaped field.
  */
 requested: string
 /**

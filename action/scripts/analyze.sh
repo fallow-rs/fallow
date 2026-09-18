@@ -1330,9 +1330,17 @@ fi
 # One aggregated warning, for the same annotation-budget reason as the
 # degraded-analysis block above. Honoured requests are deliberately not named:
 # the interesting fact is a report that is wider than what was asked for.
+#
+# Selected on `affects == "scope"`, never on a name list. The object also
+# carries requests that produce a file beside the report (`sarif-file`), whose
+# failure says nothing about the report's scope; warning "the findings below
+# cover more of the project" for one of those states the opposite of what
+# happened, and the SARIF-absence warning below already owns that case. A
+# request name added in a later release carries its own class, so this selector
+# keeps saying the right thing about it.
 REQUESTS_UNAPPLIED=$(jq -r '
   [ (.request_outcomes // {}) | to_entries[]
-    | select(.value.status != "applied")
+    | select(.value.status != "applied" and .value.affects == "scope")
     | if .value.reason then "\(.key) (\(.value.reason))" else .key end ]
   | join(", ")
 ' "$RESULTS_FILE" 2>/dev/null || true)
@@ -1401,8 +1409,10 @@ if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && 
     # scanning silently stops receiving alerts. Driven by file absence rather
     # than by the envelope, so it also fires for a pinned older binary that
     # publishes no `request_outcomes` (issue #2690).
+    # Root only: `--sarif-file` is rejected for command: audit, which is the one
+    # envelope with a nested dead_code section, so there is no second carrier.
     SARIF_FILE_REASON=$(jq -r '
-      (.request_outcomes // .dead_code.request_outcomes // {})["sarif-file"]
+      (.request_outcomes // {})["sarif-file"]
       | if . == null or .status == "applied" then empty else (.message // .reason) end
     ' "$RESULTS_FILE" 2>/dev/null || true)
     echo "::warning::Fallow produced no SARIF document, so this run uploads nothing and code scanning keeps the alerts from the previous upload.${SARIF_FILE_REASON:+ ${SARIF_FILE_REASON}} Check the earlier log lines for the cause, or drop format: sarif if code scanning is not wanted."

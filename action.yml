@@ -377,7 +377,7 @@ outputs:
     description: 'true when the run recorded a diagnostic meaning its findings were computed over less than the whole project. Read from the envelope root, or from the dead_code section on command: audit.'
     value: ${{ steps.analyze.outputs.analysis_degraded }}
   requests-unapplied:
-    description: 'Comma-separated names of the narrowing requests the run could not apply, each with its reason in parentheses (for example "changed-since (git-failed)"). Empty when every request applied and when nothing was asked for. Any entry means the report covers MORE than was requested, so a changed-code review read it as if it were scoped.'
+    description: 'Comma-separated names of the narrowing requests the run could not apply, each with its reason in parentheses (for example "changed-since (git-failed)"). Empty when every narrowing request applied and when nothing was asked for. Any entry means the report covers MORE than was requested, so a changed-code review read it as if it were scoped. Only requests that narrow the report are listed (the envelope entries whose affects is "scope"); a request that writes a file beside the report, such as sarif-file, never appears here, because its failure does not change what the report covers.'
     value: ${{ steps.analyze.outputs.requests_unapplied }}
   post-skipped-reason:
     description: 'Reason the Post review comments step skipped posting (pagination_failure / none). Set to pagination_failure only when the inline-review POST was actually aborted to avoid duplicate threads (multi-comment dedup lookup failed). Empty when the Post review comments step did not run.'

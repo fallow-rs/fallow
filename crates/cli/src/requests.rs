@@ -47,13 +47,18 @@ static CHANGED_SINCE_OUTCOME: OnceLock<RequestOutcome> = OnceLock::new();
 pub fn resolve_changed_since(root: &Path, git_ref: &str) -> Option<FxHashSet<PathBuf>> {
     match fallow_engine::changed_files::changed_files(root, git_ref) {
         Ok(files) => {
-            record_changed_since(RequestOutcome::applied(git_ref));
+            record_changed_since(RequestOutcome::applied(RequestName::ChangedSince, git_ref));
             Some(files)
         }
         Err(err) => {
             let message = err.changed_since_message(git_ref);
             eprintln!("Warning: {message}");
-            record_changed_since(RequestOutcome::not_applied(git_ref, err.reason(), message));
+            record_changed_since(RequestOutcome::not_applied(
+                RequestName::ChangedSince,
+                git_ref,
+                err.reason(),
+                message,
+            ));
             None
         }
     }
@@ -71,7 +76,10 @@ static SARIF_FILE_OUTCOME: OnceLock<RequestOutcome> = OnceLock::new();
 
 /// Record a `--sarif-file` document that was written.
 pub fn record_sarif_file_applied(path: &Path) {
-    let _ = SARIF_FILE_OUTCOME.set(RequestOutcome::applied(path.display().to_string()));
+    let _ = SARIF_FILE_OUTCOME.set(RequestOutcome::applied(
+        RequestName::SarifFile,
+        path.display().to_string(),
+    ));
 }
 
 /// Record a `--sarif-file` document that was not written, with the reason token
@@ -82,6 +90,7 @@ pub fn record_sarif_file_applied(path: &Path) {
 /// secondary artefact is missing (issue #2690).
 pub fn record_sarif_file_failure(path: &Path, reason: &str, message: String) {
     let _ = SARIF_FILE_OUTCOME.set(RequestOutcome::not_applied(
+        RequestName::SarifFile,
         path.display().to_string(),
         reason,
         message,

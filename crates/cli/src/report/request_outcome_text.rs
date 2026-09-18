@@ -14,10 +14,15 @@
 //! silently reading a future `partial` as "did what you asked" is the failure
 //! mode this whole object exists to remove.
 //!
-//! Informational on purpose. An unapplied request means the report is WIDER
-//! than what was asked for, which is a reviewing problem and not a build
-//! failure, and the CLI's exit code is unchanged by it. Whether a CI job should
-//! care is the integration's decision.
+//! Informational on purpose. An unapplied request is a reviewing problem and
+//! not a build failure, and the CLI's exit code is unchanged by it. Whether a
+//! CI job should care is the integration's decision.
+//!
+//! What an unapplied request means is read off the entry's `affects`, never off
+//! its name: a narrowing request that stood down leaves the report WIDER than
+//! asked for, while a secondary artifact that was not written says nothing
+//! about the report's scope at all. One sentence for both classes would state
+//! something false about whichever one did not happen.
 
 use serde_json::Value;
 
@@ -25,6 +30,7 @@ use serde_json::Value;
 struct RequestLine {
     name: String,
     status: String,
+    affects: Option<String>,
     reason: Option<String>,
 }
 
@@ -40,6 +46,21 @@ impl RequestLine {
 
     fn applied(&self) -> bool {
         self.status == "applied"
+    }
+
+    /// Whether an unapplied entry means the report widened.
+    ///
+    /// An entry that does not say is not assumed to narrow: the class travels
+    /// with every entry this build emits, so a missing or unrecognised value
+    /// comes from a producer this build does not know, and claiming a widened
+    /// report on its behalf is the defect `affects` exists to remove.
+    fn widens_report(&self) -> bool {
+        self.affects.as_deref() == Some("scope")
+    }
+
+    /// Whether an unapplied entry means a requested file was not written.
+    fn withholds_artifact(&self) -> bool {
+        self.affects.as_deref() == Some("artifact")
     }
 }
 
@@ -57,6 +78,10 @@ fn read_request_outcomes(envelope: &Value) -> Vec<RequestLine> {
             Some(RequestLine {
                 name: name.clone(),
                 status: entry.get("status")?.as_str()?.to_owned(),
+                affects: entry
+                    .get("affects")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
                 reason: entry
                     .get("reason")
                     .and_then(Value::as_str)
@@ -90,8 +115,18 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
         clauses.push(format!("applied {}", join(&applied)));
     }
     let mut line = format!("Request outcomes: {}.", clauses.join("; "));
-    if !unapplied.is_empty() {
+    // One sentence per class, and only for a class that actually has an
+    // unapplied entry. A single sentence for the whole object told the reader
+    // that a SARIF file which failed to write had widened the analysis, which
+    // is the opposite of true and the thing a reviewer acts on.
+    if unapplied.iter().any(|request| request.widens_report()) {
         line.push_str(" Anything not applied means this report is wider than requested.");
+    }
+    if unapplied.iter().any(|request| request.withholds_artifact()) {
+        line.push_str(
+            " A requested output file was not written, so anything reading it has nothing \
+             to read; the report itself is unaffected.",
+        );
     }
     Some(line)
 }
@@ -151,6 +186,7 @@ mod tests {
         let value = envelope(&serde_json::json!({
             "changed-since": {
                 "status": "not-applied",
+                "affects": "scope",
                 "requested": "origin/main",
                 "reason": "invalid-ref",
                 "message": "..."
@@ -168,7 +204,11 @@ mod tests {
     #[test]
     fn an_applied_request_states_the_scope_without_a_warning_clause() {
         let value = envelope(&serde_json::json!({
-            "diff-filter": { "status": "applied", "requested": "--diff-file pr.diff" }
+            "diff-filter": {
+                "status": "applied",
+                "affects": "scope",
+                "requested": "--diff-file pr.diff"
+            }
         }));
         assert_eq!(
             summary_line(&value).expect("a request was received"),
@@ -179,8 +219,17 @@ mod tests {
     #[test]
     fn a_mixed_run_keeps_the_two_groups_apart_in_one_line() {
         let value = envelope(&serde_json::json!({
-            "changed-since": { "status": "not-applied", "requested": "x", "reason": "git-failed" },
-            "diff-filter": { "status": "applied", "requested": "--diff-stdin" }
+            "changed-since": {
+                "status": "not-applied",
+                "affects": "scope",
+                "requested": "x",
+                "reason": "git-failed"
+            },
+            "diff-filter": {
+                "status": "applied",
+                "affects": "scope",
+                "requested": "--diff-stdin"
+            }
         }));
         assert_eq!(
             summary_line(&value).expect("requests were received"),
@@ -189,10 +238,62 @@ mod tests {
         );
     }
 
+    /// A secondary artifact that was not written says so, and says nothing
+    /// about the scope of the report it travels in.
+    #[test]
+    fn an_unwritten_artifact_does_not_claim_the_report_widened() {
+        let value = envelope(&serde_json::json!({
+            "sarif-file": {
+                "status": "not-applied",
+                "affects": "artifact",
+                "requested": "out.sarif",
+                "reason": "write-failed"
+            }
+        }));
+        let line = summary_line(&value).expect("a request was received");
+        assert!(
+            !line.contains("wider than requested"),
+            "an unwritten file did not widen the report: {line}"
+        );
+        assert!(
+            line.contains("A requested output file was not written"),
+            "{line}"
+        );
+    }
+
+    /// Both classes failing in one run states both facts, in a fixed order.
+    #[test]
+    fn a_run_that_widened_and_withheld_states_both() {
+        let value = envelope(&serde_json::json!({
+            "changed-since": {
+                "status": "not-applied",
+                "affects": "scope",
+                "requested": "origin/main",
+                "reason": "git-failed"
+            },
+            "sarif-file": {
+                "status": "not-applied",
+                "affects": "artifact",
+                "requested": "out.sarif",
+                "reason": "write-failed"
+            }
+        }));
+        let line = summary_line(&value).expect("requests were received");
+        let widened = line.find("wider than requested").expect("the scope clause");
+        let withheld = line
+            .find("A requested output file was not written")
+            .expect("the artifact clause");
+        assert!(widened < withheld, "{line}");
+    }
+
     #[test]
     fn an_unrecognised_request_name_still_reports() {
         let value = envelope(&serde_json::json!({
-            "some-future-request": { "status": "not-applied", "requested": "x" }
+            "some-future-request": {
+                "status": "not-applied",
+                "affects": "scope",
+                "requested": "x"
+            }
         }));
         assert_eq!(
             annotation_line(&value).expect("a request was received"),
@@ -201,12 +302,34 @@ mod tests {
         );
     }
 
+    /// A class this build does not know is not read as a narrowing request:
+    /// claiming a widened report on its behalf is the failure `affects` exists
+    /// to remove, and the entry is still reported by name.
+    #[test]
+    fn an_unrecognised_class_claims_neither_sentence() {
+        let value = envelope(&serde_json::json!({
+            "some-future-request": {
+                "status": "not-applied",
+                "affects": "some-future-class",
+                "requested": "x"
+            }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("a request was received"),
+            "Request outcomes: not applied some-future-request."
+        );
+    }
+
     /// The status set is open, so a value this build does not know must not be
     /// read as "the run did what it was asked".
     #[test]
     fn an_unrecognised_status_is_not_applied() {
         let value = envelope(&serde_json::json!({
-            "changed-since": { "status": "partial", "requested": "origin/main" }
+            "changed-since": {
+                "status": "partial",
+                "affects": "scope",
+                "requested": "origin/main"
+            }
         }));
         assert_eq!(
             summary_line(&value).expect("a request was received"),

@@ -142,8 +142,25 @@ an exit code.
   reporting concern does not belong inside a filtering decision. A diff that
   parsed but names no analyzable file reports `applied`, because the filter WAS
   applied over an empty scope. `fallow audit` records nothing: it exits 2 rather
-  than widen. On the combined envelope the root is the only carrier, matching
-  `workspace_diagnostics`.
+  than widen, and it resolves its base ref through the non-printing
+  `crate::check::try_get_changed_files` so the widening sentence cannot reach a
+  run that produced no report. On the combined envelope the root is the only
+  carrier, matching `workspace_diagnostics`.
+- The object also carries `--sarif-file`, which produces a file BESIDE the
+  report rather than narrowing it, so every entry publishes `affects`
+  (`scope` / `artifact`) and every consumer selects on that rather than on a
+  name. Without it the one sentence a consumer writes for the whole object
+  reported a failed SARIF write as a run wider than requested, on the pull
+  request, the merge request, the job summary and the Action's
+  `requests-unapplied` output. The class is derived from the name inside
+  `RequestOutcome::applied` / `not_applied`, so an entry cannot be filed under
+  one name carrying another's class.
+- The stand-down sentences name their candidate bases by relation to the
+  analysis root (`the project root`, `the repository root (the project root is
+  <offset> below it)`) rather than by absolute path, because `message` is a wire
+  field and every other path-bearing member of a fallow envelope is
+  project-root-relative. `requested` is the exception by design: it echoes what
+  the user typed, which may be an absolute path they chose.
 
 ## Compact health populations
 

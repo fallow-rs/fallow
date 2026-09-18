@@ -77,6 +77,44 @@ pub enum RequestName {
     SarifFile,
 }
 
+impl RequestName {
+    /// What an unapplied request of this name means for the report.
+    #[must_use]
+    pub const fn affects(self) -> RequestEffect {
+        match self {
+            Self::ChangedSince | Self::DiffFilter => RequestEffect::Scope,
+            Self::SarifFile => RequestEffect::Artifact,
+        }
+    }
+}
+
+/// What a request governs, and therefore what its failure means.
+///
+/// Published on every entry so a consumer selects on the class rather than on
+/// a name list. Without it the one sentence a consumer can write for the whole
+/// object ("the report is wider than requested") is false for any request that
+/// does not narrow, which is how a failed `--sarif-file` write came to be
+/// reported as an unscoped run. A request name added later carries its own
+/// class, so a consumer written today keeps saying the right thing about it.
+///
+/// The value set is OPEN, like the names and the statuses: read a class this
+/// build does not recognise as "some request", not as an error, and do not read
+/// it as `scope`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum RequestEffect {
+    /// The request narrows what the report covers. Not applied means the
+    /// report that follows is complete, valid, and WIDER than what was asked
+    /// for, which is a reviewing problem rather than a build failure.
+    Scope,
+    /// The request produces a secondary file beside the report. Not applied
+    /// means that file was not written, so anything consuming it has nothing to
+    /// read. The report on stdout and the exit code are unaffected, and nothing
+    /// about the run's scope changed.
+    Artifact,
+}
+
 /// What became of one request on this run.
 ///
 /// Two-valued today. The value set is OPEN so a later `partial` needs no bump,
@@ -104,10 +142,15 @@ pub enum RequestStatus {
 pub struct RequestOutcome {
     /// What became of the request.
     pub status: RequestStatus,
+    /// What this request governs, and therefore what an unapplied one means.
+    /// Derived from the name, so the two can never disagree.
+    pub affects: RequestEffect,
     /// What was asked, as the user spelled it: the git ref for
     /// `changed-since`, the diff source label (`--diff-file pr.diff`,
     /// `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`,
-    /// the target path for `sarif-file`.
+    /// the target path for `sarif-file`. Echoed rather than normalised, so a
+    /// consumer must not join it to the project root the way it joins every
+    /// other path-shaped field.
     pub requested: String,
     /// Why the request was not applied, as a kebab-case token. Present exactly
     /// when `status` is not `applied`. The set is open per request name; the
@@ -124,10 +167,14 @@ pub struct RequestOutcome {
 
 impl RequestOutcome {
     /// A request the run honoured.
+    ///
+    /// Takes the name rather than the class so no caller can file a request
+    /// under the wrong one.
     #[must_use]
-    pub fn applied(requested: impl Into<String>) -> Self {
+    pub fn applied(name: RequestName, requested: impl Into<String>) -> Self {
         Self {
             status: RequestStatus::Applied,
+            affects: name.affects(),
             requested: requested.into(),
             reason: None,
             message: None,
@@ -138,12 +185,14 @@ impl RequestOutcome {
     /// sentence the CLI also wrote to stderr.
     #[must_use]
     pub fn not_applied(
+        name: RequestName,
         requested: impl Into<String>,
         reason: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
         Self {
             status: RequestStatus::NotApplied,
+            affects: name.affects(),
             requested: requested.into(),
             reason: Some(reason.into()),
             message: Some(message.into()),
@@ -171,10 +220,14 @@ impl RequestOutcome {
 /// `serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer
 /// does not recognise means "some request", not an error.
 ///
-/// `sarif-file` reports a SECONDARY artefact rather than the scope of the
+/// `sarif-file` reports a SECONDARY artifact rather than the scope of the
 /// report it travels in, and it is in the same object for the same reason the
 /// others are: the run was asked to do something and did something else, and
-/// nothing in the primary report says so.
+/// nothing in the primary report says so. Which of the two an entry is, every
+/// entry says for itself: `affects` is `scope` for the narrowing requests and
+/// `artifact` for this one. Select on it. A consumer that instead assumes the
+/// whole object narrows the report tells its reader an unwritten SARIF file
+/// widened the analysis, which is what `affects` exists to prevent.
 ///
 /// `invalid-ref` is reachable only through the programmatic API. The
 /// `--changed-since` flag validates its value before a run starts and fails
@@ -228,7 +281,7 @@ mod tests {
         let mut requests = RequestOutcomes::new();
         requests.insert(
             RequestName::ChangedSince,
-            RequestOutcome::applied("origin/main"),
+            RequestOutcome::applied(RequestName::ChangedSince, "origin/main"),
         );
         assert!(requests.into_option().is_some());
     }
@@ -241,13 +294,17 @@ mod tests {
         let mut requests = RequestOutcomes::new();
         requests.insert(
             RequestName::DiffFilter,
-            RequestOutcome::applied("--diff-file pr.diff"),
+            RequestOutcome::applied(RequestName::DiffFilter, "--diff-file pr.diff"),
         );
         let value = serde_json::to_value(&requests).expect("request outcomes serialize");
         assert_eq!(
             value,
             serde_json::json!({
-                "diff-filter": { "status": "applied", "requested": "--diff-file pr.diff" }
+                "diff-filter": {
+                    "status": "applied",
+                    "affects": "scope",
+                    "requested": "--diff-file pr.diff"
+                }
             })
         );
     }
@@ -257,7 +314,12 @@ mod tests {
         let mut requests = RequestOutcomes::new();
         requests.insert(
             RequestName::ChangedSince,
-            RequestOutcome::not_applied("origin/main", "invalid-ref", "Ignored."),
+            RequestOutcome::not_applied(
+                RequestName::ChangedSince,
+                "origin/main",
+                "invalid-ref",
+                "Ignored.",
+            ),
         );
         let value = serde_json::to_value(&requests).expect("request outcomes serialize");
         assert_eq!(
@@ -265,6 +327,7 @@ mod tests {
             serde_json::json!({
                 "changed-since": {
                     "status": "not-applied",
+                    "affects": "scope",
                     "requested": "origin/main",
                     "reason": "invalid-ref",
                     "message": "Ignored."
@@ -280,16 +343,53 @@ mod tests {
         let mut requests = RequestOutcomes::new();
         requests.insert(
             RequestName::ChangedSince,
-            RequestOutcome::applied("origin/main"),
+            RequestOutcome::applied(RequestName::ChangedSince, "origin/main"),
         );
         requests.insert(
             RequestName::DiffFilter,
-            RequestOutcome::not_applied("--diff-stdin", "not-utf8", "Ignored."),
+            RequestOutcome::not_applied(
+                RequestName::DiffFilter,
+                "--diff-stdin",
+                "not-utf8",
+                "Ignored.",
+            ),
         );
         let value = serde_json::to_value(&requests).expect("request outcomes serialize");
         assert_eq!(value["changed-since"]["status"], "applied");
         assert_eq!(value["diff-filter"]["status"], "not-applied");
         assert_eq!(value["diff-filter"]["reason"], "not-utf8");
+    }
+
+    /// The class travels with the entry, so a consumer never has to keep a
+    /// name list to know whether an unapplied request widened the report.
+    #[test]
+    fn a_secondary_artifact_request_is_not_classed_as_scope() {
+        let mut requests = RequestOutcomes::new();
+        requests.insert(
+            RequestName::SarifFile,
+            RequestOutcome::not_applied(
+                RequestName::SarifFile,
+                "out.sarif",
+                "write-failed",
+                "Not written.",
+            ),
+        );
+        requests.insert(
+            RequestName::ChangedSince,
+            RequestOutcome::applied(RequestName::ChangedSince, "origin/main"),
+        );
+        let value = serde_json::to_value(&requests).expect("request outcomes serialize");
+        assert_eq!(value["sarif-file"]["affects"], "artifact");
+        assert_eq!(value["changed-since"]["affects"], "scope");
+    }
+
+    /// The class is derived from the name at construction, so an entry filed
+    /// under one name cannot carry another's class.
+    #[test]
+    fn every_name_carries_its_own_class() {
+        assert_eq!(RequestName::ChangedSince.affects(), RequestEffect::Scope);
+        assert_eq!(RequestName::DiffFilter.affects(), RequestEffect::Scope);
+        assert_eq!(RequestName::SarifFile.affects(), RequestEffect::Artifact);
     }
 
     #[test]

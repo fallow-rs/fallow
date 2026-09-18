@@ -1264,9 +1264,13 @@ variables:
       # --quiet --format json, so the envelope is the only channel that
       # reaches the pipeline. One aggregated line, for the same reason the
       # degraded-analysis block aggregates.
+      # Selected on `affects == "scope"`, never on a name list: the object also
+      # carries requests that produce a file beside the report, whose failure
+      # says nothing about the report's scope, and a name added later carries
+      # its own class.
       REQUESTS_UNAPPLIED=$(jq -r '
         [ (.request_outcomes // {}) | to_entries[]
-          | select(.value.status != "applied")
+          | select(.value.status != "applied" and .value.affects == "scope")
           | if .value.reason then "\(.key) (\(.value.reason))" else .key end ]
         | join(", ")
       ' fallow-results.json 2>/dev/null || true)

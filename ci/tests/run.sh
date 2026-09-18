@@ -2253,7 +2253,7 @@ assert_not_contains "$OUT" "coverage-auto-detected" \
 
 # #2687, #2688: this job runs fallow with --quiet and a machine format, so the
 # envelope is the only channel that reaches the pipeline.
-REQUESTS='"request_outcomes":{"changed-since":{"status":"not-applied","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","requested":"--diff-stdin"}}'
+REQUESTS='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
 ENVELOPE=$(gitlab_gate_envelope '' "$REQUESTS")
 set +e
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
@@ -2272,7 +2272,7 @@ else
   fail "gitlab requests: an unapplied request leaves the pipeline green" "got $GATE_STATUS"
 fi
 
-APPLIED='"request_outcomes":{"diff-filter":{"status":"applied","requested":"--diff-stdin"}}'
+APPLIED='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
 ENVELOPE=$(gitlab_gate_envelope '' "$APPLIED")
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   MOCK_GATE_ENVELOPE="$ENVELOPE" \
@@ -2288,6 +2288,16 @@ OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   FALLOW_FAIL_ON_ISSUES=false) || true
 assert_not_contains "$OUT" "could not apply" \
   "gitlab requests: a pinned binary that publishes no object warns about nothing"
+
+# A request that writes a file beside the report narrows nothing.
+ARTIFACT='"request_outcomes":{"sarif-file":{"status":"not-applied","affects":"artifact","requested":"gl-fallow.sarif","reason":"write-failed","message":"m"}}'
+ENVELOPE=$(gitlab_gate_envelope '' "$ARTIFACT")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "could not apply" \
+  "gitlab requests: an unwritten output file is not reported as an unscoped run"
 
 EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
 ENVELOPE=$(gitlab_gate_envelope '' "$EMPTY")

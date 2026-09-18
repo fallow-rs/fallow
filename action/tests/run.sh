@@ -1200,17 +1200,18 @@ for arg in "$@"; do
   prev="$arg"
 done
 if [ "$fmt" = "sarif" ]; then exit 1; fi
-printf '%s\n' '{"summary":{"functions_above_threshold":0},"request_outcomes":{"sarif-file":{"status":"not-applied","requested":"fallow-results.sarif","reason":"write-failed","message":"failed to write SARIF file: Permission denied."}}}'
+printf '%s\n' '{"summary":{"functions_above_threshold":0},"request_outcomes":{"sarif-file":{"status":"not-applied","affects":"artifact","requested":"fallow-results.sarif","reason":"write-failed","message":"failed to write SARIF file: Permission denied."}}}'
 exit 1
 SH
 chmod +x "$ANALYZE_TMP/bin/fallow"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
-SARIF_REASON_EXIT=$?
 cd "$DIR"
 assert_contains "$OUT" "failed to write SARIF file: Permission denied." \
   "analyze: the warning repeats the reason the envelope recorded"
+assert_not_contains "$OUT" "could not apply" \
+  "analyze: a failed SARIF write is not reported as a run wider than requested"
 
 # --- Summary jq tests ---
 
@@ -3666,6 +3667,18 @@ run_gate_analyze() {
   GATE_ARGV=$(cat "$run_dir/analysis.log")
 }
 
+# The output is declared as a comma-separated list, so "present and empty" is a
+# line with nothing after the `=`. Matching the key alone also matches a
+# populated value, which is how a test named for the empty case can never fail.
+assert_requests_unapplied_empty() {
+  local name="$1"
+  if grep -qx 'requests_unapplied=' <<< "$GATE_OUTPUTS"; then
+    pass "$name"
+  else
+    fail "$name" "expected an empty requests_unapplied line, got: $GATE_OUTPUTS"
+  fi
+}
+
 # The headline of every issue in this batch: the gate fails the job even though
 # fail-on-issues is false, because the two are independent.
 for gate_case in \
@@ -3813,7 +3826,7 @@ assert_not_contains "$GATE_STDOUT" "coverage-auto-detected" \
 
 # #2687, #2688: the fact the CLI can only report on the wire, because this step
 # always runs it with --quiet and a machine format.
-REQUESTS_UNAPPLIED_FIXTURE='"request_outcomes":{"changed-since":{"status":"not-applied","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","requested":"$FALLOW_DIFF_FILE pr.diff"}}'
+REQUESTS_UNAPPLIED_FIXTURE='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"$FALLOW_DIFF_FILE pr.diff"}}'
 run_gate_analyze "$(gate_envelope '' "$REQUESTS_UNAPPLIED_FIXTURE")" \
   INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
 assert_contains "$GATE_STDOUT" "::warning::Fallow could not apply: changed-since (git-failed)" \
@@ -3830,17 +3843,26 @@ fi
 
 # Applied-only, and absent: neither may produce a warning or a populated
 # output, or every scoped run in CI would carry a false alarm.
-REQUESTS_APPLIED_FIXTURE='"request_outcomes":{"diff-filter":{"status":"applied","requested":"--diff-stdin"}}'
+REQUESTS_APPLIED_FIXTURE='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
 run_gate_analyze "$(gate_envelope '' "$REQUESTS_APPLIED_FIXTURE")" \
   INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
 assert_not_contains "$GATE_STDOUT" "could not apply" \
   "requests: a run that applied everything it was asked stays silent"
-assert_contains "$GATE_OUTPUTS" "requests_unapplied=" \
-  "requests: the output is present and empty when everything applied"
+assert_requests_unapplied_empty "requests: the output is present and empty when everything applied"
 
 run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
 assert_not_contains "$GATE_STDOUT" "could not apply" \
   "requests: a pinned binary that publishes no object warns about nothing"
+
+# A request that writes a file BESIDE the report narrows nothing, so the scope
+# warning and the scope-shaped output must both stay clear of it. The
+# SARIF-absence warning owns that case and says the right thing about it.
+REQUESTS_ARTIFACT_FIXTURE='"request_outcomes":{"sarif-file":{"status":"not-applied","affects":"artifact","requested":"fallow-results.sarif","reason":"write-failed","message":"m"}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_ARTIFACT_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: an unwritten output file is not reported as an unscoped run"
+assert_requests_unapplied_empty "requests: the scope output stays empty when only an output file failed"
 
 EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
 run_gate_analyze "$(gate_envelope '' "$EMPTY")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"

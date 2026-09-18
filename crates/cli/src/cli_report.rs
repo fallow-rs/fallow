@@ -283,6 +283,7 @@ mod status_note_tests {
         requests.insert(
             fallow_output::RequestName::ChangedSince,
             fallow_output::RequestOutcome::not_applied(
+                fallow_output::RequestName::ChangedSince,
                 "origin/main",
                 "invalid-ref",
                 "--changed-since 'origin/main' was ignored.",
@@ -290,7 +291,10 @@ mod status_note_tests {
         );
         requests.insert(
             fallow_output::RequestName::DiffFilter,
-            fallow_output::RequestOutcome::applied("--diff-file pr.diff"),
+            fallow_output::RequestOutcome::applied(
+                fallow_output::RequestName::DiffFilter,
+                "--diff-file pr.diff",
+            ),
         );
         requests
     }

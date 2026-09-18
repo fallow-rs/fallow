@@ -413,7 +413,10 @@ pub(crate) fn init_shared_diff(
         let label = src.label();
         match place_diff(src, root, candidate_bases, quiet) {
             Ok(loaded) => {
-                request = Some(fallow_output::RequestOutcome::applied(label));
+                request = Some(fallow_output::RequestOutcome::applied(
+                    fallow_output::RequestName::DiffFilter,
+                    label,
+                ));
                 Some(loaded)
             }
             Err(stand_down) => {
@@ -421,6 +424,7 @@ pub(crate) fn init_shared_diff(
                     eprintln!("fallow: warning [diff-file]: {}", stand_down.message);
                 }
                 request = Some(fallow_output::RequestOutcome::not_applied(
+                    fallow_output::RequestName::DiffFilter,
                     label,
                     stand_down.reason,
                     stand_down.message,

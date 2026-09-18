@@ -98,6 +98,17 @@ own sentence, because its clean result means nothing was measured rather than
 that nothing was found. It warns and passes by default; set
 `fail-on-empty-analysis: true` to fail instead.
 
+### Requests the run could not apply
+
+A run asked to narrow its report (`changed-since`, or a supplied diff) and
+unable to, widens instead of failing, and the report that follows is complete
+and covers more than was asked for. That is reported once as a `::warning::` and
+published as the `requests-unapplied` output, so a workflow can branch on it
+rather than trusting a scoped review that was never scoped. Only requests that
+narrow the report are listed. A request that writes a file beside the report,
+such as the SARIF document, changes nothing about the report's scope, and a
+failure there is reported by the SARIF warning instead.
+
 ### Upgrading from an earlier action
 
 The inline `Check threshold` step is gone. Its logic moved into the analyze
