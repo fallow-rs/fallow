@@ -1320,6 +1320,26 @@ if [ -n "$DEGRADED_SUMMARY" ]; then
   ANALYSIS_DEGRADED=true
   echo "::warning::Fallow analyzed a degraded file set: ${DEGRADED_SUMMARY}. Findings were computed over less than the whole project."
 fi
+# --- Requests the run could not apply (issues #2687, #2688) ---
+#
+# The CLI writes this to stderr too, and this step replays stderr as
+# ::debug:: (see below), which nobody reads without ACTIONS_STEP_DEBUG. The
+# envelope is the channel that survives `--quiet --format json`, which is how
+# this step always invokes fallow.
+#
+# One aggregated warning, for the same annotation-budget reason as the
+# degraded-analysis block above. Honoured requests are deliberately not named:
+# the interesting fact is a report that is wider than what was asked for.
+REQUESTS_UNAPPLIED=$(jq -r '
+  [ (.request_outcomes // {}) | to_entries[]
+    | select(.value.status != "applied")
+    | if .value.reason then "\(.key) (\(.value.reason))" else .key end ]
+  | join(", ")
+' "$RESULTS_FILE" 2>/dev/null || true)
+if [ -n "$REQUESTS_UNAPPLIED" ]; then
+  echo "::warning::Fallow could not apply: ${REQUESTS_UNAPPLIED}. The findings below cover more of the project than was requested, so do not read this run as scoped to the change."
+fi
+
 if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' "$RESULTS_FILE" > /dev/null 2>&1; then
   EMPTY_ANALYSIS=true
   EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check the analysis root, ignorePatterns, and any path or workspace filter."
@@ -1438,7 +1458,8 @@ fi
     "gates_warned=$(join_gate_names "${GATE_WARNED_NAMES[@]:-}")" \
     "gates_skipped=$(join_gate_names "${GATE_SKIPPED_NAMES[@]:-}")" \
     "gates_passed=$(join_gate_names "${GATE_PASSED_NAMES[@]:-}")" \
-    "analysis_degraded=${ANALYSIS_DEGRADED}"
+    "analysis_degraded=${ANALYSIS_DEGRADED}" \
+    "requests_unapplied=${REQUESTS_UNAPPLIED}"
   if [ -f "$SARIF_FILE" ]; then
     printf '%s\n' "sarif=${SARIF_FILE}"
   fi

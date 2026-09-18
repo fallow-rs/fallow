@@ -3766,6 +3766,37 @@ assert_not_contains "$GATE_STDOUT" "boundaries-not-configured" \
   "degraded: the unconfigured-check kinds are not reported"
 assert_contains "$GATE_OUTPUTS" "analysis_degraded=true" "degraded: the output is set"
 
+# #2687, #2688: the fact the CLI can only report on the wire, because this step
+# always runs it with --quiet and a machine format.
+REQUESTS_UNAPPLIED_FIXTURE='"request_outcomes":{"changed-since":{"status":"not-applied","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","requested":"$FALLOW_DIFF_FILE pr.diff"}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_UNAPPLIED_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "::warning::Fallow could not apply: changed-since (git-failed)" \
+  "requests: an unapplied request warns once with its reason"
+assert_not_contains "$GATE_STDOUT" "diff-filter" \
+  "requests: an honoured request is not named in the warning"
+assert_contains "$GATE_OUTPUTS" "requests_unapplied=changed-since (git-failed)" \
+  "requests: the output carries the unapplied names"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "requests: an unapplied request does not fail the job"
+else
+  fail "requests: an unapplied request does not fail the job" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+
+# Applied-only, and absent: neither may produce a warning or a populated
+# output, or every scoped run in CI would carry a false alarm.
+REQUESTS_APPLIED_FIXTURE='"request_outcomes":{"diff-filter":{"status":"applied","requested":"--diff-stdin"}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_APPLIED_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: a run that applied everything it was asked stays silent"
+assert_contains "$GATE_OUTPUTS" "requests_unapplied=" \
+  "requests: the output is present and empty when everything applied"
+
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: a pinned binary that publishes no object warns about nothing"
+
 EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
 run_gate_analyze "$(gate_envelope '' "$EMPTY")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"
 assert_contains "$GATE_STDOUT" "::warning::Fallow analyzed no source file at all" \

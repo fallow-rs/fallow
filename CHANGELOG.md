@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A run that asked to be scoped and could not be now says so.** Before:
+  `--changed-since origin/main` on a shallow clone, or a `--diff-file` fallow
+  could not place, warned on stderr, widened to the whole project and produced a
+  report that looked scoped. After: the run publishes `request_outcomes` in its
+  JSON envelope, so a reviewer, a CI job and an agent can all tell a scoped
+  report from a whole-project one.
+
+  This mattered most where nobody could see it. Both the GitHub Action and the
+  GitLab template invoke fallow with `--quiet` and a machine format, and the
+  diff source they pass arrives through `$FALLOW_DIFF_FILE`, which is the one
+  channel `--quiet` silences completely. A pull request whose diff fallow could
+  not place therefore reported every finding in the repository as though they
+  were all introduced by the change, with no trace anywhere the consumer reads.
+
+  Two channels report today. `changed-since` reports `git-missing`,
+  `not-a-repository` or `git-failed`; `diff-filter` reports `oversize`,
+  `unreadable`, `not-utf8`, `foreign-namespace` or `ambiguous-base`. Each entry
+  carries `requested` (what was asked, as you spelled it) and, when the request
+  was not applied, a `reason` token and a one-sentence `message` that ends with
+  the next step. Honoured requests are published too, with
+  `status: "applied"`, which is what lets a comment state "scoped to the
+  change" positively: read an absent object as "nothing was asked for", never
+  as "nothing failed". The key set and the `status` value set are both open, so
+  a request added later reaches an unchanged consumer.
+
+  `fallow audit` is unaffected and carries no object: it already exits 2 rather
+  than widen, and states its scope through `base_ref` and `base_description`.
+
+  The rendered surfaces carry the fact too. The job summary, the pull-request
+  comment, the merge-request note, both review targets and the annotation
+  stream state it, live and through `fallow report --from`, and it is
+  informational everywhere: nothing here changes an exit code. The GitHub
+  Action warns once and publishes a `requests-unapplied` output; the GitLab
+  template prints the same line and writes `FALLOW_REQUESTS_UNAPPLIED` into
+  `fallow-gates.env`. The MCP tools restate it on the root `warnings` array,
+  where it replaces a silence the `--quiet` subprocess made unavoidable.
+
+  No `schema_version` moves: the object is additive, optional, and absent on
+  every run produced today
+  (Closes [#2687](https://github.com/fallow-rs/fallow/issues/2687), [#2688](https://github.com/fallow-rs/fallow/issues/2688)).
+
 ## [3.27.0] - 2026-09-17
 
 ### Fixed

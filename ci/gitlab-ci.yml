@@ -1258,6 +1258,22 @@ variables:
         ANALYSIS_DEGRADED=true
         echo "WARNING: Fallow analyzed a degraded file set: ${DEGRADED_SUMMARY}. Findings were computed over less than the whole project."
       fi
+      # ── Requests the run could not apply ─────────────────────────────
+      #
+      # The CLI also writes this to stderr, and this job runs it with
+      # --quiet --format json, so the envelope is the only channel that
+      # reaches the pipeline. One aggregated line, for the same reason the
+      # degraded-analysis block aggregates.
+      REQUESTS_UNAPPLIED=$(jq -r '
+        [ (.request_outcomes // {}) | to_entries[]
+          | select(.value.status != "applied")
+          | if .value.reason then "\(.key) (\(.value.reason))" else .key end ]
+        | join(", ")
+      ' fallow-results.json 2>/dev/null || true)
+      if [ -n "$REQUESTS_UNAPPLIED" ]; then
+        echo "WARNING: Fallow could not apply: ${REQUESTS_UNAPPLIED}. The findings below cover more of the project than was requested, so do not read this run as scoped to the change."
+      fi
+
       if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' fallow-results.json > /dev/null 2>&1; then
         EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check FALLOW_ROOT, ignorePatterns, and any path or workspace filter."
         if [ "$FALLOW_FAIL_ON_EMPTY_ANALYSIS" = "true" ]; then
@@ -1303,6 +1319,7 @@ variables:
         echo "FALLOW_GATES_SKIPPED=${GATE_SKIPPED_NAMES}"
         echo "FALLOW_GATES_PASSED=${GATE_PASSED_NAMES}"
         echo "FALLOW_ANALYSIS_DEGRADED=${ANALYSIS_DEGRADED}"
+        echo "FALLOW_REQUESTS_UNAPPLIED=${REQUESTS_UNAPPLIED}"
       } > fallow-gates.env
 
       if [ ${#GATE_FAILURES[@]} -gt 0 ]; then
