@@ -1268,3 +1268,241 @@ fn a_baseline_with_entries_never_earns_the_zero_entry_note() {
         output.stderr
     );
 }
+
+/// Save a dead-code baseline over `project`, then remove what it recorded, so
+/// every entry goes unmatched with no current finding to compare against.
+///
+/// That pair is the shape #2675 is about: the advisory stays silent because a
+/// cleaned project and a rotted baseline look identical from the counts, while
+/// `--fail-on-stale-baseline` asks for exactly that case and its rule holds.
+fn rotted_dead_code_baseline(project: &TempDir, orphans: usize) -> String {
+    let root = project.path();
+    let baseline = root.join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8").to_owned();
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        &baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a baseline should not error: {}",
+        saved.stderr
+    );
+    for index in 0..orphans {
+        std::fs::remove_file(root.join(format!("src/orphan{index}.ts")))
+            .expect("clean the project");
+    }
+    baseline_arg
+}
+
+fn run_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOutput {
+    let mut command = std::process::Command::new(common::fallow_bin());
+    command.env("RUST_LOG", "").env("NO_COLOR", "1");
+    common::scrub_coverage_env(&mut command);
+    for arg in args {
+        command.arg(arg);
+    }
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    let output = command.output().expect("run fallow");
+    CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+fn decision_sidecar(path: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(path).expect("read the decision sidecar"))
+        .expect("parse the decision sidecar")
+}
+
+fn decision_gate<'a>(sidecar: &'a Value, id: &str) -> &'a Value {
+    sidecar["gates"]
+        .as_array()
+        .expect("the gates array is present")
+        .iter()
+        .find(|gate| gate["id"] == id)
+        .unwrap_or_else(|| panic!("expected a `{id}` row, got {}", sidecar["gates"]))
+}
+
+/// The headline ask of #2675: an armed and tripped baseline gate reaches the
+/// Check Run as a named gate, and the sticky comment says what went stale.
+#[test]
+fn a_tripped_stale_baseline_gate_reaches_the_comment_and_the_decision_surface() {
+    let project = orphan_project(3);
+    let baseline_arg = rotted_dead_code_baseline(&project, 3);
+    let sidecar_path = project.path().join("decision.json");
+
+    let output = run_with_env(
+        &[
+            "dead-code",
+            "--root",
+            root_arg(&project),
+            "--format",
+            "pr-comment-github",
+            "--quiet",
+            "--baseline",
+            &baseline_arg,
+            "--fail-on-stale-baseline",
+        ],
+        &[(
+            "FALLOW_PR_DECISION_FILE",
+            sidecar_path.to_str().expect("utf8"),
+        )],
+    );
+
+    assert!(
+        output
+            .stdout
+            .contains("**Baseline has stale entries.** 3 of 3 saved entries matched nothing"),
+        "the artefact a reviewer reads must say what went stale: {}",
+        output.stdout
+    );
+    assert!(
+        output
+            .stdout
+            .contains("Gate outcomes: failed stale-baseline"),
+        "the gate inventory keeps its place beside the advisory: {}",
+        output.stdout
+    );
+
+    let sidecar = decision_sidecar(&sidecar_path);
+    let row = decision_gate(&sidecar, "stale-baseline");
+    assert_eq!(row["label"], "Stale baseline");
+    assert_eq!(row["status"], "failure");
+    assert_eq!(
+        row["scope"], "this run",
+        "a baseline verdict is not scoped to the change and must not claim to be"
+    );
+    assert_eq!(
+        sidecar["gates"][0]["id"], "dead-code",
+        "the command row stays first"
+    );
+}
+
+/// Published without the flag that arms it, the same verdict must not paint a
+/// red gate: `enforced` is the CLI's statement about its own exit code, and a
+/// repository that never asked for the gate has not configured a failure.
+#[test]
+fn an_unarmed_stale_baseline_gate_reaches_the_decision_surface_as_neutral() {
+    let project = orphan_project(2);
+    let baseline_arg = rotted_dead_code_baseline(&project, 2);
+    let sidecar_path = project.path().join("decision.json");
+
+    let output = run_with_env(
+        &[
+            "dead-code",
+            "--root",
+            root_arg(&project),
+            "--format",
+            "pr-comment-gitlab",
+            "--quiet",
+            "--baseline",
+            &baseline_arg,
+        ],
+        &[(
+            "FALLOW_PR_DECISION_FILE",
+            sidecar_path.to_str().expect("utf8"),
+        )],
+    );
+    assert_eq!(output.code, 0, "no gate was armed: {}", output.stderr);
+
+    let sidecar = decision_sidecar(&sidecar_path);
+    assert_eq!(
+        decision_gate(&sidecar, "stale-baseline")["status"],
+        "neutral"
+    );
+    assert!(
+        output.stdout.contains("**Baseline has stale entries.**"),
+        "the advisory is about the baseline, not about the exit code: {}",
+        output.stdout
+    );
+}
+
+/// A run whose baseline is fresh says nothing about staleness, so the clause is
+/// conditional rather than always present.
+#[test]
+fn a_fresh_baseline_adds_no_advisory_to_the_comment() {
+    let project = orphan_project(2);
+    let baseline = project.path().join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(saved.code == 0 || saved.code == 1, "{}", saved.stderr);
+
+    let output = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "pr-comment-github",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]);
+
+    assert!(
+        !output.stdout.contains("Baseline"),
+        "a baseline that matched everything earns no advisory: {}",
+        output.stdout
+    );
+}
+
+/// The check-run `conclusion` is a documented non-blocker. Appending a failing
+/// gate row must not turn a combined run that armed a gate into a merge
+/// blocker for every consumer with a required check.
+#[test]
+fn a_tripped_gate_row_does_not_move_the_combined_check_run_conclusion() {
+    let project = orphan_project(3);
+    let baseline_arg = rotted_dead_code_baseline(&project, 3);
+    let sidecar_path = project.path().join("decision.json");
+
+    let output = run_with_env(
+        &[
+            "--root",
+            root_arg(&project),
+            "--format",
+            "pr-comment-github",
+            "--quiet",
+            "--baseline",
+            &baseline_arg,
+            "--fail-on-stale-baseline",
+        ],
+        &[(
+            "FALLOW_PR_DECISION_FILE",
+            sidecar_path.to_str().expect("utf8"),
+        )],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "combined should not error: {}",
+        output.stderr
+    );
+
+    let sidecar = decision_sidecar(&sidecar_path);
+    assert_eq!(
+        decision_gate(&sidecar, "stale-baseline")["status"],
+        "failure"
+    );
+    assert_ne!(
+        sidecar["conclusion"], "failure",
+        "the conclusion stays derived from the per-area rows: {}",
+        sidecar["gates"]
+    );
+}

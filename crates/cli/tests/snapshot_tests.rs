@@ -14,7 +14,10 @@ use fallow_api::{
 use fallow_cli::report::{
     build_compact_lines, build_duplication_markdown, build_health_markdown, build_markdown,
     ci::{
-        pr_comment::{Provider, issues_from_codeclimate, render_pr_comment},
+        pr_comment::{
+            Provider, issues_from_codeclimate, render_pr_comment,
+            render_pr_comment_with_status_note,
+        },
         review::render_review_envelope,
     },
 };
@@ -1984,6 +1987,122 @@ fn pr_comment_gitlab_snapshot() {
     let output = render_pr_comment("check", Provider::Gitlab, &issues, None);
 
     insta::assert_snapshot!("pr_comment_gitlab", output);
+}
+
+/// The advisory a reviewer reads when the baseline has rotted, on the surface
+/// they actually open. Separate snapshots from the no-baseline pair on purpose:
+/// a clause emitted unconditionally would move those two instead, and the
+/// regression in the plain body has to stay catchable.
+#[test]
+fn pr_comment_github_stale_baseline_snapshot() {
+    insta::assert_snapshot!(
+        "pr_comment_github_stale_baseline",
+        stale_baseline_pr_comment(Provider::Github)
+    );
+}
+
+#[test]
+fn pr_comment_gitlab_stale_baseline_snapshot() {
+    insta::assert_snapshot!(
+        "pr_comment_gitlab_stale_baseline",
+        stale_baseline_pr_comment(Provider::Gitlab)
+    );
+}
+
+/// A baseline that matched everything says nothing about staleness, so the body
+/// carries the gate inventory and no advisory.
+#[test]
+fn pr_comment_github_fresh_baseline_snapshot() {
+    insta::assert_snapshot!(
+        "pr_comment_github_fresh_baseline",
+        fresh_baseline_pr_comment(Provider::Github)
+    );
+}
+
+#[test]
+fn pr_comment_gitlab_fresh_baseline_snapshot() {
+    insta::assert_snapshot!(
+        "pr_comment_gitlab_fresh_baseline",
+        fresh_baseline_pr_comment(Provider::Gitlab)
+    );
+}
+
+fn baseline_staleness_fixture(
+    warning: BaselineStalenessAdvisory,
+    matched: usize,
+    gate_trips: bool,
+) -> BaselineStaleness {
+    BaselineStaleness {
+        baseline_entries: 8,
+        matched_entries: matched,
+        stale_entries: 8 - matched,
+        current_findings: 6,
+        change_scoped: false,
+        stale: !matches!(warning, BaselineStalenessAdvisory::None),
+        warning,
+        gate_trips,
+        moved_entries: 0,
+        scope_reasons: BaselineScopeReasons::empty(),
+    }
+}
+
+/// One finding rather than the full sample set: these snapshots exist to pin
+/// the status note, and a body carrying every rule would move all four of them
+/// whenever an unrelated message changes.
+fn baseline_sample_issues() -> Vec<CiIssue> {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results
+        .unused_exports
+        .push(UnusedExportFinding::with_actions(UnusedExport {
+            path: root.join("src/helpers.ts"),
+            export_name: "capitalize".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        }));
+    let codeclimate =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
+    issues_from_codeclimate(&codeclimate)
+}
+
+fn baseline_pr_comment(staleness: &BaselineStaleness, provider: Provider) -> String {
+    let issues = baseline_sample_issues();
+    let mut gates = GateOutcomes::new();
+    gates.insert(
+        GateName::StaleBaseline,
+        GateOutcome::new(
+            if staleness.gate_trips {
+                GateStatus::Fail
+            } else {
+                GateStatus::Pass
+            },
+            true,
+        ),
+    );
+    let note = fallow_cli::report::ci_status_note(
+        None,
+        fallow_cli::report::baseline_advisory_text::advisory_line_for_staleness(Some(staleness))
+            .as_deref(),
+        Some(&gates),
+    );
+    render_pr_comment_with_status_note("check", provider, &issues, None, note.as_deref())
+}
+
+fn stale_baseline_pr_comment(provider: Provider) -> String {
+    baseline_pr_comment(
+        &baseline_staleness_fixture(BaselineStalenessAdvisory::ZeroOverlap, 0, true),
+        provider,
+    )
+}
+
+fn fresh_baseline_pr_comment(provider: Provider) -> String {
+    baseline_pr_comment(
+        &baseline_staleness_fixture(BaselineStalenessAdvisory::None, 8, false),
+        provider,
+    )
 }
 
 #[test]

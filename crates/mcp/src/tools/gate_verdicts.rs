@@ -154,55 +154,22 @@ const CARRIER_KEYS: &[&str] = &[
 
 /// Every verdict this envelope states, in a fixed order so two identical runs
 /// produce identical responses.
+///
+/// The baseline sites are the shared list, because the pull-request comment
+/// advisory reads the same envelopes and a site only one surface knows about
+/// is a baseline only one surface reports. `audit` resolves its baselines from
+/// config as well as from parameters, which is why the sites are keyed on the
+/// envelope rather than on what the caller passed.
 fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
     let noun = noun(root);
-    let mut warnings: Vec<String> = BASELINE_SITES
-        .iter()
-        .filter_map(|(path, analysis)| baseline_warning(lookup(root, path)?, *analysis, noun))
+    let mut warnings: Vec<String> = fallow_types::envelope_sites::baseline_staleness_objects(root)
+        .filter_map(|(staleness, analysis)| baseline_warning(staleness, analysis, noun))
         .collect();
     let baseline_reported = !warnings.is_empty();
     warnings.extend(gate_warnings(root, baseline_reported));
     warnings.extend(degraded_analysis_warning(root));
     warnings
 }
-
-/// Where a loaded baseline's staleness sits on each envelope shape, and which
-/// analysis it belongs to on the shapes that carry more than one.
-///
-/// Every row is a path a run actually emits, measured rather than inferred.
-/// `dead-code` and `dupes` publish it at the root and `health` inside
-/// `summary`; the combined envelope repeats those under `check`, `dupes` and
-/// `health`. `audit` publishes one per baseline it loaded, at the root of its
-/// `dead_code` and `duplication` sections and inside its `complexity`
-/// section's own `summary`, so all three of its baselines have a row. Naming
-/// the sites is what keeps the multi-section shapes from reporting one
-/// baseline's rot against another's counts, and a shape that carries none of
-/// them contributes nothing.
-///
-/// The label is the section the envelope actually uses, not the command the
-/// baseline came from, because that is what an agent reading the sentence goes
-/// looking for. Audit's row reports a distinct verdict for a reason of its own:
-/// every audit is change-scoped, so its staleness object always reports
-/// `change_scoped: true`, which makes both the advisory and `gate_trips` false
-/// by construction. That case gets the unjudged sentence rather than silence,
-/// because a baseline no run ever judges rots without a word.
-///
-/// `audit` resolves its baselines from config as well as from parameters,
-/// which is why the rows are keyed on the envelope rather than on what the
-/// caller passed.
-const BASELINE_SITES: &[(&[&str], Option<&str>)] = &[
-    (&["baseline_staleness"], None),
-    (&["summary", "baseline_staleness"], None),
-    (&["check", "baseline_staleness"], Some("dead-code")),
-    (&["dupes", "baseline_staleness"], Some("duplication")),
-    (&["health", "summary", "baseline_staleness"], Some("health")),
-    (&["dead_code", "baseline_staleness"], Some("dead-code")),
-    (&["duplication", "baseline_staleness"], Some("duplication")),
-    (
-        &["complexity", "summary", "baseline_staleness"],
-        Some("complexity"),
-    ),
-];
 
 /// Where a run publishes the diagnostics that say it was degraded, in the
 /// order they are looked for.
@@ -217,15 +184,6 @@ const DIAGNOSTIC_SITES: &[&[&str]] = &[
     &["duplication", "workspace_diagnostics"],
     &["complexity", "workspace_diagnostics"],
 ];
-
-fn lookup<'a>(root: &'a Map<String, Value>, path: &[&str]) -> Option<&'a Value> {
-    let (first, rest) = path.split_first()?;
-    let mut current = root.get(*first)?;
-    for key in rest {
-        current = current.get(key)?;
-    }
-    Some(current)
-}
 
 /// What this command calls the things a baseline entry describes, matching the
 /// noun its own CLI advisory uses. Read from the envelope's `kind`, so a
@@ -474,7 +432,7 @@ fn number(value: f64) -> String {
 fn degraded_analysis_warning(root: &Map<String, Value>) -> Option<String> {
     let counts = DIAGNOSTIC_SITES
         .iter()
-        .filter_map(|path| lookup(root, path)?.as_array())
+        .filter_map(|path| fallow_types::envelope_sites::lookup(root, path)?.as_array())
         .map(|diagnostics| degrading_kinds(diagnostics))
         .find(|counts| !counts.is_empty())?;
     let kinds = counts

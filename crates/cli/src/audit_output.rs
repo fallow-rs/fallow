@@ -206,16 +206,22 @@ fn print_audit_pr_comment(
     } else {
         audit_decision_conclusion(result.verdict)
     };
+    let gates = audit_gate_outcomes(result);
+    let advisory = audit_baseline_advisory(result);
+    let note = report::ci_status_note(
+        incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+        advisory.as_deref(),
+        gates.as_ref(),
+    );
     report::ci::pr_comment::print_pr_comment_with_status(
         "audit",
         provider,
         &value,
         conclusion,
-        report::ci_status_note(
-            incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
-            audit_gate_outcomes(result).as_ref(),
-        )
-        .as_deref(),
+        report::ci::pr_comment::PrCommentStatus {
+            message: note.as_deref(),
+            gates: &report::gate_outcome_text::gate_rows_for_gates(gates.as_ref()),
+        },
     )
 }
 
@@ -242,10 +248,56 @@ fn print_audit_review(
         conclusion,
         report::ci_status_note(
             incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+            audit_baseline_advisory(result).as_deref(),
             audit_gate_outcomes(result).as_ref(),
         )
         .as_deref(),
     )
+}
+
+/// The advisory for the baselines this audit loaded, rendered off the same
+/// section shape its JSON envelope publishes.
+///
+/// Built as that shape rather than passed object by object, because
+/// `fallow report --from` renders the saved audit envelope through the shared
+/// reader and the two must not each decide how three baselines read. Every
+/// audit narrows to the files that changed against its base, so in practice
+/// all three objects are change-scoped and this stays silent; building the
+/// shape rather than trusting that keeps the two paths identical if one ever
+/// is not.
+fn audit_baseline_advisory(result: &AuditResult) -> Option<String> {
+    let mut sections = serde_json::Map::new();
+    if let Some(staleness) = result
+        .check
+        .as_ref()
+        .and_then(|check| check.baseline_staleness.as_ref())
+    {
+        sections.insert(
+            "dead_code".to_owned(),
+            serde_json::json!({ "baseline_staleness": staleness.to_envelope(0) }),
+        );
+    }
+    if let Some(staleness) = result
+        .dupes
+        .as_ref()
+        .and_then(|dupes| dupes.baseline_staleness.as_ref())
+    {
+        sections.insert(
+            "duplication".to_owned(),
+            serde_json::json!({ "baseline_staleness": staleness.to_envelope(0) }),
+        );
+    }
+    if let Some(staleness) = result
+        .health
+        .as_ref()
+        .and_then(|health| health.report.summary.baseline_staleness.as_ref())
+    {
+        sections.insert(
+            "complexity".to_owned(),
+            serde_json::json!({ "summary": { "baseline_staleness": staleness } }),
+        );
+    }
+    report::baseline_advisory_text::advisory_line(&serde_json::Value::Object(sections))
 }
 
 fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: OutputFormat) {

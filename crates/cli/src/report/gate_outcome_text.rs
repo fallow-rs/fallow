@@ -54,6 +54,37 @@ impl GateLine {
     fn described(&self) -> String {
         format!("{}{}", self.name, self.measured_clause())
     }
+
+    /// The `observed` display text for a decision-surface row: the numbers the
+    /// gate compared when it compared any, and the status word otherwise.
+    ///
+    /// A row with an empty `observed` renders as a bare label in the check run
+    /// and as `Fallow / <id>: ` in a split commit status, so a gate that
+    /// measured nothing says what it concluded instead.
+    fn observed_text(&self) -> String {
+        match (
+            self.observed,
+            self.threshold,
+            self.threshold_label.as_deref(),
+        ) {
+            (Some(observed), Some(threshold), _) => {
+                format!("{} against {}", trim_num(observed), trim_num(threshold))
+            }
+            (Some(observed), None, Some(label)) => {
+                format!("{} at or above {label}", trim_num(observed))
+            }
+            (Some(observed), None, None) => trim_num(observed),
+            _ => self.status.clone(),
+        }
+    }
+
+    /// The `threshold` display text, `None` when the gate has no threshold to
+    /// show.
+    fn threshold_text(&self) -> Option<String> {
+        self.threshold
+            .map(trim_num)
+            .or_else(|| self.threshold_label.clone())
+    }
 }
 
 /// Render a whole number without a trailing `.0`, so a count of three reads as
@@ -201,6 +232,110 @@ pub fn summary_line_for_gates(gates: Option<&fallow_output::GateOutcomes>) -> Op
 pub fn annotation_line(envelope: &Value) -> Option<String> {
     let line = summary_line(envelope)?;
     Some(format!("::notice::Fallow: {line}"))
+}
+
+/// One decision-surface row per gate the run armed, so every gate the envelope
+/// reports reaches the check run as a named gate rather than as a failed step.
+///
+/// Generalized rather than special-cased: `--fail-on-stale-baseline` was the
+/// gate a reviewer could not see (#2675), and building a row per entry covers
+/// the twelve others at the same cost, including any gate a later release adds.
+///
+/// The surface `conclusion` is deliberately NOT derived from these rows. It is
+/// a documented non-blocker and moving it is a separate decision with its own
+/// blast radius, so a caller extends its `gates` array after computing its own
+/// conclusion.
+pub fn gate_rows(envelope: &Value) -> Vec<fallow_output::PrDecisionGate> {
+    read_gate_outcomes(envelope)
+        .iter()
+        .map(|gate| fallow_output::PrDecisionGate {
+            id: gate.name.clone(),
+            label: gate_label(&gate.name),
+            status: row_status(gate),
+            observed: gate.observed_text(),
+            threshold: gate.threshold_text(),
+            // The existing command row says "new code". A gate verdict is not
+            // scoped to the change: the baseline rule compares what the whole
+            // run matched, and a health floor reads the whole score.
+            scope: "this run".to_owned(),
+        })
+        .collect()
+}
+
+/// [`gate_rows`] for a live run, which holds the gates typed rather than as a
+/// parsed envelope.
+///
+/// Routed through the same function for the same reason
+/// [`summary_line_for_gates`] is: the saved render and the direct render are
+/// one contract with its own parity suite.
+pub fn gate_rows_for_gates(
+    gates: Option<&fallow_output::GateOutcomes>,
+) -> Vec<fallow_output::PrDecisionGate> {
+    let Some(gates) = gates else {
+        return Vec::new();
+    };
+    gate_rows(&serde_json::json!({ "gate_outcomes": gates }))
+}
+
+/// How a gate's four-valued status maps onto the check-run conclusions the
+/// decision surface publishes.
+///
+/// An unenforced failure is `neutral`, not `failure`: `enforced` is the CLI's
+/// statement about its own exit code, and a verdict published without the flag
+/// that arms it must not paint a red gate on a run the repository configured to
+/// pass. `warn` and any status this build does not recognise are `neutral` too,
+/// never `success`, which is the rule [`partition`] already follows.
+fn row_status(gate: &GateLine) -> fallow_output::PrDecisionConclusion {
+    use fallow_output::PrDecisionConclusion as Conclusion;
+    match gate.status.as_str() {
+        "fail" if gate.enforced => Conclusion::Failure,
+        "pass" => Conclusion::Success,
+        "skipped" => Conclusion::Skipped,
+        _ => Conclusion::Neutral,
+    }
+}
+
+/// The display label for a gate name.
+///
+/// The name set is OPEN, so an unrecognised name degrades to its kebab spelling
+/// read as words rather than being dropped or panicking: a gate from a newer
+/// build still reaches the check run with a readable label.
+fn gate_label(name: &str) -> String {
+    known_gate_label(name).map_or_else(|| sentence_case(name), str::to_owned)
+}
+
+/// The label for a gate this build emits, `None` for a name it does not know.
+///
+/// Separate from [`gate_label`] so the coverage test can tell a deliberate
+/// label from the open-set fallback, which for a one-word name renders the same
+/// string.
+fn known_gate_label(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "error-severity-findings" => "Error-severity findings",
+        "regression" => "Regression",
+        "stale-baseline" => "Stale baseline",
+        "duplication-threshold" => "Duplication threshold",
+        "health-min-score" => "Health minimum score",
+        "health-min-severity" => "Health minimum severity",
+        "health-findings" => "Health findings",
+        "health-coverage-gaps" => "Coverage gaps",
+        "health-runtime-coverage" => "Runtime coverage",
+        "security" => "Security",
+        "security-advisory" => "Security advisory",
+        "audit-verdict" => "Audit verdict",
+        "type-aware-require" => "Type-aware completeness",
+        _ => return None,
+    })
+}
+
+/// `some-future-gate` -> `Some future gate`.
+fn sentence_case(name: &str) -> String {
+    let spaced = name.replace('-', " ");
+    let mut chars = spaced.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -364,5 +499,133 @@ mod tests {
             summary_line(&value).expect("gates ran"),
             "Gate outcomes: failed regression, stale-baseline."
         );
+    }
+
+    #[test]
+    fn an_envelope_without_the_object_builds_no_rows() {
+        assert!(gate_rows(&serde_json::json!({ "kind": "dead-code" })).is_empty());
+        assert!(gate_rows_for_gates(None).is_empty());
+    }
+
+    /// The row #2675 asked for: an armed and tripped baseline gate reaching the
+    /// check run as a named gate rather than as a failed step.
+    #[test]
+    fn an_armed_stale_baseline_gate_becomes_a_failing_row() {
+        let value = envelope(&serde_json::json!({
+            "stale-baseline": { "status": "fail", "enforced": true }
+        }));
+
+        let rows = gate_rows(&value);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "stale-baseline");
+        assert_eq!(rows[0].label, "Stale baseline");
+        assert_eq!(rows[0].status, fallow_output::PrDecisionConclusion::Failure);
+        assert_eq!(rows[0].observed, "fail");
+        assert_eq!(rows[0].threshold, None);
+        assert_eq!(rows[0].scope, "this run");
+    }
+
+    /// `enforced` is the CLI's statement about its own exit code. A verdict
+    /// published without the flag that arms it must not paint a red gate on a
+    /// run the repository configured to pass.
+    #[test]
+    fn the_four_statuses_map_onto_the_check_run_conclusions() {
+        use fallow_output::PrDecisionConclusion as Conclusion;
+        for (status, enforced, expected) in [
+            ("fail", true, Conclusion::Failure),
+            ("fail", false, Conclusion::Neutral),
+            ("warn", true, Conclusion::Neutral),
+            ("skipped", false, Conclusion::Skipped),
+            ("pass", true, Conclusion::Success),
+            ("deferred", true, Conclusion::Neutral),
+        ] {
+            let value = envelope(&serde_json::json!({
+                "stale-baseline": { "status": status, "enforced": enforced }
+            }));
+            let rows = gate_rows(&value);
+            assert_eq!(rows[0].status, expected, "{status} enforced={enforced}");
+            assert_eq!(
+                rows[0].observed, status,
+                "{status} must say what it concluded"
+            );
+        }
+    }
+
+    #[test]
+    fn a_measured_gate_carries_both_numbers() {
+        let value = envelope(&serde_json::json!({
+            "health-min-score": {
+                "status": "fail", "enforced": true, "observed": 85.0, "threshold": 90.0
+            }
+        }));
+
+        let rows = gate_rows(&value);
+
+        assert_eq!(rows[0].observed, "85 against 90");
+        assert_eq!(rows[0].threshold.as_deref(), Some("90"));
+    }
+
+    #[test]
+    fn a_named_floor_is_carried_as_the_threshold() {
+        let value = envelope(&serde_json::json!({
+            "health-min-severity": {
+                "status": "fail", "enforced": true, "observed": 3.0,
+                "threshold_label": "critical"
+            }
+        }));
+
+        let rows = gate_rows(&value);
+
+        assert_eq!(rows[0].observed, "3 at or above critical");
+        assert_eq!(rows[0].threshold.as_deref(), Some("critical"));
+    }
+
+    /// The name set is OPEN, so a gate from a newer build must still reach the
+    /// check run with a readable label rather than being dropped.
+    #[test]
+    fn an_unrecognised_gate_name_still_builds_a_readable_row() {
+        let value = envelope(&serde_json::json!({
+            "some-future-gate": { "status": "fail", "enforced": true }
+        }));
+
+        let rows = gate_rows(&value);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "some-future-gate");
+        assert_eq!(rows[0].label, "Some future gate");
+    }
+
+    /// Tested against the emitter rather than against a hand-kept list: a gate
+    /// added without a label would otherwise reach the check run reading as a
+    /// kebab identifier.
+    #[test]
+    fn every_gate_this_build_emits_has_its_own_label() {
+        for name in fallow_output::GateName::ALL {
+            let key = name.as_str();
+            assert!(
+                known_gate_label(key).is_some(),
+                "{key} falls through to the open-set fallback"
+            );
+        }
+    }
+
+    /// The live path holds the gates typed and the saved path reads them off
+    /// the envelope. The rows must be identical, or the check run a pipeline
+    /// publishes from `report --from` differs from a direct render's.
+    #[test]
+    fn the_live_and_saved_rows_agree() {
+        let mut gates = fallow_output::GateOutcomes::new();
+        gates.insert(
+            fallow_output::GateName::StaleBaseline,
+            fallow_output::GateOutcome::new(fallow_output::GateStatus::Fail, true),
+        );
+        gates.insert(
+            fallow_output::GateName::HealthMinScore,
+            fallow_output::GateOutcome::measured(fallow_output::GateStatus::Fail, true, 85.0, 90.0),
+        );
+        let envelope = serde_json::json!({ "gate_outcomes": gates });
+
+        assert_eq!(gate_rows(&envelope), gate_rows_for_gates(Some(&gates)));
     }
 }

@@ -168,6 +168,62 @@ fn saved_reports_preserve_native_health_duplication_and_combined_output() {
     );
 }
 
+/// The baseline advisory and the gate rows are rendered from typed state on a
+/// direct run and read back off the envelope by `report --from`. This is the
+/// one test that catches a divergence between the two, and the integrations
+/// post whatever the saved path produced.
+#[test]
+fn saved_stale_baseline_surfaces_match_direct_rendering() {
+    let project = tempfile::tempdir().expect("stale baseline project");
+    let root = project.path();
+    std::fs::create_dir(root.join("src")).expect("create source directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"stale-baseline-parity","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write manifest");
+    std::fs::write(root.join("src/index.ts"), "export const entry = true;\n")
+        .expect("write entrypoint");
+    for name in ["a", "b", "c"] {
+        std::fs::write(
+            root.join(format!("src/{name}.ts")),
+            format!("export const {name} = true;\n"),
+        )
+        .expect("write unused source");
+    }
+
+    let baseline = root.join("baseline.json");
+    let saved = run(
+        root,
+        &analysis_args(
+            Some("check"),
+            root,
+            "json",
+            &["--save-baseline", baseline.to_str().expect("utf8")],
+        ),
+    );
+    assert!(
+        matches!(saved.status.code(), Some(0 | 1)),
+        "saving a baseline failed: {}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    // Remove what the baseline recorded, so every entry goes unmatched and the
+    // gate rule holds on a run with nothing left to report.
+    for name in ["a", "b", "c"] {
+        std::fs::remove_file(root.join(format!("src/{name}.ts"))).expect("clean the project");
+    }
+
+    assert_saved_report_parity_with_args(
+        root,
+        Some("check"),
+        &[
+            "--baseline",
+            baseline.to_str().expect("utf8"),
+            "--fail-on-stale-baseline",
+        ],
+    );
+}
+
 #[test]
 fn saved_owner_grouped_dead_code_matches_direct_rendering() {
     let project = tempfile::tempdir().expect("owner-grouped project");

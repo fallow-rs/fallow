@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The artefact people read now says the baseline went stale.** A repository
+  whose baseline had rotted saw the advisory in the GitHub Action's step log and
+  job summary, and nothing at all on the sticky pull-request comment, the GitLab
+  merge-request note or the Check Run: those bodies are rendered in Rust and
+  were left out when the staleness object shipped.
+
+  All three now carry it. The comment, the note and the two review bodies gain
+  one advisory sentence in the status line they already used, present when the
+  baseline matched nothing, went partially stale, or tripped
+  `fail-on-stale-baseline`, and absent otherwise. The wording of the facts
+  matches the job summary word for word, so the two surfaces can be read side by
+  side; the remedy says to re-save from a whole-project run rather than naming
+  one channel, because a single renderer serves GitHub and GitLab and cannot
+  know which of the three ways to re-save the reader uses. An audit or combined
+  envelope carrying several baselines gets one sentence per baseline, each
+  naming its section.
+
+  The Check Run now lists every gate a run armed as its own row, next to the
+  command's, rather than showing a tripped gate only as a failed step. A row
+  names the gate, what it compared, and its threshold when it has one, and an
+  unenforced verdict reports as neutral rather than as a failure. The check's
+  overall conclusion is unchanged, so an advisory check does not become a merge
+  blocker. Repositories using `fallow ci post-check-run --split-gates` gain one
+  new `Fallow / <gate>` commit-status context per armed gate; nothing is renamed,
+  and neither integration passes that flag by default.
+
 - **`fallow audit`'s baselines no longer rot in silence.** An audit loads up to
   three baselines (`dead-code-baseline`, `dupes-baseline`, `health-baseline`,
   each also settable from project config) and judges none of them, because every

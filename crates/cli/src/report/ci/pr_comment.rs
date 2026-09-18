@@ -68,6 +68,22 @@ fn short_hex_hash(value: &str) -> String {
     format!("{:06x}", (hash & 0x00ff_ffff) as u32)
 }
 
+/// What a run concluded, as the sticky comment and the decision sidecar carry
+/// it: one blockquote note in the body, and one row per armed gate.
+///
+/// The two travel together because they are two renderings of the same
+/// verdict, and a call that carried only the note is exactly how a tripped
+/// gate reached the comment but not the Check Run (#2675).
+#[derive(Clone, Copy)]
+pub struct PrCommentStatus<'a> {
+    /// The blockquote note appended to the body: the type-aware message, the
+    /// baseline advisory, the gate inventory, or any combination.
+    pub message: Option<&'a str>,
+    /// One row per gate the run armed, appended to the decision surface's
+    /// `gates` array after the command row.
+    pub gates: &'a [PrDecisionGate],
+}
+
 /// Render the sticky comment body. `conclusion` is the gate outcome the caller
 /// already computed, folded into the severity-derived verdict by the renderer;
 /// `None` renders the severity-derived verdict alone.
@@ -89,6 +105,28 @@ pub fn render_pr_comment(
         },
         conclusion.map(super::review::review_conclusion),
     )
+}
+
+/// [`render_pr_comment`] with the status note appended, which is the body both
+/// integrations post.
+///
+/// Separate from the printing path so the body a reviewer reads is
+/// snapshot-testable: the note carries the baseline advisory and the gate
+/// inventory, and those are exactly the clauses a regression would drop.
+#[must_use]
+pub fn render_pr_comment_with_status_note(
+    command: &str,
+    provider: Provider,
+    issues: &[CiIssue],
+    conclusion: Option<PrDecisionConclusion>,
+    status_message: Option<&str>,
+) -> String {
+    let mut body = render_pr_comment(command, provider, issues, conclusion);
+    if let Some(message) = status_message {
+        body.push_str("\n\n> ");
+        body.push_str(message);
+    }
+    body
 }
 
 /// Map a fallow rule id to its category for sticky-comment grouping.
@@ -175,13 +213,13 @@ pub(crate) fn print_pr_comment(
     command: &str,
     provider: Provider,
     codeclimate: &Value,
-    status_message: Option<&str>,
+    status: PrCommentStatus<'_>,
 ) -> ExitCode {
     let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
         issues_from_codeclimate(codeclimate),
     ));
     let conclusion = issue_decision_conclusion(issues.is_empty());
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status_message)
+    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status)
 }
 
 #[must_use]
@@ -190,12 +228,12 @@ pub(crate) fn print_pr_comment_with_status(
     provider: Provider,
     codeclimate: &Value,
     conclusion: PrDecisionConclusion,
-    status_message: Option<&str>,
+    status: PrCommentStatus<'_>,
 ) -> ExitCode {
     let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
         issues_from_codeclimate(codeclimate),
     ));
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status_message)
+    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status)
 }
 
 #[must_use]
@@ -204,13 +242,13 @@ pub(crate) fn print_pr_comment_from_codeclimate_issues(
     provider: Provider,
     codeclimate: &[CodeClimateIssue],
     conclusion: Option<PrDecisionConclusion>,
-    status_message: Option<&str>,
+    status: PrCommentStatus<'_>,
 ) -> ExitCode {
     let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
         issues_from_codeclimate_issues(codeclimate),
     ));
     let conclusion = conclusion.unwrap_or_else(|| issue_decision_conclusion(issues.is_empty()));
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status_message)
+    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status)
 }
 
 fn rebase_issue_paths(mut issues: Vec<CiIssue>) -> Vec<CiIssue> {
@@ -229,13 +267,15 @@ fn print_pr_comment_from_ci_issues(
     provider: Provider,
     issues: &[CiIssue],
     conclusion: PrDecisionConclusion,
-    status_message: Option<&str>,
+    status: PrCommentStatus<'_>,
 ) -> ExitCode {
-    let mut body = render_pr_comment(command, provider, issues, Some(conclusion));
-    if let Some(message) = status_message {
-        body.push_str("\n\n> ");
-        body.push_str(message);
-    }
+    let body = render_pr_comment_with_status_note(
+        command,
+        provider,
+        issues,
+        Some(conclusion),
+        status.message,
+    );
     let max_comments = max_comments();
     let envelope = PrCommentEnvelope {
         marker_id: sticky_marker_id(),
@@ -249,8 +289,7 @@ fn print_pr_comment_from_ci_issues(
             total_findings: issues.len(),
         },
     };
-    let decision =
-        build_issue_decision_surface(command, issues, &envelope, conclusion, status_message);
+    let decision = build_issue_decision_surface(command, issues, &envelope, conclusion, status);
     let details = build_pr_details_artifact(command, issues);
     write_pr_comment_envelope_sidecar(&envelope);
     write_pr_decision_sidecar(&decision);
@@ -265,27 +304,33 @@ fn build_issue_decision_surface(
     issues: &[CiIssue],
     envelope: &PrCommentEnvelope,
     conclusion: PrDecisionConclusion,
-    status_message: Option<&str>,
+    status: PrCommentStatus<'_>,
 ) -> PrDecisionSurface {
+    // The command row stays first and the caller's `conclusion` stays the
+    // surface's: the gate rows are additive display, and deriving the check-run
+    // conclusion from them would turn an advisory check into a merge blocker
+    // for every consumer with a required check.
+    let mut gates = vec![PrDecisionGate {
+        id: command.to_owned(),
+        label: command_title(command).to_owned(),
+        status: conclusion,
+        observed: count_label(issues.len(), "finding", "findings"),
+        threshold: None,
+        scope: "new code".to_owned(),
+    }];
+    gates.extend(status.gates.iter().cloned());
     PrDecisionSurface {
         schema: PR_DECISION_SCHEMA.to_owned(),
         title: "Fallow".to_owned(),
         conclusion,
-        gates: vec![PrDecisionGate {
-            id: command.to_owned(),
-            label: command_title(command).to_owned(),
-            status: conclusion,
-            observed: count_label(issues.len(), "finding", "findings"),
-            threshold: None,
-            scope: "new code".to_owned(),
-        }],
+        gates,
         annotations: issues
             .iter()
             .take(max_comments())
             .map(decision_annotation_from_issue)
             .collect(),
         details: PrDecisionDetails {
-            summary_markdown: decision_summary_markdown(conclusion, issues.len(), status_message),
+            summary_markdown: decision_summary_markdown(conclusion, issues.len(), status.message),
             full_report_path: None,
             details_url: envelope.details_url.clone(),
         },
@@ -593,7 +638,10 @@ mod tests {
             &issues,
             &envelope,
             PrDecisionConclusion::Failure,
-            Some(crate::report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+            PrCommentStatus {
+                message: Some(crate::report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+                gates: &[],
+            },
         );
 
         assert_eq!(decision.conclusion, PrDecisionConclusion::Failure);
@@ -604,6 +652,58 @@ mod tests {
                 .details
                 .summary_markdown
                 .contains("quality gates failed")
+        );
+    }
+
+    /// A gate row is additive display: it lands after the command row and does
+    /// not move the surface `conclusion`, which `ci post-check-run` maps
+    /// straight onto the GitHub check-run conclusion.
+    #[test]
+    fn gate_rows_follow_the_command_row_without_moving_the_conclusion() {
+        let envelope = PrCommentEnvelope {
+            marker_id: "fallow-results".to_owned(),
+            body: "body".to_owned(),
+            is_clean: true,
+            details_url: None,
+            check_summary: Some("pass".to_owned()),
+            truncation: PrCommentTruncation {
+                truncated: false,
+                shown_findings: 0,
+                total_findings: 0,
+            },
+        };
+        let gates = [PrDecisionGate {
+            id: "stale-baseline".to_owned(),
+            label: "Stale baseline".to_owned(),
+            status: PrDecisionConclusion::Failure,
+            observed: "fail".to_owned(),
+            threshold: None,
+            scope: "this run".to_owned(),
+        }];
+
+        let decision = build_issue_decision_surface(
+            "dead-code",
+            &[],
+            &envelope,
+            PrDecisionConclusion::Success,
+            PrCommentStatus {
+                message: None,
+                gates: &gates,
+            },
+        );
+
+        assert_eq!(decision.conclusion, PrDecisionConclusion::Success);
+        assert_eq!(decision.gates[0].id, "dead-code");
+        assert_eq!(decision.gates[1].id, "stale-baseline");
+        assert_eq!(decision.gates[1].scope, "this run");
+    }
+
+    #[test]
+    fn a_body_without_a_note_is_the_bare_render() {
+        let issues: Vec<CiIssue> = Vec::new();
+        assert_eq!(
+            render_pr_comment_with_status_note("check", Provider::Github, &issues, None, None),
+            render_pr_comment("check", Provider::Github, &issues, None)
         );
     }
 
