@@ -87,6 +87,33 @@ impl ScopeReason {
         }
     }
 
+    /// Whether repeating the run without this channel judges the same project.
+    ///
+    /// A channel the caller added for one run, a diff, a base ref, a path or an
+    /// issue-type filter, is removable: dropping it widens the run to the whole
+    /// project, which is exactly what judging a whole-project baseline needs.
+    /// Production mode and workspace scoping are the caller's own statement
+    /// about what the project is, and they resolve from the project config and
+    /// the environment as well as from a flag, so repeating the command without
+    /// the flag analyzes something nobody asked about and, on the config and
+    /// environment routes, is not even narrower.
+    ///
+    /// This is the rule the GitHub Action and the GitLab template already apply
+    /// before re-reading a baseline unscoped, and the one the `scope_reasons`
+    /// documentation states.
+    #[must_use]
+    pub const fn is_removable_by_rerun(self) -> bool {
+        match self {
+            Self::Diff
+            | Self::ChangedSince
+            | Self::ChangedFiles
+            | Self::Scope
+            | Self::File
+            | Self::IssueTypeFilter => true,
+            Self::Workspace | Self::ChangedWorkspaces | Self::Production => false,
+        }
+    }
+
     const fn bit(self) -> u16 {
         1 << (self as u16)
     }
@@ -138,6 +165,16 @@ impl BaselineScopeReasons {
         ScopeReason::ALL
             .into_iter()
             .filter(move |reason| self.contains(*reason))
+    }
+
+    /// True when repeating the run without every channel in this set judges
+    /// the same project, so a command that drops them all is worth suggesting.
+    ///
+    /// Vacuously true for an empty set; callers that mean "this run was
+    /// narrowed and can be widened" check [`Self::is_empty`] first.
+    #[must_use]
+    pub fn all_removable_by_rerun(self) -> bool {
+        self.iter().all(ScopeReason::is_removable_by_rerun)
     }
 
     /// The reasons as a comma-joined list of kebab-case names, for prose.
@@ -352,6 +389,45 @@ mod tests {
             assert!(!reasons.is_empty());
             assert_eq!(reasons.join(), reason.as_str());
         }
+    }
+
+    /// The same split the GitHub Action and the GitLab template encode in
+    /// `BASELINE_REMOVABLE_SCOPE_REASONS`. Kept as one list here so a new
+    /// channel has to answer the question rather than inherit an answer.
+    #[test]
+    fn removable_channels_are_the_ones_a_repeat_can_drop() {
+        let removable: Vec<&str> = ScopeReason::ALL
+            .into_iter()
+            .filter(|reason| reason.is_removable_by_rerun())
+            .map(ScopeReason::as_str)
+            .collect();
+
+        assert_eq!(
+            removable,
+            [
+                "diff",
+                "changed-since",
+                "changed-files",
+                "scope",
+                "file",
+                "issue-type-filter"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_set_is_removable_only_when_every_channel_in_it_is() {
+        let removable = BaselineScopeReasons::empty()
+            .with(ScopeReason::ChangedSince)
+            .with(ScopeReason::Scope);
+        assert!(removable.all_removable_by_rerun());
+
+        assert!(
+            !removable
+                .with(ScopeReason::Production)
+                .all_removable_by_rerun(),
+            "a repeat that drops the base ref still runs in production mode"
+        );
     }
 
     #[test]

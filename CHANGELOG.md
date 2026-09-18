@@ -92,12 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to both of them. The Action publishes the list as a new
   `baseline-scope-reasons` output.
 
-  A narrowed run that loaded a non-empty baseline also gains a
-  `recheck-baseline` entry in `next_steps`, pointing at the unscoped command
-  that can judge it. It is emitted on a run with no findings too, which is
-  exactly the run where a rotted baseline is otherwise silent. Like every other
-  entry it is runnable as-is and never mutating: it re-reads the baseline and
-  reports, it never re-saves. The MCP tools state the same fact as a sentence in
+  A run that loaded a non-empty baseline and was narrowed only by channels a
+  repeat can drop also gains a `recheck-baseline` entry in `next_steps`,
+  pointing at the unscoped command that can judge it. It is emitted on a run
+  with no findings too, which is exactly the run where a rotted baseline is
+  otherwise silent. Like every other entry it is runnable as-is and never
+  mutating: it re-reads the baseline and reports, it never re-saves. A run
+  narrowed by production mode or by workspace scoping gets no entry, because
+  those channels resolve from the project config and the environment as well as
+  from a flag, so the suggested command would come back just as narrow. The MCP tools state the same fact as a sentence in
   their `warnings` array, so an agent handed a scoped report learns that the
   baseline behind it was never judged.
 

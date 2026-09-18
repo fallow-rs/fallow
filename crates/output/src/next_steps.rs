@@ -21,6 +21,9 @@ const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hoo
 /// baseline can rot unnoticed for as long as every run is narrowed. The step
 /// names the one run that CAN judge it. It stays read-only, like every other
 /// entry: it re-reads the baseline and reports, it never re-saves.
+///
+/// Offered only when dropping every channel in `scope_reasons` widens the run,
+/// because the step's command carries `--baseline` and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BaselineRecheckInput<'a> {
     /// The command whose baseline this is, as `fallow <command>` spells it.
@@ -34,7 +37,8 @@ pub struct BaselineRecheckInput<'a> {
     /// re-check.
     pub baseline_entries: usize,
     /// The channels that narrowed this run, named in the reason so the two
-    /// cannot drift from the published `scope_reasons`.
+    /// cannot drift from the published `scope_reasons`. A channel the printed
+    /// command cannot drop suppresses the step entirely.
     pub scope_reasons: BaselineScopeReasons,
 }
 
@@ -439,9 +443,20 @@ fn next_step(id: &str, command: String, reason: &str) -> NextStep {
 /// Silent on an unscoped run, because there the advisory and the gate already
 /// spoke, and silent on an empty baseline, because there is nothing to
 /// re-check.
+///
+/// Silent as well when any channel that narrowed the run survives the printed
+/// command. The command is rebuilt from scratch and carries nothing but
+/// `--baseline`, so it drops only narrowing that came from a flag. Production
+/// mode and workspace scoping also resolve from the project config and the
+/// environment, where the same command would come back just as narrow and
+/// re-emit this step without end. An entry that cannot judge the baseline is
+/// worse than no entry: `next_steps` is a contract an agent follows.
 fn recheck_baseline(input: Option<BaselineRecheckInput<'_>>) -> Option<NextStep> {
     let input = input?;
-    if input.scope_reasons.is_empty() || input.baseline_entries == 0 {
+    if input.scope_reasons.is_empty()
+        || input.baseline_entries == 0
+        || !input.scope_reasons.all_removable_by_rerun()
+    {
         return None;
     }
     Some(next_step(
@@ -1046,7 +1061,7 @@ mod tests {
             baseline_entries: 8,
             scope_reasons: BaselineScopeReasons::empty()
                 .with(ScopeReason::ChangedSince)
-                .with(ScopeReason::Production),
+                .with(ScopeReason::Scope),
         }
     }
 
@@ -1071,7 +1086,7 @@ mod tests {
             "fallow dead-code --baseline .fallow-baseline.json"
         );
         assert!(
-            steps[0].reason.contains("changed-since, production"),
+            steps[0].reason.contains("changed-since, scope"),
             "the reason must name the published scope_reasons: {}",
             steps[0].reason
         );
@@ -1150,6 +1165,50 @@ mod tests {
         assert!(
             steps.is_empty(),
             "an unscoped run already got the advisory and the gate"
+        );
+    }
+
+    #[test]
+    fn narrowing_the_printed_command_cannot_drop_offers_no_baseline_recheck() {
+        let results = AnalysisResults::default();
+        for reason in [
+            ScopeReason::Production,
+            ScopeReason::Workspace,
+            ScopeReason::ChangedWorkspaces,
+        ] {
+            let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+                baseline_recheck: Some(BaselineRecheckInput {
+                    scope_reasons: BaselineScopeReasons::empty().with(reason),
+                    ..narrowed_baseline("dead-code")
+                }),
+                ..dead_code_input(&results)
+            });
+
+            assert!(
+                steps.is_empty(),
+                "`fallow dead-code --baseline <path>` resolves {} again, so the step would \
+                 re-emit itself: {steps:?}",
+                reason.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn one_unremovable_channel_suppresses_the_recheck_for_the_whole_set() {
+        let results = AnalysisResults::default();
+        let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+            baseline_recheck: Some(BaselineRecheckInput {
+                scope_reasons: BaselineScopeReasons::empty()
+                    .with(ScopeReason::ChangedSince)
+                    .with(ScopeReason::Production),
+                ..narrowed_baseline("dead-code")
+            }),
+            ..dead_code_input(&results)
+        });
+
+        assert!(
+            steps.is_empty(),
+            "dropping the base ref still leaves a production run, which judges nothing: {steps:?}"
         );
     }
 
