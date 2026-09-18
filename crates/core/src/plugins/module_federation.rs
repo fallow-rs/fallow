@@ -614,10 +614,18 @@ define_plugin! {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
 
+        let location = ConfigLocation { config_path, root, context: None };
+        // The declared `always_used` pattern is matched against the
+        // project-relative path without a `**/` rewrite, so it covers a root
+        // config only. Credit the file that was actually read, at any depth.
+        if let Some(relative) = location.relative_config_path() {
+            result.always_used_files.push(globset::escape(&relative));
+        }
+
         apply_from_source(
             &mut result,
             source,
-            &ConfigLocation { config_path, root, context: None },
+            &location,
             "module-federation",
             &FederationSites {
                 plugin_arrays: &[],
@@ -954,9 +962,28 @@ mod tests {
     }
 
     #[test]
-    fn config_without_federation_keys_contributes_nothing() {
+    fn config_without_federation_keys_contributes_only_its_own_file() {
         let result = resolve(r"export default { name: 'checkout' };");
-        assert!(result.is_empty());
+        assert!(entry_patterns(&result).is_empty());
+        assert!(result.provided_dependencies.is_empty());
+        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(
+            result.always_used_files,
+            vec!["module-federation.config.ts".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_nested_config_file_is_credited_as_used() {
+        let nested = ModuleFederationPlugin.resolve_config(
+            Path::new("/project/packages/host/module-federation.config.ts"),
+            r"export default { exposes: { './Button': './src/Button.tsx' } };",
+            Path::new("/project"),
+        );
+        assert_eq!(
+            nested.always_used_files,
+            vec!["packages/host/module-federation.config.ts".to_string()]
+        );
     }
 
     #[test]

@@ -196,6 +196,60 @@ fn installed_package_with_the_alias_name_is_neither_unlisted_nor_unused() {
     );
 }
 
+/// The config file the plugin read is never itself dead code, including in a
+/// workspace where the Federation dependency is hoisted to the root and each
+/// package keeps its own config.
+#[test]
+fn a_nested_config_file_is_not_reported_as_unused() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "mf-workspace",
+            "private": true,
+            "workspaces": ["packages/*"],
+            "devDependencies": { "@module-federation/enhanced": "^0.9.0" }
+        }"#,
+    );
+    write(
+        &root.join("packages/host/package.json"),
+        r#"{ "name": "@mf/host", "private": true }"#,
+    );
+    write(
+        &root.join("packages/host/module-federation.config.ts"),
+        r#"export default {
+             name: "host",
+             exposes: { "./Panel": "./src/Panel.tsx" },
+           };"#,
+    );
+    write(
+        &root.join("packages/host/src/Panel.tsx"),
+        "export default (): string => \"panel\";",
+    );
+    write(
+        &root.join("packages/host/src/orphan.ts"),
+        "export const x = 1;",
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results);
+
+    assert!(
+        !contains_suffix(&unused, "packages/host/module-federation.config.ts"),
+        "the config the plugin read is used, got {unused:?}"
+    );
+    assert!(
+        !contains_suffix(&unused, "packages/host/src/Panel.tsx"),
+        "the exposed file is an entry point at this depth, got {unused:?}"
+    );
+    assert!(
+        contains_suffix(&unused, "packages/host/src/orphan.ts"),
+        "an unexposed file still reports, got {unused:?}"
+    );
+}
+
 /// The provider rule covers only the directory tree that declared the alias, so
 /// a sibling package importing the same specifier without declaring the remote
 /// keeps reporting.
