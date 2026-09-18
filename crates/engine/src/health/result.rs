@@ -98,8 +98,19 @@ pub(super) fn finalize_health_result<R>(
     // comments in this crate warn about: health-stage entries have a single
     // writer per run and are not produced under `rayon::join`, so the read
     // cannot answer "whichever pass wrote last".
+    //
+    // The capture happens before `clear_health_stage_diagnostics` runs, on every
+    // route, so in a long-lived process (watch mode, the engine session, the MCP
+    // server) it still holds the PREVIOUS run's health-stage entries. Dropping
+    // them here makes the registry read the single source for these kinds, so a
+    // coverage file that has since been deleted or a CODEOWNERS that has since
+    // been fixed stops being reported for the life of the process. Nothing else
+    // records them, and the pipeline records this run's after the capture, so
+    // the filter can take nothing this run produced.
+    let mut captured = workspace_diagnostics;
+    captured.retain(|diagnostic| !diagnostic.kind.is_health_stage());
     let workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
-        workspace_diagnostics,
+        captured,
         fallow_config::health_stage_workspace_diagnostics(&config.root),
     );
 
