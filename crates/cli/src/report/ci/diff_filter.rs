@@ -187,7 +187,7 @@ impl DiffStandDown {
             "oversize",
             format!(
                 "{label} is {bytes} bytes (cap {cap}); line-level filtering disabled, \
-                 reporting all findings. Narrow the diff, or raise the cap."
+                 reporting all findings. Narrow the diff; the cap is fixed."
             ),
         )
     }
@@ -218,8 +218,8 @@ impl DiffStandDown {
     /// discards the diff and reports at full scope, so the message names the
     /// ambiguity and says so rather than letting silence imply the report was
     /// scoped.
-    fn ambiguous_base(candidate_bases: &[PathBuf], label: &str) -> Self {
-        let bases = join_bases(candidate_bases, " and ");
+    fn ambiguous_base(candidate_bases: &[PathBuf], root: &Path, label: &str) -> Self {
+        let bases = join_bases(candidate_bases, root, " and ");
         Self::new(
             "ambiguous-base",
             format!(
@@ -236,9 +236,14 @@ impl DiffStandDown {
     /// certainly generated relative to some other directory. fallow cannot
     /// place it, so it discards the diff and reports at full scope. Say so,
     /// once, rather than let the unscoped report imply the diff was applied.
-    fn foreign_namespace(index: &DiffIndex, candidate_bases: &[PathBuf], label: &str) -> Self {
+    fn foreign_namespace(
+        index: &DiffIndex,
+        candidate_bases: &[PathBuf],
+        root: &Path,
+        label: &str,
+    ) -> Self {
         let total = index.touched_files().count();
-        let bases = join_bases(candidate_bases, ", ");
+        let bases = join_bases(candidate_bases, root, ", ");
         Self::new(
             "foreign-namespace",
             format!(
@@ -251,12 +256,36 @@ impl DiffStandDown {
     }
 }
 
-fn join_bases(candidate_bases: &[PathBuf], separator: &str) -> String {
+fn join_bases(candidate_bases: &[PathBuf], root: &Path, separator: &str) -> String {
     candidate_bases
         .iter()
-        .map(|base| base.display().to_string())
+        .map(|base| base_label(base, root))
         .collect::<Vec<_>>()
         .join(separator)
+}
+
+/// Name a candidate base without putting the machine's checkout path in it.
+///
+/// This sentence is the `message` of a wire member, and every other
+/// path-bearing member of a fallow envelope is project-root-relative, so an
+/// absolute base here would make one input's output differ between checkouts.
+/// The two candidates a CLI run offers are the analysis root and the git
+/// toplevel above it (`diff_base_candidates`), and naming them by their
+/// relation to the root tells the user which directory to regenerate the diff
+/// from at least as well as the absolute path did: what they need is the path
+/// prefix their diff is missing, which is exactly the offset reported here.
+fn base_label(base: &Path, root: &Path) -> String {
+    if base == root {
+        return "the project root".to_owned();
+    }
+    if let Ok(offset) = root.strip_prefix(base) {
+        let offset = offset.display().to_string().replace('\\', "/");
+        return format!("the repository root (the project root is {offset} below it)");
+    }
+    if let Ok(inside) = base.strip_prefix(root) {
+        return inside.display().to_string().replace('\\', "/");
+    }
+    "a directory outside the project root".to_owned()
 }
 
 /// Read + parse the resolved diff source into a `DiffIndex` for
@@ -439,10 +468,11 @@ fn place_diff(
         None => Err(DiffStandDown::foreign_namespace(
             &loaded.index,
             candidate_bases,
+            root,
             &label,
         )),
         Some(chosen) if chosen.ambiguous => {
-            Err(DiffStandDown::ambiguous_base(candidate_bases, &label))
+            Err(DiffStandDown::ambiguous_base(candidate_bases, root, &label))
         }
         Some(chosen) => {
             let offset = root_offset_below(&chosen.base, root);
@@ -810,6 +840,71 @@ mod tests {
             load_diff_index_from_reader(Cursor::new(text), "--diff-file pr.diff", 1024, true)
                 .unwrap();
         assert_eq!(loaded.source_label, "--diff-file pr.diff");
+    }
+
+    /// The stand-down message is a wire field, so it names the candidate bases
+    /// by their relation to the project root rather than by absolute path.
+    #[test]
+    fn a_stand_down_names_its_bases_without_the_checkout_path() {
+        let root = Path::new("/checkout/packages/app");
+        let toplevel = Path::new("/checkout");
+        let index = DiffIndex::from_unified_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +export const a = 1;\n",
+        );
+        let bases = vec![toplevel.to_path_buf(), root.to_path_buf()];
+
+        let foreign = DiffStandDown::foreign_namespace(&index, &bases, root, "--diff-file pr.diff");
+        assert_eq!(foreign.reason, "foreign-namespace");
+        let ambiguous = DiffStandDown::ambiguous_base(&bases, root, "--diff-file pr.diff");
+        assert_eq!(ambiguous.reason, "ambiguous-base");
+
+        for message in [&foreign.message, &ambiguous.message] {
+            assert!(
+                !message.contains("/checkout"),
+                "no absolute base reaches the wire: {message}"
+            );
+            assert!(
+                message.contains("the project root"),
+                "the analysis root is named: {message}"
+            );
+            assert!(
+                message.contains("the repository root (the project root is packages/app below it)"),
+                "the toplevel is named with the offset the diff is missing: {message}"
+            );
+        }
+    }
+
+    /// A single-candidate run (analysis root at the repository toplevel) names
+    /// the one base it had, and still names no path.
+    #[test]
+    fn a_single_candidate_base_is_named_as_the_project_root() {
+        let root = Path::new("/checkout");
+        let stand_down = DiffStandDown::ambiguous_base(&[root.to_path_buf()], root, "--diff-stdin");
+        assert!(
+            stand_down
+                .message
+                .contains("under the project root, so their base is ambiguous"),
+            "{}",
+            stand_down.message
+        );
+        assert!(!stand_down.message.contains("/checkout"));
+    }
+
+    /// The cap has no override, so the remedy cannot suggest raising it.
+    #[test]
+    fn the_oversize_remedy_asks_only_for_something_the_user_can_do() {
+        let stand_down =
+            DiffStandDown::oversize("--diff-file pr.diff", MAX_DIFF_BYTES + 1, MAX_DIFF_BYTES);
+        assert!(
+            !stand_down.message.contains("raise the cap"),
+            "{}",
+            stand_down.message
+        );
+        assert!(stand_down.message.contains("Narrow the diff"));
     }
 
     #[test]
