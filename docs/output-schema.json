@@ -26467,7 +26467,7 @@
         {
           "type": "string",
           "const": "not-applied",
-          "description": "The run could not do what it was asked and continued anyway. The report\nthat follows is valid and complete, and WIDER than what was asked for."
+          "description": "The run could not do what it was asked and continued anyway. The report\nthat follows is valid and complete; what the failure cost is read off\n`affects`, which says whether the report widened or a requested file was\nnever written."
         }
       ],
       "description": "What became of one request on this run.\n\nTwo-valued today. The value set is OPEN so a later `partial` needs no bump,\nand it is deliberately not added now: nothing emits it, and a permanently\nunused value reads as a measurement nobody takes."

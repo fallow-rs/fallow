@@ -128,7 +128,9 @@ pub enum RequestStatus {
     /// requested.
     Applied,
     /// The run could not do what it was asked and continued anyway. The report
-    /// that follows is valid and complete, and WIDER than what was asked for.
+    /// that follows is valid and complete; what the failure cost is read off
+    /// `affects`, which says whether the report widened or a requested file was
+    /// never written.
     NotApplied,
 }
 

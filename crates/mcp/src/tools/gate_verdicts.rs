@@ -435,26 +435,53 @@ fn degraded_analysis_warning(root: &Map<String, Value>) -> Option<String> {
 /// tool spawns the CLI with `--quiet`, which removes the stderr line that used
 /// to be the ONLY trace of a stand-down, and the agent is then handed a
 /// whole-project report in answer to a question about a change.
+///
+/// Grouped by the entry's `affects`, never by its name. The object also carries
+/// requests that write a file beside the report, whose failure leaves the
+/// report's scope untouched, and one sentence for both classes tells the agent
+/// that an unwritten file widened the analysis. A class this build does not
+/// recognise is reported without either claim rather than assumed to narrow.
 fn unapplied_request_warning(root: &Map<String, Value>) -> Option<String> {
     let requests = root.get("request_outcomes")?.as_object()?;
-    let unapplied = requests
-        .iter()
-        .filter(|(_, outcome)| outcome.get("status").and_then(Value::as_str) != Some("applied"))
-        .map(
-            |(name, outcome)| match outcome.get("reason").and_then(Value::as_str) {
-                Some(reason) => format!("{name} ({reason})"),
-                None => name.clone(),
-            },
-        )
-        .collect::<Vec<_>>();
-    if unapplied.is_empty() {
-        return None;
+    let mut widened: Vec<String> = Vec::new();
+    let mut withheld: Vec<String> = Vec::new();
+    let mut unclassified: Vec<String> = Vec::new();
+    for (name, outcome) in requests {
+        if outcome.get("status").and_then(Value::as_str) == Some("applied") {
+            continue;
+        }
+        let described = match outcome.get("reason").and_then(Value::as_str) {
+            Some(reason) => format!("{name} ({reason})"),
+            None => name.clone(),
+        };
+        match outcome.get("affects").and_then(Value::as_str) {
+            Some("scope") => widened.push(described),
+            Some("artifact") => withheld.push(described),
+            _ => unclassified.push(described),
+        }
     }
-    Some(format!(
-        "Requests not applied: {}. The report below is complete and WIDER than what was \
-         asked for; read request_outcomes for the remedy on each.",
-        unapplied.join(", ")
-    ))
+    let mut sentences: Vec<String> = Vec::new();
+    if !widened.is_empty() {
+        sentences.push(format!(
+            "Requests not applied: {}. The report below is complete and WIDER than what was \
+             asked for; read request_outcomes for the remedy on each.",
+            widened.join(", ")
+        ));
+    }
+    if !withheld.is_empty() {
+        sentences.push(format!(
+            "Output not written: {}. The report below is unaffected, but anything reading \
+             that file has nothing to read; read request_outcomes for the remedy on each.",
+            withheld.join(", ")
+        ));
+    }
+    if !unclassified.is_empty() {
+        sentences.push(format!(
+            "Requests not applied: {}. Read request_outcomes for what each one means.",
+            unclassified.join(", ")
+        ));
+    }
+    (!sentences.is_empty()).then(|| sentences.join(" "))
 }
 
 fn degrading_kinds(diagnostics: &[Value]) -> BTreeMap<&str, usize> {
@@ -960,11 +987,16 @@ mod tests {
             "request_outcomes": {
                 "changed-since": {
                     "status": "not-applied",
+                    "affects": "scope",
                     "requested": "origin/main",
                     "reason": "git-failed",
                     "message": "..."
                 },
-                "diff-filter": { "status": "applied", "requested": "--diff-stdin" }
+                "diff-filter": {
+                    "status": "applied",
+                    "affects": "scope",
+                    "requested": "--diff-stdin"
+                }
             },
         }));
 
@@ -987,7 +1019,11 @@ mod tests {
         let envelope = serde_json::json!({
             "kind": "dead-code",
             "request_outcomes": {
-                "diff-filter": { "status": "applied", "requested": "--diff-stdin" }
+                "diff-filter": {
+                    "status": "applied",
+                    "affects": "scope",
+                    "requested": "--diff-stdin"
+                }
             },
         });
         assert!(
@@ -1003,7 +1039,11 @@ mod tests {
         let warnings = warnings_of(&serde_json::json!({
             "kind": "dead-code",
             "request_outcomes": {
-                "changed-since": { "status": "partial", "requested": "origin/main" }
+                "changed-since": {
+                    "status": "partial",
+                    "affects": "scope",
+                    "requested": "origin/main"
+                }
             },
         }));
         assert_eq!(warnings.len(), 1, "{warnings:?}");
@@ -1011,6 +1051,30 @@ mod tests {
             warnings[0].starts_with("Requests not applied: changed-since."),
             "{warnings:?}"
         );
+    }
+
+    /// A request that writes a file beside the report narrows nothing, so the
+    /// agent must not be told the report covers more than it asked for.
+    #[test]
+    fn an_output_file_that_was_not_written_does_not_claim_a_wider_report() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dead-code",
+            "request_outcomes": {
+                "sarif-file": {
+                    "status": "not-applied",
+                    "affects": "artifact",
+                    "requested": "out.sarif",
+                    "reason": "write-failed",
+                    "message": "..."
+                }
+            },
+        }));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("Output not written: sarif-file (write-failed)."),
+            "{warnings:?}"
+        );
+        assert!(!warnings[0].contains("WIDER"), "{warnings:?}");
     }
 
     /// The typed route reads the same member, so a tool cannot answer
@@ -1022,6 +1086,7 @@ mod tests {
             "request_outcomes": {
                 "diff-filter": {
                     "status": "not-applied",
+                    "affects": "scope",
                     "requested": "--diff-stdin",
                     "reason": "not-utf8"
                 }
