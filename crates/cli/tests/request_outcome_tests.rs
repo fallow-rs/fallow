@@ -293,6 +293,50 @@ fn audit_refuses_rather_than_widening_and_publishes_no_entry() {
     );
 }
 
+/// The widening sentence belongs to the commands that widen. Audit produces no
+/// report at all, and its flag is `--base`, so neither the claim nor the other
+/// command's flag name may appear on the run that refused.
+#[test]
+fn audit_states_the_cause_without_claiming_a_whole_project_report() {
+    let project = committed_project();
+    let root = root_arg(&project);
+    let out = run(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "refs/heads/does-not-exist",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(out.code, 2, "{}{}", out.stdout, out.stderr);
+    assert!(
+        !out.stderr.contains("covers the whole project"),
+        "a run that produced no report cannot claim a whole-project one: {}",
+        out.stderr
+    );
+    assert!(
+        !out.stderr.contains("--changed-since"),
+        "audit's flag is --base: {}",
+        out.stderr
+    );
+    let envelope = parse_json(&out);
+    let message = envelope["message"].as_str().expect("an error document");
+    assert!(
+        message.contains("refs/heads/does-not-exist"),
+        "the document names the ref that failed: {message}"
+    );
+    assert!(
+        message.contains("unknown revision") || message.contains("ambiguous argument"),
+        "the document carries git's own cause: {message}"
+    );
+    assert!(
+        !message.contains('\n'),
+        "the cause is folded onto one line: {message}"
+    );
+}
+
 /// One case per diff stand-down, each driven into the real failure mode rather
 /// than asserted against the constant that produced it.
 #[test]

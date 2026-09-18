@@ -1375,6 +1375,35 @@ fn compute_brief_focus_facts(
     fallow_engine::module_graph::focus_facts_for_changed_paths(graph, root, changed_files)
 }
 
+/// The files an audit compares, or the exit-2 document naming why git could
+/// not say.
+///
+/// Resolved without the shared `--changed-since` warning on purpose. That
+/// sentence says the report covers the whole project instead of the changed
+/// files, which is what every command that WIDENS does; audit widens nothing,
+/// it stops here. It also names `--changed-since`, and audit's flag is
+/// `--base`. The cause travels into the error document instead, folded onto one
+/// line so a CI log keeps one fact per record.
+fn audit_changed_files(
+    opts: &AuditOptions<'_>,
+    base_ref: &str,
+) -> Result<FxHashSet<PathBuf>, ExitCode> {
+    crate::check::try_get_changed_files(opts.root, base_ref).map_err(|err| {
+        let cause = err
+            .describe()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        emit_error(
+            &format!(
+                "could not determine changed files for base ref '{base_ref}': {cause}. Verify the ref exists in this git repository"
+            ),
+            2,
+            opts.output,
+        )
+    })
+}
+
 /// Run the audit pipeline: resolve base ref, run analyses, compute verdict.
 pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     execute_audit_with_type_aware(opts, AuditTypeAwareOptions::default())
@@ -1388,15 +1417,7 @@ pub fn execute_audit_with_type_aware(
 
     let (base_ref, base_description) = resolve_base_ref(opts)?;
 
-    let Some(mut changed_files) = crate::check::get_changed_files(opts.root, &base_ref) else {
-        return Err(emit_error(
-            &format!(
-                "could not determine changed files for base ref '{base_ref}'. Verify the ref exists in this git repository"
-            ),
-            2,
-            opts.output,
-        ));
-    };
+    let mut changed_files = audit_changed_files(opts, &base_ref)?;
     if let Some(walkthrough_file) = opts.walkthrough_file
         && let Ok(walkthrough_file) = dunce::canonicalize(walkthrough_file)
     {

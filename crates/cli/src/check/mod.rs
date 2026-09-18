@@ -25,6 +25,7 @@ pub mod rules;
 
 pub use filtering::get_changed_files;
 pub use filtering::resolve_workspace_scope;
+pub use filtering::try_get_changed_files;
 
 #[derive(Default, Clone)]
 pub struct IssueFilters {
