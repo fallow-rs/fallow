@@ -696,7 +696,7 @@ test("VS Code CI runs the extension-host integration suite with a pinned cached 
   assert.match(workflow, /^  pull_request:$/m, "CI must run for pull requests");
   assert.match(vscodeJob, /needs\.changes\.outputs\.vscode == 'true'/);
   assert.match(vscodeJob, /persist-credentials: false/);
-  assert.match(vscodeJob, /version: 11\.10\.0/);
+  assert.match(vscodeJob, /version: 11\.25\.0/);
   assert.match(vscodeJob, /pnpm audit --prod/);
   assert.match(vscodeFilter, /editors\/vscode\/\*\*/);
   assert.match(vscodeFilter, /\.github\/workflows\/ci\.yml/);
@@ -723,7 +723,7 @@ test("VS Code CI runs the extension-host integration suite with a pinned cached 
 
   const harness = readFileSync("editors/vscode/test/integration/runTest.ts", "utf8");
   const packageJson = readFileSync("editors/vscode/package.json", "utf8");
-  assert.match(packageJson, /"packageManager": "pnpm@11\.10\.0"/);
+  assert.match(packageJson, /"packageManager": "pnpm@11\.25\.0"/);
   assert.match(harness, /version: "1\.96\.0"/);
 });
 
