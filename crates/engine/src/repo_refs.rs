@@ -564,7 +564,7 @@ fn raw_materialization_marker_path(worktree_root: &Path) -> EngineResult<PathBuf
         &["rev-parse", "--git-path", RAW_MATERIALIZATION_MARKER],
     )
     .ok_or_else(|| EngineError::new("could not resolve base-worktree materialization marker"))?;
-    let marker = PathBuf::from(marker.trim());
+    let marker = PathBuf::from(marker);
     if marker.is_absolute() {
         Ok(marker)
     } else {
@@ -602,13 +602,11 @@ fn register_no_checkout_worktree(
 }
 
 fn resolve_registered_commit(destination: &Path, base_ref: &str) -> EngineResult<String> {
-    run_git(destination, &["rev-parse", "--verify", "HEAD^{commit}"])
-        .map(|commit| commit.trim().to_owned())
-        .ok_or_else(|| {
-            EngineError::new(format!(
-                "could not resolve the commit for base ref `{base_ref}` after creating the worktree"
-            ))
-        })
+    run_git(destination, &["rev-parse", "--verify", "HEAD^{commit}"]).ok_or_else(|| {
+        EngineError::new(format!(
+            "could not resolve the commit for base ref `{base_ref}` after creating the worktree"
+        ))
+    })
 }
 
 fn populate_worktree_index(destination: &Path, commit: &str) -> EngineResult<()> {
@@ -745,7 +743,7 @@ fn materialization_scope(repo_root: &Path) -> MaterializationScope {
 /// resolved, which fails open to full materialization).
 fn analysis_subdir_prefix(repo_root: &Path) -> Option<String> {
     let toplevel = run_git(repo_root, &["rev-parse", "--show-toplevel"])?;
-    let toplevel = PathBuf::from(toplevel.trim());
+    let toplevel = PathBuf::from(toplevel);
     let canonical_toplevel = dunce::canonicalize(&toplevel).unwrap_or(toplevel);
     let canonical_root = dunce::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
     let relative = canonical_root.strip_prefix(&canonical_toplevel).ok()?;
@@ -766,10 +764,10 @@ fn analysis_subdir_prefix(repo_root: &Path) -> Option<String> {
 /// is the common full-clone case. Non-cone mode uses glob patterns that this
 /// matcher does not implement, so it also falls back to full materialization.
 fn sparse_cone_dirs(repo_root: &Path) -> Option<Vec<String>> {
-    if run_git(repo_root, &["config", "--get", "core.sparseCheckout"])?.trim() != "true" {
+    if run_git(repo_root, &["config", "--get", "core.sparseCheckout"])? != "true" {
         return None;
     }
-    if run_git(repo_root, &["config", "--get", "core.sparseCheckoutCone"])?.trim() != "true" {
+    if run_git(repo_root, &["config", "--get", "core.sparseCheckoutCone"])? != "true" {
         return None;
     }
     let output = git_command(repo_root)
@@ -1237,8 +1235,6 @@ pub fn auto_detect_audit_base_ref(root: &Path) -> Option<ResolvedAuditBase> {
 #[must_use]
 pub fn short_head_sha(root: &Path) -> Option<String> {
     run_git(root, &["rev-parse", "--short", "HEAD"])
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
 }
 
 /// Resolve a concrete `--changed-workspaces` ref for project-level next steps.
@@ -1260,7 +1256,7 @@ pub fn default_workspace_ref_for_workspaces(
     if workspaces.is_empty() || !crate::churn::is_git_repo(root) {
         return None;
     }
-    if let Some(reference) = run_git(
+    run_git(
         root,
         &[
             "symbolic-ref",
@@ -1268,16 +1264,13 @@ pub fn default_workspace_ref_for_workspaces(
             "--short",
             "refs/remotes/origin/HEAD",
         ],
-    ) {
-        let reference = reference.trim();
-        if !reference.is_empty() {
-            return Some(reference.to_owned());
-        }
-    }
-    ["origin/main", "origin/master"]
-        .into_iter()
-        .find(|candidate| git_ref_exists(root, candidate))
-        .map(str::to_owned)
+    )
+    .or_else(|| {
+        ["origin/main", "origin/master"]
+            .into_iter()
+            .find(|candidate| git_ref_exists(root, candidate))
+            .map(str::to_owned)
+    })
 }
 
 /// Git identities for the current user in forms useful for self-routing.
@@ -1300,9 +1293,7 @@ pub fn current_user_identities(root: &Path) -> Vec<String> {
 }
 
 fn read_git_config(root: &Path, key: &str) -> Option<String> {
-    let value = run_git(root, &["config", "--get", key])?;
-    let trimmed = value.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    run_git(root, &["config", "--get", key])
 }
 
 fn git_ref_exists(root: &Path, reference: &str) -> bool {
@@ -1376,12 +1367,21 @@ fn git_command(root: &Path) -> Command {
     command
 }
 
+/// Run `git <args>` in `root` and return trimmed, non-empty stdout, or `None`
+/// on a non-zero exit, empty output, or non-UTF-8 output.
+///
+/// Trimming belongs to this contract: git terminates every line it prints, and
+/// callers feed these values straight back to git as refs and compare them as
+/// paths, where a trailing newline is rejected or silently mismatches. Non-UTF-8
+/// output stays `None` rather than becoming a mangled ref or path.
 fn run_git(root: &Path, args: &[&str]) -> Option<String> {
     let output = git_command(root).args(args).output().ok()?;
     if !output.status.success() {
         return None;
     }
-    String::from_utf8(output.stdout).ok()
+    let value = String::from_utf8(output.stdout).ok()?;
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 #[cfg(test)]
@@ -1621,6 +1621,88 @@ mod tests {
         let sha = short_head_sha(&repo).expect("HEAD sha");
         assert_eq!(sha, sha.trim());
         assert!(!sha.is_empty());
+    }
+
+    /// Regression for issue #2699: the detected ref is handed straight back to
+    /// git as a diff target, so it must carry no line ending. Without the
+    /// trimmed probe contract the upstream is `origin/main\n`, the merge-base
+    /// call against it fails, and the detection degrades to the tip branch with
+    /// an unusable ref.
+    #[test]
+    fn auto_detect_audit_base_ref_omits_git_line_endings_for_the_upstream_merge_base() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        fs::write(repo.join("tracked.txt"), "committed\n").expect("write tracked file");
+        commit_all(&repo, "initial");
+        let fork_point = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["remote", "add", "origin", &repo.to_string_lossy()]);
+        git(&repo, &["update-ref", "refs/remotes/origin/main", "main"]);
+        git(&repo, &["checkout", "-b", "feature"]);
+        git(
+            &repo,
+            &["branch", "--set-upstream-to=origin/main", "feature"],
+        );
+        fs::write(repo.join("feature.txt"), "my change\n").expect("write feature file");
+        commit_all(&repo, "feature");
+
+        let detected = auto_detect_audit_base_ref(&repo).expect("base is detected");
+
+        assert_eq!(detected.git_ref, fork_point);
+        assert_eq!(
+            detected.description.as_deref(),
+            Some("merge-base with origin/main")
+        );
+        assert!(crate::validate::validate_git_ref(&detected.git_ref).is_ok());
+    }
+
+    /// Regression for issue #2699 on the remote-default branch of the
+    /// detection, where the line ending survives `strip_prefix` and reappears
+    /// inside the composed `origin/<branch>` ref.
+    #[test]
+    fn auto_detect_audit_base_ref_omits_git_line_endings_for_the_remote_default() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        fs::write(repo.join("tracked.txt"), "committed\n").expect("write tracked file");
+        commit_all(&repo, "initial");
+        let fork_point = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["update-ref", "refs/remotes/origin/main", "main"]);
+        git(
+            &repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+
+        let detected = auto_detect_audit_base_ref(&repo).expect("base is detected");
+
+        assert_eq!(detected.git_ref, fork_point);
+        assert_eq!(
+            detected.description.as_deref(),
+            Some("merge-base with origin/main")
+        );
+        assert!(crate::validate::validate_git_ref(&detected.git_ref).is_ok());
+    }
+
+    /// The repository top level is compared as a path prefix, so a line ending
+    /// on it makes every subdirectory root fall back to the whole base
+    /// worktree instead of the matching subdirectory (issue #2699).
+    #[test]
+    fn base_analysis_root_preserves_repo_subdirectory_roots() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        let app_root = repo.join("apps").join("mobile");
+        fs::create_dir_all(&app_root).expect("create app root");
+        let base_worktree = temp.path().join("base-worktree");
+
+        assert_eq!(
+            base_analysis_root(&app_root, &base_worktree),
+            base_worktree.join("apps").join("mobile")
+        );
     }
 
     #[cfg(unix)]

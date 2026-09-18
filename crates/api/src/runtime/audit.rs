@@ -162,14 +162,16 @@ pub(super) fn resolve_audit_base_ref(
         .root
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    repo_refs::auto_detect_audit_base_ref(&root).ok_or_else(|| {
+    let detected = repo_refs::auto_detect_audit_base_ref(&root).ok_or_else(|| {
         ProgrammaticError::new(
             "could not detect base branch. Set audit.base to specify the comparison target",
             2,
         )
         .with_code("FALLOW_AUDIT_BASE_NOT_FOUND")
         .with_context("audit.base")
-    })
+    })?;
+    validate_git_ref(&detected.git_ref, "audit.base")?;
+    Ok(detected)
 }
 
 fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> AnalysisOptions {
@@ -1494,5 +1496,59 @@ mod tests {
             .status()
             .expect("git command");
         assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// #2699: the auto-detect fallthrough gets the same ref validation as the
+    /// explicit and environment paths, so a malformed detection surfaces as a
+    /// base-ref error instead of a changed-files failure deeper in the run.
+    #[test]
+    fn resolve_audit_base_ref_validates_the_auto_detected_ref() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(root.join("index.ts"), "export const used = 1;\n").expect("write entry");
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        git(root, &["update-ref", "refs/remotes/origin/main", "main"]);
+        git(
+            root,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        let options = AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                ..AnalysisOptions::default()
+            },
+            ..AuditOptions::default()
+        };
+
+        let resolved = resolve_audit_base_ref(&options).expect("base ref resolves");
+
+        assert!(
+            fallow_engine::validate::validate_git_ref(&resolved.git_ref).is_ok(),
+            "auto-detected ref must be usable as a git ref: {:?}",
+            resolved.git_ref
+        );
+        assert_eq!(
+            resolved.description.as_deref(),
+            Some("merge-base with origin/main")
+        );
     }
 }
