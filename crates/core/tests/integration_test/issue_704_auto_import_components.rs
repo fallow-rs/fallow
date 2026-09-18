@@ -9,11 +9,12 @@
 //!   synthesized auto-import edges, including the `Lazy` and directory-prefix
 //!   name forms) stay reachable.
 //!
-//! Issue #2695 extends this to configs that switch auto-import off. A config
-//! that statically proves nothing is scanned (`components: { dirs: [] }`,
+//! Issue #2695 extends this to configs that switch the auto-import scan off. A
+//! config that statically proves nothing is scanned (`components: { dirs: [] }`,
 //! `imports: { scan: false }`) counts as the default, so its convention files
 //! lose their entry patterns too, while a config with unmodeled custom
-//! directories keeps them.
+//! directories keeps them, as does an `imports: { autoImport: false }` that only
+//! switches the injection off.
 
 use std::path::Path;
 
@@ -116,6 +117,22 @@ fn flag_off_keeps_disabled_auto_import_config_files_alive() {
             "flag off must not report {dead}, got: {unused:?}"
         );
     }
+}
+
+#[test]
+fn injection_only_opt_out_keeps_composable_entry_patterns() {
+    let root = fixture_path("nuxt-auto-imports-explicit-imports");
+    let mut config = create_config(root.clone());
+    config.auto_imports = true;
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results, &root);
+
+    assert!(
+        !unused.contains(&"app/composables/useExplicit.ts".to_string()),
+        "an imports.autoImport opt-out only switches the injection off, so a composable \
+         consumed through #imports must keep its entry pattern, got: {unused:?}"
+    );
 }
 
 #[test]

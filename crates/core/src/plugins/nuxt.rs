@@ -1026,8 +1026,11 @@ pub fn is_script_auto_import_entry_pattern(pattern: &str) -> bool {
 ///   array literal, or an object literal whose `dirs` is an empty array literal
 ///   (other keys in that object do not matter: an empty `dirs` scans nothing);
 /// - composables and utils: the single `imports` property is an object literal
-///   with `scan: false` or `autoImport: false` and with `dirs` absent or empty
-///   (`imports.dirs` entries are scanned even when `scan` is off).
+///   with `scan: false` and with `dirs` absent or empty (`imports.dirs` entries
+///   are scanned even when `scan` is off). A lone `imports.autoImport: false`
+///   stays `Custom`: it switches the injection off, not the scan, so the same
+///   directories stay registered and are consumed through `#imports`, which
+///   resolves to no file and credits nothing.
 ///
 /// Everything else stays `Custom` and keeps its patterns: a value that is not one
 /// of those literals, a config object the parser cannot resolve, a parse failure,
@@ -1168,11 +1171,17 @@ fn components_value_proves_disabled(expr: &Expression<'_>) -> bool {
 
 /// Whether an `imports` object literal proves that no composable or util
 /// directory is scanned.
+///
+/// Only `scan: false` proves it. `autoImport: false` switches the injection off
+/// while the scan keeps registering the same directories, and Nuxt's documented
+/// replacement is an explicit `import { useThing } from '#imports'`, a bare
+/// specifier that resolves to no file and therefore credits nothing.
 fn imports_object_proves_disabled(obj: &ObjectExpression<'_>) -> bool {
-    let switched_off = ["scan", "autoImport"].iter().any(|key| {
-        matches!(sole_static_property(obj, key), PropertyLookup::Found(expr) if is_false_literal(expr))
-    });
-    if !switched_off {
+    let scan_off = matches!(
+        sole_static_property(obj, "scan"),
+        PropertyLookup::Found(expr) if is_false_literal(expr)
+    );
+    if !scan_off {
         return false;
     }
     match sole_static_property(obj, "dirs") {
@@ -2448,13 +2457,14 @@ mod tests {
             ("modules: ['@nuxt/image']", AutoImportSetting::Default),
             ("imports: { scan: false }", AutoImportSetting::Disabled),
             (
-                "imports: { autoImport: false }",
-                AutoImportSetting::Disabled,
-            ),
-            (
                 "imports: { scan: false, dirs: [] }",
                 AutoImportSetting::Disabled,
             ),
+            (
+                "imports: { scan: false, autoImport: false }",
+                AutoImportSetting::Disabled,
+            ),
+            ("imports: { autoImport: false }", AutoImportSetting::Custom),
             (
                 "imports: { scan: false, dirs: ['app/extra'] }",
                 AutoImportSetting::Custom,
