@@ -50,6 +50,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every run produced today
   (Closes [#2687](https://github.com/fallow-rs/fallow/issues/2687), [#2688](https://github.com/fallow-rs/fallow/issues/2688)).
 
+- **`--group-by` now says so on every format that drops it.** Grouping is
+  carried by `json`, `human`, `sarif` and `codeclimate`. Before: `compact`,
+  `markdown` and `badge` printed a one-line note, and the four pull-request
+  comment and review formats plus `github-annotations` and `github-summary`
+  rendered a flat document and said nothing at all, so a consumer that asked
+  for groups received a report that is valid, complete and not what it asked
+  for. After: every one of them prints the note, naming the format the way
+  `--format` spells it, and the four comment and review bodies carry one clause
+  stating the requested mode and pointing at `--format json`. `fallow report
+  --from` renders the identical clause for a saved grouped envelope.
+
+  The fallback itself is unchanged and still exits `0`: it produces a less
+  useful report rather than a wrong one, and failing a run that passes
+  `--group-by` across several formats would be out of proportion. Nothing is
+  added to the envelope either, because the fallback is decided at render time
+  and the one format with an envelope supports grouping. The degradation is now
+  documented in `docs/backwards-compatibility.md`, which is the part of the
+  report that was unambiguously missing
+  (Closes [#2691](https://github.com/fallow-rs/fallow/issues/2691)).
+
 ## [3.27.0] - 2026-09-17
 
 ### Fixed

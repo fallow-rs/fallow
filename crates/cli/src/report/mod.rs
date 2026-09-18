@@ -8,6 +8,7 @@ pub mod github;
 pub mod github_annotations;
 pub mod github_summary;
 pub mod grouping;
+pub(crate) mod grouping_note;
 mod human;
 mod json;
 mod markdown;
@@ -477,21 +478,27 @@ fn print_check_github_format(
 }
 
 /// The note a CI comment or review body carries: the type-aware message, the
-/// gate verdict, whether the run did what it was asked, or any combination.
+/// gate verdict, whether the run did what it was asked, a grouping this target
+/// cannot carry, or any combination.
 ///
 /// Shared by the live renderers and by `fallow report --from`, because the two
 /// must produce byte-identical bodies for one envelope and that parity has its
 /// own suite. The clauses join in a fixed order, so two identical runs render
 /// identical bodies and a run that has nothing to say renders no note at all.
+///
+/// `grouping_dropped` is the `--group-by` mode when one was requested, because
+/// every target this note reaches renders one flat document (issue #2691).
 pub(crate) fn ci_status_note(
     existing: Option<&'static str>,
     gates: Option<&fallow_output::GateOutcomes>,
     requests: Option<&fallow_output::RequestOutcomes>,
+    grouping_dropped: Option<&str>,
 ) -> Option<String> {
     let joined = [
         existing.map(str::to_owned),
         gate_outcome_text::summary_line_for_gates(gates),
         request_outcome_text::summary_line_for_requests(requests),
+        grouping_dropped.map(grouping_note::dropped_grouping_clause),
     ]
     .into_iter()
     .flatten()
@@ -517,10 +524,12 @@ fn print_results_ci_comment(
     let incomplete = ci::required_type_aware_incomplete(ctx.type_aware);
     let conclusion = incomplete.then_some(fallow_output::PrDecisionConclusion::Failure);
     let requests = crate::requests::request_outcomes();
+    let grouping_dropped = dropped_grouping_mode(ctx, output);
     let status_message = ci_status_note(
         incomplete.then_some(ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
         ctx.gate_outcomes.as_ref(),
         requests.as_ref(),
+        grouping_dropped,
     );
     print_ci_comment_format_with_status(
         "dead-code",
@@ -587,10 +596,16 @@ fn print_grouped_results(
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_codeclimate(original, ctx.root, ctx.rules, resolver)
         }
-        // The GitHub formats have no grouping concept; render ungrouped from
-        // the original results (same fallback the PR-comment formats use).
-        OutputFormat::GithubAnnotations => print_check_github_annotations(original, ctx),
+        // The GitHub-native formats have no grouping concept, so they render
+        // the ungrouped document from the original results and say so on
+        // stderr. There is nowhere in an annotation stream or a job summary to
+        // put the fact (issue #2691).
+        OutputFormat::GithubAnnotations => {
+            dropped_grouping_mode(ctx, output);
+            print_check_github_annotations(original, ctx)
+        }
         OutputFormat::GithubSummary => {
+            dropped_grouping_mode(ctx, output);
             print_check_github_format(original, ctx, GithubTarget::Summary)
         }
         ci_format => print_results_ci_comment(original, ctx, ci_format),
@@ -659,9 +674,13 @@ pub(crate) fn print_duplication_report(
         OutputFormat::GithubSummary => {
             print_dupes_github_format(report, ctx, GithubTarget::Summary)
         }
-        ci_format => {
-            print_duplication_ci_comment(report, ctx.root, ci_format, ctx.gate_outcomes.as_ref())
-        }
+        ci_format => print_duplication_ci_comment(
+            report,
+            ctx.root,
+            ci_format,
+            ctx.gate_outcomes.as_ref(),
+            None,
+        ),
     }
 }
 
@@ -703,11 +722,12 @@ fn print_duplication_ci_comment(
     root: &Path,
     output: OutputFormat,
     gates: Option<&fallow_output::GateOutcomes>,
+    grouping_dropped: Option<&str>,
 ) -> ExitCode {
     let issues = codeclimate::api_duplication_codeclimate_issues(report, root);
     let value = fallow_output::codeclimate_issues_to_value(&issues);
     let requests = crate::requests::request_outcomes();
-    let status_note = ci_status_note(None, gates, requests.as_ref());
+    let status_note = ci_status_note(None, gates, requests.as_ref(), grouping_dropped);
     print_ci_comment_format_with_status("dupes", &value, output, None, status_note.as_deref())
         .unwrap_or_else(|| {
             eprintln!("Error: badge format is only supported for the health command");
@@ -756,25 +776,33 @@ fn print_grouped_duplication_report(
         OutputFormat::PrCommentGithub
         | OutputFormat::PrCommentGitlab
         | OutputFormat::ReviewGithub
-        | OutputFormat::ReviewGitlab => {
-            print_duplication_ci_comment(report, ctx.root, output, ctx.gate_outcomes.as_ref())
-        }
-        // The GitHub formats have no grouping concept; render ungrouped (same
-        // fallback the PR-comment formats use).
+        | OutputFormat::ReviewGitlab => print_duplication_ci_comment(
+            report,
+            ctx.root,
+            output,
+            ctx.gate_outcomes.as_ref(),
+            note_dropped_grouping(Some(grouping.mode), output),
+        ),
+        // The GitHub-native formats have no grouping concept, so they render
+        // the ungrouped document and say so on stderr. There is nowhere in an
+        // annotation stream or a job summary to put the fact, and the note is
+        // the whole fix for those two targets (issue #2691).
         OutputFormat::GithubAnnotations => {
+            note_dropped_grouping(Some(grouping.mode), output);
             print_dupes_github_format(report, ctx, GithubTarget::Annotations)
         }
         OutputFormat::GithubSummary => {
+            note_dropped_grouping(Some(grouping.mode), output);
             print_dupes_github_format(report, ctx, GithubTarget::Summary)
         }
         OutputFormat::Compact => {
             compact::print_duplication_compact(report, ctx.root);
-            warn_dupes_grouping_unsupported(grouping, "compact");
+            note_dropped_grouping(Some(grouping.mode), output);
             ExitCode::SUCCESS
         }
         OutputFormat::Markdown => {
             markdown::print_duplication_markdown(report, ctx.root);
-            warn_dupes_grouping_unsupported(grouping, "markdown");
+            note_dropped_grouping(Some(grouping.mode), output);
             ExitCode::SUCCESS
         }
         OutputFormat::Badge => {
@@ -877,12 +905,32 @@ fn print_ci_comment_format_with_status(
     Some(exit)
 }
 
-fn warn_dupes_grouping_unsupported(grouping: &DuplicationGrouping, format: &str) {
-    eprintln!(
-        "note: --group-by {} is not supported for {format} duplication output, falling back to \
-         ungrouped output (use --format json for the full grouped envelope)",
-        grouping.mode
-    );
+/// Note on stderr that this render target dropped the requested grouping, and
+/// return the mode so the rendered body can say the same thing.
+///
+/// The two travel together on purpose: until issue #2691 three targets printed
+/// the note, six said nothing at all, and no target put the fact in what it
+/// rendered.
+fn note_dropped_grouping(mode: Option<&str>, output: OutputFormat) -> Option<&str> {
+    if let Some(mode) = mode {
+        eprintln!(
+            "note: --group-by {mode} is not supported for {format} output, falling back to \
+             ungrouped output (use --format json for the full grouped envelope)",
+            format = output.flag_label()
+        );
+    }
+    mode
+}
+
+/// The requested `--group-by` mode when this target cannot carry it, noted on
+/// stderr on the way out.
+fn dropped_grouping_mode<'a>(ctx: &'a ReportContext<'_>, output: OutputFormat) -> Option<&'a str> {
+    note_dropped_grouping(
+        ctx.group_by
+            .as_ref()
+            .map(grouping::OwnershipResolver::mode_label),
+        output,
+    )
 }
 
 /// Print health (complexity) analysis results in the configured format.
@@ -917,13 +965,13 @@ pub(crate) fn print_health_report(
         OutputFormat::Compact => {
             compact::print_health_compact(report, ctx.root);
             compact::print_type_aware_compact(ctx.type_aware, ctx.type_aware_scope);
-            warn_grouping_unsupported(grouping, "compact");
+            dropped_health_grouping_mode(grouping, output);
             ExitCode::SUCCESS
         }
         OutputFormat::Markdown => {
             markdown::print_health_markdown(report, ctx.root);
             markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
-            warn_grouping_unsupported(grouping, "markdown");
+            dropped_health_grouping_mode(grouping, output);
             ExitCode::SUCCESS
         }
         OutputFormat::Sarif => match group_resolver {
@@ -964,19 +1012,26 @@ pub(crate) fn print_health_report(
         OutputFormat::PrCommentGithub
         | OutputFormat::PrCommentGitlab
         | OutputFormat::ReviewGithub
-        | OutputFormat::ReviewGitlab => {
-            print_health_ci_comment(report, ctx.root, output, ctx.gate_outcomes.as_ref())
-        }
-        // The GitHub formats have no grouping concept; render ungrouped (same
-        // fallback the PR-comment formats use).
+        | OutputFormat::ReviewGitlab => print_health_ci_comment(
+            report,
+            ctx.root,
+            output,
+            ctx.gate_outcomes.as_ref(),
+            dropped_health_grouping_mode(grouping, output),
+        ),
+        // The GitHub-native formats have no grouping concept, so they render
+        // the ungrouped document and say so on stderr. There is nowhere in an
+        // annotation stream or a job summary to put the fact (issue #2691).
         OutputFormat::GithubAnnotations => {
+            dropped_health_grouping_mode(grouping, output);
             print_health_github_format(report, ctx, GithubTarget::Annotations)
         }
         OutputFormat::GithubSummary => {
+            dropped_health_grouping_mode(grouping, output);
             print_health_github_format(report, ctx, GithubTarget::Summary)
         }
         OutputFormat::Badge => {
-            warn_grouping_unsupported(grouping, "badge");
+            dropped_health_grouping_mode(grouping, output);
             badge::print_health_badge(report)
         }
     }
@@ -1043,11 +1098,12 @@ fn print_health_ci_comment(
     root: &Path,
     output: OutputFormat,
     gates: Option<&fallow_output::GateOutcomes>,
+    grouping_dropped: Option<&str>,
 ) -> ExitCode {
     let issues = codeclimate::api_health_codeclimate_issues(report, root);
     let value = fallow_output::codeclimate_issues_to_value(&issues);
     let requests = crate::requests::request_outcomes();
-    let status_note = ci_status_note(None, gates, requests.as_ref());
+    let status_note = ci_status_note(None, gates, requests.as_ref(), grouping_dropped);
     print_ci_comment_format_with_status("health", &value, output, None, status_note.as_deref())
         .unwrap_or_else(|| {
             eprintln!("Error: badge format is only supported for the health command");
@@ -1055,14 +1111,15 @@ fn print_health_ci_comment(
         })
 }
 
-fn warn_grouping_unsupported(grouping: Option<&fallow_output::HealthGrouping>, format: &str) {
-    if let Some(g) = grouping {
-        eprintln!(
-            "note: --group-by {} is not supported for {format} output, falling back to \
-             ungrouped output (use --format json for the full grouped envelope)",
-            g.mode
-        );
-    }
+/// The requested health `--group-by` mode when this target cannot carry it.
+///
+/// Health threads its grouping through its own parameter rather than
+/// `ReportContext::group_by`, which standalone `fallow health` leaves unset.
+fn dropped_health_grouping_mode(
+    grouping: Option<&fallow_output::HealthGrouping>,
+    output: OutputFormat,
+) -> Option<&str> {
+    note_dropped_grouping(grouping.map(|grouping| grouping.mode), output)
 }
 
 /// Print cross-reference findings (duplicated code that is also dead code).

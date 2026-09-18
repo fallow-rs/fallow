@@ -183,7 +183,9 @@ fn print_audit_pr_comment(
             audit_gate_outcomes(result).as_ref(),
             // Audit publishes no `request_outcomes`: it exits 2 rather than
             // widen when its base ref will not resolve, and it states its own
-            // scope through `base_ref` and `base_description`.
+            // scope through `base_ref` and `base_description`. It has no
+            // `--group-by` either.
+            None,
             None,
         )
         .as_deref(),
@@ -216,7 +218,9 @@ fn print_audit_review(
             audit_gate_outcomes(result).as_ref(),
             // Audit publishes no `request_outcomes`: it exits 2 rather than
             // widen when its base ref will not resolve, and it states its own
-            // scope through `base_ref` and `base_description`.
+            // scope through `base_ref` and `base_description`. It has no
+            // `--group-by` either.
+            None,
             None,
         )
         .as_deref(),
