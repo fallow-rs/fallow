@@ -3291,6 +3291,12 @@ if [ "${MOCK_NO_STALENESS:-}" = "1" ]; then
   printf '{"schema_version":9,"total_issues":0,"baseline":{"entries":8,"matched":3}}\n'
   exit 0
 fi
+# An audit-shaped envelope: one staleness object per section, which is what
+# makes the first-match `//` chain the wrong reader for this command.
+if [ "${MOCK_AUDIT_BASELINES:-}" = "1" ]; then
+  printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
+  exit 0
+fi
 if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ] && [ "$scoped" = "false" ]; then
   printf 'not json at all\n'
   exit 2
@@ -3665,6 +3671,64 @@ assert_not_contains "$STALE_STDOUT" "has no entries this command recognises" \
 
 STALE_SUMMARY_EXPECTED="Baseline recognises nothing" \
   run_stale_summary "zero-entry" HAS_NATIVE_REPORT="true" FALLOW_BASELINE_ENTRIES="0"
+
+# 16. `fallow audit` loads up to three baselines and judges none of them, and
+# the single-analysis `//` chain is first-match, so it would report one and hide
+# the other two. One line per section instead, naming the command a reader has
+# to run: `duplication` is served by `fallow dupes` and `complexity` by
+# `fallow health`, so the section label and the command deliberately differ.
+run_stale_analyze INPUT_COMMAND="audit" MOCK_AUDIT_BASELINES="1" \
+  INPUT_DEAD_CODE_BASELINE="audit/dc.json" \
+  INPUT_DUPES_BASELINE="audit/du.json" \
+  INPUT_HEALTH_BASELINE="audit/he.json"
+assert_contains "$STALE_STDOUT" "::notice::fallow: the dead-code baseline (audit/dc.json) has 12 entries and was not judged" \
+  "audit baselines: the dead-code baseline is reported with its path"
+assert_contains "$STALE_STDOUT" "Run 'fallow dead-code --baseline audit/dc.json' over the whole project" \
+  "audit baselines: the pointer names the unscoped command"
+assert_contains "$STALE_STDOUT" "::notice::fallow: the duplication baseline (audit/du.json) has 3 entries and was not judged" \
+  "audit baselines: the duplication baseline is reported too"
+assert_contains "$STALE_STDOUT" "Run 'fallow dupes --baseline audit/du.json' over the whole project" \
+  "audit baselines: duplication points at fallow dupes, not at the section name"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the complexity baseline at audit/he.json has no entries this command recognises" \
+  "audit baselines: a zero-entry audit baseline gets the recognition warning"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "audit baselines: naming an inert baseline does not fail the job"
+else
+  fail "audit baselines: naming an inert baseline does not fail the job" "exit ${STALE_EXIT}"
+fi
+
+# Audit resolves all three from project config as well as from inputs, so there
+# is not always a path to echo back.
+run_stale_analyze INPUT_COMMAND="audit" MOCK_AUDIT_BASELINES="1"
+assert_contains "$STALE_STDOUT" "::notice::fallow: the dead-code baseline has 12 entries and was not judged" \
+  "audit baselines: a config-resolved baseline is reported without a path"
+assert_contains "$STALE_STDOUT" "Run 'fallow dead-code' with that baseline over the whole project" \
+  "audit baselines: the pointer degrades when there is no path to name"
+
+# A single-analysis command keeps the first-match chain and gains no audit line.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json"
+assert_not_contains "$STALE_STDOUT" "was not judged on this run: fallow audit" \
+  "audit baselines: a single-analysis run gains no audit pointer"
+
+# 17. The gate cannot apply to audit and the `baseline` input is already
+# rejected for it, so the pair is only reachable through `args`.
+run_stale_analyze INPUT_COMMAND="audit" INPUT_ARGS="--fail-on-stale-baseline"
+if [ "$STALE_EXIT" -eq 2 ]; then
+  pass "audit baselines: --fail-on-stale-baseline smuggled through args is rejected"
+else
+  fail "audit baselines: --fail-on-stale-baseline smuggled through args is rejected" "exit ${STALE_EXIT}"
+fi
+assert_contains "$STALE_STDOUT" "cannot apply to command: audit" \
+  "audit baselines: the rejection says why"
+
+# The same flag in args on a command that CAN judge a baseline is untouched.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_ARGS="--fail-on-stale-baseline"
+if [ "$STALE_EXIT" -ne 2 ]; then
+  pass "audit baselines: the rejection is scoped to audit"
+else
+  fail "audit baselines: the rejection is scoped to audit" "exit ${STALE_EXIT}"
+fi
 
 rm -rf "$STALE_WORK"
 

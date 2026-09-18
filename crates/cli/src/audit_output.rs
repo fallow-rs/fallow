@@ -70,7 +70,40 @@ fn audit_gate_outcomes(result: &AuditResult) -> Option<fallow_output::GateOutcom
     };
     let mut gates = fallow_output::GateOutcomes::new();
     gates.insert(GateName::AuditVerdict, GateOutcome::new(status, true));
+    if audit_loaded_any_baseline(result) {
+        // The honest projection of a gate that stood down: every audit narrows
+        // to the changed slice, so a whole-project baseline cannot be judged
+        // and the gate is inert by design. Publishing it as `skipped` and
+        // unenforced is what puts the fact in `gate_outcomes`, in the
+        // "Gate outcomes:" line the comment and MR note render, and in the
+        // MCP's gate sentences. One entry for up to three baselines, for the
+        // same reason the CLI prints its note once.
+        gates.insert(
+            GateName::StaleBaseline,
+            GateOutcome::new(GateStatus::Skipped, false),
+        );
+    }
     gates.into_option()
+}
+
+/// Whether this audit loaded any of its three baselines.
+///
+/// Read from the sub-pass results rather than from the options, because audit
+/// resolves all three from project config as well as from flags, so an audit
+/// can load a baseline with no flag at all.
+fn audit_loaded_any_baseline(result: &AuditResult) -> bool {
+    result
+        .check
+        .as_ref()
+        .is_some_and(|check| check.baseline_staleness.is_some())
+        || result
+            .dupes
+            .as_ref()
+            .is_some_and(|dupes| dupes.baseline_staleness.is_some())
+        || result
+            .health
+            .as_ref()
+            .is_some_and(|health| health.report.summary.baseline_staleness.is_some())
 }
 
 fn audit_decision_conclusion(verdict: AuditVerdict) -> PrDecisionConclusion {
@@ -997,6 +1030,10 @@ fn build_audit_dead_code_json_with_results(
         check.elapsed,
         check.config_fixable,
         &check.workspace_diagnostics,
+        check
+            .baseline_staleness
+            .as_ref()
+            .map(|loaded| loaded.to_envelope(0)),
     ) {
         Ok(mut json) => {
             if let Some(ref base) = result.base_snapshot {
@@ -1045,6 +1082,7 @@ fn build_audit_duplication_json(
         Ok(mut json) => {
             let root_prefix = format!("{}/", dupes.config.root.display());
             report::strip_root_prefix(&mut json, &root_prefix);
+            insert_duplication_baseline_staleness(&mut json, dupes);
             if let Some(ref base) = result.base_snapshot {
                 if let Some(comparison) = result.comparison.as_ref() {
                     annotate_domain_json(&mut json, "clone_groups", comparison.dupes.introduced());
@@ -1065,6 +1103,31 @@ fn build_audit_duplication_json(
             2,
             OutputFormat::Json,
         )),
+    }
+}
+
+/// Publish the duplication sub-pass's view of its loaded baseline at the audit
+/// `duplication` section root, where the standalone `dupes` envelope carries
+/// the same key.
+///
+/// Inserted into the serialized value rather than added to
+/// `DupesReportPayload`, because that payload is `serde(flatten)`ed into
+/// `DupesOutput`, which owns a `baseline_staleness` of its own: a typed member
+/// would put two keys of that name at the standalone envelope root. The audit
+/// section is built from the payload alone and never flows through the
+/// envelope, so this is the only carrier it has.
+fn insert_duplication_baseline_staleness(
+    json: &mut serde_json::Value,
+    dupes: &crate::dupes::DupesResult,
+) {
+    let Some(loaded) = dupes.baseline_staleness.as_ref() else {
+        return;
+    };
+    let Some(object) = json.as_object_mut() else {
+        return;
+    };
+    if let Ok(staleness) = serde_json::to_value(loaded.to_envelope(0)) {
+        object.insert("baseline_staleness".into(), staleness);
     }
 }
 

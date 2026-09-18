@@ -583,13 +583,14 @@ pub fn api_check_json_payload_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
     analysis_diagnostics: &[WorkspaceDiagnostic],
+    baseline_staleness: Option<fallow_output::BaselineStaleness>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_check_json_payload(CheckJsonPayloadInput {
         results,
         root,
         elapsed,
         config_fixable,
-        extras: CheckJsonExtraOutputs::default(),
+        extras: check_json_extras(None, None, None, baseline_staleness),
         workspace_diagnostics: analysis_diagnostics.to_vec(),
     })
 }

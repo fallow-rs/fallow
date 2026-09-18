@@ -172,11 +172,12 @@ fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
 /// Every row is a path a run actually emits, measured rather than inferred.
 /// `dead-code` and `dupes` publish it at the root and `health` inside
 /// `summary`; the combined envelope repeats those under `check`, `dupes` and
-/// `health`. `audit` publishes exactly one, under its `complexity` section's
-/// own `summary`, and none for its dead-code or duplication baselines, so
-/// there are no rows for those. Naming the sites is what keeps the
-/// multi-section shapes from reporting one baseline's rot against another's
-/// counts, and a shape that carries none of them contributes nothing.
+/// `health`. `audit` publishes one per baseline it loaded, at the root of its
+/// `dead_code` and `duplication` sections and inside its `complexity`
+/// section's own `summary`, so all three of its baselines have a row. Naming
+/// the sites is what keeps the multi-section shapes from reporting one
+/// baseline's rot against another's counts, and a shape that carries none of
+/// them contributes nothing.
 ///
 /// The label is the section the envelope actually uses, not the command the
 /// baseline came from, because that is what an agent reading the sentence goes
@@ -195,6 +196,8 @@ const BASELINE_SITES: &[(&[&str], Option<&str>)] = &[
     (&["check", "baseline_staleness"], Some("dead-code")),
     (&["dupes", "baseline_staleness"], Some("duplication")),
     (&["health", "summary", "baseline_staleness"], Some("health")),
+    (&["dead_code", "baseline_staleness"], Some("dead-code")),
+    (&["duplication", "baseline_staleness"], Some("duplication")),
     (
         &["complexity", "summary", "baseline_staleness"],
         Some("complexity"),

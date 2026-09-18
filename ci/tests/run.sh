@@ -299,6 +299,10 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
     printf 'not json at all\n'
     exit 2
   fi
+  if [ "${MOCK_AUDIT_BASELINES:-}" = "1" ]; then
+    printf '%s\n' '{"kind":"audit","total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}'
+    exit 0
+  fi
   if [ "${MOCK_ZERO_ENTRY_BASELINE:-}" = "1" ]; then
     printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":false}}'
     exit 0
@@ -590,6 +594,42 @@ OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
   FALLOW_BASELINE=baseline.json)
 assert_not_contains "$OUT" "has no entries this command recognises" \
   "stale gate: a populated baseline says nothing about recognition"
+
+# fallow audit loads up to three baselines and judges none of them, and the
+# single-analysis // chain is first-match, so it would report one and hide the
+# other two. One line per section instead, naming the command a reader has to
+# run rather than the section it sits in.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_AUDIT_BASELINES=1 \
+  FALLOW_COMMAND=audit \
+  FALLOW_AUDIT_DEAD_CODE_BASELINE=audit/dc.json \
+  FALLOW_AUDIT_DUPES_BASELINE=audit/du.json \
+  FALLOW_AUDIT_HEALTH_BASELINE=audit/he.json)
+assert_contains "$OUT" "NOTICE: the dead-code baseline (audit/dc.json) has 12 entries and was not judged" \
+  "audit baselines: the dead-code baseline is reported with its path"
+assert_contains "$OUT" "Run 'fallow dupes --baseline audit/du.json' over the whole project" \
+  "audit baselines: duplication points at fallow dupes, not at the section name"
+assert_contains "$OUT" "WARNING: the complexity baseline at audit/he.json has no entries this command recognises" \
+  "audit baselines: a zero-entry audit baseline gets the recognition warning"
+
+# The gate cannot apply to audit and FALLOW_BASELINE is already rejected for
+# it, so the pair is only reachable through FALLOW_ARGS.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+# This suite runs without `set -e`, so the exit code is captured inline rather
+# than by toggling it: enabling it here would abort every later case.
+STALE_ARGS_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  FALLOW_COMMAND=audit \
+  FALLOW_ARGS=--fail-on-stale-baseline 2>&1) || STALE_ARGS_EXIT=$?
+if [ "$STALE_ARGS_EXIT" -eq 2 ]; then
+  pass "audit baselines: --fail-on-stale-baseline smuggled through FALLOW_ARGS is rejected"
+else
+  fail "audit baselines: --fail-on-stale-baseline smuggled through FALLOW_ARGS is rejected" "exit $STALE_ARGS_EXIT"
+fi
+assert_contains "$OUT" "cannot apply to command: audit" \
+  "audit baselines: the rejection says why"
 
 # Diff scoping reaches the CLI through FALLOW_DIFF_FILE, not argv.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"

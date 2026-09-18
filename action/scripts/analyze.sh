@@ -364,6 +364,16 @@ if [ -n "${INPUT_MIN_SCORE:-}${INPUT_MIN_SEVERITY:-}" ] \
   exit 2
 fi
 
+# `fallow audit` cannot judge a whole-project baseline, and the `baseline` input
+# is already rejected for it above, so the pair is unreachable through the
+# inputs. It is still reachable through `args`, where it buys a green run plus a
+# note this script replays as `::debug::`. Grep for it the way the
+# `--report-only` check above does.
+if [ "$INPUT_COMMAND" = "audit" ]   && printf '%s' "${INPUT_ARGS:-}" | grep -q -- '--fail-on-stale-baseline'; then
+  echo "::error::--fail-on-stale-baseline in args: cannot apply to command: audit, which analyzes only the files that changed against its base and cannot judge a whole-project baseline. Run the gate on dead-code, dupes or health."
+  exit 2
+fi
+
 # The stale-baseline gate reads the analysis envelope, so it needs a baseline to
 # judge and a command that reports one. Saying so here beats a silent pass.
 if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ]; then
@@ -994,6 +1004,66 @@ elif [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
   else
     stale_baseline_stand_down "it analyzed only part of the project$(baseline_unremovable_scope_clause)" "Run an unscoped job to judge the baseline."
   fi
+fi
+
+# `fallow audit` loads up to three baselines and judges none of them: every
+# audit narrows to the files that changed against its base, so a whole-project
+# baseline matches less of the run for reasons that are not rot. It says so once
+# on stderr, which `--quiet` removes and this script replays as `::debug::`, so
+# an audit user never learned that the baseline they pass is inert (issue
+# #2677).
+#
+# Read each section separately rather than lengthening the single-analysis `//`
+# chain: that chain is first-match, so an audit with three baselines would
+# report one of them and hide the other two. One notice per object found, and
+# the single-analysis step outputs stay bound to their own read, because
+# overloading them would make `baseline-stale-entries` mean a different baseline
+# from one run to the next.
+#
+# A notice, not a warning: nobody asked for a judgement here, and the CLI itself
+# is silent unless the gate flag was passed. The unreachable-combination check
+# at input validation already rejects `command: audit` with the gate.
+audit_baseline_notices() {
+  local file=$1 row label command input entries path
+  # label:jq-prefix:command:input-variable. The label names the envelope
+  # section a reader goes looking in; the command is what they have to run, and
+  # the two differ:
+  # `duplication` is served by `fallow dupes` and `complexity` by
+  # `fallow health`.
+  for row in \
+    'dead-code:.dead_code:dead-code:INPUT_DEAD_CODE_BASELINE' \
+    'duplication:.duplication:dupes:INPUT_DUPES_BASELINE' \
+    'complexity:.complexity.summary:health:INPUT_HEALTH_BASELINE'
+  do
+    label=${row%%:*}
+    command=$(printf '%s' "$row" | cut -d: -f3)
+    input=${row##*:}
+    entries=$(jq -r "($(printf '%s' "$row" | cut -d: -f2).baseline_staleness // empty) | .baseline_entries // empty" "$file" 2>/dev/null || true)
+    # Absent means that baseline was never loaded, which is not worth a line.
+    if [ -z "$entries" ]; then
+      continue
+    fi
+    # Audit resolves all three from project config as well as from inputs, so
+    # there is not always a path to echo back.
+    path=$(eval "printf '%s' \"\${${input}:-}\"")
+    if [ "$entries" = "0" ]; then
+      if [ -n "$path" ]; then
+        echo "::warning::fallow: the ${label} baseline at ${path} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+      else
+        echo "::warning::fallow: the ${label} baseline has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+      fi
+      continue
+    fi
+    if [ -n "$path" ]; then
+      echo "::notice::fallow: the ${label} baseline (${path}) has ${entries} entries and was not judged on this run: fallow audit analyzes only the files that changed against its base. Run 'fallow ${command} --baseline ${path}' over the whole project to check it."
+    else
+      echo "::notice::fallow: the ${label} baseline has ${entries} entries and was not judged on this run: fallow audit analyzes only the files that changed against its base. Run 'fallow ${command}' with that baseline over the whole project to check it."
+    fi
+  done
+}
+
+if [ "$INPUT_COMMAND" = "audit" ]; then
+  audit_baseline_notices "$RESULTS_FILE"
 fi
 
 # A baseline with no recognised entries suppresses nothing, so every verdict

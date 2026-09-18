@@ -418,6 +418,15 @@ variables:
         echo "ERROR: The audit command does not support FALLOW_BASELINE/FALLOW_SAVE_BASELINE. Use FALLOW_AUDIT_DEAD_CODE_BASELINE, FALLOW_AUDIT_HEALTH_BASELINE, or FALLOW_AUDIT_DUPES_BASELINE instead."
         exit 2
       fi
+      # audit cannot judge a whole-project baseline, and FALLOW_BASELINE is
+      # already rejected for it above, so the pair is unreachable through the
+      # variables. It is still reachable through FALLOW_ARGS, where it buys a
+      # green pipeline plus a note --quiet removes.
+      if [ "$FALLOW_COMMAND" = "audit" ] \
+        && printf '%s' "$FALLOW_ARGS" | grep -q -- '--fail-on-stale-baseline'; then
+        echo "ERROR: --fail-on-stale-baseline in FALLOW_ARGS cannot apply to command: audit, which analyzes only the files that changed against its base and cannot judge a whole-project baseline. Run the gate on dead-code, dupes or health."
+        exit 2
+      fi
       # The stale-baseline gate reads the analysis envelope, so it needs a
       # baseline to judge and a command that reports one.
       if [ "$FALLOW_FAIL_ON_STALE_BASELINE" = "true" ]; then
@@ -935,6 +944,53 @@ variables:
         else
           stale_baseline_stand_down "it analyzed only part of the project$(baseline_unremovable_scope_clause)" "Run an unscoped pipeline to judge the baseline."
         fi
+      fi
+
+      # fallow audit loads up to three baselines and judges none of them:
+      # every audit narrows to the files that changed against its base. It says
+      # so once on stderr, which --quiet removes, so an audit user never learned
+      # that the baseline they pass is inert (issue #2677).
+      #
+      # Read each section separately rather than lengthening the
+      # single-analysis // chain: that chain is first-match, so an audit with
+      # three baselines would report one and hide the other two.
+      audit_baseline_notices() {
+        local file=$1 row label command input entries path
+        # label:jq-prefix:command:variable. The label names the envelope
+        # section a reader goes looking in; the command is what they have to
+        # run, and the two differ: duplication is served by fallow dupes and
+        # complexity by fallow health.
+        for row in \
+          'dead-code:.dead_code:dead-code:FALLOW_AUDIT_DEAD_CODE_BASELINE' \
+          'duplication:.duplication:dupes:FALLOW_AUDIT_DUPES_BASELINE' \
+          'complexity:.complexity.summary:health:FALLOW_AUDIT_HEALTH_BASELINE'
+        do
+          label=${row%%:*}
+          command=$(printf '%s' "$row" | cut -d: -f3)
+          input=${row##*:}
+          entries=$(jq -r "($(printf '%s' "$row" | cut -d: -f2).baseline_staleness // empty) | .baseline_entries // empty" "$file" 2>/dev/null || true)
+          if [ -z "$entries" ]; then
+            continue
+          fi
+          path=$(eval "printf '%s' \"\${${input}:-}\"")
+          if [ "$entries" = "0" ]; then
+            if [ -n "$path" ]; then
+              echo "WARNING: the ${label} baseline at ${path} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+            else
+              echo "WARNING: the ${label} baseline has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+            fi
+            continue
+          fi
+          if [ -n "$path" ]; then
+            echo "NOTICE: the ${label} baseline (${path}) has ${entries} entries and was not judged on this run: fallow audit analyzes only the files that changed against its base. Run 'fallow ${command} --baseline ${path}' over the whole project to check it."
+          else
+            echo "NOTICE: the ${label} baseline has ${entries} entries and was not judged on this run: fallow audit analyzes only the files that changed against its base. Run 'fallow ${command}' with that baseline over the whole project to check it."
+          fi
+        done
+      }
+
+      if [ "$FALLOW_COMMAND" = "audit" ]; then
+        audit_baseline_notices fallow-results.json
       fi
 
       # A baseline with no recognised entries suppresses nothing, so every

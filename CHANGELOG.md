@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow audit`'s baselines no longer rot in silence.** An audit loads up to
+  three baselines (`dead-code-baseline`, `dupes-baseline`, `health-baseline`,
+  each also settable from project config) and judges none of them, because every
+  audit analyzes only the files that changed against its base. It said so once
+  on stderr, which `--quiet` removes, and its envelope reported nothing at all
+  for the dead-code and duplication baselines, so no CI integration could see
+  that the baseline it passes is inert.
+
+  The audit envelope now carries a staleness object per loaded baseline, at the
+  same place each command's own envelope carries it, plus one
+  `gate_outcomes["stale-baseline"]` entry reporting that the gate stood down.
+  All three always report `change_scoped: true` and `gate_trips: false`, so
+  nobody should build a gate on them. The GitHub Action and the GitLab template
+  now print one line per audit baseline naming the unscoped command that can
+  judge it, and both reject `--fail-on-stale-baseline` on an audit run through
+  `args` or `FALLOW_ARGS`, the last path by which that combination could still
+  buy a green run plus an invisible note.
+
 - **A baseline that recognises nothing no longer gates green in silence.** A
   baseline saved by another command, or an empty file, loaded without complaint
   and suppressed nothing. Every verdict that followed was green and honest,

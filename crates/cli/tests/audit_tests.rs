@@ -7350,3 +7350,152 @@ fn audit_embeds_a_health_baseline_staleness_that_agrees_with_the_stood_down_gate
         output.stderr
     );
 }
+
+/// Save one whole-project baseline per command, the state an audit is pointed
+/// at in practice.
+fn save_audit_baselines(
+    dir: &Path,
+    root: &str,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let dead_code = dir.join("dc-baseline.json");
+    let dupes = dir.join("du-baseline.json");
+    let health = dir.join("he-baseline.json");
+    for (command, path, extra) in [
+        ("dead-code", &dead_code, None),
+        ("dupes", &dupes, None),
+        ("health", &health, Some("--complexity")),
+    ] {
+        let mut args = vec![
+            command,
+            "--root",
+            root,
+            "--format",
+            "json",
+            "--quiet",
+            "--save-baseline",
+            path.to_str().expect("utf8"),
+        ];
+        if let Some(extra) = extra {
+            args.push(extra);
+        }
+        let saved = run_fallow_raw(&args);
+        assert!(
+            saved.code == 0 || saved.code == 1,
+            "saving the {command} baseline should not error: {}",
+            saved.stderr
+        );
+    }
+    (dead_code, dupes, health)
+}
+
+/// Every audit narrows to the changed slice, so a whole-project baseline cannot
+/// be judged there and the gate is inert by design. `scope_reasons` is the one
+/// value measured rather than assumed: the audit resolves its base ref and
+/// hands the dead-code sub-pass a ref, while dupes and health receive an
+/// already resolved changed-file set and can only name that.
+fn assert_audit_baseline_stood_down(staleness: &serde_json::Value, reasons: &serde_json::Value) {
+    assert!(
+        staleness.is_object(),
+        "the section must publish its baseline's staleness"
+    );
+    assert_eq!(
+        staleness["change_scoped"],
+        serde_json::Value::Bool(true),
+        "{staleness}"
+    );
+    assert_eq!(
+        staleness["gate_trips"],
+        serde_json::Value::Bool(false),
+        "a change-scoped run cannot trip the gate, so nobody should build one \
+         on this: {staleness}"
+    );
+    assert_eq!(&staleness["scope_reasons"], reasons, "{staleness}");
+}
+
+/// `fallow audit` loads up to three baselines and judges none of them: every
+/// audit narrows to the files that changed against its base, so a whole-project
+/// baseline matches less of the run for reasons that are not rot. The CLI said
+/// so once on stderr, which `--quiet` removes; the envelope said nothing at all
+/// for the dead-code and duplication baselines, so no CI integration could see
+/// that the baseline it passes is inert.
+#[test]
+fn audit_publishes_staleness_for_every_baseline_it_loaded() {
+    let fixture = create_audit_fixture("baseline-staleness");
+    let dir = fixture.path();
+    let root = dir.to_str().expect("fixture path should be UTF-8");
+    let (dead_code_baseline, dupes_baseline, health_baseline) = save_audit_baselines(dir, root);
+
+    // A second commit gives the audit a changed slice to analyze.
+    fs::write(
+        dir.join("src/added.ts"),
+        "export const added = (): number => 1;\nexport const alsoAdded = (): number => 2;\n",
+    )
+    .unwrap();
+    commit_all(dir, "add a module");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "HEAD~1",
+        "--dead-code-baseline",
+        dead_code_baseline.to_str().expect("utf8"),
+        "--dupes-baseline",
+        dupes_baseline.to_str().expect("utf8"),
+        "--health-baseline",
+        health_baseline.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let envelope = parse_json(&output);
+
+    assert_audit_baseline_stood_down(
+        &envelope["dead_code"]["baseline_staleness"],
+        &serde_json::json!(["changed-since"]),
+    );
+    assert_audit_baseline_stood_down(
+        &envelope["duplication"]["baseline_staleness"],
+        &serde_json::json!(["changed-files"]),
+    );
+    assert_audit_baseline_stood_down(
+        &envelope["complexity"]["summary"]["baseline_staleness"],
+        &serde_json::json!(["changed-files"]),
+    );
+
+    // One entry for up to three baselines, for the same reason the CLI prints
+    // its note once. `skipped` and unenforced is the honest projection of a
+    // gate that stood down rather than passed.
+    let entry = &envelope["gate_outcomes"]["stale-baseline"];
+    assert_eq!(entry["status"], "skipped", "{envelope}");
+    assert_eq!(
+        entry["enforced"],
+        serde_json::Value::Bool(false),
+        "{envelope}"
+    );
+}
+
+/// The gate entry describes a baseline that was loaded, so an audit without one
+/// must not claim a gate stood down.
+#[test]
+fn an_audit_without_a_baseline_arms_no_stale_baseline_gate() {
+    let fixture = create_audit_fixture("no-baseline");
+    let root = fixture
+        .path()
+        .to_str()
+        .expect("fixture path should be UTF-8");
+    let output = run_fallow_raw(&[
+        "audit", "--root", root, "--base", "HEAD", "--format", "json", "--quiet",
+    ]);
+    let envelope = parse_json(&output);
+
+    assert!(
+        envelope["gate_outcomes"]["stale-baseline"].is_null(),
+        "no baseline was loaded, so no gate stood down: {envelope}"
+    );
+    assert!(
+        envelope["dead_code"]["baseline_staleness"].is_null(),
+        "the object is absent when no baseline was loaded: {envelope}"
+    );
+}
