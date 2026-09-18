@@ -263,6 +263,13 @@ fn baseline_warning(
         || "the loaded baseline".to_string(),
         |analysis| format!("the {analysis} baseline"),
     );
+    if baseline_entries == 0 {
+        return Some(format!(
+            "Baseline staleness: {subject} has no entries this command recognises. It may be a \
+             baseline saved by another command, or an empty file. Either way it suppresses \
+             nothing."
+        ));
+    }
     if advisory == "none" && !gate_trips {
         return unjudged_baseline_warning(staleness, &subject, &total, baseline_entries);
     }
@@ -289,6 +296,10 @@ fn baseline_warning(
 
 /// One sentence for a baseline this run could not judge at all, which neither
 /// advisory covers.
+///
+/// Reached only with a non-empty baseline; a zero-entry one is reported by its
+/// own sentence before this, because "nothing was judged" and "there was
+/// nothing to judge" are different problems with different remedies.
 ///
 /// A change-scoped run compares a whole-project baseline against a slice of
 /// it, so the advisory and the gate both stand down by construction and a
@@ -601,6 +612,55 @@ mod tests {
             warnings
                 .iter()
                 .all(|warning| !warning.contains("was not judged")),
+            "{warnings:?}"
+        );
+    }
+
+    /// A baseline with no recognised entries earns every green verdict below
+    /// honestly and would otherwise say nothing, so an agent handed the report
+    /// cannot tell a working baseline from one saved by another command.
+    #[test]
+    fn a_baseline_with_no_recognised_entries_is_reported() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dupes",
+            "baseline_staleness": staleness("none", 0, 0, false),
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(
+            warnings[0],
+            "Baseline staleness: the loaded baseline has no entries this command recognises. It \
+             may be a baseline saved by another command, or an empty file. Either way it \
+             suppresses nothing."
+        );
+    }
+
+    /// The zero-entry sentence wins over the unjudged one: "there was nothing
+    /// to judge" and "nothing judged it" are different problems with different
+    /// remedies, and re-running unscoped would not fix the first.
+    #[test]
+    fn a_zero_entry_baseline_on_a_narrowed_run_reports_the_empty_baseline() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "health",
+            "summary": {
+                "baseline_staleness": {
+                    "baseline_entries": 0,
+                    "matched_entries": 0,
+                    "stale_entries": 0,
+                    "current_findings": 0,
+                    "change_scoped": true,
+                    "stale": false,
+                    "warning": "none",
+                    "gate_trips": false,
+                    "moved_entries": 0,
+                    "scope_reasons": ["production"],
+                },
+            },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("no entries this command recognises"),
             "{warnings:?}"
         );
     }

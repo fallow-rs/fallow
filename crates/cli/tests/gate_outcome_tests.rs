@@ -1113,3 +1113,158 @@ fn a_narrowed_run_with_no_findings_still_points_at_the_unscoped_recheck() {
         "the reason names the published scope_reasons: {recheck}"
     );
 }
+
+/// A baseline with no entries this command recognises suppresses nothing, and
+/// every verdict that follows is green and honest: the advisory has nothing to
+/// judge, so `gate_trips` is false and the gate reports `pass`. A repository
+/// that pointed `--baseline` at a baseline another command saved, or at an
+/// empty file, would gate on it forever and never be told.
+///
+/// Each command has its own format, and the three do not agree on what a
+/// foreign file means: `dupes` and `health` give every field a serde default,
+/// so any JSON object loads as zero entries, while `dead-code` rejects one
+/// today because five of its fields carry no default. That asymmetry is not a
+/// kind check, so the note is asserted on the commands that accept the file.
+#[test]
+fn a_dupes_run_says_so_when_the_baseline_is_another_commands() {
+    let project = orphan_project(2);
+    let dead_code_baseline = project.path().join("dead-code-baseline.json");
+    let baseline_arg = dead_code_baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a dead-code baseline should not error: {}",
+        saved.stderr
+    );
+
+    let output = run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+        "--fail-on-stale-baseline",
+    ]);
+    let envelope = parse_json(&output);
+    assert_eq!(
+        envelope["baseline_staleness"]["baseline_entries"], 0,
+        "the wrong-kind file loads as zero entries: {envelope}"
+    );
+    assert_eq!(
+        gate(&envelope, "stale-baseline")["status"],
+        "pass",
+        "a baseline with nothing in it cannot report a stale entry: {envelope}"
+    );
+    assert!(
+        output
+            .stderr
+            .contains("has no entries this command recognises"),
+        "the fact must reach stderr even under --quiet, because it appears in \
+         no human report and --ci implies --quiet: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "a legitimately empty baseline is a real state, so the exit code does \
+         not move: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn a_health_run_says_so_when_the_baseline_is_another_commands() {
+    let project = cloned_project();
+    let dupes_baseline = project.path().join("dupes-baseline.json");
+    let baseline_arg = dupes_baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a duplication baseline should not error: {}",
+        saved.stderr
+    );
+
+    let output = run(&[
+        "health",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--complexity",
+        "--baseline",
+        baseline_arg,
+    ]);
+    let envelope = parse_json(&output);
+    assert_eq!(
+        envelope["summary"]["baseline_staleness"]["baseline_entries"], 0,
+        "the wrong-kind file loads as zero entries: {envelope}"
+    );
+    assert!(
+        output
+            .stderr
+            .contains("has no entries this command recognises"),
+        "{}",
+        output.stderr
+    );
+}
+
+/// The note is about the baseline, not about this run, so a baseline that does
+/// carry entries never earns it however the run turned out.
+#[test]
+fn a_baseline_with_entries_never_earns_the_zero_entry_note() {
+    let project = orphan_project(3);
+    let baseline = project.path().join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a baseline should not error: {}",
+        saved.stderr
+    );
+
+    let output = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        !output.stderr.contains("has no entries"),
+        "a populated baseline says nothing about recognition: {}",
+        output.stderr
+    );
+}

@@ -132,6 +132,15 @@ append_baseline_advisory() {
   [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
   [ -n "${FALLOW_BASELINE_ENTRIES:-}" ] || return 0
   local line=""
+  # Checked before the advisory: a baseline with no recognised entries earns
+  # every green verdict below honestly and says nothing, so the advisory `case`
+  # would fall through to its silent arm. The path is not in this step's env
+  # (see action.yml), so the line omits it; the step log carries it.
+  if [ "${FALLOW_BASELINE_ENTRIES:-}" = "0" ]; then
+    line="> **Baseline recognises nothing.** The baseline has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+    printf '%s\n\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+    return 0
+  fi
   case "${FALLOW_BASELINE_ADVISORY:-}" in
     partial)
       line="> **Baseline is partially stale.** ${FALLOW_BASELINE_STALE_ENTRIES} of ${FALLOW_BASELINE_ENTRIES} saved entries matched nothing this run, so the baseline protects less than what was saved. Re-save it with the \`save-baseline\` input."

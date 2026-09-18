@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A baseline that recognises nothing no longer gates green in silence.** A
+  baseline saved by another command, or an empty file, loaded without complaint
+  and suppressed nothing. Every verdict that followed was green and honest,
+  because a baseline with no entries has nothing that can go stale, so a
+  repository that pointed `baseline` at the wrong file kept a permanently
+  passing `fail-on-stale-baseline` gate and was never told.
+
+  Such a run now says so on CLI stderr, in the GitHub Action's step log and job
+  summary, in the GitLab job log, and in the MCP tools' warnings. Each command
+  has its own baseline format and they do not treat a foreign file alike: `dupes`
+  and `health` accept one as zero entries, while `dead-code` rejects it outright.
+  The note covers all three rather than relying on that difference. The exit code
+  is unchanged on every command, because a baseline saved from a clean project is
+  legitimately empty and failing there would break every repository that saves
+  one on a green main.
+
 ### Added
 
 - **A narrowed run now names the channels that narrowed it.** A run scoped to

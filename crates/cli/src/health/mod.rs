@@ -445,7 +445,7 @@ pub fn run_health(
     if let Some(ref timings) = result.timings {
         report::print_health_performance(timings, opts.output, json_style);
     }
-    record_loaded_baseline(&result, opts.baseline);
+    report_loaded_baseline(&result, opts.baseline);
     let code = print_health_result(
         &result,
         HealthPrintOptions {
@@ -781,19 +781,22 @@ fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_
     score || findings || runtime_coverage || stale_baseline
 }
 
-/// Record the loaded baseline for the `recheck-baseline` next step.
+/// Say what this run made of the loaded baseline, and record it for the
+/// `recheck-baseline` next step.
 ///
-/// Recorded here rather than at the engine's load site, which cannot reach CLI
-/// runtime state, and only for the standalone command: `audit` and the
-/// combined run build their next steps from their own builders and would
-/// otherwise offer a `health` path on an envelope that is not health's.
-fn record_loaded_baseline(result: &HealthResult, baseline_path: Option<&std::path::Path>) {
+/// Both happen here rather than at the engine's load site, which cannot reach
+/// CLI runtime state or print a CLI note, and only for the standalone command:
+/// `audit` and the combined run build their next steps from their own builders
+/// and would otherwise offer a `health` path on an envelope that is not
+/// health's.
+fn report_loaded_baseline(result: &HealthResult, baseline_path: Option<&std::path::Path>) {
     let Some(path) = baseline_path else {
         return;
     };
     let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
         return;
     };
+    crate::baseline_gate::note_zero_entry_baseline(baseline_path, staleness.baseline_entries);
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: "health",
         path: path.display().to_string(),

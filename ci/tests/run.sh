@@ -299,6 +299,10 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
     printf 'not json at all\n'
     exit 2
   fi
+  if [ "${MOCK_ZERO_ENTRY_BASELINE:-}" = "1" ]; then
+    printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":false}}'
+    exit 0
+  fi
   printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":3,"stale_entries":5,"current_findings":3,"change_scoped":false,"stale":true,"warning":"partial","gate_trips":true}}'
   exit 0
 fi
@@ -567,6 +571,25 @@ OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
   FALLOW_PRODUCTION=true)
 assert_contains "$OUT" "only part of the project (production mode or workspace scoping)" \
   "stale gate: a binary without the member falls back to the variable-based reason"
+
+# A baseline with no recognised entries suppresses nothing, so every verdict
+# reads green honestly and the advisory case would fall through to its silent
+# arm: "0" is non-empty. The branch keys on the count, not on the command.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_ZERO_ENTRY_BASELINE=1 \
+  FALLOW_BASELINE=wrong-kind.json)
+assert_contains "$OUT" "WARNING: the baseline at wrong-kind.json has no entries this command recognises" \
+  "stale gate: a baseline that recognises nothing is called out"
+
+# A populated baseline never earns that warning.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_BASELINE=baseline.json)
+assert_not_contains "$OUT" "has no entries this command recognises" \
+  "stale gate: a populated baseline says nothing about recognition"
 
 # Diff scoping reaches the CLI through FALLOW_DIFF_FILE, not argv.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"

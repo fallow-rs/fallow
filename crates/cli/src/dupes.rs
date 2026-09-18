@@ -606,6 +606,7 @@ fn apply_duplication_baseline(
         eprintln!("Comparing against duplication baseline: {}", path.display());
         warn_on_duplication_baseline_staleness(staleness, path);
     }
+    crate::baseline_gate::note_zero_entry_baseline(Some(path), baseline_entries);
 
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: "dupes",

@@ -1842,6 +1842,7 @@ fn load_and_compare_baseline(
         eprintln!("Comparing against baseline: {}", baseline_path.display());
         warn_on_baseline_staleness(staleness, baseline_path);
     }
+    crate::baseline_gate::note_zero_entry_baseline(Some(baseline_path), baseline_entries);
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: "dead-code",
         path: baseline_path.display().to_string(),

@@ -115,6 +115,42 @@ pub fn note_stood_down(path: Option<&Path>, enabled: bool, reason: &str) {
     );
 }
 
+/// Say that a loaded baseline carries nothing this command recognises.
+///
+/// A baseline with zero entries suppresses nothing, and every downstream
+/// verdict follows from that honestly: the advisory is silent because there is
+/// nothing to judge, and the gate reports `pass` because no entry went
+/// unmatched. The run is therefore green forever, which is the correct reading
+/// of the numbers and the wrong answer for a repository that pointed
+/// `--baseline` at the wrong file.
+///
+/// Each command has its own baseline format, and two of the three accept a
+/// foreign one: `dupes` and `health` give every field a serde default, so any
+/// JSON object deserializes into them with zero entries. `dead-code` happens to
+/// reject one today because five of its fields carry no default, but that is a
+/// field-attribute asymmetry rather than a kind check, so this note covers all
+/// three rather than relying on it.
+///
+/// Prints regardless of `--quiet`, for the reason [`report_gate`] documents:
+/// the fact appears in no human report, and `--ci` implies `--quiet`, which is
+/// exactly the configuration where a silently green gate matters. The exit code
+/// does not move: a baseline saved from a clean project is legitimately empty,
+/// and failing there would break every repository that saves one on a green
+/// main.
+pub fn note_zero_entry_baseline(path: Option<&Path>, entries: usize) {
+    if entries > 0 {
+        return;
+    }
+    let Some(path) = path else {
+        return;
+    };
+    eprintln!(
+        "Note: the baseline at {} has no entries this command recognises. It may be a baseline \
+         saved by another command, or an empty file. Either way it suppresses nothing.",
+        path.display(),
+    );
+}
+
 /// Print the gate's verdict for one loaded baseline and report whether it
 /// fired.
 ///

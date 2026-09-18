@@ -996,6 +996,18 @@ elif [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
   fi
 fi
 
+# A baseline with no recognised entries suppresses nothing, so every verdict
+# below reads green honestly and says nothing at all: the advisory is silent
+# because there was nothing to judge, and the gate passes because no entry went
+# unmatched. A repository that pointed `baseline` at the wrong file, or at an
+# empty one, would otherwise gate on it forever. Sits beside the branches below
+# rather than inside them, because "0" is non-empty and falls through the
+# advisory `case` to its silent arm. Distinct from the `-z` branch above, which
+# means the run reported no staleness at all.
+if [ -n "${INPUT_BASELINE:-}" ] && [ "$BASELINE_ENTRIES" = "0" ]; then
+  echo "::warning::fallow: the baseline at ${INPUT_BASELINE} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+fi
+
 # The advisory and the gate answer different questions and legitimately
 # disagree, so warn on either. A rotted baseline on a project with nothing left
 # to report is `warning: none` with `gate_trips: true`, and that is exactly the

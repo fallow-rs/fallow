@@ -3609,7 +3609,7 @@ assert_contains "$STALE_STDOUT" "baseline and save-baseline name the same file" 
 # 14. The step summary carries the advisory on every render path, because both
 # preferred paths return early and would otherwise drop it.
 run_stale_summary() {
-  local label=$1
+  local label=$1 expected=${STALE_SUMMARY_EXPECTED:-"Baseline is partially stale"}
   shift
   local run_dir
   run_dir=$(mktemp -d "$STALE_WORK/summary.XXXXXX")
@@ -3631,7 +3631,7 @@ run_stale_summary() {
       env "$@" bash "$SCRIPTS_DIR/summary.sh" > /dev/null 2>&1
   )
   set -e
-  assert_contains "$(cat "$run_dir/step_summary")" "Baseline is partially stale" \
+  assert_contains "$(cat "$run_dir/step_summary")" "$expected" \
     "stale gate: the step summary carries the advisory on the ${label} path"
 }
 
@@ -3639,6 +3639,32 @@ run_stale_summary "native" HAS_NATIVE_REPORT="true"
 run_stale_summary "typed" HAS_NATIVE_REPORT="false" \
   FALLOW_PR_COMMENT_ENVELOPE_FILE="envelope.json"
 run_stale_summary "jq fallback" HAS_NATIVE_REPORT="false"
+
+# 15. A baseline with no recognised entries suppresses nothing, so every
+# verdict reads green honestly and the advisory `case` would fall through to its
+# silent arm: "0" is non-empty and reaches the silent `*)` arm. The branch keys
+# on the count rather than on the command, so the command here is only the one
+# this mock's envelope shape models; the wrong-kind case that motivates it is
+# pinned per command in the Rust integration tests. The step log names the
+# path; the summary has no variable for it.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="wrong-kind.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
+  INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the baseline at wrong-kind.json has no entries this command recognises" \
+  "stale gate: a baseline that recognises nothing is called out"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "stale gate: an empty baseline is a real state and does not fail the job"
+else
+  fail "stale gate: an empty baseline is a real state and does not fail the job" "exit ${STALE_EXIT}"
+fi
+
+# A populated baseline never earns that warning, whatever the advisory says.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json"
+assert_not_contains "$STALE_STDOUT" "has no entries this command recognises" \
+  "stale gate: a populated baseline says nothing about recognition"
+
+STALE_SUMMARY_EXPECTED="Baseline recognises nothing" \
+  run_stale_summary "zero-entry" HAS_NATIVE_REPORT="true" FALLOW_BASELINE_ENTRIES="0"
 
 rm -rf "$STALE_WORK"
 
