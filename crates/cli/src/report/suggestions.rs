@@ -130,21 +130,40 @@ pub fn build_dead_code_next_steps(
         workspace_ref: workspace_ref.as_deref(),
         audit_changed: audit_changed_applicable(root),
         has_external_plugins: has_external_plugins(root),
-        baseline_recheck: loaded_baseline.as_ref().map(baseline_recheck_input),
+        baseline_recheck: loaded_baseline.as_ref().and_then(baseline_recheck_input),
     })
 }
 
 /// The `recheck-baseline` input for a baseline this process recorded at load
 /// time, in the borrowed shape the contract builders take.
+///
+/// `None` when the step's command would inherit the diff from the environment:
+/// the command carries `--baseline` and nothing else, so with
+/// `FALLOW_DIFF_FILE` exported it narrows again and offers itself again.
 fn baseline_recheck_input(
     loaded: &crate::output_runtime::LoadedBaselineRecheck,
-) -> fallow_output::BaselineRecheckInput<'_> {
-    fallow_output::BaselineRecheckInput {
+) -> Option<fallow_output::BaselineRecheckInput<'_>> {
+    let diff_file_exported = std::env::var_os("FALLOW_DIFF_FILE").is_some_and(|v| !v.is_empty());
+    recheck_input_unless_diff_survives(loaded, diff_file_exported)
+}
+
+fn recheck_input_unless_diff_survives(
+    loaded: &crate::output_runtime::LoadedBaselineRecheck,
+    diff_file_exported: bool,
+) -> Option<fallow_output::BaselineRecheckInput<'_>> {
+    if diff_file_exported
+        && loaded
+            .scope_reasons
+            .contains(fallow_output::ScopeReason::Diff)
+    {
+        return None;
+    }
+    Some(fallow_output::BaselineRecheckInput {
         command: loaded.command,
         path: &loaded.path,
         baseline_entries: loaded.baseline_entries,
         scope_reasons: loaded.scope_reasons,
-    }
+    })
 }
 
 /// Whether the project declares any auto-discovered external plugin
@@ -170,7 +189,7 @@ pub fn health_next_steps_input<'a>(
         offer_setup,
         digest.map(impact_counts),
         audit_changed_applicable(root),
-        loaded_baseline.map(baseline_recheck_input),
+        loaded_baseline.and_then(baseline_recheck_input),
     )
 }
 
@@ -202,7 +221,7 @@ pub fn build_dupes_next_steps(
         offer_setup,
         impact_digest: digest.map(impact_counts),
         audit_changed: audit_changed_applicable(root),
-        baseline_recheck: loaded_baseline.as_ref().map(baseline_recheck_input),
+        baseline_recheck: loaded_baseline.as_ref().and_then(baseline_recheck_input),
     })
 }
 
@@ -297,6 +316,30 @@ mod tests {
     use fallow_types::results::{AnalysisResults, UnusedExport};
 
     use super::*;
+
+    fn loaded_baseline(
+        reason: fallow_output::ScopeReason,
+    ) -> crate::output_runtime::LoadedBaselineRecheck {
+        crate::output_runtime::LoadedBaselineRecheck {
+            command: "dead-code",
+            path: "baseline.json".to_string(),
+            baseline_entries: 3,
+            scope_reasons: fallow_output::BaselineScopeReasons::empty().with(reason),
+        }
+    }
+
+    #[test]
+    fn recheck_is_withheld_when_the_environment_would_narrow_the_rerun_again() {
+        let diff = loaded_baseline(fallow_output::ScopeReason::Diff);
+        assert!(recheck_input_unless_diff_survives(&diff, true).is_none());
+        assert!(recheck_input_unless_diff_survives(&diff, false).is_some());
+    }
+
+    #[test]
+    fn an_exported_diff_file_does_not_withhold_a_recheck_for_another_channel() {
+        let file = loaded_baseline(fallow_output::ScopeReason::File);
+        assert!(recheck_input_unless_diff_survives(&file, true).is_some());
+    }
 
     fn unused_export(path: &str, name: &str) -> UnusedExportFinding {
         UnusedExportFinding::with_actions(UnusedExport {
