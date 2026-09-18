@@ -2516,9 +2516,11 @@ fn merge_workspace_plugin_results(
 
 /// When `autoImports` is enabled, drop the modeled Nuxt convention entry
 /// patterns so genuinely-unreferenced convention files are reported as
-/// `unused-file`. Component and script fallbacks have separate conservative
-/// config guards because custom `components:` and `imports:` settings affect
-/// different convention surfaces.
+/// `unused-file`. Component and script fallbacks are classified separately
+/// because `components:` and `imports:` settings affect different convention
+/// surfaces. A surface whose settings are not modeled keeps its patterns; a
+/// config that statically proves the surface scans nothing is treated like the
+/// default and loses them.
 fn gate_auto_import_entry_patterns(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
@@ -2530,14 +2532,14 @@ fn gate_auto_import_entry_patterns(
     if !result.active_plugins.iter().any(|name| name == "nuxt") {
         return;
     }
-    let components_custom = plugins::nuxt::config_declares_components(&config.root)
-        || workspaces
-            .iter()
-            .any(|ws| plugins::nuxt::config_declares_components(&ws.root));
-    let imports_custom = plugins::nuxt::config_declares_imports(&config.root)
-        || workspaces
-            .iter()
-            .any(|ws| plugins::nuxt::config_declares_imports(&ws.root));
+    let settings: Vec<_> = std::iter::once(config.root.as_path())
+        .chain(workspaces.iter().map(|ws| ws.root.as_path()))
+        .map(plugins::nuxt::auto_import_settings)
+        .collect();
+    let components_custom = settings
+        .iter()
+        .any(|setting| setting.components.is_custom());
+    let imports_custom = settings.iter().any(|setting| setting.scripts.is_custom());
     result.entry_patterns.retain(|(rule, plugin)| {
         if plugin != "nuxt" {
             return true;
