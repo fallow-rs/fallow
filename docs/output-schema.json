@@ -40,6 +40,17 @@
           ],
           "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
         },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -913,6 +924,17 @@
           ],
           "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
         },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -1014,6 +1036,17 @@
             }
           ],
           "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+        },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -1651,6 +1684,17 @@
             }
           ],
           "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+        },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -2888,6 +2932,17 @@
             }
           ],
           "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+        },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -12763,6 +12818,17 @@
           ],
           "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
         },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -14078,6 +14144,17 @@
             }
           ],
           "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+        },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -26219,6 +26296,60 @@
         "$ref": "#/definitions/GateOutcome"
       },
       "description": "Every gate a run ARMED, keyed by name.\n\nArmed, not evaluated: a gate is armed by a flag or by config, never merely\nbecause the rule behind it exists. Fallow's default severity rules fail a\nrun with no flag at all, so a `dead-code` run can exit 1 carrying no object\nwhatsoever. Read an absent object as \"no gate was asked for\", never as\n\"nothing failed\".\n\nAbsent from an envelope whenever it is empty, so a run that armed no gate is\nbyte-identical to one produced before this object existed. An empty object\nis never emitted: it would assert that gates were armed and none tripped,\nwhich is a different and false claim.\n\nThe names this build can emit are `error-severity-findings`, `regression`,\n`stale-baseline`, `duplication-threshold`, `health-min-score`,\n`health-min-severity`, `health-findings`, `health-coverage-gaps`,\n`health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`\nand `type-aware-require`. The set is OPEN: a name a consumer does not\nrecognise means \"some gate\", not an error."
+    },
+    "RequestOutcomes": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/RequestOutcome"
+      },
+      "description": "Every narrowing or shaping request a run RECEIVED, keyed by name.\n\nReceived, not failed: a request the run honoured is published with\n`status: \"applied\"`, so a consumer can say \"scoped to the change\"\npositively. Read an absent object as \"nothing was asked for\", never as\n\"nothing failed\".\n\nAbsent from an envelope whenever it is empty, so a run that was asked for\nnothing is byte-identical to one produced before this object existed. An\nempty object is never emitted: it would assert that something was asked and\nall of it applied, which is a different and false claim.\n\nThe names this build can emit are `changed-since` and `diff-filter`. The\nreasons are `git-missing`, `not-a-repository`, `git-failed` and\n`invalid-ref` for `changed-since`, and `oversize`, `unreadable`,\n`not-utf8`, `foreign-namespace` and `ambiguous-base` for `diff-filter`.\nBoth sets are OPEN: a name a consumer does not recognise means \"some\nrequest\", not an error.\n\n`invalid-ref` is reachable only through the programmatic API. The\n`--changed-since` flag validates its value before a run starts and fails\nwith exit 2 and an error document, which is the right side to err on: a\nmalformed ref is invalid input rather than a report of the wrong scope."
+    },
+    "RequestOutcome": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "What became of the request.",
+          "$ref": "#/definitions/RequestStatus"
+        },
+        "requested": {
+          "type": "string",
+          "description": "What was asked, as the user spelled it: the git ref for\n`changed-since`, the diff source label (`--diff-file pr.diff`,\n`--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the request was not applied, as a kebab-case token. Present exactly\nwhen `status` is not `applied`. The set is open per request name; the\nnames this build can emit are listed on [`RequestOutcomes`]."
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "One sentence naming what was asked, what happened instead, and the next\nstep. Byte-identical to the stderr line for the same case, so a\nconsumer that renders this never contradicts a log a human read.\nPresent exactly when `status` is not `applied`."
+        }
+      },
+      "required": [
+        "status",
+        "requested"
+      ],
+      "description": "One request's fate on one run.\n\n`reason` and `message` are present exactly when `status` is not `applied`,\nand absent otherwise, so a consumer that only wants to know whether a\nreport is scoped reads `status` alone."
+    },
+    "RequestStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "applied",
+          "description": "The run did what it was asked. The report is scoped or shaped as\nrequested."
+        },
+        {
+          "type": "string",
+          "const": "not-applied",
+          "description": "The run could not do what it was asked and continued anyway. The report\nthat follows is valid and complete, and WIDER than what was asked for."
+        }
+      ],
+      "description": "What became of one request on this run.\n\nTwo-valued today. The value set is OPEN so a later `partial` needs no bump,\nand it is deliberately not added now: nothing emits it, and a permanently\nunused value reads as a measurement nobody takes."
     }
   }
 }

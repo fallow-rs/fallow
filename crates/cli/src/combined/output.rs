@@ -883,6 +883,7 @@ fn build_combined_json_output(
 
     fallow_api::serialize_combined_json(CombinedJsonOutputInput {
         gate_outcomes: combined_gate_outcomes(&input),
+        request_outcomes: crate::requests::request_outcomes(),
         check: input.check_result.map(|result| CombinedCheckJsonSection {
             results: &result.results,
             root: &result.config.root,

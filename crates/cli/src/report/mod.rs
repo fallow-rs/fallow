@@ -11,6 +11,7 @@ pub mod grouping;
 mod human;
 mod json;
 mod markdown;
+pub(crate) mod request_outcome_text;
 pub(crate) mod sarif;
 mod shared;
 pub(crate) mod sink;
@@ -451,7 +452,15 @@ fn print_check_github_format(
         ctx.elapsed,
         ctx.config_fixable,
         None,
-        fallow_api::CheckJsonExtraOutputs::default(),
+        // Only the request outcomes: this envelope is a render input for the
+        // GitHub-native targets and has never carried the baseline or the
+        // gates. Whether the run did what it was asked belongs here anyway,
+        // because the annotation stream and the job summary are where a
+        // reviewer reads the scope (issues #2687, #2688).
+        fallow_api::CheckJsonExtraOutputs {
+            request_outcomes: crate::requests::request_outcomes(),
+            ..Default::default()
+        },
         ctx.workspace_diagnostics,
     ) {
         Ok(envelope) => print_github_format(
@@ -468,20 +477,30 @@ fn print_check_github_format(
 }
 
 /// The note a CI comment or review body carries: the type-aware message, the
-/// gate verdict, or both.
+/// gate verdict, whether the run did what it was asked, or any combination.
 ///
 /// Shared by the live renderers and by `fallow report --from`, because the two
 /// must produce byte-identical bodies for one envelope and that parity has its
-/// own suite.
+/// own suite. The clauses join in a fixed order, so two identical runs render
+/// identical bodies and a run that has nothing to say renders no note at all.
 pub(crate) fn ci_status_note(
     existing: Option<&'static str>,
     gates: Option<&fallow_output::GateOutcomes>,
+    requests: Option<&fallow_output::RequestOutcomes>,
 ) -> Option<String> {
-    match (existing, gate_outcome_text::summary_line_for_gates(gates)) {
-        (Some(existing), Some(gates)) => Some(format!("{existing} {gates}")),
-        (Some(existing), None) => Some(existing.to_owned()),
-        (None, gates) => gates,
+    let joined = [
+        existing.map(str::to_owned),
+        gate_outcome_text::summary_line_for_gates(gates),
+        request_outcome_text::summary_line_for_requests(requests),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ");
+    if joined.is_empty() {
+        return None;
     }
+    Some(joined)
 }
 
 /// Render the CI comment / review / badge fallback arms for dead-code results.
@@ -497,9 +516,11 @@ fn print_results_ci_comment(
     let value = fallow_output::codeclimate_issues_to_value(&issues);
     let incomplete = ci::required_type_aware_incomplete(ctx.type_aware);
     let conclusion = incomplete.then_some(fallow_output::PrDecisionConclusion::Failure);
+    let requests = crate::requests::request_outcomes();
     let status_message = ci_status_note(
         incomplete.then_some(ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
         ctx.gate_outcomes.as_ref(),
+        requests.as_ref(),
     );
     print_ci_comment_format_with_status(
         "dead-code",
@@ -685,8 +706,9 @@ fn print_duplication_ci_comment(
 ) -> ExitCode {
     let issues = codeclimate::api_duplication_codeclimate_issues(report, root);
     let value = fallow_output::codeclimate_issues_to_value(&issues);
-    let gate_note = gate_outcome_text::summary_line_for_gates(gates);
-    print_ci_comment_format_with_status("dupes", &value, output, None, gate_note.as_deref())
+    let requests = crate::requests::request_outcomes();
+    let status_note = ci_status_note(None, gates, requests.as_ref());
+    print_ci_comment_format_with_status("dupes", &value, output, None, status_note.as_deref())
         .unwrap_or_else(|| {
             eprintln!("Error: badge format is only supported for the health command");
             ExitCode::from(2)
@@ -1024,8 +1046,9 @@ fn print_health_ci_comment(
 ) -> ExitCode {
     let issues = codeclimate::api_health_codeclimate_issues(report, root);
     let value = fallow_output::codeclimate_issues_to_value(&issues);
-    let gate_note = gate_outcome_text::summary_line_for_gates(gates);
-    print_ci_comment_format_with_status("health", &value, output, None, gate_note.as_deref())
+    let requests = crate::requests::request_outcomes();
+    let status_note = ci_status_note(None, gates, requests.as_ref());
+    print_ci_comment_format_with_status("health", &value, output, None, status_note.as_deref())
         .unwrap_or_else(|| {
             eprintln!("Error: badge format is only supported for the health command");
             ExitCode::from(2)

@@ -150,6 +150,7 @@ const CARRIER_KEYS: &[&str] = &[
     "gate_outcomes",
     "baseline_staleness",
     "workspace_diagnostics",
+    "request_outcomes",
 ];
 
 /// Every verdict this envelope states, in a fixed order so two identical runs
@@ -163,6 +164,7 @@ fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
     let baseline_reported = !warnings.is_empty();
     warnings.extend(gate_warnings(root, baseline_reported));
     warnings.extend(degraded_analysis_warning(root));
+    warnings.extend(unapplied_request_warning(root));
     warnings
 }
 
@@ -417,6 +419,41 @@ fn degraded_analysis_warning(root: &Map<String, Value>) -> Option<String> {
     Some(format!(
         "Analysis was degraded: {kinds}. Findings may be incomplete; read \
          workspace_diagnostics for what each kind changes."
+    ))
+}
+
+/// One sentence for every request the run could not apply, never one per
+/// request.
+///
+/// Reads the envelope's own `request_outcomes`, so a request added in a later
+/// release reports here without a change. Honoured requests are deliberately
+/// silent: an agent acting on a result needs what stood in its way, and
+/// "the filter applied" is readable in `request_outcomes` for a caller that
+/// wants the full inventory.
+///
+/// This one matters more on the MCP route than anywhere else. Every CLI-backed
+/// tool spawns the CLI with `--quiet`, which removes the stderr line that used
+/// to be the ONLY trace of a stand-down, and the agent is then handed a
+/// whole-project report in answer to a question about a change.
+fn unapplied_request_warning(root: &Map<String, Value>) -> Option<String> {
+    let requests = root.get("request_outcomes")?.as_object()?;
+    let unapplied = requests
+        .iter()
+        .filter(|(_, outcome)| outcome.get("status").and_then(Value::as_str) != Some("applied"))
+        .map(
+            |(name, outcome)| match outcome.get("reason").and_then(Value::as_str) {
+                Some(reason) => format!("{name} ({reason})"),
+                None => name.clone(),
+            },
+        )
+        .collect::<Vec<_>>();
+    if unapplied.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Requests not applied: {}. The report below is complete and WIDER than what was \
+         asked for; read request_outcomes for the remedy on each.",
+        unapplied.join(", ")
     ))
 }
 
@@ -909,6 +946,94 @@ mod tests {
         assert!(
             value["summary"]["baseline_staleness"]["gate_trips"] == Value::Bool(true),
             "the envelope's own members must not move: {value}"
+        );
+    }
+
+    /// Every CLI-backed tool spawns the CLI with `--quiet`, which removes the
+    /// stderr line that used to be the only trace of a stand-down. Without
+    /// this sentence an agent is handed a whole-project report in answer to a
+    /// question about a change.
+    #[test]
+    fn a_request_the_run_could_not_apply_says_so_and_names_its_reason() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dead-code",
+            "request_outcomes": {
+                "changed-since": {
+                    "status": "not-applied",
+                    "requested": "origin/main",
+                    "reason": "git-failed",
+                    "message": "..."
+                },
+                "diff-filter": { "status": "applied", "requested": "--diff-stdin" }
+            },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("Requests not applied: changed-since (git-failed)."),
+            "{warnings:?}"
+        );
+        assert!(warnings[0].contains("WIDER than what was"), "{warnings:?}");
+        assert!(
+            !warnings[0].contains("diff-filter"),
+            "an honoured request needs no sentence: {warnings:?}"
+        );
+    }
+
+    /// A run that applied everything it was asked adds nothing, so the object
+    /// appearing on every scoped CI run cannot make every response noisy.
+    #[test]
+    fn a_run_that_applied_everything_it_was_asked_adds_no_warning() {
+        let envelope = serde_json::json!({
+            "kind": "dead-code",
+            "request_outcomes": {
+                "diff-filter": { "status": "applied", "requested": "--diff-stdin" }
+            },
+        });
+        assert!(
+            annotate_envelope(&envelope.to_string()).is_none(),
+            "nothing to add must pass the original bytes through"
+        );
+    }
+
+    /// The status set is open: a value this build does not know must not be
+    /// read as "the run did what it was asked".
+    #[test]
+    fn an_unrecognised_request_status_is_reported_rather_than_assumed_applied() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dead-code",
+            "request_outcomes": {
+                "changed-since": { "status": "partial", "requested": "origin/main" }
+            },
+        }));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("Requests not applied: changed-since."),
+            "{warnings:?}"
+        );
+    }
+
+    /// The typed route reads the same member, so a tool cannot answer
+    /// differently depending on whether a parameter forced the CLI fallback.
+    #[test]
+    fn the_typed_route_reports_an_unapplied_request_too() {
+        let envelope = serde_json::json!({
+            "kind": "dupes",
+            "request_outcomes": {
+                "diff-filter": {
+                    "status": "not-applied",
+                    "requested": "--diff-stdin",
+                    "reason": "not-utf8"
+                }
+            },
+        });
+        let annotated = annotate_value(&envelope).expect("envelope is annotated");
+        let value: Value = serde_json::from_str(&annotated).expect("annotated body parses");
+        assert!(
+            value["warnings"][0]
+                .as_str()
+                .is_some_and(|entry| entry.contains("diff-filter (not-utf8)")),
+            "{value}"
         );
     }
 }

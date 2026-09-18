@@ -90,6 +90,15 @@ pub struct DupesOutput<Report, Group> {
     /// was asked for", never "nothing failed". See [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
+    /// Every narrowing or shaping request this run RECEIVED, keyed by name,
+    /// absent when it was asked for nothing. An entry whose `status` is not
+    /// `applied` means the run could not do what it was asked and reported
+    /// something WIDER instead, so what follows is a valid report of a scope
+    /// nobody requested. Honoured requests are published too, with
+    /// `status: "applied"`, so an absent object means "nothing was asked for",
+    /// never "nothing failed". See [`crate::RequestOutcomes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_outcomes: Option<crate::RequestOutcomes>,
     /// `_meta` block with metric / rule definitions, emitted when `--explain`
     /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
@@ -139,6 +148,9 @@ pub struct DupesOutputInput<Report, Group> {
     pub baseline_staleness: Option<crate::BaselineStaleness>,
     /// Every gate this run evaluated, absent when it evaluated none.
     pub gate_outcomes: Option<crate::GateOutcomes>,
+    /// Every narrowing or shaping request this run received, absent when it
+    /// was asked for nothing.
+    pub request_outcomes: Option<crate::RequestOutcomes>,
     /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<Meta>,
     /// Workspace-discovery and source-discovery diagnostics. See
@@ -167,6 +179,7 @@ pub fn build_dupes_output<Report, Group>(
         groups: input.groups,
         baseline_staleness: input.baseline_staleness,
         gate_outcomes: input.gate_outcomes,
+        request_outcomes: input.request_outcomes,
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
@@ -348,6 +361,7 @@ mod tests {
     fn dupes_json_output_uses_output_owned_root_contract() {
         let output = build_dupes_output(DupesOutputInput::<_, serde_json::Value> {
             gate_outcomes: None,
+            request_outcomes: None,
             baseline_staleness: None,
             schema_version: 7,
             version: "0.0.0".to_string(),

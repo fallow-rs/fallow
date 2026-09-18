@@ -5,7 +5,7 @@ use fallow_config::{OutputFormat, ResolvedConfig};
 use fallow_types::duplicates::{DefaultIgnoreSkips, DuplicationReport};
 
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
-use crate::check::{get_changed_files, resolve_workspace_scope};
+use crate::check::resolve_workspace_scope;
 use crate::report;
 use crate::{error::emit_error, load_config_for_analysis};
 
@@ -691,7 +691,7 @@ fn resolve_changed_since(
         return None;
     }
     let git_ref = opts.changed_since?;
-    get_changed_files(opts.root, git_ref)
+    crate::requests::resolve_changed_since(opts.root, git_ref)
 }
 
 /// Keep only the `n` highest-ranked clone groups.

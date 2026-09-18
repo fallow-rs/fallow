@@ -47,6 +47,63 @@ impl ChangedFilesError {
             Self::GitFailed(stderr) => augment_git_failed(stderr),
         }
     }
+
+    /// Stable kebab-case token naming this failure, for machine consumers.
+    ///
+    /// One token per variant, so a consumer can branch on the cause without
+    /// matching prose. Published on the wire as
+    /// `request_outcomes["changed-since"].reason`.
+    #[must_use]
+    pub const fn reason(&self) -> &'static str {
+        match self {
+            Self::InvalidRef(_) => "invalid-ref",
+            Self::GitMissing(_) => "git-missing",
+            Self::NotARepository => "not-a-repository",
+            Self::GitFailed(_) => "git-failed",
+        }
+    }
+
+    /// The full sentence for a run whose `--changed-since` request could not be
+    /// applied: what was asked, what happened instead, and the next step.
+    ///
+    /// The one prose source for this fact. The CLI writes it to stderr and
+    /// publishes the same string on the envelope, so a log a human read and a
+    /// report a script read cannot say different things.
+    ///
+    /// Git's own stderr is folded onto one line: the sentence travels into a
+    /// jq-rendered CI annotation and into a rendered pull-request comment, and
+    /// a multi-line value there splits one fact across two log records.
+    #[must_use]
+    pub fn changed_since_message(&self, git_ref: &str) -> String {
+        let cause = self
+            .describe()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "--changed-since '{git_ref}' was ignored because {cause}, so this report covers \
+             the whole project instead of the changed files. {}",
+            self.changed_since_remedy()
+        )
+    }
+
+    /// The next step for [`Self::changed_since_message`], one per cause.
+    const fn changed_since_remedy(&self) -> &'static str {
+        match self {
+            Self::InvalidRef(_) => {
+                "Pass a ref git can resolve, such as a branch name or a commit sha."
+            }
+            Self::GitMissing(_) => {
+                "Install git and make it available on PATH, or drop --changed-since."
+            }
+            Self::NotARepository => {
+                "Run fallow from inside the repository, or drop --changed-since."
+            }
+            Self::GitFailed(_) => {
+                "Verify the ref exists in this repository, and check out with full history."
+            }
+        }
+    }
 }
 
 fn augment_git_failed(stderr: &str) -> String {
@@ -421,20 +478,8 @@ fn changed_files_error_from_output(output: &Output) -> ChangedFilesError {
 pub fn get_changed_files(root: &Path, git_ref: &str) -> Option<FxHashSet<PathBuf>> {
     match try_get_changed_files(root, git_ref) {
         Ok(files) => Some(files),
-        Err(ChangedFilesError::InvalidRef(e)) => {
-            eprintln!("Warning: --changed-since ignored: invalid git ref: {e}");
-            None
-        }
-        Err(ChangedFilesError::GitMissing(e)) => {
-            eprintln!("Warning: --changed-since ignored: failed to run git: {e}");
-            None
-        }
-        Err(ChangedFilesError::NotARepository) => {
-            eprintln!("Warning: --changed-since ignored: not a git repository");
-            None
-        }
-        Err(ChangedFilesError::GitFailed(stderr)) => {
-            eprintln!("Warning: --changed-since failed for ref '{git_ref}': {stderr}");
+        Err(err) => {
+            eprintln!("Warning: {}", err.changed_since_message(git_ref));
             None
         }
     }
@@ -934,6 +979,64 @@ mod tests {
     #[test]
     fn validate_git_ref_allows_reflog_relative_date() {
         assert!(validate_git_ref("HEAD@{1 week ago}").is_ok());
+    }
+
+    /// One reason token per cause, because each carries a different remedy and
+    /// a consumer branches on the token rather than on the prose.
+    #[test]
+    fn every_changed_files_cause_reports_its_own_reason() {
+        let reasons = [
+            ChangedFilesError::InvalidRef("unclosed brace".to_owned()).reason(),
+            ChangedFilesError::GitMissing("no such file".to_owned()).reason(),
+            ChangedFilesError::NotARepository.reason(),
+            ChangedFilesError::GitFailed("unknown revision".to_owned()).reason(),
+        ];
+        assert_eq!(
+            reasons,
+            [
+                "invalid-ref",
+                "git-missing",
+                "not-a-repository",
+                "git-failed"
+            ]
+        );
+        let unique: std::collections::BTreeSet<&str> = reasons.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            reasons.len(),
+            "two causes must not share a token"
+        );
+    }
+
+    /// The published sentence and the stderr line are the same string, so the
+    /// remedy cannot drift between a log a human read and a report a script
+    /// read. It names the ref, says the report widened, and ends with a next
+    /// step.
+    #[test]
+    fn the_changed_since_message_names_the_ref_the_widening_and_the_next_step() {
+        let message = ChangedFilesError::NotARepository.changed_since_message("origin/main");
+        assert!(
+            message.contains("--changed-since 'origin/main'"),
+            "{message}"
+        );
+        assert!(message.contains("covers the whole project"), "{message}");
+        assert!(message.ends_with("or drop --changed-since."), "{message}");
+    }
+
+    /// Git writes multi-line stderr, and the sentence travels into a CI
+    /// annotation and a rendered comment where a newline splits one fact
+    /// across two records.
+    #[test]
+    fn the_changed_since_message_folds_git_stderr_onto_one_line() {
+        let message = ChangedFilesError::GitFailed(
+            "fatal: ambiguous argument 'x'\nUse '--' to separate paths".to_owned(),
+        )
+        .changed_since_message("x");
+        assert!(!message.contains('\n'), "{message}");
+        assert!(
+            message.contains("ambiguous argument 'x' Use '--'"),
+            "{message}"
+        );
     }
 
     #[test]

@@ -181,6 +181,10 @@ fn print_audit_pr_comment(
         report::ci_status_note(
             incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
             audit_gate_outcomes(result).as_ref(),
+            // Audit publishes no `request_outcomes`: it exits 2 rather than
+            // widen when its base ref will not resolve, and it states its own
+            // scope through `base_ref` and `base_description`.
+            None,
         )
         .as_deref(),
     )
@@ -210,6 +214,10 @@ fn print_audit_review(
         report::ci_status_note(
             incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
             audit_gate_outcomes(result).as_ref(),
+            // Audit publishes no `request_outcomes`: it exits 2 rather than
+            // widen when its base ref will not resolve, and it states its own
+            // scope through `base_ref` and `base_description`.
+            None,
         )
         .as_deref(),
     )

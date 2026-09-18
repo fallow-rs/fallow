@@ -60,12 +60,13 @@ pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_js
         input.elapsed,
         input.config_fixable,
         check_output_meta(input.explain, input.type_aware),
-        check_json_extras_with_gates(
+        check_json_extras_with_verdicts(
             input.regression,
             None,
             input.baseline_matched,
             input.baseline_staleness,
             input.gate_outcomes.clone(),
+            crate::requests::request_outcomes(),
         ),
         input.workspace_diagnostics,
     )?;
@@ -91,6 +92,7 @@ pub(super) struct PrintGroupedJsonInput<'a> {
 pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
     let output = match fallow_api::serialize_grouped_check_json(GroupedCheckJsonOutputInput {
         gate_outcomes: input.gate_outcomes.clone(),
+        request_outcomes: crate::requests::request_outcomes(),
         groups: input.groups,
         original: input.original,
         root: input.root,
@@ -594,33 +596,42 @@ pub fn api_check_json_payload_with_config_fixable(
     })
 }
 
+/// The baseline and regression sections for a dead-code SECTION of a larger
+/// envelope, which publishes neither the run's gates nor its requests.
+///
+/// The combined envelope carries both at its root and nowhere else, the same
+/// rule `workspace_diagnostics` follows there (issue #2366): a run that skips
+/// the dead-code section must still report what it was asked to do.
 pub fn check_json_extras(
     regression: Option<&crate::regression::RegressionOutcome>,
     baseline_deltas: Option<BaselineDeltas>,
     baseline_matched: Option<(usize, usize)>,
     baseline_staleness: Option<fallow_output::BaselineStaleness>,
 ) -> CheckJsonExtraOutputs {
-    check_json_extras_with_gates(
+    check_json_extras_with_verdicts(
         regression,
         baseline_deltas,
         baseline_matched,
         baseline_staleness,
         None,
+        None,
     )
 }
 
-/// [`check_json_extras`] plus the run's gate outcomes, for the callers that
-/// evaluated gates. Kept separate so the many callers that evaluate none do not
-/// each have to pass `None`.
-pub fn check_json_extras_with_gates(
+/// [`check_json_extras`] plus the run's gate outcomes and request outcomes,
+/// for the standalone envelope that owns both. Kept separate so the section
+/// callers do not each have to pass `None` twice.
+pub fn check_json_extras_with_verdicts(
     regression: Option<&crate::regression::RegressionOutcome>,
     baseline_deltas: Option<BaselineDeltas>,
     baseline_matched: Option<(usize, usize)>,
     baseline_staleness: Option<fallow_output::BaselineStaleness>,
     gate_outcomes: Option<fallow_output::GateOutcomes>,
+    request_outcomes: Option<fallow_output::RequestOutcomes>,
 ) -> CheckJsonExtraOutputs {
     CheckJsonExtraOutputs {
         gate_outcomes,
+        request_outcomes,
         regression: regression.map(regression_output),
         baseline_deltas,
         baseline: baseline_matched.map(|(entries, matched)| BaselineMatch { entries, matched }),
@@ -740,6 +751,7 @@ pub(super) fn api_health_json_document(
 ) -> Result<serde_json::Value, serde_json::Error> {
     let output = fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         gate_outcomes,
+        request_outcomes: crate::requests::request_outcomes(),
         report: report.clone(),
         root,
         elapsed,
@@ -778,6 +790,7 @@ fn api_grouped_health_json_document(
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         gate_outcomes,
+        request_outcomes: crate::requests::request_outcomes(),
         report: report.clone(),
         root,
         elapsed,
@@ -893,6 +906,7 @@ pub(super) fn api_duplication_json_document(
     );
     fallow_api::serialize_duplication_json(DuplicationJsonOutputInput {
         gate_outcomes: render.gate_outcomes.clone(),
+        request_outcomes: crate::requests::request_outcomes(),
         report,
         root,
         elapsed,
@@ -940,6 +954,7 @@ fn api_grouped_duplication_json_document(
     );
     fallow_api::serialize_grouped_duplication_json(GroupedDuplicationJsonOutputInput {
         gate_outcomes: render.gate_outcomes.clone(),
+        request_outcomes: crate::requests::request_outcomes(),
         report,
         grouping,
         root,
@@ -1334,6 +1349,7 @@ mod tests {
             fallow_output::HealthGroup,
         > = fallow_output::HealthOutput {
             gate_outcomes: None,
+            request_outcomes: None,
             schema_version: SchemaVersion(fallow_output::HEALTH_SCHEMA_VERSION),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
             elapsed_ms: ElapsedMs(7),
