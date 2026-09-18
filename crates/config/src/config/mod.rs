@@ -423,7 +423,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub include_entry_exports: bool,
 
-    /// When true, drops Nuxt convention-based entry-pattern fallbacks: component fallbacks are dropped unless nuxt.config declares components:, and composable/util fallbacks are dropped unless it declares imports:, so genuinely-unreferenced convention files surface as unused-file. Boolean, defaults to false; set it for a Nuxt project that has explicitly configured its auto-import directories. Synthesis of auto-import graph edges (resolving `<Card />` or `useUserStore()` to their convention files) happens regardless of this flag.
+    /// When true, drops Nuxt convention-based entry-pattern fallbacks so genuinely-unreferenced convention files surface as unused-file. Component fallbacks are kept when nuxt.config customizes components: in a way fallow does not model, and composable/util fallbacks are kept when it customizes imports:; a config that statically proves the surface scans nothing (components: false, components: [], components: { dirs: [] }, imports: { scan: false } or imports: { autoImport: false }) is treated like the default and its fallbacks are dropped. Boolean, defaults to false; set it for a Nuxt project that has explicitly configured its auto-import directories. Synthesis of auto-import graph edges (resolving `<Card />` or `useUserStore()` to their convention files) happens regardless of this flag.
     #[serde(default)]
     pub auto_imports: bool,
 

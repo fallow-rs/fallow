@@ -2376,8 +2376,10 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
   // Resolve framework convention auto-imports (Nuxt components) as graph edges.
   // Edges for `<Card001 />`-style template tags are always synthesized; setting
   // this to true also drops the Nuxt component entry patterns so an
-  // unreferenced component is reported as unused-file. Kept conservative: a
-  // `components:` key in nuxt.config keeps the entry patterns. Default false.
+  // unreferenced component is reported as unused-file. Kept conservative: an
+  // unmodelled `components:` or `imports:` config keeps the entry patterns, but
+  // a config that switches the scan off (`components: { dirs: [] }`,
+  // `imports: { scan: false }`) is treated like the default. Default false.
   "autoImports": false,
 
   // Production mode

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`autoImports` now reports unused convention files in a Nuxt project that
+  turns auto-import off.** A config that switches the scan off
+  (`components: false`, `components: []`, `components: { dirs: [] }`,
+  `imports: { scan: false }`, `imports: { autoImport: false }`) counted as a
+  custom layout, so every component, composable and util stayed an entry point
+  and nothing was ever reported. Such a config is now treated like Nuxt's
+  default and the convention entry patterns are dropped as the flag promises. A
+  project that sets `autoImports: true` together with one of those shapes will
+  see new `unused-file` findings.
+
+  Every other `components:` or `imports:` shape keeps its entry patterns,
+  including a key nested inside a module's options, a config that also declares
+  `extends`, an object built with a spread, and a non-empty `imports.dirs` next
+  to `scan: false`. Template tags and composable calls still credit their files,
+  so only genuinely unreferenced files surface. Thanks
+  [@Tsuyoshi84](https://github.com/Tsuyoshi84) for the report.
+  (Closes [#2695](https://github.com/fallow-rs/fallow/issues/2695))
+
 ## [3.27.0] - 2026-09-17
 
 ### Fixed
