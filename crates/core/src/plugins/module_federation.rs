@@ -281,12 +281,16 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
     let Some(normalized) = config_parser::normalize_config_path(trimmed, base, root) else {
         return;
     };
+    // An entry pattern is compiled as a glob, while a target is a literal path.
+    // Bracketed route filenames are the Next.js convention, so an unescaped
+    // target would both miss the exposed file and credit an unrelated one.
+    let escaped = globset::escape(&normalized);
     if has_source_extension(&normalized) {
-        result.push_entry_pattern(normalized);
+        result.push_entry_pattern(escaped);
         return;
     }
-    result.push_entry_pattern(format!("{normalized}.{EXPOSE_EXTENSIONS}"));
-    result.push_entry_pattern(format!("{normalized}/index.{EXPOSE_EXTENSIONS}"));
+    result.push_entry_pattern(format!("{escaped}.{EXPOSE_EXTENSIONS}"));
+    result.push_entry_pattern(format!("{escaped}/index.{EXPOSE_EXTENSIONS}"));
 }
 
 fn has_source_extension(target: &str) -> bool {
@@ -548,6 +552,17 @@ mod tests {
             .collect()
     }
 
+    /// Compile an entry pattern the way `CompiledPathRule::for_entry_rule` does,
+    /// so a test observes the paths a pattern really covers.
+    fn covers(pattern: &str, path: &str) -> bool {
+        globset::GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+            .expect("entry pattern compiles")
+            .compile_matcher()
+            .is_match(path)
+    }
+
     fn standalone(source: &str) -> (FederationConfig, Vec<ComputedKey>) {
         read(
             source,
@@ -599,6 +614,37 @@ mod tests {
                 format!("src/Button.{EXPOSE_EXTENSIONS}"),
                 format!("src/Button/index.{EXPOSE_EXTENSIONS}"),
             ]
+        );
+    }
+
+    #[test]
+    fn bracketed_target_covers_the_exposed_file_only() {
+        let result = resolve(r"export default { exposes: { './Page': './src/pages/[id].tsx' } };");
+        let patterns = entry_patterns(&result);
+        assert_eq!(patterns.len(), 1, "got {patterns:?}");
+        assert!(
+            covers(&patterns[0], "src/pages/[id].tsx"),
+            "the exposed file is covered, got {patterns:?}"
+        );
+        assert!(
+            !covers(&patterns[0], "src/pages/d.tsx"),
+            "a bracket is not a character class, got {patterns:?}"
+        );
+    }
+
+    #[test]
+    fn wildcard_target_does_not_cover_files_the_config_does_not_name() {
+        let result = resolve(r"export default { exposes: { './all': './src/*' } };");
+        let patterns = entry_patterns(&result);
+        assert!(
+            !patterns
+                .iter()
+                .any(|pattern| covers(pattern, "src/unrelated.ts")),
+            "got {patterns:?}"
+        );
+        assert!(
+            patterns.iter().any(|pattern| covers(pattern, "src/*.ts")),
+            "a file literally named `*` is still covered, got {patterns:?}"
         );
     }
 
