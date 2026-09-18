@@ -23,12 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not place therefore reported every finding in the repository as though they
   were all introduced by the change, with no trace anywhere the consumer reads.
 
-  Two channels report today. `changed-since` reports `git-missing`,
+  Two channels narrow a report today. `changed-since` reports `git-missing`,
   `not-a-repository` or `git-failed`; `diff-filter` reports `oversize`,
   `unreadable`, `not-utf8`, `foreign-namespace` or `ambiguous-base`. Each entry
-  carries `requested` (what was asked, as you spelled it) and, when the request
-  was not applied, a `reason` token and a one-sentence `message` that ends with
-  the next step. Honoured requests are published too, with
+  carries `affects` (`scope` here, `artifact` for a request that writes a file
+  beside the report), `requested` (what was asked, as you spelled it, never
+  rewritten to be root-relative) and, when the request was not applied, a
+  `reason` token and a one-sentence `message` that ends with the next step.
+  Select on `affects` rather than on a name: it is what lets a consumer say "the
+  report is wider than you asked" about exactly the requests that widen it, and
+  a request added later carries its own class. Honoured requests are published too, with
   `status: "applied"`, which is what lets a comment state "scoped to the
   change" positively: read an absent object as "nothing was asked for", never
   as "nothing failed". The key set and the `status` value set are both open, so
@@ -36,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   `fallow audit` is unaffected and carries no object: it already exits 2 rather
   than widen, and states its scope through `base_ref` and `base_description`.
+  Its error document now also names the cause git reported for a `--base` it
+  could not resolve.
+
+  On the comment and review targets, `fallow report --from` states a diff filter
+  that stood down in the rendering process itself. Both integrations download
+  the pull request's diff in those steps, so that filter, not the analysis run's,
+  decides which findings become inline comments.
 
   The rendered surfaces carry the fact too. The job summary, the pull-request
   comment, the merge-request note, both review targets and the annotation
@@ -87,7 +98,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run publishes a `sarif-file` entry in `request_outcomes` with
   `directory-create-failed`, `write-failed` or `serialize-failed` and the same
   sentence it printed, and `fallow report --from` and the MCP tools can read
-  it. A written file is published as `applied` with its path.
+  it. A written file is published as `applied` with its path. The entry is
+  marked `affects: "artifact"`, so nothing reports a failed write as a report
+  that covers more of the project than was asked for: the Action's
+  `requests-unapplied` output and both integrations' scope warning list the
+  narrowing requests only.
 
   The GitHub Action's warning for a SARIF artefact it could not produce now
   says what that costs (nothing is uploaded, so code scanning keeps the alerts
