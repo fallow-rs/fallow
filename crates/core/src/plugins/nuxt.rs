@@ -1027,7 +1027,9 @@ pub fn is_script_auto_import_entry_pattern(pattern: &str) -> bool {
 ///   (other keys in that object do not matter: an empty `dirs` scans nothing);
 /// - composables and utils: the single `imports` property is an object literal
 ///   with `scan: false` and with `dirs` absent or empty (`imports.dirs` entries
-///   are scanned even when `scan` is off). A lone `imports.autoImport: false`
+///   are scanned even when `scan` is off). The patterns this surface gates also
+///   cover `shared/utils` and `shared/types`, as
+///   [`is_script_auto_import_entry_pattern`] shows. A lone `imports.autoImport: false`
 ///   stays `Custom`: it switches the injection off, not the scan, so the same
 ///   directories stay registered and are consumed through `#imports`, which
 ///   resolves to no file and credits nothing.
@@ -1036,9 +1038,10 @@ pub fn is_script_auto_import_entry_pattern(pattern: &str) -> bool {
 /// of those literals, a config object the parser cannot resolve, a parse failure,
 /// a top-level `extends` (layers merge by concatenating arrays, so a base layer
 /// can re-add directories on top of an empty `dirs`), a spread in either object,
-/// and a repeated key. `components: true` also stays `Custom`: it selects Nuxt's
-/// default set, which additionally registers `~/components/global` as its own
-/// base, a naming form [`derive_component_name`] does not produce.
+/// and a repeated key. `components: true` also stays `Custom`, even though Nuxt
+/// resolves it exactly like an absent key: the explicit spelling is rare, the
+/// absent key is already decided by the outer key check, and leaving `true` on
+/// the conservative side costs nothing.
 ///
 /// The synthesized auto-import edges are never affected by this classification. A
 /// local module or an unimport preset can register directories that never appear
