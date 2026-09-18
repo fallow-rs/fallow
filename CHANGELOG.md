@@ -19,14 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package that declares no remote keeps reporting the same specifier.
 
   Read from `module-federation.config.{ts,js,mjs,cjs,mts,cts}` and from inline
-  plugin options in webpack, rspack, rsbuild and vite configs. Entry-export
-  reporting is unchanged: exposed files follow `includeEntryExports` like any
-  other entry point. An `exposes` or `remotes` value that is computed rather
-  than a literal object is reported on stderr instead of being silently skipped.
+  plugin options in webpack, rspack, rsbuild and vite configs. Exposed files
+  follow `includeEntryExports` like any other entry point, so with that setting
+  enabled an unused-file finding for an exposed component becomes an
+  unused-export finding for the export it exposes.
+
+  Whatever the reader cannot read is named on stderr rather than skipped in
+  silence: an `exposes` or `remotes` value that is not an object literal, a
+  mapping that spreads a computed object, the array form of either key, and an
+  individual `exposes` entry whose target is not a literal string. Each message
+  names the configuration key that covers the gap.
 
   No remote container is fetched and no cross-deployment reachability is
-  inferred. `shared` configuration and runtime `registerRemotes` / `loadRemote`
-  calls are not read yet
+  inferred. `shared` configuration, runtime `registerRemotes` / `loadRemote`
+  calls, the array form of `exposes` and `remotes`, and Federation options
+  registered outside a config's top-level `plugins` array (such as a Next.js
+  `webpack(config)` hook) are not read yet
   ([#2698](https://github.com/fallow-rs/fallow/issues/2698)).
 
 ## [3.27.0] - 2026-09-17

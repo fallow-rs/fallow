@@ -64,6 +64,10 @@ const EXPOSE_EXTENSIONS: &str = "{ts,tsx,mts,cts,js,jsx,mjs,cjs,vue,svelte}";
 /// remote.
 const SCOPE_SUFFIX: &str = "**/*";
 
+/// Stand-in name for an `exposes` entry whose key is itself computed, so a
+/// diagnostic can still count the entry.
+const COMPUTED_ENTRY_KEY: &str = "<computed>";
+
 /// What one Federation options object statically declares.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct FederationConfig {
@@ -144,14 +148,14 @@ impl ConfigLocation<'_> {
     }
 }
 
-/// A Federation key that is present but not statically readable.
+/// A Federation key this reader understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ComputedKey {
+enum FederationKey {
     Exposes,
     Remotes,
 }
 
-impl ComputedKey {
+impl FederationKey {
     const fn name(self) -> &'static str {
         match self {
             Self::Exposes => "exposes",
@@ -161,45 +165,108 @@ impl ComputedKey {
 
     const fn consequence(self) -> &'static str {
         match self {
-            Self::Exposes => "its targets are not registered as entry points",
-            Self::Remotes => "its aliases are not treated as provided by a remote container",
+            Self::Exposes => "the targets are not registered as entry points",
+            Self::Remotes => "the aliases are not treated as provided by a remote container",
         }
     }
 
+    /// The configuration key that covers what the reader could not read.
     const fn advice(self) -> &'static str {
         match self {
-            Self::Exposes => {
-                "Name the exposed files in `entryPoints`, or keep the object literal and compute \
-                 only its values."
-            }
+            Self::Exposes => "Name the exposed files in `dynamicallyLoaded`.",
             Self::Remotes => {
-                "Name the aliases in `ignoreDependencies`, or keep the object literal and compute \
-                 only its values."
+                "Name the aliases in `ignoreDependencies`, or declare them as the keys of an \
+                 object literal, whose values may be computed."
             }
         }
     }
 }
 
+/// Why a Federation key declaration could not be read in full.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UnreadReason {
+    /// The value is not an object literal.
+    NotObjectLiteral,
+    /// The value is the array form, which this reader does not read yet.
+    ArrayForm,
+    /// The object literal spreads a value that is not statically readable, so
+    /// it may declare more than what was read.
+    Spread,
+    /// Entry keys whose value holds no statically readable string.
+    Entries(Vec<String>),
+}
+
+/// One Federation key declaration that was present but not fully readable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnreadDeclaration {
+    key: FederationKey,
+    reason: UnreadReason,
+}
+
+/// How many entry keys a diagnostic names before it falls back to a count.
+const ENTRY_SAMPLE: usize = 3;
+
+impl UnreadDeclaration {
+    fn message(&self, plugin_label: &str, config_label: &str) -> String {
+        let key = self.key.name();
+        let situation = match &self.reason {
+            UnreadReason::NotObjectLiteral => {
+                format!("`{key}` in '{config_label}' is not a static object literal")
+            }
+            UnreadReason::ArrayForm => {
+                format!("`{key}` in '{config_label}' uses the array form, which is not read yet")
+            }
+            UnreadReason::Spread => format!(
+                "`{key}` in '{config_label}' spreads a value that is not statically readable"
+            ),
+            UnreadReason::Entries(names) => {
+                let (subject, verb) = if names.len() == 1 {
+                    ("entry", "holds")
+                } else {
+                    ("entries", "hold")
+                };
+                format!(
+                    "the `{key}` {subject} {} in '{config_label}' {verb} no statically readable \
+                     value",
+                    entry_sample(names)
+                )
+            }
+        };
+        format!(
+            "Plugin '{plugin_label}': {situation}, so {}. {}",
+            self.key.consequence(),
+            self.key.advice(),
+        )
+    }
+}
+
+fn entry_sample(names: &[String]) -> String {
+    let sample = names
+        .iter()
+        .take(ENTRY_SAMPLE)
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match names.len().saturating_sub(ENTRY_SAMPLE) {
+        0 => sample,
+        rest => format!("{sample} and {rest} more"),
+    }
+}
+
 /// Read every statically available Federation options object in `source`,
-/// warning once per config file for an `exposes` or `remotes` key that is
-/// present but not a static object literal.
+/// warning once per config file for each `exposes` or `remotes` declaration that
+/// is present but not fully readable.
 fn extract(
     source: &str,
     location: &ConfigLocation<'_>,
     plugin_label: &str,
     sites: &FederationSites<'_>,
 ) -> FederationConfig {
-    let (config, computed) = read(source, location.config_path, sites);
-    if !computed.is_empty() {
+    let (config, unread) = read(source, location.config_path, sites);
+    if !unread.is_empty() {
         let config_label = location.label();
-        for key in computed {
-            tracing::warn!(
-                "Plugin '{plugin_label}': `{}` in '{config_label}' is not a static object \
-                 literal, so {}. {}",
-                key.name(),
-                key.consequence(),
-                key.advice(),
-            );
+        for declaration in unread {
+            tracing::warn!("{}", declaration.message(plugin_label, &config_label));
         }
     }
     config
@@ -304,14 +371,14 @@ fn read(
     source: &str,
     config_path: &Path,
     sites: &FederationSites<'_>,
-) -> (FederationConfig, Vec<ComputedKey>) {
+) -> (FederationConfig, Vec<UnreadDeclaration>) {
     config_parser::extract_from_source(source, config_path, |program| {
         let config_object = config_parser::find_config_object(program)?;
         let mut config = FederationConfig::default();
-        let mut computed = Vec::new();
+        let mut unread = Vec::new();
 
         if sites.read_config_object {
-            read_options(config_object, &mut config, &mut computed);
+            read_options(config_object, &mut config, &mut unread);
         }
 
         for path in sites.plugin_arrays {
@@ -322,12 +389,12 @@ fn read(
                 if let Some(expr) = element.as_expression()
                     && let Some(options) = federation_options(expr)
                 {
-                    read_options(options, &mut config, &mut computed);
+                    read_options(options, &mut config, &mut unread);
                 }
             }
         }
 
-        Some((config, computed))
+        Some((config, unread))
     })
     .unwrap_or_default()
 }
@@ -335,27 +402,45 @@ fn read(
 fn read_options(
     options: &ObjectExpression<'_>,
     config: &mut FederationConfig,
-    computed: &mut Vec<ComputedKey>,
+    unread: &mut Vec<UnreadDeclaration>,
 ) {
-    read_exposes(options, config, computed);
-    read_remotes(options, config, computed);
+    read_exposes(options, config, unread);
+    read_remotes(options, config, unread);
 }
 
 fn read_exposes(
     options: &ObjectExpression<'_>,
     config: &mut FederationConfig,
-    computed: &mut Vec<ComputedKey>,
+    unread: &mut Vec<UnreadDeclaration>,
 ) {
-    let Some(mapping) = federation_key_object(options, ComputedKey::Exposes, computed) else {
+    let Some(mapping) = federation_key_object(options, FederationKey::Exposes, unread) else {
         return;
     };
+    let mut unread_entries = Vec::new();
     for property in &mapping.properties {
         let ObjectPropertyKind::ObjectProperty(property) = property else {
             continue;
         };
-        for target in exposed_target_strings(&property.value) {
+        let targets = exposed_target_strings(&property.value);
+        if targets.is_empty() {
+            push_unique(
+                &mut unread_entries,
+                property_key_name(&property.key).unwrap_or_else(|| COMPUTED_ENTRY_KEY.to_string()),
+            );
+            continue;
+        }
+        for target in targets {
             classify_exposed_target(&target, config);
         }
+    }
+    if !unread_entries.is_empty() {
+        push_unique(
+            unread,
+            UnreadDeclaration {
+                key: FederationKey::Exposes,
+                reason: UnreadReason::Entries(unread_entries),
+            },
+        );
     }
 }
 
@@ -393,9 +478,9 @@ fn classify_exposed_target(target: &str, config: &mut FederationConfig) {
 fn read_remotes(
     options: &ObjectExpression<'_>,
     config: &mut FederationConfig,
-    computed: &mut Vec<ComputedKey>,
+    unread: &mut Vec<UnreadDeclaration>,
 ) {
-    let Some(mapping) = federation_key_object(options, ComputedKey::Remotes, computed) else {
+    let Some(mapping) = federation_key_object(options, FederationKey::Remotes, unread) else {
         return;
     };
     for property in &mapping.properties {
@@ -410,16 +495,21 @@ fn read_remotes(
     }
 }
 
-/// Resolve one Federation key to its object literal, recording the key as
-/// computed when it is present but not statically readable.
+/// Resolve one Federation key to its object literal, recording why the
+/// declaration is not fully readable when that is the case.
 fn federation_key_object<'a>(
     options: &'a ObjectExpression<'a>,
-    key: ComputedKey,
-    computed: &mut Vec<ComputedKey>,
+    key: FederationKey,
+    unread: &mut Vec<UnreadDeclaration>,
 ) -> Option<&'a ObjectExpression<'a>> {
     let value = config_parser::property_expr(options, key.name())?;
     let Some(mapping) = config_parser::object_expression(value) else {
-        push_unique(computed, key);
+        let reason = if config_parser::array_expression(value).is_some() {
+            UnreadReason::ArrayForm
+        } else {
+            UnreadReason::NotObjectLiteral
+        };
+        push_unique(unread, UnreadDeclaration { key, reason });
         return None;
     };
     if mapping
@@ -427,7 +517,13 @@ fn federation_key_object<'a>(
         .iter()
         .any(|property| matches!(property, ObjectPropertyKind::SpreadProperty(_)))
     {
-        push_unique(computed, key);
+        push_unique(
+            unread,
+            UnreadDeclaration {
+                key,
+                reason: UnreadReason::Spread,
+            },
+        );
     }
     Some(mapping)
 }
@@ -563,7 +659,7 @@ mod tests {
             .is_match(path)
     }
 
-    fn standalone(source: &str) -> (FederationConfig, Vec<ComputedKey>) {
+    fn standalone(source: &str) -> (FederationConfig, Vec<UnreadDeclaration>) {
         read(
             source,
             Path::new(CONFIG),
@@ -733,14 +829,21 @@ mod tests {
         assert_eq!(result.provided_dependencies.len(), 1);
     }
 
+    fn unread(key: FederationKey, reason: UnreadReason) -> Vec<UnreadDeclaration> {
+        vec![UnreadDeclaration { key, reason }]
+    }
+
     #[test]
     fn computed_exposes_reports_the_key_and_keeps_literal_siblings() {
-        let (config, computed) =
+        let (config, declarations) =
             standalone(r"export default { exposes: computeExposes(), remotes: {} };");
         assert!(config.exposed_targets.is_empty());
-        assert_eq!(computed, vec![ComputedKey::Exposes]);
+        assert_eq!(
+            declarations,
+            unread(FederationKey::Exposes, UnreadReason::NotObjectLiteral)
+        );
 
-        let (config, computed) = standalone(
+        let (config, declarations) = standalone(
             r"
             export default {
                 exposes: { './a': './src/a.ts', ...extraExposes },
@@ -748,19 +851,106 @@ mod tests {
             ",
         );
         assert_eq!(config.exposed_targets, vec!["./src/a.ts".to_string()]);
-        assert_eq!(computed, vec![ComputedKey::Exposes]);
+        assert_eq!(
+            declarations,
+            unread(FederationKey::Exposes, UnreadReason::Spread)
+        );
+    }
+
+    #[test]
+    fn an_entry_whose_target_is_not_readable_is_reported_by_name() {
+        let (config, declarations) = standalone(
+            r"
+            const widget = './src/Widget.tsx';
+            export default {
+                exposes: {
+                    './Button': './src/Button.tsx',
+                    './Widget': widget,
+                    './Card': { name: 'card' },
+                },
+            };
+            ",
+        );
+        assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
+        assert_eq!(
+            declarations,
+            unread(
+                FederationKey::Exposes,
+                UnreadReason::Entries(vec!["./Widget".to_string(), "./Card".to_string()]),
+            )
+        );
+    }
+
+    #[test]
+    fn array_form_is_reported_as_a_shape_rather_than_as_computed() {
+        let (config, declarations) =
+            standalone(r"export default { exposes: ['./src/Button.tsx'] };");
+        assert!(config.exposed_targets.is_empty());
+        assert_eq!(
+            declarations,
+            unread(FederationKey::Exposes, UnreadReason::ArrayForm)
+        );
+    }
+
+    #[test]
+    fn diagnostics_name_a_configuration_key_that_exists() {
+        let exposes = UnreadDeclaration {
+            key: FederationKey::Exposes,
+            reason: UnreadReason::NotObjectLiteral,
+        }
+        .message("module-federation", "module-federation.config.ts");
+        assert!(exposes.contains("`dynamicallyLoaded`"), "{exposes}");
+        assert!(!exposes.contains("entryPoints"), "{exposes}");
+
+        let remotes = UnreadDeclaration {
+            key: FederationKey::Remotes,
+            reason: UnreadReason::ArrayForm,
+        }
+        .message("webpack", "webpack.config.js");
+        assert!(remotes.contains("`ignoreDependencies`"), "{remotes}");
+        assert!(remotes.contains("array form"), "{remotes}");
+        assert!(
+            !remotes.contains("not a static object literal"),
+            "{remotes}"
+        );
+
+        let entries = UnreadDeclaration {
+            key: FederationKey::Exposes,
+            reason: UnreadReason::Entries(
+                ["./a", "./b", "./c", "./d"]
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+        }
+        .message("module-federation", "module-federation.config.ts");
+        assert!(
+            entries.contains("entries `./a`, `./b`, `./c` and 1 more"),
+            "{entries}"
+        );
+
+        let one = UnreadDeclaration {
+            key: FederationKey::Exposes,
+            reason: UnreadReason::Entries(vec!["./a".to_string()]),
+        }
+        .message("module-federation", "module-federation.config.ts");
+        assert!(one.contains("entry `./a`"), "{one}");
+        assert!(one.contains("holds no statically readable value"), "{one}");
     }
 
     #[test]
     fn shorthand_remotes_property_reports_the_key() {
-        let (config, computed) = standalone(
+        let (config, declarations) = standalone(
             r"
             const remotes = { checkout: 'checkout@https://example.test/remoteEntry.js' };
             export default { remotes };
             ",
         );
         assert!(config.remote_aliases.is_empty());
-        assert_eq!(computed, vec![ComputedKey::Remotes]);
+        assert_eq!(
+            declarations,
+            unread(FederationKey::Remotes, UnreadReason::NotObjectLiteral)
+        );
     }
 
     #[test]
