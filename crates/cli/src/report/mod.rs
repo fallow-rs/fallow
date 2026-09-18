@@ -598,8 +598,13 @@ fn print_grouped_results(
         }
         // The GitHub-native formats have no grouping concept, so they render
         // the ungrouped document from the original results and say so on
-        // stderr. There is nowhere in an annotation stream or a job summary to
-        // put the fact (issue #2691).
+        // stderr. Deliberately stderr only: both documents COULD carry the
+        // sentence (each already appends the gate and request lines), but a
+        // dropped grouping is a fact about the invocation rather than about the
+        // findings, and neither document has a reader who can act on it. The
+        // comment and review bodies carry the clause because a human reads them
+        // and would otherwise take the flat list for a grouped one (issue
+        // #2691).
         OutputFormat::GithubAnnotations => {
             dropped_grouping_mode(ctx, output);
             print_check_github_annotations(original, ctx)
@@ -784,9 +789,11 @@ fn print_grouped_duplication_report(
             note_dropped_grouping(Some(grouping.mode), output),
         ),
         // The GitHub-native formats have no grouping concept, so they render
-        // the ungrouped document and say so on stderr. There is nowhere in an
-        // annotation stream or a job summary to put the fact, and the note is
-        // the whole fix for those two targets (issue #2691).
+        // the ungrouped document and say so on stderr, which is the whole fix
+        // for those two targets. Not because those documents have nowhere to
+        // put it (both already append the gate and request lines) but because a
+        // dropped grouping is a fact about the invocation, and the reader who
+        // can act on it is the one reading the job log (issue #2691).
         OutputFormat::GithubAnnotations => {
             note_dropped_grouping(Some(grouping.mode), output);
             print_dupes_github_format(report, ctx, GithubTarget::Annotations)

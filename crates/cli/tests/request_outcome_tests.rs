@@ -391,6 +391,80 @@ fn every_diff_stand_down_reports_its_own_reason() {
     assert_eq!(request(&envelope, "diff-filter")["reason"], "not-utf8");
 }
 
+/// The fifth documented reason, and the only one that needs a repository to
+/// reach: a diff path that resolves under the git toplevel AND under the
+/// analysis root below it names two possible bases, and fallow will not filter
+/// against a guess.
+///
+/// Also pins that the recorded sentence names those bases by their relation to
+/// the project root rather than by absolute path: `message` is a wire field,
+/// and every other path-bearing member of a fallow envelope is
+/// project-root-relative.
+#[test]
+fn an_ambiguous_base_reports_its_reason_without_a_machine_path() {
+    let dir = TempDir::new().expect("temp project");
+    let root_path = dir.path();
+    std::fs::create_dir_all(root_path.join("src")).expect("toplevel src");
+    std::fs::create_dir_all(root_path.join("packages/app/src")).expect("package src");
+    std::fs::write(
+        root_path.join("package.json"),
+        r#"{"name":"mono","private":true}"#,
+    )
+    .expect("root package.json");
+    std::fs::write(
+        root_path.join("packages/app/package.json"),
+        r#"{"name":"app","version":"1.0.0","main":"src/index.ts"}"#,
+    )
+    .expect("package package.json");
+    let source = "export const a = (): number => 1;\n";
+    std::fs::write(root_path.join("src/a.ts"), source).expect("toplevel source");
+    std::fs::write(root_path.join("packages/app/src/a.ts"), source).expect("package source");
+    std::fs::write(
+        root_path.join("packages/app/src/index.ts"),
+        "export const main = (): number => 1;\n",
+    )
+    .expect("entry");
+    git(root_path, &["init", "-b", "main"]);
+
+    let diff = root_path.join("ambiguous.diff");
+    std::fs::write(
+        &diff,
+        "diff --git a/src/a.ts b/src/a.ts\n\
+         --- a/src/a.ts\n\
+         +++ b/src/a.ts\n\
+         @@ -1,1 +1,1 @@\n\
+         +export const a = (): number => 1;\n",
+    )
+    .expect("ambiguous diff");
+
+    let package_root = root_path.join("packages/app");
+    let envelope = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        package_root.to_str().expect("utf8"),
+        "--diff-file",
+        diff.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    let entry = request(&envelope, "diff-filter");
+    assert_eq!(entry["status"], "not-applied");
+    assert_eq!(entry["reason"], "ambiguous-base");
+    let message = entry["message"].as_str().expect("a remedy sentence");
+    assert!(
+        message.contains("the repository root (the project root is packages/app below it)"),
+        "the bases are named by their relation to the root: {message}"
+    );
+    // The diff's own path is echoed as the user typed it, deliberately. What
+    // must not appear is a base fallow derived for itself, which unfixed was
+    // this exact directory.
+    assert!(
+        !message.contains(package_root.to_str().expect("utf8")),
+        "no derived checkout path reaches the wire: {message}"
+    );
+}
+
 /// The positive case, which is what lets a reviewer read "this report IS
 /// scoped to the change" off the envelope. An honoured request carries neither
 /// a reason nor a sentence, so a consumer rendering `message` never states
