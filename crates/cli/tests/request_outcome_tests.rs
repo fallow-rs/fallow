@@ -675,8 +675,11 @@ fn a_re_render_says_its_own_diff_filter_stood_down() {
 #[test]
 fn a_written_sarif_file_reports_applied_with_its_path() {
     let project = project();
-    let root = root_arg(&project);
-    let sarif = project.path().join("out").join("results.sarif");
+    // Canonical, so the path sits under the root the run resolves on every
+    // platform: a symlinked temp dir otherwise hides root-prefix rewriting.
+    let canonical = project.path().canonicalize().expect("canonical root");
+    let root = canonical.to_str().expect("utf8");
+    let sarif = canonical.join("out").join("results.sarif");
     let sarif_arg = sarif.to_str().expect("utf8");
     let envelope = parse_json(&run(&[
         "dead-code",
@@ -707,8 +710,10 @@ fn an_unwritable_sarif_target_reports_not_applied_without_moving_the_exit_code()
     use std::os::unix::fs::PermissionsExt;
 
     let project = project();
-    let root = root_arg(&project);
-    let locked = project.path().join("locked");
+    // Canonical for the same reason as the applied case above.
+    let canonical = project.path().canonicalize().expect("canonical root");
+    let root = canonical.to_str().expect("utf8");
+    let locked = canonical.join("locked");
     std::fs::create_dir_all(&locked).expect("locked dir");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
         .expect("drop write permission");

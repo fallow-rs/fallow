@@ -14,13 +14,25 @@ pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
             }
         }
         serde_json::Value::Object(map) => {
-            for value in map.values_mut() {
+            for (key, value) in map.iter_mut() {
+                if key == VERBATIM_KEY {
+                    continue;
+                }
                 strip_root_prefix(value, prefix);
             }
         }
         _ => {}
     }
 }
+
+/// The one envelope member whose strings are not paths of the analyzed tree.
+///
+/// `request_outcomes` echoes what the user asked for (`requested`) and the
+/// sentence the CLI printed (`message`), and its contract promises both
+/// unchanged. Rewriting them would turn a `--sarif-file` under the root into a
+/// path the consumer cannot open from its own working directory, and would
+/// make the wire sentence differ from the stderr line it mirrors.
+const VERBATIM_KEY: &str = "request_outcomes";
 
 fn strip_root_prefix_from_string(value: &mut String, prefix: &str) {
     if let Some(rest) = value.strip_prefix(prefix) {
@@ -125,6 +137,29 @@ mod tests {
         strip_root_prefix(&mut value, "/project/");
 
         assert_eq!(value, json!("See src/a.ts and src/b.ts"));
+    }
+
+    #[test]
+    fn leaves_request_outcomes_verbatim_while_stripping_its_siblings() {
+        let mut value = json!({
+            "path": "/project/src/index.ts",
+            "request_outcomes": {
+                "sarif-file": {
+                    "requested": "/project/out/results.sarif",
+                    "message": "failed to write SARIF file '/project/out/results.sarif'"
+                }
+            }
+        });
+
+        strip_root_prefix(&mut value, "/project/");
+
+        assert_eq!(value["path"], "src/index.ts");
+        let entry = &value["request_outcomes"]["sarif-file"];
+        assert_eq!(entry["requested"], "/project/out/results.sarif");
+        assert_eq!(
+            entry["message"],
+            "failed to write SARIF file '/project/out/results.sarif'"
+        );
     }
 
     #[test]
