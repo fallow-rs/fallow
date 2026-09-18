@@ -2400,7 +2400,7 @@ fn get_nested_string_or_array(obj: &ObjectExpression, path: &[&str]) -> Option<V
 /// (Angular CLI schema for `styles`/`scripts`/`polyfills`:
 /// `{ "input": "src/x.scss", "bundleName": "x", "inject": false }`). Extracting
 /// `input` prevents object-form entries from being silently dropped. See #126.
-fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
+pub(crate) fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
     match expr {
         Expression::StringLiteral(s) => vec![s.value.to_string()],
         Expression::TemplateLiteral(t) if t.expressions.is_empty() => t

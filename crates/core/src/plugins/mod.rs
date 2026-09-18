@@ -44,6 +44,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "expo-router",
     "gatsby",
     "hardhat",
+    "module-federation",
     "nestjs",
     "next-intl",
     "nextjs",
@@ -1275,6 +1276,7 @@ mod lit;
 mod markdownlint;
 mod mintlify;
 mod mocha;
+mod module_federation;
 mod msw;
 mod napi_rs;
 mod nestjs;

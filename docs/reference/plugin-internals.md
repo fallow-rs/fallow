@@ -35,6 +35,21 @@ declarative behavior belongs in the external plugin contract.
 - Generated schema and examples must move with external plugin fields.
 - Do not document volatile built-in plugin counts as architecture.
 
+## Runtime-provided specifiers
+
+A plugin may contribute a `ProvidedDependencyRule` from parsed config, not only
+as a static list. Use it for an import specifier the framework supplies at
+runtime rather than npm, such as a Module Federation remote alias.
+
+Scope the rule to the directory of the config file that declared it, not to the
+whole project: a config inside a workspace package must not silence a finding in
+a sibling package. Match the specifier exactly plus its `alias/` subpath prefix,
+never a bare prefix that would also cover a sibling package name.
+
+The rule suppresses unlisted-dependency findings only. It does not change
+resolution, so a real installed package, a path alias, or a workspace package
+with the same name still wins, and the import keeps crediting that package.
+
 ## Author verification
 
 Use `plugin-check` as the primary read-only authoring check:

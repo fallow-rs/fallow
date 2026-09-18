@@ -56,3 +56,6 @@ sais = "sais"
 # Candle API identifiers used by the local similar-code model implementation.
 mmaped = "mmaped"
 arange = "arange"
+# `styl` is the Stylus file extension, recognized when deciding whether a
+# Module Federation `exposes` target already names a file.
+styl = "styl"

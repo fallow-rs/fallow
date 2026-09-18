@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Module Federation `exposes` and `remotes` are read from configuration.** A
+  file named by a statically readable `exposes` mapping is now a runtime entry
+  point, so an exposed component stops looking like dead code without being
+  listed in `dynamicallyLoaded`. A declared `remotes` alias and its subpaths are
+  treated as provided by the remote container, so `import('checkout/Button')`
+  stops being reported as an unlisted npm dependency. That suppression covers
+  only the directory tree of the config file that declared the alias, so a
+  package that declares no remote keeps reporting the same specifier.
+
+  Read from `module-federation.config.{ts,js,mjs,cjs,mts,cts}` and from inline
+  plugin options in webpack, rspack, rsbuild and vite configs. Entry-export
+  reporting is unchanged: exposed files follow `includeEntryExports` like any
+  other entry point. An `exposes` or `remotes` value that is computed rather
+  than a literal object is reported on stderr instead of being silently skipped.
+
+  No remote container is fetched and no cross-deployment reachability is
+  inferred. `shared` configuration and runtime `registerRemotes` / `loadRemote`
+  calls are not read yet
+  ([#2698](https://github.com/fallow-rs/fallow/issues/2698)).
+
 ## [3.27.0] - 2026-09-17
 
 ### Fixed
