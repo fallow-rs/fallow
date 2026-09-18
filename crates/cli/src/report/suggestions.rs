@@ -120,6 +120,7 @@ pub fn build_dead_code_next_steps(
     digest: Option<crate::impact::ImpactDigest>,
 ) -> Vec<NextStep> {
     let workspace_ref = default_workspace_ref_for_next_step(root);
+    let loaded_baseline = crate::output_runtime::loaded_baseline_for("dead-code");
     build_dead_code_next_steps_contract(DeadCodeNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
         results,
@@ -129,7 +130,21 @@ pub fn build_dead_code_next_steps(
         workspace_ref: workspace_ref.as_deref(),
         audit_changed: audit_changed_applicable(root),
         has_external_plugins: has_external_plugins(root),
+        baseline_recheck: loaded_baseline.as_ref().map(baseline_recheck_input),
     })
+}
+
+/// The `recheck-baseline` input for a baseline this process recorded at load
+/// time, in the borrowed shape the contract builders take.
+fn baseline_recheck_input(
+    loaded: &crate::output_runtime::LoadedBaselineRecheck,
+) -> fallow_output::BaselineRecheckInput<'_> {
+    fallow_output::BaselineRecheckInput {
+        command: loaded.command,
+        path: &loaded.path,
+        baseline_entries: loaded.baseline_entries,
+        scope_reasons: loaded.scope_reasons,
+    }
 }
 
 /// Whether the project declares any auto-discovered external plugin
@@ -142,19 +157,28 @@ fn has_external_plugins(root: &Path) -> bool {
 /// Next-steps for standalone `fallow health`. See [`build_dead_code_next_steps`]
 /// for the `offer_setup` parameter contract.
 #[must_use]
-pub fn health_next_steps_input(
+pub fn health_next_steps_input<'a>(
     report: &HealthReport,
     root: &Path,
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
-) -> HealthNextStepsInput {
+    loaded_baseline: Option<&'a crate::output_runtime::LoadedBaselineRecheck>,
+) -> HealthNextStepsInput<'a> {
     fallow_output::build_health_next_steps_input(
         report,
         suggestions_enabled(),
         offer_setup,
         digest.map(impact_counts),
         audit_changed_applicable(root),
+        loaded_baseline.map(baseline_recheck_input),
     )
+}
+
+/// The baseline `fallow health` recorded at load time, held by the caller so
+/// the borrowed input outlives the builder call.
+#[must_use]
+pub fn loaded_health_baseline() -> Option<crate::output_runtime::LoadedBaselineRecheck> {
+    crate::output_runtime::loaded_baseline_for("health")
 }
 
 /// Next-steps for standalone `fallow dupes`. See [`build_dead_code_next_steps`]
@@ -171,12 +195,14 @@ pub fn build_dupes_next_steps(
         .iter()
         .map(|group| group.fingerprint.as_str())
         .collect::<Vec<_>>();
+    let loaded_baseline = crate::output_runtime::loaded_baseline_for("dupes");
     build_dupes_next_steps_contract(DupesNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
         clone_fingerprints: &clone_fingerprints,
         offer_setup,
         impact_digest: digest.map(impact_counts),
         audit_changed: audit_changed_applicable(root),
+        baseline_recheck: loaded_baseline.as_ref().map(baseline_recheck_input),
     })
 }
 
@@ -465,6 +491,7 @@ mod tests {
             Path::new("/project"),
             false,
             None,
+            None,
         ));
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
 
@@ -475,8 +502,13 @@ mod tests {
     #[test]
     fn health_next_steps_input_feeds_output_contract_builder() {
         let report = health_report_with_finding();
-        let input =
-            health_next_steps_input(&report, Path::new("/project"), true, Some(digest(2, 1)));
+        let input = health_next_steps_input(
+            &report,
+            Path::new("/project"),
+            true,
+            Some(digest(2, 1)),
+            None,
+        );
 
         assert!(input.suggestions_enabled);
         assert!(input.has_findings);
@@ -589,7 +621,7 @@ mod tests {
         ));
         all.extend(build_dupes_next_steps(&payload, &root, false, None));
         all.extend(build_health_next_steps_contract(health_next_steps_input(
-            &report, &root, false, None,
+            &report, &root, false, None, None,
         )));
         all.extend(build_combined_next_steps(
             Some(&results),

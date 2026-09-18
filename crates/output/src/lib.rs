@@ -111,7 +111,9 @@ pub use audit_walkthrough::{
     is_judgment_action,
 };
 pub use audit_weakening::{WeakeningKind, WeakeningSignal};
-pub use baseline_staleness::{BaselineStaleness, BaselineStalenessAdvisory};
+pub use baseline_staleness::{
+    BaselineScopeReasons, BaselineStaleness, BaselineStalenessAdvisory, ScopeReason,
+};
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     GroupByMode, apply_config_fixable_to_duplicate_exports, build_check_output,
@@ -266,11 +268,11 @@ pub use list_envelopes::{
     WorkspacesOutput, serialize_list_boundaries_json_output, serialize_list_workspaces_json_output,
 };
 pub use next_steps::{
-    AuditNextStepsInput, CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput,
-    HealthNextStepsInput, ImpactDigestCounts, TraceUnusedExportInput, build_audit_next_steps,
-    build_audit_next_steps_input, build_combined_next_steps, build_dead_code_next_steps,
-    build_dupes_next_steps, build_health_next_steps, build_health_next_steps_input,
-    impact_digest_summary, trace_unused_export_input,
+    AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,
+    DupesNextStepsInput, HealthNextStepsInput, ImpactDigestCounts, TraceUnusedExportInput,
+    build_audit_next_steps, build_audit_next_steps_input, build_combined_next_steps,
+    build_dead_code_next_steps, build_dupes_next_steps, build_health_next_steps,
+    build_health_next_steps_input, impact_digest_summary, trace_unused_export_input,
 };
 pub use pr_comment_envelope::{PrCommentEnvelope, PrCommentTruncation};
 pub use pr_comment_post_plan::{

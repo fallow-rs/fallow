@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A narrowed run now names the channels that narrowed it.** A run scoped to
+  part of the project cannot judge a whole-project baseline, so both the
+  staleness advisory and `fail-on-stale-baseline` stand down there. The envelope
+  said only that this had happened, never why, and the GitHub Action and the
+  GitLab template had to guess from their own inputs which narrowing they could
+  remove and which was the caller's own choice.
+
+  `baseline_staleness` now carries `scope_reasons`, an array of channel names
+  present exactly when `change_scoped` is true and absent otherwise, so a
+  whole-project run is unchanged. The names are `diff`, `changed-since`,
+  `changed-files`, `workspace`, `changed-workspaces`, `scope`, `file`,
+  `issue-type-filter` and `production`; which of them a command can emit differs
+  per command, so read the array rather than assuming, and treat the name set as
+  open. Both integrations now decide from it instead of from their inputs: a run
+  narrowed only by channels they added is still re-read over the whole project,
+  and a run narrowed by production mode or workspace scoping stands down at once
+  and says which channel was responsible. Scoping passed through the `args`
+  input or `FALLOW_ARGS` is invisible to every input variable and is now visible
+  to both of them. The Action publishes the list as a new
+  `baseline-scope-reasons` output.
+
+  A narrowed run that loaded a non-empty baseline also gains a
+  `recheck-baseline` entry in `next_steps`, pointing at the unscoped command
+  that can judge it. It is emitted on a run with no findings too, which is
+  exactly the run where a rotted baseline is otherwise silent. Like every other
+  entry it is runnable as-is and never mutating: it re-reads the baseline and
+  reports, it never re-saves. The MCP tools state the same fact as a sentence in
+  their `warnings` array, so an agent handed a scoped report learns that the
+  baseline behind it was never judged.
+
 ## [3.27.0] - 2026-09-17
 
 ### Fixed

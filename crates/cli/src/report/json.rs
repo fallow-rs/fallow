@@ -738,6 +738,7 @@ pub(super) fn api_health_json_document(
     workspace_diagnostics: &[WorkspaceDiagnostic],
     gate_outcomes: Option<fallow_output::GateOutcomes>,
 ) -> Result<serde_json::Value, serde_json::Error> {
+    let loaded_baseline = crate::report::suggestions::loaded_health_baseline();
     let output = fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         gate_outcomes,
         report: report.clone(),
@@ -754,6 +755,7 @@ pub(super) fn api_health_json_document(
                 root,
                 crate::report::suggestions::setup_pointer_applicable(root),
                 crate::report::suggestions::due_impact_digest(root),
+                loaded_baseline.as_ref(),
             ),
         ),
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
@@ -776,6 +778,7 @@ fn api_grouped_health_json_document(
     workspace_diagnostics: &[WorkspaceDiagnostic],
     gate_outcomes: Option<fallow_output::GateOutcomes>,
 ) -> Result<serde_json::Value, serde_json::Error> {
+    let loaded_baseline = crate::report::suggestions::loaded_health_baseline();
     fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         gate_outcomes,
         report: report.clone(),
@@ -792,6 +795,7 @@ fn api_grouped_health_json_document(
                 root,
                 crate::report::suggestions::setup_pointer_applicable(root),
                 crate::report::suggestions::due_impact_digest(root),
+                loaded_baseline.as_ref(),
             ),
         ),
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),

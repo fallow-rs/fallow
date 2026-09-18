@@ -595,25 +595,32 @@ fn apply_duplication_baseline(
     let before = report.clone_groups.len();
     *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
     let matched = before.saturating_sub(report.clone_groups.len());
+    let scope_reasons = duplication_comparison_scope_reasons(config, effective_changed_files);
     let staleness = fallow_engine::baseline::BaselineStaleness {
         entries: baseline_entries,
         matched,
         current_findings: before,
-        change_scoped: duplication_comparison_is_narrowed(config, effective_changed_files),
+        change_scoped: !scope_reasons.is_empty(),
     };
     if !opts.quiet {
         eprintln!("Comparing against duplication baseline: {}", path.display());
         warn_on_duplication_baseline_staleness(staleness, path);
     }
 
+    crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
+        command: "dupes",
+        path: path.display().to_string(),
+        baseline_entries,
+        scope_reasons,
+    });
     Ok(Some(crate::baseline_gate::LoadedBaselineStaleness {
         staleness,
         path: path.to_path_buf(),
+        scope_reasons,
     }))
 }
 
-/// True when the duplication baseline was compared against less than the whole
-/// project.
+/// Which channels narrowed the duplication comparison below the whole project.
 ///
 /// Deliberately narrower than the dead-code equivalent. `dupes` saves and
 /// compares the baseline BEFORE `filter_dupes_report` runs, so `--workspace`,
@@ -623,11 +630,19 @@ fn apply_duplication_baseline(
 /// channels that narrow the analysis itself count here: a resolved changed-file
 /// set, which selects the focused analysis, and production mode, which drops
 /// test, story and dev files at discovery.
-fn duplication_comparison_is_narrowed(
+///
+/// The changed-file set is reported as `changed-files` rather than as the flag
+/// that produced it, because by this point the flag is gone. `change_scoped` is
+/// derived from the returned set, so the two cannot disagree.
+fn duplication_comparison_scope_reasons(
     config: &ResolvedConfig,
     effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-) -> bool {
-    effective_changed_files.is_some() || config.production
+) -> fallow_output::BaselineScopeReasons {
+    use fallow_output::ScopeReason;
+
+    fallow_output::BaselineScopeReasons::empty()
+        .insert_if(effective_changed_files.is_some(), ScopeReason::ChangedFiles)
+        .insert_if(config.production, ScopeReason::Production)
 }
 
 fn read_duplication_baseline(
@@ -884,7 +899,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     let baseline_staleness = result
         .baseline_staleness
         .as_ref()
-        .map(|loaded| loaded.staleness.to_envelope(0));
+        .map(|loaded| loaded.to_envelope(0));
     let gate_outcomes = dupes_gate_outcomes(result, baseline_staleness.as_ref());
     let ctx = report::ReportContext {
         root: &result.config.root,

@@ -783,6 +783,14 @@ read_staleness_field() {
     "$file" 2>/dev/null || true
 }
 
+# `scope_reasons` needs its own reader: it is an array, and the scalar reader
+# above returns the raw jq rendering of one, which is not a log line.
+read_staleness_scope_reasons() {
+  local file=$1
+  jq -r "(${BASELINE_STALENESS_JQ}) | (.scope_reasons // []) | join(\", \")" \
+    "$file" 2>/dev/null || true
+}
+
 read_all_staleness_fields() {
   local file=$1
   BASELINE_ENTRIES=$(read_staleness_field "$file" baseline_entries)
@@ -791,15 +799,34 @@ read_all_staleness_fields() {
   BASELINE_ADVISORY=$(read_staleness_field "$file" warning)
   BASELINE_GATE_TRIPS=$(read_staleness_field "$file" gate_trips)
   BASELINE_CHANGE_SCOPED=$(read_staleness_field "$file" change_scoped)
+  BASELINE_SCOPE_REASONS=$(read_staleness_scope_reasons "$file")
 }
 
 read_all_staleness_fields "$RESULTS_FILE"
 
-# True when this script is the reason the run was narrowed, so removing what it
-# added can produce a run that CAN judge the baseline. Production mode and
-# workspace scoping are the user's own choice about what to analyze and are
-# never removed, so a run narrowed by those stands down instead.
+# True when every channel that narrowed the run is one this script added, so
+# removing them can produce a run that CAN judge the baseline. Production mode
+# and workspace scoping are the user's own choice about what to analyze, are
+# never removed, and make the re-read pointless.
+#
+# Driven by the run's own scope_reasons when the binary reports them, so
+# scoping smuggled through the 'args' input is visible here instead of sending
+# the script into a re-read that comes back narrowed anyway. A binary that
+# predates the member falls back to the input-based guess, which is the only
+# reading available there.
+BASELINE_REMOVABLE_SCOPE_REASONS="diff changed-since changed-files scope file issue-type-filter"
+
 action_can_rerun_unscoped() {
+  if [ -n "${BASELINE_SCOPE_REASONS:-}" ]; then
+    local reason
+    for reason in $(printf '%s' "$BASELINE_SCOPE_REASONS" | tr ',' ' '); do
+      case " ${BASELINE_REMOVABLE_SCOPE_REASONS} " in
+        *" ${reason} "*) ;;
+        *) return 1 ;;
+      esac
+    done
+    return 0
+  fi
   if [ "${INPUT_PRODUCTION:-}" = "true" ]; then return 1; fi
   if [ "${INPUT_PRODUCTION_DEAD_CODE:-}" = "true" ]; then return 1; fi
   if [ "${INPUT_PRODUCTION_HEALTH:-}" = "true" ]; then return 1; fi
@@ -807,6 +834,24 @@ action_can_rerun_unscoped() {
   if [ -n "${INPUT_WORKSPACE:-}" ]; then return 1; fi
   if [ -n "${INPUT_CHANGED_WORKSPACES:-}" ]; then return 1; fi
   return 0
+}
+
+# The channels that narrowed the run, as a parenthetical for a log line. Empty
+# when the binary does not report them.
+baseline_scope_clause() {
+  if [ -n "${BASELINE_SCOPE_REASONS:-}" ]; then
+    printf ' (%s)' "$BASELINE_SCOPE_REASONS"
+  fi
+}
+
+# Why a narrowed run cannot be re-read unscoped. Falls back to the two inputs
+# the guess is built from, for a binary that reports no scope_reasons.
+baseline_unremovable_scope_clause() {
+  if [ -n "${BASELINE_SCOPE_REASONS:-}" ]; then
+    printf ' (%s)' "$BASELINE_SCOPE_REASONS"
+  else
+    printf ' (production mode or workspace scoping)'
+  fi
 }
 
 # Build the re-read's argv as an element-wise copy of the analysis argv with
@@ -940,14 +985,14 @@ elif [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
     if run_stale_gate_analysis; then
       read_all_staleness_fields "$GATE_RESULTS_FILE"
       if [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
-        stale_baseline_stand_down "the unscoped re-read was still narrowed to part of the project" "Remove the positional path from the 'args' input to judge the baseline."
+        stale_baseline_stand_down "the unscoped re-read was still narrowed to part of the project$(baseline_scope_clause)" "Remove the positional path from the 'args' input to judge the baseline."
       fi
     else
       stale_baseline_stand_down "the unscoped baseline re-read produced no readable result" "The primary analysis is unaffected; the step debug log carries its stderr."
     fi
     rm -f "$GATE_RESULTS_RAW_FILE" "$GATE_RESULTS_FILE" "$GATE_STDERR_FILE"
   else
-    stale_baseline_stand_down "it analyzed only part of the project (production mode or workspace scoping)" "Run an unscoped job to judge the baseline."
+    stale_baseline_stand_down "it analyzed only part of the project$(baseline_unremovable_scope_clause)" "Run an unscoped job to judge the baseline."
   fi
 fi
 
@@ -1433,6 +1478,7 @@ fi
     "baseline_stale_entries=${BASELINE_STALE_ENTRIES}" \
     "baseline_advisory=${BASELINE_ADVISORY}" \
     "baseline_change_scoped=${BASELINE_CHANGE_SCOPED}" \
+    "baseline_scope_reasons=${BASELINE_SCOPE_REASONS}" \
     "baseline_gate_trips=${BASELINE_GATE_TRIPS}" \
     "gates_failed=$(join_gate_names "${GATE_FAILED_NAMES[@]:-}")" \
     "gates_warned=$(join_gate_names "${GATE_WARNED_NAMES[@]:-}")" \

@@ -1186,7 +1186,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             quiet: opts.quiet,
             output: opts.output,
             analysis_identity: &analysis_identity,
-            change_scoped: baseline_scope_is_narrowed(opts, config.production),
+            scope_reasons: baseline_scope_reasons(opts, config.production),
         },
     )?;
 
@@ -1461,7 +1461,7 @@ fn envelope_baseline_staleness(result: &CheckResult) -> Option<fallow_output::Ba
     result
         .baseline_staleness
         .as_ref()
-        .map(|loaded| loaded.staleness.to_envelope(0))
+        .map(|loaded| loaded.to_envelope(0))
 }
 
 fn type_aware_completeness_failed(result: &CheckResult, quiet: bool) -> bool {
@@ -1696,35 +1696,49 @@ struct BaselineIo<'a> {
     quiet: bool,
     output: OutputFormat,
     analysis_identity: &'a fallow_types::semantic::SemanticAnalysisIdentity,
-    /// True when this run analyzed only part of the project, so a
-    /// whole-project baseline matches less of it for reasons that are not rot.
-    change_scoped: bool,
+    /// Which channels narrowed this run, so a whole-project baseline matches
+    /// less of it for reasons that are not rot. Empty means whole-project.
+    scope_reasons: fallow_output::BaselineScopeReasons,
 }
 
-/// True when scope or issue-type narrowing ran before the baseline comparison,
-/// so the current results cover less than the baseline ever described.
+/// Which channels narrowed the run before the baseline comparison, so the
+/// current results cover less than the baseline ever described.
 ///
-/// Mirrors the health side's `is_change_scoped` and adds the dead-code-only
-/// filter channel, because `--unused-*` flags drop whole baseline categories.
-/// The diff channel is resolved exactly as `apply_scope_filters` resolves it:
-/// on these commands `--diff-file` and `--diff-stdin` never reach
-/// `opts.diff_index` and arrive through the shared index instead, so reading
-/// the field alone would miss every diff-scoped run. Production mode counts
-/// as narrowing too: it drops test, story and dev files before analysis, and
-/// the resolved config carries the effective flag whether it came from the CLI
-/// or from the project config.
-fn baseline_scope_is_narrowed(opts: &CheckOptions<'_>, production: bool) -> bool {
+/// Mirrors the health side's `baseline_scope_reasons` and adds the
+/// dead-code-only filter channel, because `--unused-*` flags drop whole
+/// baseline categories. The diff channel is resolved exactly as
+/// `apply_scope_filters` resolves it: on these commands `--diff-file` and
+/// `--diff-stdin` never reach `opts.diff_index` and arrive through the shared
+/// index instead, so reading the field alone would miss every diff-scoped run.
+/// Production mode counts as narrowing too: it drops test, story and dev files
+/// before analysis, and the resolved config carries the effective flag whether
+/// it came from the CLI or from the project config.
+///
+/// This is the only predicate on this command: `change_scoped` is derived from
+/// the returned set, so the boolean and the published array cannot disagree.
+/// It is also the command that can name every channel, because it reads the
+/// flags rather than a set already resolved from them.
+fn baseline_scope_reasons(
+    opts: &CheckOptions<'_>,
+    production: bool,
+) -> fallow_output::BaselineScopeReasons {
+    use fallow_output::ScopeReason;
+
     let diff_scoped = opts.diff_index.is_some()
         || (opts.use_shared_diff_index
             && crate::report::ci::diff_filter::shared_diff_index().is_some());
-    diff_scoped
-        || opts.changed_since.is_some()
-        || opts.workspace.is_some()
-        || opts.changed_workspaces.is_some()
-        || opts.scope.is_some()
-        || !opts.file.is_empty()
-        || opts.filters.any_active()
-        || production
+    fallow_output::BaselineScopeReasons::empty()
+        .insert_if(diff_scoped, ScopeReason::Diff)
+        .insert_if(opts.changed_since.is_some(), ScopeReason::ChangedSince)
+        .insert_if(opts.workspace.is_some(), ScopeReason::Workspace)
+        .insert_if(
+            opts.changed_workspaces.is_some(),
+            ScopeReason::ChangedWorkspaces,
+        )
+        .insert_if(opts.scope.is_some(), ScopeReason::Scope)
+        .insert_if(!opts.file.is_empty(), ScopeReason::File)
+        .insert_if(opts.filters.any_active(), ScopeReason::IssueTypeFilter)
+        .insert_if(production, ScopeReason::Production)
 }
 
 /// Save baseline and/or compare against an existing baseline.
@@ -1822,15 +1836,22 @@ fn load_and_compare_baseline(
         entries: baseline_entries,
         matched,
         current_findings: before,
-        change_scoped: io.change_scoped,
+        change_scoped: !io.scope_reasons.is_empty(),
     };
     if !io.quiet {
         eprintln!("Comparing against baseline: {}", baseline_path.display());
         warn_on_baseline_staleness(staleness, baseline_path);
     }
+    crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
+        command: "dead-code",
+        path: baseline_path.display().to_string(),
+        baseline_entries,
+        scope_reasons: io.scope_reasons,
+    });
     Ok(LoadedBaselineStaleness {
         staleness,
         path: baseline_path.to_path_buf(),
+        scope_reasons: io.scope_reasons,
     })
 }
 
@@ -2217,7 +2238,7 @@ mod tests {
                 quiet: true,
                 output: OutputFormat::Json,
                 analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
-                change_scoped: false,
+                scope_reasons: fallow_output::BaselineScopeReasons::empty(),
             },
         )
         .expect("baseline save succeeds");

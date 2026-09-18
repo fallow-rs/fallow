@@ -259,17 +259,40 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
   if [ -n "${FALLOW_TEST_LOG:-}" ] && [ -n "${FALLOW_DIFF_FILE:-}" ]; then
     printf 'diff_file=set\n' >> "$FALLOW_TEST_LOG"
   fi
-  scoped=false
+  # The real binary serializes scope_reasons in its own declaration order,
+  # never in argv order, so the mock sorts into that order too.
+  REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production"
+  found=""
   for arg in "$@"; do
     case "$arg" in
-      --changed-since|--changed-since=*) scoped=true ;;
+      --changed-since|--changed-since=*) found="$found changed-since" ;;
+      --production) found="$found production" ;;
     esac
   done
   if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
+    found="$found diff"
+  fi
+  if [ -n "${MOCK_SCOPE_REASONS:-}" ]; then
+    found=$(printf '%s' "$MOCK_SCOPE_REASONS" | tr ',' ' ')
+  fi
+  reasons=""
+  for candidate in $REASON_ORDER; do
+    case " $found " in
+      *" $candidate "*)
+        if [ -z "$reasons" ]; then reasons="\"$candidate\""; else reasons="$reasons,\"$candidate\""; fi
+        ;;
+    esac
+  done
+  scoped=false
+  if [ -n "$reasons" ]; then
     scoped=true
   fi
   if [ "$scoped" = "true" ]; then
-    printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":0,"stale_entries":8,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}'
+    if [ "${MOCK_NO_SCOPE_REASONS:-}" = "1" ]; then
+      printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":0,"stale_entries":8,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}'
+    else
+      printf '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":0,"stale_entries":8,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":[%s]}}\n' "$reasons"
+    fi
     exit 0
   fi
   if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ]; then
@@ -497,6 +520,53 @@ if [ "$STALE_RUNS" = "1" ]; then
 else
   fail "stale gate: an unscoped pipeline analyzes exactly once" "ran $STALE_RUNS times"
 fi
+
+# The stand-down names the channels the run reported, and scoping smuggled
+# through FALLOW_ARGS is visible there instead of sending the template into an
+# unscoped re-read that comes back narrowed anyway.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_SCOPE_REASONS=production \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json)
+STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
+if [ "$STALE_RUNS" = "1" ]; then
+  pass "stale gate: an unremovable reason skips the re-read even with no matching variable"
+else
+  fail "stale gate: an unremovable reason skips the re-read even with no matching variable" "ran $STALE_RUNS times"
+fi
+assert_contains "$OUT" "only part of the project (production)" \
+  "stale gate: the stand-down names the smuggled channel"
+
+# Reasons this template can remove still earn the re-read.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_SCOPE_REASONS=changed-files,scope \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json)
+STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
+if [ "$STALE_RUNS" = "2" ]; then
+  pass "stale gate: removable reasons still earn the unscoped re-read"
+else
+  fail "stale gate: removable reasons still earn the unscoped re-read" "ran $STALE_RUNS times"
+fi
+
+# A binary that predates the member keeps the variable-based guess.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_NO_SCOPE_REASONS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_CHANGED_SINCE=abc123 \
+  FALLOW_PRODUCTION=true)
+assert_contains "$OUT" "only part of the project (production mode or workspace scoping)" \
+  "stale gate: a binary without the member falls back to the variable-based reason"
 
 # Diff scoping reaches the CLI through FALLOW_DIFF_FILE, not argv.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"

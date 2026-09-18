@@ -36,6 +36,19 @@ use std::path::{Path, PathBuf};
 pub struct LoadedBaselineStaleness {
     pub staleness: BaselineStaleness,
     pub path: PathBuf,
+    /// Which channels narrowed the run, from the same predicate that produced
+    /// `staleness.change_scoped`. Carried here rather than on the engine
+    /// struct so the analysis keeps the one boolean it needs.
+    pub scope_reasons: fallow_output::BaselineScopeReasons,
+}
+
+impl LoadedBaselineStaleness {
+    /// This run's view of the baseline, for the JSON envelope.
+    #[must_use]
+    pub fn to_envelope(&self, moved_entries: usize) -> fallow_output::BaselineStaleness {
+        self.staleness
+            .to_envelope(moved_entries, self.scope_reasons)
+    }
 }
 
 /// What each command calls the things its baseline entries describe.

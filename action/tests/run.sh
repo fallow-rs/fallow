@@ -3254,13 +3254,37 @@ printf 'analysis %s\n' "$*" >> "$MOCK_ANALYSIS_LOG"
 if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
   printf 'diff_file=set\n' >> "$MOCK_ANALYSIS_LOG"
 fi
-scoped=false
+# Report the channels that narrowed this argv, the way the real binary
+# derives them from the flags it was given. MOCK_SCOPE_REASONS overrides the
+# list, which is how a run narrowed through the 'args' input is simulated: the
+# envelope names a reason no INPUT_* variable would reveal.
+# The real binary serializes the array in its own declaration order, never in
+# argv order, so the mock sorts into that order too: the script's rule reads the
+# list and a mock that emitted argv order would test a shape no run produces.
+REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production"
+found=""
 for arg in "$@"; do
   case "$arg" in
-    --changed-since|--changed-since=*) scoped=true ;;
+    --changed-since|--changed-since=*) found="$found changed-since" ;;
+    --production) found="$found production" ;;
   esac
 done
 if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
+  found="$found diff"
+fi
+if [ -n "${MOCK_SCOPE_REASONS:-}" ]; then
+  found=$(printf '%s' "$MOCK_SCOPE_REASONS" | tr ',' ' ')
+fi
+reasons=""
+for candidate in $REASON_ORDER; do
+  case " $found " in
+    *" $candidate "*)
+      if [ -z "$reasons" ]; then reasons="\"$candidate\""; else reasons="$reasons,\"$candidate\""; fi
+      ;;
+  esac
+done
+scoped=false
+if [ -n "$reasons" ]; then
   scoped=true
 fi
 if [ "${MOCK_NO_STALENESS:-}" = "1" ]; then
@@ -3277,7 +3301,11 @@ matched=${MOCK_MATCHED:-3}
 stale=$((entries - matched))
 findings=${MOCK_FINDINGS:-3}
 if [ "$scoped" = "true" ]; then
-  printf '{"schema_version":9,"total_issues":0,"baseline_staleness":{"baseline_entries":%s,"matched_entries":0,"stale_entries":%s,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}\n' "$entries" "$entries"
+  if [ "${MOCK_NO_SCOPE_REASONS:-}" = "1" ]; then
+    printf '{"schema_version":9,"total_issues":0,"baseline_staleness":{"baseline_entries":%s,"matched_entries":0,"stale_entries":%s,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}\n' "$entries" "$entries"
+  else
+    printf '{"schema_version":9,"total_issues":0,"baseline_staleness":{"baseline_entries":%s,"matched_entries":0,"stale_entries":%s,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":[%s]}}\n' "$entries" "$entries" "$reasons"
+  fi
   exit 0
 fi
 gate_trips=false
@@ -3445,6 +3473,50 @@ assert_not_contains "$STALE_STDOUT" "::warning::fallow: baseline staleness could
   "stale gate: a run that asked for nothing is not warned at"
 assert_not_contains "$STALE_STDOUT" "stood down" \
   "stale gate: the notice does not name a gate that was never requested"
+
+# 7c. The stand-down names the channels the run reported rather than guessing
+# from this script's own inputs, and the reasons reach the step outputs.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_PRODUCTION="true"
+assert_contains "$STALE_STDOUT" "only part of the project (changed-since, production)" \
+  "stale gate: the stand-down names the channels that narrowed the run"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_scope_reasons=changed-since, production" \
+  "stale gate: the channels reach the step outputs"
+
+# 7d. Scoping smuggled through the 'args' input is invisible to every INPUT_*
+# variable, so the input-based guess would send the script into an unscoped
+# re-read that comes back narrowed anyway. Reading the run's own reasons is what
+# makes it stand down the first time.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  MOCK_SCOPE_REASONS="production"
+STALE_RUN_COUNT=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^analysis ' || true)
+if [ "$STALE_RUN_COUNT" = "1" ]; then
+  pass "stale gate: an unremovable reason skips the re-read even with no matching input"
+else
+  fail "stale gate: an unremovable reason skips the re-read even with no matching input" "ran ${STALE_RUN_COUNT} times"
+fi
+assert_contains "$STALE_STDOUT" "only part of the project (production)" \
+  "stale gate: the stand-down names the smuggled channel"
+
+# 7e. A run narrowed only by channels this script can remove still pays for the
+# re-read, which is the case the re-read exists for.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  MOCK_SCOPE_REASONS="changed-files,scope"
+STALE_RUN_COUNT=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^analysis ' || true)
+if [ "$STALE_RUN_COUNT" = "2" ]; then
+  pass "stale gate: removable reasons still earn the unscoped re-read"
+else
+  fail "stale gate: removable reasons still earn the unscoped re-read" "ran ${STALE_RUN_COUNT} times"
+fi
+
+# 7f. A binary that predates the member keeps today's behaviour: the guess from
+# the inputs, and the wording that names the two inputs it is built from.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_PRODUCTION="true" MOCK_NO_SCOPE_REASONS="1"
+assert_contains "$STALE_STDOUT" "only part of the project (production mode or workspace scoping)" \
+  "stale gate: a binary without the member falls back to the input-based reason"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_scope_reasons=" \
+  "stale gate: the output is published empty rather than omitted"
 
 # 8. The re-run exits 1 on findings, which is not an error here.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \

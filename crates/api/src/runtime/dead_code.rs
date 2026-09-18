@@ -325,6 +325,9 @@ fn build_dead_code_programmatic_output(
         workspace_ref: default_workspace_ref_for_workspaces(root, session.workspaces()).as_deref(),
         audit_changed: fallow_engine::churn::is_git_repo(root),
         has_external_plugins: !fallow_config::discover_external_plugins(root, &[]).is_empty(),
+        // The programmatic runtime loads no baseline, so there is never one to
+        // re-check.
+        baseline_recheck: None,
     });
     let config_fixable =
         fallow_config::is_config_fixable(&resolved.root, resolved.config_path.as_ref());

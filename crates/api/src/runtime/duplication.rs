@@ -112,6 +112,7 @@ pub(super) fn run_duplication_report_with_session(
         offer_setup: setup_pointer_applicable(root),
         impact_digest: None,
         audit_changed: fallow_engine::churn::is_git_repo(root),
+        baseline_recheck: None,
     });
     let output: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {

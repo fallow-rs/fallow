@@ -746,6 +746,14 @@ variables:
           "$file" 2>/dev/null || true
       }
 
+      # scope_reasons needs its own reader: it is an array, and the scalar
+      # reader above returns the raw jq rendering of one, not a log line.
+      read_staleness_scope_reasons() {
+        local file=$1
+        jq -r "(${BASELINE_STALENESS_JQ}) | (.scope_reasons // []) | join(\", \")" \
+          "$file" 2>/dev/null || true
+      }
+
       read_all_staleness_fields() {
         local file=$1
         BASELINE_ENTRIES=$(read_staleness_field "$file" baseline_entries)
@@ -753,6 +761,7 @@ variables:
         BASELINE_ADVISORY=$(read_staleness_field "$file" warning)
         BASELINE_GATE_TRIPS=$(read_staleness_field "$file" gate_trips)
         BASELINE_CHANGE_SCOPED=$(read_staleness_field "$file" change_scoped)
+        BASELINE_SCOPE_REASONS=$(read_staleness_scope_reasons "$file")
       }
 
       read_all_staleness_fields fallow-results.json
@@ -760,7 +769,24 @@ variables:
       # Production mode and workspace scoping are the user's own choice about
       # what to analyze, so they are never removed and a run narrowed by them
       # stands down instead.
+      #
+      # Driven by the run's own scope_reasons when the binary reports them, so
+      # scoping smuggled through FALLOW_ARGS is visible here instead of sending
+      # the template into a re-read that comes back narrowed anyway. A binary
+      # that predates the member falls back to the variable-based guess.
+      BASELINE_REMOVABLE_SCOPE_REASONS="diff changed-since changed-files scope file issue-type-filter"
+
       template_can_rerun_unscoped() {
+        if [ -n "${BASELINE_SCOPE_REASONS:-}" ]; then
+          local reason
+          for reason in $(printf '%s' "$BASELINE_SCOPE_REASONS" | tr ',' ' '); do
+            case " ${BASELINE_REMOVABLE_SCOPE_REASONS} " in
+              *" ${reason} "*) ;;
+              *) return 1 ;;
+            esac
+          done
+          return 0
+        fi
         if [ "$FALLOW_PRODUCTION" = "true" ]; then return 1; fi
         if [ "$FALLOW_PRODUCTION_DEAD_CODE" = "true" ]; then return 1; fi
         if [ "$FALLOW_PRODUCTION_HEALTH" = "true" ]; then return 1; fi
@@ -864,6 +890,25 @@ variables:
       # baseline is an ordinary configuration, and warning on every merge
       # request about a judgement nobody requested is noise the project cannot
       # turn off. The CLI itself is silent there, so the level matches it.
+      # The channels that narrowed the run, as a parenthetical for a log line.
+      # Empty when the binary does not report them.
+      baseline_scope_clause() {
+        if [ -n "${BASELINE_SCOPE_REASONS:-}" ]; then
+          printf ' (%s)' "$BASELINE_SCOPE_REASONS"
+        fi
+      }
+
+      # Why a narrowed run cannot be re-read unscoped. Falls back to the two
+      # variables the guess is built from, for a binary that reports no
+      # scope_reasons.
+      baseline_unremovable_scope_clause() {
+        if [ -n "${BASELINE_SCOPE_REASONS:-}" ]; then
+          printf ' (%s)' "$BASELINE_SCOPE_REASONS"
+        else
+          printf ' (production mode or workspace scoping)'
+        fi
+      }
+
       stale_baseline_stand_down() {
         if [ "$FALLOW_FAIL_ON_STALE_BASELINE" = "true" ]; then
           echo "WARNING: baseline staleness could not be judged on this run because ${1}. FALLOW_FAIL_ON_STALE_BASELINE stood down. ${2}"
@@ -881,14 +926,14 @@ variables:
           if run_stale_gate_analysis; then
             read_all_staleness_fields fallow-stale-baseline-gate.json
             if [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
-              stale_baseline_stand_down "the unscoped re-read was still narrowed to part of the project" "Remove the positional path from FALLOW_ARGS to judge the baseline."
+              stale_baseline_stand_down "the unscoped re-read was still narrowed to part of the project$(baseline_scope_clause)" "Remove the positional path from FALLOW_ARGS to judge the baseline."
             fi
           else
             stale_baseline_stand_down "the unscoped baseline re-read produced no readable result" "The primary analysis is unaffected; its stderr is printed above."
           fi
           rm -f fallow-stale-baseline-gate-raw.json fallow-stale-baseline-gate.json fallow-stale-baseline-gate-stderr.log
         else
-          stale_baseline_stand_down "it analyzed only part of the project (production mode or workspace scoping)" "Run an unscoped pipeline to judge the baseline."
+          stale_baseline_stand_down "it analyzed only part of the project$(baseline_unremovable_scope_clause)" "Run an unscoped pipeline to judge the baseline."
         fi
       fi
 

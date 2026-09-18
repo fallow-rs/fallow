@@ -1003,7 +1003,7 @@ fn combined_gate_outcomes(
                 result
                     .baseline_staleness
                     .as_ref()
-                    .map(|loaded| loaded.staleness.to_envelope(0))
+                    .map(|loaded| loaded.to_envelope(0))
                     .as_ref(),
                 result.fail_on_stale_baseline,
             ),
@@ -1093,7 +1093,7 @@ fn check_json_extras_for_combined(result: &CheckResult) -> fallow_api::CheckJson
         result
             .baseline_staleness
             .as_ref()
-            .map(|loaded| loaded.staleness.to_envelope(0)),
+            .map(|loaded| loaded.to_envelope(0)),
     )
 }
 

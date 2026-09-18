@@ -148,8 +148,22 @@ impl BaselineStaleness {
     /// threshold and the gate rule have exactly one implementation. Only
     /// `health` can follow a file move; the commands that match entries by
     /// fingerprint pass `0`.
+    ///
+    /// `scope_reasons` comes from the caller because only the command knows
+    /// which channels it read; this struct carries the boolean the analysis
+    /// needs and nothing more. The two must agree, which is why every caller
+    /// derives `change_scoped` from the same reason set it passes here.
     #[must_use]
-    pub fn to_envelope(&self, moved_entries: usize) -> fallow_output::BaselineStaleness {
+    pub fn to_envelope(
+        &self,
+        moved_entries: usize,
+        scope_reasons: fallow_output::BaselineScopeReasons,
+    ) -> fallow_output::BaselineStaleness {
+        debug_assert_eq!(
+            self.change_scoped,
+            !scope_reasons.is_empty(),
+            "change_scoped and scope_reasons must be derived from the same predicate"
+        );
         let warning = self.warning();
         fallow_output::BaselineStaleness {
             baseline_entries: self.entries,
@@ -169,6 +183,7 @@ impl BaselineStaleness {
             },
             gate_trips: self.trips_gate(),
             moved_entries,
+            scope_reasons,
         }
     }
 }

@@ -854,3 +854,262 @@ fn the_annotation_verdict_comes_before_the_findings() {
         "the verdict is the first line, so a cap cannot drop it: {first}"
     );
 }
+
+/// `scope_reasons` and `change_scoped` are one predicate's two projections, so
+/// the array is non-empty exactly when the boolean is true. A consumer that
+/// reads the array to decide whether the narrowing is removable would otherwise
+/// be deciding from a different answer than the one that suppressed the gate.
+fn assert_scope_projection_agrees(staleness: &Value, expected: &[&str]) {
+    let reasons = staleness["scope_reasons"]
+        .as_array()
+        .map(|reasons| {
+            reasons
+                .iter()
+                .map(|reason| reason.as_str().expect("a reason is a string"))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    assert_eq!(reasons, expected, "staleness was {staleness}");
+    assert_eq!(
+        staleness["change_scoped"],
+        Value::Bool(!reasons.is_empty()),
+        "change_scoped must follow the reason set: {staleness}"
+    );
+}
+
+#[test]
+fn dead_code_names_every_channel_that_narrowed_the_run() {
+    let project = orphan_project(3);
+    let root = project.path();
+    let baseline = root.join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a baseline should not error: {}",
+        saved.stderr
+    );
+
+    let unscoped = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]));
+    assert_scope_projection_agrees(&unscoped["baseline_staleness"], &[]);
+    assert!(
+        unscoped["baseline_staleness"]
+            .as_object()
+            .expect("staleness is an object")
+            .get("scope_reasons")
+            .is_none(),
+        "a whole-project run keeps the member off the wire entirely: {}",
+        unscoped["baseline_staleness"]
+    );
+
+    let narrowed = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+        "--production",
+        "--unused-exports",
+    ]));
+    assert_scope_projection_agrees(
+        &narrowed["baseline_staleness"],
+        &["issue-type-filter", "production"],
+    );
+}
+
+/// `dupes` compares and saves before the report-narrowing filters run, so its
+/// predicate sees a resolved changed-file set and production mode and nothing
+/// else. It reports `changed-files` rather than the flag that produced it,
+/// because by then the flag is gone.
+#[test]
+fn dupes_reports_the_two_channels_that_narrow_its_comparison() {
+    let project = cloned_project();
+    let baseline = project.path().join("dupes-baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a duplication baseline should not error: {}",
+        saved.stderr
+    );
+
+    let unscoped = parse_json(&run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]));
+    assert_scope_projection_agrees(&unscoped["baseline_staleness"], &[]);
+
+    let narrowed = parse_json(&run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+        "--production",
+    ]));
+    assert_scope_projection_agrees(&narrowed["baseline_staleness"], &["production"]);
+}
+
+/// `health` runs its predicate after the flags were resolved, so workspace
+/// roots and a changed-file set have already lost the flag they came from.
+#[test]
+fn health_reports_the_coarser_channels_its_predicate_can_see() {
+    let project = complex_project();
+    let root = project.path();
+    let baseline = root.join("health-baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "health",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--complexity",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a health baseline should not error: {}",
+        saved.stderr
+    );
+
+    let unscoped = parse_json(&run(&[
+        "health",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--complexity",
+        "--baseline",
+        baseline_arg,
+    ]));
+    assert_scope_projection_agrees(&unscoped["summary"]["baseline_staleness"], &[]);
+
+    let narrowed = parse_json(&run(&[
+        "health",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--complexity",
+        "--baseline",
+        baseline_arg,
+        "--production",
+    ]));
+    assert_scope_projection_agrees(&narrowed["summary"]["baseline_staleness"], &["production"]);
+}
+
+/// A rotted baseline on a project with nothing left to report is the run where
+/// the advisory and the gate are both silent by construction, so the read-only
+/// pointer has to survive the zero-finding early return.
+#[test]
+fn a_narrowed_run_with_no_findings_still_points_at_the_unscoped_recheck() {
+    let project = orphan_project(2);
+    let root = project.path();
+    let baseline = root.join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a baseline should not error: {}",
+        saved.stderr
+    );
+
+    // The positional path narrows to the entry point, which the baseline never
+    // recorded, so the run reports nothing and matches nothing: the shape where
+    // both the advisory and the gate are silent by construction.
+    let output = run(&[
+        "dead-code",
+        "src/index.ts",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]);
+    let envelope = parse_json(&output);
+    assert_scope_projection_agrees(&envelope["baseline_staleness"], &["scope"]);
+
+    let steps = envelope["next_steps"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a narrowed baseline run offers a pointer: {envelope}"));
+    let recheck = steps
+        .iter()
+        .find(|step| step["id"] == "recheck-baseline")
+        .unwrap_or_else(|| panic!("expected a recheck-baseline entry, got {envelope}"));
+    let command = recheck["command"].as_str().expect("command is a string");
+    assert!(
+        command.starts_with("fallow dead-code --baseline "),
+        "the pointer names the command whose baseline it is: {command}"
+    );
+    assert!(
+        command.ends_with("baseline.json"),
+        "the pointer names the loaded baseline, root-relative like every other \
+         path on the envelope: {command}"
+    );
+    assert!(
+        !command.contains("--save-baseline"),
+        "next_steps is a read-only contract: {command}"
+    );
+    assert!(
+        recheck["reason"]
+            .as_str()
+            .expect("reason is a string")
+            .contains("(scope)"),
+        "the reason names the published scope_reasons: {recheck}"
+    );
+}

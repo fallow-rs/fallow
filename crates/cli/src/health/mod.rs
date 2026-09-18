@@ -445,6 +445,7 @@ pub fn run_health(
     if let Some(ref timings) = result.timings {
         report::print_health_performance(timings, opts.output, json_style);
     }
+    record_loaded_baseline(&result, opts.baseline);
     let code = print_health_result(
         &result,
         HealthPrintOptions {
@@ -778,6 +779,27 @@ fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_
     let runtime_coverage = has_failing_runtime_coverage(result);
     let stale_baseline = stale_baseline_gate_failed(result, options);
     score || findings || runtime_coverage || stale_baseline
+}
+
+/// Record the loaded baseline for the `recheck-baseline` next step.
+///
+/// Recorded here rather than at the engine's load site, which cannot reach CLI
+/// runtime state, and only for the standalone command: `audit` and the
+/// combined run build their next steps from their own builders and would
+/// otherwise offer a `health` path on an envelope that is not health's.
+fn record_loaded_baseline(result: &HealthResult, baseline_path: Option<&std::path::Path>) {
+    let Some(path) = baseline_path else {
+        return;
+    };
+    let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
+        return;
+    };
+    crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
+        command: "health",
+        path: path.display().to_string(),
+        baseline_entries: staleness.baseline_entries,
+        scope_reasons: staleness.scope_reasons,
+    });
 }
 
 /// Say that `--report-only` suppressed the gate, so a job that passes both
