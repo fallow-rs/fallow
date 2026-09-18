@@ -1,0 +1,8 @@
+{
+  "name": "module-federation-consumer",
+  "private": true,
+  "devDependencies": {
+    "@module-federation/enhanced": "^0.9.0",
+    "webpack": "^5.98.0"
+  }
+}

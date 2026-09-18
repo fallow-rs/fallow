@@ -35,6 +35,38 @@ declarative behavior belongs in the external plugin contract.
 - Generated schema and examples must move with external plugin fields.
 - Do not document volatile built-in plugin counts as architecture.
 
+## Runtime-provided specifiers
+
+A plugin may contribute a `ProvidedDependencyRule` from parsed config, not only
+as a static list. Use it for an import specifier the framework supplies at
+runtime rather than npm, such as a Module Federation remote alias.
+
+Scope the rule to the directory of the config file that declared it, not to the
+whole project: a config inside a workspace package must not silence a finding in
+a sibling package. Match the specifier exactly plus its `alias/` subpath prefix,
+never a bare prefix that would also cover a sibling package name.
+
+The rule suppresses unlisted-dependency findings only. It does not change
+resolution, so a real installed package, a path alias, or a workspace package
+with the same name still wins, and the import keeps crediting that package.
+
+## Config paths read from a nested config
+
+A path read out of a config file resolves against that file's directory unless
+the config declares its own base, as webpack's `context` does. A tool config
+that is not at the project root is therefore only correct for the tree it sits
+in, which is what keeps a workspace package from seeding entries for a sibling.
+
+An entry pattern is a glob while a config value is a literal path, so escape a
+value before pushing it as a pattern. Bracketed route filenames and `*` in a
+path would otherwise both miss the named file and cover files the config does
+not name.
+
+A declared `always_used` pattern is matched against the project-relative path
+without a `**/` rewrite, so it covers a root-level file only. A plugin that
+reads a config at any depth must push the resolved path onto
+`always_used_files` itself, or the file it just consumed is reported as unused.
+
 ## Author verification
 
 Use `plugin-check` as the primary read-only authoring check:

@@ -7262,7 +7262,7 @@
     ]
   },
   "plugins": {
-    "count": 126,
+    "count": 127,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -7314,6 +7314,7 @@
       "rolldown",
       "rspack",
       "rsbuild",
+      "module-federation",
       "tsup",
       "tsdown",
       "pkg-utils",

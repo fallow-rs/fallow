@@ -142,6 +142,15 @@ define_plugin!(
             &[&["plugins"]],
         ));
 
+        super::module_federation::apply_bundler_plugin_options(
+            &mut result,
+            source,
+            config_path,
+            root,
+            None,
+            "vite",
+        );
+
         for (find, replacement) in
             config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
         {
@@ -807,5 +816,36 @@ mod tests {
                 .contains(&"lightningcss".to_string()),
             "only the two selector keys make the package load-bearing"
         );
+    }
+
+    #[test]
+    fn resolve_config_reads_inline_module_federation_options() {
+        let source = r#"
+            import { federation } from "@module-federation/vite";
+
+            export default defineConfig({
+                plugins: [
+                    federation({
+                        name: "host",
+                        exposes: { "./Button": "./src/Button.tsx" },
+                        remotes: { checkout: "checkout@https://example.test/remoteEntry.js" },
+                    }),
+                ],
+            });
+        "#;
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|rule| rule.pattern == "src/Button.tsx")
+        );
+        assert_eq!(result.provided_dependencies.len(), 1);
+        assert!(result.provided_dependencies[0].covers_specifier("checkout/Button"));
     }
 }
