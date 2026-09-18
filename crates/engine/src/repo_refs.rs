@@ -1190,7 +1190,31 @@ pub fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> Pat
     }
 }
 
-/// Auto-detect the base ref used by changed-code audit.
+/// Auto-detect the base ref used by changed-code audit when no explicit base
+/// or environment override is set.
+///
+/// The base is the `git merge-base` (fork point) against the branch's upstream
+/// or the remote default, mirroring the `fallow hooks install --target git`
+/// pre-commit hook (issue #242). Resolving to the merge-base SHA, rather than a
+/// bare branch name, fixes the long-standing bug where the default branch was
+/// discovered via `origin/HEAD` but returned as the bare name `main` (issue
+/// #1168): git resolves a bare `main` to the LOCAL `refs/heads/main`, which is
+/// stale on worktree checkouts cut from `origin/main`, so the audit diffed
+/// every branch against an ancient base and false-failed the gate.
+///
+/// Resolution order:
+/// 1. `@{upstream}` merge-base, so a branch forked off a non-default
+///    integration branch compares against where it actually forked.
+/// 2. Remote default (`origin/HEAD` -> `origin/main` -> `origin/master`)
+///    merge-base. The remote-tracking ref refreshes on fetch, unlike a
+///    long-stale local branch; the merge-base is also immune to an unfetched
+///    `origin/main` in the false-fail direction.
+/// 3. Local `main` / `master` when there is no `origin` remote, preserving the
+///    historical behavior for air-gapped and local-only repositories.
+///
+/// A branch with no common ancestor with its base (a shallow clone, unrelated
+/// history) falls back to the remote-tracking tip rather than failing the
+/// detection outright.
 #[must_use]
 pub fn auto_detect_audit_base_ref(root: &Path) -> Option<ResolvedAuditBase> {
     if let Some(upstream) = git_upstream_ref(root) {
@@ -1419,6 +1443,22 @@ mod tests {
     fn commit_all(root: &Path, message: &str) {
         git(root, &["add", "."]);
         git(root, &["commit", "-m", message]);
+    }
+
+    /// A repository on `main` with one seed commit and no remote.
+    fn seeded_repo(parent: &Path) -> PathBuf {
+        let root = parent.join("repo");
+        init_repo(&root);
+        fs::write(root.join("README.md"), "seed\n").expect("write seed");
+        commit_all(&root, "initial");
+        root
+    }
+
+    /// Add a tracked file, commit it, and return the new HEAD SHA.
+    fn commit_file(repo: &Path, name: &str, body: &str) -> String {
+        fs::write(repo.join(name), body).expect("write file");
+        commit_all(repo, name);
+        git(repo, &["rev-parse", "HEAD"])
     }
 
     #[cfg(unix)]
@@ -1685,6 +1725,165 @@ mod tests {
             Some("merge-base with origin/main")
         );
         assert!(crate::validate::validate_git_ref(&detected.git_ref).is_ok());
+    }
+
+    #[test]
+    fn auto_detect_audit_base_ref_resolves_origin_default_to_merge_base() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = seeded_repo(temp.path());
+        let head = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["branch", "trunk"]);
+        git(&repo, &["update-ref", "refs/remotes/origin/trunk", "trunk"]);
+        git(
+            &repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/trunk",
+            ],
+        );
+
+        let detected = auto_detect_audit_base_ref(&repo).expect("base is detected");
+
+        // trunk == HEAD, so the merge-base is HEAD's own SHA. The bare branch
+        // name `trunk` is never returned: it would resolve to a local ref.
+        assert_eq!(detected.git_ref, head);
+        assert_eq!(
+            detected.description.as_deref(),
+            Some("merge-base with origin/trunk")
+        );
+    }
+
+    /// Regression for issue #1168: a worktree checkout whose local `main` is
+    /// stale relative to a fresh `origin/main`. The base must be the fork point
+    /// (merge-base with `origin/main`), NOT the stale local-`main` commit that
+    /// the old bare-name resolution diffed against.
+    #[test]
+    fn auto_detect_audit_base_ref_ignores_stale_local_main() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = seeded_repo(temp.path());
+        let stale = git(&repo, &["rev-parse", "HEAD"]);
+
+        git(&repo, &["update-ref", "refs/remotes/origin/main", "main"]);
+        git(
+            &repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        let fork_point = commit_file(&repo, "teammate.txt", "merged work\n");
+        git(&repo, &["update-ref", "refs/remotes/origin/main", "main"]);
+
+        // Cut a feature branch from the fresh origin tip using the raw SHA (no
+        // upstream tracking), then leave local `main` behind at the stale commit.
+        git(&repo, &["checkout", "-b", "feature", &fork_point]);
+        commit_file(&repo, "feature.txt", "my change\n");
+        git(&repo, &["branch", "-f", "main", &stale]);
+
+        let detected = auto_detect_audit_base_ref(&repo).expect("base is detected");
+
+        assert_eq!(
+            detected.git_ref, fork_point,
+            "base must be the fork point (origin/main), not stale local main"
+        );
+        assert_eq!(
+            detected.description.as_deref(),
+            Some("merge-base with origin/main")
+        );
+    }
+
+    #[test]
+    fn auto_detect_audit_base_ref_prefers_configured_upstream() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = seeded_repo(temp.path());
+        let fork_point = git(&repo, &["rev-parse", "HEAD"]);
+        // Configure `origin` so refs/remotes/origin/* are recognized as
+        // tracking refs and `--set-upstream-to` is accepted.
+        git(&repo, &["remote", "add", "origin", &repo.to_string_lossy()]);
+        git(&repo, &["update-ref", "refs/remotes/origin/main", "main"]);
+        git(&repo, &["checkout", "-b", "feature"]);
+        git(
+            &repo,
+            &["branch", "--set-upstream-to=origin/main", "feature"],
+        );
+        commit_file(&repo, "feature.txt", "my change\n");
+
+        let detected = auto_detect_audit_base_ref(&repo).expect("base is detected");
+
+        assert_eq!(detected.git_ref, fork_point);
+        assert_eq!(
+            detected.description.as_deref(),
+            Some("merge-base with origin/main")
+        );
+    }
+
+    #[test]
+    fn auto_detect_audit_base_ref_falls_back_to_local_main_without_remote() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = seeded_repo(temp.path());
+
+        let detected = auto_detect_audit_base_ref(&repo).expect("base is detected");
+
+        assert_eq!(detected.git_ref, "main");
+        assert_eq!(detected.description.as_deref(), Some("local main"));
+    }
+
+    #[test]
+    fn auto_detect_audit_base_ref_falls_back_to_local_master_without_remote() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        fs::create_dir_all(&repo).expect("create repo");
+        git(&repo, &["init", "-b", "master"]);
+        git(&repo, &["config", "user.name", "Test User"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        fs::write(repo.join("README.md"), "seed\n").expect("write seed");
+        commit_all(&repo, "initial");
+
+        let detected = auto_detect_audit_base_ref(&repo).expect("base is detected");
+
+        assert_eq!(detected.git_ref, "master");
+        assert_eq!(detected.description.as_deref(), Some("local master"));
+    }
+
+    #[test]
+    fn auto_detect_audit_base_ref_returns_none_outside_git_repo() {
+        let temp = tempfile::tempdir().expect("temp dir");
+
+        assert!(auto_detect_audit_base_ref(temp.path()).is_none());
+    }
+
+    /// When the remote default shares no history with HEAD (the merge-base
+    /// failure a shallow clone also hits), auto-detect falls back to the
+    /// remote-tracking ref tip rather than failing the detection. That tip is
+    /// the only branch that returns a ref git composed rather than printed, so
+    /// it also pins the trimming for issue #2699.
+    #[test]
+    fn auto_detect_audit_base_ref_falls_back_to_remote_tip_without_common_ancestor() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = seeded_repo(temp.path());
+        git(&repo, &["checkout", "--orphan", "unrelated"]);
+        let unrelated = commit_file(&repo, "unrelated.txt", "no shared history\n");
+        git(
+            &repo,
+            &["update-ref", "refs/remotes/origin/main", &unrelated],
+        );
+        git(
+            &repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        git(&repo, &["checkout", "main"]);
+
+        let detected = auto_detect_audit_base_ref(&repo).expect("base is detected");
+
+        assert_eq!(detected.git_ref, "origin/main");
+        assert_eq!(detected.description.as_deref(), Some("origin/main (tip)"));
     }
 
     /// The repository top level is compared as a path prefix, so a line ending
