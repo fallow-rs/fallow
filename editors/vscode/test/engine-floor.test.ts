@@ -12,6 +12,13 @@
  *    `@types/vscode` prevents the upstream-driven drift, but a manual
  *    bump would slip through. This sentinel forces the change to also
  *    touch this test, prompting a deliberate decision.
+ *
+ * 3. `mocha` crossing into 12.x. The integration suites run in-process
+ *    inside the extension host, and the 1.96 host ships Node 20.18.1.
+ *    Mocha 12 is ESM-only and its CommonJS implementation file requires
+ *    ESM siblings, so it needs Node ^20.19 || >=22.12 and fails to load
+ *    there with ERR_REQUIRE_ESM. Without this guard the mismatch only
+ *    surfaces in the slow extension-host job.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -57,5 +64,13 @@ describe("package.json engine floor invariant", () => {
       "engines.vscode bumped above ^1.96.0; deliberate bump must also update this sentinel test",
     ).toBe("^1.96.0");
     expect(pkg.devDependencies["@types/vscode"]).toBe("1.96.0");
+  });
+
+  it("holds mocha on 11.x while the extension host runs Node 20.18.1", () => {
+    const [major] = parse(pkg.devDependencies["mocha"] ?? "0.0.0");
+    expect(
+      major,
+      "mocha 12 needs Node ^20.19 || >=22.12 for its internal require of ESM files; the VS Code 1.96 extension host ships Node 20.18.1, so the integration suites cannot load it in-process",
+    ).toBe(11);
   });
 });
