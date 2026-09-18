@@ -27,11 +27,17 @@ fn unused_file_paths(results: &fallow_types::results::AnalysisResults) -> Vec<St
         .collect()
 }
 
-fn unused_export_names(results: &fallow_types::results::AnalysisResults) -> Vec<&str> {
+fn unused_exports(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
     results
         .unused_exports
         .iter()
-        .map(|finding| finding.export.export_name.as_str())
+        .map(|finding| {
+            format!(
+                "{}:{}",
+                finding.export.path.to_string_lossy().replace('\\', "/"),
+                finding.export.export_name
+            )
+        })
         .collect()
 }
 
@@ -86,22 +92,23 @@ fn exposed_targets_are_entry_points_and_unexposed_files_stay_unused() {
 #[test]
 fn exposed_entry_exports_follow_the_entry_export_setting() {
     let root = fixture_path("module-federation-producer");
+    let exposed_default = "src/components/Button.tsx:default";
 
     let default_results =
         fallow_core::analyze(&create_config(root.clone())).expect("analysis should succeed");
+    let reported = unused_exports(&default_results);
     assert!(
-        !unused_export_names(&default_results).contains(&"default"),
-        "an exposed default export is not reported at default settings, got {:?}",
-        unused_export_names(&default_results)
+        !contains_suffix(&reported, exposed_default),
+        "the exposed default export is not reported at default settings, got {reported:?}"
     );
 
     let mut config = create_config(root);
     config.include_entry_exports = true;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let reported = unused_exports(&results);
     assert!(
-        unused_export_names(&results).contains(&"default"),
-        "with include_entry_exports the exposed default export is reportable, got {:?}",
-        unused_export_names(&results)
+        contains_suffix(&reported, exposed_default),
+        "with include_entry_exports the exposed default export is reportable, got {reported:?}"
     );
 }
 
