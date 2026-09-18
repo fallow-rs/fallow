@@ -48,17 +48,10 @@ const FEDERATION_CALLEES: &[&str] = &[
     "federation",
 ];
 
-/// Extensions that make an `exposes` target name a file rather than a module
-/// request or an extensionless path.
-const SOURCE_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "json", "vue", "svelte", "astro", "css",
-    "scss", "sass", "less", "styl",
-];
-
 /// Brace list appended to an extensionless `exposes` target. Entry patterns are
 /// plain globs with no extension expansion, so a bare `src/Button` would match
 /// no file.
-const EXPOSE_EXTENSIONS: &str = "{ts,tsx,mts,cts,js,jsx,mjs,cjs,vue,svelte}";
+const EXPOSE_EXTENSIONS: &str = "{ts,tsx,mts,cts,gts,js,jsx,mjs,cjs,gjs,vue,svelte,astro,mdx}";
 
 /// Glob suffix that covers every file under the directory that declared the
 /// remote.
@@ -360,11 +353,16 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
     result.push_entry_pattern(format!("{escaped}/index.{EXPOSE_EXTENSIONS}"));
 }
 
+/// Whether an `exposes` target names a file rather than a module request or an
+/// extensionless path. Discovery's own extension set decides, so a target
+/// naming a file type discovery does not analyze stays a module request.
 fn has_source_extension(target: &str) -> bool {
     Path::new(target)
         .extension()
         .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| SOURCE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
+        .is_some_and(|ext| {
+            crate::discover::SOURCE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
+        })
 }
 
 fn read(
@@ -750,6 +748,12 @@ mod tests {
             patterns.iter().any(|pattern| covers(pattern, "src/*.ts")),
             "a file literally named `*` is still covered, got {patterns:?}"
         );
+    }
+
+    #[test]
+    fn a_target_naming_a_discovered_extension_is_used_as_written() {
+        let result = resolve(r"export default { exposes: { './Button': './src/Button.gts' } };");
+        assert_eq!(entry_patterns(&result), vec!["src/Button.gts"]);
     }
 
     #[test]
