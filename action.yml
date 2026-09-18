@@ -359,7 +359,7 @@ outputs:
     description: 'true when the run behind these numbers analyzed only part of the project, so the baseline could not be judged. Read this before dividing baseline-matched by baseline-entries.'
     value: ${{ steps.analyze.outputs.baseline_change_scoped }}
   baseline-scope-reasons:
-    description: 'Comma-separated names of the channels that narrowed the run, in the order fallow publishes them (for example "changed-since, production"). Empty when the run was not narrowed or the fallow version predates the member. Read it to tell narrowing you can remove from narrowing you chose.'
+    description: 'Names of the channels that narrowed the run, in the order fallow publishes them, separated by a comma and a space (for example "changed-since, production"). Empty when the run was not narrowed or the fallow version predates the member. Read it to tell narrowing you can remove from narrowing you chose.'
     value: ${{ steps.analyze.outputs.baseline_scope_reasons }}
   baseline-unrecognised:
     description: 'true when the loaded file carries no key the running command writes into its own baselines, so it is a baseline another command saved or an object with nothing of that command in it. Empty when no baseline was loaded, when the baseline belongs to the command that read it, or when the fallow version predates the member. A baseline saved on a project with nothing to record is empty and is NOT reported here.'
