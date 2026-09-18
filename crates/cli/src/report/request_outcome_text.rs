@@ -139,6 +139,66 @@ fn join(requests: &[&RequestLine]) -> String {
         .join(", ")
 }
 
+/// [`summary_line`] for a body `fallow report --from` is about to write, where
+/// the diff filter was resolved again in THIS process.
+///
+/// `changed-since` and `sarif-file` belong to the run that produced the
+/// envelope: a re-render scopes no analysis and writes no SARIF file, so the
+/// saved record is the only truth about them and reading it from the envelope
+/// is right. `diff-filter` is not like that. Both shipped integrations download
+/// the pull-request diff in their comment and review steps and then re-render
+/// with `report --from`, and the filter that decides which findings become
+/// inline comments is resolved in that second process, from that diff
+/// (`filter_issues_from_env`). When it stands down, the body is written at full
+/// scope while the saved entry describes a different diff, resolved by a
+/// different process, and under `--quiet` (which both integrations pass) the
+/// stand-down reaches no other channel at all.
+///
+/// So a stand-down in THIS process is overlaid on the saved object, and the
+/// body states it rather than claiming a scope the render never achieved
+/// (issue #2688).
+///
+/// Only a stand-down. A filter that applied here says nothing the body does not
+/// already say ("N inline comments on the changed lines"), while the saved entry
+/// may still record that the findings themselves were computed at full scope,
+/// which is the more useful of the two facts and the one the reader would lose.
+/// The rule is therefore "a stand-down anywhere in the chain is reported, and
+/// nothing new is claimed": a re-render never turns a producing run's
+/// stand-down into a scoped report, and a healthy render adds no sentence that
+/// was not there before.
+pub fn summary_line_for_saved_render(envelope: &Value) -> Option<String> {
+    summary_line_with_live_diff_filter(
+        envelope,
+        crate::report::ci::diff_filter::shared_diff_request_outcome(),
+    )
+}
+
+fn summary_line_with_live_diff_filter(
+    envelope: &Value,
+    live: Option<&fallow_output::RequestOutcome>,
+) -> Option<String> {
+    let stood_down = live
+        .filter(|outcome| outcome.status == fallow_output::RequestStatus::NotApplied)
+        .and_then(|outcome| serde_json::to_value(outcome).ok());
+    let Some(live) = stood_down else {
+        return summary_line(envelope);
+    };
+    // Collected through a sorted map so the merged object keeps the wire order
+    // a live render produces, which is what the live/saved parity suite pins.
+    let mut merged: std::collections::BTreeMap<String, Value> = envelope
+        .get("request_outcomes")
+        .and_then(Value::as_object)
+        .map(|map| {
+            map.iter()
+                .map(|(name, entry)| (name.clone(), entry.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    merged.insert("diff-filter".to_owned(), live);
+    let merged: serde_json::Map<String, Value> = merged.into_iter().collect();
+    summary_line(&serde_json::json!({ "request_outcomes": Value::Object(merged) }))
+}
+
 /// [`summary_line`] for a live run, which holds the requests typed rather than
 /// as a parsed envelope.
 ///
@@ -317,6 +377,120 @@ mod tests {
         assert_eq!(
             summary_line(&value).expect("a request was received"),
             "Request outcomes: not applied some-future-request."
+        );
+    }
+
+    /// A re-render that resolved its own diff states that diff's fate, not the
+    /// producing run's: the body it is about to write was filtered by this
+    /// process, and under `--quiet` nothing else says so.
+    #[test]
+    fn a_re_render_states_the_diff_filter_it_resolved_itself() {
+        let saved = envelope(&serde_json::json!({
+            "diff-filter": {
+                "status": "applied",
+                "affects": "scope",
+                "requested": "--diff-stdin"
+            }
+        }));
+        let live = fallow_output::RequestOutcome::not_applied(
+            fallow_output::RequestName::DiffFilter,
+            "$FALLOW_DIFF_FILE pr.diff",
+            "oversize",
+            "...",
+        );
+        assert_eq!(
+            summary_line_with_live_diff_filter(&saved, Some(&live))
+                .expect("a request was received"),
+            "Request outcomes: not applied diff-filter (oversize). \
+             Anything not applied means this report is wider than requested."
+        );
+    }
+
+    /// The other channels belong to the producing run, and a re-render that
+    /// stood its own filter down must not drop them or disturb the wire order.
+    #[test]
+    fn the_overlay_keeps_the_producing_run_channels_and_the_wire_order() {
+        let saved = envelope(&serde_json::json!({
+            "changed-since": {
+                "status": "applied",
+                "affects": "scope",
+                "requested": "origin/main"
+            },
+            "sarif-file": {
+                "status": "not-applied",
+                "affects": "artifact",
+                "requested": "out.sarif",
+                "reason": "write-failed"
+            }
+        }));
+        let live = fallow_output::RequestOutcome::not_applied(
+            fallow_output::RequestName::DiffFilter,
+            "$FALLOW_DIFF_FILE pr.diff",
+            "foreign-namespace",
+            "...",
+        );
+        let line = summary_line_with_live_diff_filter(&saved, Some(&live))
+            .expect("requests were received");
+        assert_eq!(
+            line,
+            "Request outcomes: not applied diff-filter (foreign-namespace), \
+             sarif-file (write-failed); applied changed-since. \
+             Anything not applied means this report is wider than requested. \
+             A requested output file was not written, so anything reading it has nothing \
+             to read; the report itself is unaffected."
+        );
+    }
+
+    /// A filter that applied in the re-render claims nothing: the body already
+    /// states its own scope, and the saved record still carries the scope the
+    /// FINDINGS were computed at, which is the fact a reader would lose.
+    #[test]
+    fn a_filter_that_applied_here_does_not_overwrite_the_saved_stand_down() {
+        let saved = envelope(&serde_json::json!({
+            "diff-filter": {
+                "status": "not-applied",
+                "affects": "scope",
+                "requested": "--diff-stdin",
+                "reason": "not-utf8"
+            }
+        }));
+        let live = fallow_output::RequestOutcome::applied(
+            fallow_output::RequestName::DiffFilter,
+            "$FALLOW_DIFF_FILE pr.diff",
+        );
+        assert_eq!(
+            summary_line_with_live_diff_filter(&saved, Some(&live)),
+            summary_line(&saved)
+        );
+    }
+
+    /// And it adds no clause to a body that had none, so a healthy render is
+    /// byte-identical to what it produced before.
+    #[test]
+    fn a_filter_that_applied_here_adds_no_clause_of_its_own() {
+        let bare = serde_json::json!({ "kind": "dead-code" });
+        let live = fallow_output::RequestOutcome::applied(
+            fallow_output::RequestName::DiffFilter,
+            "$FALLOW_DIFF_FILE pr.diff",
+        );
+        assert!(summary_line_with_live_diff_filter(&bare, Some(&live)).is_none());
+    }
+
+    /// A process that resolved no diff overlays nothing, so a re-render of a
+    /// saved envelope stays byte-identical to the live render of the same run.
+    #[test]
+    fn no_live_diff_leaves_the_saved_object_alone() {
+        let saved = envelope(&serde_json::json!({
+            "diff-filter": {
+                "status": "not-applied",
+                "affects": "scope",
+                "requested": "--diff-stdin",
+                "reason": "not-utf8"
+            }
+        }));
+        assert_eq!(
+            summary_line_with_live_diff_filter(&saved, None),
+            summary_line(&saved)
         );
     }
 

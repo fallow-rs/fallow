@@ -246,6 +246,10 @@ fn render_saved_ci_target(
 /// type-aware message keeps its place and the later lines join it rather than
 /// replacing it. The clause order matches `report::ci_status_note`, which is
 /// what `the_live_and_saved_notes_agree` pins.
+///
+/// The requests are read through `summary_line_for_saved_render`, because the
+/// diff filter governing THIS body was resolved by this process rather than by
+/// the run that saved the envelope.
 fn saved_status_message(
     envelope: &serde_json::Value,
     existing: Option<&'static str>,
@@ -254,7 +258,7 @@ fn saved_status_message(
     let joined = [
         existing.map(str::to_owned),
         crate::report::gate_outcome_text::summary_line(envelope),
-        crate::report::request_outcome_text::summary_line(envelope),
+        crate::report::request_outcome_text::summary_line_for_saved_render(envelope),
         grouping_dropped.map(crate::report::grouping_note::dropped_grouping_clause),
     ]
     .into_iter()

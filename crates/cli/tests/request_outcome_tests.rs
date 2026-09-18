@@ -526,6 +526,75 @@ fn the_rendered_pr_comment_body_names_the_unapplied_request() {
     );
 }
 
+/// The comment and review steps of both shipped integrations download the diff
+/// themselves and re-render a saved envelope with `report --from --quiet`, so
+/// the filter that decides which findings become inline comments is resolved in
+/// THAT process. A stand-down there reaches no other channel, and the body it
+/// writes would otherwise say the comments sit on the changed lines.
+#[test]
+fn a_re_render_says_its_own_diff_filter_stood_down() {
+    let project = project();
+    let root_path = project.path();
+    let root = root_arg(&project);
+    let envelope = root_path.join("envelope.json");
+    let saved = run(&["dead-code", "--root", root, "--format", "json", "--quiet"]);
+    std::fs::write(&envelope, &saved.stdout).expect("saved envelope");
+    assert!(
+        parse_json(&saved).get("request_outcomes").is_none(),
+        "the producing run was asked for nothing: {}",
+        saved.stdout
+    );
+    let envelope = envelope.to_str().expect("utf8");
+    let foreign = foreign_diff(root_path);
+
+    let stood_down = run_fallow_raw_with_env(
+        &[
+            "report",
+            "--from",
+            envelope,
+            "--root",
+            root,
+            "--quiet",
+            "--format",
+            "review-github",
+        ],
+        &[("FALLOW_DIFF_FILE", foreign.as_str())],
+    );
+    assert!(
+        stood_down
+            .stdout
+            .contains("not applied diff-filter (foreign-namespace)"),
+        "the rendered body must say the filter it resolved stood down: {}",
+        stood_down.stdout
+    );
+    assert_eq!(
+        stood_down.stderr, "",
+        "and it must say it on the channel --quiet keeps"
+    );
+
+    // The healthy render says nothing new, so a body produced before this
+    // existed is unchanged.
+    let placeable = placeable_diff(root_path);
+    let applied = run_fallow_raw_with_env(
+        &[
+            "report",
+            "--from",
+            envelope,
+            "--root",
+            root,
+            "--quiet",
+            "--format",
+            "review-github",
+        ],
+        &[("FALLOW_DIFF_FILE", placeable.as_str())],
+    );
+    assert!(
+        !applied.stdout.contains("Request outcomes"),
+        "a filter that applied claims nothing of its own: {}",
+        applied.stdout
+    );
+}
+
 /// A SARIF document that was written is published as honoured, so a consumer
 /// can tell "uploaded nothing because nothing was asked" from "uploaded
 /// nothing because the write failed" (issue #2690).
