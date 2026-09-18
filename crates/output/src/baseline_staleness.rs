@@ -128,6 +128,10 @@ impl ScopeReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct BaselineScopeReasons(u16);
 
+/// The bitset holds one bit per reason, so a seventeenth variant would alias
+/// the first in release builds.
+const _: () = assert!(ScopeReason::ALL.len() <= u16::BITS as usize);
+
 impl BaselineScopeReasons {
     /// A run that was not narrowed.
     #[must_use]

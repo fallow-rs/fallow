@@ -369,7 +369,7 @@ fi
 # inputs. It is still reachable through `args`, where it buys a green run plus a
 # note this script replays as `::debug::`. Grep for it the way the
 # `--report-only` check above does.
-if [ "$INPUT_COMMAND" = "audit" ]   && printf '%s' "${INPUT_ARGS:-}" | grep -q -- '--fail-on-stale-baseline'; then
+if [ "$INPUT_COMMAND" = "audit" ] && printf '%s' "${INPUT_ARGS:-}" | grep -q -- '--fail-on-stale-baseline'; then
   echo "::error::--fail-on-stale-baseline in args: cannot apply to command: audit, which analyzes only the files that changed against its base and cannot judge a whole-project baseline. Run the gate on dead-code, dupes or health."
   exit 2
 fi
