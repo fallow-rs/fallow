@@ -1256,7 +1256,7 @@ variables:
       ' fallow-results.json 2>/dev/null || true)
       if [ -n "$DEGRADED_SUMMARY" ]; then
         ANALYSIS_DEGRADED=true
-        echo "WARNING: Fallow analyzed a degraded file set: ${DEGRADED_SUMMARY}. Findings were computed over less than the whole project."
+        echo "WARNING: Fallow ran with degraded inputs: ${DEGRADED_SUMMARY}. Some findings or scores were computed over less than the whole project, or from an input that did not load."
       fi
       # ── Requests the run could not apply ─────────────────────────────
       #

@@ -1318,7 +1318,7 @@ DEGRADED_SUMMARY=$(jq -r '
 ' "$RESULTS_FILE" 2>/dev/null || true)
 if [ -n "$DEGRADED_SUMMARY" ]; then
   ANALYSIS_DEGRADED=true
-  echo "::warning::Fallow analyzed a degraded file set: ${DEGRADED_SUMMARY}. Findings were computed over less than the whole project."
+  echo "::warning::Fallow ran with degraded inputs: ${DEGRADED_SUMMARY}. Some findings or scores were computed over less than the whole project, or from an input that did not load."
 fi
 # --- Requests the run could not apply (issues #2687, #2688) ---
 #
@@ -1368,7 +1368,10 @@ if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && 
   if [ "$HAS_NATIVE_REPORT" = "true" ]; then
     REPORT_ARGS=(report --from "$RESULTS_FILE" --root "$INPUT_ROOT" --quiet --format sarif)
     [ -n "${INPUT_CONFIG:-}" ] && REPORT_ARGS+=(--config "$INPUT_CONFIG")
-    fallow "${REPORT_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null || true
+    # Appended rather than discarded: the re-render is the last chance to
+    # produce the artefact, so the reason it failed is the only useful thing
+    # left. The stderr replay below picks it up (issue #2690).
+    fallow "${REPORT_ARGS[@]}" > "$SARIF_FILE" 2>> "$STDERR_FILE" || true
   fi
   if ! valid_sarif "$SARIF_FILE"; then
     # Compatibility path for pinned binaries that either lack `report` or
@@ -1391,10 +1394,18 @@ if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && 
         SARIF_ARGS+=("sarif")
       fi
     done
-    fallow "${SARIF_ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null || true
+    fallow "${SARIF_ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>> "$STDERR_FILE" || true
   fi
   if ! valid_sarif "$SARIF_FILE"; then
-    echo "::warning::SARIF generation failed"
+    # A missing artefact keeps the step green and uploads nothing, so code
+    # scanning silently stops receiving alerts. Driven by file absence rather
+    # than by the envelope, so it also fires for a pinned older binary that
+    # publishes no `request_outcomes` (issue #2690).
+    SARIF_FILE_REASON=$(jq -r '
+      (.request_outcomes // .dead_code.request_outcomes // {})["sarif-file"]
+      | if . == null or .status == "applied" then empty else (.message // .reason) end
+    ' "$RESULTS_FILE" 2>/dev/null || true)
+    echo "::warning::Fallow produced no SARIF document, so this run uploads nothing and code scanning keeps the alerts from the previous upload.${SARIF_FILE_REASON:+ ${SARIF_FILE_REASON}} Check the earlier log lines for the cause, or drop format: sarif if code scanning is not wanted."
     rm -f "$SARIF_FILE"
   fi
 fi

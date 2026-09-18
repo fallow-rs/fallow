@@ -2235,6 +2235,21 @@ OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   FALLOW_FAIL_ON_ISSUES=false) || true
 assert_contains "$OUT" "skipped-large-file (2)" "gitlab degraded: kinds and counts are aggregated"
 assert_not_contains "$OUT" "boundaries-not-configured" "gitlab degraded: unconfigured-check kinds are not reported"
+assert_contains "$OUT" "Fallow ran with degraded inputs" \
+  "gitlab degraded: the sentence covers a degraded input as well as a narrower file set"
+
+# #2689: the health pipeline's own degraded inputs reach the same aggregated
+# line through the same selector, with no change to this template's jq.
+HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$HEALTH_DEGRADED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=health \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "hotspots-skipped (1)" \
+  "gitlab degraded: the health kinds are reported without a template change"
+assert_not_contains "$OUT" "coverage-auto-detected" \
+  "gitlab degraded: auto-detected coverage is provenance and not a degraded run"
 
 # #2687, #2688: this job runs fallow with --quiet and a machine format, so the
 # envelope is the only channel that reaches the pipeline.

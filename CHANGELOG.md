@@ -50,6 +50,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every run produced today
   (Closes [#2687](https://github.com/fallow-rs/fallow/issues/2687), [#2688](https://github.com/fallow-rs/fallow/issues/2688)).
 
+- **A health score computed from inputs that did not load now says so.** Before:
+  scoring that failed, a project with no git repository, a shallow clone, an
+  unpinned run clock, a CODEOWNERS or bot pattern that would not parse and an
+  unreadable trend snapshot each printed a line and then contributed zeros, and
+  the envelope presented those zeros exactly as it presents a genuinely clean
+  measurement. After: each one records a `workspace_diagnostics[]` entry with
+  `degrades_analysis: true`, so "measured zero" and "measured nothing" are
+  finally distinguishable from a machine-read report.
+
+  The new kinds are `file-scores-unavailable`, `hotspots-skipped`,
+  `shallow-clone`, `unpinned-clock`, `ownership-unavailable` (with a `cause` of
+  `invalid-bot-pattern` or `codeowners-parse-failed`) and
+  `trend-snapshot-unreadable`. A seventh, `coverage-auto-detected`, is
+  provenance rather than a degradation and deliberately does not set
+  `degrades_analysis`: it names the coverage file that fed the CRAP scores, so
+  a score computed against a file nobody chose can be reproduced. Its note is
+  now printed on any non-quiet run rather than only when `CI` is set, which
+  printed it exactly where stderr is discarded and hid it from the person who
+  could act on it. Every other stderr line is unchanged, and the entries are
+  recorded whether or not `--quiet` was passed.
+
+  No consumer change is required: the GitHub Action, the GitLab template and
+  the MCP tools already select on `degrades_analysis` rather than on a list of
+  kinds, so they report these the day you upgrade. Their aggregated warning now
+  says "degraded inputs" rather than "a degraded file set", because a health
+  input that did not load is not a narrower file list. No `schema_version`
+  moves: the kind set is open
+  (Closes [#2689](https://github.com/fallow-rs/fallow/issues/2689)).
+
+- **A `--sarif-file` that was never written is now on the wire.** Before: an
+  unwritable directory, a failed create, a serialization error or a failed
+  flush each printed a warning, left the primary report and the exit code
+  untouched, and put nothing in the envelope, so a repository configured for
+  code scanning could quietly stop receiving alerts behind a green job. After:
+  the run publishes a `sarif-file` entry in `request_outcomes` with
+  `directory-create-failed`, `write-failed` or `serialize-failed` and the same
+  sentence it printed, and `fallow report --from` and the MCP tools can read
+  it. A written file is published as `applied` with its path.
+
+  The GitHub Action's warning for a SARIF artefact it could not produce now
+  says what that costs (nothing is uploaded, so code scanning keeps the alerts
+  from the previous upload) and repeats the reason the envelope recorded. It is
+  driven by the file being absent rather than by the envelope, so it still
+  fires for a pinned older binary, and the two SARIF re-render fallbacks no
+  longer send their own stderr to `/dev/null`. The exit code is unchanged
+  everywhere: the report on stdout is complete either way
+  (Closes [#2690](https://github.com/fallow-rs/fallow/issues/2690)).
+
 - **`--group-by` now says so on every format that drops it.** Grouping is
   carried by `json`, `human`, `sarif` and `codeclimate`. Before: `compact`,
   `markdown` and `badge` printed a one-line note, and the four pull-request

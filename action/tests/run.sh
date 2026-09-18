@@ -1148,7 +1148,7 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   MOCK_CALL_LOG="$ANALYZE_TMP/sarif-calls" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_not_contains "$OUT" "SARIF generation failed" "analyze: valid SARIF + exit 1 does not warn (issue #813)"
+assert_not_contains "$OUT" "produced no SARIF document" "analyze: valid SARIF + exit 1 does not warn (issue #813)"
 [ -s "$SARIF_OK_WORK/fallow-results.sarif" ] && pass "analyze: valid SARIF + exit 1 still writes the file" || fail "analyze: valid SARIF + exit 1 still writes the file" "missing sarif file"
 HEALTH_ANALYSIS_CALLS=$(grep -c '^health ' "$ANALYZE_TMP/sarif-calls" || true)
 [ "$HEALTH_ANALYSIS_CALLS" -eq 1 ] && pass "analyze: SARIF reuses the saved JSON analysis" || fail "analyze: SARIF reuses the saved JSON analysis" "expected one health analysis, got $HEALTH_ANALYSIS_CALLS"
@@ -1160,8 +1160,15 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" MOCK_SARIF_MODE="empty" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_contains "$OUT" "SARIF generation failed" "analyze: empty/invalid SARIF still warns (issue #813)"
+assert_contains "$OUT" "produced no SARIF document" "analyze: empty/invalid SARIF still warns (issue #813)"
 [ ! -e "$SARIF_BAD_WORK/fallow-results.sarif" ] && pass "analyze: empty SARIF is not published" || fail "analyze: empty SARIF is not published" "empty SARIF file remains"
+# #2690: the step stays green and uploads nothing, so the warning has to say
+# what that costs rather than only that something failed.
+assert_contains "$OUT" "code scanning keeps the alerts from the previous upload" \
+  "analyze: the missing-SARIF warning names the consequence"
+assert_not_contains "$(cat "$ANALYZE_TMP/output" 2>/dev/null || true)" "sarif=fallow-results.sarif" \
+  "analyze: a missing SARIF artefact sets no upload output"
+
 
 SARIF_COMPAT_WORK="$ANALYZE_TMP/sarif-report-empty-direct-valid"
 mkdir -p "$SARIF_COMPAT_WORK"
@@ -1173,10 +1180,37 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   MOCK_CALL_LOG="$ANALYZE_TMP/sarif-compat-calls" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_not_contains "$OUT" "SARIF generation failed" "analyze: report-capable older binary falls back to direct SARIF"
+assert_not_contains "$OUT" "produced no SARIF document" "analyze: report-capable older binary falls back to direct SARIF"
 [ -s "$SARIF_COMPAT_WORK/fallow-results.sarif" ] && pass "analyze: compatibility fallback publishes valid SARIF" || fail "analyze: compatibility fallback publishes valid SARIF" "missing sarif file"
 HEALTH_COMPAT_CALLS=$(grep -c '^health ' "$ANALYZE_TMP/sarif-compat-calls" || true)
 [ "$HEALTH_COMPAT_CALLS" -eq 2 ] && pass "analyze: compatibility fallback reruns only when saved rendering fails" || fail "analyze: compatibility fallback reruns only when saved rendering fails" "expected two health calls, got $HEALTH_COMPAT_CALLS"
+# #2690: when the binary recorded why, the warning repeats its sentence rather
+# than making the reader turn on step debugging to find it.
+SARIF_REASON_WORK="$ANALYZE_TMP/sarif-reason"
+mkdir -p "$SARIF_REASON_WORK"
+cd "$SARIF_REASON_WORK" && rm -f "$ANALYZE_TMP/output"
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then echo "fallow 9.9.9"; exit 0; fi
+if [ "${1:-}" = "--help" ] || [ "${2:-}" = "--help" ]; then echo "--sarif-file"; echo "report"; exit 0; fi
+fmt=""
+prev=""
+for arg in "$@"; do
+  [ "$prev" = "--format" ] && fmt="$arg"
+  prev="$arg"
+done
+if [ "$fmt" = "sarif" ]; then exit 1; fi
+printf '%s\n' '{"summary":{"functions_above_threshold":0},"request_outcomes":{"sarif-file":{"status":"not-applied","requested":"fallow-results.sarif","reason":"write-failed","message":"failed to write SARIF file: Permission denied."}}}'
+exit 1
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+SARIF_REASON_EXIT=$?
+cd "$DIR"
+assert_contains "$OUT" "failed to write SARIF file: Permission denied." \
+  "analyze: the warning repeats the reason the envelope recorded"
 
 # --- Summary jq tests ---
 
@@ -3762,9 +3796,20 @@ DEGRADED='"workspace_diagnostics":[{"path":"a","kind":"skipped-large-file","mess
 run_gate_analyze "$(gate_envelope '' "$DEGRADED")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
 assert_contains "$GATE_STDOUT" "node-modules-missing (1), skipped-large-file (2)" \
   "degraded: kinds and counts are aggregated into one warning"
+assert_contains "$GATE_STDOUT" "Fallow ran with degraded inputs" \
+  "degraded: the sentence covers a degraded input as well as a narrower file set"
 assert_not_contains "$GATE_STDOUT" "boundaries-not-configured" \
   "degraded: the unconfigured-check kinds are not reported"
 assert_contains "$GATE_OUTPUTS" "analysis_degraded=true" "degraded: the output is set"
+
+# #2689: the health pipeline's own degraded inputs reach the same aggregated
+# warning through the same selector, with no change to this script's jq.
+HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":".","kind":"shallow-clone","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'
+run_gate_analyze "$(gate_envelope '' "$HEALTH_DEGRADED")" INPUT_COMMAND="health" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "hotspots-skipped (1), shallow-clone (1)" \
+  "degraded: the health kinds are reported without a script change"
+assert_not_contains "$GATE_STDOUT" "coverage-auto-detected" \
+  "degraded: auto-detected coverage is provenance and not a degraded run"
 
 # #2687, #2688: the fact the CLI can only report on the wire, because this step
 # always runs it with --quiet and a machine format.

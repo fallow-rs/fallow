@@ -481,3 +481,149 @@ fn the_rendered_pr_comment_body_names_the_unapplied_request() {
         out.stdout
     );
 }
+
+/// A SARIF document that was written is published as honoured, so a consumer
+/// can tell "uploaded nothing because nothing was asked" from "uploaded
+/// nothing because the write failed" (issue #2690).
+#[test]
+fn a_written_sarif_file_reports_applied_with_its_path() {
+    let project = project();
+    let root = root_arg(&project);
+    let sarif = project.path().join("out").join("results.sarif");
+    let sarif_arg = sarif.to_str().expect("utf8");
+    let envelope = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--sarif-file",
+        sarif_arg,
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    let entry = request(&envelope, "sarif-file");
+    assert_eq!(entry["status"], "applied");
+    assert_eq!(entry["requested"], sarif_arg);
+    assert!(
+        entry["reason"].is_null() && entry["message"].is_null(),
+        "an honoured request carries neither: {entry}"
+    );
+    assert!(sarif.is_file(), "the file the entry claims must exist");
+}
+
+/// The defect itself: the document on stdout is complete, the exit code is the
+/// one the findings produced, and until now nothing anywhere said the SARIF
+/// artefact a consumer uploads was never written.
+#[cfg(unix)]
+#[test]
+fn an_unwritable_sarif_target_reports_not_applied_without_moving_the_exit_code() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = project();
+    let root = root_arg(&project);
+    let locked = project.path().join("locked");
+    std::fs::create_dir_all(&locked).expect("locked dir");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
+        .expect("drop write permission");
+
+    let baseline = run(&["dead-code", "--root", root, "--format", "json", "--quiet"]);
+    for (target, reason) in [
+        (locked.join("results.sarif"), "write-failed"),
+        (
+            locked.join("nested").join("results.sarif"),
+            "directory-create-failed",
+        ),
+    ] {
+        let sarif_arg = target.to_str().expect("utf8").to_owned();
+        let out = run(&[
+            "dead-code",
+            "--root",
+            root,
+            "--sarif-file",
+            &sarif_arg,
+            "--format",
+            "json",
+            "--quiet",
+        ]);
+        assert_eq!(
+            baseline.code, out.code,
+            "a missing secondary artefact must not move the exit code"
+        );
+        let envelope = parse_json(&out);
+        let entry = request(&envelope, "sarif-file");
+        assert_eq!(entry["status"], "not-applied", "{entry}");
+        assert_eq!(entry["reason"], reason, "{entry}");
+        let message = entry["message"].as_str().expect("a remedy sentence");
+        assert!(
+            message.contains("code scanning") || message.contains("receives no findings"),
+            "the sentence must say what the consumer loses: {message}"
+        );
+        assert!(
+            !message.contains('\n'),
+            "the sentence travels into a CI annotation and must stay on one line: {message}"
+        );
+        assert!(
+            out.stderr.contains(message),
+            "the wire message and the printed line must be the same string: {}",
+            out.stderr
+        );
+    }
+
+    // Restore write permission so the temporary directory can be removed.
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
+        .expect("restore permission");
+}
+
+/// The failure line is printed whether or not `--quiet` was passed, which the
+/// issue asks to keep, and the record does not depend on it either.
+#[cfg(unix)]
+#[test]
+fn a_failed_sarif_write_is_reported_under_quiet_and_without_it() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = project();
+    let root = root_arg(&project);
+    let locked = project.path().join("locked");
+    std::fs::create_dir_all(&locked).expect("locked dir");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
+        .expect("drop write permission");
+    let sarif_arg = locked
+        .join("results.sarif")
+        .to_str()
+        .expect("utf8")
+        .to_owned();
+
+    let quiet = run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--sarif-file",
+        &sarif_arg,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let loud = run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--sarif-file",
+        &sarif_arg,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(
+        request(&parse_json(&quiet), "sarif-file"),
+        request(&parse_json(&loud), "sarif-file")
+    );
+    for out in [&quiet, &loud] {
+        assert!(
+            out.stderr.contains("failed to write SARIF file"),
+            "a failed write is printed either way: {}",
+            out.stderr
+        );
+    }
+
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
+        .expect("restore permission");
+}

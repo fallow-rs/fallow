@@ -11912,6 +11912,122 @@
             "excluded_file_count"
           ],
           "description": "The walk finished with no source file to analyze at all, so every\nfinding count this run reports is zero because nothing was measured\nrather than because the project is clean (issue #2686).\n\nDistinct from [`Self::ExcludedByDefaultIgnore`], which reports one\npattern's exclusions and is designed behavior on generated output. The\nalarm is not the exclusion, it is having nothing left afterwards, and\nthat condition also fires with no exclusion at all: a docs-only\nrepository, a workspace member with no TypeScript, or a path filter that\nmatched nothing. `excluded_file_count` names the built-in-ignore\ncontribution so the common cause is still attributable, and is `0` when\nno built-in pattern took part.\n\nThis is the kind a CI consumer reads to tell \"measured zero\" from\n\"measured nothing\": the human report has said so since 3.26.0, but only\nin human format and only under the built-in-ignore cause, so `--quiet\n--format json` saw a clean green either way."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "description": "Scoring error text."
+            },
+            "kind": {
+              "type": "string",
+              "const": "file-scores-unavailable"
+            }
+          },
+          "required": [
+            "kind",
+            "error"
+          ],
+          "description": "Per-file health scoring failed, so the score list is empty and the\nscored-file count is `0` because nothing was measured rather than\nbecause the project has no files worth scoring. Every score-derived\nnumber (the average maintainability index, the refactoring targets, the\nhotspot complexity half) is then structurally zero (issue #2689)."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "hotspots-skipped"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "Churn-based hotspot analysis was skipped because the project root is not\na git repository, so the hotspots, churn and ownership sections report\nnothing at all. The remaining health sections are unaffected.\n\nCarries no payload: the other two skip paths (a malformed `--since`, a\n`--churn-file` that became unreadable after validation) route through\n`tracing` rather than a user-facing note and are not part of this kind\nyet."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ownership_requested": {
+              "type": "boolean",
+              "description": "`true` when the run also asked for ownership attribution, which a\nshallow clone skews further by inflating single-author dominance."
+            },
+            "kind": {
+              "type": "string",
+              "const": "shallow-clone"
+            }
+          },
+          "required": [
+            "kind",
+            "ownership_requested"
+          ],
+          "description": "The repository is a shallow clone, so churn is measured over the fetched\nhistory only and every hotspot figure is incomplete."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unpinned-clock"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "No commit timestamp was available, so churn recency and ownership\nstaleness were measured against the wall clock and drift between two\nruns over the same commit."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cause": {
+              "type": "string",
+              "description": "Which input failed, as a kebab-case token: `invalid-bot-pattern` or\n`codeowners-parse-failed`. The set is open."
+            },
+            "error": {
+              "type": "string",
+              "description": "Underlying error text."
+            },
+            "kind": {
+              "type": "string",
+              "const": "ownership-unavailable"
+            }
+          },
+          "required": [
+            "kind",
+            "cause",
+            "error"
+          ],
+          "description": "Ownership attribution was requested but its inputs did not load, so\nhotspot entries carry degraded or absent owner signals."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "description": "Filesystem or JSON error text."
+            },
+            "kind": {
+              "type": "string",
+              "const": "trend-snapshot-unreadable"
+            }
+          },
+          "required": [
+            "kind",
+            "error"
+          ],
+          "description": "A saved health snapshot could not be read or parsed, so the trend is\ncomputed over fewer snapshots than the project has on disk and a\ndirection can flip on the missing point alone."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "coverage-auto-detected"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "Test coverage was auto-detected on disk rather than passed with\n`--coverage`, and `path` names the file that fed the CRAP scores.\n\nDeliberately NOT one of the [`Self::warns_on_stderr`] kinds: nothing\ndegraded, the run measured exactly what it found. It is provenance, and\nit is on the wire because a score computed against a file the user did\nnot name is not reproducible and nothing else says which file it was."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
@@ -26302,7 +26418,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/RequestOutcome"
       },
-      "description": "Every narrowing or shaping request a run RECEIVED, keyed by name.\n\nReceived, not failed: a request the run honoured is published with\n`status: \"applied\"`, so a consumer can say \"scoped to the change\"\npositively. Read an absent object as \"nothing was asked for\", never as\n\"nothing failed\".\n\nAbsent from an envelope whenever it is empty, so a run that was asked for\nnothing is byte-identical to one produced before this object existed. An\nempty object is never emitted: it would assert that something was asked and\nall of it applied, which is a different and false claim.\n\nThe names this build can emit are `changed-since` and `diff-filter`. The\nreasons are `git-missing`, `not-a-repository`, `git-failed` and\n`invalid-ref` for `changed-since`, and `oversize`, `unreadable`,\n`not-utf8`, `foreign-namespace` and `ambiguous-base` for `diff-filter`.\nBoth sets are OPEN: a name a consumer does not recognise means \"some\nrequest\", not an error.\n\n`invalid-ref` is reachable only through the programmatic API. The\n`--changed-since` flag validates its value before a run starts and fails\nwith exit 2 and an error document, which is the right side to err on: a\nmalformed ref is invalid input rather than a report of the wrong scope."
+      "description": "Every narrowing or shaping request a run RECEIVED, keyed by name.\n\nReceived, not failed: a request the run honoured is published with\n`status: \"applied\"`, so a consumer can say \"scoped to the change\"\npositively. Read an absent object as \"nothing was asked for\", never as\n\"nothing failed\".\n\nAbsent from an envelope whenever it is empty, so a run that was asked for\nnothing is byte-identical to one produced before this object existed. An\nempty object is never emitted: it would assert that something was asked and\nall of it applied, which is a different and false claim.\n\nThe names this build can emit are `changed-since`, `diff-filter` and\n`sarif-file`. The reasons are `git-missing`, `not-a-repository`,\n`git-failed` and `invalid-ref` for `changed-since`, `oversize`,\n`unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for\n`diff-filter`, and `directory-create-failed`, `write-failed` and\n`serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer\ndoes not recognise means \"some request\", not an error.\n\n`sarif-file` reports a SECONDARY artefact rather than the scope of the\nreport it travels in, and it is in the same object for the same reason the\nothers are: the run was asked to do something and did something else, and\nnothing in the primary report says so.\n\n`invalid-ref` is reachable only through the programmatic API. The\n`--changed-since` flag validates its value before a run starts and fails\nwith exit 2 and an error document, which is the right side to err on: a\nmalformed ref is invalid input rather than a report of the wrong scope."
     },
     "RequestOutcome": {
       "type": "object",
@@ -26313,7 +26429,7 @@
         },
         "requested": {
           "type": "string",
-          "description": "What was asked, as the user spelled it: the git ref for\n`changed-since`, the diff source label (`--diff-file pr.diff`,\n`--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`."
+          "description": "What was asked, as the user spelled it: the git ref for\n`changed-since`, the diff source label (`--diff-file pr.diff`,\n`--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`,\nthe target path for `sarif-file`."
         },
         "reason": {
           "type": [

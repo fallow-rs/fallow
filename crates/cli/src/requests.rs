@@ -7,12 +7,14 @@
 //!
 //! # Why a process-wide record rather than a threaded value
 //!
-//! `--changed-since` and the diff source are global CLI inputs resolved once
-//! per process against one root. A combined run resolves `--changed-since`
-//! separately for dead-code, duplication and health, and the three answers are
-//! the same answer, so recording the first is recording all of them. The diff
-//! source is already cached this way, for a stronger reason: stdin can be
-//! drained exactly once.
+//! `--changed-since`, the diff source and `--sarif-file` are global CLI inputs
+//! resolved once per process against one root. A combined run resolves
+//! `--changed-since` separately for dead-code, duplication and health, and the
+//! three answers are the same answer, so recording the first is recording all
+//! of them. The diff source is already cached this way, for a stronger reason:
+//! stdin can be drained exactly once. And `--sarif-file` is written before the
+//! envelope that reports it is assembled, so the record is what carries the
+//! fate forward.
 //!
 //! # Why an honoured request is recorded too
 //!
@@ -61,12 +63,37 @@ fn record_changed_since(outcome: RequestOutcome) {
     let _ = CHANGED_SINCE_OUTCOME.set(outcome);
 }
 
+/// What became of this run's `--sarif-file` request.
+///
+/// One global path per process, written once by the single site that produces
+/// the file.
+static SARIF_FILE_OUTCOME: OnceLock<RequestOutcome> = OnceLock::new();
+
+/// Record a `--sarif-file` document that was written.
+pub fn record_sarif_file_applied(path: &Path) {
+    let _ = SARIF_FILE_OUTCOME.set(RequestOutcome::applied(path.display().to_string()));
+}
+
+/// Record a `--sarif-file` document that was not written, with the reason token
+/// and the sentence the CLI also printed.
+///
+/// The exit code does not move: the primary report is complete and the run
+/// still exits on its findings, so this is the only channel that says the
+/// secondary artefact is missing (issue #2690).
+pub fn record_sarif_file_failure(path: &Path, reason: &str, message: String) {
+    let _ = SARIF_FILE_OUTCOME.set(RequestOutcome::not_applied(
+        path.display().to_string(),
+        reason,
+        message,
+    ));
+}
+
 /// This run's `request_outcomes` object, or `None` when it was asked for
 /// nothing.
 ///
-/// Reads the two channels where they are produced rather than taking them as
-/// parameters, so a command that grows a third narrowing request cannot
-/// publish a half-filled object by forgetting to thread one through.
+/// Reads each channel where it is produced rather than taking them as
+/// parameters, so a command that grows another request cannot publish a
+/// half-filled object by forgetting to thread one through.
 #[must_use]
 pub fn request_outcomes() -> Option<RequestOutcomes> {
     let mut requests = RequestOutcomes::new();
@@ -78,5 +105,6 @@ pub fn request_outcomes() -> Option<RequestOutcomes> {
         RequestName::DiffFilter,
         crate::report::ci::diff_filter::shared_diff_request_outcome().cloned(),
     );
+    requests.insert_if(RequestName::SarifFile, SARIF_FILE_OUTCOME.get().cloned());
     requests.into_option()
 }

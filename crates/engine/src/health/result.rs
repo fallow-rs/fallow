@@ -88,6 +88,21 @@ pub(super) fn finalize_health_result<R>(
         coverage_gaps_has_findings,
     } = output;
 
+    // The caller captured `workspace_diagnostics` before the analysis started,
+    // so the pipeline's own degraded inputs (scoring, churn, ownership, trend,
+    // coverage provenance) are only in the registry at this point. One merge
+    // here reaches every route, CLI and programmatic, rather than threading a
+    // mutable list through five call chains (issue #2689).
+    //
+    // A registry read is safe for these and not for the walk-recorded kinds the
+    // comments in this crate warn about: health-stage entries have a single
+    // writer per run and are not produced under `rayon::join`, so the read
+    // cannot answer "whichever pass wrote last".
+    let workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
+        workspace_diagnostics,
+        fallow_config::health_stage_workspace_diagnostics(&config.root),
+    );
+
     finalize_health_report_side_effects(&mut HealthReportSideEffectsInput {
         opts,
         report: &mut report,

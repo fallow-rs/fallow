@@ -69,6 +69,12 @@ pub enum RequestName {
     /// findings a supplied unified diff touches. Not applied means every
     /// finding is reported.
     DiffFilter,
+    /// `--sarif-file <path>`: also write the findings as a SARIF document at
+    /// `path`. Not applied means the file was never written, so a consumer
+    /// uploading it to code scanning has nothing to upload. The primary report
+    /// on stdout is unaffected, which is why the run neither fails nor says
+    /// anything else about it.
+    SarifFile,
 }
 
 /// What became of one request on this run.
@@ -100,7 +106,8 @@ pub struct RequestOutcome {
     pub status: RequestStatus,
     /// What was asked, as the user spelled it: the git ref for
     /// `changed-since`, the diff source label (`--diff-file pr.diff`,
-    /// `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`.
+    /// `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`,
+    /// the target path for `sarif-file`.
     pub requested: String,
     /// Why the request was not applied, as a kebab-case token. Present exactly
     /// when `status` is not `applied`. The set is open per request name; the
@@ -156,12 +163,18 @@ impl RequestOutcome {
 /// empty object is never emitted: it would assert that something was asked and
 /// all of it applied, which is a different and false claim.
 ///
-/// The names this build can emit are `changed-since` and `diff-filter`. The
-/// reasons are `git-missing`, `not-a-repository`, `git-failed` and
-/// `invalid-ref` for `changed-since`, and `oversize`, `unreadable`,
-/// `not-utf8`, `foreign-namespace` and `ambiguous-base` for `diff-filter`.
-/// Both sets are OPEN: a name a consumer does not recognise means "some
-/// request", not an error.
+/// The names this build can emit are `changed-since`, `diff-filter` and
+/// `sarif-file`. The reasons are `git-missing`, `not-a-repository`,
+/// `git-failed` and `invalid-ref` for `changed-since`, `oversize`,
+/// `unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for
+/// `diff-filter`, and `directory-create-failed`, `write-failed` and
+/// `serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer
+/// does not recognise means "some request", not an error.
+///
+/// `sarif-file` reports a SECONDARY artefact rather than the scope of the
+/// report it travels in, and it is in the same object for the same reason the
+/// others are: the run was asked to do something and did something else, and
+/// nothing in the primary report says so.
 ///
 /// `invalid-ref` is reachable only through the programmatic API. The
 /// `--changed-since` flag validates its value before a run starts and fails

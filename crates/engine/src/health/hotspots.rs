@@ -198,6 +198,13 @@ pub(super) fn fetch_churn_data(
         if !opts.quiet {
             eprintln!("note: hotspot analysis skipped: no git repository found at project root");
         }
+        // Outside the quiet guard: the note is for a human, the diagnostic is
+        // for the consumer that runs fallow with `--quiet` (issue #2689).
+        super::diagnostics::record_health_diagnostic(
+            opts.root,
+            None,
+            fallow_types::workspace::WorkspaceDiagnosticKind::HotspotsSkipped,
+        );
         return None;
     }
 
@@ -415,18 +422,29 @@ fn clock_provenance(clock: crate::clock::AnalysisClock) -> ClockProvenance {
 /// is the point of the warning, since it exists for projects whose history
 /// lives in a non-git VCS.
 fn warn_unpinned_clock(opts: &HealthOptions<'_>, clock: crate::clock::AnalysisClock) {
-    if !clock.is_reproducible() && !opts.quiet {
+    if clock.is_reproducible() {
+        return;
+    }
+    if !opts.quiet {
         eprintln!(
             "Warning: no commit timestamp available, so churn recency and \
              ownership staleness were measured against the wall clock and will \
              drift between runs. Set FALLOW_CLOCK_EPOCH to pin them."
         );
     }
+    super::diagnostics::record_health_diagnostic(
+        opts.root,
+        None,
+        fallow_types::workspace::WorkspaceDiagnosticKind::UnpinnedClock,
+    );
 }
 
 /// Emit shallow-clone warnings (and the ownership-skew note) when relevant.
 fn warn_shallow_clone(opts: &HealthOptions<'_>, shallow_clone: bool) {
-    if shallow_clone && !opts.quiet {
+    if !shallow_clone {
+        return;
+    }
+    if !opts.quiet {
         eprintln!(
             "Warning: shallow clone detected. Hotspot analysis may be incomplete. \
              Use `git fetch --unshallow` for full history."
@@ -438,6 +456,13 @@ fn warn_shallow_clone(opts: &HealthOptions<'_>, shallow_clone: bool) {
             );
         }
     }
+    super::diagnostics::record_health_diagnostic(
+        opts.root,
+        None,
+        fallow_types::workspace::WorkspaceDiagnosticKind::ShallowClone {
+            ownership_requested: opts.ownership,
+        },
+    );
 }
 
 /// Compile the bot-author glob set for ownership analysis, warning on a bad pattern.
@@ -450,6 +475,14 @@ fn load_ownership_bot_globs(
             if !opts.quiet {
                 eprintln!("Warning: invalid bot pattern in health.ownership.botPatterns: {e}");
             }
+            super::diagnostics::record_health_diagnostic(
+                opts.root,
+                None,
+                fallow_types::workspace::WorkspaceDiagnosticKind::OwnershipUnavailable {
+                    cause: "invalid-bot-pattern".to_owned(),
+                    error: e.to_string(),
+                },
+            );
             globset::GlobSet::empty()
         })
     })
@@ -464,8 +497,21 @@ fn load_ownership_codeowners(
         .then(|| match crate::codeowners::CodeOwners::load(root, None) {
             Ok(co) => Some(co),
             Err(e) => {
-                if !opts.quiet && !e.contains("no CODEOWNERS file found") {
-                    eprintln!("Warning: failed to parse CODEOWNERS: {e}");
+                // A project with no CODEOWNERS at all never asked for declared
+                // owners, so it is not a degraded input and gets neither the
+                // note nor the diagnostic.
+                if !e.contains("no CODEOWNERS file found") {
+                    if !opts.quiet {
+                        eprintln!("Warning: failed to parse CODEOWNERS: {e}");
+                    }
+                    super::diagnostics::record_health_diagnostic(
+                        root,
+                        None,
+                        fallow_types::workspace::WorkspaceDiagnosticKind::OwnershipUnavailable {
+                            cause: "codeowners-parse-failed".to_owned(),
+                            error: e,
+                        },
+                    );
                 }
                 None
             }
