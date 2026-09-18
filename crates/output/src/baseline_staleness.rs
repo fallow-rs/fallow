@@ -282,6 +282,19 @@ pub struct BaselineStaleness {
     /// entries by fingerprint and never classify one as moved, so they report
     /// `0`. Always `0` in health's count mode too.
     pub moved_entries: usize,
+    /// True when the loaded file carries no key this command's own baseline
+    /// format writes, so it is a baseline another command saved or an object
+    /// with nothing of this command's in it. Read this, not
+    /// `baseline_entries == 0`, before telling anyone their baseline is the
+    /// wrong file: a baseline saved from a project that had nothing to record
+    /// is legitimately empty and is not a mistake.
+    ///
+    /// Present only when true, so an envelope from a run that loaded its own
+    /// baseline is unchanged. `dead-code` never sets it: five of its baseline
+    /// fields have no serde default, so a file that is not one fails to load
+    /// with exit 2 long before this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unrecognised_format: bool,
     /// Which channels narrowed this run, present and non-empty exactly when
     /// `change_scoped` is true. Both members are derived from one function, so
     /// the boolean and the array cannot disagree.
@@ -318,6 +331,7 @@ mod tests {
             warning: BaselineStalenessAdvisory::None,
             gate_trips: false,
             moved_entries: 0,
+            unrecognised_format: false,
             scope_reasons,
         }
     }

@@ -54,20 +54,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   buy a green run plus an invisible note.
 
 - **A baseline that recognises nothing no longer gates green in silence.** A
-  baseline saved by another command, or an empty file, loaded without complaint
-  and suppressed nothing. Every verdict that followed was green and honest,
-  because a baseline with no entries has nothing that can go stale, so a
-  repository that pointed `baseline` at the wrong file kept a permanently
-  passing `fail-on-stale-baseline` gate and was never told.
+  baseline saved by another command loaded without complaint and suppressed
+  nothing. Every verdict that followed was green and honest, because a baseline
+  with no entries has nothing that can go stale, so a repository that pointed
+  `baseline` at the wrong file kept a permanently passing
+  `fail-on-stale-baseline` gate and was never told.
 
   Such a run now says so on CLI stderr, in the GitHub Action's step log and job
-  summary, in the GitLab job log, and in the MCP tools' warnings. Each command
-  has its own baseline format and they do not treat a foreign file alike: `dupes`
-  and `health` accept one as zero entries, while `dead-code` rejects it outright.
-  The note covers all three rather than relying on that difference. The exit code
-  is unchanged on every command, because a baseline saved from a clean project is
-  legitimately empty and failing there would break every repository that saves
-  one on a green main.
+  summary, in the GitLab job log, and in the MCP tools' warnings, and publishes
+  `baseline_staleness.unrecognised_format: true`, an optional member present
+  only in that state. The decision is the keys the file carries, measured
+  against the keys the reading command writes into its own baselines, not the
+  entry count: a baseline saved on a green main from a project with nothing to
+  record is legitimately empty, is not a mistake, and stays silent everywhere.
+  `dead-code` never reports it, because five of its baseline fields have no
+  default and a foreign file fails to load with exit 2 instead. The exit code is
+  unchanged on every command. The Action publishes the member as a new
+  `baseline-unrecognised` output, and both integrations now report the fact for
+  a baseline passed through `args` or `FALLOW_ARGS` as well.
 
 ### Added
 

@@ -1123,8 +1123,10 @@ fn a_narrowed_run_with_no_findings_still_points_at_the_unscoped_recheck() {
 /// Each command has its own format, and the three do not agree on what a
 /// foreign file means: `dupes` and `health` give every field a serde default,
 /// so any JSON object loads as zero entries, while `dead-code` rejects one
-/// today because five of its fields carry no default. That asymmetry is not a
-/// kind check, so the note is asserted on the commands that accept the file.
+/// today because five of its fields carry no default. The two that accept the
+/// file separate it from their own empty baseline by the keys it carries, so
+/// the note is asserted on both of them, and its absence on a legitimately
+/// empty baseline is asserted beside it.
 #[test]
 fn a_dupes_run_says_so_when_the_baseline_is_another_commands() {
     let project = orphan_project(2);
@@ -1227,6 +1229,69 @@ fn a_health_run_says_so_when_the_baseline_is_another_commands() {
         "{}",
         output.stderr
     );
+}
+
+/// A baseline saved on a project that had nothing to record carries zero
+/// entries and is not a mistake, so the note must not fire on it. The
+/// documented workflow saves one on a green main and compares on every pull
+/// request, which would otherwise warn on every run and could not be turned
+/// off.
+#[test]
+fn a_baseline_this_command_saved_itself_never_earns_the_note() {
+    let project = orphan_project(2);
+    let root = root_arg(&project);
+
+    for (command, extra, baseline_name, staleness_path) in [
+        (
+            "dupes",
+            None,
+            "dupes-baseline.json",
+            vec!["baseline_staleness"],
+        ),
+        (
+            "health",
+            Some("--complexity"),
+            "health-baseline.json",
+            vec!["summary", "baseline_staleness"],
+        ),
+    ] {
+        let baseline = project.path().join(baseline_name);
+        let baseline_arg = baseline.to_str().expect("utf8");
+        let mut save = vec![command, "--root", root, "--format", "json", "--quiet"];
+        save.extend(extra);
+        save.extend(["--save-baseline", baseline_arg]);
+        let saved = run(&save);
+        assert!(
+            saved.code == 0 || saved.code == 1,
+            "saving a {command} baseline should not error: {}",
+            saved.stderr
+        );
+
+        let mut compare = vec![command, "--root", root, "--format", "json", "--quiet"];
+        compare.extend(extra);
+        compare.extend(["--baseline", baseline_arg]);
+        let output = run(&compare);
+        let envelope = parse_json(&output);
+        let staleness = staleness_path
+            .iter()
+            .fold(&envelope, |value, key| &value[*key]);
+
+        assert_eq!(
+            staleness["baseline_entries"], 0,
+            "a project with nothing to record saves an empty baseline: {envelope}"
+        );
+        assert!(
+            staleness.get("unrecognised_format").is_none(),
+            "the file is this command's own baseline: {envelope}"
+        );
+        assert!(
+            !output
+                .stderr
+                .contains("has no entries this command recognises"),
+            "{command} must not call its own baseline the wrong file: {}",
+            output.stderr
+        );
+    }
 }
 
 /// The note is about the baseline, not about this run, so a baseline that does

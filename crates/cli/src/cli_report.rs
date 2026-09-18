@@ -271,6 +271,7 @@ mod status_note_tests {
             warning: BaselineStalenessAdvisory::ZeroOverlap,
             gate_trips: true,
             moved_entries: 0,
+            unrecognised_format: false,
             scope_reasons: BaselineScopeReasons::empty(),
         }
     }

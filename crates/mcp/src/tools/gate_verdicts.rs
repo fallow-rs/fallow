@@ -198,8 +198,13 @@ fn noun(root: &Map<String, Value>) -> &'static str {
 }
 
 /// One sentence for a loaded baseline that matched less than it was saved
-/// with, mirroring the CLI's two advisory messages and its gate message, or
-/// for one this run was too narrow to judge at all.
+/// with, mirroring the CLI's two advisory messages and its gate message, for
+/// one this run was too narrow to judge at all, or for a file that is not this
+/// command's baseline.
+///
+/// A file written by another command is read from `unrecognised_format` rather
+/// than from `baseline_entries == 0`, which is also what a baseline saved on a
+/// project with nothing to record carries.
 ///
 /// The remedy names the parameter rather than a path because the envelope
 /// carries no baseline path, and because `audit` resolves its three baselines
@@ -224,7 +229,11 @@ fn baseline_warning(
         || "the loaded baseline".to_string(),
         |analysis| format!("the {analysis} baseline"),
     );
-    if baseline_entries == 0 {
+    if staleness
+        .get("unrecognised_format")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         return Some(format!(
             "Baseline staleness: {subject} has no entries this command recognises. It may be a \
              baseline saved by another command, or an empty file. Either way it suppresses \
@@ -577,14 +586,16 @@ mod tests {
         );
     }
 
-    /// A baseline with no recognised entries earns every green verdict below
+    /// A baseline written by another command earns every green verdict below
     /// honestly and would otherwise say nothing, so an agent handed the report
     /// cannot tell a working baseline from one saved by another command.
     #[test]
     fn a_baseline_with_no_recognised_entries_is_reported() {
+        let mut unrecognised = staleness("none", 0, 0, false);
+        unrecognised["unrecognised_format"] = serde_json::json!(true);
         let warnings = warnings_of(&serde_json::json!({
             "kind": "dupes",
-            "baseline_staleness": staleness("none", 0, 0, false),
+            "baseline_staleness": unrecognised,
         }));
 
         assert_eq!(warnings.len(), 1, "{warnings:?}");
@@ -596,9 +607,22 @@ mod tests {
         );
     }
 
-    /// The zero-entry sentence wins over the unjudged one: "there was nothing
-    /// to judge" and "nothing judged it" are different problems with different
-    /// remedies, and re-running unscoped would not fix the first.
+    /// The same numbers with the member absent describe a baseline saved on a
+    /// project that had nothing to record, which is not a mistake and must not
+    /// be reported as one.
+    #[test]
+    fn an_empty_baseline_of_this_command_is_not_reported() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dupes",
+            "baseline_staleness": staleness("none", 0, 0, false),
+        }));
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    /// The unrecognised sentence wins over the unjudged one: "this is not a
+    /// baseline of mine" and "nothing judged it" are different problems with
+    /// different remedies, and re-running unscoped would not fix the first.
     #[test]
     fn a_zero_entry_baseline_on_a_narrowed_run_reports_the_empty_baseline() {
         let warnings = warnings_of(&serde_json::json!({
@@ -614,6 +638,7 @@ mod tests {
                     "warning": "none",
                     "gate_trips": false,
                     "moved_entries": 0,
+                    "unrecognised_format": true,
                     "scope_reasons": ["production"],
                 },
             },

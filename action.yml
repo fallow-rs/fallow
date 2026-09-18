@@ -361,6 +361,9 @@ outputs:
   baseline-scope-reasons:
     description: 'Comma-separated names of the channels that narrowed the run, in the order fallow publishes them (for example "changed-since, production"). Empty when the run was not narrowed or the fallow version predates the member. Read it to tell narrowing you can remove from narrowing you chose.'
     value: ${{ steps.analyze.outputs.baseline_scope_reasons }}
+  baseline-unrecognised:
+    description: 'true when the loaded file carries no key the running command writes into its own baselines, so it is a baseline another command saved or an object with nothing of that command in it. Empty when no baseline was loaded, when the baseline belongs to the command that read it, or when the fallow version predates the member. A baseline saved on a project with nothing to record is empty and is NOT reported here.'
+    value: ${{ steps.analyze.outputs.baseline_unrecognised }}
   baseline-gate-trips:
     description: 'true when the baseline has entries that match nothing and the run could judge it, which is what fail-on-stale-baseline exits on. Gate on this in a downstream step to report staleness without failing the job.'
     value: ${{ steps.analyze.outputs.baseline_gate_trips }}
@@ -617,6 +620,7 @@ runs:
         FALLOW_BASELINE_STALE_ENTRIES: ${{ steps.analyze.outputs.baseline_stale_entries }}
         FALLOW_BASELINE_ENTRIES: ${{ steps.analyze.outputs.baseline_entries }}
         FALLOW_BASELINE_GATE_TRIPS: ${{ steps.analyze.outputs.baseline_gate_trips }}
+        FALLOW_BASELINE_UNRECOGNISED: ${{ steps.analyze.outputs.baseline_unrecognised }}
         FALLOW_GATES_FAILED: ${{ steps.analyze.outputs.gates_failed }}
         FALLOW_GATES_WARNED: ${{ steps.analyze.outputs.gates_warned }}
         FALLOW_GATES_SKIPPED: ${{ steps.analyze.outputs.gates_skipped }}

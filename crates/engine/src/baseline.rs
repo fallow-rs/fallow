@@ -149,15 +149,18 @@ impl BaselineStaleness {
     /// `health` can follow a file move; the commands that match entries by
     /// fingerprint pass `0`.
     ///
-    /// `scope_reasons` comes from the caller because only the command knows
-    /// which channels it read; this struct carries the boolean the analysis
-    /// needs and nothing more. The two must agree, which is why every caller
-    /// derives `change_scoped` from the same reason set it passes here.
+    /// `scope_reasons` and `unrecognised_format` come from the caller because
+    /// only the command knows which channels it read and which format it read
+    /// the file as; this struct carries the counts the analysis needs and
+    /// nothing more. `change_scoped` and `scope_reasons` must agree, which is
+    /// why every caller derives the boolean from the same reason set it passes
+    /// here.
     #[must_use]
     pub fn to_envelope(
         &self,
         moved_entries: usize,
         scope_reasons: fallow_output::BaselineScopeReasons,
+        unrecognised_format: bool,
     ) -> fallow_output::BaselineStaleness {
         debug_assert_eq!(
             self.change_scoped,
@@ -183,6 +186,7 @@ impl BaselineStaleness {
             },
             gate_trips: self.trips_gate(),
             moved_entries,
+            unrecognised_format,
             scope_reasons,
         }
     }
@@ -197,6 +201,28 @@ pub const fn stale_baseline_gate_trips(
     change_scoped: bool,
 ) -> bool {
     !change_scoped && entries > 0 && matched < entries
+}
+
+/// Whether a baseline file is written in the format it was loaded as.
+///
+/// The duplication and health formats give every field a serde default, so a
+/// baseline another command saved, and an object with nothing in it, both
+/// deserialize into zero entries and are indistinguishable from this command's
+/// own baseline saved from a project that had nothing to record. Asking which
+/// keys the file actually carries separates them: a file that declares at
+/// least one key of the format it was read as is that command's baseline,
+/// however empty it is.
+///
+/// False for anything that is not a JSON object, including a file this crate
+/// would refuse to deserialize; those paths report their own error before a
+/// caller gets here.
+#[must_use]
+pub fn declares_baseline_format(json: &str, declared_keys: &[&str]) -> bool {
+    let Ok(serde_json::Value::Object(object)) = serde_json::from_str::<serde_json::Value>(json)
+    else {
+        return false;
+    };
+    declared_keys.iter().any(|key| object.contains_key(*key))
 }
 
 /// Baseline data for comparison.
@@ -1697,6 +1723,13 @@ pub struct DuplicationBaselineData {
 }
 
 impl DuplicationBaselineData {
+    /// The keys this format writes, for [`declares_baseline_format`].
+    pub const DECLARED_KEYS: &'static [&'static str] = &[
+        "clone_groups",
+        "clone_fingerprints",
+        "normalized_clone_fingerprints",
+    ];
+
     /// Build a duplication baseline from the current report.
     pub fn from_report(report: &DuplicationReport, root: &Path) -> Self {
         let fingerprints =
@@ -1957,6 +1990,18 @@ const HEALTH_FINDING_DIMENSIONS: [HealthFindingDimension; 2] = [
 ];
 
 impl HealthBaselineData {
+    /// The keys this format writes, for [`declares_baseline_format`]. A health
+    /// baseline omits the buckets it has nothing for, so a file carrying any
+    /// one of these is health's own.
+    pub const DECLARED_KEYS: &'static [&'static str] = &[
+        "findings",
+        "finding_counts",
+        "identity_finding_counts",
+        "runtime_coverage_findings",
+        "runtime_coverage_source_hashes",
+        "target_keys",
+    ];
+
     /// Build a health baseline from findings and targets.
     pub(crate) fn from_findings(
         findings: &[fallow_output::ComplexityViolation],
@@ -3110,6 +3155,73 @@ mod tests {
             1,
             "a saved baseline carries a normalized key per clone group"
         );
+    }
+
+    /// The key list is what separates a foreign file from a legitimately empty
+    /// baseline, so a field added to the format without a key here would make
+    /// its own saved baseline read as foreign.
+    #[test]
+    fn the_declared_keys_are_every_key_each_format_writes() {
+        let duplication = DuplicationBaselineData {
+            clone_groups: vec!["src/a.ts:1-10".to_owned()],
+            clone_fingerprints: vec!["abc".to_owned()],
+            normalized_clone_fingerprints: vec!["def".to_owned()],
+        };
+        assert_eq!(
+            serialized_keys(&duplication),
+            DuplicationBaselineData::DECLARED_KEYS
+        );
+
+        let counts: HealthFindingCountMap = std::iter::once((
+            "src/a.ts".to_owned(),
+            std::iter::once(("complexity".to_owned(), HealthBaselineCount { count: 1 })).collect(),
+        ))
+        .collect();
+        let health = HealthBaselineData {
+            findings: vec!["src/a.ts:run:1".to_owned()],
+            finding_counts: counts.clone(),
+            identity_finding_counts: counts,
+            runtime_coverage_findings: vec!["src/a.ts:run".to_owned()],
+            runtime_coverage_source_hashes: vec!["src/a.ts\0run\0hash".to_owned()],
+            target_keys: vec!["src/a.ts:complexity".to_owned()],
+        };
+        assert_eq!(serialized_keys(&health), HealthBaselineData::DECLARED_KEYS);
+    }
+
+    fn serialized_keys<T: serde::Serialize>(value: &T) -> Vec<String> {
+        let serde_json::Value::Object(object) =
+            serde_json::to_value(value).expect("baseline serializes")
+        else {
+            panic!("a baseline serializes as an object");
+        };
+        object.keys().cloned().collect()
+    }
+
+    #[test]
+    fn a_baseline_saved_from_a_clean_project_still_declares_its_format() {
+        let empty = serde_json::to_string(&DuplicationBaselineData::default())
+            .expect("baseline serializes");
+
+        assert!(
+            declares_baseline_format(&empty, DuplicationBaselineData::DECLARED_KEYS),
+            "an empty duplication baseline is still a duplication baseline: {empty}"
+        );
+        assert!(
+            !declares_baseline_format(&empty, HealthBaselineData::DECLARED_KEYS),
+            "and it is not a health one: {empty}"
+        );
+        assert!(!declares_baseline_format(
+            "{}",
+            HealthBaselineData::DECLARED_KEYS
+        ));
+        assert!(!declares_baseline_format(
+            "[]",
+            HealthBaselineData::DECLARED_KEYS
+        ));
+        assert!(!declares_baseline_format(
+            "not json",
+            HealthBaselineData::DECLARED_KEYS
+        ));
     }
 
     #[test]

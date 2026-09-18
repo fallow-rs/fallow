@@ -40,6 +40,10 @@ pub struct LoadedBaselineStaleness {
     /// `staleness.change_scoped`. Carried here rather than on the engine
     /// struct so the analysis keeps the one boolean it needs.
     pub scope_reasons: fallow_output::BaselineScopeReasons,
+    /// True when the file carried no key this command's baseline format
+    /// writes, so it is another command's baseline rather than an empty one of
+    /// this command's.
+    pub unrecognised_format: bool,
 }
 
 impl LoadedBaselineStaleness {
@@ -47,7 +51,7 @@ impl LoadedBaselineStaleness {
     #[must_use]
     pub fn to_envelope(&self, moved_entries: usize) -> fallow_output::BaselineStaleness {
         self.staleness
-            .to_envelope(moved_entries, self.scope_reasons)
+            .to_envelope(moved_entries, self.scope_reasons, self.unrecognised_format)
     }
 }
 
@@ -115,30 +119,28 @@ pub fn note_stood_down(path: Option<&Path>, enabled: bool, reason: &str) {
     );
 }
 
-/// Say that a loaded baseline carries nothing this command recognises.
+/// Say that a loaded baseline is not written in this command's format.
 ///
-/// A baseline with zero entries suppresses nothing, and every downstream
-/// verdict follows from that honestly: the advisory is silent because there is
-/// nothing to judge, and the gate reports `pass` because no entry went
-/// unmatched. The run is therefore green forever, which is the correct reading
-/// of the numbers and the wrong answer for a repository that pointed
-/// `--baseline` at the wrong file.
+/// Such a file suppresses nothing, and every downstream verdict follows from
+/// that honestly: the advisory is silent because there is nothing to judge, and
+/// the gate reports `pass` because no entry went unmatched. The run is
+/// therefore green forever, which is the correct reading of the numbers and the
+/// wrong answer for a repository that pointed `--baseline` at the wrong file.
 ///
-/// Each command has its own baseline format, and two of the three accept a
-/// foreign one: `dupes` and `health` give every field a serde default, so any
-/// JSON object deserializes into them with zero entries. `dead-code` happens to
-/// reject one today because five of its fields carry no default, but that is a
-/// field-attribute asymmetry rather than a kind check, so this note covers all
-/// three rather than relying on it.
+/// `dupes` and `health` give every baseline field a serde default, so any JSON
+/// object deserializes into them with zero entries; the caller separates a
+/// foreign file from one of this command's own by the keys it carries, because
+/// a baseline saved from a project that had nothing to record is legitimately
+/// empty and telling that repository it picked the wrong file would be wrong on
+/// every run.
 ///
 /// Prints regardless of `--quiet`, for the reason [`report_gate`] documents:
 /// the fact appears in no human report, and `--ci` implies `--quiet`, which is
 /// exactly the configuration where a silently green gate matters. The exit code
-/// does not move: a baseline saved from a clean project is legitimately empty,
-/// and failing there would break every repository that saves one on a green
-/// main.
-pub fn note_zero_entry_baseline(path: Option<&Path>, entries: usize) {
-    if entries > 0 {
+/// does not move, because a file nobody can read as a baseline is a
+/// configuration mistake rather than a finding.
+pub fn note_unrecognised_baseline(path: Option<&Path>, unrecognised_format: bool) {
+    if !unrecognised_format {
         return;
     }
     let Some(path) = path else {

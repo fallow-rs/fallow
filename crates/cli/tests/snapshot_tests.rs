@@ -2042,6 +2042,7 @@ fn baseline_staleness_fixture(
         warning,
         gate_trips,
         moved_entries: 0,
+        unrecognised_format: false,
         scope_reasons: BaselineScopeReasons::empty(),
     }
 }

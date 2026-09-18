@@ -809,6 +809,7 @@ read_all_staleness_fields() {
   BASELINE_ADVISORY=$(read_staleness_field "$file" warning)
   BASELINE_GATE_TRIPS=$(read_staleness_field "$file" gate_trips)
   BASELINE_CHANGE_SCOPED=$(read_staleness_field "$file" change_scoped)
+  BASELINE_UNRECOGNISED=$(read_staleness_field "$file" unrecognised_format)
   BASELINE_SCOPE_REASONS=$(read_staleness_scope_reasons "$file")
 }
 
@@ -1024,7 +1025,7 @@ fi
 # is silent unless the gate flag was passed. The unreachable-combination check
 # at input validation already rejects `command: audit` with the gate.
 audit_baseline_notices() {
-  local file=$1 row label command input entries path
+  local file=$1 row label command input entries unrecognised path
   # label:jq-prefix:command:input-variable. The label names the envelope
   # section a reader goes looking in; the command is what they have to run, and
   # the two differ:
@@ -1043,10 +1044,11 @@ audit_baseline_notices() {
     if [ -z "$entries" ]; then
       continue
     fi
+    unrecognised=$(jq -r "($(printf '%s' "$row" | cut -d: -f2).baseline_staleness // empty) | .unrecognised_format // empty" "$file" 2>/dev/null || true)
     # Audit resolves all three from project config as well as from inputs, so
     # there is not always a path to echo back.
     path=$(eval "printf '%s' \"\${${input}:-}\"")
-    if [ "$entries" = "0" ]; then
+    if [ "$unrecognised" = "true" ]; then
       if [ -n "$path" ]; then
         echo "::warning::fallow: the ${label} baseline at ${path} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
       else
@@ -1066,16 +1068,26 @@ if [ "$INPUT_COMMAND" = "audit" ]; then
   audit_baseline_notices "$RESULTS_FILE"
 fi
 
-# A baseline with no recognised entries suppresses nothing, so every verdict
+# A baseline written by another command suppresses nothing, so every verdict
 # below reads green honestly and says nothing at all: the advisory is silent
 # because there was nothing to judge, and the gate passes because no entry went
-# unmatched. A repository that pointed `baseline` at the wrong file, or at an
-# empty one, would otherwise gate on it forever. Sits beside the branches below
-# rather than inside them, because "0" is non-empty and falls through the
-# advisory `case` to its silent arm. Distinct from the `-z` branch above, which
-# means the run reported no staleness at all.
-if [ -n "${INPUT_BASELINE:-}" ] && [ "$BASELINE_ENTRIES" = "0" ]; then
-  echo "::warning::fallow: the baseline at ${INPUT_BASELINE} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+# unmatched. A repository that pointed `baseline` at the wrong file would
+# otherwise gate on it forever. Sits beside the branches below rather than
+# inside them, because such a run falls through the advisory `case` to its
+# silent arm. Distinct from the `-z` branch above, which means the run reported
+# no staleness at all.
+#
+# Keyed on the binary's own verdict rather than on a zero entry count, which a
+# baseline saved on a green main with nothing to record carries too: warning on
+# every run about a correctly saved baseline is noise the repository cannot turn
+# off. Not gated on the `baseline` input either, so a baseline passed through
+# `args` earns the same line; the path is named only when this script knows it.
+if [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
+  if [ -n "${INPUT_BASELINE:-}" ]; then
+    echo "::warning::fallow: the baseline at ${INPUT_BASELINE} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+  else
+    echo "::warning::fallow: the loaded baseline has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+  fi
 fi
 
 # The advisory and the gate answer different questions and legitimately
@@ -1561,6 +1573,7 @@ fi
     "baseline_advisory=${BASELINE_ADVISORY}" \
     "baseline_change_scoped=${BASELINE_CHANGE_SCOPED}" \
     "baseline_scope_reasons=${BASELINE_SCOPE_REASONS}" \
+    "baseline_unrecognised=${BASELINE_UNRECOGNISED}" \
     "baseline_gate_trips=${BASELINE_GATE_TRIPS}" \
     "gates_failed=$(join_gate_names "${GATE_FAILED_NAMES[@]:-}")" \
     "gates_warned=$(join_gate_names "${GATE_WARNED_NAMES[@]:-}")" \

@@ -770,6 +770,7 @@ variables:
         BASELINE_ADVISORY=$(read_staleness_field "$file" warning)
         BASELINE_GATE_TRIPS=$(read_staleness_field "$file" gate_trips)
         BASELINE_CHANGE_SCOPED=$(read_staleness_field "$file" change_scoped)
+        BASELINE_UNRECOGNISED=$(read_staleness_field "$file" unrecognised_format)
         BASELINE_SCOPE_REASONS=$(read_staleness_scope_reasons "$file")
       }
 
@@ -955,7 +956,7 @@ variables:
       # single-analysis // chain: that chain is first-match, so an audit with
       # three baselines would report one and hide the other two.
       audit_baseline_notices() {
-        local file=$1 row label command input entries path
+        local file=$1 row label command input entries unrecognised path
         # label:jq-prefix:command:variable. The label names the envelope
         # section a reader goes looking in; the command is what they have to
         # run, and the two differ: duplication is served by fallow dupes and
@@ -972,8 +973,9 @@ variables:
           if [ -z "$entries" ]; then
             continue
           fi
+          unrecognised=$(jq -r "($(printf '%s' "$row" | cut -d: -f2).baseline_staleness // empty) | .unrecognised_format // empty" "$file" 2>/dev/null || true)
           path=$(eval "printf '%s' \"\${${input}:-}\"")
-          if [ "$entries" = "0" ]; then
+          if [ "$unrecognised" = "true" ]; then
             if [ -n "$path" ]; then
               echo "WARNING: the ${label} baseline at ${path} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
             else
@@ -993,14 +995,24 @@ variables:
         audit_baseline_notices fallow-results.json
       fi
 
-      # A baseline with no recognised entries suppresses nothing, so every
+      # A baseline written by another command suppresses nothing, so every
       # verdict below reads green honestly and says nothing at all. A project
-      # that pointed FALLOW_BASELINE at the wrong file, or at an empty one,
-      # would otherwise gate on it forever. Sits beside the branches below
-      # rather than inside them, because "0" is non-empty and falls through the
-      # advisory case to its silent arm.
-      if [ -n "$FALLOW_BASELINE" ] && [ "$BASELINE_ENTRIES" = "0" ]; then
-        echo "WARNING: the baseline at ${FALLOW_BASELINE} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+      # that pointed FALLOW_BASELINE at the wrong file would otherwise gate on
+      # it forever. Sits beside the branches below rather than inside them,
+      # because such a run falls through the advisory case to its silent arm.
+      #
+      # Keyed on the binary's own verdict rather than on a zero entry count,
+      # which a baseline saved on a green main with nothing to record carries
+      # too: warning on every pipeline about a correctly saved baseline is noise
+      # the project cannot turn off. Not gated on FALLOW_BASELINE either, so a
+      # baseline passed through FALLOW_ARGS earns the same line; the path is
+      # named only when the template knows it.
+      if [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
+        if [ -n "$FALLOW_BASELINE" ]; then
+          echo "WARNING: the baseline at ${FALLOW_BASELINE} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+        else
+          echo "WARNING: the loaded baseline has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+        fi
       fi
 
       # The advisory and the gate answer different questions and legitimately

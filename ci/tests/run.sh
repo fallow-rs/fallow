@@ -300,7 +300,11 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
     exit 2
   fi
   if [ "${MOCK_AUDIT_BASELINES:-}" = "1" ]; then
-    printf '%s\n' '{"kind":"audit","total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}'
+    printf '%s\n' '{"kind":"audit","total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}'
+    exit 0
+  fi
+  if [ "${MOCK_UNRECOGNISED_BASELINE:-}" = "1" ]; then
+    printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":true}}'
     exit 0
   fi
   if [ "${MOCK_ZERO_ENTRY_BASELINE:-}" = "1" ]; then
@@ -576,16 +580,36 @@ OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
 assert_contains "$OUT" "only part of the project (production mode or workspace scoping)" \
   "stale gate: a binary without the member falls back to the variable-based reason"
 
-# A baseline with no recognised entries suppresses nothing, so every verdict
-# reads green honestly and the advisory case would fall through to its silent
-# arm: "0" is non-empty. The branch keys on the count, not on the command.
+# A baseline written by another command suppresses nothing, so every verdict
+# reads green honestly and the advisory case falls through to its silent arm.
+# The branch reads the binary's own verdict, not the entry count.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_UNRECOGNISED_BASELINE=1 \
+  FALLOW_BASELINE=wrong-kind.json)
+assert_contains "$OUT" "WARNING: the baseline at wrong-kind.json has no entries this command recognises" \
+  "stale gate: a baseline that recognises nothing is called out"
+
+# A baseline passed through FALLOW_ARGS never reaches FALLOW_BASELINE, so the
+# line degrades to the subject instead of going missing.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_UNRECOGNISED_BASELINE=1 \
+  FALLOW_ARGS="--baseline wrong-kind.json")
+assert_contains "$OUT" "WARNING: the loaded baseline has no entries this command recognises" \
+  "stale gate: a baseline passed through FALLOW_ARGS is called out without a path"
+
+# A baseline saved on a project with nothing to record carries zero entries and
+# is not a mistake, so the documented save-on-green-main workflow stays quiet.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
 OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
   MOCK_BASELINE_STALENESS=1 \
   MOCK_ZERO_ENTRY_BASELINE=1 \
-  FALLOW_BASELINE=wrong-kind.json)
-assert_contains "$OUT" "WARNING: the baseline at wrong-kind.json has no entries this command recognises" \
-  "stale gate: a baseline that recognises nothing is called out"
+  FALLOW_BASELINE=own-empty.json)
+assert_not_contains "$OUT" "has no entries this command recognises" \
+  "stale gate: a baseline this command saved itself is never called the wrong file"
 
 # A populated baseline never earns that warning.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
@@ -612,7 +636,7 @@ assert_contains "$OUT" "NOTICE: the dead-code baseline (audit/dc.json) has 12 en
 assert_contains "$OUT" "Run 'fallow dupes --baseline audit/du.json' over the whole project" \
   "audit baselines: duplication points at fallow dupes, not at the section name"
 assert_contains "$OUT" "WARNING: the complexity baseline at audit/he.json has no entries this command recognises" \
-  "audit baselines: a zero-entry audit baseline gets the recognition warning"
+  "audit baselines: an unrecognised audit baseline gets the recognition warning"
 
 # The gate cannot apply to audit and FALLOW_BASELINE is already rejected for
 # it, so the pair is only reachable through FALLOW_ARGS.

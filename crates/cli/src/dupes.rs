@@ -590,7 +590,7 @@ fn apply_duplication_baseline(
         return Ok(None);
     };
 
-    let baseline_data = read_duplication_baseline(path, opts.output)?;
+    let (baseline_data, unrecognised_format) = read_duplication_baseline(path, opts.output)?;
     let baseline_entries = baseline_data.entry_count();
     let before = report.clone_groups.len();
     *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
@@ -606,7 +606,7 @@ fn apply_duplication_baseline(
         eprintln!("Comparing against duplication baseline: {}", path.display());
         warn_on_duplication_baseline_staleness(staleness, path);
     }
-    crate::baseline_gate::note_zero_entry_baseline(Some(path), baseline_entries);
+    crate::baseline_gate::note_unrecognised_baseline(Some(path), unrecognised_format);
 
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: "dupes",
@@ -618,6 +618,7 @@ fn apply_duplication_baseline(
         staleness,
         path: path.to_path_buf(),
         scope_reasons,
+        unrecognised_format,
     }))
 }
 
@@ -646,10 +647,14 @@ fn duplication_comparison_scope_reasons(
         .insert_if(config.production, ScopeReason::Production)
 }
 
+/// The loaded baseline, and whether the file was written by another command:
+/// every field of this format has a serde default, so a foreign JSON object
+/// loads as zero clone groups and is otherwise indistinguishable from a
+/// baseline saved on a project with no duplication.
 fn read_duplication_baseline(
     path: &std::path::Path,
     output: OutputFormat,
-) -> Result<DuplicationBaselineData, ExitCode> {
+) -> Result<(DuplicationBaselineData, bool), ExitCode> {
     let json = std::fs::read_to_string(path).map_err(|e| {
         emit_error(
             &format!("failed to read duplication baseline: {e}"),
@@ -657,13 +662,18 @@ fn read_duplication_baseline(
             output,
         )
     })?;
-    serde_json::from_str::<DuplicationBaselineData>(&json).map_err(|e| {
+    let data = serde_json::from_str::<DuplicationBaselineData>(&json).map_err(|e| {
         emit_error(
             &format!("failed to parse duplication baseline: {e}"),
             2,
             output,
         )
-    })
+    })?;
+    let unrecognised_format = !fallow_engine::baseline::declares_baseline_format(
+        &json,
+        DuplicationBaselineData::DECLARED_KEYS,
+    );
+    Ok((data, unrecognised_format))
 }
 
 /// Warn when a loaded duplication baseline no longer describes the current

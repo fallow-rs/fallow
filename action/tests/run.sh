@@ -3333,7 +3333,7 @@ fi
 # An audit-shaped envelope: one staleness object per section, which is what
 # makes the first-match `//` chain the wrong reader for this command.
 if [ "${MOCK_AUDIT_BASELINES:-}" = "1" ]; then
-  printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
+  printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
   exit 0
 fi
 if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ] && [ "$scoped" = "false" ]; then
@@ -3357,8 +3357,12 @@ gate_trips=false
 if [ "$stale" -gt 0 ]; then gate_trips=true; fi
 stale_flag=false
 if [ "$advisory" != "none" ]; then stale_flag=true; fi
-printf '{"schema_version":9,"total_issues":%s,"baseline_staleness":{"baseline_entries":%s,"matched_entries":%s,"stale_entries":%s,"current_findings":%s,"change_scoped":false,"stale":%s,"warning":"%s","gate_trips":%s}}\n' \
-  "${MOCK_TOTAL_ISSUES:-0}" "$entries" "$matched" "$stale" "$findings" "$stale_flag" "$advisory" "$gate_trips"
+unrecognised=""
+if [ "${MOCK_UNRECOGNISED:-}" = "1" ]; then
+  unrecognised=',"unrecognised_format":true'
+fi
+printf '{"schema_version":9,"total_issues":%s,"baseline_staleness":{"baseline_entries":%s,"matched_entries":%s,"stale_entries":%s,"current_findings":%s,"change_scoped":false,"stale":%s,"warning":"%s","gate_trips":%s%s}}\n' \
+  "${MOCK_TOTAL_ISSUES:-0}" "$entries" "$matched" "$stale" "$findings" "$stale_flag" "$advisory" "$gate_trips" "$unrecognised"
 if [ "${MOCK_EXIT_ONE:-}" = "1" ]; then
   exit 1
 fi
@@ -3654,7 +3658,7 @@ assert_contains "$STALE_STDOUT" "baseline and save-baseline name the same file" 
 # 14. The step summary carries the advisory on every render path, because both
 # preferred paths return early and would otherwise drop it.
 run_stale_summary() {
-  local label=$1 expected=${STALE_SUMMARY_EXPECTED:-"Baseline is partially stale"}
+  local label=$1 expected=${STALE_SUMMARY_EXPECTED-"Baseline is partially stale"}
   shift
   local run_dir
   run_dir=$(mktemp -d "$STALE_WORK/summary.XXXXXX")
@@ -3676,8 +3680,13 @@ run_stale_summary() {
       env "$@" bash "$SCRIPTS_DIR/summary.sh" > /dev/null 2>&1
   )
   set -e
-  assert_contains "$(cat "$run_dir/step_summary")" "$expected" \
-    "stale gate: the step summary carries the advisory on the ${label} path"
+  if [ -n "$expected" ]; then
+    assert_contains "$(cat "$run_dir/step_summary")" "$expected" \
+      "stale gate: the step summary carries the advisory on the ${label} path"
+  else
+    assert_not_contains "$(cat "$run_dir/step_summary")" "Baseline recognises nothing" \
+      "stale gate: the step summary says nothing about the ${label} path"
+  fi
 }
 
 run_stale_summary "native" HAS_NATIVE_REPORT="true"
@@ -3685,23 +3694,39 @@ run_stale_summary "typed" HAS_NATIVE_REPORT="false" \
   FALLOW_PR_COMMENT_ENVELOPE_FILE="envelope.json"
 run_stale_summary "jq fallback" HAS_NATIVE_REPORT="false"
 
-# 15. A baseline with no recognised entries suppresses nothing, so every
-# verdict reads green honestly and the advisory `case` would fall through to its
-# silent arm: "0" is non-empty and reaches the silent `*)` arm. The branch keys
-# on the count rather than on the command, so the command here is only the one
-# this mock's envelope shape models; the wrong-kind case that motivates it is
-# pinned per command in the Rust integration tests. The step log names the
-# path; the summary has no variable for it.
+# 15. A baseline written by another command suppresses nothing, so every
+# verdict reads green honestly and the advisory `case` falls through to its
+# silent arm. The branch reads the binary's own verdict rather than the entry
+# count, so the command here is only the one this mock's envelope shape models;
+# the wrong-kind case that motivates it is pinned per command in the Rust
+# integration tests. The step log names the path; the summary has no variable
+# for it.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="wrong-kind.json" \
   MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
-  INPUT_FAIL_ON_STALE_BASELINE="true"
+  MOCK_UNRECOGNISED="1" INPUT_FAIL_ON_STALE_BASELINE="true"
 assert_contains "$STALE_STDOUT" "::warning::fallow: the baseline at wrong-kind.json has no entries this command recognises" \
   "stale gate: a baseline that recognises nothing is called out"
 if [ "$STALE_EXIT" -eq 0 ]; then
-  pass "stale gate: an empty baseline is a real state and does not fail the job"
+  pass "stale gate: an unreadable baseline is a real state and does not fail the job"
 else
-  fail "stale gate: an empty baseline is a real state and does not fail the job" "exit ${STALE_EXIT}"
+  fail "stale gate: an unreadable baseline is a real state and does not fail the job" "exit ${STALE_EXIT}"
 fi
+
+# A baseline passed through the `args` input never reaches INPUT_BASELINE, so
+# the line degrades to the subject instead of going missing.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_ARGS="--baseline wrong-kind.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
+  MOCK_UNRECOGNISED="1"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the loaded baseline has no entries this command recognises" \
+  "stale gate: a baseline passed through args is called out without a path"
+
+# A baseline saved on a project with nothing to record carries zero entries and
+# is not a mistake, so the warning the repository cannot turn off must not fire
+# on the documented save-on-green-main workflow.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="own-empty.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0"
+assert_not_contains "$STALE_STDOUT" "has no entries this command recognises" \
+  "stale gate: a baseline this command saved itself is never called the wrong file"
 
 # A populated baseline never earns that warning, whatever the advisory says.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json"
@@ -3709,7 +3734,13 @@ assert_not_contains "$STALE_STDOUT" "has no entries this command recognises" \
   "stale gate: a populated baseline says nothing about recognition"
 
 STALE_SUMMARY_EXPECTED="Baseline recognises nothing" \
-  run_stale_summary "zero-entry" HAS_NATIVE_REPORT="true" FALLOW_BASELINE_ENTRIES="0"
+  run_stale_summary "unrecognised" HAS_NATIVE_REPORT="true" \
+  FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true"
+
+STALE_SUMMARY_EXPECTED="" \
+  run_stale_summary "own empty baseline" HAS_NATIVE_REPORT="true" \
+  FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_ADVISORY="none" \
+  FALLOW_BASELINE_GATE_TRIPS="false"
 
 # 16. `fallow audit` loads up to three baselines and judges none of them, and
 # the single-analysis `//` chain is first-match, so it would report one and hide
@@ -3729,7 +3760,7 @@ assert_contains "$STALE_STDOUT" "::notice::fallow: the duplication baseline (aud
 assert_contains "$STALE_STDOUT" "Run 'fallow dupes --baseline audit/du.json' over the whole project" \
   "audit baselines: duplication points at fallow dupes, not at the section name"
 assert_contains "$STALE_STDOUT" "::warning::fallow: the complexity baseline at audit/he.json has no entries this command recognises" \
-  "audit baselines: a zero-entry audit baseline gets the recognition warning"
+  "audit baselines: an unrecognised audit baseline gets the recognition warning"
 if [ "$STALE_EXIT" -eq 0 ]; then
   pass "audit baselines: naming an inert baseline does not fail the job"
 else

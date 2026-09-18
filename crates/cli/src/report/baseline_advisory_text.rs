@@ -268,6 +268,7 @@ mod tests {
                 warning,
                 gate_trips,
                 moved_entries: 0,
+                unrecognised_format: false,
                 scope_reasons: BaselineScopeReasons::empty(),
             };
             let envelope = serde_json::json!({ "baseline_staleness": typed });

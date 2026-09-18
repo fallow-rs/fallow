@@ -1842,7 +1842,6 @@ fn load_and_compare_baseline(
         eprintln!("Comparing against baseline: {}", baseline_path.display());
         warn_on_baseline_staleness(staleness, baseline_path);
     }
-    crate::baseline_gate::note_zero_entry_baseline(Some(baseline_path), baseline_entries);
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: "dead-code",
         path: baseline_path.display().to_string(),
@@ -1853,6 +1852,12 @@ fn load_and_compare_baseline(
         staleness,
         path: baseline_path.to_path_buf(),
         scope_reasons: io.scope_reasons,
+        // `BaselineData` leaves five fields without a serde default, from
+        // `unused_files` to `unused_dev_dependencies`, so a file that is not a
+        // dead-code baseline fails to parse above with exit 2 and never
+        // reaches here. A dead-code baseline that loads is always this
+        // command's own, however empty.
+        unrecognised_format: false,
     })
 }
 

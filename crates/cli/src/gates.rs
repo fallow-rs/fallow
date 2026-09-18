@@ -264,6 +264,7 @@ mod tests {
             warning: fallow_output::BaselineStalenessAdvisory::None,
             gate_trips: true,
             moved_entries: 0,
+            unrecognised_format: false,
             scope_reasons: fallow_output::BaselineScopeReasons::empty(),
         };
         let unarmed = stale_baseline_outcome(Some(&staleness), false).expect("verdict published");
@@ -287,6 +288,7 @@ mod tests {
             warning: fallow_output::BaselineStalenessAdvisory::None,
             gate_trips: false,
             moved_entries: 0,
+            unrecognised_format: false,
             scope_reasons: fallow_output::BaselineScopeReasons::empty()
                 .with(fallow_output::ScopeReason::Production),
         };

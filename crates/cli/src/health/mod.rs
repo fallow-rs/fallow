@@ -796,7 +796,7 @@ fn report_loaded_baseline(result: &HealthResult, baseline_path: Option<&std::pat
     let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
         return;
     };
-    crate::baseline_gate::note_zero_entry_baseline(baseline_path, staleness.baseline_entries);
+    crate::baseline_gate::note_unrecognised_baseline(baseline_path, staleness.unrecognised_format);
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: "health",
         path: path.display().to_string(),

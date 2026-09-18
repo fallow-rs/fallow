@@ -161,6 +161,10 @@ pub(super) fn load_health_baseline(
         matched_entries: overlap.matched_entries,
         moved_entries: overlap.moved_entries,
         current_findings: before,
+        unrecognised_format: !crate::baseline::declares_baseline_format(
+            &json,
+            HealthBaselineData::DECLARED_KEYS,
+        ),
         scope_reasons,
     };
     let staleness = staleness_from_counts(&counts);
@@ -226,6 +230,9 @@ struct StalenessCounts {
     /// found nothing to compare, either because the project is clean or the
     /// scope was empty, so staleness cannot be judged and `stale` stays false.
     current_findings: usize,
+    /// True when the file carried no key the health baseline format writes, so
+    /// it is another command's baseline rather than an empty health one.
+    unrecognised_format: bool,
     /// Which channels narrowed this run. `change_scoped` is derived from it, so
     /// the boolean and the published array cannot disagree.
     scope_reasons: fallow_output::BaselineScopeReasons,
@@ -234,7 +241,11 @@ struct StalenessCounts {
 /// Staleness data for a loaded baseline that matched `matched_entries` of its
 /// `baseline_entries` saved entries on this run.
 fn staleness_from_counts(counts: &StalenessCounts) -> fallow_output::BaselineStaleness {
-    staleness_decision(counts).to_envelope(counts.moved_entries, counts.scope_reasons)
+    staleness_decision(counts).to_envelope(
+        counts.moved_entries,
+        counts.scope_reasons,
+        counts.unrecognised_format,
+    )
 }
 
 #[cfg(test)]
@@ -247,6 +258,7 @@ mod tests {
             matched_entries,
             moved_entries: 0,
             current_findings: baseline_entries.max(1),
+            unrecognised_format: false,
             scope_reasons: fallow_output::BaselineScopeReasons::empty(),
         }
     }
