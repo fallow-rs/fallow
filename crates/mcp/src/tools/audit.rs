@@ -321,6 +321,33 @@ mod tests {
         assert!(value["verdict"].is_string(), "{value}");
     }
 
+    /// #2699: a `root` pointing at a package added on the branch has no
+    /// counterpart in the base commit. The typed route must audit it and
+    /// attribute everything under it as introduced, as `fallow audit` does on
+    /// the same repository and root, instead of refusing the call over a root
+    /// the caller spelled correctly.
+    #[test]
+    fn typed_route_audits_a_root_added_on_the_branch() {
+        let project = super::super::base_root_fixture::new_package_repo();
+        let root = project
+            .path()
+            .join(super::super::base_root_fixture::NEW_PACKAGE);
+
+        let value = run_audit_api_value(&AuditParams {
+            root: Some(root.display().to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        })
+        .expect("typed route result")
+        .expect("typed route");
+
+        assert_eq!(value["kind"], "audit", "{value}");
+        assert_eq!(value["attribution"]["gate"], "new-only", "{value}");
+        assert_eq!(value["attribution"]["dead_code_introduced"], 1, "{value}");
+        assert_eq!(value["dead_code"]["unused_files"][0]["introduced"], true);
+        assert_eq!(value["verdict"], "fail", "{value}");
+    }
+
     #[test]
     fn default_new_only_audit_uses_programmatic_api_route() {
         let params = AuditParams::default();

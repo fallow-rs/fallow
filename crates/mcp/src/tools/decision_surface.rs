@@ -112,6 +112,38 @@ mod tests {
         assert!(json["decisions"].is_array());
     }
 
+    /// #2699: called without a `base`, `decision_surface` shares the audit
+    /// base-ref detection, and a `root` pointing at a package added on the
+    /// branch has no counterpart in the detected base commit. Both used to
+    /// fail before analysis.
+    #[tokio::test]
+    async fn run_decision_surface_auto_detects_the_base_for_a_root_added_on_the_branch() {
+        let project = super::super::base_root_fixture::new_package_repo();
+        let root = project
+            .path()
+            .join(super::super::base_root_fixture::NEW_PACKAGE);
+
+        let result = run_decision_surface(
+            "unused-binary-on-api-path",
+            DecisionSurfaceParams {
+                root: Some(root.display().to_string()),
+                no_cache: Some(true),
+                ..DecisionSurfaceParams::default()
+            },
+        )
+        .await
+        .expect("api result");
+
+        let text = match &result.content[0] {
+            ContentBlock::Text(text) => &text.text,
+            _ => panic!("expected text content"),
+        };
+        assert_eq!(result.is_error, Some(false), "{text}");
+        let json: serde_json::Value = serde_json::from_str(text).expect("json");
+        assert_eq!(json["kind"], "decision-surface", "{json}");
+        assert!(json["decisions"].is_array(), "{json}");
+    }
+
     fn audit_fixture() -> tempfile::TempDir {
         let project = tempfile::tempdir().expect("project");
         std::fs::create_dir_all(project.path().join("src")).expect("create src");

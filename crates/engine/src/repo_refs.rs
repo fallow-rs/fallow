@@ -1186,7 +1186,49 @@ pub fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> Pat
         dunce::canonicalize(current_root).unwrap_or_else(|_| current_root.to_path_buf());
     match current_root.strip_prefix(&git_root) {
         Ok(relative) => base_worktree_root.join(relative),
-        Err(_) => base_worktree_root.to_path_buf(),
+        Err(error) => {
+            tracing::warn!(
+                current_root = %current_root.display(),
+                git_root = %git_root.display(),
+                error = %error,
+                "Could not remap the analysis root into the base worktree; falling back to the worktree root"
+            );
+            base_worktree_root.to_path_buf()
+        }
+    }
+}
+
+/// Analysis root for a detached base worktree, and whether the base commit
+/// contains it at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BaseAnalysisRoot {
+    /// The head analysis root maps onto a directory that the base commit
+    /// contains, so the base snapshot is analyzed there.
+    Present(PathBuf),
+    /// The head analysis root maps onto a directory the base commit does not
+    /// contain, such as a package added on the branch. Everything under it is
+    /// new, so the base snapshot for that root is empty.
+    NewInHead(PathBuf),
+}
+
+/// Resolve the analysis root inside a detached base worktree and report
+/// whether the base commit contains it.
+///
+/// A root that the base commit does not contain is the ordinary shape of
+/// auditing a package added on the branch. Analyzing the whole base worktree
+/// instead would compare a subdirectory head snapshot against a
+/// whole-repository base snapshot, whose key spaces do not intersect, and
+/// refusing the call would blame a `root` the caller spelled correctly.
+#[must_use]
+pub fn resolve_base_analysis_root(
+    current_root: &Path,
+    base_worktree_root: &Path,
+) -> BaseAnalysisRoot {
+    let root = base_analysis_root(current_root, base_worktree_root);
+    if root.is_dir() {
+        BaseAnalysisRoot::Present(root)
+    } else {
+        BaseAnalysisRoot::NewInHead(root)
     }
 }
 
@@ -1901,6 +1943,34 @@ mod tests {
         assert_eq!(
             base_analysis_root(&app_root, &base_worktree),
             base_worktree.join("apps").join("mobile")
+        );
+    }
+
+    /// Auditing a package added on the branch is the ordinary case where the
+    /// remapped root is absent from the base worktree. Consumers need that
+    /// reported rather than validating the joined path and refusing the call
+    /// (issue #2699).
+    #[test]
+    fn resolve_base_analysis_root_reports_a_root_absent_from_the_base() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        let existing_root = repo.join("apps").join("mobile");
+        fs::create_dir_all(&existing_root).expect("create existing root");
+        let new_root = repo.join("apps").join("new");
+        fs::create_dir_all(&new_root).expect("create new root");
+
+        let base_worktree = temp.path().join("base-worktree");
+        fs::create_dir_all(base_worktree.join("apps").join("mobile"))
+            .expect("create base subdirectory");
+
+        assert_eq!(
+            resolve_base_analysis_root(&existing_root, &base_worktree),
+            BaseAnalysisRoot::Present(base_worktree.join("apps").join("mobile"))
+        );
+        assert_eq!(
+            resolve_base_analysis_root(&new_root, &base_worktree),
+            BaseAnalysisRoot::NewInHead(base_worktree.join("apps").join("new"))
         );
     }
 

@@ -240,6 +240,7 @@ struct AuditSubanalyses {
     complexity: crate::HealthProgrammaticOutput,
 }
 
+#[derive(Default)]
 struct AuditRuntimeKeySnapshot {
     public: AuditProgrammaticKeySnapshot,
     styling: FxHashSet<String>,
@@ -807,7 +808,16 @@ fn compute_base_snapshot(
             .with_code("FALLOW_AUDIT_BASE_WORKTREE_FAILED")
             .with_context("audit.base")
     })?;
-    let base_root = repo_refs::base_analysis_root(&current_root, worktree.path());
+    let base_root = match repo_refs::resolve_base_analysis_root(&current_root, worktree.path()) {
+        repo_refs::BaseAnalysisRoot::Present(root) => root,
+        // A root the base commit does not contain (a package added on the
+        // branch) has an empty base snapshot, so every finding under it is
+        // introduced. That matches the CLI, which analyzes the same absent
+        // directory and finds nothing there.
+        repo_refs::BaseAnalysisRoot::NewInHead(_) => {
+            return Ok(AuditRuntimeKeySnapshot::default());
+        }
+    };
     let current_config_path = options
         .analysis
         .config_path

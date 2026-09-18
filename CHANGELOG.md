@@ -16,8 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`origin/main` followed by a newline). `fallow audit` was unaffected, since it
   trims its own probes. The engine's git probe now returns trimmed, non-empty
   output, so both routes resolve the same merge-base and the tools return a
-  verdict. A repository root pointing at a subdirectory also gets the matching
-  subdirectory of the base snapshot again instead of the whole base worktree.
+  verdict. A `root` pointing at a subdirectory also gets the matching
+  subdirectory of the base snapshot again instead of the whole base worktree,
+  and a `root` the base commit does not contain, such as a package added on the
+  branch, is audited against an empty base snapshot so everything under it is
+  attributed as introduced, matching `fallow audit` on the same root.
   Thanks [@codingthat](https://github.com/codingthat) for the report and the
   bisect (Closes [#2699](https://github.com/fallow-rs/fallow/issues/2699)).
 

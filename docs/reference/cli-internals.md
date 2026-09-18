@@ -90,9 +90,18 @@ an exit code.
   `decision_surface` routes in `crates/api/src/runtime/` delegate to it. The
   CLI previously kept a second copy with its own git probe, which is how the
   two routes drifted into disagreeing about the same repository (#2699). Do not
-  reintroduce a git probe outside `repo_refs`; every probe there returns
-  trimmed, non-empty stdout, because callers feed the values back to git as
-  refs and compare them as paths.
+  reintroduce base-ref detection, or a git probe serving it, outside
+  `repo_refs`; every probe there returns trimmed, non-empty stdout, because
+  callers feed the values back to git as refs and compare them as paths.
+  Unrelated CLI-local probes stay where they are: `get_head_sha` in
+  `crates/cli/src/audit_base_ref.rs`, the base-worktree helpers in
+  `crates/cli/src/base_worktree.rs`, and the hook scaffolding in
+  `crates/cli/src/init.rs`.
+- A base analysis root that the base commit does not contain is a normal audit
+  shape, not a caller error. `repo_refs::resolve_base_analysis_root` reports it,
+  and the typed `audit` and `decision_surface` routes take an empty base
+  snapshot for it, so a package added on the branch has everything under it
+  attributed as introduced, matching the CLI (#2699).
 - Audit worktree cleanup must be scoped to Fallow-owned paths and registrations.
   Never prune unrelated user worktrees.
 - `ci reconcile-review` and `ci post-review` isolate provider lifecycle
