@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789804645427,
+  "lastUpdate": 1789817979916,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "935f1ca88e7d0925c75bcb159df915d6e55db84c",
-          "message": "feat: report skipped hidden directories that hold source files (#2450)\n\nCloses #461.\n\nSource discovery skips dot-prefixed directories outside a small convention\nallowlist, and the skip was silent, so first-party code under a directory such\nas `.claude/hooks/` was invisible with no explanation and no config field to\nreach it.\n\nA `skipped-source-dotdir` workspace diagnostic and one aggregated stderr note\nnow name each skipped directory that holds source files the project has not\nexcluded, state that its imports and exports are not analyzed, and give the two\nreal remedies: `fallow --root <dir>`, or `ignorePatterns` to silence it.\nTraversal is unchanged. Classification is bounded and deterministic.\n\nTwo containment defects are fixed alongside it. A `package.json` script\nreference now scopes the exact root-relative path it names instead of every\ndirectory of that name in the tree, with the scope's match mode carried across\nthe engine boundary. `.pnpm` joins the script-scope denylist beside\n`.pnpm-store`, along with 17 further generated-output and VCS directories.\n\nThe diagnostic kind is additive under the open-set exception for\n`workspace_diagnostics[].kind`, so no envelope moves its `schema_version`.",
-          "timestamp": "2026-08-30T19:57:32+02:00",
-          "tree_id": "52406d8eac7daee188cacd29942cf996175779af",
-          "url": "https://github.com/fallow-rs/fallow/commit/935f1ca88e7d0925c75bcb159df915d6e55db84c"
-        },
-        "date": 1788112984705,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9764877,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49430,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1186790,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8410,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8401,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "40e9dfb659aefb38c8df28a626b222f1bae6e5cb",
+          "message": "fix(cli): say on every artefact when a baseline went stale or cannot be judged (#2705)\n\nFollow-ups to the baseline staleness work in 3.27.0.\n\nThe sticky PR comment, the decision sidecar behind the Check Run and the\nGitLab MR note now carry the baseline advisory, so a reviewer sees a\nrotted baseline on the surface they read and not only in the job log.\n\nbaseline_staleness gains scope_reasons, which names the channels that\nnarrowed a run (diff, changed-since, changed-files, workspace,\nchanged-workspaces, scope, file, issue-type-filter, production), and\nunrecognised_format, which is true when the loaded file carries nothing\nthe running command writes into its own baselines. A baseline another\ncommand saved no longer reports zero entries and gates green in silence,\nwhile a baseline this command saved on a clean project is not flagged.\n\nA narrowed run with a non-empty baseline gains a recheck-baseline next\nstep when repeating the command without the narrowing can judge it. The\nstep is withheld for production and workspace scoping, and while\nFALLOW_DIFF_FILE is exported on a diff-scoped run.\n\nfallow audit's three baselines are judged and reported instead of\nrotting behind the changed-file scope. The Action publishes\nbaseline-scope-reasons and baseline-unrecognised; the GitLab template\nand the MCP tools state the same facts.\n\nCloses #2675\nCloses #2677\nCloses #2678\nCloses #2679",
+          "timestamp": "2026-09-19T13:35:04+02:00",
+          "tree_id": "4392418240b688d6c4cb66a997e74a2ac9387788",
+          "url": "https://github.com/fallow-rs/fallow/commit/40e9dfb659aefb38c8df28a626b222f1bae6e5cb"
+        },
+        "date": 1789817975546,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9894148,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51236,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1206451,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8491,
             "unit": "allocations"
           }
         ]
