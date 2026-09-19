@@ -940,7 +940,7 @@
     "json-schema-to-typescript": "16.0.0",
     "mocha": "11.8.0",
     "rolldown": "1.2.8",
-    "ovsx": "1.1.1",
+    "ovsx": "1.2.0",
     "typescript": "7.0.2",
     "vitest": "5.0.0",
     "yauzl": "3.4.0"
