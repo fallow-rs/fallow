@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789804952048,
+  "lastUpdate": 1789818271778,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "e368c0d05060409b9bcea702972415a85193c914",
-          "message": "fix(process): wait out an executable that is busy at spawn (#2496)\n\nUnix refuses to exec a file while any process holds it open for writing, and the\nholder is not always the process that opened it. `fs::write` closes its\ndescriptor, but a fork from any other thread during that open window carries a\nreference to the same open file description into the new child, and the inode\nkeeps counting a writer until that child reaches its own exec. A multi-threaded\nprocess that writes an executable and then runs it therefore races every other\nthread that spawns. That is how `cargo test -p fallow-api --lib` failed once in\nCI with `failed to spawn /tmp/.../fallow-similar-code: Text file busy`. The same\nshape reaches real users from the other side: an MCP tool call that re-runs the\nFallow binary while a package manager is still writing it.\n\nA new `crates/process/src/spawn_retry.rs` holds one retry schedule (200\nmicroseconds, doubling, capped at 20 milliseconds, one second total) behind two\nhelpers: a blocking one for `std::process::Command` and a Tokio one that awaits\n`tokio::time::sleep` so the pause yields instead of holding a worker. Both drive\nthe same struct, so the two paths cannot drift.\n\nWired into every managed spawn: `ScopedChild::spawn` and\n`ScopedChild::spawn_process_tree` (companion sidecars, audit helpers),\n`spawn_fallow` in the MCP tool path, and `spawn_managed_child` behind the MCP\ncode_mode tool. The last two re-run the Fallow binary itself. Each call site\nkeeps its exact error text, ProcessTree construction and cleanup behavior.\n`crates/engine/src/repo_refs.rs` deliberately keeps a plain spawn: it runs git\nfrom PATH, a binary Fallow never writes, so it cannot meet the condition.\n\nMeasured with a stress binary linked against the real crate, eight workers each\nwriting a stub and running it, 40000 spawns per row, on Linux:\n\n    Command::spawn (blocking, before)              1382 (3.455%)\n    ScopedChild::spawn_process_tree (after)           0\n    tokio::process::Command::spawn (before)         930 (2.325%)\n    spawn_tokio_retrying_busy_executable (after)      0\n\nSame wall time in both modes, so the retry costs nothing on the success path.\nTwo controls place the fault on the just-written target rather than on spawning:\nthe same loop single threaded fails 0 of 16000, and a thread that spawns a\npre-existing file under the same fork load fails 0 of 2000. On macOS an open\nwrite handle does not block exec at all, which is why this only ever failed on\nLinux CI.\n\nThe suite-level flake is not reproduced: the fallow-api lib suite is green over\n220 contended Linux runs before the change and 220 after. What is established is\nthe mechanism and the per-spawn rate, not a suite-level delta.",
-          "timestamp": "2026-08-31T18:45:13+02:00",
-          "tree_id": "df2f37a9849c34438fac9e1c90a43fdbf2c4d6e2",
-          "url": "https://github.com/fallow-rs/fallow/commit/e368c0d05060409b9bcea702972415a85193c914"
-        },
-        "date": 1788195030964,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/61275ff83c557589aac1b36638b95a83dbfc0e2b"
         },
         "date": 1789804948602,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.7,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "40e9dfb659aefb38c8df28a626b222f1bae6e5cb",
+          "message": "fix(cli): say on every artefact when a baseline went stale or cannot be judged (#2705)\n\nFollow-ups to the baseline staleness work in 3.27.0.\n\nThe sticky PR comment, the decision sidecar behind the Check Run and the\nGitLab MR note now carry the baseline advisory, so a reviewer sees a\nrotted baseline on the surface they read and not only in the job log.\n\nbaseline_staleness gains scope_reasons, which names the channels that\nnarrowed a run (diff, changed-since, changed-files, workspace,\nchanged-workspaces, scope, file, issue-type-filter, production), and\nunrecognised_format, which is true when the loaded file carries nothing\nthe running command writes into its own baselines. A baseline another\ncommand saved no longer reports zero entries and gates green in silence,\nwhile a baseline this command saved on a clean project is not flagged.\n\nA narrowed run with a non-empty baseline gains a recheck-baseline next\nstep when repeating the command without the narrowing can judge it. The\nstep is withheld for production and workspace scoping, and while\nFALLOW_DIFF_FILE is exported on a diff-scoped run.\n\nfallow audit's three baselines are judged and reported instead of\nrotting behind the changed-file scope. The Action publishes\nbaseline-scope-reasons and baseline-unrecognised; the GitLab template\nand the MCP tools state the same facts.\n\nCloses #2675\nCloses #2677\nCloses #2678\nCloses #2679",
+          "timestamp": "2026-09-19T13:35:04+02:00",
+          "tree_id": "4392418240b688d6c4cb66a997e74a2ac9387788",
+          "url": "https://github.com/fallow-rs/fallow/commit/40e9dfb659aefb38c8df28a626b222f1bae6e5cb"
+        },
+        "date": 1789818268500,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
