@@ -36,6 +36,25 @@ fn git(dir: &std::path::Path, args: &[&str]) {
     );
 }
 
+fn git_capture(dir: &std::path::Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git command failed");
+    assert!(
+        output.status.success(),
+        "git {:?} failed\nstderr: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
 fn commit_all(dir: &std::path::Path, message: &str) {
     git(dir, &["add", "."]);
     git(
@@ -4252,6 +4271,48 @@ fn audit_honors_fallow_audit_base_env_when_no_flag() {
         json["base_description"].as_str(),
         Some("FALLOW_AUDIT_BASE=HEAD~1"),
         "env-set base should carry its provenance"
+    );
+}
+
+/// The auto-detected base and its provenance have to survive the CLI's own
+/// plumbing, not only the engine detection: `base_ref` carries the merge-base
+/// SHA and `base_description` names where it came from (issue #2699). The
+/// empty `FALLOW_AUDIT_BASE` pins the override off so the run really
+/// auto-detects.
+#[test]
+fn audit_reports_the_auto_detected_merge_base_with_its_provenance() {
+    let dir = audit_fixture_with_two_commits();
+    let fork_point = git_capture(dir.path(), &["rev-parse", "HEAD~1"]);
+    git(
+        dir.path(),
+        &["update-ref", "refs/remotes/origin/main", &fork_point],
+    );
+    git(
+        dir.path(),
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+    );
+
+    let output = run_audit_string_env(dir.path(), &[], &[("FALLOW_AUDIT_BASE", "")]);
+
+    assert_eq!(
+        output.code, 0,
+        "auto-detected audit should run. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["base_ref"].as_str(),
+        Some(fork_point.as_str()),
+        "the base must be the merge-base SHA, not a bare branch name"
+    );
+    assert_eq!(
+        json["base_description"].as_str(),
+        Some("merge-base with origin/main"),
+        "the auto-detected base must carry its provenance"
     );
 }
 

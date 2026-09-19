@@ -445,6 +445,29 @@ export type RegressionStatus = ("pass" | "exceeded" | "skipped")
  */
 export type RegressionToleranceKind = ("absolute" | "percentage")
 /**
+ * What became of one request on this run.
+ *
+ * Two-valued today. The value set is OPEN so a later `partial` needs no bump,
+ * and it is deliberately not added now: nothing emits it, and a permanently
+ * unused value reads as a measurement nobody takes.
+ */
+export type RequestStatus = ("applied" | "not-applied")
+/**
+ * What a request governs, and therefore what its failure means.
+ *
+ * Published on every entry so a consumer selects on the class rather than on
+ * a name list. Without it the one sentence a consumer can write for the whole
+ * object ("the report is wider than requested") is false for any request that
+ * does not narrow, which is how a failed `--sarif-file` write came to be
+ * reported as an unscoped run. A request name added later carries its own
+ * class, so a consumer written today keeps saying the right thing about it.
+ *
+ * The value set is OPEN, like the names and the statuses: read a class this
+ * build does not recognise as "some request", not as an error, and do not read
+ * it as `scope`.
+ */
+export type RequestEffect = ("scope" | "artifact")
+/**
  * A diagnostic about a workspace-discovery candidate.
  *
  * The `message` field is a human-readable rendering derived from `kind`. It
@@ -586,6 +609,42 @@ kind: "excluded-by-default-ignore"
  */
 excluded_file_count: number
 kind: "no-source-files-analyzed"
+} | {
+/**
+ * Scoring error text.
+ */
+error: string
+kind: "file-scores-unavailable"
+} | {
+kind: "hotspots-skipped"
+} | {
+/**
+ * `true` when the run also asked for ownership attribution, which a
+ * shallow clone skews further by inflating single-author dominance.
+ */
+ownership_requested: boolean
+kind: "shallow-clone"
+} | {
+kind: "unpinned-clock"
+} | {
+/**
+ * Which input failed, as a kebab-case token: `invalid-bot-pattern` or
+ * `codeowners-parse-failed`. The set is open.
+ */
+cause: string
+/**
+ * Underlying error text.
+ */
+error: string
+kind: "ownership-unavailable"
+} | {
+/**
+ * Filesystem or JSON error text.
+ */
+error: string
+kind: "trend-snapshot-unreadable"
+} | {
+kind: "coverage-auto-detected"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
@@ -2836,6 +2895,16 @@ regression?: (RegressionResult | null)
  * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
+/**
+ * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * absent when it was asked for nothing. An entry whose `status` is not
+ * `applied` means the run could not do what it was asked and reported
+ * something WIDER instead, so what follows is a valid report of a scope
+ * nobody requested. Honoured requests are published too, with
+ * `status: "applied"`, so an absent object means "nothing was asked for",
+ * never "nothing failed". See [`crate::RequestOutcomes`].
+ */
+request_outcomes?: (RequestOutcomes | null)
 /**
  * `_meta` block with docs and rule definitions, when `--explain` was
  * passed.
@@ -5400,6 +5469,77 @@ exceeded: boolean
  * Only present when status is `skipped`.
  */
 reason?: (string | null)
+}
+/**
+ * Every narrowing or shaping request a run RECEIVED, keyed by name.
+ *
+ * Received, not failed: a request the run honoured is published with
+ * `status: "applied"`, so a consumer can say "scoped to the change"
+ * positively. Read an absent object as "nothing was asked for", never as
+ * "nothing failed".
+ *
+ * Absent from an envelope whenever it is empty, so a run that was asked for
+ * nothing is byte-identical to one produced before this object existed. An
+ * empty object is never emitted: it would assert that something was asked and
+ * all of it applied, which is a different and false claim.
+ *
+ * The names this build can emit are `changed-since`, `diff-filter` and
+ * `sarif-file`. The reasons are `git-missing`, `not-a-repository`,
+ * `git-failed` and `invalid-ref` for `changed-since`, `oversize`,
+ * `unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for
+ * `diff-filter`, and `directory-create-failed`, `write-failed` and
+ * `serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer
+ * does not recognise means "some request", not an error.
+ *
+ * `sarif-file` reports a SECONDARY artifact rather than the scope of the
+ * report it travels in, and it is in the same object for the same reason the
+ * others are: the run was asked to do something and did something else, and
+ * nothing in the primary report says so. Which of the two an entry is, every
+ * entry says for itself: `affects` is `scope` for the narrowing requests and
+ * `artifact` for this one. Select on it. A consumer that instead assumes the
+ * whole object narrows the report tells its reader an unwritten SARIF file
+ * widened the analysis, which is what `affects` exists to prevent.
+ *
+ * `invalid-ref` is reachable only through the programmatic API. The
+ * `--changed-since` flag validates its value before a run starts and fails
+ * with exit 2 and an error document, which is the right side to err on: a
+ * malformed ref is invalid input rather than a report of the wrong scope.
+ */
+export interface RequestOutcomes {
+[k: string]: RequestOutcome
+}
+/**
+ * One request's fate on one run.
+ *
+ * `reason` and `message` are present exactly when `status` is not `applied`,
+ * and absent otherwise, so a consumer that only wants to know whether a
+ * report is scoped reads `status` alone.
+ */
+export interface RequestOutcome {
+status: RequestStatus
+affects: RequestEffect
+/**
+ * What was asked, as the user spelled it: the git ref for
+ * `changed-since`, the diff source label (`--diff-file pr.diff`,
+ * `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`,
+ * the target path for `sarif-file`. Echoed rather than normalised, so a
+ * consumer must not join it to the project root the way it joins every
+ * other path-shaped field.
+ */
+requested: string
+/**
+ * Why the request was not applied, as a kebab-case token. Present exactly
+ * when `status` is not `applied`. The set is open per request name; the
+ * names this build can emit are listed on [`RequestOutcomes`].
+ */
+reason?: (string | null)
+/**
+ * One sentence naming what was asked, what happened instead, and the next
+ * step. Byte-identical to the stderr line for the same case, so a
+ * consumer that renders this never contradicts a log a human read.
+ * Present exactly when `status` is not `applied`.
+ */
+message?: (string | null)
 }
 /**
  * A read-only follow-up command fallow surfaces from the current findings,
@@ -11075,6 +11215,16 @@ groups?: (HealthGroup[] | null)
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
+ * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * absent when it was asked for nothing. An entry whose `status` is not
+ * `applied` means the run could not do what it was asked and reported
+ * something WIDER instead, so what follows is a valid report of a scope
+ * nobody requested. Honoured requests are published too, with
+ * `status: "applied"`, so an absent object means "nothing was asked for",
+ * never "nothing failed". See [`crate::RequestOutcomes`].
+ */
+request_outcomes?: (RequestOutcomes | null)
+/**
  * `_meta` block with metric definitions, when `--explain` was passed.
  */
 _meta?: (Meta | null)
@@ -11268,6 +11418,16 @@ baseline_staleness?: (BaselineStaleness | null)
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
+ * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * absent when it was asked for nothing. An entry whose `status` is not
+ * `applied` means the run could not do what it was asked and reported
+ * something WIDER instead, so what follows is a valid report of a scope
+ * nobody requested. Honoured requests are published too, with
+ * `status: "applied"`, so an absent object means "nothing was asked for",
+ * never "nothing failed". See [`crate::RequestOutcomes`].
+ */
+request_outcomes?: (RequestOutcomes | null)
+/**
  * `_meta` block with metric / rule definitions, emitted when `--explain`
  * is passed (always present in MCP responses).
  */
@@ -11444,6 +11604,16 @@ baseline_staleness?: (BaselineStaleness | null)
  * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
+/**
+ * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * absent when it was asked for nothing. An entry whose `status` is not
+ * `applied` means the run could not do what it was asked and reported
+ * something WIDER instead, so what follows is a valid report of a scope
+ * nobody requested. Honoured requests are published too, with
+ * `status: "applied"`, so an absent object means "nothing was asked for",
+ * never "nothing failed". See [`crate::RequestOutcomes`].
+ */
+request_outcomes?: (RequestOutcomes | null)
 /**
  * `_meta` block with docs and rule definitions, when `--explain` was
  * passed.
@@ -12124,6 +12294,16 @@ config: SecurityOutputConfig
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
+ * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * absent when it was asked for nothing. An entry whose `status` is not
+ * `applied` means the run could not do what it was asked and reported
+ * something WIDER instead, so what follows is a valid report of a scope
+ * nobody requested. Honoured requests are published too, with
+ * `status: "applied"`, so an absent object means "nothing was asked for",
+ * never "nothing failed". See [`crate::RequestOutcomes`].
+ */
+request_outcomes?: (RequestOutcomes | null)
+/**
  * Security-specific rule and field metadata, emitted with `--explain`.
  */
 _meta?: (Meta | null)
@@ -12757,6 +12937,16 @@ config: SecurityOutputConfig
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
+ * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * absent when it was asked for nothing. An entry whose `status` is not
+ * `applied` means the run could not do what it was asked and reported
+ * something WIDER instead, so what follows is a valid report of a scope
+ * nobody requested. Honoured requests are published too, with
+ * `status: "applied"`, so an absent object means "nothing was asked for",
+ * never "nothing failed". See [`crate::RequestOutcomes`].
+ */
+request_outcomes?: (RequestOutcomes | null)
+/**
  * Security-specific rule and field metadata, emitted with `--explain`.
  */
 _meta?: (Meta | null)
@@ -13049,6 +13239,16 @@ elapsed_ms: ElapsedMs
  * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
+/**
+ * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * absent when it was asked for nothing. An entry whose `status` is not
+ * `applied` means the run could not do what it was asked and reported
+ * something WIDER instead, so what follows is a valid report of a scope
+ * nobody requested. Honoured requests are published too, with
+ * `status: "applied"`, so an absent object means "nothing was asked for",
+ * never "nothing failed". See [`crate::RequestOutcomes`].
+ */
+request_outcomes?: (RequestOutcomes | null)
 /**
  * Per-section `_meta` blocks, when `--explain` was passed.
  */

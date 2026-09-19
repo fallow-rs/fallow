@@ -76,6 +76,12 @@ pub(crate) fn print_summary(kind: EnvelopeKind, envelope: &Value, root: &Path) -
         outln!("");
         outln!("{line}");
     }
+    // Same reasoning, one fact further: whether the run did what it was asked
+    // belongs beside what it concluded, not inside a per-kind section.
+    if let Some(line) = crate::report::request_outcome_text::summary_line(envelope) {
+        outln!("");
+        outln!("{line}");
+    }
     ExitCode::SUCCESS
 }
 

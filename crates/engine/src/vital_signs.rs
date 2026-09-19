@@ -785,10 +785,12 @@ pub(crate) fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
                     Ok(snap) => snapshots.push(snap),
                     Err(e) => {
                         eprintln!("warning: skipping corrupt snapshot {}: {e}", path.display());
+                        record_unreadable_snapshot(root, &path, &e.to_string());
                     }
                 },
                 Err(e) => {
                     eprintln!("warning: could not read snapshot {}: {e}", path.display());
+                    record_unreadable_snapshot(root, &path, &e.to_string());
                 }
             }
         }
@@ -796,6 +798,18 @@ pub(crate) fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
 
     snapshots.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     snapshots
+}
+
+/// Record a snapshot this run could not use, so the thinner trend is visible to
+/// a consumer that never sees the warning above (issue #2689).
+fn record_unreadable_snapshot(root: &Path, path: &Path, error: &str) {
+    crate::health::diagnostics::record_health_diagnostic(
+        root,
+        Some(path),
+        fallow_types::workspace::WorkspaceDiagnosticKind::TrendSnapshotUnreadable {
+            error: error.to_owned(),
+        },
+    );
 }
 
 /// Tolerance for treating a metric delta as "stable" rather than improving/declining.

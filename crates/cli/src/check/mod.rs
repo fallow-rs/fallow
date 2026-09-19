@@ -25,6 +25,7 @@ pub mod rules;
 
 pub use filtering::get_changed_files;
 pub use filtering::resolve_workspace_scope;
+pub use filtering::try_get_changed_files;
 
 #[derive(Default, Clone)]
 pub struct IssueFilters {
@@ -1053,7 +1054,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     let changed_files: Option<rustc_hash::FxHashSet<std::path::PathBuf>> = opts
         .changed_since
-        .and_then(|git_ref| filtering::get_changed_files(opts.root, git_ref));
+        .and_then(|git_ref| crate::requests::resolve_changed_since(opts.root, git_ref));
 
     let mut data = run_check_analysis(opts, &config)?;
 

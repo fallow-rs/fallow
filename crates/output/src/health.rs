@@ -63,6 +63,15 @@ pub struct HealthOutput<Report, Group> {
     /// was asked for", never "nothing failed". See [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
+    /// Every narrowing or shaping request this run RECEIVED, keyed by name,
+    /// absent when it was asked for nothing. An entry whose `status` is not
+    /// `applied` means the run could not do what it was asked and reported
+    /// something WIDER instead, so what follows is a valid report of a scope
+    /// nobody requested. Honoured requests are published too, with
+    /// `status: "applied"`, so an absent object means "nothing was asked for",
+    /// never "nothing failed". See [`crate::RequestOutcomes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_outcomes: Option<crate::RequestOutcomes>,
     /// `_meta` block with metric definitions, when `--explain` was passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
@@ -96,6 +105,9 @@ pub struct HealthOutputInput<Report, Group> {
     pub groups: Option<Vec<Group>>,
     /// Every gate this run evaluated, absent when it evaluated none.
     pub gate_outcomes: Option<crate::GateOutcomes>,
+    /// Every narrowing or shaping request this run received, absent when it
+    /// was asked for nothing.
+    pub request_outcomes: Option<crate::RequestOutcomes>,
     /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<Meta>,
     /// Workspace-discovery, source-discovery, and analysis-stage diagnostics.
@@ -131,6 +143,7 @@ pub fn build_health_output<Report, Group>(
         grouped_by: input.grouped_by,
         groups: input.groups,
         gate_outcomes: input.gate_outcomes,
+        request_outcomes: input.request_outcomes,
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
@@ -173,6 +186,7 @@ mod tests {
         let output = serialize_health_json_output(HealthJsonOutputInput {
             output: HealthOutputInput {
                 gate_outcomes: None,
+                request_outcomes: None,
                 schema_version: 7,
                 version: "test".to_string(),
                 elapsed: Duration::ZERO,

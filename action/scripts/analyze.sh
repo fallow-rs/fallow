@@ -1457,8 +1457,36 @@ DEGRADED_SUMMARY=$(jq -r '
 ' "$RESULTS_FILE" 2>/dev/null || true)
 if [ -n "$DEGRADED_SUMMARY" ]; then
   ANALYSIS_DEGRADED=true
-  echo "::warning::Fallow analyzed a degraded file set: ${DEGRADED_SUMMARY}. Findings were computed over less than the whole project."
+  echo "::warning::Fallow ran with degraded inputs: ${DEGRADED_SUMMARY}. Some findings or scores were computed over less than the whole project, or from an input that did not load."
 fi
+# --- Requests the run could not apply (issues #2687, #2688) ---
+#
+# The CLI writes this to stderr too, and this step replays stderr as
+# ::debug:: (see below), which nobody reads without ACTIONS_STEP_DEBUG. The
+# envelope is the channel that survives `--quiet --format json`, which is how
+# this step always invokes fallow.
+#
+# One aggregated warning, for the same annotation-budget reason as the
+# degraded-analysis block above. Honoured requests are deliberately not named:
+# the interesting fact is a report that is wider than what was asked for.
+#
+# Selected on `affects == "scope"`, never on a name list. The object also
+# carries requests that produce a file beside the report (`sarif-file`), whose
+# failure says nothing about the report's scope; warning "the findings below
+# cover more of the project" for one of those states the opposite of what
+# happened, and the SARIF-absence warning below already owns that case. A
+# request name added in a later release carries its own class, so this selector
+# keeps saying the right thing about it.
+REQUESTS_UNAPPLIED=$(jq -r '
+  [ (.request_outcomes // {}) | to_entries[]
+    | select(.value.status != "applied" and .value.affects == "scope")
+    | if .value.reason then "\(.key) (\(.value.reason))" else .key end ]
+  | join(", ")
+' "$RESULTS_FILE" 2>/dev/null || true)
+if [ -n "$REQUESTS_UNAPPLIED" ]; then
+  echo "::warning::Fallow could not apply: ${REQUESTS_UNAPPLIED}. The findings below cover more of the project than was requested, so do not read this run as scoped to the change."
+fi
+
 if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' "$RESULTS_FILE" > /dev/null 2>&1; then
   EMPTY_ANALYSIS=true
   EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check the analysis root, ignorePatterns, and any path or workspace filter."
@@ -1487,7 +1515,10 @@ if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && 
   if [ "$HAS_NATIVE_REPORT" = "true" ]; then
     REPORT_ARGS=(report --from "$RESULTS_FILE" --root "$INPUT_ROOT" --quiet --format sarif)
     [ -n "${INPUT_CONFIG:-}" ] && REPORT_ARGS+=(--config "$INPUT_CONFIG")
-    fallow "${REPORT_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null || true
+    # Appended rather than discarded: the re-render is the last chance to
+    # produce the artefact, so the reason it failed is the only useful thing
+    # left. The stderr replay below picks it up (issue #2690).
+    fallow "${REPORT_ARGS[@]}" > "$SARIF_FILE" 2>> "$STDERR_FILE" || true
   fi
   if ! valid_sarif "$SARIF_FILE"; then
     # Compatibility path for pinned binaries that either lack `report` or
@@ -1510,10 +1541,20 @@ if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && 
         SARIF_ARGS+=("sarif")
       fi
     done
-    fallow "${SARIF_ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null || true
+    fallow "${SARIF_ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>> "$STDERR_FILE" || true
   fi
   if ! valid_sarif "$SARIF_FILE"; then
-    echo "::warning::SARIF generation failed"
+    # A missing artefact keeps the step green and uploads nothing, so code
+    # scanning silently stops receiving alerts. Driven by file absence rather
+    # than by the envelope, so it also fires for a pinned older binary that
+    # publishes no `request_outcomes` (issue #2690).
+    # Root only: `--sarif-file` is rejected for command: audit, which is the one
+    # envelope with a nested dead_code section, so there is no second carrier.
+    SARIF_FILE_REASON=$(jq -r '
+      (.request_outcomes // {})["sarif-file"]
+      | if . == null or .status == "applied" then empty else (.message // .reason) end
+    ' "$RESULTS_FILE" 2>/dev/null || true)
+    echo "::warning::Fallow produced no SARIF document, so this run uploads nothing and code scanning keeps the alerts from the previous upload.${SARIF_FILE_REASON:+ ${SARIF_FILE_REASON}} Check the earlier log lines for the cause, or drop format: sarif if code scanning is not wanted."
     rm -f "$SARIF_FILE"
   fi
 fi
@@ -1579,7 +1620,8 @@ fi
     "gates_warned=$(join_gate_names "${GATE_WARNED_NAMES[@]:-}")" \
     "gates_skipped=$(join_gate_names "${GATE_SKIPPED_NAMES[@]:-}")" \
     "gates_passed=$(join_gate_names "${GATE_PASSED_NAMES[@]:-}")" \
-    "analysis_degraded=${ANALYSIS_DEGRADED}"
+    "analysis_degraded=${ANALYSIS_DEGRADED}" \
+    "requests_unapplied=${REQUESTS_UNAPPLIED}"
   if [ -f "$SARIF_FILE" ]; then
     printf '%s\n' "sarif=${SARIF_FILE}"
   fi

@@ -73,6 +73,145 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `baseline-unrecognised` output, and both integrations now report the fact for
   a baseline passed through `args` or `FALLOW_ARGS` as well.
 
+- **A run that asked to be scoped and could not be now says so.** Before:
+  `--changed-since origin/main` on a shallow clone, or a `--diff-file` fallow
+  could not place, warned on stderr, widened to the whole project and produced a
+  report that looked scoped. After: the run publishes `request_outcomes` in its
+  JSON envelope, so a reviewer, a CI job and an agent can all tell a scoped
+  report from a whole-project one.
+
+  This mattered most where nobody could see it. Both the GitHub Action and the
+  GitLab template invoke fallow with `--quiet` and a machine format, and the
+  diff source they pass arrives through `$FALLOW_DIFF_FILE`, which is the one
+  channel `--quiet` silences completely. A pull request whose diff fallow could
+  not place therefore reported every finding in the repository as though they
+  were all introduced by the change, with no trace anywhere the consumer reads.
+
+  Two channels narrow a report today. `changed-since` reports `git-missing`,
+  `not-a-repository` or `git-failed`; `diff-filter` reports `oversize`,
+  `unreadable`, `not-utf8`, `foreign-namespace` or `ambiguous-base`. Each entry
+  carries `affects` (`scope` here, `artifact` for a request that writes a file
+  beside the report), `requested` (what was asked, as you spelled it, never
+  rewritten to be root-relative) and, when the request was not applied, a
+  `reason` token and a one-sentence `message` that ends with the next step.
+  Select on `affects` rather than on a name: it is what lets a consumer say "the
+  report is wider than you asked" about exactly the requests that widen it, and
+  a request added later carries its own class. Honoured requests are published too, with
+  `status: "applied"`, which is what lets a comment state "scoped to the
+  change" positively: read an absent object as "nothing was asked for", never
+  as "nothing failed". The key set and the `status` value set are both open, so
+  a request added later reaches an unchanged consumer.
+
+  `fallow audit` is unaffected and carries no object: it already exits 2 rather
+  than widen, and states its scope through `base_ref` and `base_description`.
+  Its error document now also names the cause git reported for a `--base` it
+  could not resolve.
+
+  On the comment and review targets, `fallow report --from` states a diff filter
+  that stood down in the rendering process itself. Both integrations download
+  the pull request's diff in those steps, so that filter, not the analysis run's,
+  decides which findings become inline comments.
+
+  The rendered surfaces carry the fact too. The job summary, the pull-request
+  comment, the merge-request note, both review targets and the annotation
+  stream state it, live and through `fallow report --from`, and it is
+  informational everywhere: nothing here changes an exit code. The GitHub
+  Action warns once and publishes a `requests-unapplied` output; the GitLab
+  template prints the same line and writes `FALLOW_REQUESTS_UNAPPLIED` into
+  `fallow-gates.env`. The MCP tools restate it on the root `warnings` array,
+  where it replaces a silence the `--quiet` subprocess made unavoidable.
+
+  No `schema_version` moves: the object is additive, optional, and absent on
+  every run produced today
+  (Closes [#2687](https://github.com/fallow-rs/fallow/issues/2687), [#2688](https://github.com/fallow-rs/fallow/issues/2688)).
+
+- **A health score computed from inputs that did not load now says so.** Before:
+  scoring that failed, a project with no git repository, a shallow clone, an
+  unpinned run clock, a CODEOWNERS or bot pattern that would not parse and an
+  unreadable trend snapshot each printed a line and then contributed zeros, and
+  the envelope presented those zeros exactly as it presents a genuinely clean
+  measurement. After: each one records a `workspace_diagnostics[]` entry with
+  `degrades_analysis: true`, so "measured zero" and "measured nothing" are
+  finally distinguishable from a machine-read report.
+
+  The new kinds are `file-scores-unavailable`, `hotspots-skipped`,
+  `shallow-clone`, `unpinned-clock`, `ownership-unavailable` (with a `cause` of
+  `invalid-bot-pattern` or `codeowners-parse-failed`) and
+  `trend-snapshot-unreadable`. A seventh, `coverage-auto-detected`, is
+  provenance rather than a degradation and deliberately does not set
+  `degrades_analysis`: it names the coverage file that fed the CRAP scores, so
+  a score computed against a file nobody chose can be reproduced. Its note is
+  now printed on any non-quiet run rather than only when `CI` is set, which
+  printed it exactly where stderr is discarded and hid it from the person who
+  could act on it. Every other stderr line is unchanged, and the entries are
+  recorded whether or not `--quiet` was passed.
+
+  No consumer change is required: the GitHub Action, the GitLab template and
+  the MCP tools already select on `degrades_analysis` rather than on a list of
+  kinds, so they report these the day you upgrade. Their aggregated warning now
+  says "degraded inputs" rather than "a degraded file set", because a health
+  input that did not load is not a narrower file list. No `schema_version`
+  moves: the kind set is open
+  (Closes [#2689](https://github.com/fallow-rs/fallow/issues/2689)).
+
+- **A `--sarif-file` that was never written is now on the wire.** Before: an
+  unwritable directory, a failed create, a serialization error or a failed
+  flush each printed a warning, left the primary report and the exit code
+  untouched, and put nothing in the envelope, so a repository configured for
+  code scanning could quietly stop receiving alerts behind a green job. After:
+  the run publishes a `sarif-file` entry in `request_outcomes` with
+  `directory-create-failed`, `write-failed` or `serialize-failed` and the same
+  sentence it printed, and `fallow report --from` and the MCP tools can read
+  it. A written file is published as `applied` with its path. The entry is
+  marked `affects: "artifact"`, so nothing reports a failed write as a report
+  that covers more of the project than was asked for: the Action's
+  `requests-unapplied` output and both integrations' scope warning list the
+  narrowing requests only.
+
+  The GitHub Action's warning for a SARIF artefact it could not produce now
+  says what that costs (nothing is uploaded, so code scanning keeps the alerts
+  from the previous upload) and repeats the reason the envelope recorded. It is
+  driven by the file being absent rather than by the envelope, so it still
+  fires for a pinned older binary, and the two SARIF re-render fallbacks no
+  longer send their own stderr to `/dev/null`. The exit code is unchanged
+  everywhere: the report on stdout is complete either way
+  (Closes [#2690](https://github.com/fallow-rs/fallow/issues/2690)).
+
+- **`--group-by` now says so on every format that drops it.** Grouping is
+  carried by `json`, `human`, `sarif` and `codeclimate`. Before: `compact`,
+  `markdown` and `badge` printed a one-line note, and the four pull-request
+  comment and review formats plus `github-annotations` and `github-summary`
+  rendered a flat document and said nothing at all, so a consumer that asked
+  for groups received a report that is valid, complete and not what it asked
+  for. After: every one of them prints the note, naming the format the way
+  `--format` spells it, and the four comment and review bodies carry one clause
+  stating the requested mode and pointing at `--format json`. `fallow report
+  --from` renders the identical clause for a saved grouped envelope.
+
+  The fallback itself is unchanged and still exits `0`: it produces a less
+  useful report rather than a wrong one, and failing a run that passes
+  `--group-by` across several formats would be out of proportion. Nothing is
+  added to the envelope either, because the fallback is decided at render time
+  and the one format with an envelope supports grouping. The degradation is now
+  documented in `docs/backwards-compatibility.md`, which is the part of the
+  report that was unambiguously missing
+  (Closes [#2691](https://github.com/fallow-rs/fallow/issues/2691)).
+
+- **The MCP `audit` and `decision_surface` tools auto-detect a base ref again.**
+  Called without a `base` argument on a repository that has a remote, both tools
+  failed before analysis with `FALLOW_CHANGED_FILES_FAILED`, because the
+  auto-detected ref reached the diff carrying the line ending git printed
+  (`origin/main` followed by a newline). `fallow audit` was unaffected, since it
+  trims its own probes. The engine's git probe now returns trimmed, non-empty
+  output, so both routes resolve the same merge-base and the tools return a
+  verdict. A `root` pointing at a subdirectory also gets the matching
+  subdirectory of the base snapshot again instead of the whole base worktree,
+  and a `root` the base commit does not contain, such as a package added on the
+  branch, is audited against an empty base snapshot so everything under it is
+  attributed as introduced, matching `fallow audit` on the same root.
+  Thanks [@codingthat](https://github.com/codingthat) for the report and the
+  bisect (Closes [#2699](https://github.com/fallow-rs/fallow/issues/2699)).
+
 ### Added
 
 - **A narrowed run now names the channels that narrowed it.** A run scoped to
@@ -104,9 +243,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mutating: it re-reads the baseline and reports, it never re-saves. A run
   narrowed by production mode or by workspace scoping gets no entry, because
   those channels resolve from the project config and the environment as well as
-  from a flag, so the suggested command would come back just as narrow. The MCP tools state the same fact as a sentence in
-  their `warnings` array, so an agent handed a scoped report learns that the
-  baseline behind it was never judged.
+  from a flag, so the suggested command would come back just as narrow. The MCP
+  tools state the same fact as a sentence in their `warnings` array, so an agent
+  handed a scoped report learns that the baseline behind it was never judged.
 
 ## [3.27.0] - 2026-09-17
 

@@ -88,6 +88,7 @@ fn api_health_json_document(
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         gate_outcomes: None,
+        request_outcomes: None,
         report: report.clone(),
         root,
         elapsed,
@@ -119,6 +120,7 @@ fn api_grouped_duplication_json_document(
         .collect();
     fallow_api::serialize_grouped_duplication_json(fallow_api::GroupedDuplicationJsonOutputInput {
         gate_outcomes: None,
+        request_outcomes: None,
         baseline_staleness: None,
         report,
         grouping,
@@ -2088,6 +2090,8 @@ fn baseline_pr_comment(staleness: &BaselineStaleness, provider: Provider) -> Str
         fallow_cli::report::baseline_advisory_text::advisory_line_for_staleness(Some(staleness))
             .as_deref(),
         Some(&gates),
+        None,
+        None,
     );
     render_pr_comment_with_status_note("check", provider, &issues, None, note.as_deref())
 }

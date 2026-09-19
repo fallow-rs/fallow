@@ -65,6 +65,7 @@ mod pr_details;
 mod pr_status;
 mod pr_summary;
 mod report_contract;
+mod request_outcomes;
 mod review_envelopes;
 mod root_envelopes;
 mod sarif;
@@ -295,6 +296,7 @@ pub use report_contract::{
     COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SecurityRuleMeta,
     coverage_analyze_meta, coverage_setup_meta, dupes_meta, health_meta, security_meta,
 };
+pub use request_outcomes::{RequestName, RequestOutcome, RequestOutcomes, RequestStatus};
 pub use review_envelopes::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
     GitLabReviewPositionType, MARKER_REGEX_V2, ReviewCheckConclusion, ReviewComment,

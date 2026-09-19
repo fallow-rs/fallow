@@ -894,6 +894,7 @@ fn build_combined_json_output(
             input.dupes_result,
             input.health_result,
         ),
+        request_outcomes: crate::requests::request_outcomes(),
         check: input.check_result.map(|result| CombinedCheckJsonSection {
             results: &result.results,
             root: &result.config.root,

@@ -55,15 +55,15 @@ use fallow_output::{
     InspectEvidenceSection, InspectFileIdentity, InspectIdentity, InspectOutput,
     InspectSectionStatus, InspectSymbolIdentity, InspectTargetDescriptor, LargeFunctionEntry,
     OwnershipMetrics, RecommendationCategory, RefactoringTarget, RefactoringTargetFinding,
-    RejectedJudgment, ResolutionEvent, ReviewBriefSchemaVersion, ReviewCheckConclusion,
-    ReviewComment, ReviewDirection, ReviewEffort, ReviewEnvelopeEvent, ReviewEnvelopeSchema,
-    ReviewEnvelopeSummary, ReviewEnvelopeWireOutput, ReviewProvider, ReviewReconcileOutput,
-    ReviewReconcileSchema, RiskClass, RiskProfile, RuntimeCoverageReport, SecurityBlindSpotFile,
-    SecurityBlindSpotGroup, SecurityBlindSpotsOutput, SecurityBlindSpotsSchemaVersion,
-    SecurityBlindSpotsSummary, SecurityGateVerdict, SecurityReachabilityCounts,
-    SecurityRuntimeStateCounts, SecuritySchemaVersion, SecuritySeverityCounts, SecuritySummary,
-    SecuritySurvivor, SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion,
-    SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
+    RejectedJudgment, RequestName, ResolutionEvent, ReviewBriefSchemaVersion,
+    ReviewCheckConclusion, ReviewComment, ReviewDirection, ReviewEffort, ReviewEnvelopeEvent,
+    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewEnvelopeWireOutput, ReviewProvider,
+    ReviewReconcileOutput, ReviewReconcileSchema, RiskClass, RiskProfile, RuntimeCoverageReport,
+    SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
+    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
+    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySchemaVersion,
+    SecuritySeverityCounts, SecuritySummary, SecuritySurvivor, SecuritySurvivorsOutput,
+    SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
     SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
     SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
     SimilarCodeCacheClearOutput, SimilarCodeCacheClearSchemaVersion, SimilarCodeInspectOutput,
@@ -789,6 +789,10 @@ fn register_meta_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<GateOutcome>();
     let _ = generator.subschema_for::<GateName>();
     let _ = generator.subschema_for::<GateStatus>();
+    // Same reason for the request catalogue: `RequestOutcomes` is a keyed map,
+    // so the name enum is reachable from nothing and would otherwise be the one
+    // part of the object the mirror does not publish.
+    let _ = generator.subschema_for::<RequestName>();
 }
 
 /// Register the `fallow audit --brief --format json` envelope.

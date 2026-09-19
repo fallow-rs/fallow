@@ -1129,6 +1129,27 @@ fn audit_repo_ref_orchestration_routes_through_engine() {
         );
     }
 
+    // The copy that drifted and caused #2699 lived on the CLI side, so the
+    // same rule has to hold for the CLI entry point into the detection.
+    let cli_path = "crates/cli/src/audit_base_ref.rs";
+    let cli_source = read_source_without_line_comments(cli_path).expect("read cli base-ref source");
+    assert!(
+        cli_source.contains("fallow_engine::repo_refs::auto_detect_audit_base_ref"),
+        "{cli_path} must resolve the auto-detected base through the engine"
+    );
+    for forbidden in [
+        "fn git_stdout",
+        "fn git_ref_exists",
+        "fn git_upstream_ref",
+        "fn git_merge_base",
+        "fn detect_remote_default_ref",
+    ] {
+        assert!(
+            !cli_source.contains(forbidden),
+            "{cli_path} must not own audit git orchestration helper `{forbidden}`"
+        );
+    }
+
     let decision_surface_path = "crates/api/src/runtime/decision_surface.rs";
     let decision_surface =
         read_source_without_line_comments(decision_surface_path).expect("read decision surface");

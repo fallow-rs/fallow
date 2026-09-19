@@ -2430,6 +2430,69 @@ OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   FALLOW_FAIL_ON_ISSUES=false) || true
 assert_contains "$OUT" "skipped-large-file (2)" "gitlab degraded: kinds and counts are aggregated"
 assert_not_contains "$OUT" "boundaries-not-configured" "gitlab degraded: unconfigured-check kinds are not reported"
+assert_contains "$OUT" "Fallow ran with degraded inputs" \
+  "gitlab degraded: the sentence covers a degraded input as well as a narrower file set"
+
+# #2689: the health pipeline's own degraded inputs reach the same aggregated
+# line through the same selector, with no change to this template's jq.
+HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$HEALTH_DEGRADED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=health \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "hotspots-skipped (1)" \
+  "gitlab degraded: the health kinds are reported without a template change"
+assert_not_contains "$OUT" "coverage-auto-detected" \
+  "gitlab degraded: auto-detected coverage is provenance and not a degraded run"
+
+# #2687, #2688: this job runs fallow with --quiet and a machine format, so the
+# envelope is the only channel that reaches the pipeline.
+REQUESTS='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
+ENVELOPE=$(gitlab_gate_envelope '' "$REQUESTS")
+set +e
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false)
+GATE_STATUS=$?
+set -e
+assert_contains "$OUT" "WARNING: Fallow could not apply: changed-since (git-failed)" \
+  "gitlab requests: an unapplied request warns once with its reason"
+assert_not_contains "$OUT" "could not apply: changed-since (git-failed), diff-filter" \
+  "gitlab requests: an honoured request is not named in the warning"
+if [ "$GATE_STATUS" = "0" ]; then
+  pass "gitlab requests: an unapplied request leaves the pipeline green"
+else
+  fail "gitlab requests: an unapplied request leaves the pipeline green" "got $GATE_STATUS"
+fi
+
+APPLIED='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
+ENVELOPE=$(gitlab_gate_envelope '' "$APPLIED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "could not apply" \
+  "gitlab requests: a run that applied everything it was asked stays silent"
+
+ENVELOPE=$(gitlab_gate_envelope '')
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "could not apply" \
+  "gitlab requests: a pinned binary that publishes no object warns about nothing"
+
+# A request that writes a file beside the report narrows nothing.
+ARTIFACT='"request_outcomes":{"sarif-file":{"status":"not-applied","affects":"artifact","requested":"gl-fallow.sarif","reason":"write-failed","message":"m"}}'
+ENVELOPE=$(gitlab_gate_envelope '' "$ARTIFACT")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "could not apply" \
+  "gitlab requests: an unwritten output file is not reported as an unscoped run"
 
 EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
 ENVELOPE=$(gitlab_gate_envelope '' "$EMPTY")

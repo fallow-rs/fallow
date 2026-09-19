@@ -65,12 +65,21 @@ fn load_health_coverage(
     };
     let discovered_sources = (!opts.coverage_inputs.coverage_relocated)
         .then(|| discovered_regular_sources(file_paths, &config.root));
-    if std::env::var("CI").is_ok_and(|v| !v.is_empty()) {
+    // Quiet-gated like every other health note, rather than gated on `CI`
+    // being set. The old guard printed the line only where stderr is discarded
+    // by the consumer and hid it from the human who could act on it; the
+    // machine surface is the diagnostic below (issue #2689).
+    if !opts.quiet {
         eprintln!(
             "note: using auto-detected coverage at {}; pass --coverage explicitly for deterministic CI scores",
             auto_path.display()
         );
     }
+    super::diagnostics::record_health_diagnostic(
+        &config.root,
+        Some(&auto_path),
+        fallow_types::workspace::WorkspaceDiagnosticKind::CoverageAutoDetected,
+    );
     Ok(scoring::load_istanbul_coverage_for_sources(
         &auto_path,
         opts.coverage_inputs.coverage_root,

@@ -265,7 +265,13 @@ fn compute_base_decision_snapshot(
             .with_code("FALLOW_DECISION_SURFACE_FAILED")
             .with_context("decisionSurface.base")
     })?;
-    let base_root = repo_refs::base_analysis_root(current_root, worktree.path());
+    let base_root = match repo_refs::resolve_base_analysis_root(current_root, worktree.path()) {
+        repo_refs::BaseAnalysisRoot::Present(root) => root,
+        // A root the base commit does not contain has an empty base snapshot:
+        // no boundary edges, no cycles, no public API and no manifests, so the
+        // whole surface reads as new in this change.
+        repo_refs::BaseAnalysisRoot::NewInHead(_) => return Ok(DecisionSnapshot::default()),
+    };
     // The base manifests are read while the worktree still exists; a manifest
     // absent at base stays absent (it is new in this change).
     let base_manifests: FxHashMap<String, String> = manifests

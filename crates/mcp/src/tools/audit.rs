@@ -282,6 +282,72 @@ mod tests {
     use super::super::coverage_fixture::{COVERAGE_ROOT, CoverageFixture, branchy_finding};
     use super::*;
 
+    /// #2699: called without a `base` on a repository that has remote-tracking
+    /// refs, the typed route must auto-detect the base and return a verdict.
+    /// It used to fail before analysis because the auto-detected ref reached
+    /// the diff with the line ending git printed.
+    #[test]
+    fn typed_route_auto_detects_the_base_without_a_base_parameter() {
+        let fixture = CoverageFixture::new(false);
+        let root = std::path::PathBuf::from(fixture.root_string());
+        let first_commit = git_capture(&root, &["rev-parse", "HEAD~1"]);
+        git_capture(
+            &root,
+            &["update-ref", "refs/remotes/origin/main", &first_commit],
+        );
+        git_capture(
+            &root,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+
+        let value = run_audit_api_value(&AuditParams {
+            root: Some(fixture.root_string()),
+            gate: Some("all".to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        })
+        .expect("typed route result")
+        .expect("typed route");
+
+        assert_eq!(value["base_ref"], first_commit, "{value}");
+        assert_eq!(
+            value["base_description"], "merge-base with origin/main",
+            "{value}"
+        );
+        assert!(value["verdict"].is_string(), "{value}");
+    }
+
+    /// #2699: a `root` pointing at a package added on the branch has no
+    /// counterpart in the base commit. The typed route must audit it and
+    /// attribute everything under it as introduced, as `fallow audit` does on
+    /// the same repository and root, instead of refusing the call over a root
+    /// the caller spelled correctly.
+    #[test]
+    fn typed_route_audits_a_root_added_on_the_branch() {
+        let project = super::super::base_root_fixture::new_package_repo();
+        let root = project
+            .path()
+            .join(super::super::base_root_fixture::NEW_PACKAGE);
+
+        let value = run_audit_api_value(&AuditParams {
+            root: Some(root.display().to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        })
+        .expect("typed route result")
+        .expect("typed route");
+
+        assert_eq!(value["kind"], "audit", "{value}");
+        assert_eq!(value["attribution"]["gate"], "new-only", "{value}");
+        assert_eq!(value["attribution"]["dead_code_introduced"], 1, "{value}");
+        assert_eq!(value["dead_code"]["unused_files"][0]["introduced"], true);
+        assert_eq!(value["verdict"], "fail", "{value}");
+    }
+
     #[test]
     fn default_new_only_audit_uses_programmatic_api_route() {
         let params = AuditParams::default();
@@ -731,5 +797,21 @@ mod tests {
             .status()
             .expect("git command");
         assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn git_capture(root: &std::path::Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .output()
+            .expect("git command");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
     }
 }

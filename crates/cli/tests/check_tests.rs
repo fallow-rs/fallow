@@ -1500,6 +1500,50 @@ fn type_aware_trace_does_not_credit_an_unreachable_consumer() {
     assert_eq!(trace["semantic"]["references"][0]["path"], "src/orphan.ts");
 }
 
+/// Kinds only a combined run can carry, because the standalone `dead-code`
+/// envelope never runs the health pipeline that records them (issue #2689).
+const HEALTH_STAGE_KINDS: [&str; 7] = [
+    "file-scores-unavailable",
+    "hotspots-skipped",
+    "shallow-clone",
+    "unpinned-clock",
+    "ownership-unavailable",
+    "trend-snapshot-unreadable",
+    "coverage-auto-detected",
+];
+
+/// Assert the combined root is never NARROWER than the standalone `dead-code`
+/// envelope: it carries every entry that envelope carries, in the same order,
+/// and anything extra comes from a section the standalone run never executed.
+///
+/// Equality was the right assertion while only the walks contributed. The
+/// health section now records its own degraded inputs, so an extra entry is
+/// expected and a MISSING one is still a failure.
+fn assert_combined_root_covers_standalone(
+    standalone: &serde_json::Value,
+    combined: &serde_json::Value,
+    context: &str,
+) {
+    let standalone_entries = standalone["workspace_diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let combined_entries = combined["workspace_diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let shared: Vec<serde_json::Value> = combined_entries
+        .iter()
+        .filter(|entry| !HEALTH_STAGE_KINDS.contains(&entry["kind"].as_str().unwrap_or_default()))
+        .cloned()
+        .collect();
+    assert_eq!(
+        standalone_entries, shared,
+        "{context}: standalone {} vs combined {}",
+        standalone["workspace_diagnostics"], combined["workspace_diagnostics"]
+    );
+}
+
 fn combined_root_diagnostics_of_kind(
     json: &serde_json::Value,
     kind: &str,
@@ -1998,11 +2042,17 @@ fn combined_json_root_workspace_diagnostics_are_byte_identical_across_repeat_run
                 "skipped-large-file".to_owned(),
                 "src/huge.test.ts".to_owned()
             ),
+            // The health section's own degraded input, merged into its result
+            // at finalize and unioned in last because health is the last
+            // section (issue #2689). The fixture is a bare temporary directory,
+            // so there is no repository for the churn analysis to read.
+            ("hotspots-skipped".to_owned(), ".".to_owned()),
         ],
         "the union runs in section order: the dead-code analysis's own snapshot \
          (its production walk's skips and the config-load stash), then the \
          registry entries recorded after the session was built, sorted by path \
-         and kind, then the skip only the full-file-set walks saw"
+         and kind, then the skip only the full-file-set walks saw, then the \
+         health section's own degraded inputs"
     );
     for (index, run) in observed.iter().enumerate() {
         assert_eq!(
@@ -2088,10 +2138,10 @@ fn combined_json_root_matches_standalone_dead_code_under_a_production_split() {
         "--quiet",
         "--no-cache",
     ]));
-    assert_eq!(
-        standalone["workspace_diagnostics"], combined["workspace_diagnostics"],
-        "the combined root carries the standalone dead-code list: standalone {} vs combined {}",
-        standalone["workspace_diagnostics"], combined["workspace_diagnostics"]
+    assert_combined_root_covers_standalone(
+        &standalone,
+        &combined,
+        "the combined root carries the standalone dead-code list",
     );
     assert_eq!(
         combined_root_diagnostics_of_kind(&combined, "skipped-large-file").len(),
@@ -2338,11 +2388,10 @@ fn combined_json_root_keeps_both_overlapping_glob_diagnostics() {
         "both globs matched the same directory and both are reported: {}",
         combined["workspace_diagnostics"]
     );
-    assert_eq!(
-        standalone["workspace_diagnostics"], combined["workspace_diagnostics"],
-        "the combined root is never narrower than the standalone dead-code envelope: \
-         standalone {} vs combined {}",
-        standalone["workspace_diagnostics"], combined["workspace_diagnostics"]
+    assert_combined_root_covers_standalone(
+        &standalone,
+        &combined,
+        "the combined root is never narrower than the standalone dead-code envelope",
     );
 }
 

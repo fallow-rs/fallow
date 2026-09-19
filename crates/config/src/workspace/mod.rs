@@ -21,7 +21,8 @@ pub use deno_json::{
 pub use diagnostics::capture_workspace_warnings;
 pub use diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceLoadError, append_workspace_diagnostics,
-    clear_analysis_stage_diagnostics, missing_node_modules_diagnostic, node_modules_missing,
+    clear_analysis_stage_diagnostics, clear_health_stage_diagnostics,
+    health_stage_workspace_diagnostics, missing_node_modules_diagnostic, node_modules_missing,
     record_source_parse_degradations, record_source_read_failures, record_workspace_diagnostics,
     registry_diagnostics_to_fold, replace_source_discovery_diagnostics,
     stash_workspace_diagnostics, workspace_diagnostics_for,

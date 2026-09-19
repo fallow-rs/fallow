@@ -1148,7 +1148,7 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   MOCK_CALL_LOG="$ANALYZE_TMP/sarif-calls" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_not_contains "$OUT" "SARIF generation failed" "analyze: valid SARIF + exit 1 does not warn (issue #813)"
+assert_not_contains "$OUT" "produced no SARIF document" "analyze: valid SARIF + exit 1 does not warn (issue #813)"
 [ -s "$SARIF_OK_WORK/fallow-results.sarif" ] && pass "analyze: valid SARIF + exit 1 still writes the file" || fail "analyze: valid SARIF + exit 1 still writes the file" "missing sarif file"
 HEALTH_ANALYSIS_CALLS=$(grep -c '^health ' "$ANALYZE_TMP/sarif-calls" || true)
 [ "$HEALTH_ANALYSIS_CALLS" -eq 1 ] && pass "analyze: SARIF reuses the saved JSON analysis" || fail "analyze: SARIF reuses the saved JSON analysis" "expected one health analysis, got $HEALTH_ANALYSIS_CALLS"
@@ -1160,8 +1160,15 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" MOCK_SARIF_MODE="empty" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_contains "$OUT" "SARIF generation failed" "analyze: empty/invalid SARIF still warns (issue #813)"
+assert_contains "$OUT" "produced no SARIF document" "analyze: empty/invalid SARIF still warns (issue #813)"
 [ ! -e "$SARIF_BAD_WORK/fallow-results.sarif" ] && pass "analyze: empty SARIF is not published" || fail "analyze: empty SARIF is not published" "empty SARIF file remains"
+# #2690: the step stays green and uploads nothing, so the warning has to say
+# what that costs rather than only that something failed.
+assert_contains "$OUT" "code scanning keeps the alerts from the previous upload" \
+  "analyze: the missing-SARIF warning names the consequence"
+assert_not_contains "$(cat "$ANALYZE_TMP/output" 2>/dev/null || true)" "sarif=fallow-results.sarif" \
+  "analyze: a missing SARIF artefact sets no upload output"
+
 
 SARIF_COMPAT_WORK="$ANALYZE_TMP/sarif-report-empty-direct-valid"
 mkdir -p "$SARIF_COMPAT_WORK"
@@ -1173,10 +1180,38 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   MOCK_CALL_LOG="$ANALYZE_TMP/sarif-compat-calls" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_not_contains "$OUT" "SARIF generation failed" "analyze: report-capable older binary falls back to direct SARIF"
+assert_not_contains "$OUT" "produced no SARIF document" "analyze: report-capable older binary falls back to direct SARIF"
 [ -s "$SARIF_COMPAT_WORK/fallow-results.sarif" ] && pass "analyze: compatibility fallback publishes valid SARIF" || fail "analyze: compatibility fallback publishes valid SARIF" "missing sarif file"
 HEALTH_COMPAT_CALLS=$(grep -c '^health ' "$ANALYZE_TMP/sarif-compat-calls" || true)
 [ "$HEALTH_COMPAT_CALLS" -eq 2 ] && pass "analyze: compatibility fallback reruns only when saved rendering fails" || fail "analyze: compatibility fallback reruns only when saved rendering fails" "expected two health calls, got $HEALTH_COMPAT_CALLS"
+# #2690: when the binary recorded why, the warning repeats its sentence rather
+# than making the reader turn on step debugging to find it.
+SARIF_REASON_WORK="$ANALYZE_TMP/sarif-reason"
+mkdir -p "$SARIF_REASON_WORK"
+cd "$SARIF_REASON_WORK" && rm -f "$ANALYZE_TMP/output"
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then echo "fallow 9.9.9"; exit 0; fi
+if [ "${1:-}" = "--help" ] || [ "${2:-}" = "--help" ]; then echo "--sarif-file"; echo "report"; exit 0; fi
+fmt=""
+prev=""
+for arg in "$@"; do
+  [ "$prev" = "--format" ] && fmt="$arg"
+  prev="$arg"
+done
+if [ "$fmt" = "sarif" ]; then exit 1; fi
+printf '%s\n' '{"summary":{"functions_above_threshold":0},"request_outcomes":{"sarif-file":{"status":"not-applied","affects":"artifact","requested":"fallow-results.sarif","reason":"write-failed","message":"failed to write SARIF file: Permission denied."}}}'
+exit 1
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_contains "$OUT" "failed to write SARIF file: Permission denied." \
+  "analyze: the warning repeats the reason the envelope recorded"
+assert_not_contains "$OUT" "could not apply" \
+  "analyze: a failed SARIF write is not reported as a run wider than requested"
 
 # --- Summary jq tests ---
 
@@ -3864,6 +3899,18 @@ run_gate_analyze() {
   GATE_ARGV=$(cat "$run_dir/analysis.log")
 }
 
+# The output is declared as a comma-separated list, so "present and empty" is a
+# line with nothing after the `=`. Matching the key alone also matches a
+# populated value, which is how a test named for the empty case can never fail.
+assert_requests_unapplied_empty() {
+  local name="$1"
+  if grep -qx 'requests_unapplied=' <<< "$GATE_OUTPUTS"; then
+    pass "$name"
+  else
+    fail "$name" "expected an empty requests_unapplied line, got: $GATE_OUTPUTS"
+  fi
+}
+
 # The headline of every issue in this batch: the gate fails the job even though
 # fail-on-issues is false, because the two are independent.
 for gate_case in \
@@ -3994,9 +4041,60 @@ DEGRADED='"workspace_diagnostics":[{"path":"a","kind":"skipped-large-file","mess
 run_gate_analyze "$(gate_envelope '' "$DEGRADED")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
 assert_contains "$GATE_STDOUT" "node-modules-missing (1), skipped-large-file (2)" \
   "degraded: kinds and counts are aggregated into one warning"
+assert_contains "$GATE_STDOUT" "Fallow ran with degraded inputs" \
+  "degraded: the sentence covers a degraded input as well as a narrower file set"
 assert_not_contains "$GATE_STDOUT" "boundaries-not-configured" \
   "degraded: the unconfigured-check kinds are not reported"
 assert_contains "$GATE_OUTPUTS" "analysis_degraded=true" "degraded: the output is set"
+
+# #2689: the health pipeline's own degraded inputs reach the same aggregated
+# warning through the same selector, with no change to this script's jq.
+HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":".","kind":"shallow-clone","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'
+run_gate_analyze "$(gate_envelope '' "$HEALTH_DEGRADED")" INPUT_COMMAND="health" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "hotspots-skipped (1), shallow-clone (1)" \
+  "degraded: the health kinds are reported without a script change"
+assert_not_contains "$GATE_STDOUT" "coverage-auto-detected" \
+  "degraded: auto-detected coverage is provenance and not a degraded run"
+
+# #2687, #2688: the fact the CLI can only report on the wire, because this step
+# always runs it with --quiet and a machine format.
+REQUESTS_UNAPPLIED_FIXTURE='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"$FALLOW_DIFF_FILE pr.diff"}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_UNAPPLIED_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "::warning::Fallow could not apply: changed-since (git-failed)" \
+  "requests: an unapplied request warns once with its reason"
+assert_not_contains "$GATE_STDOUT" "diff-filter" \
+  "requests: an honoured request is not named in the warning"
+assert_contains "$GATE_OUTPUTS" "requests_unapplied=changed-since (git-failed)" \
+  "requests: the output carries the unapplied names"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "requests: an unapplied request does not fail the job"
+else
+  fail "requests: an unapplied request does not fail the job" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+
+# Applied-only, and absent: neither may produce a warning or a populated
+# output, or every scoped run in CI would carry a false alarm.
+REQUESTS_APPLIED_FIXTURE='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_APPLIED_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: a run that applied everything it was asked stays silent"
+assert_requests_unapplied_empty "requests: the output is present and empty when everything applied"
+
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: a pinned binary that publishes no object warns about nothing"
+
+# A request that writes a file BESIDE the report narrows nothing, so the scope
+# warning and the scope-shaped output must both stay clear of it. The
+# SARIF-absence warning owns that case and says the right thing about it.
+REQUESTS_ARTIFACT_FIXTURE='"request_outcomes":{"sarif-file":{"status":"not-applied","affects":"artifact","requested":"fallow-results.sarif","reason":"write-failed","message":"m"}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_ARTIFACT_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: an unwritten output file is not reported as an unscoped run"
+assert_requests_unapplied_empty "requests: the scope output stays empty when only an output file failed"
 
 EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
 run_gate_analyze "$(gate_envelope '' "$EMPTY")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"

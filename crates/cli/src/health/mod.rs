@@ -25,7 +25,7 @@ use fallow_engine::health::{
     RuntimeCoverageSeamInput, execute_health_inner, validate_health_churn_file,
 };
 
-use crate::check::{get_changed_files, resolve_workspace_scope};
+use crate::check::resolve_workspace_scope;
 use crate::error::emit_error;
 use crate::report;
 use crate::report::OwnershipResolver;
@@ -164,7 +164,7 @@ fn build_health_scope_inputs<'a>(
 ) -> Result<HealthScopeInputs<'a, OwnershipResolver>, ExitCode> {
     let changed_files = opts
         .changed_since
-        .and_then(|git_ref| get_changed_files(opts.root, git_ref));
+        .and_then(|git_ref| crate::requests::resolve_changed_since(opts.root, git_ref));
     let diff_index = health_diff_index(opts);
     let mut ws_roots = resolve_workspace_scope(
         opts.root,
