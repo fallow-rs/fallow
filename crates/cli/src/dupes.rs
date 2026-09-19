@@ -5,7 +5,7 @@ use fallow_config::{OutputFormat, ResolvedConfig};
 use fallow_types::duplicates::{DefaultIgnoreSkips, DuplicationReport};
 
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
-use crate::check::{get_changed_files, resolve_workspace_scope};
+use crate::check::resolve_workspace_scope;
 use crate::report;
 use crate::{error::emit_error, load_config_for_analysis};
 
@@ -590,30 +590,39 @@ fn apply_duplication_baseline(
         return Ok(None);
     };
 
-    let baseline_data = read_duplication_baseline(path, opts.output)?;
+    let (baseline_data, unrecognised_format) = read_duplication_baseline(path, opts.output)?;
     let baseline_entries = baseline_data.entry_count();
     let before = report.clone_groups.len();
     *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
     let matched = before.saturating_sub(report.clone_groups.len());
+    let scope_reasons = duplication_comparison_scope_reasons(config, effective_changed_files);
     let staleness = fallow_engine::baseline::BaselineStaleness {
         entries: baseline_entries,
         matched,
         current_findings: before,
-        change_scoped: duplication_comparison_is_narrowed(config, effective_changed_files),
+        change_scoped: !scope_reasons.is_empty(),
     };
     if !opts.quiet {
         eprintln!("Comparing against duplication baseline: {}", path.display());
         warn_on_duplication_baseline_staleness(staleness, path);
     }
+    crate::baseline_gate::note_unrecognised_baseline(Some(path), unrecognised_format);
 
+    crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
+        command: "dupes",
+        path: path.display().to_string(),
+        baseline_entries,
+        scope_reasons,
+    });
     Ok(Some(crate::baseline_gate::LoadedBaselineStaleness {
         staleness,
         path: path.to_path_buf(),
+        scope_reasons,
+        unrecognised_format,
     }))
 }
 
-/// True when the duplication baseline was compared against less than the whole
-/// project.
+/// Which channels narrowed the duplication comparison below the whole project.
 ///
 /// Deliberately narrower than the dead-code equivalent. `dupes` saves and
 /// compares the baseline BEFORE `filter_dupes_report` runs, so `--workspace`,
@@ -623,17 +632,29 @@ fn apply_duplication_baseline(
 /// channels that narrow the analysis itself count here: a resolved changed-file
 /// set, which selects the focused analysis, and production mode, which drops
 /// test, story and dev files at discovery.
-fn duplication_comparison_is_narrowed(
+///
+/// The changed-file set is reported as `changed-files` rather than as the flag
+/// that produced it, because by this point the flag is gone. `change_scoped` is
+/// derived from the returned set, so the two cannot disagree.
+fn duplication_comparison_scope_reasons(
     config: &ResolvedConfig,
     effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-) -> bool {
-    effective_changed_files.is_some() || config.production
+) -> fallow_output::BaselineScopeReasons {
+    use fallow_output::ScopeReason;
+
+    fallow_output::BaselineScopeReasons::empty()
+        .insert_if(effective_changed_files.is_some(), ScopeReason::ChangedFiles)
+        .insert_if(config.production, ScopeReason::Production)
 }
 
+/// The loaded baseline, and whether the file was written by another command:
+/// every field of this format has a serde default, so a foreign JSON object
+/// loads as zero clone groups and is otherwise indistinguishable from a
+/// baseline saved on a project with no duplication.
 fn read_duplication_baseline(
     path: &std::path::Path,
     output: OutputFormat,
-) -> Result<DuplicationBaselineData, ExitCode> {
+) -> Result<(DuplicationBaselineData, bool), ExitCode> {
     let json = std::fs::read_to_string(path).map_err(|e| {
         emit_error(
             &format!("failed to read duplication baseline: {e}"),
@@ -641,13 +662,18 @@ fn read_duplication_baseline(
             output,
         )
     })?;
-    serde_json::from_str::<DuplicationBaselineData>(&json).map_err(|e| {
+    let data = serde_json::from_str::<DuplicationBaselineData>(&json).map_err(|e| {
         emit_error(
             &format!("failed to parse duplication baseline: {e}"),
             2,
             output,
         )
-    })
+    })?;
+    let unrecognised_format = !fallow_engine::baseline::declares_baseline_format(
+        &json,
+        DuplicationBaselineData::DECLARED_KEYS,
+    );
+    Ok((data, unrecognised_format))
 }
 
 /// Warn when a loaded duplication baseline no longer describes the current
@@ -691,7 +717,7 @@ fn resolve_changed_since(
         return None;
     }
     let git_ref = opts.changed_since?;
-    get_changed_files(opts.root, git_ref)
+    crate::requests::resolve_changed_since(opts.root, git_ref)
 }
 
 /// Keep only the `n` highest-ranked clone groups.
@@ -884,7 +910,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     let baseline_staleness = result
         .baseline_staleness
         .as_ref()
-        .map(|loaded| loaded.staleness.to_envelope(0));
+        .map(|loaded| loaded.to_envelope(0));
     let gate_outcomes = dupes_gate_outcomes(result, baseline_staleness.as_ref());
     let ctx = report::ReportContext {
         root: &result.config.root,

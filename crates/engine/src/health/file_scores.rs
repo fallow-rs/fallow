@@ -184,6 +184,13 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
         }
         Err(e) => {
             eprintln!("Warning: failed to compute file scores: {e}");
+            super::diagnostics::record_health_diagnostic(
+                &input.config.root,
+                None,
+                fallow_types::workspace::WorkspaceDiagnosticKind::FileScoresUnavailable {
+                    error: e,
+                },
+            );
             Ok((None, Some(0), None))
         }
     }

@@ -77,6 +77,11 @@ pub struct HealthJsonReportInput<'a> {
     /// Every gate this run evaluated, absent when it evaluated none. The
     /// programmatic route runs no CLI-layer gate and leaves this `None`.
     pub gate_outcomes: Option<fallow_output::GateOutcomes>,
+    /// Every narrowing or shaping request this run received, absent when it
+    /// was asked for nothing. The programmatic route resolves no CLI flag and
+    /// leaves this `None`; an entry whose `status` is not `applied` means the
+    /// report is wider than what was asked for.
+    pub request_outcomes: Option<fallow_output::RequestOutcomes>,
     /// Typed health report to serialize.
     pub report: HealthReport,
     /// Project root; its prefix is stripped from every path in the output.
@@ -542,6 +547,7 @@ pub fn serialize_health_report_json(
     fallow_output::serialize_health_json_output(HealthJsonOutputInput {
         output: HealthOutputInput {
             gate_outcomes: input.gate_outcomes,
+            request_outcomes: input.request_outcomes,
             schema_version: HEALTH_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,

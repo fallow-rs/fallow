@@ -120,6 +120,7 @@ pub fn build_dead_code_next_steps(
     digest: Option<crate::impact::ImpactDigest>,
 ) -> Vec<NextStep> {
     let workspace_ref = default_workspace_ref_for_next_step(root);
+    let loaded_baseline = crate::output_runtime::loaded_baseline_for("dead-code");
     build_dead_code_next_steps_contract(DeadCodeNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
         results,
@@ -129,6 +130,39 @@ pub fn build_dead_code_next_steps(
         workspace_ref: workspace_ref.as_deref(),
         audit_changed: audit_changed_applicable(root),
         has_external_plugins: has_external_plugins(root),
+        baseline_recheck: loaded_baseline.as_ref().and_then(baseline_recheck_input),
+    })
+}
+
+/// The `recheck-baseline` input for a baseline this process recorded at load
+/// time, in the borrowed shape the contract builders take.
+///
+/// `None` when the step's command would inherit the diff from the environment:
+/// the command carries `--baseline` and nothing else, so with
+/// `FALLOW_DIFF_FILE` exported it narrows again and offers itself again.
+fn baseline_recheck_input(
+    loaded: &crate::output_runtime::LoadedBaselineRecheck,
+) -> Option<fallow_output::BaselineRecheckInput<'_>> {
+    let diff_file_exported = std::env::var_os("FALLOW_DIFF_FILE").is_some_and(|v| !v.is_empty());
+    recheck_input_unless_diff_survives(loaded, diff_file_exported)
+}
+
+fn recheck_input_unless_diff_survives(
+    loaded: &crate::output_runtime::LoadedBaselineRecheck,
+    diff_file_exported: bool,
+) -> Option<fallow_output::BaselineRecheckInput<'_>> {
+    if diff_file_exported
+        && loaded
+            .scope_reasons
+            .contains(fallow_output::ScopeReason::Diff)
+    {
+        return None;
+    }
+    Some(fallow_output::BaselineRecheckInput {
+        command: loaded.command,
+        path: &loaded.path,
+        baseline_entries: loaded.baseline_entries,
+        scope_reasons: loaded.scope_reasons,
     })
 }
 
@@ -142,19 +176,28 @@ fn has_external_plugins(root: &Path) -> bool {
 /// Next-steps for standalone `fallow health`. See [`build_dead_code_next_steps`]
 /// for the `offer_setup` parameter contract.
 #[must_use]
-pub fn health_next_steps_input(
+pub fn health_next_steps_input<'a>(
     report: &HealthReport,
     root: &Path,
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
-) -> HealthNextStepsInput {
+    loaded_baseline: Option<&'a crate::output_runtime::LoadedBaselineRecheck>,
+) -> HealthNextStepsInput<'a> {
     fallow_output::build_health_next_steps_input(
         report,
         suggestions_enabled(),
         offer_setup,
         digest.map(impact_counts),
         audit_changed_applicable(root),
+        loaded_baseline.and_then(baseline_recheck_input),
     )
+}
+
+/// The baseline `fallow health` recorded at load time, held by the caller so
+/// the borrowed input outlives the builder call.
+#[must_use]
+pub fn loaded_health_baseline() -> Option<crate::output_runtime::LoadedBaselineRecheck> {
+    crate::output_runtime::loaded_baseline_for("health")
 }
 
 /// Next-steps for standalone `fallow dupes`. See [`build_dead_code_next_steps`]
@@ -171,12 +214,14 @@ pub fn build_dupes_next_steps(
         .iter()
         .map(|group| group.fingerprint.as_str())
         .collect::<Vec<_>>();
+    let loaded_baseline = crate::output_runtime::loaded_baseline_for("dupes");
     build_dupes_next_steps_contract(DupesNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
         clone_fingerprints: &clone_fingerprints,
         offer_setup,
         impact_digest: digest.map(impact_counts),
         audit_changed: audit_changed_applicable(root),
+        baseline_recheck: loaded_baseline.as_ref().and_then(baseline_recheck_input),
     })
 }
 
@@ -271,6 +316,30 @@ mod tests {
     use fallow_types::results::{AnalysisResults, UnusedExport};
 
     use super::*;
+
+    fn loaded_baseline(
+        reason: fallow_output::ScopeReason,
+    ) -> crate::output_runtime::LoadedBaselineRecheck {
+        crate::output_runtime::LoadedBaselineRecheck {
+            command: "dead-code",
+            path: "baseline.json".to_string(),
+            baseline_entries: 3,
+            scope_reasons: fallow_output::BaselineScopeReasons::empty().with(reason),
+        }
+    }
+
+    #[test]
+    fn recheck_is_withheld_when_the_environment_would_narrow_the_rerun_again() {
+        let diff = loaded_baseline(fallow_output::ScopeReason::Diff);
+        assert!(recheck_input_unless_diff_survives(&diff, true).is_none());
+        assert!(recheck_input_unless_diff_survives(&diff, false).is_some());
+    }
+
+    #[test]
+    fn an_exported_diff_file_does_not_withhold_a_recheck_for_another_channel() {
+        let file = loaded_baseline(fallow_output::ScopeReason::File);
+        assert!(recheck_input_unless_diff_survives(&file, true).is_some());
+    }
 
     fn unused_export(path: &str, name: &str) -> UnusedExportFinding {
         UnusedExportFinding::with_actions(UnusedExport {
@@ -465,6 +534,7 @@ mod tests {
             Path::new("/project"),
             false,
             None,
+            None,
         ));
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
 
@@ -475,8 +545,13 @@ mod tests {
     #[test]
     fn health_next_steps_input_feeds_output_contract_builder() {
         let report = health_report_with_finding();
-        let input =
-            health_next_steps_input(&report, Path::new("/project"), true, Some(digest(2, 1)));
+        let input = health_next_steps_input(
+            &report,
+            Path::new("/project"),
+            true,
+            Some(digest(2, 1)),
+            None,
+        );
 
         assert!(input.suggestions_enabled);
         assert!(input.has_findings);
@@ -589,7 +664,7 @@ mod tests {
         ));
         all.extend(build_dupes_next_steps(&payload, &root, false, None));
         all.extend(build_health_next_steps_contract(health_next_steps_input(
-            &report, &root, false, None,
+            &report, &root, false, None, None,
         )));
         all.extend(build_combined_next_steps(
             Some(&results),

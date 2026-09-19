@@ -37,6 +37,11 @@ pub struct CombinedJsonOutputInput<'a> {
     /// Every gate this run evaluated, absent when it evaluated none. The
     /// programmatic route runs no CLI-layer gate and leaves this `None`.
     pub gate_outcomes: Option<fallow_output::GateOutcomes>,
+    /// Every narrowing or shaping request this run received, absent when it
+    /// was asked for nothing. The programmatic route resolves no CLI flag and
+    /// leaves this `None`; an entry whose `status` is not `applied` means the
+    /// report is wider than what was asked for.
+    pub request_outcomes: Option<fallow_output::RequestOutcomes>,
 
     /// Dead-code section; `None` omits `check` from the envelope.
     pub check: Option<CombinedCheckJsonSection<'a>>,
@@ -114,6 +119,7 @@ pub fn serialize_combined_json(
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed_ms_for_output(input.elapsed)),
         gate_outcomes: input.gate_outcomes,
+        request_outcomes: input.request_outcomes,
         meta,
         check,
         dupes,
@@ -220,6 +226,7 @@ mod tests {
     fn combined_json_root_contains_stable_envelope_fields() {
         let root = serialize_combined_json(CombinedJsonOutputInput {
             gate_outcomes: None,
+            request_outcomes: None,
             check: None,
             dupes: None,
             health: None,
@@ -306,6 +313,7 @@ mod tests {
 
         let output = serialize_combined_json(CombinedJsonOutputInput {
             gate_outcomes: None,
+            request_outcomes: None,
             check: Some(CombinedCheckJsonSection {
                 results: &results,
                 root,
@@ -344,6 +352,7 @@ mod tests {
         let results = AnalysisResults::default();
         serialize_combined_json(CombinedJsonOutputInput {
             gate_outcomes: None,
+            request_outcomes: None,
             check: include_check.then(|| CombinedCheckJsonSection {
                 results: &results,
                 root,

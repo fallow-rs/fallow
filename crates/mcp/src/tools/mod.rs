@@ -1,6 +1,8 @@
 mod analyze;
 mod api_runtime;
 mod audit;
+#[cfg(test)]
+mod base_root_fixture;
 mod check_changed;
 mod check_runtime_coverage;
 mod cloud_runtime_context;

@@ -52,6 +52,13 @@ updates:
       # Pinned so engines.vscode floor stays low and Cursor/Windsurf forks can install.
       # Bump deliberately when raising the engine floor.
       - dependency-name: "@types/vscode"
+      # Mocha 12 is ESM-only and its CommonJS implementation file requires ESM
+      # siblings, so it needs Node ^20.19 || >=22.12. The integration suites run
+      # in-process inside the VS Code 1.96 extension host, which ships Node
+      # 20.18.1, so the major cannot load there at all. Raise this together with
+      # the engine floor.
+      - dependency-name: mocha
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /npm/fallow

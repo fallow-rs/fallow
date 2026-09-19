@@ -168,6 +168,117 @@ fn saved_reports_preserve_native_health_duplication_and_combined_output() {
     );
 }
 
+/// The baseline advisory and the gate rows are rendered from typed state on a
+/// direct run and read back off the envelope by `report --from`. This is the
+/// one test that catches a divergence between the two, and the integrations
+/// post whatever the saved path produced.
+#[test]
+fn saved_stale_baseline_surfaces_match_direct_rendering() {
+    let project = tempfile::tempdir().expect("stale baseline project");
+    let root = project.path();
+    std::fs::create_dir(root.join("src")).expect("create source directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"stale-baseline-parity","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write manifest");
+    std::fs::write(root.join("src/index.ts"), "export const entry = true;\n")
+        .expect("write entrypoint");
+    for name in ["a", "b", "c"] {
+        std::fs::write(
+            root.join(format!("src/{name}.ts")),
+            format!("export const {name} = true;\n"),
+        )
+        .expect("write unused source");
+    }
+
+    let baseline = root.join("baseline.json");
+    let saved = run(
+        root,
+        &analysis_args(
+            Some("check"),
+            root,
+            "json",
+            &["--save-baseline", baseline.to_str().expect("utf8")],
+        ),
+    );
+    assert!(
+        matches!(saved.status.code(), Some(0 | 1)),
+        "saving a baseline failed: {}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    // Remove what the baseline recorded, so every entry goes unmatched and the
+    // gate rule holds on a run with nothing left to report.
+    for name in ["a", "b", "c"] {
+        std::fs::remove_file(root.join(format!("src/{name}.ts"))).expect("clean the project");
+    }
+
+    let baseline_args = [
+        "--baseline",
+        baseline.to_str().expect("utf8"),
+        "--fail-on-stale-baseline",
+    ];
+    assert_saved_report_parity_with_args(root, Some("check"), &baseline_args);
+
+    // The bodies agreeing is only half of the render: the Check Run the action
+    // posts is built from the decision sidecar, whose gate rows the saved path
+    // fills from the envelope. A run with an armed gate is the only shape that
+    // puts a row in it.
+    let json = run(
+        root,
+        &analysis_args(Some("check"), root, "json", &baseline_args),
+    );
+    assert!(matches!(json.status.code(), Some(0 | 1)));
+    let saved_path = root.join("results.json");
+    std::fs::write(&saved_path, &json.stdout).expect("write saved results");
+    let direct_decision = root.join("direct-decision.json");
+    let saved_decision = root.join("saved-decision.json");
+
+    let direct = run_with_env(
+        root,
+        &analysis_args(Some("check"), root, "pr-comment-github", &baseline_args),
+        &[(
+            "FALLOW_PR_DECISION_FILE",
+            direct_decision.to_str().expect("utf8"),
+        )],
+    );
+    assert!(matches!(direct.status.code(), Some(0 | 1)));
+    let rendered = run_with_env(
+        root,
+        &[
+            "report".to_owned(),
+            "--from".to_owned(),
+            saved_path.display().to_string(),
+            "--root".to_owned(),
+            root.display().to_string(),
+            "--quiet".to_owned(),
+            "--format".to_owned(),
+            "pr-comment-github".to_owned(),
+        ],
+        &[(
+            "FALLOW_PR_DECISION_FILE",
+            saved_decision.to_str().expect("utf8"),
+        )],
+    );
+    assert!(rendered.status.success());
+
+    let direct_sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(direct_decision).expect("read direct decision"))
+            .expect("parse direct decision");
+    let saved_sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(saved_decision).expect("read saved decision"))
+            .expect("parse saved decision");
+    assert_eq!(saved_sidecar, direct_sidecar);
+    assert!(
+        saved_sidecar["gates"]
+            .as_array()
+            .expect("the sidecar carries gate rows")
+            .iter()
+            .any(|gate| gate["id"] == "stale-baseline"),
+        "the armed gate must reach the saved Check Run: {saved_sidecar}"
+    );
+}
+
 #[test]
 fn saved_owner_grouped_dead_code_matches_direct_rendering() {
     let project = tempfile::tempdir().expect("owner-grouped project");

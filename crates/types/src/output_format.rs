@@ -39,6 +39,32 @@ pub enum OutputFormat {
     GithubSummary,
 }
 
+impl OutputFormat {
+    /// The `--format` spelling of this variant.
+    ///
+    /// Notes that name the format a run degraded on have to name it the way the
+    /// user would pass it, so the sentence doubles as the fix. `codeclimate` is
+    /// the canonical spelling of the aliased GitLab Code Quality format.
+    #[must_use]
+    pub const fn flag_label(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::Json => "json",
+            Self::Sarif => "sarif",
+            Self::Compact => "compact",
+            Self::Markdown => "markdown",
+            Self::CodeClimate => "codeclimate",
+            Self::PrCommentGithub => "pr-comment-github",
+            Self::PrCommentGitlab => "pr-comment-gitlab",
+            Self::ReviewGithub => "review-github",
+            Self::ReviewGitlab => "review-gitlab",
+            Self::Badge => "badge",
+            Self::GithubAnnotations => "github-annotations",
+            Self::GithubSummary => "github-summary",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,6 +84,34 @@ mod tests {
         OutputFormat::GithubAnnotations,
         OutputFormat::GithubSummary,
     ];
+
+    /// The labels are what a note tells a user to pass, so they must be the
+    /// `--format` values clap accepts rather than prettier prose.
+    #[test]
+    fn flag_labels_are_the_format_values() {
+        let labels: Vec<&str> = VARIANTS
+            .iter()
+            .map(|variant| variant.flag_label())
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "human",
+                "json",
+                "sarif",
+                "compact",
+                "markdown",
+                "codeclimate",
+                "pr-comment-github",
+                "pr-comment-gitlab",
+                "review-github",
+                "review-gitlab",
+                "badge",
+                "github-annotations",
+                "github-summary",
+            ]
+        );
+    }
 
     #[test]
     fn default_is_human() {

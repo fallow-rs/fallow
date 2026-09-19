@@ -100,6 +100,12 @@ where
         shared_parse,
     };
 
+    // Drop health-stage diagnostics from a previous run over this root (a
+    // watch-mode rerun, a long-lived engine session, the base pass of `fallow
+    // audit`) BEFORE the pipeline re-records this run's, so a fixed CODEOWNERS
+    // or an unshallowed clone does not leave a stale entry (issue #2689).
+    fallow_config::clear_health_stage_diagnostics(&config.root);
+
     let scope = prepare_health_scope(opts, &config, &files, scope_inputs);
 
     let HealthPreparedCore {

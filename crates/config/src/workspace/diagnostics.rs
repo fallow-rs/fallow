@@ -386,7 +386,11 @@ pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagno
         let preserved = map.get(&canonical).map_or_else(Vec::new, |existing| {
             existing
                 .iter()
-                .filter(|d| d.kind.is_source_discovery() || d.kind.is_analysis_stage())
+                .filter(|d| {
+                    d.kind.is_source_discovery()
+                        || d.kind.is_analysis_stage()
+                        || d.kind.is_health_stage()
+                })
                 .cloned()
                 .collect()
         });
@@ -630,6 +634,56 @@ pub fn clear_analysis_stage_diagnostics(root: &Path) {
     {
         existing.retain(|d| !d.kind.is_analysis_stage());
     }
+}
+
+/// Remove all health-stage diagnostics (see
+/// [`WorkspaceDiagnosticKind::is_health_stage`]) for `root` from the registry,
+/// keeping every other entry.
+///
+/// Called at the START of each health run so a stale `shallow-clone` or
+/// `ownership-unavailable` entry from a previous run over the same root (a
+/// watch-mode rerun, a long-lived engine session, the two passes of `fallow
+/// audit`) is dropped before the pipeline re-records only what still applies.
+/// Mirrors [`clear_analysis_stage_diagnostics`] and pairs with the preserve in
+/// [`stash_workspace_diagnostics`] (issue #2689).
+pub fn clear_health_stage_diagnostics(root: &Path) {
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let Some(registry) = WORKSPACE_DIAGNOSTICS.get() else {
+        return;
+    };
+    if let Ok(mut map) = registry.lock()
+        && let Some(existing) = map.get_mut(&canonical)
+    {
+        existing.retain(|d| !d.kind.is_health_stage());
+    }
+}
+
+/// Read only the health-stage diagnostics (see
+/// [`WorkspaceDiagnosticKind::is_health_stage`]) the registry holds for `root`.
+///
+/// The health envelope captures `workspace_diagnostics` before the analysis
+/// runs, so the pipeline's own diagnostics reach it through this read at
+/// finalize time rather than by threading a mutable list through scoring,
+/// churn, ownership, trend and coverage resolution (issue #2689).
+#[must_use]
+pub fn health_stage_workspace_diagnostics(root: &Path) -> Vec<WorkspaceDiagnostic> {
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let Some(registry) = WORKSPACE_DIAGNOSTICS.get() else {
+        return Vec::new();
+    };
+    registry
+        .lock()
+        .ok()
+        .map(|map| {
+            map.get(&canonical).map_or_else(Vec::new, |existing| {
+                existing
+                    .iter()
+                    .filter(|d| d.kind.is_health_stage())
+                    .cloned()
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
 }
 
 /// Read the workspace-discovery diagnostics produced by the most recent
@@ -1074,6 +1128,71 @@ mod tests {
             count_kind(&after, "skipped-large-file"),
             1,
             "the source-discovery diagnostic survives the analysis-stage clear"
+        );
+    }
+
+    /// The health pipeline appends after config load, so combined mode's
+    /// per-analysis config re-load must preserve its entries. It must also not
+    /// preserve them past the next health run, or a fixed CODEOWNERS is
+    /// reported forever (issue #2689).
+    #[test]
+    fn health_stage_entries_survive_a_config_reload_and_not_the_next_health_run() {
+        let root = Path::new("/fallow-test-2689-health-stage");
+        stash_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )],
+        );
+        append_workspace_diagnostics(
+            root,
+            vec![
+                WorkspaceDiagnostic::new(
+                    root,
+                    root.to_path_buf(),
+                    WorkspaceDiagnosticKind::HotspotsSkipped,
+                ),
+                WorkspaceDiagnostic::new(
+                    root,
+                    root.join("coverage/coverage-final.json"),
+                    WorkspaceDiagnosticKind::CoverageAutoDetected,
+                ),
+            ],
+        );
+
+        // Combined mode re-loads config for the next analysis.
+        stash_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )],
+        );
+        let after_reload = workspace_diagnostics_for(root);
+        assert_eq!(count_kind(&after_reload, "hotspots-skipped"), 1);
+        assert_eq!(count_kind(&after_reload, "coverage-auto-detected"), 1);
+
+        // The dead-code analyze pass inside the health run must not take them.
+        clear_analysis_stage_diagnostics(root);
+        assert_eq!(
+            health_stage_workspace_diagnostics(root).len(),
+            2,
+            "the analysis-stage clear must leave health-stage entries alone"
+        );
+
+        clear_health_stage_diagnostics(root);
+        let after = workspace_diagnostics_for(root);
+        assert!(
+            !after.iter().any(|d| d.kind.is_health_stage()),
+            "the next health run starts from nothing: {after:?}"
+        );
+        assert_eq!(
+            count_kind(&after, "undeclared-workspace"),
+            1,
+            "the workspace-discovery diagnostic survives the health-stage clear"
         );
     }
 

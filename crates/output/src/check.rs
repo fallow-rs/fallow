@@ -82,6 +82,15 @@ pub struct CheckOutput {
     /// was asked for", never "nothing failed". See [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
+    /// Every narrowing or shaping request this run RECEIVED, keyed by name,
+    /// absent when it was asked for nothing. An entry whose `status` is not
+    /// `applied` means the run could not do what it was asked and reported
+    /// something WIDER instead, so what follows is a valid report of a scope
+    /// nobody requested. Honoured requests are published too, with
+    /// `status: "applied"`, so an absent object means "nothing was asked for",
+    /// never "nothing failed". See [`crate::RequestOutcomes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_outcomes: Option<crate::RequestOutcomes>,
     /// `_meta` block with docs and rule definitions, when `--explain` was
     /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
@@ -185,6 +194,15 @@ pub struct CheckGroupedOutput {
     /// was asked for", never "nothing failed". See [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
+    /// Every narrowing or shaping request this run RECEIVED, keyed by name,
+    /// absent when it was asked for nothing. An entry whose `status` is not
+    /// `applied` means the run could not do what it was asked and reported
+    /// something WIDER instead, so what follows is a valid report of a scope
+    /// nobody requested. Honoured requests are published too, with
+    /// `status: "applied"`, so an absent object means "nothing was asked for",
+    /// never "nothing failed". See [`crate::RequestOutcomes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_outcomes: Option<crate::RequestOutcomes>,
     /// `_meta` block with docs and rule definitions, when `--explain` was
     /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
@@ -287,6 +305,7 @@ pub fn build_check_output(input: CheckOutputInput) -> CheckOutput {
         baseline_staleness: None,
         regression: None,
         gate_outcomes: None,
+        request_outcomes: None,
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
@@ -1294,6 +1313,7 @@ mod tests {
         let root = std::path::Path::new("/project");
         let output = CheckGroupedOutput {
             gate_outcomes: None,
+            request_outcomes: None,
             baseline_staleness: None,
             schema_version: SchemaVersion(7),
             version: ToolVersion("0.0.0".to_string()),

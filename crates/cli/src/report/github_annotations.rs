@@ -50,6 +50,9 @@ pub(crate) fn print_annotations(kind: EnvelopeKind, envelope: &Value, root: &Pat
     if let Some(line) = crate::report::gate_outcome_text::annotation_line(envelope) {
         outln!("{line}");
     }
+    if let Some(line) = crate::report::request_outcome_text::annotation_line(envelope) {
+        outln!("{line}");
+    }
     if !rendered.is_empty() {
         outln!("{rendered}");
     }

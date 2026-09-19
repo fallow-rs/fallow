@@ -300,6 +300,59 @@ pub enum WorkspaceDiagnosticKind {
         /// candidate to exclude in the first place.
         excluded_file_count: u32,
     },
+    /// Per-file health scoring failed, so the score list is empty and the
+    /// scored-file count is `0` because nothing was measured rather than
+    /// because the project has no files worth scoring. Every score-derived
+    /// number (the average maintainability index, the refactoring targets, the
+    /// hotspot complexity half) is then structurally zero (issue #2689).
+    FileScoresUnavailable {
+        /// Scoring error text.
+        error: String,
+    },
+    /// Churn-based hotspot analysis was skipped because the project root is not
+    /// a git repository, so the hotspots, churn and ownership sections report
+    /// nothing at all. The remaining health sections are unaffected.
+    ///
+    /// Carries no payload: the other two skip paths (a malformed `--since`, a
+    /// `--churn-file` that became unreadable after validation) route through
+    /// `tracing` rather than a user-facing note and are not part of this kind
+    /// yet.
+    HotspotsSkipped,
+    /// The repository is a shallow clone, so churn is measured over the fetched
+    /// history only and every hotspot figure is incomplete.
+    ShallowClone {
+        /// `true` when the run also asked for ownership attribution, which a
+        /// shallow clone skews further by inflating single-author dominance.
+        ownership_requested: bool,
+    },
+    /// No commit timestamp was available, so churn recency and ownership
+    /// staleness were measured against the wall clock and drift between two
+    /// runs over the same commit.
+    UnpinnedClock,
+    /// Ownership attribution was requested but its inputs did not load, so
+    /// hotspot entries carry degraded or absent owner signals.
+    OwnershipUnavailable {
+        /// Which input failed, as a kebab-case token: `invalid-bot-pattern` or
+        /// `codeowners-parse-failed`. The set is open.
+        cause: String,
+        /// Underlying error text.
+        error: String,
+    },
+    /// A saved health snapshot could not be read or parsed, so the trend is
+    /// computed over fewer snapshots than the project has on disk and a
+    /// direction can flip on the missing point alone.
+    TrendSnapshotUnreadable {
+        /// Filesystem or JSON error text.
+        error: String,
+    },
+    /// Test coverage was auto-detected on disk rather than passed with
+    /// `--coverage`, and `path` names the file that fed the CRAP scores.
+    ///
+    /// Deliberately NOT one of the [`Self::warns_on_stderr`] kinds: nothing
+    /// degraded, the run measured exactly what it found. It is provenance, and
+    /// it is on the wire because a score computed against a file the user did
+    /// not name is not reproducible and nothing else says which file it was.
+    CoverageAutoDetected,
 }
 
 impl WorkspaceDiagnosticKind {
@@ -326,6 +379,13 @@ impl WorkspaceDiagnosticKind {
             Self::RulePacksNotConfigured => "rule-packs-not-configured",
             Self::ExcludedByDefaultIgnore { .. } => "excluded-by-default-ignore",
             Self::NoSourceFilesAnalyzed { .. } => "no-source-files-analyzed",
+            Self::FileScoresUnavailable { .. } => "file-scores-unavailable",
+            Self::HotspotsSkipped => "hotspots-skipped",
+            Self::ShallowClone { .. } => "shallow-clone",
+            Self::UnpinnedClock => "unpinned-clock",
+            Self::OwnershipUnavailable { .. } => "ownership-unavailable",
+            Self::TrendSnapshotUnreadable { .. } => "trend-snapshot-unreadable",
+            Self::CoverageAutoDetected => "coverage-auto-detected",
         }
     }
 
@@ -342,12 +402,18 @@ impl WorkspaceDiagnosticKind {
     /// consumer that wants to distinguish "measured zero" from "measured
     /// nothing" can read them, and off the stderr surface that every other
     /// command shares.
+    ///
+    /// `coverage-auto-detected` answers false for a third reason: it reports
+    /// the provenance of an input that DID load, so a consumer sentence about a
+    /// degraded run would state something untrue about it. Its own note is
+    /// printed by the health pipeline.
     #[must_use]
     pub const fn warns_on_stderr(&self) -> bool {
         match self {
             Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
-            | Self::ExcludedByDefaultIgnore { .. } => false,
+            | Self::ExcludedByDefaultIgnore { .. }
+            | Self::CoverageAutoDetected => false,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
@@ -363,7 +429,13 @@ impl WorkspaceDiagnosticKind {
             | Self::BunLockOverrideResolutionSkipped
             | Self::BunResolutionsShadowedByOverrides
             | Self::NodeModulesMissing
-            | Self::NoSourceFilesAnalyzed { .. } => true,
+            | Self::NoSourceFilesAnalyzed { .. }
+            | Self::FileScoresUnavailable { .. }
+            | Self::HotspotsSkipped
+            | Self::ShallowClone { .. }
+            | Self::UnpinnedClock
+            | Self::OwnershipUnavailable { .. }
+            | Self::TrendSnapshotUnreadable { .. } => true,
         }
     }
 
@@ -476,7 +548,14 @@ impl WorkspaceDiagnosticKind {
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
             | Self::ExcludedByDefaultIgnore { .. }
-            | Self::NoSourceFilesAnalyzed { .. } => false,
+            | Self::NoSourceFilesAnalyzed { .. }
+            | Self::FileScoresUnavailable { .. }
+            | Self::HotspotsSkipped
+            | Self::ShallowClone { .. }
+            | Self::UnpinnedClock
+            | Self::OwnershipUnavailable { .. }
+            | Self::TrendSnapshotUnreadable { .. }
+            | Self::CoverageAutoDetected => false,
         }
     }
 
@@ -514,6 +593,61 @@ impl WorkspaceDiagnosticKind {
             | Self::SourceReadFailure { .. }
             | Self::SourceParseDegraded { .. }
             | Self::NodeModulesMissing
+            | Self::ExcludedByDefaultIgnore { .. }
+            | Self::NoSourceFilesAnalyzed { .. }
+            | Self::FileScoresUnavailable { .. }
+            | Self::HotspotsSkipped
+            | Self::ShallowClone { .. }
+            | Self::UnpinnedClock
+            | Self::OwnershipUnavailable { .. }
+            | Self::TrendSnapshotUnreadable { .. }
+            | Self::CoverageAutoDetected => false,
+        }
+    }
+
+    /// Whether this diagnostic is recorded by the HEALTH pipeline (scoring,
+    /// churn, ownership, trend, coverage input resolution) rather than by
+    /// workspace discovery, source discovery or the analyze stage.
+    ///
+    /// Health-stage diagnostics are appended to the registry after config
+    /// load, so `stash_workspace_diagnostics` must preserve them across
+    /// combined mode's per-analysis config re-loads, and the health run clears
+    /// its previous entries before re-recording so a fixed CODEOWNERS drops out
+    /// on the next run (issue #2689).
+    ///
+    /// They are deliberately NOT [`Self::is_analysis_stage`], although they
+    /// share both of those properties. That predicate additionally means "the
+    /// dead-code analyze pass re-records this", and the pass clears every kind
+    /// answering it on entry. Health computes file scores by running that same
+    /// pass, so a health-stage kind classified there would be wiped mid-run by
+    /// the analysis it is reporting on.
+    #[must_use]
+    pub const fn is_health_stage(&self) -> bool {
+        match self {
+            Self::FileScoresUnavailable { .. }
+            | Self::HotspotsSkipped
+            | Self::ShallowClone { .. }
+            | Self::UnpinnedClock
+            | Self::OwnershipUnavailable { .. }
+            | Self::TrendSnapshotUnreadable { .. }
+            | Self::CoverageAutoDetected => true,
+            Self::UndeclaredWorkspace
+            | Self::MalformedPackageJson { .. }
+            | Self::GlobMatchedNoPackageJson { .. }
+            | Self::MalformedTsconfig { .. }
+            | Self::TsconfigReferenceDirMissing
+            | Self::MalformedPnpmWorkspaceYaml { .. }
+            | Self::SkippedLargeFile { .. }
+            | Self::SkippedMinifiedFile { .. }
+            | Self::SkippedSourceDotdir
+            | Self::SourceReadFailure { .. }
+            | Self::SourceParseDegraded { .. }
+            | Self::BunLockbOverrideResolutionSkipped
+            | Self::BunLockOverrideResolutionSkipped
+            | Self::BunResolutionsShadowedByOverrides
+            | Self::NodeModulesMissing
+            | Self::BoundariesNotConfigured
+            | Self::RulePacksNotConfigured
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. } => false,
         }
@@ -693,6 +827,22 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
         }
         WorkspaceDiagnosticKind::SourceReadFailure { error } => {
             WorkspaceDiagnosticKind::SourceReadFailure {
+                error: normalise(error),
+            }
+        }
+        WorkspaceDiagnosticKind::FileScoresUnavailable { error } => {
+            WorkspaceDiagnosticKind::FileScoresUnavailable {
+                error: normalise(error),
+            }
+        }
+        WorkspaceDiagnosticKind::OwnershipUnavailable { cause, error } => {
+            WorkspaceDiagnosticKind::OwnershipUnavailable {
+                cause,
+                error: normalise(error),
+            }
+        }
+        WorkspaceDiagnosticKind::TrendSnapshotUnreadable { error } => {
+            WorkspaceDiagnosticKind::TrendSnapshotUnreadable {
                 error: normalise(error),
             }
         }
@@ -929,6 +1079,65 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                 )
             }
         }
+        WorkspaceDiagnosticKind::FileScoresUnavailable { error } => format!(
+            "Could not compute per-file health scores ({error}), so the score list is empty and \
+             the scored-file count is 0 because nothing was measured rather than because the \
+             project has nothing to score. Rerun with --no-cache, or scope the run to a \
+             subdirectory to find the input that fails."
+        ),
+        WorkspaceDiagnosticKind::HotspotsSkipped => {
+            "Hotspot analysis was skipped because no git repository was found at the project \
+             root, so the hotspots, churn and ownership sections report nothing rather than \
+             zero. Run fallow inside the repository, or pass --churn-file with exported change \
+             history."
+                .to_owned()
+        }
+        WorkspaceDiagnosticKind::ShallowClone {
+            ownership_requested,
+        } => {
+            let ownership = if *ownership_requested {
+                " Ownership signals are skewed too, because a shallow clone inflates \
+                 single-author dominance."
+            } else {
+                ""
+            };
+            format!(
+                "This is a shallow clone, so churn covers only the fetched history and every \
+                 hotspot figure is incomplete.{ownership} Run git fetch --unshallow for the full \
+                 history."
+            )
+        }
+        WorkspaceDiagnosticKind::UnpinnedClock => {
+            "No commit timestamp was available, so churn recency and ownership staleness were \
+             measured against the wall clock and drift between runs over the same commit. Set \
+             FALLOW_CLOCK_EPOCH to pin the run clock."
+                .to_owned()
+        }
+        WorkspaceDiagnosticKind::OwnershipUnavailable { cause, error } => {
+            if cause == "codeowners-parse-failed" {
+                format!(
+                    "Ownership signals are degraded: CODEOWNERS could not be parsed ({error}), \
+                     so hotspot entries carry no declared owner. Fix the CODEOWNERS syntax, or \
+                     drop --ownership for this run."
+                )
+            } else {
+                format!(
+                    "Ownership signals are degraded: health.ownership.botPatterns contains an \
+                     invalid glob ({error}), so no author is classified as a bot and bot commits \
+                     count towards ownership. Fix the pattern, or remove it from the config."
+                )
+            }
+        }
+        WorkspaceDiagnosticKind::TrendSnapshotUnreadable { error } => format!(
+            "Skipped health snapshot '{display}' ({error}), so the trend is computed over fewer \
+             snapshots than this project has on disk. Delete the unreadable file, or rewrite it \
+             with fallow health --save-snapshot."
+        ),
+        WorkspaceDiagnosticKind::CoverageAutoDetected => format!(
+            "Coverage was auto-detected at '{display}' rather than passed with --coverage, so the \
+             CRAP scores depend on whichever coverage file is on disk at run time. Pass --coverage \
+             '{display}' explicitly for reproducible scores."
+        ),
         WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
             pattern,
             file_count,
@@ -1778,6 +1987,135 @@ mod tests {
             diag.message.contains("ignorePatterns"),
             "next-step hint preserved: {}",
             diag.message
+        );
+    }
+    /// The seven health-pipeline kinds (issue #2689). Each is classified in
+    /// four places, and getting one wrong is silent: an entry that answers
+    /// `is_analysis_stage` is wiped by the dead-code pass the health run itself
+    /// invokes, and one that answers `is_source_discovery` is preserved by the
+    /// wrong mechanism.
+    #[test]
+    fn health_stage_kinds_are_classified_as_health_stage_and_nothing_else() {
+        for kind in [
+            WorkspaceDiagnosticKind::FileScoresUnavailable {
+                error: "boom".to_owned(),
+            },
+            WorkspaceDiagnosticKind::HotspotsSkipped,
+            WorkspaceDiagnosticKind::ShallowClone {
+                ownership_requested: true,
+            },
+            WorkspaceDiagnosticKind::UnpinnedClock,
+            WorkspaceDiagnosticKind::OwnershipUnavailable {
+                cause: "codeowners-parse-failed".to_owned(),
+                error: "boom".to_owned(),
+            },
+            WorkspaceDiagnosticKind::TrendSnapshotUnreadable {
+                error: "boom".to_owned(),
+            },
+            WorkspaceDiagnosticKind::CoverageAutoDetected,
+        ] {
+            let id = kind.id();
+            assert!(kind.is_health_stage(), "{id} must be health-stage");
+            assert!(!kind.is_analysis_stage(), "{id} must not be analysis-stage");
+            assert!(
+                !kind.is_source_discovery(),
+                "{id} must not be source-discovery"
+            );
+            assert!(
+                !kind.is_source_walk_recorded(),
+                "{id} must not be walk-recorded"
+            );
+            assert!(
+                !kind.source_never_analyzed(),
+                "{id} reports an input, not an unread source file"
+            );
+        }
+    }
+
+    /// Six of the seven report a result the run could not measure as asked;
+    /// the coverage provenance entry does not, and a consumer sentence about a
+    /// degraded run must not fire for it.
+    #[test]
+    fn only_the_coverage_provenance_kind_does_not_degrade_the_analysis() {
+        assert!(
+            WorkspaceDiagnosticKind::HotspotsSkipped.warns_on_stderr(),
+            "a skipped hotspot section is a degraded result"
+        );
+        assert!(
+            WorkspaceDiagnosticKind::UnpinnedClock.warns_on_stderr(),
+            "a drifting measurement is a degraded result"
+        );
+        assert!(
+            !WorkspaceDiagnosticKind::CoverageAutoDetected.warns_on_stderr(),
+            "auto-detected coverage loaded fine and degraded nothing"
+        );
+    }
+
+    /// The message is the only prose a consumer renders, so each one must name
+    /// the consequence and a next step rather than restate the kind.
+    #[test]
+    fn health_stage_messages_name_a_next_step() {
+        let root = Path::new("/project");
+        let shallow = WorkspaceDiagnostic::new(
+            root,
+            root.to_path_buf(),
+            WorkspaceDiagnosticKind::ShallowClone {
+                ownership_requested: true,
+            },
+        );
+        assert!(
+            shallow.message.contains("git fetch --unshallow"),
+            "{}",
+            shallow.message
+        );
+        assert!(
+            shallow.message.contains("Ownership signals are skewed too"),
+            "a run that asked for ownership is told what else it costs: {}",
+            shallow.message
+        );
+        let without_ownership = WorkspaceDiagnostic::new(
+            root,
+            root.to_path_buf(),
+            WorkspaceDiagnosticKind::ShallowClone {
+                ownership_requested: false,
+            },
+        );
+        assert!(
+            !without_ownership.message.contains("Ownership"),
+            "a run that did not ask for ownership is not told about it: {}",
+            without_ownership.message
+        );
+
+        let coverage = WorkspaceDiagnostic::new(
+            root,
+            root.join("coverage/coverage-final.json"),
+            WorkspaceDiagnosticKind::CoverageAutoDetected,
+        );
+        assert_eq!(coverage.kind.id(), "coverage-auto-detected");
+        assert!(
+            coverage
+                .message
+                .contains("--coverage 'coverage/coverage-final.json'"),
+            "the remedy names the file that fed the score: {}",
+            coverage.message
+        );
+        assert!(
+            !coverage.degrades_analysis,
+            "provenance is not a degraded run"
+        );
+
+        let ownership = WorkspaceDiagnostic::new(
+            root,
+            root.to_path_buf(),
+            WorkspaceDiagnosticKind::OwnershipUnavailable {
+                cause: "invalid-bot-pattern".to_owned(),
+                error: "unclosed".to_owned(),
+            },
+        );
+        assert!(
+            ownership.message.contains("botPatterns"),
+            "the two causes render different remedies: {}",
+            ownership.message
         );
     }
 }

@@ -70,7 +70,40 @@ fn audit_gate_outcomes(result: &AuditResult) -> Option<fallow_output::GateOutcom
     };
     let mut gates = fallow_output::GateOutcomes::new();
     gates.insert(GateName::AuditVerdict, GateOutcome::new(status, true));
+    if audit_loaded_any_baseline(result) {
+        // The honest projection of a gate that stood down: every audit narrows
+        // to the changed slice, so a whole-project baseline cannot be judged
+        // and the gate is inert by design. Publishing it as `skipped` and
+        // unenforced is what puts the fact in `gate_outcomes`, in the
+        // "Gate outcomes:" line the comment and MR note render, and in the
+        // MCP's gate sentences. One entry for up to three baselines, for the
+        // same reason the CLI prints its note once.
+        gates.insert(
+            GateName::StaleBaseline,
+            GateOutcome::new(GateStatus::Skipped, false),
+        );
+    }
     gates.into_option()
+}
+
+/// Whether this audit loaded any of its three baselines.
+///
+/// Read from the sub-pass results rather than from the options, because audit
+/// resolves all three from project config as well as from flags, so an audit
+/// can load a baseline with no flag at all.
+fn audit_loaded_any_baseline(result: &AuditResult) -> bool {
+    result
+        .check
+        .as_ref()
+        .is_some_and(|check| check.baseline_staleness.is_some())
+        || result
+            .dupes
+            .as_ref()
+            .is_some_and(|dupes| dupes.baseline_staleness.is_some())
+        || result
+            .health
+            .as_ref()
+            .is_some_and(|health| health.report.summary.baseline_staleness.is_some())
 }
 
 fn audit_decision_conclusion(verdict: AuditVerdict) -> PrDecisionConclusion {
@@ -173,16 +206,28 @@ fn print_audit_pr_comment(
     } else {
         audit_decision_conclusion(result.verdict)
     };
+    let gates = audit_gate_outcomes(result);
+    let advisory = audit_baseline_advisory(result);
+    let note = report::ci_status_note(
+        incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+        advisory.as_deref(),
+        gates.as_ref(),
+        // Audit publishes no `request_outcomes`: it exits 2 rather than widen
+        // when its base ref will not resolve, and it states its own scope
+        // through `base_ref` and `base_description`. It has no `--group-by`
+        // either.
+        None,
+        None,
+    );
     report::ci::pr_comment::print_pr_comment_with_status(
         "audit",
         provider,
         &value,
         conclusion,
-        report::ci_status_note(
-            incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
-            audit_gate_outcomes(result).as_ref(),
-        )
-        .as_deref(),
+        report::ci::pr_comment::PrCommentStatus {
+            message: note.as_deref(),
+            gates: &report::gate_outcome_text::gate_rows_for_gates(gates.as_ref()),
+        },
     )
 }
 
@@ -209,10 +254,62 @@ fn print_audit_review(
         conclusion,
         report::ci_status_note(
             incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+            audit_baseline_advisory(result).as_deref(),
             audit_gate_outcomes(result).as_ref(),
+            // Audit publishes no `request_outcomes`: it exits 2 rather than
+            // widen when its base ref will not resolve, and it states its own
+            // scope through `base_ref` and `base_description`. It has no
+            // `--group-by` either.
+            None,
+            None,
         )
         .as_deref(),
     )
+}
+
+/// The advisory for the baselines this audit loaded, rendered off the same
+/// section shape its JSON envelope publishes.
+///
+/// Built as that shape rather than passed object by object, because
+/// `fallow report --from` renders the saved audit envelope through the shared
+/// reader and the two must not each decide how three baselines read. Every
+/// audit narrows to the files that changed against its base, so in practice
+/// all three objects are change-scoped and this stays silent; building the
+/// shape rather than trusting that keeps the two paths identical if one ever
+/// is not.
+fn audit_baseline_advisory(result: &AuditResult) -> Option<String> {
+    let mut sections = serde_json::Map::new();
+    if let Some(staleness) = result
+        .check
+        .as_ref()
+        .and_then(|check| check.baseline_staleness.as_ref())
+    {
+        sections.insert(
+            "dead_code".to_owned(),
+            serde_json::json!({ "baseline_staleness": staleness.to_envelope(0) }),
+        );
+    }
+    if let Some(staleness) = result
+        .dupes
+        .as_ref()
+        .and_then(|dupes| dupes.baseline_staleness.as_ref())
+    {
+        sections.insert(
+            "duplication".to_owned(),
+            serde_json::json!({ "baseline_staleness": staleness.to_envelope(0) }),
+        );
+    }
+    if let Some(staleness) = result
+        .health
+        .as_ref()
+        .and_then(|health| health.report.summary.baseline_staleness.as_ref())
+    {
+        sections.insert(
+            "complexity".to_owned(),
+            serde_json::json!({ "summary": { "baseline_staleness": staleness } }),
+        );
+    }
+    report::baseline_advisory_text::advisory_line(&serde_json::Value::Object(sections))
 }
 
 fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: OutputFormat) {
@@ -997,6 +1094,10 @@ fn build_audit_dead_code_json_with_results(
         check.elapsed,
         check.config_fixable,
         &check.workspace_diagnostics,
+        check
+            .baseline_staleness
+            .as_ref()
+            .map(|loaded| loaded.to_envelope(0)),
     ) {
         Ok(mut json) => {
             if let Some(ref base) = result.base_snapshot {
@@ -1045,6 +1146,7 @@ fn build_audit_duplication_json(
         Ok(mut json) => {
             let root_prefix = format!("{}/", dupes.config.root.display());
             report::strip_root_prefix(&mut json, &root_prefix);
+            insert_duplication_baseline_staleness(&mut json, dupes);
             if let Some(ref base) = result.base_snapshot {
                 if let Some(comparison) = result.comparison.as_ref() {
                     annotate_domain_json(&mut json, "clone_groups", comparison.dupes.introduced());
@@ -1065,6 +1167,31 @@ fn build_audit_duplication_json(
             2,
             OutputFormat::Json,
         )),
+    }
+}
+
+/// Publish the duplication sub-pass's view of its loaded baseline at the audit
+/// `duplication` section root, where the standalone `dupes` envelope carries
+/// the same key.
+///
+/// Inserted into the serialized value rather than added to
+/// `DupesReportPayload`, because that payload is `serde(flatten)`ed into
+/// `DupesOutput`, which owns a `baseline_staleness` of its own: a typed member
+/// would put two keys of that name at the standalone envelope root. The audit
+/// section is built from the payload alone and never flows through the
+/// envelope, so this is the only carrier it has.
+fn insert_duplication_baseline_staleness(
+    json: &mut serde_json::Value,
+    dupes: &crate::dupes::DupesResult,
+) {
+    let Some(loaded) = dupes.baseline_staleness.as_ref() else {
+        return;
+    };
+    let Some(object) = json.as_object_mut() else {
+        return;
+    };
+    if let Ok(staleness) = serde_json::to_value(loaded.to_envelope(0)) {
+        object.insert("baseline_staleness".into(), staleness);
     }
 }
 

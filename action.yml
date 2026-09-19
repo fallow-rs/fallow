@@ -358,6 +358,12 @@ outputs:
   baseline-change-scoped:
     description: 'true when the run behind these numbers analyzed only part of the project, so the baseline could not be judged. Read this before dividing baseline-matched by baseline-entries.'
     value: ${{ steps.analyze.outputs.baseline_change_scoped }}
+  baseline-scope-reasons:
+    description: 'Names of the channels that narrowed the run, in the order fallow publishes them, separated by a comma and a space (for example "changed-since, production"). Empty when the run was not narrowed or the fallow version predates the member. Read it to tell narrowing you can remove from narrowing you chose.'
+    value: ${{ steps.analyze.outputs.baseline_scope_reasons }}
+  baseline-unrecognised:
+    description: 'true when the loaded file carries no key the running command writes into its own baselines, so it is a baseline another command saved or an object with nothing of that command in it. Empty when no baseline was loaded, when the baseline belongs to the command that read it, or when the fallow version predates the member. A baseline saved on a project with nothing to record is empty and is NOT reported here.'
+    value: ${{ steps.analyze.outputs.baseline_unrecognised }}
   baseline-gate-trips:
     description: 'true when the baseline has entries that match nothing and the run could judge it, which is what fail-on-stale-baseline exits on. Gate on this in a downstream step to report staleness without failing the job.'
     value: ${{ steps.analyze.outputs.baseline_gate_trips }}
@@ -376,6 +382,9 @@ outputs:
   analysis-degraded:
     description: 'true when the run recorded a diagnostic meaning its findings were computed over less than the whole project. Read from the envelope root, or from the dead_code section on command: audit.'
     value: ${{ steps.analyze.outputs.analysis_degraded }}
+  requests-unapplied:
+    description: 'Comma-separated names of the narrowing requests the run could not apply, each with its reason in parentheses (for example "changed-since (git-failed)"). Empty when every narrowing request applied and when nothing was asked for. Any entry means the report covers MORE than was requested, so a changed-code review read it as if it were scoped. Only requests that narrow the report are listed (the envelope entries whose affects is "scope"); a request that writes a file beside the report, such as sarif-file, never appears here, because its failure does not change what the report covers.'
+    value: ${{ steps.analyze.outputs.requests_unapplied }}
   post-skipped-reason:
     description: 'Reason the Post review comments step skipped posting (pagination_failure / none). Set to pagination_failure only when the inline-review POST was actually aborted to avoid duplicate threads (multi-comment dedup lookup failed). Empty when the Post review comments step did not run.'
     value: ${{ steps.review.outputs.post_skipped_reason }}
@@ -536,7 +545,7 @@ runs:
         steps.analyze.outputs.sarif != '' &&
         steps.ghas-check.outputs.available == 'true' &&
         always()
-      uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+      uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
       with:
         sarif_file: ${{ steps.analyze.outputs.sarif }}
         category: fallow
@@ -614,6 +623,7 @@ runs:
         FALLOW_BASELINE_STALE_ENTRIES: ${{ steps.analyze.outputs.baseline_stale_entries }}
         FALLOW_BASELINE_ENTRIES: ${{ steps.analyze.outputs.baseline_entries }}
         FALLOW_BASELINE_GATE_TRIPS: ${{ steps.analyze.outputs.baseline_gate_trips }}
+        FALLOW_BASELINE_UNRECOGNISED: ${{ steps.analyze.outputs.baseline_unrecognised }}
         FALLOW_GATES_FAILED: ${{ steps.analyze.outputs.gates_failed }}
         FALLOW_GATES_WARNED: ${{ steps.analyze.outputs.gates_warned }}
         FALLOW_GATES_SKIPPED: ${{ steps.analyze.outputs.gates_skipped }}
