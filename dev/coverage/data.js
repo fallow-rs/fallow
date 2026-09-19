@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789681205607,
+  "lastUpdate": 1789796687004,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "829a7cd490df0492fad6fdbd9b2059813050820d",
-          "message": "fix(cli): resolve a project-local Fallow from the standalone commit gate (#2492)\n\nFollow-up to #2465, which fixed the generated Lefthook job: a real installed Git\nhook keeps its caller PATH and does not add node_modules/.bin, so command -v\nfallow misses a project-local install and the job exits 0 without auditing.\n\nThe standalone .claude/hooks/fallow-gate.sh never learned any of it. Its only\nproject-local arm was npx --no-install, which needs npx on the hook own PATH\nrather than the shell one, and cannot see a Plug and Play install at all,\nbecause Plug and Play has no node_modules/.bin for npx to look in. Both cases\nfell through to \"binary not found, skipping audit\", the same silent success\n#2464 was filed for.\n\nThe script now tries the same installs in the same order as the job it ships\nalongside: PATH, the node_modules/.bin launcher, Yarn Plug and Play, then npx\n--no-install as a last resort. A comment in each file points at the other, since\nthe two must stay in step.\n\nTwo execution tests run the real rendered script rather than asserting on a\nstring: a project-local launcher with no global install reachable, and a Plug\nand Play install with no node_modules directory at all. Both reduce PATH to the\nprobe directory plus the system ones and link jq into the probe directory, since\non a developer machine the jq directory also holds the global fallow and would\nsatisfy the very resolution step under test. An unreachable\nFALLOW_GATE_MIN_VERSION makes the chosen runner observable in the block message.\nBoth fail without the new arms.",
-          "timestamp": "2026-08-31T16:29:15+02:00",
-          "tree_id": "6a331d36aadb5ec386086234912afceff48c2285",
-          "url": "https://github.com/fallow-rs/fallow/commit/829a7cd490df0492fad6fdbd9b2059813050820d"
-        },
-        "date": 1788187248755,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/aeb92c9a0f54ec18a11b2522459688728abf53e2"
         },
         "date": 1789681202032,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cc74281756dd722afb169d8310dbb73fbf06ec50",
+          "message": "fix(mcp): auto-detect the audit base ref on the typed audit and decision_surface routes (#2703)\n\nThe MCP audit and decision_surface tools failed with\nFALLOW_CHANGED_FILES_FAILED when no base was passed, on any repository\nwith a remote: the engine's git probe returned raw stdout, so the\nauto-detected ref carried git's trailing newline into ref validation.\nThe CLI route trimmed in its own copy of the detection and kept working.\nRegression from 3.1.0.\n\nThe engine probe returns trimmed, non-empty output again, which also\nrepairs the repository root used when a typed run starts in a\nsubdirectory. The API validates an auto-detected ref the same way it\nvalidates an explicit one. The CLI's duplicate detection is removed and\nrouted through the engine, so both routes share one implementation.\n\nThanks @codingthat for the report and the bisect.\n\nCloses #2699",
+          "timestamp": "2026-09-19T06:55:22+02:00",
+          "tree_id": "a8a79896a2165d3fb493f72eb05741bc740fc219",
+          "url": "https://github.com/fallow-rs/fallow/commit/cc74281756dd722afb169d8310dbb73fbf06ec50"
+        },
+        "date": 1789796682734,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
