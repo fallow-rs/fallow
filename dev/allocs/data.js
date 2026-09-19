@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789794029130,
+  "lastUpdate": 1789804645427,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "7a3fcb30d2c6650bd5db529276a835add84710b1",
-          "message": "fix(health): read the coverage maps other producers actually write (#2461)\n\nc8, nyc in v8 mode, and older vitest versions write a coverage map in which the\nimplicit else of a bare `if` carries `column: -1`. Positions are unsigned, so\none unplaceable coordinate in `branchMap`, a section the CRAP path never reads,\naborted the run with exit 2. Unplaceable coordinates are now clamped on a retry\nthat only runs after the strict parse has failed.\n\nRaw V8 coverage and `oxc-coverage-instrument` record an accessor as `get area`\nwhere istanbul-lib-instrument leaves the record anonymous, and fallow extracts\nthe unit as `area`. A covered accessor read as unmeasured under the first two\nproducers. A record now answers to its property name as well as to the\nspelling the producer chose.\n\nThe MCP coverage fixture asserted a body span the instrumenter does not emit\nfor its own source, and `coverage_tier` now documents what it describes when\nnothing measured the function.\n\nCloses #2454\nCloses #2456",
-          "timestamp": "2026-08-30T11:41:03+02:00",
-          "tree_id": "254c5dcd9162208570cdb11ccd12a5eec29ce063",
-          "url": "https://github.com/fallow-rs/fallow/commit/7a3fcb30d2c6650bd5db529276a835add84710b1"
-        },
-        "date": 1788083192263,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9695051,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49313,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1159177,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8316,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8469,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "61275ff83c557589aac1b36638b95a83dbfc0e2b",
+          "message": "fix(output): report what a run was asked to do and whether it did it (#2704)\n\nSeveral requests could be dropped or degraded by a run with only a\nstderr line to say so, which --quiet and the CI integrations never see.\n\nA new optional root object, request_outcomes, records each narrowing or\nartifact request the run received: status (applied or not-applied),\naffects (scope or artifact), requested as the user spelled it, and for an\nunapplied entry a reason token and the sentence the CLI printed. It covers\n--changed-since falling back to the whole project, the diff filter\nstanding down, and a --sarif-file that could not be written. The object\nis absent when nothing was asked for, so no schema version moves, and the\nJSON root-prefix pass leaves it verbatim.\n\nDegraded health inputs (file scores, hotspots without git, shallow\nclones, an unpinned clock, ownership, unreadable trend snapshots) reach\nworkspace_diagnostics with degrades_analysis set. --group-by on a format\nthat cannot carry it now says so on every such format and in the comment\nand review bodies.\n\nThe GitHub Action publishes requests-unapplied and warns when the SARIF\nfile it was about to upload was never written; the GitLab template writes\nFALLOW_REQUESTS_UNAPPLIED. The MCP tools state the same facts.\n\nCloses #2687\nCloses #2688\nCloses #2689\nCloses #2690\nCloses #2691",
+          "timestamp": "2026-09-19T09:51:52+02:00",
+          "tree_id": "e9ed8aaf16c5a0cde9447e9781ea8054829fefbb",
+          "url": "https://github.com/fallow-rs/fallow/commit/61275ff83c557589aac1b36638b95a83dbfc0e2b"
+        },
+        "date": 1789804641287,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9912875,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51187,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1187634,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8401,
             "unit": "allocations"
           }
         ]
