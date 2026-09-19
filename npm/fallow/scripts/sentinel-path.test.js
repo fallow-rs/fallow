@@ -89,10 +89,7 @@ test("resolveSentinelPath falls back to FALLOW_VERIFY_CACHE_DIR when platform pk
   }
 });
 
-test("resolveSentinelPath honors FALLOW_VERIFY_CACHE_DIR even when platform pkg dir IS writable", () => {
-  // Per the cascade documented in the source, the platform pkg dir wins when
-  // writable. The cache-dir env is the FALLBACK for when the platform dir is
-  // read-only. We pass a non-existent platform dir to force the fallback.
+test("resolveSentinelPath uses FALLOW_VERIFY_CACHE_DIR when platform pkg dir is unset", () => {
   const cacheDir = mkTmp();
   try {
     const result = resolveSentinelPath({

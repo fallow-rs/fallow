@@ -710,7 +710,7 @@ fn run_analysis_setup(config: &ResolvedConfig) -> Result<AnalysisSetup, FallowEr
     let progress = new_analysis_progress(config);
 
     let (workspaces_vec, workspaces_ms) = discover_analysis_workspaces(config)?;
-    let root_pkg = load_root_package_json(config);
+    let root_pkg = fallow_config::load_dir_package_json(&config.root);
     let discovery_hidden_dir_scopes =
         discover::collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
 
@@ -1942,14 +1942,6 @@ fn trace_pipeline_profile(profile: &PipelineProfile) {
     );
 }
 
-/// Analyze package.json scripts from root and all workspace packages.
-///
-/// Populates the plugin result with script-used packages and config file
-/// entry patterns. Also scans CI config files for binary invocations.
-fn load_root_package_json(config: &ResolvedConfig) -> Option<PackageJson> {
-    fallow_config::load_dir_package_json(&config.root)
-}
-
 fn load_workspace_packages(
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<LoadedWorkspacePackage> {
@@ -1961,6 +1953,10 @@ fn load_workspace_packages(
         .collect()
 }
 
+/// Analyze package.json scripts from root and all workspace packages.
+///
+/// Populates the plugin result with script-used packages and config file
+/// entry patterns. Also scans CI config files for binary invocations.
 fn analyze_all_scripts(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],

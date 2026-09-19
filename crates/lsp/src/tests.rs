@@ -4213,7 +4213,7 @@ fn filter_disabled_diagnostics_empty_disabled_set_passes_all() {
         make_diagnostic_with_code("unused-file"),
     ];
     let disabled: FxHashSet<String> = FxHashSet::default();
-    let result = filter_disabled_diagnostics(&diags, &disabled);
+    let result = filter_disabled_diagnostics(diags, &disabled);
     assert_eq!(
         result.len(),
         2,
@@ -4228,7 +4228,7 @@ fn filter_disabled_diagnostics_removes_matching_string_code() {
         make_diagnostic_with_code("unused-file"),
     ];
     let disabled: FxHashSet<String> = std::iter::once("unused-export".to_string()).collect();
-    let result = filter_disabled_diagnostics(&diags, &disabled);
+    let result = filter_disabled_diagnostics(diags, &disabled);
     assert_eq!(result.len(), 1);
     assert_eq!(
         result[0]
@@ -4248,7 +4248,7 @@ fn filter_disabled_diagnostics_removes_matching_string_code() {
 fn filter_disabled_diagnostics_keeps_numeric_codes_always() {
     let diags = vec![make_diagnostic_with_numeric_code(1001)];
     let disabled: FxHashSet<String> = std::iter::once("1001".to_string()).collect();
-    let result = filter_disabled_diagnostics(&diags, &disabled);
+    let result = filter_disabled_diagnostics(diags, &disabled);
     assert_eq!(
         result.len(),
         1,
@@ -4260,7 +4260,7 @@ fn filter_disabled_diagnostics_keeps_numeric_codes_always() {
 fn filter_disabled_diagnostics_keeps_codeless_diagnostics() {
     let diags = vec![make_diagnostic_no_code()];
     let disabled: FxHashSet<String> = std::iter::once("unused-export".to_string()).collect();
-    let result = filter_disabled_diagnostics(&diags, &disabled);
+    let result = filter_disabled_diagnostics(diags, &disabled);
     assert_eq!(
         result.len(),
         1,
@@ -4282,7 +4282,7 @@ fn filter_disabled_diagnostics_removes_all_disabled() {
     ]
     .into_iter()
     .collect();
-    let result = filter_disabled_diagnostics(&diags, &disabled);
+    let result = filter_disabled_diagnostics(diags, &disabled);
     assert!(
         result.is_empty(),
         "all diagnostics disabled must yield an empty result"

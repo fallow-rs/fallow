@@ -15,7 +15,7 @@
 // bin/fallow exits non-zero before execing the binary. FALLOW_SKIP_BINARY_VERIFY
 // remains the documented escape hatch.
 //
-// Refs: SECURITY.md "Binary distribution and verification".
+// See SECURITY.md for binary distribution and verification.
 //
 // No external deps beyond node:fs / node:path / node:crypto.
 

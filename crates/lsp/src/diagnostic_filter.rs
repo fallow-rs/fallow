@@ -2,25 +2,22 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use ls_types::{Diagnostic, NumberOrString, Uri};
 
-/// Drop diagnostics whose string `code` is in the `disabled` set, cloning the
-/// survivors. A diagnostic with no code or a numeric code is always kept.
+/// Drop diagnostics whose string `code` is in the `disabled` set in place.
+/// A diagnostic with no code or a numeric code is always kept.
 pub fn filter_disabled_diagnostics(
-    diags: &[Diagnostic],
+    mut diags: Vec<Diagnostic>,
     disabled: &FxHashSet<String>,
 ) -> Vec<Diagnostic> {
     if disabled.is_empty() {
-        return diags.to_vec();
+        return diags;
     }
-    diags
-        .iter()
-        .filter(|d| {
-            d.code.as_ref().is_none_or(|code| match code {
-                NumberOrString::String(s) => !disabled.contains(s.as_str()),
-                NumberOrString::Number(_) => true,
-            })
+    diags.retain(|d| {
+        d.code.as_ref().is_none_or(|code| match code {
+            NumberOrString::String(s) => !disabled.contains(s.as_str()),
+            NumberOrString::Number(_) => true,
         })
-        .cloned()
-        .collect()
+    });
+    diags
 }
 
 /// Stamp `Diagnostic.data` with `{ "changedSince": "<git_ref>" }` on every

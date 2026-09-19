@@ -648,20 +648,18 @@ mod tests {
     #[test]
     fn tampered_payload_fails_signature() {
         let (signing, verifying) = fixed_keypair();
-        let claims = make_claims(2_000_000_000);
-        let mut jwt = sign_jwt(&signing, &claims);
-        let mid = jwt.find('.').unwrap() + 5;
-        let bad: String = jwt
-            .chars()
-            .enumerate()
-            .map(|(i, c)| if i == mid { 'X' } else { c })
-            .collect();
-        jwt = bad;
-        let err = verify_jwt(&jwt, &verifying, 1_900_000_000, DEFAULT_HARD_FAIL_DAYS).unwrap_err();
-        assert!(matches!(
-            err,
-            LicenseError::BadSignature | LicenseError::BadPayload(_)
-        ));
+        let mut claims = make_claims(2_000_000_000);
+        let jwt = sign_jwt(&signing, &claims);
+        let mut parts: Vec<String> = jwt.split('.').map(str::to_owned).collect();
+        // Keep a valid payload and the original signature, so JSON parsing cannot
+        // reject the token in place of signature verification.
+        claims.seats += 1;
+        parts[1] = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap());
+        let tampered = parts.join(".");
+
+        let err =
+            verify_jwt(&tampered, &verifying, 1_900_000_000, DEFAULT_HARD_FAIL_DAYS).unwrap_err();
+        assert!(matches!(err, LicenseError::BadSignature));
     }
 
     #[test]

@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -50,12 +54,38 @@ test("full mode runs fast checks first, then the full checks", () => {
   ]);
 });
 
-test("commands use executable and argument arrays without a shell", () => {
-  for (const command of commandsForMode("full")) {
-    assert.equal(typeof command.command, "string");
-    assert.ok(Array.isArray(command.args));
-    assert.equal(command.shell, undefined);
-  }
+test("default runner preserves literal arguments without a shell", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "fallow runner "));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fixture = join(directory, "record arguments.mjs");
+  const output = join(directory, "arguments.json");
+  const args = ["two words", "$(echo expanded)", "literal;value", "*.mjs", ""];
+  writeFileSync(
+    fixture,
+    'import { writeFileSync } from "node:fs";\n' +
+      "writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)));\n",
+  );
+  const command = {
+    label: "Literal argument probe",
+    command: process.execPath,
+    args: [fixture, output, ...args],
+  };
+  const moduleUrl = new URL("./verify-repo.mjs", import.meta.url).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import { commandsForMode, runVerification } from ${JSON.stringify(moduleUrl)};
+       const commands = commandsForMode("fast");
+       commands.splice(0, commands.length, ${JSON.stringify(command)});
+       process.exitCode = runVerification("fast");`,
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.deepEqual(JSON.parse(readFileSync(output, "utf8")), args);
 });
 
 test("verification stops at the first failed command", () => {

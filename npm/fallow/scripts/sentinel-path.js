@@ -9,7 +9,7 @@
 //   4. Every location read-only: returns { path: null, location: 'none', writable: false }.
 //      Callers run verify on every invocation and surface FALLOW_SKIP_BINARY_VERIFY=1 as the escape.
 //
-// Refs RFC 868 (npm/cli#9360). See .plans/rfc-868-lazy-binary-verify.md.
+// See SECURITY.md for binary distribution and verification.
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -19,8 +19,8 @@ const SENTINEL_FILENAME = ".fallow-verified";
 
 // Returns true when the directory exists and the current process can create
 // a file in it. Tries an atomic O_CREAT|O_EXCL write so we never disturb an
-// existing sentinel during the writability probe. Falls back to fs.accessSync
-// when mkdtempSync fails for non-permission reasons.
+// existing sentinel during the writability probe. Any failed probe makes this
+// location unavailable so resolution can try the next cache directory.
 function isWritable(dir) {
   if (typeof dir !== "string" || dir.length === 0) {
     return false;
@@ -126,7 +126,7 @@ function tryXdgFallback(env, homeDir, platformId, filename, ensureDir, writableP
 }
 
 // Resolve the sentinel path according to the cascade documented above.
-// Dependency-inject env / homedir / platform / fsProbe so the unit tests can
+// Dependency-inject env / homedir / platform / isWritable / ensureDir so tests can
 // exercise every branch without touching the real filesystem state.
 //
 // Returns: {

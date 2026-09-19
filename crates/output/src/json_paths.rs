@@ -40,17 +40,13 @@ fn strip_root_prefix_from_string(value: &mut String, prefix: &str) {
         return;
     }
 
-    let normalized = normalize_output_path(value);
-    let normalized_prefix = normalize_output_path(prefix);
+    let normalized = normalize_uri(value);
+    let normalized_prefix = normalize_uri(prefix);
     if let Some(rest) = normalized.strip_prefix(&normalized_prefix) {
         *value = rest.to_string();
     } else if let Some(stripped) = strip_embedded_root_prefixes(&normalized, &normalized_prefix) {
         *value = stripped;
     }
-}
-
-fn normalize_output_path(path: &str) -> String {
-    normalize_uri(path)
 }
 
 /// Normalize a path string to a valid URI: forward slashes and percent-encoded

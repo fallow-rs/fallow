@@ -963,10 +963,10 @@ impl FallowLspServer {
         // clear; those URIs are re-cleared below once the flip is observed.
         let mut pushed_live_uris: Vec<Uri> = Vec::new();
 
-        for (uri, diags) in &diagnostics_by_file {
+        for (uri, diags) in diagnostics_by_file {
             new_uris.insert(uri.clone());
 
-            if uri_is_stale(uri, snapshot, &live_documents) {
+            if uri_is_stale(&uri, snapshot, &live_documents) {
                 continue;
             }
 
@@ -976,13 +976,13 @@ impl FallowLspServer {
             // arrive while this loop awaits, flipping the client into pull
             // mode mid-publish.
             let use_pull_diagnostics = self.client_pulls.load(Ordering::SeqCst);
-            let is_live = live_documents.contains_key(uri);
+            let is_live = live_documents.contains_key(&uri);
             if !use_pull_diagnostics || !is_live {
                 self.client
                     .publish_diagnostics(
                         uri.clone(),
                         filtered.clone(),
-                        snapshot.get(uri).map(|state| state.version),
+                        snapshot.get(&uri).map(|state| state.version),
                     )
                     .await;
                 if is_live && !filtered.is_empty() {
@@ -990,10 +990,7 @@ impl FallowLspServer {
                 }
             }
 
-            self.cached_diagnostics
-                .write()
-                .await
-                .insert(uri.clone(), filtered);
+            self.cached_diagnostics.write().await.insert(uri, filtered);
         }
 
         self.clear_stale_diagnostics(&mut new_uris, snapshot, &live_documents)

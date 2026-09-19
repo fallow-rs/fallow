@@ -1119,7 +1119,7 @@ fn dupes_family_entry(family: &Value) -> String {
         .filter_map(Value::as_str)
         .map(markdown_code_span)
         .collect();
-    let shown = files.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+    let shown = files[..files.len().min(3)].join(", ");
     let more = if files.len() > 3 {
         format!(" (+{} more)", files.len() - 3)
     } else {

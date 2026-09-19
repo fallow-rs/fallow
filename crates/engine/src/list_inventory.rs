@@ -160,15 +160,34 @@ mod tests {
 
     #[test]
     fn entry_points_accept_plugin_result() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"next":"15.0.0"}}"#,
+        )
+        .expect("package manifest");
         let config = FallowConfig::default().resolve(
-            Path::new("/project").to_path_buf(),
+            temp.path().to_path_buf(),
             OutputFormat::Json,
             1,
             false,
             true,
             None,
         );
-        let discovered = Vec::new();
+        let discovered = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: config.root.join("src/app/dashboard/page.tsx"),
+                size_bytes: 0,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: config.root.join("src/helpers/format.ts"),
+                size_bytes: 0,
+            },
+        ];
+        let plugin_result = collect_active_plugins(temp.path(), &config, &discovered, &[])
+            .expect("Next.js plugins load");
 
         let entries = collect_entry_points(&config, &discovered, &[], None);
 
@@ -177,5 +196,15 @@ mod tests {
                 .iter()
                 .all(|entry| !matches!(entry.source, EntryPointSource::Plugin { .. }))
         );
+
+        let entries = collect_entry_points(&config, &discovered, &[], Some(&plugin_result));
+        let plugin_entries: Vec<_> = entries
+            .iter()
+            .filter_map(|entry| match &entry.source {
+                EntryPointSource::Plugin { name } => Some((&entry.path, name.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(plugin_entries, vec![(&discovered[0].path, "nextjs")]);
     }
 }

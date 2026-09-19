@@ -286,7 +286,7 @@ pub fn review_similar_code(
 
     let mut matched = vec![None; raw.candidates.len()];
     let mut match_kind = vec![SimilarCodeVerdictMatch::Unverified; raw.candidates.len()];
-    let mut diagnostics = raw.diagnostics.clone();
+    let mut diagnostics = raw.diagnostics;
     let mut seen_candidate_ids = FxHashSet::default();
     let mut seen_review_keys = FxHashSet::default();
     for verdict in verdicts.verdicts {

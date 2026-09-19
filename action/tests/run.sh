@@ -3694,7 +3694,8 @@ for gate_case in \
     health-*) command_for_gate="health"; extra_for_gate='"summary":{"functions_above_threshold":0}' ;;
     duplication-*) command_for_gate="dupes"; extra_for_gate='"stats":{"clone_groups":0}' ;;
   esac
-  run_gate_analyze "$(gate_envelope "{\"$gate_name\":{\"status\":\"fail\",\"enforced\":true}}" "$extra_for_gate")" \
+  printf -v gate_outcome '{"%s":{"status":"fail","enforced":true}}' "$gate_name"
+  run_gate_analyze "$(gate_envelope "$gate_outcome" "$extra_for_gate")" \
     INPUT_COMMAND="$command_for_gate" INPUT_FAIL_ON_ISSUES="false" "$gate_input"
   assert_contains "$GATE_STDOUT" "::error::$expected" \
     "gate: $gate_name fails the job with fail-on-issues false"

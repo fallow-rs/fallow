@@ -76,7 +76,7 @@ pub struct CoordinationGapPaths {
 impl ModuleGraph {
     /// Compute the impact closure for a changed-file seed set.
     ///
-    /// BFS over `reverse_deps` from every changed file yields the transitive
+    /// Traversing `reverse_deps` from every changed file yields the transitive
     /// affected set; the seed partitions into `in_diff`, the rest into
     /// `affected_not_shown`. The coordination gap walks each changed file's
     /// exported-symbol references and reports those whose consumer is outside the
@@ -100,27 +100,20 @@ impl ModuleGraph {
         let affected = self.collect_reverse_closure(&in_diff_set, capacity);
         let coordination_gap = self.collect_coordination_gaps(&in_diff_set);
 
-        let mut in_diff: Vec<FileId> = in_diff_set.ones().map(|i| FileId(i as u32)).collect();
-        in_diff.sort_unstable_by_key(|f| f.0);
-        let mut affected_not_shown: Vec<FileId> =
-            affected.ones().map(|i| FileId(i as u32)).collect();
-        affected_not_shown.sort_unstable_by_key(|f| f.0);
-
         ImpactClosure {
-            in_diff,
-            affected_not_shown,
+            in_diff: in_diff_set.ones().map(|i| FileId(i as u32)).collect(),
+            affected_not_shown: affected.ones().map(|i| FileId(i as u32)).collect(),
             coordination_gap,
         }
     }
 
-    /// BFS over `reverse_deps` from the seed set, returning the bitset of files
+    /// Traverse `reverse_deps` from the seed set, returning the bitset of files
     /// reached but NOT in the seed (the affected-not-shown partition).
     fn collect_reverse_closure(&self, seed: &FixedBitSet, capacity: usize) -> FixedBitSet {
         let mut visited = seed.clone();
-        let mut affected = FixedBitSet::with_capacity(capacity);
-        let mut queue: Vec<FileId> = seed.ones().map(|i| FileId(i as u32)).collect();
+        let mut stack: Vec<FileId> = seed.ones().map(|i| FileId(i as u32)).collect();
 
-        while let Some(current) = queue.pop() {
+        while let Some(current) = stack.pop() {
             let Some(importers) = self.reverse_deps.get(current.0 as usize) else {
                 continue;
             };
@@ -130,13 +123,11 @@ impl ModuleGraph {
                     continue;
                 }
                 visited.insert(idx);
-                if !seed.contains(idx) {
-                    affected.insert(idx);
-                }
-                queue.push(importer);
+                stack.push(importer);
             }
         }
-        affected
+        visited.difference_with(seed);
+        visited
     }
 
     /// For each changed file, collect the consumers (via exported-symbol
@@ -572,6 +563,18 @@ mod tests {
         assert_eq!(paths.coordination_gap.len(), 1);
         assert_eq!(paths.coordination_gap[0].changed_file, "src/core.ts");
         assert_eq!(paths.coordination_gap[0].consumer_file, "src/mid.ts");
+    }
+
+    #[test]
+    fn closure_partitions_cyclic_graph_with_repeated_and_invalid_seeds() {
+        let mut graph = build_reverse_dep_graph();
+        graph.reverse_deps[2].push(FileId(0));
+        graph.reverse_deps[1].push(FileId(u32::MAX));
+
+        let closure = graph.impact_closure(&[FileId(1), FileId(u32::MAX), FileId(0), FileId(1)]);
+
+        assert_eq!(closure.in_diff, vec![FileId(0), FileId(1)]);
+        assert_eq!(closure.affected_not_shown, vec![FileId(2)]);
     }
 
     #[test]
