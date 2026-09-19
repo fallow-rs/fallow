@@ -133,6 +133,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report that was unambiguously missing
   (Closes [#2691](https://github.com/fallow-rs/fallow/issues/2691)).
 
+- **The MCP `audit` and `decision_surface` tools auto-detect a base ref again.**
+  Called without a `base` argument on a repository that has a remote, both tools
+  failed before analysis with `FALLOW_CHANGED_FILES_FAILED`, because the
+  auto-detected ref reached the diff carrying the line ending git printed
+  (`origin/main` followed by a newline). `fallow audit` was unaffected, since it
+  trims its own probes. The engine's git probe now returns trimmed, non-empty
+  output, so both routes resolve the same merge-base and the tools return a
+  verdict. A `root` pointing at a subdirectory also gets the matching
+  subdirectory of the base snapshot again instead of the whole base worktree,
+  and a `root` the base commit does not contain, such as a package added on the
+  branch, is audited against an empty base snapshot so everything under it is
+  attributed as introduced, matching `fallow audit` on the same root.
+  Thanks [@codingthat](https://github.com/codingthat) for the report and the
+  bisect (Closes [#2699](https://github.com/fallow-rs/fallow/issues/2699)).
+
 ## [3.27.0] - 2026-09-17
 
 ### Fixed

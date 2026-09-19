@@ -233,7 +233,7 @@ mod base_ref;
 mod cache;
 
 #[cfg(test)]
-use base_ref::{auto_detect_base_ref, parse_audit_base_override};
+use base_ref::parse_audit_base_override;
 use base_ref::{get_head_sha, resolve_base_ref};
 #[cfg(test)]
 use cache::{
