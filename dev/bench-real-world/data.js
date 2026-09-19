@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789733612731,
+  "lastUpdate": 1789819034170,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "1f2bf7070b2650dd2e613fe0b84df61f7363a741",
-          "message": "fix(cli): clear test-only-dependency findings under single-type filters (#1194)\n\nIssueFilters::apply() clears every issue category not selected by a single-type filter flag, but the --unused-deps clear arm omitted test_only_dependencies, so a focused run like `fallow dead-code --unused-files` on a project with a production dependency imported only from test files leaked that test-only finding alongside the requested issue type.\n\nThis groups test-only-dependency with the other dependency kinds under --unused-deps (matching type-only and the --file scope, which already cleared all five categories), sets filter_flag to --unused-deps for the test-only-dependency row in the capability manifest, regenerates the SKILL.md issue-types table, and adds a neuter-verified filter-parity regression test.\n\nFixes #1192.",
-          "timestamp": "2026-06-11T10:56:25Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/1f2bf7070b2650dd2e613fe0b84df61f7363a741"
-        },
-        "date": 1781177310774,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 243,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 220,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 490,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 397,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 261,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 242,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 692,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 628,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1667,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1480,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 1140,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 1116,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 1030,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 911,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 11637,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 11034,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9279,6 +9177,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1122,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "40e9dfb659aefb38c8df28a626b222f1bae6e5cb",
+          "message": "fix(cli): say on every artefact when a baseline went stale or cannot be judged (#2705)\n\nFollow-ups to the baseline staleness work in 3.27.0.\n\nThe sticky PR comment, the decision sidecar behind the Check Run and the\nGitLab MR note now carry the baseline advisory, so a reviewer sees a\nrotted baseline on the surface they read and not only in the job log.\n\nbaseline_staleness gains scope_reasons, which names the channels that\nnarrowed a run (diff, changed-since, changed-files, workspace,\nchanged-workspaces, scope, file, issue-type-filter, production), and\nunrecognised_format, which is true when the loaded file carries nothing\nthe running command writes into its own baselines. A baseline another\ncommand saved no longer reports zero entries and gates green in silence,\nwhile a baseline this command saved on a clean project is not flagged.\n\nA narrowed run with a non-empty baseline gains a recheck-baseline next\nstep when repeating the command without the narrowing can judge it. The\nstep is withheld for production and workspace scoping, and while\nFALLOW_DIFF_FILE is exported on a diff-scoped run.\n\nfallow audit's three baselines are judged and reported instead of\nrotting behind the changed-file scope. The Action publishes\nbaseline-scope-reasons and baseline-unrecognised; the GitLab template\nand the MCP tools state the same facts.\n\nCloses #2675\nCloses #2677\nCloses #2678\nCloses #2679",
+          "timestamp": "2026-09-19T11:35:04Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/40e9dfb659aefb38c8df28a626b222f1bae6e5cb"
+        },
+        "date": 1789819028911,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 506,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 304,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1221,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1019,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 914,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 811,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 915,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 714,
             "unit": "ms"
           }
         ]
