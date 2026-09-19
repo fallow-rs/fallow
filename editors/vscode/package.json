@@ -939,7 +939,7 @@
     "@vscode/vsce": "3.9.2",
     "json-schema-to-typescript": "16.0.0",
     "mocha": "11.8.0",
-    "rolldown": "1.2.7",
+    "rolldown": "1.2.8",
     "ovsx": "1.1.1",
     "typescript": "7.0.2",
     "vitest": "5.0.0",
