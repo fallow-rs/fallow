@@ -159,8 +159,8 @@ fn git_fixture() -> TempDir {
 /// Run `fallow <args> --root <root> --format json --quiet`, parse stdout, and
 /// validate it against the schema branch for `expected_kind`. Analysis
 /// envelopes additionally receive `--no-cache`.
-fn run_and_validate(schema: &Value, root: &Path, args: &[&str], expected_kind: &str) {
-    run_and_validate_with(schema, root, args, expected_kind, |_| {});
+fn run_and_validate(schema: &Value, root: &Path, args: &[&str], expected_kind: &str) -> Value {
+    run_and_validate_with(schema, root, args, expected_kind, |_| {})
 }
 
 fn run_and_validate_with(
@@ -169,7 +169,7 @@ fn run_and_validate_with(
     args: &[&str],
     expected_kind: &str,
     configure: impl FnOnce(&mut Command),
-) {
+) -> Value {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     configure(&mut cmd);
@@ -193,6 +193,7 @@ fn run_and_validate_with(
         )
     });
     assert_conforms(schema, expected_kind, &value);
+    value
 }
 
 #[test]
@@ -264,6 +265,85 @@ fn cli_json_documents_conform_to_output_schema() {
         root,
         &["type-aware", "status"],
         "type-aware-status",
+    );
+}
+
+/// The facts a run publishes about itself: `request_outcomes` and the
+/// health-stage `workspace_diagnostics` kinds. Neither appears in any document
+/// the case above produces, so without this their schema branches are pinned by
+/// the type-derived drift gate alone and never validated against real emitted
+/// output. Each case asserts the member is present, so neither can pass
+/// vacuously.
+#[test]
+fn run_fact_documents_conform_to_output_schema() {
+    let fixture = git_fixture();
+    let root = fixture.path();
+    let schema = load_schema_root();
+
+    // An envelope carrying `request_outcomes`: the object is absent from every
+    // document above, so without this case its schema branches are pinned only
+    // by the type-derived drift gate and never validated against real emitted
+    // output. Both an unapplied entry (reason and message present) and an
+    // applied one (both absent) travel in this run.
+    let diff = root.join("scoped.diff");
+    std::fs::write(
+        &diff,
+        "diff --git a/src/lib.ts b/src/lib.ts\n\
+         --- a/src/lib.ts\n\
+         +++ b/src/lib.ts\n\
+         @@ -1,1 +1,1 @@\n\
+         +export const used = () => 42;\n",
+    )
+    .unwrap();
+    let scoped = run_and_validate(
+        &schema,
+        root,
+        &[
+            "dead-code",
+            "--changed-since",
+            "refs/heads/does-not-exist",
+            "--diff-file",
+            diff.to_str().unwrap(),
+        ],
+        "dead-code",
+    );
+    assert_eq!(
+        scoped["request_outcomes"]["changed-since"]["status"], "not-applied",
+        "the case must carry the member it validates: {scoped}"
+    );
+    assert_eq!(
+        scoped["request_outcomes"]["diff-filter"]["status"], "applied",
+        "and both entry shapes: {scoped}"
+    );
+
+    // And one carrying the health-stage `workspace_diagnostics` kinds, which
+    // are in the same position: `hotspots-skipped` needs no git repository, so
+    // it is driven from a fixture that is not one.
+    let non_repo = TempDir::new().expect("temp dir");
+    std::fs::create_dir_all(non_repo.path().join("src")).unwrap();
+    std::fs::write(
+        non_repo.path().join("package.json"),
+        r#"{"name":"health-diagnostics","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        non_repo.path().join("src/index.ts"),
+        "export const entry = () => 1;\n",
+    )
+    .unwrap();
+    let degraded = run_and_validate(
+        &schema,
+        non_repo.path(),
+        &["health", "--hotspots"],
+        "health",
+    );
+    assert!(
+        degraded["workspace_diagnostics"]
+            .as_array()
+            .is_some_and(|entries| entries
+                .iter()
+                .any(|entry| entry["kind"] == "hotspots-skipped")),
+        "the case must carry the kind it validates: {degraded}"
     );
 }
 

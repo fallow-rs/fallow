@@ -163,16 +163,143 @@ pub(crate) fn resolve_diff_source(
     Ok(None)
 }
 
+/// Why a supplied diff could not be applied, plus the sentence that says so.
+///
+/// The reason token is what `request_outcomes["diff-filter"].reason` publishes
+/// and the message is what both the stderr line and that entry's `message`
+/// render, so the log a human read and the envelope a script read cannot state
+/// different things. Every stand-down returns one of these instead of printing
+/// where it happens: the print is quiet-gated at one place, and the recording
+/// is not, which is the whole defect this type exists to close (issue #2688).
+#[derive(Debug)]
+pub(crate) struct DiffStandDown {
+    reason: &'static str,
+    message: String,
+}
+
+impl DiffStandDown {
+    fn new(reason: &'static str, message: String) -> Self {
+        Self { reason, message }
+    }
+
+    fn oversize(label: &str, bytes: u64, cap: u64) -> Self {
+        Self::new(
+            "oversize",
+            format!(
+                "{label} is {bytes} bytes (cap {cap}); line-level filtering disabled, \
+                 reporting all findings. Narrow the diff; the cap is fixed."
+            ),
+        )
+    }
+
+    fn unreadable(label: &str, err: &std::io::Error) -> Self {
+        Self::new(
+            "unreadable",
+            format!(
+                "could not read {label}: {err} (line-level filtering disabled, \
+                 reporting all findings). Check the path exists and is readable."
+            ),
+        )
+    }
+
+    fn not_utf8(label: &str, err: &std::string::FromUtf8Error) -> Self {
+        Self::new(
+            "not-utf8",
+            format!(
+                "could not read {label} as UTF-8: {err} (line-level filtering disabled, \
+                 reporting all findings). Regenerate the diff as UTF-8 text."
+            ),
+        )
+    }
+
+    /// The diff's paths resolve equally well under two different directories,
+    /// so existence alone cannot place its base. Rather than filter against a
+    /// guess (whose wrong half drops every source-anchored finding), the run
+    /// discards the diff and reports at full scope, so the message names the
+    /// ambiguity and says so rather than letting silence imply the report was
+    /// scoped.
+    fn ambiguous_base(candidate_bases: &[PathBuf], root: &Path, label: &str) -> Self {
+        let bases = join_bases(candidate_bases, root, " and ");
+        Self::new(
+            "ambiguous-base",
+            format!(
+                "the paths in {label} name existing files under {bases}, so their base is \
+                 ambiguous and fallow cannot tell which one the diff is relative to. It will \
+                 not filter against a guess: every finding is reported (full scope, not scoped \
+                 to the diff). Generate the diff from the repository root (plain `git diff`, \
+                 not `git diff --relative`) to scope the report."
+            ),
+        )
+    }
+
+    /// A diff whose paths name no file under any candidate base was almost
+    /// certainly generated relative to some other directory. fallow cannot
+    /// place it, so it discards the diff and reports at full scope. Say so,
+    /// once, rather than let the unscoped report imply the diff was applied.
+    fn foreign_namespace(
+        index: &DiffIndex,
+        candidate_bases: &[PathBuf],
+        root: &Path,
+        label: &str,
+    ) -> Self {
+        let total = index.touched_files().count();
+        let bases = join_bases(candidate_bases, root, ", ");
+        Self::new(
+            "foreign-namespace",
+            format!(
+                "none of the {total} file(s) named by {label} exist under {bases}; the diff's \
+                 paths look relative to a different directory. fallow cannot place the diff, so \
+                 every finding is reported (full scope, not scoped to the diff). Regenerate the \
+                 diff from one of those directories to scope the report."
+            ),
+        )
+    }
+}
+
+fn join_bases(candidate_bases: &[PathBuf], root: &Path, separator: &str) -> String {
+    candidate_bases
+        .iter()
+        .map(|base| base_label(base, root))
+        .collect::<Vec<_>>()
+        .join(separator)
+}
+
+/// Name a candidate base without putting the machine's checkout path in it.
+///
+/// This sentence is the `message` of a wire member, and every other
+/// path-bearing member of a fallow envelope is project-root-relative, so an
+/// absolute base here would make one input's output differ between checkouts.
+/// The two candidates a CLI run offers are the analysis root and the git
+/// toplevel above it (`diff_base_candidates`), and naming them by their
+/// relation to the root tells the user which directory to regenerate the diff
+/// from at least as well as the absolute path did: what they need is the path
+/// prefix their diff is missing, which is exactly the offset reported here.
+fn base_label(base: &Path, root: &Path) -> String {
+    if base == root {
+        return "the project root".to_owned();
+    }
+    if let Ok(offset) = root.strip_prefix(base) {
+        let offset = offset.display().to_string().replace('\\', "/");
+        return format!("the repository root (the project root is {offset} below it)");
+    }
+    if let Ok(inside) = base.strip_prefix(root) {
+        return inside.display().to_string().replace('\\', "/");
+    }
+    "a directory outside the project root".to_owned()
+}
+
 /// Read + parse the resolved diff source into a `DiffIndex` for
 /// finding-level filtering. Failure modes (file missing, oversize,
-/// unreadable, empty index) emit a `fallow: warning [diff-file]` line on
-/// stderr unless `quiet` is set, and return `None` so the analysis runs
-/// at full scope rather than failing for a CI-script issue.
+/// unreadable) return a [`DiffStandDown`] so the caller can both warn and
+/// record, and the analysis then runs at full scope rather than failing for a
+/// CI-script issue.
 ///
 /// Stdin is consumed exactly once. The first call drains it; downstream
 /// callers must reuse the returned `LoadedDiff` rather than re-loading.
-#[must_use]
-fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<LoadedDiff> {
+fn load_diff_index_for_findings(
+    source: &DiffSource,
+    quiet: bool,
+) -> Result<LoadedDiff, DiffStandDown> {
     match source {
         DiffSource::Stdin => load_diff_index_from_stdin(quiet),
         DiffSource::Flag(path) | DiffSource::EnvVar(path) => {
@@ -181,37 +308,26 @@ fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<Load
     }
 }
 
-/// Drain stdin once and parse it into a `LoadedDiff`, warning on failure / empty index.
-fn load_diff_index_from_stdin(quiet: bool) -> Option<LoadedDiff> {
+/// Drain stdin once and parse it into a `LoadedDiff`.
+fn load_diff_index_from_stdin(quiet: bool) -> Result<LoadedDiff, DiffStandDown> {
     let stdin = std::io::stdin();
     load_diff_index_from_reader(stdin.lock(), "--diff-stdin", MAX_DIFF_BYTES, quiet)
 }
 
 /// Read a diff file (respecting the size cap) and parse it into a `LoadedDiff`.
-fn load_diff_index_from_file(path: &Path, label: &str, quiet: bool) -> Option<LoadedDiff> {
+fn load_diff_index_from_file(
+    path: &Path,
+    label: &str,
+    quiet: bool,
+) -> Result<LoadedDiff, DiffStandDown> {
     if let Ok(meta) = std::fs::metadata(path)
         && meta.len() > MAX_DIFF_BYTES
     {
-        if !quiet {
-            eprintln!(
-                "fallow: warning [diff-file]: {label} is {} bytes (cap {MAX_DIFF_BYTES}); \
-                 line-level filtering disabled, reporting all findings",
-                meta.len()
-            );
-        }
-        return None;
+        return Err(DiffStandDown::oversize(label, meta.len(), MAX_DIFF_BYTES));
     }
     match std::fs::File::open(path) {
         Ok(file) => load_diff_index_from_reader(file, label, MAX_DIFF_BYTES, quiet),
-        Err(err) => {
-            if !quiet {
-                eprintln!(
-                    "fallow: warning [diff-file]: could not read {label}: {err} \
-                     (line-level filtering disabled)"
-                );
-            }
-            None
-        }
+        Err(err) => Err(DiffStandDown::unreadable(label, &err)),
     }
 }
 
@@ -220,40 +336,22 @@ fn load_diff_index_from_reader(
     label: &str,
     limit: u64,
     quiet: bool,
-) -> Option<LoadedDiff> {
+) -> Result<LoadedDiff, DiffStandDown> {
     let mut bytes = Vec::new();
     if let Err(err) = reader.take(limit + 1).read_to_end(&mut bytes) {
-        if !quiet {
-            eprintln!(
-                "fallow: warning [diff-file]: could not read {label}: {err} \
-                 (line-level filtering disabled)"
-            );
-        }
-        return None;
+        return Err(DiffStandDown::unreadable(label, &err));
     }
     if bytes.len() as u64 > limit {
-        if !quiet {
-            eprintln!(
-                "fallow: warning [diff-file]: {label} is at least {} bytes (cap {limit}); \
-                 line-level filtering disabled, reporting all findings",
-                bytes.len()
-            );
-        }
-        return None;
+        return Err(DiffStandDown::oversize(label, bytes.len() as u64, limit));
     }
     let text = match String::from_utf8(bytes) {
         Ok(text) => text,
-        Err(err) => {
-            if !quiet {
-                eprintln!(
-                    "fallow: warning [diff-file]: could not read {label} as UTF-8: {err} \
-                     (line-level filtering disabled)"
-                );
-            }
-            return None;
-        }
+        Err(err) => return Err(DiffStandDown::not_utf8(label, &err)),
     };
     let index = DiffIndex::from_unified_diff(&text);
+    // Not a stand-down: the filter IS applied and its scope is empty, so every
+    // source-anchored finding filters out and the report reads clean. A
+    // different fact from the ones above, and deliberately still only advice.
     if !quiet && index.added_line_count() == 0 {
         eprintln!(
             "fallow: warning [diff-file]: {label} parsed 0 added lines; \
@@ -262,7 +360,7 @@ fn load_diff_index_from_reader(
              deletion-only diffs also produce empty indices."
         );
     }
-    Some(LoadedDiff {
+    Ok(LoadedDiff {
         index,
         raw: text,
         source_label: label.to_owned(),
@@ -281,6 +379,16 @@ fn load_diff_index_from_reader(
 /// filter. In every path, the diff filter is strictly opt-in.
 static SHARED_DIFF: OnceLock<Option<LoadedDiff>> = OnceLock::new();
 
+/// What became of this run's diff-filter request, for the envelope's
+/// `request_outcomes`.
+///
+/// A sibling of [`SHARED_DIFF`] rather than a widening of it: that cache's
+/// three states each carry a documented correctness argument (see
+/// [`filter_issues_from_env`]), and retyping it to carry the reason too would
+/// put a reporting concern inside a filtering decision. `None` means the run
+/// was given no diff at all.
+static DIFF_REQUEST_OUTCOME: OnceLock<Option<fallow_output::RequestOutcome>> = OnceLock::new();
+
 /// Resolve, read, and parse the diff source once for the lifetime of the
 /// process. Idempotent: only the first call populates the cache; later
 /// calls observe the original value. Returns the resolved index for the
@@ -290,60 +398,95 @@ static SHARED_DIFF: OnceLock<Option<LoadedDiff>> = OnceLock::new();
 /// Pass `None` to lock the cache to "no diff" without reading anything,
 /// so a subsequent errant load attempt cannot accidentally populate the
 /// cache later.
+///
+/// `quiet` suppresses the stderr line only. The recorded outcome is identical
+/// either way, so a `--quiet --format json` run (which is what both shipped CI
+/// integrations use) still reports that its filter stood down.
 pub(crate) fn init_shared_diff(
     source: Option<&DiffSource>,
     root: &Path,
     candidate_bases: &[PathBuf],
     quiet: bool,
 ) -> Option<&'static DiffIndex> {
-    let loaded = source
-        .and_then(|src| load_diff_index_for_findings(src, quiet))
-        .and_then(|loaded| {
-            // A diff that parsed but names no analyzable head-side file (empty,
-            // deletion-only, or binary-only) changed nothing a finding can be
-            // attributed to. That is a real, EMPTY scope, not an unplaceable
-            // base: keep the empty index so every source-anchored finding
-            // filters out (report clean) rather than falling open to full scope.
-            // Only a diff we cannot place (foreign or ambiguous base) falls open.
-            // The empty index needs no base: with no keys every lookup misses,
-            // and `key_for` still yields a key for in-root paths, so findings are
-            // dropped rather than retained.
-            if loaded.index.touched_files().next().is_none() {
-                return Some(loaded);
+    let mut request = None;
+    let loaded = source.and_then(|src| {
+        let label = src.label();
+        match place_diff(src, root, candidate_bases, quiet) {
+            Ok(loaded) => {
+                request = Some(fallow_output::RequestOutcome::applied(
+                    fallow_output::RequestName::DiffFilter,
+                    label,
+                ));
+                Some(loaded)
             }
-            let label = source.map(DiffSource::label).unwrap_or_default();
-            let chosen = choose_diff_base(&loaded.index, candidate_bases);
-            match chosen {
-                // The diff names files, but none under any candidate base
-                // (foreign), or equally under two at once (ambiguous). Either way
-                // we cannot express findings in its namespace. `check::filtering`
-                // sets the convention for that: an unfilterable path is RETAINED,
-                // never silently dropped. So drop the diff instead of the findings
-                // and report at full scope.
-                None => {
-                    if !quiet {
-                        warn_on_foreign_diff_namespace(&loaded.index, candidate_bases, &label);
-                    }
-                    None
+            Err(stand_down) => {
+                if !quiet {
+                    eprintln!("fallow: warning [diff-file]: {}", stand_down.message);
                 }
-                Some(chosen) if chosen.ambiguous => {
-                    if !quiet {
-                        warn_on_ambiguous_diff_base(candidate_bases, &label);
-                    }
-                    None
-                }
-                Some(chosen) => {
-                    let offset = root_offset_below(&chosen.base, root);
-                    Some(LoadedDiff {
-                        index: loaded.index.with_base(chosen.base).with_root_offset(offset),
-                        raw: loaded.raw,
-                        source_label: loaded.source_label,
-                    })
-                }
+                request = Some(fallow_output::RequestOutcome::not_applied(
+                    fallow_output::RequestName::DiffFilter,
+                    label,
+                    stand_down.reason,
+                    stand_down.message,
+                ));
+                None
             }
-        });
+        }
+    });
     let _ = SHARED_DIFF.set(loaded);
+    let _ = DIFF_REQUEST_OUTCOME.set(request);
     shared_diff_index()
+}
+
+/// Load a diff and decide which directory its paths are relative to.
+///
+/// `Err` is a stand-down: the caller reports at full scope. `Ok` covers both a
+/// placed diff and a parsed-but-empty one, which are different scopes and not
+/// different outcomes.
+fn place_diff(
+    source: &DiffSource,
+    root: &Path,
+    candidate_bases: &[PathBuf],
+    quiet: bool,
+) -> Result<LoadedDiff, DiffStandDown> {
+    let loaded = load_diff_index_for_findings(source, quiet)?;
+    // A diff that parsed but names no analyzable head-side file (empty,
+    // deletion-only, or binary-only) changed nothing a finding can be
+    // attributed to. That is a real, EMPTY scope, not an unplaceable base:
+    // keep the empty index so every source-anchored finding filters out
+    // (report clean) rather than falling open to full scope. Only a diff we
+    // cannot place (foreign or ambiguous base) falls open. The empty index
+    // needs no base: with no keys every lookup misses, and `key_for` still
+    // yields a key for in-root paths, so findings are dropped rather than
+    // retained.
+    if loaded.index.touched_files().next().is_none() {
+        return Ok(loaded);
+    }
+    let label = source.label();
+    // The diff names files, but none under any candidate base (foreign), or
+    // equally under two at once (ambiguous). Either way we cannot express
+    // findings in its namespace. `check::filtering` sets the convention for
+    // that: an unfilterable path is RETAINED, never silently dropped. So drop
+    // the diff instead of the findings and report at full scope.
+    match choose_diff_base(&loaded.index, candidate_bases) {
+        None => Err(DiffStandDown::foreign_namespace(
+            &loaded.index,
+            candidate_bases,
+            root,
+            &label,
+        )),
+        Some(chosen) if chosen.ambiguous => {
+            Err(DiffStandDown::ambiguous_base(candidate_bases, root, &label))
+        }
+        Some(chosen) => {
+            let offset = root_offset_below(&chosen.base, root);
+            Ok(LoadedDiff {
+                index: loaded.index.with_base(chosen.base).with_root_offset(offset),
+                raw: loaded.raw,
+                source_label: loaded.source_label,
+            })
+        }
+    }
 }
 
 /// Where the analysis root sits below `base`, forward-slashed, empty when they
@@ -406,48 +549,6 @@ fn choose_diff_base(index: &DiffIndex, candidate_bases: &[PathBuf]) -> Option<Ch
     })
 }
 
-/// The diff's paths resolve equally well under two different directories, so
-/// existence alone cannot place its base. Rather than filter against a guess
-/// (whose wrong half drops every source-anchored finding), the run discards the
-/// diff and reports at full scope, so the message names the ambiguity and says
-/// so rather than letting silence imply the report was scoped.
-fn warn_on_ambiguous_diff_base(candidate_bases: &[PathBuf], label: &str) {
-    let bases = candidate_bases
-        .iter()
-        .map(|base| base.display().to_string())
-        .collect::<Vec<_>>()
-        .join(" and ");
-    eprintln!(
-        "fallow: warning [diff-file]: the paths in {label} name existing files under \
-         {bases}, so their base is ambiguous and fallow cannot tell which one the diff \
-         is relative to. It will not filter against a guess: every finding is reported \
-         (full scope, not scoped to the diff). Generate the diff from the repository \
-         root (plain `git diff`, not `git diff --relative`) to scope the report."
-    );
-}
-
-/// A diff whose paths name no file under any candidate base was almost
-/// certainly generated relative to some other directory. fallow cannot place it,
-/// so it discards the diff and reports at full scope. Say so, once, rather than
-/// let the unscoped report imply the diff was applied.
-fn warn_on_foreign_diff_namespace(index: &DiffIndex, candidate_bases: &[PathBuf], label: &str) {
-    let total = index.touched_files().count();
-    if total == 0 {
-        return;
-    }
-    let bases = candidate_bases
-        .iter()
-        .map(|base| base.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    eprintln!(
-        "fallow: warning [diff-file]: none of the {total} file(s) named by {label} exist \
-         under {bases}; the diff's paths look relative to a different directory. fallow \
-         cannot place the diff, so every finding is reported (full scope, not scoped to \
-         the diff). Regenerate the diff from one of those directories to scope the report."
-    );
-}
-
 /// Read the cached diff index populated by [`init_shared_diff`]. Returns
 /// `None` when the cache is empty (no diff was supplied, or
 /// `init_shared_diff` was never called).
@@ -478,6 +579,14 @@ pub(crate) fn shared_diff_source_label() -> Option<&'static str> {
         .get()
         .and_then(|v| v.as_ref())
         .map(|l| l.source_label.as_str())
+}
+
+/// What became of this run's diff-filter request, for the envelope's
+/// `request_outcomes`. `None` when the run was given no diff, which is what
+/// keeps the key off the wire for everyone who never asked (issue #2688).
+#[must_use]
+pub(crate) fn shared_diff_request_outcome() -> Option<&'static fallow_output::RequestOutcome> {
+    DIFF_REQUEST_OUTCOME.get().and_then(Option::as_ref)
 }
 
 fn context_radius_from_env() -> u64 {
@@ -672,16 +781,34 @@ mod tests {
 
     #[test]
     fn bounded_diff_reader_rejects_limit_plus_one() {
+        let stand_down =
+            load_diff_index_from_reader(Cursor::new(b"123456789"), "test diff", 8, true)
+                .expect_err("a diff over the cap stands the filter down");
+        assert_eq!(stand_down.reason, "oversize");
         assert!(
-            load_diff_index_from_reader(Cursor::new(b"123456789"), "test diff", 8, true).is_none()
+            stand_down.message.contains("reporting all findings"),
+            "the recorded sentence must say the report widened: {}",
+            stand_down.message
         );
     }
 
     #[test]
     fn bounded_diff_reader_rejects_invalid_utf8() {
-        assert!(
-            load_diff_index_from_reader(Cursor::new([0xff, 0xfe]), "test diff", 8, true).is_none()
-        );
+        let stand_down =
+            load_diff_index_from_reader(Cursor::new([0xff, 0xfe]), "test diff", 8, true)
+                .expect_err("a non-UTF-8 diff stands the filter down");
+        assert_eq!(stand_down.reason, "not-utf8");
+    }
+
+    /// A reader failure and a cap breach are different remedies, so they must
+    /// not collapse into one token on the wire.
+    #[test]
+    fn a_missing_diff_file_stands_down_as_unreadable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("absent.diff");
+        let stand_down = load_diff_index_from_file(&missing, "--diff-file absent.diff", true)
+            .expect_err("a missing diff stands the filter down");
+        assert_eq!(stand_down.reason, "unreadable");
     }
 
     #[test]
@@ -717,6 +844,71 @@ mod tests {
             load_diff_index_from_reader(Cursor::new(text), "--diff-file pr.diff", 1024, true)
                 .unwrap();
         assert_eq!(loaded.source_label, "--diff-file pr.diff");
+    }
+
+    /// The stand-down message is a wire field, so it names the candidate bases
+    /// by their relation to the project root rather than by absolute path.
+    #[test]
+    fn a_stand_down_names_its_bases_without_the_checkout_path() {
+        let root = Path::new("/checkout/packages/app");
+        let toplevel = Path::new("/checkout");
+        let index = DiffIndex::from_unified_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +export const a = 1;\n",
+        );
+        let bases = vec![toplevel.to_path_buf(), root.to_path_buf()];
+
+        let foreign = DiffStandDown::foreign_namespace(&index, &bases, root, "--diff-file pr.diff");
+        assert_eq!(foreign.reason, "foreign-namespace");
+        let ambiguous = DiffStandDown::ambiguous_base(&bases, root, "--diff-file pr.diff");
+        assert_eq!(ambiguous.reason, "ambiguous-base");
+
+        for message in [&foreign.message, &ambiguous.message] {
+            assert!(
+                !message.contains("/checkout"),
+                "no absolute base reaches the wire: {message}"
+            );
+            assert!(
+                message.contains("the project root"),
+                "the analysis root is named: {message}"
+            );
+            assert!(
+                message.contains("the repository root (the project root is packages/app below it)"),
+                "the toplevel is named with the offset the diff is missing: {message}"
+            );
+        }
+    }
+
+    /// A single-candidate run (analysis root at the repository toplevel) names
+    /// the one base it had, and still names no path.
+    #[test]
+    fn a_single_candidate_base_is_named_as_the_project_root() {
+        let root = Path::new("/checkout");
+        let stand_down = DiffStandDown::ambiguous_base(&[root.to_path_buf()], root, "--diff-stdin");
+        assert!(
+            stand_down
+                .message
+                .contains("under the project root, so their base is ambiguous"),
+            "{}",
+            stand_down.message
+        );
+        assert!(!stand_down.message.contains("/checkout"));
+    }
+
+    /// The cap has no override, so the remedy cannot suggest raising it.
+    #[test]
+    fn the_oversize_remedy_asks_only_for_something_the_user_can_do() {
+        let stand_down =
+            DiffStandDown::oversize("--diff-file pr.diff", MAX_DIFF_BYTES + 1, MAX_DIFF_BYTES);
+        assert!(
+            !stand_down.message.contains("raise the cap"),
+            "{}",
+            stand_down.message
+        );
+        assert!(stand_down.message.contains("Narrow the diff"));
     }
 
     #[test]

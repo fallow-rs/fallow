@@ -1148,7 +1148,7 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   MOCK_CALL_LOG="$ANALYZE_TMP/sarif-calls" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_not_contains "$OUT" "SARIF generation failed" "analyze: valid SARIF + exit 1 does not warn (issue #813)"
+assert_not_contains "$OUT" "produced no SARIF document" "analyze: valid SARIF + exit 1 does not warn (issue #813)"
 [ -s "$SARIF_OK_WORK/fallow-results.sarif" ] && pass "analyze: valid SARIF + exit 1 still writes the file" || fail "analyze: valid SARIF + exit 1 still writes the file" "missing sarif file"
 HEALTH_ANALYSIS_CALLS=$(grep -c '^health ' "$ANALYZE_TMP/sarif-calls" || true)
 [ "$HEALTH_ANALYSIS_CALLS" -eq 1 ] && pass "analyze: SARIF reuses the saved JSON analysis" || fail "analyze: SARIF reuses the saved JSON analysis" "expected one health analysis, got $HEALTH_ANALYSIS_CALLS"
@@ -1160,8 +1160,15 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" MOCK_SARIF_MODE="empty" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_contains "$OUT" "SARIF generation failed" "analyze: empty/invalid SARIF still warns (issue #813)"
+assert_contains "$OUT" "produced no SARIF document" "analyze: empty/invalid SARIF still warns (issue #813)"
 [ ! -e "$SARIF_BAD_WORK/fallow-results.sarif" ] && pass "analyze: empty SARIF is not published" || fail "analyze: empty SARIF is not published" "empty SARIF file remains"
+# #2690: the step stays green and uploads nothing, so the warning has to say
+# what that costs rather than only that something failed.
+assert_contains "$OUT" "code scanning keeps the alerts from the previous upload" \
+  "analyze: the missing-SARIF warning names the consequence"
+assert_not_contains "$(cat "$ANALYZE_TMP/output" 2>/dev/null || true)" "sarif=fallow-results.sarif" \
+  "analyze: a missing SARIF artefact sets no upload output"
+
 
 SARIF_COMPAT_WORK="$ANALYZE_TMP/sarif-report-empty-direct-valid"
 mkdir -p "$SARIF_COMPAT_WORK"
@@ -1173,10 +1180,38 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   MOCK_CALL_LOG="$ANALYZE_TMP/sarif-compat-calls" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_not_contains "$OUT" "SARIF generation failed" "analyze: report-capable older binary falls back to direct SARIF"
+assert_not_contains "$OUT" "produced no SARIF document" "analyze: report-capable older binary falls back to direct SARIF"
 [ -s "$SARIF_COMPAT_WORK/fallow-results.sarif" ] && pass "analyze: compatibility fallback publishes valid SARIF" || fail "analyze: compatibility fallback publishes valid SARIF" "missing sarif file"
 HEALTH_COMPAT_CALLS=$(grep -c '^health ' "$ANALYZE_TMP/sarif-compat-calls" || true)
 [ "$HEALTH_COMPAT_CALLS" -eq 2 ] && pass "analyze: compatibility fallback reruns only when saved rendering fails" || fail "analyze: compatibility fallback reruns only when saved rendering fails" "expected two health calls, got $HEALTH_COMPAT_CALLS"
+# #2690: when the binary recorded why, the warning repeats its sentence rather
+# than making the reader turn on step debugging to find it.
+SARIF_REASON_WORK="$ANALYZE_TMP/sarif-reason"
+mkdir -p "$SARIF_REASON_WORK"
+cd "$SARIF_REASON_WORK" && rm -f "$ANALYZE_TMP/output"
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then echo "fallow 9.9.9"; exit 0; fi
+if [ "${1:-}" = "--help" ] || [ "${2:-}" = "--help" ]; then echo "--sarif-file"; echo "report"; exit 0; fi
+fmt=""
+prev=""
+for arg in "$@"; do
+  [ "$prev" = "--format" ] && fmt="$arg"
+  prev="$arg"
+done
+if [ "$fmt" = "sarif" ]; then exit 1; fi
+printf '%s\n' '{"summary":{"functions_above_threshold":0},"request_outcomes":{"sarif-file":{"status":"not-applied","affects":"artifact","requested":"fallow-results.sarif","reason":"write-failed","message":"failed to write SARIF file: Permission denied."}}}'
+exit 1
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_contains "$OUT" "failed to write SARIF file: Permission denied." \
+  "analyze: the warning repeats the reason the envelope recorded"
+assert_not_contains "$OUT" "could not apply" \
+  "analyze: a failed SARIF write is not reported as a run wider than requested"
 
 # --- Summary jq tests ---
 
@@ -2125,13 +2160,23 @@ for arg in "$@"; do
 done
 case "$format" in
   pr-comment-github)
+    # MOCK_BASELINE_ADVISORY mirrors what the real renderer emits for a rotted
+    # baseline with the gate armed: the advisory plus the gate inventory in the
+    # body's status blockquote, and one decision row per armed gate.
     if [ -n "${FALLOW_PR_DECISION_FILE:-}" ]; then
-      printf '{"schema":"fallow-pr-decision/v1","title":"Fallow","conclusion":"success","gates":[],"annotations":[],"details":{"summary_markdown":"Clean","full_report_path":null,"details_url":null}}\n' > "$FALLOW_PR_DECISION_FILE"
+      if [ "${MOCK_BASELINE_ADVISORY:-}" = "1" ]; then
+        printf '{"schema":"fallow-pr-decision/v1","title":"Fallow","conclusion":"success","gates":[{"id":"check","label":"Dead code","status":"success","observed":"0 findings","threshold":null,"scope":"new code"},{"id":"stale-baseline","label":"Stale baseline","status":"failure","observed":"fail","threshold":null,"scope":"this run"}],"annotations":[],"details":{"summary_markdown":"Clean","full_report_path":null,"details_url":null}}\n' > "$FALLOW_PR_DECISION_FILE"
+      else
+        printf '{"schema":"fallow-pr-decision/v1","title":"Fallow","conclusion":"success","gates":[],"annotations":[],"details":{"summary_markdown":"Clean","full_report_path":null,"details_url":null}}\n' > "$FALLOW_PR_DECISION_FILE"
+      fi
     fi
     if [ -n "${FALLOW_PR_DETAILS_FILE:-}" ]; then
       printf '{"schema":"fallow-pr-details/v1","title":"Fallow","sections":[]}\n' > "$FALLOW_PR_DETAILS_FILE"
     fi
     printf '<!-- fallow-id: fallow-results -->\n### Fallow smoke\n\nGenerated by fallow.\n'
+    if [ "${MOCK_BASELINE_ADVISORY:-}" = "1" ]; then
+      printf '\n> **Baseline matched nothing.** All 8 saved entries went unmatched. Paths may have changed, or the baseline was saved elsewhere. Re-save it from a whole-project run. Gate outcomes: failed stale-baseline.\n'
+    fi
     ;;
   review-github)
     if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
@@ -2282,6 +2327,35 @@ assert_contains "$(cat "$ACTION_TYPED_WORK/review-render-failure.out")" \
   'saved audit envelope is missing required field `version`' \
   "review.sh surfaces saved-render stderr"
 assert_not_contains "$ACTION_TYPED_OUT" "fallow check " "malformed saved artifacts do not trigger direct-analysis fallback"
+
+# #2675: the advisory and the gate row are rendered by the CLI, so the action's
+# job is to carry them to the surfaces people read. The body it posts and the
+# decision it hands to `ci post-check-run` are the two files that do that.
+ACTION_BASELINE_LOG="$ACTION_TYPED_WORK/baseline-comment.log"
+: > "$ACTION_BASELINE_LOG"
+(
+  cd "$ACTION_TYPED_WORK"
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_BASELINE_LOG" \
+    MOCK_BASELINE_ADVISORY="1" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    PR_HEAD_SHA="head456" \
+    FALLOW_COMMAND="check" \
+    bash "$SCRIPTS_DIR/comment.sh" > /dev/null
+)
+ACTION_BASELINE_BODY=$(cat "$ACTION_TYPED_WORK/fallow-pr-comment.md")
+ACTION_BASELINE_DECISION=$(cat "$ACTION_TYPED_WORK/fallow-pr-decision.json")
+assert_contains "$ACTION_BASELINE_BODY" "**Baseline matched nothing.**" \
+  "the posted PR comment body carries the baseline advisory"
+assert_contains "$ACTION_BASELINE_BODY" "Gate outcomes: failed stale-baseline." \
+  "the posted PR comment body keeps the gate inventory beside the advisory"
+assert_contains "$ACTION_BASELINE_DECISION" '"id":"stale-baseline"' \
+  "the decision sidecar carries the stale-baseline gate row"
+assert_contains "$(cat "$ACTION_BASELINE_LOG")" \
+  "ci post-check-run --provider github --decision fallow-pr-decision.json" \
+  "the sidecar carrying the gate row is the one posted as the Check Run"
 
 : > "$ACTION_TYPED_LOG"
 (
@@ -3254,17 +3328,47 @@ printf 'analysis %s\n' "$*" >> "$MOCK_ANALYSIS_LOG"
 if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
   printf 'diff_file=set\n' >> "$MOCK_ANALYSIS_LOG"
 fi
-scoped=false
+# Report the channels that narrowed this argv, the way the real binary
+# derives them from the flags it was given. MOCK_SCOPE_REASONS overrides the
+# list, which is how a run narrowed through the 'args' input is simulated: the
+# envelope names a reason no INPUT_* variable would reveal.
+# The real binary serializes the array in its own declaration order, never in
+# argv order, so the mock sorts into that order too: the script's rule reads the
+# list and a mock that emitted argv order would test a shape no run produces.
+REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production"
+found=""
 for arg in "$@"; do
   case "$arg" in
-    --changed-since|--changed-since=*) scoped=true ;;
+    --changed-since|--changed-since=*) found="$found changed-since" ;;
+    --production) found="$found production" ;;
   esac
 done
 if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
+  found="$found diff"
+fi
+if [ -n "${MOCK_SCOPE_REASONS:-}" ]; then
+  found=$(printf '%s' "$MOCK_SCOPE_REASONS" | tr ',' ' ')
+fi
+reasons=""
+for candidate in $REASON_ORDER; do
+  case " $found " in
+    *" $candidate "*)
+      if [ -z "$reasons" ]; then reasons="\"$candidate\""; else reasons="$reasons,\"$candidate\""; fi
+      ;;
+  esac
+done
+scoped=false
+if [ -n "$reasons" ]; then
   scoped=true
 fi
 if [ "${MOCK_NO_STALENESS:-}" = "1" ]; then
   printf '{"schema_version":9,"total_issues":0,"baseline":{"entries":8,"matched":3}}\n'
+  exit 0
+fi
+# An audit-shaped envelope: one staleness object per section, which is what
+# makes the first-match `//` chain the wrong reader for this command.
+if [ "${MOCK_AUDIT_BASELINES:-}" = "1" ]; then
+  printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
   exit 0
 fi
 if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ] && [ "$scoped" = "false" ]; then
@@ -3277,15 +3381,23 @@ matched=${MOCK_MATCHED:-3}
 stale=$((entries - matched))
 findings=${MOCK_FINDINGS:-3}
 if [ "$scoped" = "true" ]; then
-  printf '{"schema_version":9,"total_issues":0,"baseline_staleness":{"baseline_entries":%s,"matched_entries":0,"stale_entries":%s,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}\n' "$entries" "$entries"
+  if [ "${MOCK_NO_SCOPE_REASONS:-}" = "1" ]; then
+    printf '{"schema_version":9,"total_issues":0,"baseline_staleness":{"baseline_entries":%s,"matched_entries":0,"stale_entries":%s,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}\n' "$entries" "$entries"
+  else
+    printf '{"schema_version":9,"total_issues":0,"baseline_staleness":{"baseline_entries":%s,"matched_entries":0,"stale_entries":%s,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":[%s]}}\n' "$entries" "$entries" "$reasons"
+  fi
   exit 0
 fi
 gate_trips=false
 if [ "$stale" -gt 0 ]; then gate_trips=true; fi
 stale_flag=false
 if [ "$advisory" != "none" ]; then stale_flag=true; fi
-printf '{"schema_version":9,"total_issues":%s,"baseline_staleness":{"baseline_entries":%s,"matched_entries":%s,"stale_entries":%s,"current_findings":%s,"change_scoped":false,"stale":%s,"warning":"%s","gate_trips":%s}}\n' \
-  "${MOCK_TOTAL_ISSUES:-0}" "$entries" "$matched" "$stale" "$findings" "$stale_flag" "$advisory" "$gate_trips"
+unrecognised=""
+if [ "${MOCK_UNRECOGNISED:-}" = "1" ]; then
+  unrecognised=',"unrecognised_format":true'
+fi
+printf '{"schema_version":9,"total_issues":%s,"baseline_staleness":{"baseline_entries":%s,"matched_entries":%s,"stale_entries":%s,"current_findings":%s,"change_scoped":false,"stale":%s,"warning":"%s","gate_trips":%s%s}}\n' \
+  "${MOCK_TOTAL_ISSUES:-0}" "$entries" "$matched" "$stale" "$findings" "$stale_flag" "$advisory" "$gate_trips" "$unrecognised"
 if [ "${MOCK_EXIT_ONE:-}" = "1" ]; then
   exit 1
 fi
@@ -3446,6 +3558,50 @@ assert_not_contains "$STALE_STDOUT" "::warning::fallow: baseline staleness could
 assert_not_contains "$STALE_STDOUT" "stood down" \
   "stale gate: the notice does not name a gate that was never requested"
 
+# 7c. The stand-down names the channels the run reported rather than guessing
+# from this script's own inputs, and the reasons reach the step outputs.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_PRODUCTION="true"
+assert_contains "$STALE_STDOUT" "only part of the project (changed-since, production)" \
+  "stale gate: the stand-down names the channels that narrowed the run"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_scope_reasons=changed-since, production" \
+  "stale gate: the channels reach the step outputs"
+
+# 7d. Scoping smuggled through the 'args' input is invisible to every INPUT_*
+# variable, so the input-based guess would send the script into an unscoped
+# re-read that comes back narrowed anyway. Reading the run's own reasons is what
+# makes it stand down the first time.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  MOCK_SCOPE_REASONS="production"
+STALE_RUN_COUNT=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^analysis ' || true)
+if [ "$STALE_RUN_COUNT" = "1" ]; then
+  pass "stale gate: an unremovable reason skips the re-read even with no matching input"
+else
+  fail "stale gate: an unremovable reason skips the re-read even with no matching input" "ran ${STALE_RUN_COUNT} times"
+fi
+assert_contains "$STALE_STDOUT" "only part of the project (production)" \
+  "stale gate: the stand-down names the smuggled channel"
+
+# 7e. A run narrowed only by channels this script can remove still pays for the
+# re-read, which is the case the re-read exists for.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  MOCK_SCOPE_REASONS="changed-files,scope"
+STALE_RUN_COUNT=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^analysis ' || true)
+if [ "$STALE_RUN_COUNT" = "2" ]; then
+  pass "stale gate: removable reasons still earn the unscoped re-read"
+else
+  fail "stale gate: removable reasons still earn the unscoped re-read" "ran ${STALE_RUN_COUNT} times"
+fi
+
+# 7f. A binary that predates the member keeps today's behaviour: the guess from
+# the inputs, and the wording that names the two inputs it is built from.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_CHANGED_SINCE="abc123" INPUT_PRODUCTION="true" MOCK_NO_SCOPE_REASONS="1"
+assert_contains "$STALE_STDOUT" "only part of the project (production mode or workspace scoping)" \
+  "stale gate: a binary without the member falls back to the input-based reason"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_scope_reasons=" \
+  "stale gate: the output is published empty rather than omitted"
+
 # 8. The re-run exits 1 on findings, which is not an error here.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
   INPUT_CHANGED_SINCE="abc123" INPUT_FAIL_ON_STALE_BASELINE="true" \
@@ -3537,7 +3693,7 @@ assert_contains "$STALE_STDOUT" "baseline and save-baseline name the same file" 
 # 14. The step summary carries the advisory on every render path, because both
 # preferred paths return early and would otherwise drop it.
 run_stale_summary() {
-  local label=$1
+  local label=$1 expected=${STALE_SUMMARY_EXPECTED-"Baseline is partially stale"}
   shift
   local run_dir
   run_dir=$(mktemp -d "$STALE_WORK/summary.XXXXXX")
@@ -3559,14 +3715,125 @@ run_stale_summary() {
       env "$@" bash "$SCRIPTS_DIR/summary.sh" > /dev/null 2>&1
   )
   set -e
-  assert_contains "$(cat "$run_dir/step_summary")" "Baseline is partially stale" \
-    "stale gate: the step summary carries the advisory on the ${label} path"
+  if [ -n "$expected" ]; then
+    assert_contains "$(cat "$run_dir/step_summary")" "$expected" \
+      "stale gate: the step summary carries the advisory on the ${label} path"
+  else
+    assert_not_contains "$(cat "$run_dir/step_summary")" "Baseline recognises nothing" \
+      "stale gate: the step summary says nothing about the ${label} path"
+  fi
 }
 
 run_stale_summary "native" HAS_NATIVE_REPORT="true"
 run_stale_summary "typed" HAS_NATIVE_REPORT="false" \
   FALLOW_PR_COMMENT_ENVELOPE_FILE="envelope.json"
 run_stale_summary "jq fallback" HAS_NATIVE_REPORT="false"
+
+# 15. A baseline written by another command suppresses nothing, so every
+# verdict reads green honestly and the advisory `case` falls through to its
+# silent arm. The branch reads the binary's own verdict rather than the entry
+# count, so the command here is only the one this mock's envelope shape models;
+# the wrong-kind case that motivates it is pinned per command in the Rust
+# integration tests. The step log names the path; the summary has no variable
+# for it.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="wrong-kind.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
+  MOCK_UNRECOGNISED="1" INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the baseline at wrong-kind.json has no entries this command recognises" \
+  "stale gate: a baseline that recognises nothing is called out"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "stale gate: an unreadable baseline is a real state and does not fail the job"
+else
+  fail "stale gate: an unreadable baseline is a real state and does not fail the job" "exit ${STALE_EXIT}"
+fi
+
+# A baseline passed through the `args` input never reaches INPUT_BASELINE, so
+# the line degrades to the subject instead of going missing.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_ARGS="--baseline wrong-kind.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
+  MOCK_UNRECOGNISED="1"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the loaded baseline has no entries this command recognises" \
+  "stale gate: a baseline passed through args is called out without a path"
+
+# A baseline saved on a project with nothing to record carries zero entries and
+# is not a mistake, so the warning the repository cannot turn off must not fire
+# on the documented save-on-green-main workflow.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="own-empty.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0"
+assert_not_contains "$STALE_STDOUT" "has no entries this command recognises" \
+  "stale gate: a baseline this command saved itself is never called the wrong file"
+
+# A populated baseline never earns that warning, whatever the advisory says.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json"
+assert_not_contains "$STALE_STDOUT" "has no entries this command recognises" \
+  "stale gate: a populated baseline says nothing about recognition"
+
+STALE_SUMMARY_EXPECTED="Baseline recognises nothing" \
+  run_stale_summary "unrecognised" HAS_NATIVE_REPORT="true" \
+  FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true"
+
+STALE_SUMMARY_EXPECTED="" \
+  run_stale_summary "own empty baseline" HAS_NATIVE_REPORT="true" \
+  FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_ADVISORY="none" \
+  FALLOW_BASELINE_GATE_TRIPS="false"
+
+# 16. `fallow audit` loads up to three baselines and judges none of them, and
+# the single-analysis `//` chain is first-match, so it would report one and hide
+# the other two. One line per section instead, naming the command a reader has
+# to run: `duplication` is served by `fallow dupes` and `complexity` by
+# `fallow health`, so the section label and the command deliberately differ.
+run_stale_analyze INPUT_COMMAND="audit" MOCK_AUDIT_BASELINES="1" \
+  INPUT_DEAD_CODE_BASELINE="audit/dc.json" \
+  INPUT_DUPES_BASELINE="audit/du.json" \
+  INPUT_HEALTH_BASELINE="audit/he.json"
+assert_contains "$STALE_STDOUT" "::notice::fallow: the dead-code baseline (audit/dc.json) has 12 entries and was not judged" \
+  "audit baselines: the dead-code baseline is reported with its path"
+assert_contains "$STALE_STDOUT" "Run 'fallow dead-code --baseline audit/dc.json' over the whole project" \
+  "audit baselines: the pointer names the unscoped command"
+assert_contains "$STALE_STDOUT" "::notice::fallow: the duplication baseline (audit/du.json) has 3 entries and was not judged" \
+  "audit baselines: the duplication baseline is reported too"
+assert_contains "$STALE_STDOUT" "Run 'fallow dupes --baseline audit/du.json' over the whole project" \
+  "audit baselines: duplication points at fallow dupes, not at the section name"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the complexity baseline at audit/he.json has no entries this command recognises" \
+  "audit baselines: an unrecognised audit baseline gets the recognition warning"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "audit baselines: naming an inert baseline does not fail the job"
+else
+  fail "audit baselines: naming an inert baseline does not fail the job" "exit ${STALE_EXIT}"
+fi
+
+# Audit resolves all three from project config as well as from inputs, so there
+# is not always a path to echo back.
+run_stale_analyze INPUT_COMMAND="audit" MOCK_AUDIT_BASELINES="1"
+assert_contains "$STALE_STDOUT" "::notice::fallow: the dead-code baseline has 12 entries and was not judged" \
+  "audit baselines: a config-resolved baseline is reported without a path"
+assert_contains "$STALE_STDOUT" "Run 'fallow dead-code' with that baseline over the whole project" \
+  "audit baselines: the pointer degrades when there is no path to name"
+
+# A single-analysis command keeps the first-match chain and gains no audit line.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json"
+assert_not_contains "$STALE_STDOUT" "was not judged on this run: fallow audit" \
+  "audit baselines: a single-analysis run gains no audit pointer"
+
+# 17. The gate cannot apply to audit and the `baseline` input is already
+# rejected for it, so the pair is only reachable through `args`.
+run_stale_analyze INPUT_COMMAND="audit" INPUT_ARGS="--fail-on-stale-baseline"
+if [ "$STALE_EXIT" -eq 2 ]; then
+  pass "audit baselines: --fail-on-stale-baseline smuggled through args is rejected"
+else
+  fail "audit baselines: --fail-on-stale-baseline smuggled through args is rejected" "exit ${STALE_EXIT}"
+fi
+assert_contains "$STALE_STDOUT" "cannot apply to command: audit" \
+  "audit baselines: the rejection says why"
+
+# The same flag in args on a command that CAN judge a baseline is untouched.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json" \
+  INPUT_ARGS="--fail-on-stale-baseline"
+if [ "$STALE_EXIT" -ne 2 ]; then
+  pass "audit baselines: the rejection is scoped to audit"
+else
+  fail "audit baselines: the rejection is scoped to audit" "exit ${STALE_EXIT}"
+fi
 
 rm -rf "$STALE_WORK"
 
@@ -3630,6 +3897,18 @@ run_gate_analyze() {
   set -e
   GATE_OUTPUTS=$(cat "$GATE_OUTPUT_FILE")
   GATE_ARGV=$(cat "$run_dir/analysis.log")
+}
+
+# The output is declared as a comma-separated list, so "present and empty" is a
+# line with nothing after the `=`. Matching the key alone also matches a
+# populated value, which is how a test named for the empty case can never fail.
+assert_requests_unapplied_empty() {
+  local name="$1"
+  if grep -qx 'requests_unapplied=' <<< "$GATE_OUTPUTS"; then
+    pass "$name"
+  else
+    fail "$name" "expected an empty requests_unapplied line, got: $GATE_OUTPUTS"
+  fi
 }
 
 # The headline of every issue in this batch: the gate fails the job even though
@@ -3762,9 +4041,60 @@ DEGRADED='"workspace_diagnostics":[{"path":"a","kind":"skipped-large-file","mess
 run_gate_analyze "$(gate_envelope '' "$DEGRADED")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
 assert_contains "$GATE_STDOUT" "node-modules-missing (1), skipped-large-file (2)" \
   "degraded: kinds and counts are aggregated into one warning"
+assert_contains "$GATE_STDOUT" "Fallow ran with degraded inputs" \
+  "degraded: the sentence covers a degraded input as well as a narrower file set"
 assert_not_contains "$GATE_STDOUT" "boundaries-not-configured" \
   "degraded: the unconfigured-check kinds are not reported"
 assert_contains "$GATE_OUTPUTS" "analysis_degraded=true" "degraded: the output is set"
+
+# #2689: the health pipeline's own degraded inputs reach the same aggregated
+# warning through the same selector, with no change to this script's jq.
+HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":".","kind":"shallow-clone","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'
+run_gate_analyze "$(gate_envelope '' "$HEALTH_DEGRADED")" INPUT_COMMAND="health" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "hotspots-skipped (1), shallow-clone (1)" \
+  "degraded: the health kinds are reported without a script change"
+assert_not_contains "$GATE_STDOUT" "coverage-auto-detected" \
+  "degraded: auto-detected coverage is provenance and not a degraded run"
+
+# #2687, #2688: the fact the CLI can only report on the wire, because this step
+# always runs it with --quiet and a machine format.
+REQUESTS_UNAPPLIED_FIXTURE='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"$FALLOW_DIFF_FILE pr.diff"}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_UNAPPLIED_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "::warning::Fallow could not apply: changed-since (git-failed)" \
+  "requests: an unapplied request warns once with its reason"
+assert_not_contains "$GATE_STDOUT" "diff-filter" \
+  "requests: an honoured request is not named in the warning"
+assert_contains "$GATE_OUTPUTS" "requests_unapplied=changed-since (git-failed)" \
+  "requests: the output carries the unapplied names"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "requests: an unapplied request does not fail the job"
+else
+  fail "requests: an unapplied request does not fail the job" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+
+# Applied-only, and absent: neither may produce a warning or a populated
+# output, or every scoped run in CI would carry a false alarm.
+REQUESTS_APPLIED_FIXTURE='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_APPLIED_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: a run that applied everything it was asked stays silent"
+assert_requests_unapplied_empty "requests: the output is present and empty when everything applied"
+
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: a pinned binary that publishes no object warns about nothing"
+
+# A request that writes a file BESIDE the report narrows nothing, so the scope
+# warning and the scope-shaped output must both stay clear of it. The
+# SARIF-absence warning owns that case and says the right thing about it.
+REQUESTS_ARTIFACT_FIXTURE='"request_outcomes":{"sarif-file":{"status":"not-applied","affects":"artifact","requested":"fallow-results.sarif","reason":"write-failed","message":"m"}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_ARTIFACT_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: an unwritten output file is not reported as an unscoped run"
+assert_requests_unapplied_empty "requests: the scope output stays empty when only an output file failed"
 
 EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
 run_gate_analyze "$(gate_envelope '' "$EMPTY")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"

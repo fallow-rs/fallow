@@ -47,6 +47,15 @@ define_plugin!(
                 .unwrap_or(entry)
         }));
 
+        super::module_federation::apply_bundler_plugin_options(
+            &mut result,
+            source,
+            config_path,
+            root,
+            context.as_deref(),
+            "webpack",
+        );
+
         for (find, replacement) in
             config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
         {
@@ -459,5 +468,56 @@ mod tests {
                 ("@utils".to_string(), "src/utils".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn resolve_config_reads_inline_module_federation_options() {
+        let source = r#"
+            const { ModuleFederationPlugin } = require("webpack").container;
+
+            module.exports = {
+                plugins: [
+                    new ModuleFederationPlugin({
+                        name: "host",
+                        exposes: { "./Button": "./src/Button.tsx" },
+                        remotes: { checkout: "checkout@https://example.test/remoteEntry.js" },
+                    }),
+                ],
+            };
+        "#;
+        let plugin = WebpackPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/webpack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(result.entry_patterns, vec!["src/Button.tsx"]);
+        assert_eq!(result.provided_dependencies.len(), 1);
+        assert!(result.provided_dependencies[0].covers_specifier("checkout/Button"));
+    }
+
+    #[test]
+    fn resolve_config_context_roots_exposed_federation_targets() {
+        let source = r#"
+            const path = require("path");
+
+            module.exports = {
+                context: path.resolve(__dirname, "app"),
+                plugins: [
+                    new ModuleFederationPlugin({
+                        exposes: { "./B": "./src/B.tsx" },
+                    }),
+                ],
+            };
+        "#;
+        let plugin = WebpackPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/webpack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(result.entry_patterns, vec!["app/src/B.tsx"]);
     }
 }

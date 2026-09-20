@@ -82,6 +82,11 @@ pub struct CheckJsonExtraOutputs {
     /// key stays absent. An empty set is never emitted: it would assert that
     /// gates were evaluated and none tripped, which is a different claim.
     pub gate_outcomes: Option<fallow_output::GateOutcomes>,
+    /// Every narrowing or shaping request this run received, absent when it
+    /// was asked for nothing. The programmatic route resolves no CLI flag and
+    /// leaves this `None`; an entry whose `status` is not `applied` means the
+    /// report is wider than what was asked for.
+    pub request_outcomes: Option<fallow_output::RequestOutcomes>,
 }
 
 struct CheckJsonEnvelopeInput<'a> {
@@ -103,6 +108,11 @@ pub struct GroupedCheckJsonOutputInput<'a> {
     /// key stays absent. An empty set is never emitted: it would assert that
     /// gates were evaluated and none tripped, which is a different claim.
     pub gate_outcomes: Option<fallow_output::GateOutcomes>,
+    /// Every narrowing or shaping request this run received, absent when it
+    /// was asked for nothing. The programmatic route resolves no CLI flag and
+    /// leaves this `None`; an entry whose `status` is not `applied` means the
+    /// report is wider than what was asked for.
+    pub request_outcomes: Option<fallow_output::RequestOutcomes>,
 
     /// Results already partitioned into groups, in output order.
     pub groups: &'a [ResultGroup],
@@ -138,6 +148,11 @@ pub struct DuplicationJsonOutputInput<'a> {
     /// key stays absent. An empty set is never emitted: it would assert that
     /// gates were evaluated and none tripped, which is a different claim.
     pub gate_outcomes: Option<fallow_output::GateOutcomes>,
+    /// Every narrowing or shaping request this run received, absent when it
+    /// was asked for nothing. The programmatic route resolves no CLI flag and
+    /// leaves this `None`; an entry whose `status` is not `applied` means the
+    /// report is wider than what was asked for.
+    pub request_outcomes: Option<fallow_output::RequestOutcomes>,
 
     /// Typed duplication report to serialize.
     pub report: &'a DuplicationReport,
@@ -168,6 +183,11 @@ pub struct GroupedDuplicationJsonOutputInput<'a> {
     /// key stays absent. An empty set is never emitted: it would assert that
     /// gates were evaluated and none tripped, which is a different claim.
     pub gate_outcomes: Option<fallow_output::GateOutcomes>,
+    /// Every narrowing or shaping request this run received, absent when it
+    /// was asked for nothing. The programmatic route resolves no CLI flag and
+    /// leaves this `None`; an entry whose `status` is not `applied` means the
+    /// report is wider than what was asked for.
+    pub request_outcomes: Option<fallow_output::RequestOutcomes>,
 
     /// Typed duplication report to serialize.
     pub report: &'a DuplicationReport,
@@ -264,6 +284,7 @@ pub fn serialize_grouped_check_json(
         .collect();
 
     let envelope = CheckGroupedOutput {
+        request_outcomes: input.request_outcomes,
         schema_version: SchemaVersion(CHECK_SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(input.elapsed.as_millis() as u64),
@@ -299,6 +320,7 @@ pub fn serialize_duplication_json(
     let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             gate_outcomes: input.gate_outcomes,
+            request_outcomes: input.request_outcomes,
             schema_version: DUPES_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,
@@ -339,6 +361,7 @@ pub fn serialize_grouped_duplication_json(
     let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             gate_outcomes: input.gate_outcomes,
+            request_outcomes: input.request_outcomes,
             schema_version: DUPES_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,
@@ -402,6 +425,7 @@ fn build_check_json_envelope(input: CheckJsonEnvelopeInput<'_>) -> CheckOutput {
     output.baseline_staleness = input.extras.baseline_staleness;
     output.regression = input.extras.regression;
     output.gate_outcomes = input.extras.gate_outcomes;
+    output.request_outcomes = input.extras.request_outcomes;
     output
 }
 
@@ -429,6 +453,7 @@ mod tests {
         let root = Path::new("/project");
         let output = serialize_grouped_check_json(GroupedCheckJsonOutputInput {
             gate_outcomes: None,
+            request_outcomes: None,
             baseline_staleness: None,
             groups: &[],
             original: &AnalysisResults::default(),

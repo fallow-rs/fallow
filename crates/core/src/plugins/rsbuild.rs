@@ -21,7 +21,7 @@ define_plugin! {
     config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
-    resolve_config(config_path, source, _root) {
+    resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
 
         let imports = config_parser::extract_imports(source, config_path);
@@ -44,6 +44,15 @@ define_plugin! {
                 .referenced_dependencies
                 .push(crate::resolve::extract_package_name(dep));
         }
+
+        super::module_federation::apply_bundler_plugin_options(
+            &mut result,
+            source,
+            config_path,
+            root,
+            None,
+            "rsbuild",
+        );
 
         result
     }
@@ -143,5 +152,32 @@ mod tests {
             std::path::Path::new("/project"),
         );
         assert_eq!(result.entry_patterns, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_reads_inline_module_federation_options() {
+        let source = r#"
+            import { defineConfig } from "@rsbuild/core";
+            import { pluginModuleFederation } from "@module-federation/rsbuild-plugin";
+
+            export default defineConfig({
+                plugins: [
+                    pluginModuleFederation({
+                        name: "host",
+                        remotes: { checkout: "checkout@https://example.test/remoteEntry.js" },
+                        shared: ["react"],
+                    }),
+                ],
+            });
+        "#;
+        let plugin = RsbuildPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/rsbuild.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(result.provided_dependencies.len(), 1);
+        assert!(result.provided_dependencies[0].covers_specifier("checkout"));
     }
 }

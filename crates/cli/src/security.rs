@@ -413,6 +413,7 @@ pub fn benchmark_security_blind_spots_json(
     let normalized = unresolved_callee_diagnostics(diagnostics, root);
     let output = SecurityOutput {
         gate_outcomes: None,
+        request_outcomes: None,
         schema_version: SecuritySchemaVersion::V8,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_owned()),
         elapsed_ms: ElapsedMs(0),
@@ -778,6 +779,7 @@ fn security_rule_severities(config: &fallow_config::ResolvedConfig) -> SecurityR
 fn build_security_output(input: SecurityOutputInput<'_, '_>) -> SecurityOutput {
     SecurityOutput {
         gate_outcomes: None,
+        request_outcomes: crate::requests::request_outcomes(),
         schema_version: SecuritySchemaVersion::V8,
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(input.started.elapsed().as_millis() as u64),
@@ -1009,7 +1011,7 @@ fn security_output_config(
 
 fn apply_changed_scope(opts: &SecurityOptions<'_>, results: &mut AnalysisResults) {
     if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = fallow_engine::changed_files::get_changed_files(opts.root, git_ref)
+        && let Some(changed) = crate::requests::resolve_changed_since(opts.root, git_ref)
     {
         fallow_engine::changed_files::filter_results_by_changed_files(results, &changed);
     }
@@ -3280,6 +3282,7 @@ mod tests {
     fn output_with(findings: Vec<SecurityFinding>, unresolved_edge_files: usize) -> SecurityOutput {
         SecurityOutput {
             gate_outcomes: None,
+            request_outcomes: None,
             schema_version: SecuritySchemaVersion::V8,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),
@@ -3298,6 +3301,7 @@ mod tests {
     fn output_with_gate(verdict: SecurityGateVerdict, new_count: usize) -> SecurityOutput {
         SecurityOutput {
             gate_outcomes: None,
+            request_outcomes: None,
             schema_version: SecuritySchemaVersion::V8,
             version: ToolVersion("test".to_string()),
             elapsed_ms: ElapsedMs(0),

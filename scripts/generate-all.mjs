@@ -33,12 +33,22 @@ const TYPE_AWARE_MANIFEST_PATH = "crates/api/type-aware-protocol.json";
 const TYPE_AWARE_MODULE_PATH = "tools/type-aware-sidecar/src/generated-protocol.mjs";
 const EXTENSION_CODEGEN_PATH = "editors/vscode/scripts/codegen-contracts.mjs";
 
+/**
+ * Node's default stdout ceiling for a synchronous child is 1 MiB, and the
+ * emitted output schema passed that, which fails the whole generation with a
+ * bare `spawnSync cargo ENOBUFS` rather than anything naming a size. The
+ * generated surfaces only grow, so the ceiling is raised well past the current
+ * figure instead of tracked against it.
+ */
+const MAX_CHILD_OUTPUT_BYTES = 64 * 1024 * 1024;
+
 const run = (cmd, args, options = {}) =>
   execFileSync(cmd, args, {
     cwd: REPO_ROOT,
     encoding: options.encoding ?? "utf8",
     env: options.env ? { ...process.env, ...options.env } : process.env,
     stdio: options.stdio ?? ["ignore", "pipe", "inherit"],
+    maxBuffer: MAX_CHILD_OUTPUT_BYTES,
   });
 
 const cargoFallow = (subcommand, ...args) =>

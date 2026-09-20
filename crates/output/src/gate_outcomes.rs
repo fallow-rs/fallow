@@ -22,6 +22,11 @@
 //! one is a machine verdict a build gates on. Hence the different key
 //! (`gate_outcomes`, not `gates`) and the absence of any prose member here.
 //!
+//! The display array is DERIVED from this object for the gates a run armed, so
+//! a tripped gate reaches the check run as a named gate rather than as a failed
+//! step. That is a one-way projection into display text: a consumer that needs
+//! the verdict reads this object, never the rendered row.
+//!
 //! # Wire compatibility
 //!
 //! The key set is OPEN. A name this build does not recognise means "some gate",
@@ -82,6 +87,52 @@ pub enum GateName {
     /// `--type-aware-require complete`: semantic analysis was partial or
     /// unavailable.
     TypeAwareRequire,
+}
+
+impl GateName {
+    /// Every gate name this build can emit, in declaration order.
+    ///
+    /// Exists so a surface that has to cover the set exhaustively, such as the
+    /// pull-request decision surface's display labels, can be tested against
+    /// the emitter rather than against a hand-kept list. A new variant belongs
+    /// here as well as in [`Self::as_str`], whose match will not compile until
+    /// it is named.
+    pub const ALL: [Self; 13] = [
+        Self::ErrorSeverityFindings,
+        Self::Regression,
+        Self::StaleBaseline,
+        Self::DuplicationThreshold,
+        Self::HealthMinScore,
+        Self::HealthMinSeverity,
+        Self::HealthFindings,
+        Self::HealthCoverageGaps,
+        Self::HealthRuntimeCoverage,
+        Self::Security,
+        Self::SecurityAdvisory,
+        Self::AuditVerdict,
+        Self::TypeAwareRequire,
+    ];
+
+    /// The kebab-case key this gate serializes as, for prose and lookups
+    /// outside the JSON envelope.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ErrorSeverityFindings => "error-severity-findings",
+            Self::Regression => "regression",
+            Self::StaleBaseline => "stale-baseline",
+            Self::DuplicationThreshold => "duplication-threshold",
+            Self::HealthMinScore => "health-min-score",
+            Self::HealthMinSeverity => "health-min-severity",
+            Self::HealthFindings => "health-findings",
+            Self::HealthCoverageGaps => "health-coverage-gaps",
+            Self::HealthRuntimeCoverage => "health-runtime-coverage",
+            Self::Security => "security",
+            Self::SecurityAdvisory => "security-advisory",
+            Self::AuditVerdict => "audit-verdict",
+            Self::TypeAwareRequire => "type-aware-require",
+        }
+    }
 }
 
 /// What a gate concluded on this run.
@@ -295,6 +346,25 @@ mod tests {
             GateOutcome::new(GateStatus::Fail, true),
         );
         assert!(gates.into_option().is_some());
+    }
+
+    /// `ALL` is the list a consumer covering the set exhaustively is tested
+    /// against, so a variant missing from it would let a new gate reach the
+    /// wire with no surface knowing about it.
+    #[test]
+    fn every_name_in_all_is_distinct_and_spelled_as_serde_spells_it() {
+        let mut names = GateName::ALL.map(GateName::as_str).to_vec();
+        let total = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), total, "a duplicated entry hides one variant");
+
+        for name in GateName::ALL {
+            assert_eq!(
+                serde_json::to_value(name).expect("name serializes"),
+                serde_json::json!(name.as_str())
+            );
+        }
     }
 
     #[test]

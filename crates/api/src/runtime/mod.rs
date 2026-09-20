@@ -487,6 +487,7 @@ fn assemble_health_programmatic_output(
             next_step_facts.offer_setup,
             next_step_facts.impact_digest,
             next_step_facts.audit_changed,
+            None,
         ));
     HealthProgrammaticOutput {
         report: analysis.report,

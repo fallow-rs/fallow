@@ -34,6 +34,9 @@ pub mod duplicates;
 /// compiled (the JSON emission layer constructs them at runtime); the
 /// `schemars::JsonSchema` derive is gated per-struct on the `schema` feature.
 pub mod envelope;
+/// Where a fact sits on each JSON envelope shape, shared by the surfaces that
+/// read a saved envelope back rather than holding the run's typed state.
+pub mod envelope_sites;
 /// Module extraction types: exports, imports, re-exports, and member info.
 pub mod extract;
 /// Guard output contracts for pre-edit architecture-rule lookup.

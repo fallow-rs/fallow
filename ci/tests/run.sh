@@ -259,22 +259,57 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
   if [ -n "${FALLOW_TEST_LOG:-}" ] && [ -n "${FALLOW_DIFF_FILE:-}" ]; then
     printf 'diff_file=set\n' >> "$FALLOW_TEST_LOG"
   fi
-  scoped=false
+  # The real binary serializes scope_reasons in its own declaration order,
+  # never in argv order, so the mock sorts into that order too.
+  REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production"
+  found=""
   for arg in "$@"; do
     case "$arg" in
-      --changed-since|--changed-since=*) scoped=true ;;
+      --changed-since|--changed-since=*) found="$found changed-since" ;;
+      --production) found="$found production" ;;
     esac
   done
   if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
+    found="$found diff"
+  fi
+  if [ -n "${MOCK_SCOPE_REASONS:-}" ]; then
+    found=$(printf '%s' "$MOCK_SCOPE_REASONS" | tr ',' ' ')
+  fi
+  reasons=""
+  for candidate in $REASON_ORDER; do
+    case " $found " in
+      *" $candidate "*)
+        if [ -z "$reasons" ]; then reasons="\"$candidate\""; else reasons="$reasons,\"$candidate\""; fi
+        ;;
+    esac
+  done
+  scoped=false
+  if [ -n "$reasons" ]; then
     scoped=true
   fi
   if [ "$scoped" = "true" ]; then
-    printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":0,"stale_entries":8,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}'
+    if [ "${MOCK_NO_SCOPE_REASONS:-}" = "1" ]; then
+      printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":0,"stale_entries":8,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}'
+    else
+      printf '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":0,"stale_entries":8,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":[%s]}}\n' "$reasons"
+    fi
     exit 0
   fi
   if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ]; then
     printf 'not json at all\n'
     exit 2
+  fi
+  if [ "${MOCK_AUDIT_BASELINES:-}" = "1" ]; then
+    printf '%s\n' '{"kind":"audit","total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}'
+    exit 0
+  fi
+  if [ "${MOCK_UNRECOGNISED_BASELINE:-}" = "1" ]; then
+    printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":true}}'
+    exit 0
+  fi
+  if [ "${MOCK_ZERO_ENTRY_BASELINE:-}" = "1" ]; then
+    printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":false}}'
+    exit 0
   fi
   printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":3,"stale_entries":5,"current_findings":3,"change_scoped":false,"stale":true,"warning":"partial","gate_trips":true}}'
   exit 0
@@ -497,6 +532,128 @@ if [ "$STALE_RUNS" = "1" ]; then
 else
   fail "stale gate: an unscoped pipeline analyzes exactly once" "ran $STALE_RUNS times"
 fi
+
+# The stand-down names the channels the run reported, and scoping smuggled
+# through FALLOW_ARGS is visible there instead of sending the template into an
+# unscoped re-read that comes back narrowed anyway.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_SCOPE_REASONS=production \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json)
+STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
+if [ "$STALE_RUNS" = "1" ]; then
+  pass "stale gate: an unremovable reason skips the re-read even with no matching variable"
+else
+  fail "stale gate: an unremovable reason skips the re-read even with no matching variable" "ran $STALE_RUNS times"
+fi
+assert_contains "$OUT" "only part of the project (production)" \
+  "stale gate: the stand-down names the smuggled channel"
+
+# Reasons this template can remove still earn the re-read.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_SCOPE_REASONS=changed-files,scope \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json)
+STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
+if [ "$STALE_RUNS" = "2" ]; then
+  pass "stale gate: removable reasons still earn the unscoped re-read"
+else
+  fail "stale gate: removable reasons still earn the unscoped re-read" "ran $STALE_RUNS times"
+fi
+
+# A binary that predates the member keeps the variable-based guess.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_NO_SCOPE_REASONS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_CHANGED_SINCE=abc123 \
+  FALLOW_PRODUCTION=true)
+assert_contains "$OUT" "only part of the project (production mode or workspace scoping)" \
+  "stale gate: a binary without the member falls back to the variable-based reason"
+
+# A baseline written by another command suppresses nothing, so every verdict
+# reads green honestly and the advisory case falls through to its silent arm.
+# The branch reads the binary's own verdict, not the entry count.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_UNRECOGNISED_BASELINE=1 \
+  FALLOW_BASELINE=wrong-kind.json)
+assert_contains "$OUT" "WARNING: the baseline at wrong-kind.json has no entries this command recognises" \
+  "stale gate: a baseline that recognises nothing is called out"
+
+# A baseline passed through FALLOW_ARGS never reaches FALLOW_BASELINE, so the
+# line degrades to the subject instead of going missing.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_UNRECOGNISED_BASELINE=1 \
+  FALLOW_ARGS="--baseline wrong-kind.json")
+assert_contains "$OUT" "WARNING: the loaded baseline has no entries this command recognises" \
+  "stale gate: a baseline passed through FALLOW_ARGS is called out without a path"
+
+# A baseline saved on a project with nothing to record carries zero entries and
+# is not a mistake, so the documented save-on-green-main workflow stays quiet.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_ZERO_ENTRY_BASELINE=1 \
+  FALLOW_BASELINE=own-empty.json)
+assert_not_contains "$OUT" "has no entries this command recognises" \
+  "stale gate: a baseline this command saved itself is never called the wrong file"
+
+# A populated baseline never earns that warning.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_BASELINE=baseline.json)
+assert_not_contains "$OUT" "has no entries this command recognises" \
+  "stale gate: a populated baseline says nothing about recognition"
+
+# fallow audit loads up to three baselines and judges none of them, and the
+# single-analysis // chain is first-match, so it would report one and hide the
+# other two. One line per section instead, naming the command a reader has to
+# run rather than the section it sits in.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_AUDIT_BASELINES=1 \
+  FALLOW_COMMAND=audit \
+  FALLOW_AUDIT_DEAD_CODE_BASELINE=audit/dc.json \
+  FALLOW_AUDIT_DUPES_BASELINE=audit/du.json \
+  FALLOW_AUDIT_HEALTH_BASELINE=audit/he.json)
+assert_contains "$OUT" "NOTICE: the dead-code baseline (audit/dc.json) has 12 entries and was not judged" \
+  "audit baselines: the dead-code baseline is reported with its path"
+assert_contains "$OUT" "Run 'fallow dupes --baseline audit/du.json' over the whole project" \
+  "audit baselines: duplication points at fallow dupes, not at the section name"
+assert_contains "$OUT" "WARNING: the complexity baseline at audit/he.json has no entries this command recognises" \
+  "audit baselines: an unrecognised audit baseline gets the recognition warning"
+
+# The gate cannot apply to audit and FALLOW_BASELINE is already rejected for
+# it, so the pair is only reachable through FALLOW_ARGS.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+# This suite runs without `set -e`, so the exit code is captured inline rather
+# than by toggling it: enabling it here would abort every later case.
+STALE_ARGS_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  FALLOW_COMMAND=audit \
+  FALLOW_ARGS=--fail-on-stale-baseline 2>&1) || STALE_ARGS_EXIT=$?
+if [ "$STALE_ARGS_EXIT" -eq 2 ]; then
+  pass "audit baselines: --fail-on-stale-baseline smuggled through FALLOW_ARGS is rejected"
+else
+  fail "audit baselines: --fail-on-stale-baseline smuggled through FALLOW_ARGS is rejected" "exit $STALE_ARGS_EXIT"
+fi
+assert_contains "$OUT" "cannot apply to command: audit" \
+  "audit baselines: the rejection says why"
 
 # Diff scoping reaches the CLI through FALLOW_DIFF_FILE, not argv.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
@@ -1545,13 +1702,23 @@ for arg in "$@"; do
 done
 case "$format" in
   pr-comment-gitlab)
+    # MOCK_BASELINE_ADVISORY mirrors what the real renderer emits for a rotted
+    # baseline with the gate armed: the advisory plus the gate inventory in the
+    # body's status blockquote, and one decision row per armed gate.
     if [ -n "${FALLOW_PR_DECISION_FILE:-}" ]; then
-      printf '{"schema":"fallow-pr-decision/v1","title":"Fallow","conclusion":"success","gates":[],"annotations":[],"details":{"summary_markdown":"Clean","full_report_path":null,"details_url":null}}\n' > "$FALLOW_PR_DECISION_FILE"
+      if [ "${MOCK_BASELINE_ADVISORY:-}" = "1" ]; then
+        printf '{"schema":"fallow-pr-decision/v1","title":"Fallow","conclusion":"success","gates":[{"id":"check","label":"Dead code","status":"success","observed":"0 findings","threshold":null,"scope":"new code"},{"id":"stale-baseline","label":"Stale baseline","status":"failure","observed":"fail","threshold":null,"scope":"this run"}],"annotations":[],"details":{"summary_markdown":"Clean","full_report_path":null,"details_url":null}}\n' > "$FALLOW_PR_DECISION_FILE"
+      else
+        printf '{"schema":"fallow-pr-decision/v1","title":"Fallow","conclusion":"success","gates":[],"annotations":[],"details":{"summary_markdown":"Clean","full_report_path":null,"details_url":null}}\n' > "$FALLOW_PR_DECISION_FILE"
+      fi
     fi
     if [ -n "${FALLOW_PR_DETAILS_FILE:-}" ]; then
       printf '{"schema":"fallow-pr-details/v1","title":"Fallow","sections":[]}\n' > "$FALLOW_PR_DETAILS_FILE"
     fi
     printf '<!-- fallow-id: fallow-results -->\n### Fallow smoke\n\nGenerated by fallow.\n'
+    if [ "${MOCK_BASELINE_ADVISORY:-}" = "1" ]; then
+      printf '\n> **Baseline matched nothing.** All 8 saved entries went unmatched. Paths may have changed, or the baseline was saved elsewhere. Re-save it from a whole-project run. Gate outcomes: failed stale-baseline.\n'
+    fi
     ;;
   review-gitlab)
     if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
@@ -1725,6 +1892,34 @@ assert_contains "$CI_TYPED_OUT" "fallow ci post-pr-comment --provider gitlab" "c
 assert_contains "$CI_TYPED_OUT" "summary_scope=diff" "comment.sh passes FALLOW_SUMMARY_SCOPE to typed MR comment render"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DECISION_FILE" "comment.sh asks fallow for typed MR decision sidecar"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DETAILS_FILE" "comment.sh asks fallow for typed MR details artifact"
+
+# #2675, mirroring the GitHub assertions: the advisory and the gate row are the
+# CLI's render, and the template's job is to carry them to the MR note and to
+# the decision sidecar a downstream job reads.
+CI_BASELINE_LOG="$CI_TYPED_WORK/baseline-comment.log"
+: > "$CI_BASELINE_LOG"
+(
+  cd "$CI_TYPED_WORK"
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_BASELINE_LOG" \
+    MOCK_BASELINE_ADVISORY="1" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    FALLOW_COMMAND="check" \
+    bash "$SCRIPTS_DIR/comment.sh" > /dev/null
+)
+CI_BASELINE_BODY=$(cat "$CI_TYPED_WORK/fallow-mr-comment.md")
+CI_BASELINE_DECISION=$(cat "$CI_TYPED_WORK/fallow-mr-decision.json")
+assert_contains "$CI_BASELINE_BODY" "**Baseline matched nothing.**" \
+  "the posted MR note carries the baseline advisory"
+assert_contains "$CI_BASELINE_BODY" "Gate outcomes: failed stale-baseline." \
+  "the posted MR note keeps the gate inventory beside the advisory"
+assert_contains "$CI_BASELINE_DECISION" '"id":"stale-baseline"' \
+  "the MR decision sidecar carries the stale-baseline gate row"
+assert_contains "$(cat "$CI_BASELINE_LOG")" "ci post-pr-comment --provider gitlab" \
+  "the note carrying the advisory is the one posted"
 assert_contains "$(cat "$DIR/../../ci/gitlab-ci.yml")" "FALLOW_PR_COMMENT_LAYOUT" "GitLab template exposes sticky MR comment layout"
 CI_BLANK_SUMMARY_SCOPE_COUNT=$(printf '%s\n' "$CI_TYPED_OUT" | grep -c '^summary_scope=$' || true)
 if [ "$CI_BLANK_SUMMARY_SCOPE_COUNT" -ge 1 ]; then
@@ -2235,6 +2430,69 @@ OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   FALLOW_FAIL_ON_ISSUES=false) || true
 assert_contains "$OUT" "skipped-large-file (2)" "gitlab degraded: kinds and counts are aggregated"
 assert_not_contains "$OUT" "boundaries-not-configured" "gitlab degraded: unconfigured-check kinds are not reported"
+assert_contains "$OUT" "Fallow ran with degraded inputs" \
+  "gitlab degraded: the sentence covers a degraded input as well as a narrower file set"
+
+# #2689: the health pipeline's own degraded inputs reach the same aggregated
+# line through the same selector, with no change to this template's jq.
+HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$HEALTH_DEGRADED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=health \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "hotspots-skipped (1)" \
+  "gitlab degraded: the health kinds are reported without a template change"
+assert_not_contains "$OUT" "coverage-auto-detected" \
+  "gitlab degraded: auto-detected coverage is provenance and not a degraded run"
+
+# #2687, #2688: this job runs fallow with --quiet and a machine format, so the
+# envelope is the only channel that reaches the pipeline.
+REQUESTS='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
+ENVELOPE=$(gitlab_gate_envelope '' "$REQUESTS")
+set +e
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false)
+GATE_STATUS=$?
+set -e
+assert_contains "$OUT" "WARNING: Fallow could not apply: changed-since (git-failed)" \
+  "gitlab requests: an unapplied request warns once with its reason"
+assert_not_contains "$OUT" "could not apply: changed-since (git-failed), diff-filter" \
+  "gitlab requests: an honoured request is not named in the warning"
+if [ "$GATE_STATUS" = "0" ]; then
+  pass "gitlab requests: an unapplied request leaves the pipeline green"
+else
+  fail "gitlab requests: an unapplied request leaves the pipeline green" "got $GATE_STATUS"
+fi
+
+APPLIED='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
+ENVELOPE=$(gitlab_gate_envelope '' "$APPLIED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "could not apply" \
+  "gitlab requests: a run that applied everything it was asked stays silent"
+
+ENVELOPE=$(gitlab_gate_envelope '')
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "could not apply" \
+  "gitlab requests: a pinned binary that publishes no object warns about nothing"
+
+# A request that writes a file beside the report narrows nothing.
+ARTIFACT='"request_outcomes":{"sarif-file":{"status":"not-applied","affects":"artifact","requested":"gl-fallow.sarif","reason":"write-failed","message":"m"}}'
+ENVELOPE=$(gitlab_gate_envelope '' "$ARTIFACT")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "could not apply" \
+  "gitlab requests: an unwritten output file is not reported as an unscoped run"
 
 EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
 ENVELOPE=$(gitlab_gate_envelope '' "$EMPTY")

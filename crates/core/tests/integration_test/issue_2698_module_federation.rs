@@ -1,0 +1,327 @@
+//! Regression tests for issue #2698: Module Federation `exposes` and `remotes`
+//! were invisible to analysis.
+//!
+//! An `exposes` target is only ever loaded by a remote container at runtime, so
+//! without reading the Federation config the exposed module and everything it
+//! reaches looked like dead code. A `remotes` alias is supplied by the remote
+//! container rather than by npm, but an unresolvable bare specifier is
+//! classified as an npm package, so `import('checkout/Button')` surfaced as an
+//! unlisted dependency named `checkout`.
+
+use std::path::Path;
+
+use super::common::{create_config, create_production_config, fixture_path};
+
+fn write(path: &Path, contents: &str) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("create parent dir");
+    }
+    std::fs::write(path, contents).expect("write file");
+}
+
+fn unused_file_paths(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
+    results
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.to_string_lossy().replace('\\', "/"))
+        .collect()
+}
+
+fn unused_exports(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
+    results
+        .unused_exports
+        .iter()
+        .map(|finding| {
+            format!(
+                "{}:{}",
+                finding.export.path.to_string_lossy().replace('\\', "/"),
+                finding.export.export_name
+            )
+        })
+        .collect()
+}
+
+fn unlisted_packages(results: &fallow_types::results::AnalysisResults) -> Vec<&str> {
+    results
+        .unlisted_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect()
+}
+
+fn unresolved_specifiers(results: &fallow_types::results::AnalysisResults) -> Vec<&str> {
+    results
+        .unresolved_imports
+        .iter()
+        .map(|finding| finding.import.specifier.as_str())
+        .collect()
+}
+
+fn contains_suffix(paths: &[String], suffix: &str) -> bool {
+    paths.iter().any(|path| path.ends_with(suffix))
+}
+
+/// The producer's `module-federation.config.ts` declares a file target and an
+/// extensionless directory target. Both must become entry points, while a file
+/// the config does not name stays unused.
+#[test]
+fn exposed_targets_are_entry_points_and_unexposed_files_stay_unused() {
+    let config = create_config(fixture_path("module-federation-producer"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results);
+
+    for exposed in [
+        "src/components/Button.tsx",
+        "src/components/label.ts",
+        "src/cart/index.ts",
+    ] {
+        assert!(
+            !contains_suffix(&unused, exposed),
+            "{exposed} is reachable from an exposes target, got {unused:?}"
+        );
+    }
+    assert!(
+        contains_suffix(&unused, "src/orphan.ts"),
+        "a file no exposes target names must stay unused, got {unused:?}"
+    );
+}
+
+/// Exposed files become entry points, so their exports follow
+/// `includeEntryExports` like any other entry point instead of being
+/// unconditionally exempt.
+#[test]
+fn exposed_entry_exports_follow_the_entry_export_setting() {
+    let root = fixture_path("module-federation-producer");
+    let exposed_default = "src/components/Button.tsx:default";
+
+    let default_results =
+        fallow_core::analyze(&create_config(root.clone())).expect("analysis should succeed");
+    let reported = unused_exports(&default_results);
+    assert!(
+        !contains_suffix(&reported, exposed_default),
+        "the exposed default export is not reported at default settings, got {reported:?}"
+    );
+
+    let mut config = create_config(root);
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let reported = unused_exports(&results);
+    assert!(
+        contains_suffix(&reported, exposed_default),
+        "with include_entry_exports the exposed default export is reportable, got {reported:?}"
+    );
+}
+
+#[test]
+fn exposed_targets_survive_production_discovery() {
+    let config = create_production_config(fixture_path("module-federation-producer"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results);
+
+    assert!(
+        !contains_suffix(&unused, "src/components/Button.tsx"),
+        "the exposed component stays an entry point in production mode, got {unused:?}"
+    );
+}
+
+/// A declared remote alias and its subpaths are provided by the remote
+/// container. Every other bare specifier the project does not declare must keep
+/// reporting.
+#[test]
+fn declared_remote_alias_is_not_an_unlisted_dependency() {
+    let config = create_config(fixture_path("module-federation-consumer"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unlisted = unlisted_packages(&results);
+
+    assert!(
+        !unlisted.contains(&"checkout"),
+        "the declared remote alias is provided by the container, got {unlisted:?}"
+    );
+    assert!(
+        unlisted.contains(&"checkout-ui"),
+        "a sibling package name must not be covered by the alias, got {unlisted:?}"
+    );
+    assert!(
+        unlisted.contains(&"genuinely-missing-pkg"),
+        "an undeclared npm package must keep reporting, got {unlisted:?}"
+    );
+
+    let unresolved = unresolved_specifiers(&results);
+    assert!(
+        !unresolved.contains(&"checkout/Button"),
+        "a remote subpath import must not surface as unresolved, got {unresolved:?}"
+    );
+}
+
+/// An installed package with the same name as the alias still wins: the
+/// provider rule only silences unlisted-dependency findings, so a declared
+/// dependency keeps its usage credit.
+#[test]
+fn installed_package_with_the_alias_name_is_neither_unlisted_nor_unused() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "mf-host",
+            "private": true,
+            "dependencies": { "checkout": "^1.0.0" },
+            "devDependencies": { "@module-federation/enhanced": "^0.9.0", "webpack": "^5.98.0" }
+        }"#,
+    );
+    write(
+        &root.join("module-federation.config.ts"),
+        r#"import { createModuleFederationConfig } from "@module-federation/enhanced";
+
+           export default createModuleFederationConfig({
+             name: "host",
+             remotes: { checkout: "checkout@https://example.test/remoteEntry.js" },
+           });"#,
+    );
+    write(
+        &root.join("src/index.ts"),
+        r#"import "checkout";
+           export const mount = async (): Promise<unknown> => import("checkout/Button");"#,
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        !unlisted_packages(&results).contains(&"checkout"),
+        "a declared dependency is never unlisted, got {:?}",
+        unlisted_packages(&results)
+    );
+    let unused_deps: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_deps.contains(&"checkout"),
+        "the import still credits the installed package, got {unused_deps:?}"
+    );
+}
+
+/// The config file the plugin read is never itself dead code, including in a
+/// workspace where the Federation dependency is hoisted to the root and each
+/// package keeps its own config.
+#[test]
+fn a_nested_config_file_is_not_reported_as_unused() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "mf-workspace",
+            "private": true,
+            "workspaces": ["packages/*"],
+            "devDependencies": { "@module-federation/enhanced": "^0.9.0" }
+        }"#,
+    );
+    write(
+        &root.join("packages/host/package.json"),
+        r#"{ "name": "@mf/host", "private": true }"#,
+    );
+    write(
+        &root.join("packages/host/module-federation.config.ts"),
+        r#"export default {
+             name: "host",
+             exposes: { "./Panel": "./src/Panel.tsx" },
+           };"#,
+    );
+    write(
+        &root.join("packages/host/src/Panel.tsx"),
+        "export default (): string => \"panel\";",
+    );
+    write(
+        &root.join("packages/host/src/orphan.ts"),
+        "export const x = 1;",
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results);
+
+    assert!(
+        !contains_suffix(&unused, "packages/host/module-federation.config.ts"),
+        "the config the plugin read is used, got {unused:?}"
+    );
+    assert!(
+        !contains_suffix(&unused, "packages/host/src/Panel.tsx"),
+        "the exposed file is an entry point at this depth, got {unused:?}"
+    );
+    assert!(
+        contains_suffix(&unused, "packages/host/src/orphan.ts"),
+        "an unexposed file still reports, got {unused:?}"
+    );
+}
+
+/// The provider rule covers only the directory tree that declared the alias, so
+/// a sibling package importing the same specifier without declaring the remote
+/// keeps reporting.
+#[test]
+fn remote_alias_does_not_leak_to_a_sibling_workspace_package() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "mf-workspace",
+            "private": true,
+            "workspaces": ["packages/*"],
+            "devDependencies": { "@module-federation/enhanced": "^0.9.0" }
+        }"#,
+    );
+    write(
+        &root.join("packages/host/package.json"),
+        r#"{
+            "name": "@mf/host",
+            "private": true,
+            "devDependencies": { "@module-federation/enhanced": "^0.9.0" }
+        }"#,
+    );
+    write(
+        &root.join("packages/host/module-federation.config.ts"),
+        r#"import { createModuleFederationConfig } from "@module-federation/enhanced";
+
+           export default createModuleFederationConfig({
+             name: "host",
+             remotes: { checkout: "checkout@https://example.test/remoteEntry.js" },
+           });"#,
+    );
+    write(
+        &root.join("packages/host/src/index.ts"),
+        r#"import "checkout/Button";
+           export const mount = (): string => "host";"#,
+    );
+    write(
+        &root.join("packages/other/package.json"),
+        r#"{ "name": "@mf/other", "private": true }"#,
+    );
+    write(
+        &root.join("packages/other/src/index.ts"),
+        r#"import "checkout/Button";
+           export const mount = (): string => "other";"#,
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let sites: Vec<String> = results
+        .unlisted_dependencies
+        .iter()
+        .filter(|finding| finding.dep.package_name == "checkout")
+        .flat_map(|finding| &finding.dep.imported_from)
+        .map(|site| site.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+
+    assert!(
+        sites.iter().any(|path| path.contains("packages/other/")),
+        "the package that declared no remote still reports, got {sites:?}"
+    );
+    assert!(
+        !sites.iter().any(|path| path.contains("packages/host/")),
+        "the declaring package is covered by its own remote, got {sites:?}"
+    );
+}

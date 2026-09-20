@@ -117,18 +117,18 @@ pub(super) struct LoadedHealthBaseline {
 
 /// Load and apply a health baseline, filtering findings to show only new ones.
 ///
-/// `change_scoped` marks runs whose findings cover only part of the project
-/// (changed-file, diff, or workspace scoping). Staleness counts are still
-/// reported for such runs, but `stale` stays false and no re-save advice is
-/// printed: a baseline re-saved from a scoped run would carry only the scoped
-/// findings and silently gut the gate.
+/// `scope_reasons` names the channels that narrowed this run below the whole
+/// project (a changed-file set, a diff, or workspace scoping). Staleness counts
+/// are still reported for such runs, but `stale` stays false and no re-save
+/// advice is printed: a baseline re-saved from a scoped run would carry only
+/// the scoped findings and silently gut the gate.
 pub(super) fn load_health_baseline(
     baseline_path: &std::path::Path,
     findings: &mut Vec<fallow_output::ComplexityViolation>,
     root: &std::path::Path,
     quiet: bool,
     mode: HealthBaselineMode,
-    change_scoped: bool,
+    scope_reasons: fallow_output::BaselineScopeReasons,
 ) -> Result<LoadedHealthBaseline, HealthError> {
     let json = std::fs::read_to_string(baseline_path)
         .map_err(|e| HealthError::message(format!("failed to read health baseline: {e}"), 2))?;
@@ -161,7 +161,11 @@ pub(super) fn load_health_baseline(
         matched_entries: overlap.matched_entries,
         moved_entries: overlap.moved_entries,
         current_findings: before,
-        change_scoped,
+        unrecognised_format: !crate::baseline::declares_baseline_format(
+            &json,
+            HealthBaselineData::DECLARED_KEYS,
+        ),
+        scope_reasons,
     };
     let staleness = staleness_from_counts(&counts);
     if !quiet {
@@ -214,7 +218,7 @@ const fn staleness_decision(counts: &StalenessCounts) -> crate::baseline::Baseli
         entries: counts.baseline_entries,
         matched: counts.matched_entries,
         current_findings: counts.current_findings,
-        change_scoped: counts.change_scoped,
+        change_scoped: !counts.scope_reasons.is_empty(),
     }
 }
 
@@ -226,13 +230,22 @@ struct StalenessCounts {
     /// found nothing to compare, either because the project is clean or the
     /// scope was empty, so staleness cannot be judged and `stale` stays false.
     current_findings: usize,
-    change_scoped: bool,
+    /// True when the file carried no key the health baseline format writes, so
+    /// it is another command's baseline rather than an empty health one.
+    unrecognised_format: bool,
+    /// Which channels narrowed this run. `change_scoped` is derived from it, so
+    /// the boolean and the published array cannot disagree.
+    scope_reasons: fallow_output::BaselineScopeReasons,
 }
 
 /// Staleness data for a loaded baseline that matched `matched_entries` of its
 /// `baseline_entries` saved entries on this run.
 fn staleness_from_counts(counts: &StalenessCounts) -> fallow_output::BaselineStaleness {
-    staleness_decision(counts).to_envelope(counts.moved_entries)
+    staleness_decision(counts).to_envelope(
+        counts.moved_entries,
+        counts.scope_reasons,
+        counts.unrecognised_format,
+    )
 }
 
 #[cfg(test)]
@@ -245,7 +258,8 @@ mod tests {
             matched_entries,
             moved_entries: 0,
             current_findings: baseline_entries.max(1),
-            change_scoped: false,
+            unrecognised_format: false,
+            scope_reasons: fallow_output::BaselineScopeReasons::empty(),
         }
     }
 
@@ -286,12 +300,25 @@ mod tests {
     #[test]
     fn change_scoped_run_is_never_stale() {
         let staleness = staleness_from_counts(&StalenessCounts {
-            change_scoped: true,
+            scope_reasons: fallow_output::BaselineScopeReasons::empty()
+                .with(fallow_output::ScopeReason::ChangedFiles),
             ..counts(8, 2)
         });
         assert_eq!(staleness.stale_entries, 6);
         assert!(staleness.change_scoped);
         assert!(!staleness.stale);
+        assert_eq!(
+            staleness.scope_reasons,
+            fallow_output::BaselineScopeReasons::empty()
+                .with(fallow_output::ScopeReason::ChangedFiles)
+        );
+    }
+
+    #[test]
+    fn an_unscoped_run_reports_no_scope_reasons() {
+        let staleness = staleness_from_counts(&counts(8, 2));
+        assert!(!staleness.change_scoped);
+        assert!(staleness.scope_reasons.is_empty());
     }
 
     #[test]

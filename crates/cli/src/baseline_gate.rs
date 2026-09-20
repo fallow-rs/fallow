@@ -36,6 +36,23 @@ use std::path::{Path, PathBuf};
 pub struct LoadedBaselineStaleness {
     pub staleness: BaselineStaleness,
     pub path: PathBuf,
+    /// Which channels narrowed the run, from the same predicate that produced
+    /// `staleness.change_scoped`. Carried here rather than on the engine
+    /// struct so the analysis keeps the one boolean it needs.
+    pub scope_reasons: fallow_output::BaselineScopeReasons,
+    /// True when the file carried no key this command's baseline format
+    /// writes, so it is another command's baseline rather than an empty one of
+    /// this command's.
+    pub unrecognised_format: bool,
+}
+
+impl LoadedBaselineStaleness {
+    /// This run's view of the baseline, for the JSON envelope.
+    #[must_use]
+    pub fn to_envelope(&self, moved_entries: usize) -> fallow_output::BaselineStaleness {
+        self.staleness
+            .to_envelope(moved_entries, self.scope_reasons, self.unrecognised_format)
+    }
 }
 
 /// What each command calls the things its baseline entries describe.
@@ -98,6 +115,40 @@ pub fn note_stood_down(path: Option<&Path>, enabled: bool, reason: &str) {
     };
     eprintln!(
         "Note: --fail-on-stale-baseline did not run: {reason}, so the baseline {} was not judged.",
+        path.display(),
+    );
+}
+
+/// Say that a loaded baseline is not written in this command's format.
+///
+/// Such a file suppresses nothing, and every downstream verdict follows from
+/// that honestly: the advisory is silent because there is nothing to judge, and
+/// the gate reports `pass` because no entry went unmatched. The run is
+/// therefore green forever, which is the correct reading of the numbers and the
+/// wrong answer for a repository that pointed `--baseline` at the wrong file.
+///
+/// `dupes` and `health` give every baseline field a serde default, so any JSON
+/// object deserializes into them with zero entries; the caller separates a
+/// foreign file from one of this command's own by the keys it carries, because
+/// a baseline saved from a project that had nothing to record is legitimately
+/// empty and telling that repository it picked the wrong file would be wrong on
+/// every run.
+///
+/// Prints regardless of `--quiet`, for the reason [`report_gate`] documents:
+/// the fact appears in no human report, and `--ci` implies `--quiet`, which is
+/// exactly the configuration where a silently green gate matters. The exit code
+/// does not move, because a file nobody can read as a baseline is a
+/// configuration mistake rather than a finding.
+pub fn note_unrecognised_baseline(path: Option<&Path>, unrecognised_format: bool) {
+    if !unrecognised_format {
+        return;
+    }
+    let Some(path) = path else {
+        return;
+    };
+    eprintln!(
+        "Note: the baseline at {} has no entries this command recognises. It may be a baseline \
+         saved by another command, or an empty file. Either way it suppresses nothing.",
         path.display(),
     );
 }

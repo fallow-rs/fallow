@@ -29,6 +29,7 @@ mod coverage_intelligence;
 mod coverage_settings;
 mod css_analytics;
 mod derived_sections;
+pub(crate) mod diagnostics;
 mod execute;
 mod file_scores;
 mod filters;

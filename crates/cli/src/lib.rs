@@ -77,6 +77,7 @@ mod plugin_check;
 mod rayon_pool;
 mod regression;
 pub mod report;
+mod requests;
 mod rule_pack;
 mod runtime_support;
 mod schema;

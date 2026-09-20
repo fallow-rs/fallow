@@ -93,7 +93,7 @@ pub(super) fn prepare_health_findings(
         input.config,
         &mut collected.findings,
         input.diff_index,
-        is_change_scoped(&input),
+        baseline_scope_reasons(&input),
         &mut threshold_state_tracker,
     )?;
     threshold_state_tracker.record_no_match_entries(
@@ -305,19 +305,30 @@ fn should_emit_no_match_threshold_overrides(
         && diff_index.is_none()
 }
 
-/// True when this run analyzes a subset of the project, so a loaded full-repo
-/// baseline would look stale for reasons that have nothing to do with rot.
+/// Which channels narrowed this run below the whole project, so a loaded
+/// full-repo baseline would look stale for reasons that have nothing to do
+/// with rot.
 ///
 /// Production mode counts: it drops test, story and dev files before analysis,
 /// so their baseline entries match nothing on a project nobody touched. The
 /// resolved config carries the effective flag whether it came from the CLI or
 /// from the project config, which is the same reading `dead-code` takes in
-/// `baseline_scope_is_narrowed` and `dupes` in `duplication_comparison_is_narrowed`.
-fn is_change_scoped(input: &HealthFindingsInput<'_>) -> bool {
-    input.diff_index.is_some()
-        || input.changed_files.is_some()
-        || input.ws_roots.is_some()
-        || input.config.production
+/// `baseline_scope_reasons` and `dupes` in
+/// `duplication_comparison_scope_reasons`.
+///
+/// Coarser than the dead-code side by construction. This runs after the flags
+/// were resolved, so a changed-file set is reported as `changed-files` and
+/// workspace roots as `workspace` whether they came from `--workspace` or
+/// `--changed-workspaces`. `change_scoped` is derived from the returned set, so
+/// the two cannot disagree.
+fn baseline_scope_reasons(input: &HealthFindingsInput<'_>) -> fallow_output::BaselineScopeReasons {
+    use fallow_output::ScopeReason;
+
+    fallow_output::BaselineScopeReasons::empty()
+        .insert_if(input.diff_index.is_some(), ScopeReason::Diff)
+        .insert_if(input.changed_files.is_some(), ScopeReason::ChangedFiles)
+        .insert_if(input.ws_roots.is_some(), ScopeReason::Workspace)
+        .insert_if(input.config.production, ScopeReason::Production)
 }
 
 struct HealthFindingFinalizeResult {
@@ -334,7 +345,7 @@ fn finalize_health_findings(
     config: &ResolvedConfig,
     findings: &mut Vec<ComplexityViolation>,
     diff_index: Option<&fallow_output::DiffIndex>,
-    change_scoped: bool,
+    scope_reasons: fallow_output::BaselineScopeReasons,
     threshold_state_tracker: &mut ThresholdOverrideStateTracker,
 ) -> Result<HealthFindingFinalizeResult, HealthError> {
     // Runs before every downstream narrowing. The override rows were recorded
@@ -350,7 +361,7 @@ fn finalize_health_findings(
     let total_above_threshold = findings.len();
     let (sev_critical, sev_high, sev_moderate) = count_finding_severities(findings);
     let (loaded_baseline, baseline_staleness) =
-        apply_health_baseline_and_top(opts, config, findings, change_scoped)?;
+        apply_health_baseline_and_top(opts, config, findings, scope_reasons)?;
     Ok(HealthFindingFinalizeResult {
         total_above_threshold,
         sev_critical,
@@ -382,7 +393,7 @@ fn apply_health_baseline_and_top(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     findings: &mut Vec<ComplexityViolation>,
-    change_scoped: bool,
+    scope_reasons: fallow_output::BaselineScopeReasons,
 ) -> Result<LoadedBaselineParts, HealthError> {
     let (loaded_baseline, baseline_staleness) = if let Some(load_path) = opts.baseline {
         let loaded = load_health_baseline(
@@ -391,7 +402,7 @@ fn apply_health_baseline_and_top(
             &config.root,
             opts.quiet,
             opts.baseline_mode,
-            change_scoped,
+            scope_reasons,
         )?;
         (Some(loaded.data), Some(loaded.staleness))
     } else {

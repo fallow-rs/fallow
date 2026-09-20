@@ -854,3 +854,720 @@ fn the_annotation_verdict_comes_before_the_findings() {
         "the verdict is the first line, so a cap cannot drop it: {first}"
     );
 }
+
+/// `scope_reasons` and `change_scoped` are one predicate's two projections, so
+/// the array is non-empty exactly when the boolean is true. A consumer that
+/// reads the array to decide whether the narrowing is removable would otherwise
+/// be deciding from a different answer than the one that suppressed the gate.
+fn assert_scope_projection_agrees(staleness: &Value, expected: &[&str]) {
+    let reasons = staleness["scope_reasons"]
+        .as_array()
+        .map(|reasons| {
+            reasons
+                .iter()
+                .map(|reason| reason.as_str().expect("a reason is a string"))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    assert_eq!(reasons, expected, "staleness was {staleness}");
+    assert_eq!(
+        staleness["change_scoped"],
+        Value::Bool(!reasons.is_empty()),
+        "change_scoped must follow the reason set: {staleness}"
+    );
+}
+
+#[test]
+fn dead_code_names_every_channel_that_narrowed_the_run() {
+    let project = orphan_project(3);
+    let root = project.path();
+    let baseline = root.join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a baseline should not error: {}",
+        saved.stderr
+    );
+
+    let unscoped = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]));
+    assert_scope_projection_agrees(&unscoped["baseline_staleness"], &[]);
+    assert!(
+        unscoped["baseline_staleness"]
+            .as_object()
+            .expect("staleness is an object")
+            .get("scope_reasons")
+            .is_none(),
+        "a whole-project run keeps the member off the wire entirely: {}",
+        unscoped["baseline_staleness"]
+    );
+
+    let narrowed = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+        "--production",
+        "--unused-exports",
+    ]));
+    assert_scope_projection_agrees(
+        &narrowed["baseline_staleness"],
+        &["issue-type-filter", "production"],
+    );
+}
+
+/// `dupes` compares and saves before the report-narrowing filters run, so its
+/// predicate sees a resolved changed-file set and production mode and nothing
+/// else. It reports `changed-files` rather than the flag that produced it,
+/// because by then the flag is gone.
+#[test]
+fn dupes_reports_the_two_channels_that_narrow_its_comparison() {
+    let project = cloned_project();
+    let baseline = project.path().join("dupes-baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a duplication baseline should not error: {}",
+        saved.stderr
+    );
+
+    let unscoped = parse_json(&run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]));
+    assert_scope_projection_agrees(&unscoped["baseline_staleness"], &[]);
+
+    let narrowed = parse_json(&run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+        "--production",
+    ]));
+    assert_scope_projection_agrees(&narrowed["baseline_staleness"], &["production"]);
+}
+
+/// `health` runs its predicate after the flags were resolved, so workspace
+/// roots and a changed-file set have already lost the flag they came from.
+#[test]
+fn health_reports_the_coarser_channels_its_predicate_can_see() {
+    let project = complex_project();
+    let root = project.path();
+    let baseline = root.join("health-baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "health",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--complexity",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a health baseline should not error: {}",
+        saved.stderr
+    );
+
+    let unscoped = parse_json(&run(&[
+        "health",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--complexity",
+        "--baseline",
+        baseline_arg,
+    ]));
+    assert_scope_projection_agrees(&unscoped["summary"]["baseline_staleness"], &[]);
+
+    let narrowed = parse_json(&run(&[
+        "health",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--complexity",
+        "--baseline",
+        baseline_arg,
+        "--production",
+    ]));
+    assert_scope_projection_agrees(&narrowed["summary"]["baseline_staleness"], &["production"]);
+}
+
+/// A rotted baseline on a project with nothing left to report is the run where
+/// the advisory and the gate are both silent by construction, so the read-only
+/// pointer has to survive the zero-finding early return.
+#[test]
+fn a_narrowed_run_with_no_findings_still_points_at_the_unscoped_recheck() {
+    let project = orphan_project(2);
+    let root = project.path();
+    let baseline = root.join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a baseline should not error: {}",
+        saved.stderr
+    );
+
+    // The positional path narrows to the entry point, which the baseline never
+    // recorded, so the run reports nothing and matches nothing: the shape where
+    // both the advisory and the gate are silent by construction.
+    let output = run(&[
+        "dead-code",
+        "src/index.ts",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]);
+    let envelope = parse_json(&output);
+    assert_scope_projection_agrees(&envelope["baseline_staleness"], &["scope"]);
+
+    let steps = envelope["next_steps"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a narrowed baseline run offers a pointer: {envelope}"));
+    let recheck = steps
+        .iter()
+        .find(|step| step["id"] == "recheck-baseline")
+        .unwrap_or_else(|| panic!("expected a recheck-baseline entry, got {envelope}"));
+    let command = recheck["command"].as_str().expect("command is a string");
+    assert!(
+        command.starts_with("fallow dead-code --baseline "),
+        "the pointer names the command whose baseline it is: {command}"
+    );
+    assert!(
+        command.ends_with("baseline.json"),
+        "the pointer names the loaded baseline, root-relative like every other \
+         path on the envelope: {command}"
+    );
+    assert!(
+        !command.contains("--save-baseline"),
+        "next_steps is a read-only contract: {command}"
+    );
+    assert!(
+        recheck["reason"]
+            .as_str()
+            .expect("reason is a string")
+            .contains("(scope)"),
+        "the reason names the published scope_reasons: {recheck}"
+    );
+}
+
+/// A baseline with no entries this command recognises suppresses nothing, and
+/// every verdict that follows is green and honest: the advisory has nothing to
+/// judge, so `gate_trips` is false and the gate reports `pass`. A repository
+/// that pointed `--baseline` at a baseline another command saved, or at an
+/// empty file, would gate on it forever and never be told.
+///
+/// Each command has its own format, and the three do not agree on what a
+/// foreign file means: `dupes` and `health` give every field a serde default,
+/// so any JSON object loads as zero entries, while `dead-code` rejects one
+/// today because five of its fields carry no default. The two that accept the
+/// file separate it from their own empty baseline by the keys it carries, so
+/// the note is asserted on both of them, and its absence on a legitimately
+/// empty baseline is asserted beside it.
+#[test]
+fn a_dupes_run_says_so_when_the_baseline_is_another_commands() {
+    let project = orphan_project(2);
+    let dead_code_baseline = project.path().join("dead-code-baseline.json");
+    let baseline_arg = dead_code_baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a dead-code baseline should not error: {}",
+        saved.stderr
+    );
+
+    let output = run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+        "--fail-on-stale-baseline",
+    ]);
+    let envelope = parse_json(&output);
+    assert_eq!(
+        envelope["baseline_staleness"]["baseline_entries"], 0,
+        "the wrong-kind file loads as zero entries: {envelope}"
+    );
+    assert_eq!(
+        gate(&envelope, "stale-baseline")["status"],
+        "pass",
+        "a baseline with nothing in it cannot report a stale entry: {envelope}"
+    );
+    assert!(
+        output
+            .stderr
+            .contains("has no entries this command recognises"),
+        "the fact must reach stderr even under --quiet, because it appears in \
+         no human report and --ci implies --quiet: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.code, 0,
+        "a legitimately empty baseline is a real state, so the exit code does \
+         not move: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn a_health_run_says_so_when_the_baseline_is_another_commands() {
+    let project = cloned_project();
+    let dupes_baseline = project.path().join("dupes-baseline.json");
+    let baseline_arg = dupes_baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dupes",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a duplication baseline should not error: {}",
+        saved.stderr
+    );
+
+    let output = run(&[
+        "health",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--complexity",
+        "--baseline",
+        baseline_arg,
+    ]);
+    let envelope = parse_json(&output);
+    assert_eq!(
+        envelope["summary"]["baseline_staleness"]["baseline_entries"], 0,
+        "the wrong-kind file loads as zero entries: {envelope}"
+    );
+    assert!(
+        output
+            .stderr
+            .contains("has no entries this command recognises"),
+        "{}",
+        output.stderr
+    );
+}
+
+/// A baseline saved on a project that had nothing to record carries zero
+/// entries and is not a mistake, so the note must not fire on it. The
+/// documented workflow saves one on a green main and compares on every pull
+/// request, which would otherwise warn on every run and could not be turned
+/// off.
+#[test]
+fn a_baseline_this_command_saved_itself_never_earns_the_note() {
+    let project = orphan_project(2);
+    let root = root_arg(&project);
+
+    for (command, extra, baseline_name, staleness_path) in [
+        (
+            "dupes",
+            None,
+            "dupes-baseline.json",
+            vec!["baseline_staleness"],
+        ),
+        (
+            "health",
+            Some("--complexity"),
+            "health-baseline.json",
+            vec!["summary", "baseline_staleness"],
+        ),
+    ] {
+        let baseline = project.path().join(baseline_name);
+        let baseline_arg = baseline.to_str().expect("utf8");
+        let mut save = vec![command, "--root", root, "--format", "json", "--quiet"];
+        save.extend(extra);
+        save.extend(["--save-baseline", baseline_arg]);
+        let saved = run(&save);
+        assert!(
+            saved.code == 0 || saved.code == 1,
+            "saving a {command} baseline should not error: {}",
+            saved.stderr
+        );
+
+        let mut compare = vec![command, "--root", root, "--format", "json", "--quiet"];
+        compare.extend(extra);
+        compare.extend(["--baseline", baseline_arg]);
+        let output = run(&compare);
+        let envelope = parse_json(&output);
+        let staleness = staleness_path
+            .iter()
+            .fold(&envelope, |value, key| &value[*key]);
+
+        assert_eq!(
+            staleness["baseline_entries"], 0,
+            "a project with nothing to record saves an empty baseline: {envelope}"
+        );
+        assert!(
+            staleness.get("unrecognised_format").is_none(),
+            "the file is this command's own baseline: {envelope}"
+        );
+        assert!(
+            !output
+                .stderr
+                .contains("has no entries this command recognises"),
+            "{command} must not call its own baseline the wrong file: {}",
+            output.stderr
+        );
+    }
+}
+
+/// The note is about the baseline, not about this run, so a baseline that does
+/// carry entries never earns it however the run turned out.
+#[test]
+fn a_baseline_with_entries_never_earns_the_zero_entry_note() {
+    let project = orphan_project(3);
+    let baseline = project.path().join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a baseline should not error: {}",
+        saved.stderr
+    );
+
+    let output = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]);
+    assert!(
+        !output.stderr.contains("has no entries"),
+        "a populated baseline says nothing about recognition: {}",
+        output.stderr
+    );
+}
+
+/// Save a dead-code baseline over `project`, then remove what it recorded, so
+/// every entry goes unmatched with no current finding to compare against.
+///
+/// That pair is the shape #2675 is about: the advisory stays silent because a
+/// cleaned project and a rotted baseline look identical from the counts, while
+/// `--fail-on-stale-baseline` asks for exactly that case and its rule holds.
+fn rotted_dead_code_baseline(project: &TempDir, orphans: usize) -> String {
+    let root = project.path();
+    let baseline = root.join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8").to_owned();
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        &baseline_arg,
+    ]);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a baseline should not error: {}",
+        saved.stderr
+    );
+    for index in 0..orphans {
+        std::fs::remove_file(root.join(format!("src/orphan{index}.ts")))
+            .expect("clean the project");
+    }
+    baseline_arg
+}
+
+fn run_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOutput {
+    let mut command = std::process::Command::new(common::fallow_bin());
+    command.env("RUST_LOG", "").env("NO_COLOR", "1");
+    common::scrub_coverage_env(&mut command);
+    for arg in args {
+        command.arg(arg);
+    }
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    let output = command.output().expect("run fallow");
+    CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+fn decision_sidecar(path: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(path).expect("read the decision sidecar"))
+        .expect("parse the decision sidecar")
+}
+
+fn decision_gate<'a>(sidecar: &'a Value, id: &str) -> &'a Value {
+    sidecar["gates"]
+        .as_array()
+        .expect("the gates array is present")
+        .iter()
+        .find(|gate| gate["id"] == id)
+        .unwrap_or_else(|| panic!("expected a `{id}` row, got {}", sidecar["gates"]))
+}
+
+/// The headline ask of #2675: an armed and tripped baseline gate reaches the
+/// Check Run as a named gate, and the sticky comment says what went stale.
+#[test]
+fn a_tripped_stale_baseline_gate_reaches_the_comment_and_the_decision_surface() {
+    let project = orphan_project(3);
+    let baseline_arg = rotted_dead_code_baseline(&project, 3);
+    let sidecar_path = project.path().join("decision.json");
+
+    let output = run_with_env(
+        &[
+            "dead-code",
+            "--root",
+            root_arg(&project),
+            "--format",
+            "pr-comment-github",
+            "--quiet",
+            "--baseline",
+            &baseline_arg,
+            "--fail-on-stale-baseline",
+        ],
+        &[(
+            "FALLOW_PR_DECISION_FILE",
+            sidecar_path.to_str().expect("utf8"),
+        )],
+    );
+
+    assert!(
+        output
+            .stdout
+            .contains("**Baseline has stale entries.** 3 of 3 saved entries matched nothing"),
+        "the artefact a reviewer reads must say what went stale: {}",
+        output.stdout
+    );
+    assert!(
+        output
+            .stdout
+            .contains("Gate outcomes: failed stale-baseline"),
+        "the gate inventory keeps its place beside the advisory: {}",
+        output.stdout
+    );
+
+    let sidecar = decision_sidecar(&sidecar_path);
+    let row = decision_gate(&sidecar, "stale-baseline");
+    assert_eq!(row["label"], "Stale baseline");
+    assert_eq!(row["status"], "failure");
+    assert_eq!(
+        row["scope"], "this run",
+        "a baseline verdict is not scoped to the change and must not claim to be"
+    );
+    assert_eq!(
+        sidecar["gates"][0]["id"], "dead-code",
+        "the command row stays first"
+    );
+}
+
+/// Published without the flag that arms it, the same verdict must not paint a
+/// red gate: `enforced` is the CLI's statement about its own exit code, and a
+/// repository that never asked for the gate has not configured a failure.
+#[test]
+fn an_unarmed_stale_baseline_gate_reaches_the_decision_surface_as_neutral() {
+    let project = orphan_project(2);
+    let baseline_arg = rotted_dead_code_baseline(&project, 2);
+    let sidecar_path = project.path().join("decision.json");
+
+    let output = run_with_env(
+        &[
+            "dead-code",
+            "--root",
+            root_arg(&project),
+            "--format",
+            "pr-comment-gitlab",
+            "--quiet",
+            "--baseline",
+            &baseline_arg,
+        ],
+        &[(
+            "FALLOW_PR_DECISION_FILE",
+            sidecar_path.to_str().expect("utf8"),
+        )],
+    );
+    assert_eq!(output.code, 0, "no gate was armed: {}", output.stderr);
+
+    let sidecar = decision_sidecar(&sidecar_path);
+    assert_eq!(
+        decision_gate(&sidecar, "stale-baseline")["status"],
+        "neutral"
+    );
+    assert!(
+        output.stdout.contains("**Baseline has stale entries.**"),
+        "the advisory is about the baseline, not about the exit code: {}",
+        output.stdout
+    );
+}
+
+/// A run whose baseline is fresh says nothing about staleness, so the clause is
+/// conditional rather than always present.
+#[test]
+fn a_fresh_baseline_adds_no_advisory_to_the_comment() {
+    let project = orphan_project(2);
+    let baseline = project.path().join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    let saved = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        baseline_arg,
+    ]);
+    assert!(saved.code == 0 || saved.code == 1, "{}", saved.stderr);
+
+    let output = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "pr-comment-github",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ]);
+
+    assert!(
+        !output.stdout.contains("Baseline"),
+        "a baseline that matched everything earns no advisory: {}",
+        output.stdout
+    );
+}
+
+/// The check-run `conclusion` is a documented non-blocker. Appending a failing
+/// gate row must not turn a combined run that armed a gate into a merge
+/// blocker for every consumer with a required check.
+#[test]
+fn a_tripped_gate_row_does_not_move_the_combined_check_run_conclusion() {
+    let project = orphan_project(3);
+    let baseline_arg = rotted_dead_code_baseline(&project, 3);
+    let sidecar_path = project.path().join("decision.json");
+
+    let output = run_with_env(
+        &[
+            "--root",
+            root_arg(&project),
+            "--format",
+            "pr-comment-github",
+            "--quiet",
+            "--baseline",
+            &baseline_arg,
+            "--fail-on-stale-baseline",
+        ],
+        &[(
+            "FALLOW_PR_DECISION_FILE",
+            sidecar_path.to_str().expect("utf8"),
+        )],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "combined should not error: {}",
+        output.stderr
+    );
+
+    let sidecar = decision_sidecar(&sidecar_path);
+    assert_eq!(
+        decision_gate(&sidecar, "stale-baseline")["status"],
+        "failure"
+    );
+    assert_ne!(
+        sidecar["conclusion"], "failure",
+        "the conclusion stays derived from the per-area rows: {}",
+        sidecar["gates"]
+    );
+}

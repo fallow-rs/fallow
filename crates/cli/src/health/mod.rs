@@ -25,7 +25,7 @@ use fallow_engine::health::{
     RuntimeCoverageSeamInput, execute_health_inner, validate_health_churn_file,
 };
 
-use crate::check::{get_changed_files, resolve_workspace_scope};
+use crate::check::resolve_workspace_scope;
 use crate::error::emit_error;
 use crate::report;
 use crate::report::OwnershipResolver;
@@ -164,7 +164,7 @@ fn build_health_scope_inputs<'a>(
 ) -> Result<HealthScopeInputs<'a, OwnershipResolver>, ExitCode> {
     let changed_files = opts
         .changed_since
-        .and_then(|git_ref| get_changed_files(opts.root, git_ref));
+        .and_then(|git_ref| crate::requests::resolve_changed_since(opts.root, git_ref));
     let diff_index = health_diff_index(opts);
     let mut ws_roots = resolve_workspace_scope(
         opts.root,
@@ -445,6 +445,7 @@ pub fn run_health(
     if let Some(ref timings) = result.timings {
         report::print_health_performance(timings, opts.output, json_style);
     }
+    report_loaded_baseline(&result, opts.baseline);
     let code = print_health_result(
         &result,
         HealthPrintOptions {
@@ -778,6 +779,30 @@ fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_
     let runtime_coverage = has_failing_runtime_coverage(result);
     let stale_baseline = stale_baseline_gate_failed(result, options);
     score || findings || runtime_coverage || stale_baseline
+}
+
+/// Say what this run made of the loaded baseline, and record it for the
+/// `recheck-baseline` next step.
+///
+/// Both happen here rather than at the engine's load site, which cannot reach
+/// CLI runtime state or print a CLI note, and only for the standalone command:
+/// `audit` and the combined run build their next steps from their own builders
+/// and would otherwise offer a `health` path on an envelope that is not
+/// health's.
+fn report_loaded_baseline(result: &HealthResult, baseline_path: Option<&std::path::Path>) {
+    let Some(path) = baseline_path else {
+        return;
+    };
+    let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
+        return;
+    };
+    crate::baseline_gate::note_unrecognised_baseline(baseline_path, staleness.unrecognised_format);
+    crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
+        command: "health",
+        path: path.display().to_string(),
+        baseline_entries: staleness.baseline_entries,
+        scope_reasons: staleness.scope_reasons,
+    });
 }
 
 /// Say that `--report-only` suppressed the gate, so a job that passes both
