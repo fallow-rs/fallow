@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789937191942,
+  "lastUpdate": 1789937335333,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "935f1ca88e7d0925c75bcb159df915d6e55db84c",
-          "message": "feat: report skipped hidden directories that hold source files (#2450)\n\nCloses #461.\n\nSource discovery skips dot-prefixed directories outside a small convention\nallowlist, and the skip was silent, so first-party code under a directory such\nas `.claude/hooks/` was invisible with no explanation and no config field to\nreach it.\n\nA `skipped-source-dotdir` workspace diagnostic and one aggregated stderr note\nnow name each skipped directory that holds source files the project has not\nexcluded, state that its imports and exports are not analyzed, and give the two\nreal remedies: `fallow --root <dir>`, or `ignorePatterns` to silence it.\nTraversal is unchanged. Classification is bounded and deterministic.\n\nTwo containment defects are fixed alongside it. A `package.json` script\nreference now scopes the exact root-relative path it names instead of every\ndirectory of that name in the tree, with the scope's match mode carried across\nthe engine boundary. `.pnpm` joins the script-scope denylist beside\n`.pnpm-store`, along with 17 further generated-output and VCS directories.\n\nThe diagnostic kind is additive under the open-set exception for\n`workspace_diagnostics[].kind`, so no envelope moves its `schema_version`.",
-          "timestamp": "2026-08-30T19:57:32+02:00",
-          "tree_id": "52406d8eac7daee188cacd29942cf996175779af",
-          "url": "https://github.com/fallow-rs/fallow/commit/935f1ca88e7d0925c75bcb159df915d6e55db84c"
-        },
-        "date": 1788112916074,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/3f82ed029b182456d17d49c0a8f062054c18fd4a"
         },
         "date": 1789937187727,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 480,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1312,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "95aa9c480480800bc80779509105ad9e4879e3fa",
+          "message": "fix(nuxt): report unused convention files when the auto-import scan is off (#2702)\n\nWith autoImports: true the Nuxt plugin kept its convention entry patterns\nwhenever nuxt.config declared a components or imports key, because custom\nlayouts are not modelled. A config that only switches the scan off\n(components: false, components: [], components: { dirs: [] },\nimports: { scan: false }) was treated the same way, so components,\ncomposables and utils were never reported in a project that requires\nexplicit imports.\n\nThose literal shapes now count as the scan being off and the entry\npatterns are dropped, as with Nuxt's default config. Every other shape\nkeeps its entry patterns, including a lone imports: { autoImport: false },\na config that declares extends, and a non-empty imports.dirs next to\nscan: false. A project that combines autoImports: true with one of the\nrecognised shapes will see new unused-file findings.\n\nThanks @Tsuyoshi84 for the report.\n\nCloses #2695",
+          "timestamp": "2026-09-20T22:47:44+02:00",
+          "tree_id": "d622111a908439494035b34f665e79f384970a21",
+          "url": "https://github.com/fallow-rs/fallow/commit/95aa9c480480800bc80779509105ad9e4879e3fa"
+        },
+        "date": 1789937331840,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
