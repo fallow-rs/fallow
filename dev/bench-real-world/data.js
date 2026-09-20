@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789819034170,
+  "lastUpdate": 1789906082193,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "id": "8d811649ba1750b819d43474a374fe81cb8a447e",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v2.94.0",
-          "timestamp": "2026-06-12T00:48:45Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/8d811649ba1750b819d43474a374fe81cb8a447e"
-        },
-        "date": 1781262467697,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 295,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 270,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 544,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 440,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 269,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 246,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 836,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 716,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1731,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1586,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 1313,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 1278,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 1200,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 1066,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 13445,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 12619,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9269,6 +9167,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 714,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "40e9dfb659aefb38c8df28a626b222f1bae6e5cb",
+          "message": "fix(cli): say on every artefact when a baseline went stale or cannot be judged (#2705)\n\nFollow-ups to the baseline staleness work in 3.27.0.\n\nThe sticky PR comment, the decision sidecar behind the Check Run and the\nGitLab MR note now carry the baseline advisory, so a reviewer sees a\nrotted baseline on the surface they read and not only in the job log.\n\nbaseline_staleness gains scope_reasons, which names the channels that\nnarrowed a run (diff, changed-since, changed-files, workspace,\nchanged-workspaces, scope, file, issue-type-filter, production), and\nunrecognised_format, which is true when the loaded file carries nothing\nthe running command writes into its own baselines. A baseline another\ncommand saved no longer reports zero entries and gates green in silence,\nwhile a baseline this command saved on a clean project is not flagged.\n\nA narrowed run with a non-empty baseline gains a recheck-baseline next\nstep when repeating the command without the narrowing can judge it. The\nstep is withheld for production and workspace scoping, and while\nFALLOW_DIFF_FILE is exported on a diff-scoped run.\n\nfallow audit's three baselines are judged and reported instead of\nrotting behind the changed-file scope. The Action publishes\nbaseline-scope-reasons and baseline-unrecognised; the GitLab template\nand the MCP tools state the same facts.\n\nCloses #2675\nCloses #2677\nCloses #2678\nCloses #2679",
+          "timestamp": "2026-09-19T11:35:04Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/40e9dfb659aefb38c8df28a626b222f1bae6e5cb"
+        },
+        "date": 1789906077430,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 306,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 309,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 207,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 514,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 408,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1638,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1227,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1224,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 917,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1332,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1020,
             "unit": "ms"
           }
         ]
