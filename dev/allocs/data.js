@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789817979916,
+  "lastUpdate": 1789937186686,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d69e459ad2b8f98a1d3fec3a59b3d3013262be76",
-          "message": "test(cli): stop copying a fixture's cache directory into the copy (#2483)\n\nTwo tests in the same binary share `tests/fixtures/coverage-gaps`. One runs the\nreal binary with that fixture as its root, so the binary writes and renames\ncache files under `.fallow/`. The other copies the fixture into a temp\ndirectory, walking every entry it finds, and fails with a not-found when the\nwriter renames a cache file mid-walk. It surfaced as an unrelated red check on\na dependabot pull request that only bumped a devDependency.\n\nA fixture's cache directory is not part of the fixture, and a copied project\nwants a cold cache anyway, so both copy helpers skip it.",
-          "timestamp": "2026-08-30T23:33:51+02:00",
-          "tree_id": "19c59e682f2491adf62e4f7a2cd1cbdbbe3886d7",
-          "url": "https://github.com/fallow-rs/fallow/commit/d69e459ad2b8f98a1d3fec3a59b3d3013262be76"
-        },
-        "date": 1788125877079,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9774572,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49410,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1185720,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8430,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8491,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3f82ed029b182456d17d49c0a8f062054c18fd4a",
+          "message": "feat(plugins): read Module Federation exposes and remotes from config (#2706)\n\nA new built-in module-federation plugin reads exposes and remotes from a\nstandalone module-federation.config file and from the inline plugin\noptions of webpack, rspack, rsbuild and vite configs.\n\nexposes targets become runtime entry points, so an exposed module is no\nlonger reported as unused when nothing local imports it. remotes aliases\nbecome provided dependencies, matched on the alias and its subpaths, so\nimports from a remote are not reported as unresolved or unlisted.\n\nThis first slice covers static object-literal exposes and remotes. The\narray form and plugin calls built elsewhere in the config are not read\nyet.\n\nPart of #2698",
+          "timestamp": "2026-09-20T22:40:25+02:00",
+          "tree_id": "4fda472047d86fe1615bfaa46a3c19707e919ab7",
+          "url": "https://github.com/fallow-rs/fallow/commit/3f82ed029b182456d17d49c0a8f062054c18fd4a"
+        },
+        "date": 1789937183280,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10050415,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51528,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1198293,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8438,
             "unit": "allocations"
           }
         ]
