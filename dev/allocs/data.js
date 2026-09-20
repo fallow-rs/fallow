@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789937186686,
+  "lastUpdate": 1789937539929,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "3446f413b252cf0950ac63782e0b0ff25a1162df",
-          "message": "chore: release v3.21.0",
-          "timestamp": "2026-08-31T00:42:39+02:00",
-          "tree_id": "e583367048294079d0a67e90746aefe8047d0ec9",
-          "url": "https://github.com/fallow-rs/fallow/commit/3446f413b252cf0950ac63782e0b0ff25a1162df"
-        },
-        "date": 1788130054449,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9783341,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49451,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1195753,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8399,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8438,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "95aa9c480480800bc80779509105ad9e4879e3fa",
+          "message": "fix(nuxt): report unused convention files when the auto-import scan is off (#2702)\n\nWith autoImports: true the Nuxt plugin kept its convention entry patterns\nwhenever nuxt.config declared a components or imports key, because custom\nlayouts are not modelled. A config that only switches the scan off\n(components: false, components: [], components: { dirs: [] },\nimports: { scan: false }) was treated the same way, so components,\ncomposables and utils were never reported in a project that requires\nexplicit imports.\n\nThose literal shapes now count as the scan being off and the entry\npatterns are dropped, as with Nuxt's default config. Every other shape\nkeeps its entry patterns, including a lone imports: { autoImport: false },\na config that declares extends, and a non-empty imports.dirs next to\nscan: false. A project that combines autoImports: true with one of the\nrecognised shapes will see new unused-file findings.\n\nThanks @Tsuyoshi84 for the report.\n\nCloses #2695",
+          "timestamp": "2026-09-20T22:47:44+02:00",
+          "tree_id": "d622111a908439494035b34f665e79f384970a21",
+          "url": "https://github.com/fallow-rs/fallow/commit/95aa9c480480800bc80779509105ad9e4879e3fa"
+        },
+        "date": 1789937534997,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10088976,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51561,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1206643,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8480,
             "unit": "allocations"
           }
         ]
