@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789818271778,
+  "lastUpdate": 1789938186177,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "88b1bb6193f8d66e263bbeaf2defd39b93ba7945",
-          "message": "fix(audit): keep concurrent base worktree paths distinct and reclaim abandoned caches (#2500)\n\nTwo audits in one process could compose the same temporary base worktree name, because the name came from the process id plus a non-monotonic wall-clock reading, so the second git worktree add failed with 'already exists'. The name now carries a process-global monotonic counter, with the process id kept as the first segment for orphan reclamation.\n\nfallow audit-cache prune --max-age-days 0 documented that it still collects entries whose recorded owner root is gone, but a probed-dead owner fell through to the switched-off age gate. Those entries are abandoned and nothing else can reclaim them, so they now reclaim outright under a new owner-missing reason. Caches whose owner root still exists stay under their own project's policy.",
-          "timestamp": "2026-08-31T19:34:37+02:00",
-          "tree_id": "a2550cd69d4b4da6da571a82179d3015be943a9e",
-          "url": "https://github.com/fallow-rs/fallow/commit/88b1bb6193f8d66e263bbeaf2defd39b93ba7945"
-        },
-        "date": 1788198391199,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2899,6 +2870,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "Code Coverage",
             "value": 92.7,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "86482cc66fe9a331d8477584be5bcba3f99e8923",
+          "message": "docs(changelog): tighten the 3.27.0 and unreleased entries (#2728)\n\nRewrites the [Unreleased] and [3.27.0] sections in the format the earlier\nreleases use: one bold headline and one or two paragraphs per entry,\ngrouped under Added, Changed and Fixed.\n\nEvery fact, flag, JSON member, reason token, output name, contributor\ncredit and issue link is kept. The entries for #2675, #2677, #2678 and\n#2679 gain the closing links they were missing. Everything below\n[3.26.0] is byte-identical.",
+          "timestamp": "2026-09-20T22:53:39+02:00",
+          "tree_id": "179c61c59632fc4fb182e124d53099fe07a1d1b5",
+          "url": "https://github.com/fallow-rs/fallow/commit/86482cc66fe9a331d8477584be5bcba3f99e8923"
+        },
+        "date": 1789938181924,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
             "unit": "%"
           }
         ]
