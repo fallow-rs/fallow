@@ -20,7 +20,9 @@
 //! `components/global` or `components/islands` is named after its own directory,
 //! a config key the regexes cannot see (a computed key) keeps both surfaces'
 //! patterns, each workspace root is classified on its own, and `components: true`,
-//! `imports: {}` and `imports: { dirs: [] }` are the Nuxt defaults.
+//! `imports: {}` and `imports: { dirs: [] }` are the Nuxt defaults. A name a file
+//! imports by hand from `#components` or `#imports` earns the same credit as the
+//! template tag or the bare call.
 
 use std::path::Path;
 
@@ -299,4 +301,56 @@ fn empty_import_dirs_count_as_the_nuxt_default() {
         !unused.contains(&"app/composables/useUsed.ts".to_string()),
         "the called composable must stay reachable, got: {unused:?}"
     );
+}
+
+#[test]
+fn named_imports_from_nuxt_virtual_modules_credit_their_convention_files() {
+    let root = fixture_path("nuxt-virtual-module-imports");
+    let mut config = create_config(root.clone());
+    config.auto_imports = true;
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results, &root);
+
+    for reachable in [
+        "app/components/UsedCard.vue",
+        "app/components/DialogCard.vue",
+        "app/composables/useUsed.ts",
+    ] {
+        assert!(
+            !unused.contains(&reachable.to_string()),
+            "{reachable} is named in an import from #components or #imports and \
+             must be credited, got: {unused:?}"
+        );
+    }
+
+    for dead in ["app/components/DeadCard.vue", "app/composables/useDead.ts"] {
+        assert!(
+            unused.contains(&dead.to_string()),
+            "{dead} is referenced nowhere and must still report, got: {unused:?}"
+        );
+    }
+}
+
+#[test]
+fn flag_off_keeps_virtual_module_import_siblings_alive() {
+    let root = fixture_path("nuxt-virtual-module-imports");
+    let config = create_config(root.clone());
+    assert!(!config.auto_imports, "default is additive (flag off)");
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results, &root);
+
+    for kept in [
+        "app/components/UsedCard.vue",
+        "app/components/DialogCard.vue",
+        "app/components/DeadCard.vue",
+        "app/composables/useUsed.ts",
+        "app/composables/useDead.ts",
+    ] {
+        assert!(
+            !unused.contains(&kept.to_string()),
+            "flag off must not report {kept}, got: {unused:?}"
+        );
+    }
 }

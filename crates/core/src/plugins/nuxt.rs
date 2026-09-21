@@ -247,6 +247,9 @@ impl Plugin for NuxtPlugin {
             ("@@/", String::new()),
             ("#shared/", "shared".to_string()),
             ("#server/", "server".to_string()),
+            // A local layer is addressed as `#layers/<name>/...`, and its name
+            // defaults to its directory under the root `layers/` tree.
+            ("#layers/", "layers".to_string()),
         ];
         aliases.push(("#shared", "shared".to_string()));
         aliases.push(("#server", "server".to_string()));
@@ -1469,6 +1472,18 @@ mod tests {
         let aliases = plugin.path_aliases(Path::new("/project"));
         assert!(aliases.iter().any(|(prefix, _)| *prefix == "@/"));
         assert!(aliases.iter().any(|(prefix, _)| *prefix == "@@/"));
+    }
+
+    #[test]
+    fn path_aliases_map_layers_to_the_layers_tree() {
+        let plugin = NuxtPlugin;
+        let aliases = plugin.path_aliases(Path::new("/project"));
+        assert!(
+            aliases
+                .iter()
+                .any(|(prefix, target)| *prefix == "#layers/" && target == "layers"),
+            "a local layer is addressed through #layers/<name>/: {aliases:?}"
+        );
     }
 
     #[test]

@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-virtual-module-imports",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^4.0.0"
+  }
+}

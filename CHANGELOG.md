@@ -58,11 +58,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directories, computed config keys, and one config per workspace root.** A
   component under `components/global/` or `components/islands/` is named after
   its own directory, so `components/global/Foo.vue` is `<Foo>` and keeps its
-  credit. A `nuxt.config` that writes `components` or `imports` as a computed key
-  or an accessor keeps its convention entry patterns. In a monorepo each
-  workspace root is classified on its own, so one custom config no longer
-  switches the flag off for every app, and `components: true`, `imports: {}` and
-  `imports: { dirs: [] }` count as the Nuxt defaults. Exit codes are unchanged
+  credit. A `nuxt.config` that carries any top-level key fallow cannot read
+  statically, a computed key, an accessor or a spread such as
+  `{ ...base, devtools: {} }`, keeps the convention entry patterns for both
+  components and composables. In a monorepo each workspace root is classified on
+  its own, so one custom config no longer switches the flag off for every app,
+  and `components: true`, `imports: {}` and `imports: { dirs: [] }` count as the
+  Nuxt defaults. A name imported by hand from `#components` or `#imports` now
+  credits its convention file, the credit a template tag and a bare call already
+  earned. Exit codes are unchanged
   (Closes [#2737](https://github.com/fallow-rs/fallow/issues/2737)).
 
 - **A package named in a bundler `entry` is credited as a dependency instead of
