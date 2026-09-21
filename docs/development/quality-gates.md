@@ -134,6 +134,14 @@ Focused integration checks:
 - `node scripts/check-audit-schema-doc-sync.mjs` when audit or dead-code JSON
   envelope versions or the public audit example change.
 
+- `npm run check:conformance-fixtures` for dead-code detection changes: it
+  scores the committed fixtures under `tests/conformance/fixtures/` against
+  their `expected.json`. Runs in `verify:fast`.
+- `npm run check:dupes-accuracy` for duplication changes: it re-runs the
+  hand-written corpus in `tests/benchmark-corpus/` and exits non-zero below the
+  committed floor in `results/accuracy-baseline.json`. Runs in `verify:full`.
+  The floor is a regression tripwire, not a published accuracy claim.
+
 Both companion parity checks resolve their companion checkout as a sibling of the
 main checkout, which inside a linked git worktree is the clone the worktree
 belongs to and not the worktree directory. `FALLOW_DOCS_DIR` and
@@ -142,13 +150,6 @@ continuous integration runs them. A guessed companion checkout that is not
 present at all stands down with a `skipped:` line naming where it looked, so a
 checkout without the companion clones reports nothing to fix. A companion
 checkout that exists and has lost an expected document is still reported.
-- `npm run check:conformance-fixtures` for dead-code detection changes: it
-  scores the committed fixtures under `tests/conformance/fixtures/` against
-  their `expected.json`. Runs in `verify:fast`.
-- `npm run check:dupes-accuracy` for duplication changes: it re-runs the
-  hand-written corpus in `tests/benchmark-corpus/` and exits non-zero below the
-  committed floor in `results/accuracy-baseline.json`. Runs in `verify:full`.
-  The floor is a regression tripwire, not a published accuracy claim.
 
 ## Rust conventions
 
