@@ -215,13 +215,27 @@ fn group_warning_diagnostics<'a>(
     }
 }
 
+/// Plan one per-instance warning, keyed on what it PRINTS rather than on the
+/// kind id plus the path.
+///
+/// The dedupe exists so combined mode and watch-mode reruns print one line per
+/// logical diagnostic, and two entries that render different sentences are two
+/// logical diagnostics however much of the key they share. An id-and-path key
+/// swallowed the second of them: one Module Federation config whose `exposes`
+/// AND `remotes` are both unreadable produces two entries on one path under one
+/// kind, and only the first was ever printed (issue #2736). Matching
+/// `merge_workspace_diagnostics`, which keys on the whole kind for the same
+/// reason, the message stands in for the payload here: it is rendered from the
+/// kind and the path, so two entries whose sentences are byte-identical would
+/// print the same line twice and are still one key.
 fn per_instance_warning(canonical: &Path, diag: &WorkspaceDiagnostic) -> PlannedWarning {
     PlannedWarning {
         dedupe_key: format!(
-            "{}::{}::{}",
+            "{}::{}::{}::{}",
             canonical.display(),
             diag.kind.id(),
-            diag.path.display()
+            diag.path.display(),
+            diag.message
         ),
         message: diag.message.clone(),
     }
@@ -373,7 +387,11 @@ static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDia
 /// are recorded by the analyze pass through [`record_workspace_diagnostics`],
 /// also after this stash, and are preserved for the same reason; each analyze
 /// pass refreshes them through [`clear_analysis_stage_diagnostics`] (issue
-/// #2366).
+/// #2366). Plugin-stage diagnostics
+/// ([`WorkspaceDiagnosticKind::is_plugin_stage`]) are preserved on the same
+/// grounds: framework plugins run after config load, and
+/// [`record_plugin_config_diagnostics`] refreshes their set in one operation
+/// (issue #2736).
 ///
 /// The stored set is deduplicated on the whole `(kind, path)` the way every
 /// fold is: a repository that declares one glob in both `package.json` and
@@ -390,6 +408,7 @@ pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagno
                     d.kind.is_source_discovery()
                         || d.kind.is_analysis_stage()
                         || d.kind.is_health_stage()
+                        || d.kind.is_plugin_stage()
                 })
                 .cloned()
                 .collect()
@@ -455,6 +474,39 @@ pub fn record_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagn
     }
     emit_diagnostics(root, &diagnostics);
     append_workspace_diagnostics(root, diagnostics);
+}
+
+/// Replace the plugin-stage diagnostics for `root` with `diagnostics` in ONE
+/// registry operation, emit their deduplicated stderr warnings, and hand the
+/// same list back to the caller.
+///
+/// Called once per analysis, at the end of the plugin run, which is the single
+/// point where the root and workspace plugin results have converged. The
+/// replacement is what keeps the set CURRENT across reruns, the way
+/// [`replace_source_discovery_diagnostics`] does for a walk: a config the user
+/// fixed drops out on the next run with no separate clear, and a long-lived
+/// engine session or a watch-mode rerun does not accumulate stale entries.
+///
+/// Deliberately NOT [`append_workspace_diagnostics`], whose dedupe key is the
+/// kind id plus the canonical path. One Module Federation config file can hold
+/// two unreadable keys, which is two entries under one kind on one path, and
+/// that key drops the second. This one dedupes the incoming list on the whole
+/// `(kind, path)` the way every other fold does (issue #2736).
+#[must_use]
+pub fn record_plugin_config_diagnostics(
+    root: &Path,
+    diagnostics: Vec<WorkspaceDiagnostic>,
+) -> Vec<WorkspaceDiagnostic> {
+    let diagnostics = fallow_types::workspace::dedupe_workspace_diagnostics(diagnostics);
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
+    if let Ok(mut map) = registry.lock() {
+        let existing = map.entry(canonical).or_default();
+        existing.retain(|diagnostic| !diagnostic.kind.is_plugin_stage());
+        existing.extend(diagnostics.iter().cloned());
+    }
+    emit_diagnostics(root, &diagnostics);
+    diagnostics
 }
 
 /// Replace source-read-failure diagnostics for `root` with the failures from
@@ -1198,6 +1250,143 @@ mod tests {
         );
     }
 
+    fn plugin_diagnostic(root: &Path, key: &str, reason: &str) -> WorkspaceDiagnostic {
+        WorkspaceDiagnostic::new(
+            root,
+            root.join("module-federation.config.ts"),
+            WorkspaceDiagnosticKind::PluginConfigUnreadable {
+                plugin: "module-federation".to_owned(),
+                key: key.to_owned(),
+                reason: reason.to_owned(),
+            },
+        )
+    }
+
+    /// Plugins run after config load, so combined mode's per-analysis config
+    /// re-load must preserve their entries, and the next plugin run must
+    /// replace rather than accumulate them so a fixed config drops out
+    /// (issue #2736).
+    #[test]
+    fn plugin_stage_entries_survive_a_config_reload_and_are_replaced_by_the_next_run() {
+        let root = Path::new("/fallow-test-2736-plugin-stage");
+        let undeclared = || {
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )
+        };
+        stash_workspace_diagnostics(root, vec![undeclared()]);
+        let recorded = record_plugin_config_diagnostics(
+            root,
+            vec![plugin_diagnostic(root, "exposes", "not-object-literal")],
+        );
+        assert_eq!(recorded.len(), 1, "the caller gets its own copy back");
+
+        // Combined mode re-loads config for the next analysis.
+        stash_workspace_diagnostics(root, vec![undeclared()]);
+        let after_reload = workspace_diagnostics_for(root);
+        assert_eq!(
+            count_kind(&after_reload, "plugin-config-unreadable"),
+            1,
+            "the plugin entry survives the combined-mode re-stash exactly once: {after_reload:?}"
+        );
+        assert_eq!(count_kind(&after_reload, "undeclared-workspace"), 1);
+
+        // The dead-code analyze pass clears its own stage on entry, and plugins
+        // run inside that pass's prelude.
+        clear_analysis_stage_diagnostics(root);
+        assert_eq!(
+            count_kind(&workspace_diagnostics_for(root), "plugin-config-unreadable"),
+            1,
+            "the analysis-stage clear must leave plugin-stage entries alone"
+        );
+
+        // A rerun after the config was fixed reports nothing, and the stale
+        // entry goes with it.
+        let _ = record_plugin_config_diagnostics(root, Vec::new());
+        let after = workspace_diagnostics_for(root);
+        assert!(
+            !after.iter().any(|d| d.kind.is_plugin_stage()),
+            "each plugin run replaces the previous set: {after:?}"
+        );
+        assert_eq!(
+            count_kind(&after, "undeclared-workspace"),
+            1,
+            "the workspace-discovery diagnostic survives the plugin replace"
+        );
+    }
+
+    /// One config file can hold two unreadable keys. They share a kind id and a
+    /// path, so both the registry write and the stderr dedupe have to key on
+    /// the payload, or the second one is invisible (issue #2736).
+    #[test]
+    fn two_unreadable_keys_in_one_config_are_recorded_and_printed_twice() {
+        let root = Path::new("/fallow-test-2736-two-keys");
+        let (_, captured) = capture_workspace_warnings(|| {
+            record_plugin_config_diagnostics(
+                root,
+                vec![
+                    plugin_diagnostic(root, "exposes", "not-object-literal"),
+                    plugin_diagnostic(root, "remotes", "spread"),
+                ],
+            )
+        });
+        assert_eq!(
+            captured.len(),
+            2,
+            "both keys reach the emitter: {captured:?}"
+        );
+        let stored = workspace_diagnostics_for(root);
+        assert_eq!(
+            count_kind(&stored, "plugin-config-unreadable"),
+            2,
+            "both keys are recorded: {stored:?}"
+        );
+
+        let plans = plan_warnings(
+            root,
+            &[
+                plugin_diagnostic(root, "exposes", "not-object-literal"),
+                plugin_diagnostic(root, "remotes", "spread"),
+            ],
+        );
+        assert_eq!(plans.len(), 2, "two distinct lines are planned: {plans:?}");
+        assert_ne!(
+            plans[0].dedupe_key, plans[1].dedupe_key,
+            "the process-wide dedupe must not swallow the second key: {plans:?}"
+        );
+    }
+
+    /// The quiet kind reaches the registry and never the stderr plan, so a
+    /// project whose `nuxt.config` fallow does not model is reported once in
+    /// the envelope and never warned about again.
+    #[test]
+    fn the_not_modeled_kind_is_recorded_without_a_stderr_line() {
+        let root = Path::new("/fallow-test-2736-not-modeled");
+        let diagnostic = WorkspaceDiagnostic::new(
+            root,
+            root.join("nuxt.config.ts"),
+            WorkspaceDiagnosticKind::PluginEffectNotModeled {
+                plugin: "nuxt".to_owned(),
+                key: "components".to_owned(),
+                reason: "key-effect-not-modeled".to_owned(),
+            },
+        );
+        let _ = record_plugin_config_diagnostics(root, vec![diagnostic.clone()]);
+        assert_eq!(
+            count_kind(
+                &workspace_diagnostics_for(root),
+                "plugin-effect-not-modeled"
+            ),
+            1
+        );
+        assert!(
+            plan_warnings(root, &[diagnostic]).is_empty(),
+            "a kind that does not degrade the run plans no stderr line"
+        );
+    }
+
     #[test]
     fn build_glob_group_message_caps_examples_and_summarises_tail() {
         let root = Path::new("/project");
@@ -1308,17 +1497,20 @@ mod tests {
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].message, diag.message);
         // The key embeds `diag.path` through a raw `Display`, so the expected
-        // tail carries the platform separator: the stored path is rebuilt from
-        // its components and renders with backslashes on Windows.
-        let expected_tail = Path::new("packages").join("scratch");
+        // path segment carries the platform separator: the stored path is
+        // rebuilt from its components and renders with backslashes on Windows.
+        // It ends with the rendered message, which is what stands in for the
+        // payload so two entries sharing a kind and a path stay two lines.
+        let expected_path = Path::new("packages").join("scratch");
         assert!(
             plans[0]
                 .dedupe_key
                 .contains("::glob-matched-no-package-json::")
                 && plans[0]
                     .dedupe_key
-                    .ends_with(&expected_tail.display().to_string()),
-            "per-instance key is `root::kind::path`, not the `-agg::pattern` form: {}",
+                    .contains(&expected_path.display().to_string())
+                && plans[0].dedupe_key.ends_with(&diag.message),
+            "per-instance key is `root::kind::path::message`, not the `-agg::pattern` form: {}",
             plans[0].dedupe_key
         );
         assert!(
