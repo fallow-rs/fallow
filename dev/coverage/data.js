@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789986433317,
+  "lastUpdate": 1789990023442,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "6fdd5f78c991c0f53de0d322f72fafd6292d68f4",
-          "message": "docs(changelog): record the four Code Mode changes that landed without an entry\n\nThe output bound, the refusal text, the single-sourced allowlist, and the\nsandbox constructor fix landed as direct commits and left the Unreleased\nsection without a line for any of them.",
-          "timestamp": "2026-08-31T23:53:51+02:00",
-          "tree_id": "75ecc352ba2f06dd8af627826334cf943a94daea",
-          "url": "https://github.com/fallow-rs/fallow/commit/6fdd5f78c991c0f53de0d322f72fafd6292d68f4"
-        },
-        "date": 1788213867223,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/f6265843f78ec62f6168c2dc0d8097b407946f0e"
         },
         "date": 1789986429814,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "57366bbeba411e39536f9fcc106c639516c5eaa7",
+          "message": "ci(release): stage the fallow npm root for maintainer approval (#2744)\n\nThe release workflow stages the fallow npm root with npm stage publish instead of publishing it. The fallow trusted publisher grants stage publish only, so the version becomes installable when the maintainer approves the stage with npm 2FA before the signed tag, after comparing the staged bytes with the npm-tarballs artifact of the same run. Every other package keeps publishing over OIDC. The pinned npm moves to 11.19.0.",
+          "timestamp": "2026-09-21T13:17:39+02:00",
+          "tree_id": "358676d7ed3bc237258ac029ab0990a84c91df99",
+          "url": "https://github.com/fallow-rs/fallow/commit/57366bbeba411e39536f9fcc106c639516c5eaa7"
+        },
+        "date": 1789990019186,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
