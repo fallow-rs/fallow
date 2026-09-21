@@ -1213,6 +1213,43 @@ assert_contains "$OUT" "failed to write SARIF file: Permission denied." \
 assert_not_contains "$OUT" "could not apply" \
   "analyze: a failed SARIF write is not reported as a run wider than requested"
 
+# --- Envelope reads keep their cause in the step log (issue #2740) ---
+# Every envelope read discarded the stderr of `jq`, so a member of the wrong
+# type read as "no findings" and the run went green with no cause in the log.
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"--help"*) printf '%s\n' 'Usage: fallow dead-code' ;;
+  *) printf '%s\n' '{"kind":"dead-code","total_issues":0,"gate_outcomes":"truncated","workspace_diagnostics":"truncated"}' ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_contains "$OUT" "::debug::jq:" \
+  "analyze: a failed envelope read replays its cause as a debug line"
+assert_contains "$OUT" "has no keys" \
+  "analyze: the replayed line names what jq could not read"
+
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"--help"*) printf '%s\n' 'Usage: fallow dead-code' ;;
+  *) printf '%s\n' '{"kind":"dead-code","total_issues":0,"gate_outcomes":{},"workspace_diagnostics":[],"request_outcomes":{}}' ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" ACTIONS_STEP_DEBUG="true" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_not_contains "$OUT" "::debug::jq:" \
+  "analyze: a run without a failed envelope read logs no debug line"
+
 # --- Summary jq tests ---
 
 echo ""

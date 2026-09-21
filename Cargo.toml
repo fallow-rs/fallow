@@ -42,6 +42,10 @@ oxc_coverage_instrument = "0.9.0"
 lightningcss = { version = "=1.0.0-alpha.72", default-features = false, features = [
     "visitor",
 ] }
+# Pinned exact in lockstep with lightningcss above: lightningcss types its
+# public `Parse` trait against `cssparser` without re-exporting the crate, so
+# this pin must equal the version lightningcss resolves. A newer `cssparser`
+# gives two incompatible copies of the trait and the extractor stops compiling.
 cssparser = "=0.37.0"
 
 # CLI

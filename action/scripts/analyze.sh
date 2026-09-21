@@ -18,6 +18,36 @@ artifact_path() {
   fi
 }
 
+# Replay a captured stderr file into the step log as ::debug:: lines, then
+# remove the file. A discarded stderr is why a degraded change scope, a
+# truncated envelope or a failed capability probe reaches the log with no
+# cause (issues #2673, #2704, #2740). ::debug:: keeps a green run quiet: the
+# lines appear only when the command wrote something, and only for a run with
+# ACTIONS_STEP_DEBUG.
+replay_stderr_as_debug() {
+  local file=$1 label=$2
+  if [ -s "$file" ]; then
+    while IFS= read -r line; do
+      echo "::debug::${label}: ${line}" >&2
+    done < "$file"
+  fi
+  rm -f "$file"
+}
+
+# Run jq and keep its stderr in the step log. Every envelope read in this
+# script discarded it, so a truncated or unreadable `fallow-results.json` read
+# as "no findings": jq wrote the cause to stderr and the caller saw an empty
+# value. Only stdout is captured by a command substitution, so the replay is
+# safe inside one. jq is silent on success.
+jq_debug() {
+  local error_file status
+  error_file=$(mktemp)
+  jq "$@" 2> "$error_file"
+  status=$?
+  replay_stderr_as_debug "$error_file" "jq"
+  return $status
+}
+
 is_dead_code_baseline_command() {
   [ -n "${INPUT_BASELINE:-}" ] || return 1
   case "${INPUT_COMMAND:-}" in
@@ -58,6 +88,8 @@ repo_relative_root() {
   local abs_root
   local abs_workspace
   [ -n "$workspace" ] || return 1
+  # The stderr of `cd` is discarded because it restates the test: the `return 1`
+  # is the answer, and the caller warns on it.
   abs_root=$(cd "$root" 2>/dev/null && pwd -P) || return 1
   abs_workspace=$(cd "$workspace" 2>/dev/null && pwd -P) || return 1
 
@@ -79,6 +111,8 @@ normalize_config_path() {
 
   if [[ "$path" = /* ]]; then
     local abs_root
+    # The stderr of `cd` is discarded because a missing root is reported by the
+    # command that needs it, not by this path normalizer.
     abs_root=$(cd "${INPUT_ROOT:-.}" 2>/dev/null && pwd -P)
     if [ -n "$abs_root" ] && [[ "$path" == "$abs_root/"* ]]; then
       path="${path#"$abs_root/"}"
@@ -472,7 +506,9 @@ fi
 HAS_SARIF_FILE=false
 if { [ "$INPUT_COMMAND" = "dead-code" ] || [ "$INPUT_COMMAND" = "check" ] || [ -z "$INPUT_COMMAND" ]; }; then
   HELP_TMP=$(mktemp)
-  fallow dead-code --help > "$HELP_TMP" 2>/dev/null || true
+  HELP_ERR=$(mktemp)
+  fallow dead-code --help > "$HELP_TMP" 2> "$HELP_ERR" || true
+  replay_stderr_as_debug "$HELP_ERR" "fallow dead-code --help"
   if /usr/bin/grep -q -- '--sarif-file' "$HELP_TMP"; then
     HAS_SARIF_FILE=true
   fi
@@ -498,9 +534,11 @@ fi
 
 HAS_NO_TYPE_AWARE=false
 if [ "${INPUT_TYPE_AWARE:-}" = "false" ]; then
-  if fallow dead-code --help 2>/dev/null | /usr/bin/grep -q -- '--no-type-aware'; then
+  TYPE_AWARE_PROBE_ERR=$(mktemp)
+  if fallow dead-code --help 2> "$TYPE_AWARE_PROBE_ERR" | /usr/bin/grep -q -- '--no-type-aware'; then
     HAS_NO_TYPE_AWARE=true
   fi
+  replay_stderr_as_debug "$TYPE_AWARE_PROBE_ERR" "fallow dead-code --help"
 fi
 if [ -n "${GITHUB_ENV:-}" ]; then
   printf '%s\n' "HAS_NATIVE_REPORT=${HAS_NATIVE_REPORT}" >> "$GITHUB_ENV"
@@ -542,14 +580,22 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   _CHANGED_JSON=""
 
   # Try three-dot diff (precise: changes since merge-base, needs full history)
-  _CHANGED_JSON=$(cd "$_ROOT" && git diff --name-only -z --relative "${INPUT_CHANGED_SINCE}...HEAD" -- . 2>/dev/null | jq -Rs 'split("\u0000") | map(select(length > 0))' || true)
+  _SCOPE_ERR=$(mktemp)
+  _CHANGED_JSON=$(cd "$_ROOT" && git diff --name-only -z --relative "${INPUT_CHANGED_SINCE}...HEAD" -- . 2> "$_SCOPE_ERR" | jq -Rs 'split("\u0000") | map(select(length > 0))' || true)
+  replay_stderr_as_debug "$_SCOPE_ERR" "git diff --name-only"
 
   # Shallow clone fallback: fetch the base commit and try two-dot diff
   if ! printf '%s' "$_CHANGED_JSON" | jq -e 'length > 0' >/dev/null 2>&1; then
+    # The stderr of `git cat-file -e` is discarded because it is a pure
+    # existence test and the fetch below is the answer to a missing commit.
     if ! git cat-file -e "${INPUT_CHANGED_SINCE}^{commit}" 2>/dev/null; then
-      git fetch --depth=1 origin "$INPUT_CHANGED_SINCE" 2>/dev/null || true
+      _FETCH_ERR=$(mktemp)
+      git fetch --depth=1 origin "$INPUT_CHANGED_SINCE" 2> "$_FETCH_ERR" || true
+      replay_stderr_as_debug "$_FETCH_ERR" "git fetch"
     fi
-    _CHANGED_JSON=$(cd "$_ROOT" && git diff --name-only -z --relative "${INPUT_CHANGED_SINCE}" HEAD -- . 2>/dev/null | jq -Rs 'split("\u0000") | map(select(length > 0))' || true)
+    _SCOPE_ERR=$(mktemp)
+    _CHANGED_JSON=$(cd "$_ROOT" && git diff --name-only -z --relative "${INPUT_CHANGED_SINCE}" HEAD -- . 2> "$_SCOPE_ERR" | jq -Rs 'split("\u0000") | map(select(length > 0))' || true)
+    replay_stderr_as_debug "$_SCOPE_ERR" "git diff --name-only"
   fi
 
   # Last resort: GitHub API (works regardless of clone depth).
@@ -648,22 +694,32 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${FALLOW_DIFF_FILE:-}" ]; then
   _DIFF_PATH="$AUTO_DIFF_FILE"
 
   # Three-dot diff (precise: changes since merge-base, needs full history).
-  if (cd "$_ROOT" && git diff --unified=0 --relative "${INPUT_CHANGED_SINCE}...HEAD" -- .) > "$_DIFF_PATH" 2>/dev/null; then
+  _DIFF_ERR=$(mktemp)
+  if (cd "$_ROOT" && git diff --unified=0 --relative "${INPUT_CHANGED_SINCE}...HEAD" -- .) > "$_DIFF_PATH" 2> "$_DIFF_ERR"; then
     :
   fi
+  replay_stderr_as_debug "$_DIFF_ERR" "git diff --unified=0"
 
   # Shallow-clone fallback: fetch the base commit, retry two-dot diff.
   if [ ! -s "$_DIFF_PATH" ]; then
+    # The stderr of `git cat-file -e` is discarded because it is a pure
+    # existence test and the fetch below is the answer to a missing commit.
     if ! git cat-file -e "${INPUT_CHANGED_SINCE}^{commit}" 2>/dev/null; then
-      git fetch --depth=1 origin "$INPUT_CHANGED_SINCE" 2>/dev/null || true
+      _FETCH_ERR=$(mktemp)
+      git fetch --depth=1 origin "$INPUT_CHANGED_SINCE" 2> "$_FETCH_ERR" || true
+      replay_stderr_as_debug "$_FETCH_ERR" "git fetch"
     fi
-    (cd "$_ROOT" && git diff --unified=0 --relative "${INPUT_CHANGED_SINCE}" HEAD -- .) > "$_DIFF_PATH" 2>/dev/null || true
+    _DIFF_ERR=$(mktemp)
+    (cd "$_ROOT" && git diff --unified=0 --relative "${INPUT_CHANGED_SINCE}" HEAD -- .) > "$_DIFF_PATH" 2> "$_DIFF_ERR" || true
+    replay_stderr_as_debug "$_DIFF_ERR" "git diff --unified=0"
   fi
 
   # Last resort: GitHub API. `gh pr diff` returns the same unified-diff
   # format git produces, so the downstream DiffIndex parser is identical.
   if [ ! -s "$_DIFF_PATH" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${PR_NUMBER:-}" ] && [ -n "${GH_REPO:-}" ]; then
-    gh pr diff "$PR_NUMBER" --repo "$GH_REPO" > "$_DIFF_PATH" 2>/dev/null || true
+    _GH_DIFF_ERR=$(mktemp)
+    gh pr diff "$PR_NUMBER" --repo "$GH_REPO" > "$_DIFF_PATH" 2> "$_GH_DIFF_ERR" || true
+    replay_stderr_as_debug "$_GH_DIFF_ERR" "gh pr diff"
   fi
 
   if [ -s "$_DIFF_PATH" ]; then
@@ -797,17 +853,17 @@ read_staleness_field() {
   fi
   # `// empty` cannot be used here: jq treats `false` as absent, which would
   # silently blank `change_scoped: false` and `gate_trips: false`.
-  jq -r --arg field "$field" \
+  jq_debug -r --arg field "$field" \
     "(${selector}) | if has(\$field) then .[\$field] else empty end" \
-    "$file" 2>/dev/null || true
+    "$file" || true
 }
 
 # `scope_reasons` needs its own reader: it is an array, and the scalar reader
 # above returns the raw jq rendering of one, which is not a log line.
 read_staleness_scope_reasons() {
   local file=$1
-  jq -r "(${BASELINE_STALENESS_JQ}) | (.scope_reasons // []) | join(\", \")" \
-    "$file" 2>/dev/null || true
+  jq_debug -r "(${BASELINE_STALENESS_JQ}) | (.scope_reasons // []) | join(\", \")" \
+    "$file" || true
 }
 
 read_all_staleness_fields() {
@@ -970,7 +1026,7 @@ run_stale_gate_analysis() {
   if [ ! -s "$GATE_RESULTS_RAW_FILE" ] || ! jq -e '.' "$GATE_RESULTS_RAW_FILE" > /dev/null 2>&1; then
     return 1
   fi
-  jq -s 'last' "$GATE_RESULTS_RAW_FILE" > "$GATE_RESULTS_FILE" 2>/dev/null || return 1
+  jq_debug -s 'last' "$GATE_RESULTS_RAW_FILE" > "$GATE_RESULTS_FILE" || return 1
   if jq -e '.error == true' "$GATE_RESULTS_FILE" > /dev/null 2>&1; then
     return 1
   fi
@@ -1189,12 +1245,12 @@ gate_name_is_safe() {
 # `has()` rather than `// empty`: jq treats a `false` value as absent under the
 # alternative operator, which would blank every `enforced: false`.
 read_gate_member() {
-  jq -r --arg gate "$1" --arg member "$2" '
+  jq_debug -r --arg gate "$1" --arg member "$2" '
     (.gate_outcomes // {}) as $gates
     | if ($gates | has($gate)) and ($gates[$gate] | has($member))
       then ($gates[$gate][$member] | tostring)
       else "" end
-  ' "$RESULTS_FILE" 2>/dev/null || true
+  ' "$RESULTS_FILE" || true
 }
 
 # Which input owns which gate. A gate with no owning input set is reported and
@@ -1236,9 +1292,9 @@ gate_detail() {
   case "$1" in
     regression)
       local baseline current delta
-      baseline=$(jq -r '(.regression.baseline_total // .check.regression.baseline_total // "") | tostring' "$RESULTS_FILE" 2>/dev/null || true)
-      current=$(jq -r '(.regression.current_total // .check.regression.current_total // "") | tostring' "$RESULTS_FILE" 2>/dev/null || true)
-      delta=$(jq -r '(.regression.delta // .check.regression.delta // "") | tostring' "$RESULTS_FILE" 2>/dev/null || true)
+      baseline=$(jq_debug -r '(.regression.baseline_total // .check.regression.baseline_total // "") | tostring' "$RESULTS_FILE" || true)
+      current=$(jq_debug -r '(.regression.current_total // .check.regression.current_total // "") | tostring' "$RESULTS_FILE" || true)
+      delta=$(jq_debug -r '(.regression.delta // .check.regression.delta // "") | tostring' "$RESULTS_FILE" || true)
       if [ -n "$delta" ]; then
         printf 'issue count rose from %s to %s (delta %s, tolerance %s)' \
           "${baseline:-?}" "${current:-?}" "$delta" "${INPUT_TOLERANCE:-0}"
@@ -1264,7 +1320,7 @@ gate_detail() {
       ;;
     security)
       local new_count
-      new_count=$(jq -r '(.gate.new_count // "") | tostring' "$RESULTS_FILE" 2>/dev/null || true)
+      new_count=$(jq_debug -r '(.gate.new_count // "") | tostring' "$RESULTS_FILE" || true)
       [ -n "$new_count" ] && printf '%s new security candidate(s) on changed lines (gate: %s)' "$new_count" "${INPUT_SECURITY_GATE:-}"
       ;;
     stale-baseline)
@@ -1409,7 +1465,7 @@ if [ "$HAS_GATE_OUTCOMES" = "true" ]; then
       continue
     fi
     classify_gate "$gate_key" "$(read_gate_member "$gate_key" status)" "$(read_gate_member "$gate_key" enforced)"
-  done < <(jq -r '(.gate_outcomes // {}) | keys[]?' "$RESULTS_FILE" 2>/dev/null || true)
+  done < <(jq_debug -r '(.gate_outcomes // {}) | keys[]?' "$RESULTS_FILE" || true)
 else
   # A pinned binary older than the gate index. Read the feature-local field each
   # gate already published, and fail OPEN for the three that never had one. The
@@ -1471,12 +1527,12 @@ fi
 # competing with the baseline advisory for the same budget.
 ANALYSIS_DEGRADED=false
 EMPTY_ANALYSIS=false
-DEGRADED_SUMMARY=$(jq -r '
+DEGRADED_SUMMARY=$(jq_debug -r '
   [ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.degrades_analysis == true) ]
   | group_by(.kind)
   | map("\(.[0].kind) (\(length))")
   | join(", ")
-' "$RESULTS_FILE" 2>/dev/null || true)
+' "$RESULTS_FILE" || true)
 if [ -n "$DEGRADED_SUMMARY" ]; then
   ANALYSIS_DEGRADED=true
   echo "::warning::Fallow ran with degraded inputs: ${DEGRADED_SUMMARY}. Some findings or scores were computed over less than the whole project, or from an input that did not load."
@@ -1499,12 +1555,12 @@ fi
 # happened, and the SARIF-absence warning below already owns that case. A
 # request name added in a later release carries its own class, so this selector
 # keeps saying the right thing about it.
-REQUESTS_UNAPPLIED=$(jq -r '
+REQUESTS_UNAPPLIED=$(jq_debug -r '
   [ (.request_outcomes // {}) | to_entries[]
     | select(.value.status != "applied" and .value.affects == "scope")
     | if .value.reason then "\(.key) (\(.value.reason))" else .key end ]
   | join(", ")
-' "$RESULTS_FILE" 2>/dev/null || true)
+' "$RESULTS_FILE" || true)
 if [ -n "$REQUESTS_UNAPPLIED" ]; then
   echo "::warning::Fallow could not apply: ${REQUESTS_UNAPPLIED}. The findings below cover more of the project than was requested, so do not read this run as scoped to the change."
 fi
@@ -1513,12 +1569,12 @@ fi
 # finding then filters out, so the clean report below covered nothing (issue
 # #2734). Keyed on `scope_size == 0` beside `status == "applied"`, so a binary
 # that publishes no such member says nothing here.
-REQUESTS_EMPTY_SCOPE=$(jq -r '
+REQUESTS_EMPTY_SCOPE=$(jq_debug -r '
   [ (.request_outcomes // {}) | to_entries[]
     | select(.value.status == "applied" and .value.affects == "scope" and .value.scope_size == 0)
     | .key ]
   | join(", ")
-' "$RESULTS_FILE" 2>/dev/null || true)
+' "$RESULTS_FILE" || true)
 if [ -n "$REQUESTS_EMPTY_SCOPE" ]; then
   echo "::warning::Fallow applied ${REQUESTS_EMPTY_SCOPE} over an empty scope, so no finding could survive it and the report below is clean because nothing was analyzable. Check the diff or ref this run was given before reading it as a clean result."
 fi
@@ -1586,10 +1642,10 @@ if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && 
     # publishes no `request_outcomes` (issue #2690).
     # Root only: `--sarif-file` is rejected for command: audit, which is the one
     # envelope with a nested dead_code section, so there is no second carrier.
-    SARIF_FILE_REASON=$(jq -r '
+    SARIF_FILE_REASON=$(jq_debug -r '
       (.request_outcomes // {})["sarif-file"]
       | if . == null or .status == "applied" then empty else (.message // .reason) end
-    ' "$RESULTS_FILE" 2>/dev/null || true)
+    ' "$RESULTS_FILE" || true)
     echo "::warning::Fallow produced no SARIF document, so this run uploads nothing and code scanning keeps the alerts from the previous upload.${SARIF_FILE_REASON:+ ${SARIF_FILE_REASON}} Check the earlier log lines for the cause, or drop format: sarif if code scanning is not wanted."
     rm -f "$SARIF_FILE"
   fi

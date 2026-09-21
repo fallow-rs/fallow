@@ -283,7 +283,7 @@ variables:
           echo "ERROR: FALLOW_SKIP_INSTALL=true but no 'fallow' binary is on PATH. Install fallow before this job (e.g. 'pnpm install' so a pinned fallow lands on PATH), or unset FALLOW_SKIP_INSTALL to let the template run 'npm install -g fallow'."
           exit 2
         fi
-        installed_version="$(fallow --version 2>/dev/null || echo 'unknown version')"
+        installed_version="$(fallow --version || echo 'unknown version')"
         echo "Skipping install; using pre-installed ${installed_version} ($(command -v fallow))"
         # Let the MR-integration script-prep block pin remote scripts to the
         # matching release tag when the binary reports an exact semver (parity
@@ -297,7 +297,7 @@ variables:
 
       requested_version="$(trim "${FALLOW_VERSION:-}")"
       root="${FALLOW_ROOT:-.}"
-      project_spec="$(project_fallow_spec "$root" 2>/dev/null || true)"
+      project_spec="$(project_fallow_spec "$root" || true)"
       project_spec="$(trim "$project_spec")"
       install_spec=""
 
@@ -338,7 +338,7 @@ variables:
 
       npm install -g --ignore-scripts "$install_arg" || { echo "ERROR: Failed to install ${install_arg}"; exit 2; }
 
-      installed_version="$(fallow --version 2>/dev/null || echo 'unknown version')"
+      installed_version="$(fallow --version || echo 'unknown version')"
       echo "Installed fallow ${installed_version}"
 
       if [ -z "$requested_version" ] && [ -n "$project_spec" ] && is_exact_version "$project_spec"; then
@@ -359,6 +359,8 @@ variables:
         if [ -d "ci/scripts" ]; then
           echo "Using vendored MR integration scripts from the repository checkout..."
 
+          # The stderr of `cp` is discarded because the `else` branch names the
+          # file that failed, and the counter below decides the job outcome.
           for f in comment.sh review.sh gitlab_common.sh; do
             if cp "ci/scripts/${f}" "${FALLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
               chmod +x "${FALLOW_SCRIPTS_DIR}/${f}"
@@ -368,7 +370,7 @@ variables:
             fi
           done
         else
-          FALLOW_RESOLVED_VERSION="$(cat /tmp/fallow-version-spec 2>/dev/null || printf '%s' "${FALLOW_VERSION:-}")"
+          FALLOW_RESOLVED_VERSION="$(cat /tmp/fallow-version-spec || printf '%s' "${FALLOW_VERSION:-}")"
           if [ -z "$FALLOW_SCRIPTS_REF" ] && echo "$FALLOW_RESOLVED_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?$'; then
             FALLOW_SCRIPTS_REF="v${FALLOW_RESOLVED_VERSION}"
           fi
@@ -385,6 +387,8 @@ variables:
           FALLOW_SCRIPTS_BASE="https://raw.githubusercontent.com/fallow-rs/fallow/${FALLOW_SCRIPTS_REF}"
           echo "Downloading MR integration scripts pinned to ${FALLOW_SCRIPTS_REF}..."
 
+          # The stderr of `curl` is discarded because the `else` branch names the
+          # file that failed, and the counter below decides the job outcome.
           for f in comment.sh review.sh gitlab_common.sh; do
             if curl -sf --retry 3 --retry-connrefused --retry-delay 2 "${FALLOW_SCRIPTS_BASE}/ci/scripts/${f}" -o "${FALLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
               chmod +x "${FALLOW_SCRIPTS_DIR}/${f}"
@@ -493,7 +497,7 @@ variables:
       # variable is visible to the saved-envelope comment/review renderers.
       # They derive the diff themselves only when FALLOW_DIFF_FILE is unset.
       if [ -n "$FALLOW_CHANGED_SINCE" ] && [ -z "$FALLOW_DIFF_FILE" ]; then
-        if git diff --unified=0 "${FALLOW_CHANGED_SINCE}..HEAD" > fallow-mr.diff 2>/dev/null && [ -s fallow-mr.diff ]; then
+        if git diff --unified=0 "${FALLOW_CHANGED_SINCE}..HEAD" > fallow-mr.diff && [ -s fallow-mr.diff ]; then
           export FALLOW_DIFF_FILE="$PWD/fallow-mr.diff"
         else
           rm -f fallow-mr.diff
@@ -760,7 +764,7 @@ variables:
         # would silently blank `change_scoped: false` and `gate_trips: false`.
         jq -r --arg field "$field" \
           "(${selector}) | if has(\$field) then .[\$field] else empty end" \
-          "$file" 2>/dev/null || true
+          "$file" || true
       }
 
       # scope_reasons needs its own reader: it is an array, and the scalar
@@ -768,7 +772,7 @@ variables:
       read_staleness_scope_reasons() {
         local file=$1
         jq -r "(${BASELINE_STALENESS_JQ}) | (.scope_reasons // []) | join(\", \")" \
-          "$file" 2>/dev/null || true
+          "$file" || true
       }
 
       read_all_staleness_fields() {
@@ -894,7 +898,7 @@ variables:
             || ! jq -e '.' fallow-stale-baseline-gate-raw.json > /dev/null 2>&1; then
           return 1
         fi
-        jq -s 'last' fallow-stale-baseline-gate-raw.json > fallow-stale-baseline-gate.json 2>/dev/null || return 1
+        jq -s 'last' fallow-stale-baseline-gate-raw.json > fallow-stale-baseline-gate.json || return 1
         if jq -e '.error == true' fallow-stale-baseline-gate.json > /dev/null 2>&1; then
           return 1
         fi
@@ -1125,7 +1129,7 @@ variables:
           [ "$CODEQUALITY_EXIT" -ne 0 ] || CODEQUALITY_EXIT=2
           exit "$CODEQUALITY_EXIT"
         fi
-        CQ_COUNT=$(jq '. | length' gl-code-quality-report.json 2>/dev/null || echo 0)
+        CQ_COUNT=$(jq '. | length' gl-code-quality-report.json || echo 0)
         echo "Code Quality report: ${CQ_COUNT} findings"
       else
         echo "[]" > gl-code-quality-report.json
@@ -1205,7 +1209,7 @@ variables:
           | if ($gates | has($gate)) and ($gates[$gate] | has($member))
             then ($gates[$gate][$member] | tostring)
             else "" end
-        ' fallow-results.json 2>/dev/null || true
+        ' fallow-results.json || true
       }
 
       # The envelope carries these as JSON numbers, so a whole value arrives
@@ -1221,7 +1225,7 @@ variables:
         case "$1" in
           regression)
             local delta
-            delta=$(jq -r '(.regression.delta // .check.regression.delta // "") | tostring' fallow-results.json 2>/dev/null || true)
+            delta=$(jq -r '(.regression.delta // .check.regression.delta // "") | tostring' fallow-results.json || true)
             [ -n "$delta" ] && printf 'issue count rose by %s (tolerance %s)' "$delta" "$FALLOW_TOLERANCE"
             ;;
           duplication-threshold)
@@ -1244,7 +1248,7 @@ variables:
             ;;
           security)
             local new_count
-            new_count=$(jq -r '(.gate.new_count // "") | tostring' fallow-results.json 2>/dev/null || true)
+            new_count=$(jq -r '(.gate.new_count // "") | tostring' fallow-results.json || true)
             [ -n "$new_count" ] && printf '%s new security candidate(s) on changed lines (gate: %s)' "$new_count" "$FALLOW_SECURITY_GATE"
             ;;
         esac
@@ -1354,7 +1358,7 @@ variables:
             continue
           fi
           classify_gate "$gate_key" "$(read_gate_member "$gate_key" status)" "$(read_gate_member "$gate_key" enforced)"
-        done < <(jq -r '(.gate_outcomes // {}) | keys[]?' fallow-results.json 2>/dev/null || true)
+        done < <(jq -r '(.gate_outcomes // {}) | keys[]?' fallow-results.json || true)
       else
         # A pinned binary older than the gate index. Read the feature-local
         # field each gate already published, and fail OPEN for the three that
@@ -1400,7 +1404,7 @@ variables:
         | group_by(.kind)
         | map("\(.[0].kind) (\(length))")
         | join(", ")
-      ' fallow-results.json 2>/dev/null || true)
+      ' fallow-results.json || true)
       if [ -n "$DEGRADED_SUMMARY" ]; then
         ANALYSIS_DEGRADED=true
         echo "WARNING: Fallow ran with degraded inputs: ${DEGRADED_SUMMARY}. Some findings or scores were computed over less than the whole project, or from an input that did not load."
@@ -1420,7 +1424,7 @@ variables:
           | select(.value.status != "applied" and .value.affects == "scope")
           | if .value.reason then "\(.key) (\(.value.reason))" else .key end ]
         | join(", ")
-      ' fallow-results.json 2>/dev/null || true)
+      ' fallow-results.json || true)
       if [ -n "$REQUESTS_UNAPPLIED" ]; then
         echo "WARNING: Fallow could not apply: ${REQUESTS_UNAPPLIED}. The findings below cover more of the project than was requested, so do not read this run as scoped to the change."
       fi
@@ -1433,7 +1437,7 @@ variables:
           | select(.value.status == "applied" and .value.affects == "scope" and .value.scope_size == 0)
           | .key ]
         | join(", ")
-      ' fallow-results.json 2>/dev/null || true)
+      ' fallow-results.json || true)
       if [ -n "$REQUESTS_EMPTY_SCOPE" ]; then
         echo "WARNING: Fallow applied ${REQUESTS_EMPTY_SCOPE} over an empty scope, so no finding could survive it and the report below is clean because nothing was analyzable. Check the diff or ref this run was given before reading it as a clean result."
       fi

@@ -2416,14 +2416,12 @@ assert_contains "$OUT" "ERROR: Fallow regression gate failed" \
 # #2685: the security gate keeps exit 8 and used to sit inside the
 # FALLOW_FAIL_ON_ISSUES conditional, where it could not be reached.
 ENVELOPE=$(gitlab_gate_envelope '{"security":{"status":"fail","enforced":true}}' '"gate":{"mode":"new","verdict":"fail","new_count":2}')
-set +e
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   MOCK_GATE_ENVELOPE="$ENVELOPE" \
   FALLOW_COMMAND=security \
   FALLOW_FAIL_ON_ISSUES=false \
   FALLOW_SECURITY_GATE=new)
 GATE_STATUS=$?
-set -e
 assert_contains "$OUT" "ERROR: Fallow security gate failed" \
   "gitlab gate: security fails with FALLOW_FAIL_ON_ISSUES false"
 if [ "$GATE_STATUS" = "8" ]; then
@@ -2434,13 +2432,11 @@ fi
 
 # A gate nobody asked for reports and never fails.
 ENVELOPE=$(gitlab_gate_envelope '{"regression":{"status":"fail","enforced":true}}')
-set +e
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   MOCK_GATE_ENVELOPE="$ENVELOPE" \
   FALLOW_COMMAND=dead-code \
   FALLOW_FAIL_ON_ISSUES=false)
 GATE_STATUS=$?
-set -e
 assert_contains "$OUT" "WARNING: Fallow regression gate reports a failure" \
   "gitlab gate: an unowned failure warns"
 if [ "$GATE_STATUS" = "0" ]; then
@@ -2510,13 +2506,11 @@ assert_not_contains "$OUT" "plugin-effect-not-modeled" \
 # envelope is the only channel that reaches the pipeline.
 REQUESTS='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'
 ENVELOPE=$(gitlab_gate_envelope '' "$REQUESTS")
-set +e
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   MOCK_GATE_ENVELOPE="$ENVELOPE" \
   FALLOW_COMMAND=dead-code \
   FALLOW_FAIL_ON_ISSUES=false)
 GATE_STATUS=$?
-set -e
 assert_contains "$OUT" "WARNING: Fallow could not apply: changed-since (git-failed)" \
   "gitlab requests: an unapplied request warns once with its reason"
 assert_not_contains "$OUT" "could not apply: changed-since (git-failed), diff-filter" \
@@ -2542,13 +2536,11 @@ assert_not_contains "$OUT" "empty scope" \
 # line must stay clear of it while the advisory names it.
 EMPTY_SCOPE='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-file pr.diff","scope_size":0}}'
 ENVELOPE=$(gitlab_gate_envelope '' "$EMPTY_SCOPE")
-set +e
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   MOCK_GATE_ENVELOPE="$ENVELOPE" \
   FALLOW_COMMAND=dead-code \
   FALLOW_FAIL_ON_ISSUES=false)
 GATE_STATUS=$?
-set -e
 assert_contains "$OUT" "WARNING: Fallow applied diff-filter over an empty scope" \
   "gitlab requests: an applied request over an empty scope is advised"
 assert_not_contains "$OUT" "could not apply" \
@@ -2588,27 +2580,23 @@ assert_not_contains "$OUT" "could not apply" \
 
 EMPTY='"workspace_diagnostics":[{"path":".","kind":"no-source-files-analyzed","message":"m","excluded_file_count":3,"degrades_analysis":true}]'
 ENVELOPE=$(gitlab_gate_envelope '' "$EMPTY")
-set +e
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   MOCK_GATE_ENVELOPE="$ENVELOPE" \
   FALLOW_COMMAND=dead-code \
   FALLOW_FAIL_ON_ISSUES=false)
 GATE_STATUS=$?
-set -e
 assert_contains "$OUT" "WARNING: Fallow analyzed no source file at all" "gitlab empty analysis: warns by default"
 if [ "$GATE_STATUS" = "0" ]; then
   pass "gitlab empty analysis: passes by default"
 else
   fail "gitlab empty analysis: passes by default" "got $GATE_STATUS"
 fi
-set +e
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   MOCK_GATE_ENVELOPE="$ENVELOPE" \
   FALLOW_COMMAND=dead-code \
   FALLOW_FAIL_ON_ISSUES=false \
   FALLOW_FAIL_ON_EMPTY_ANALYSIS=true)
 GATE_STATUS=$?
-set -e
 assert_contains "$OUT" "ERROR: Fallow analyzed no source file at all" "gitlab empty analysis: fails behind the variable"
 if [ "$GATE_STATUS" = "1" ]; then
   pass "gitlab empty analysis: exits 1 behind the variable"

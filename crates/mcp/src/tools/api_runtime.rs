@@ -109,14 +109,24 @@ pub(super) fn resolve_typed_coverage_inputs(
         .map_err(|err| err.into_programmatic_error(explicit_root_context))
 }
 
-fn env_changed_since() -> Option<String> {
-    std::env::var("FALLOW_CHANGED_SINCE")
-        .ok()
+/// `FALLOW_CHANGED_SINCE` over an injectable lookup, so the fallback is testable
+/// without the ambient value of the variable deciding the assertion.
+fn changed_since_from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Option<String> {
+    lookup("FALLOW_CHANGED_SINCE")
+        .and_then(|value| value.into_string().ok())
         .filter(|value| !value.is_empty())
 }
 
 pub(super) fn changed_since_from_param(value: Option<&str>) -> Option<String> {
-    non_empty_string(value).or_else(env_changed_since)
+    changed_since_from_param_with(value, |name| std::env::var_os(name))
+}
+
+/// [`changed_since_from_param`] over an injectable lookup.
+fn changed_since_from_param_with(
+    value: Option<&str>,
+    lookup: impl Fn(&str) -> Option<OsString>,
+) -> Option<String> {
+    non_empty_string(value).or_else(|| changed_since_from_lookup(lookup))
 }
 
 pub(super) fn non_empty_path(value: Option<&str>) -> Option<PathBuf> {
@@ -239,10 +249,25 @@ mod tests {
 
     #[test]
     fn changed_since_from_param_prefers_param_over_empty_env_fallback() {
+        let env =
+            |name: &str| (name == "FALLOW_CHANGED_SINCE").then(|| OsString::from("origin/release"));
+
         assert_eq!(
-            changed_since_from_param(Some("origin/main")),
+            changed_since_from_param_with(Some("origin/main"), env),
             Some("origin/main".to_string())
         );
-        assert_eq!(changed_since_from_param(Some("")), env_changed_since());
+        assert_eq!(
+            changed_since_from_param_with(Some(""), env),
+            Some("origin/release".to_string())
+        );
+        assert_eq!(
+            changed_since_from_param_with(None, env),
+            Some("origin/release".to_string())
+        );
+        assert_eq!(
+            changed_since_from_param_with(Some(""), |_| Some(OsString::from(""))),
+            None
+        );
+        assert_eq!(changed_since_from_param_with(Some(""), |_| None), None);
     }
 }
