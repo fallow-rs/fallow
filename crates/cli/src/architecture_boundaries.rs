@@ -54,6 +54,7 @@ fn architecture_invariants_doc_tracks_guarded_boundaries() {
         "`fallow-core` is a backend implementation crate",
         "`fallow-process` is an independent infrastructure foundation",
         "must not fork their own timeout, process-tree setup",
+        "owns git ref and root detection",
     ] {
         assert!(
             doc.contains(required),
@@ -1143,6 +1144,8 @@ fn audit_repo_ref_orchestration_routes_through_engine() {
         "fn git_upstream_ref",
         "fn git_merge_base",
         "fn detect_remote_default_ref",
+        "fn get_head_sha",
+        "Command::new(\"git\")",
     ] {
         assert!(
             !cli_source.contains(forbidden),
@@ -1162,6 +1165,110 @@ fn audit_repo_ref_orchestration_routes_through_engine() {
             && !decision_surface.contains("super::audit::base_analysis_root"),
         "{decision_surface_path} must not depend on audit-internal base-worktree helpers"
     );
+}
+
+/// Each CLI file that spawns git, and the git fact it owns. The engine owns ref
+/// and root detection, so a CLI spawn is for work `repo_refs` does not model.
+/// Two entries are test-only helpers that build repository fixtures.
+const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
+    (
+        "crates/cli/src/agent_install/mcp.rs",
+        "whether an installed agent file is tracked",
+    ),
+    (
+        "crates/cli/src/audit.rs",
+        "one long-lived cat-file reader for base file contents",
+    ),
+    (
+        "crates/cli/src/base_worktree.rs",
+        "base worktree lifecycle and the diff base",
+    ),
+    (
+        "crates/cli/src/coverage/analyze.rs",
+        "the origin remote of a coverage upload",
+    ),
+    (
+        "crates/cli/src/coverage/mod.rs",
+        "the committer address of a coverage upload",
+    ),
+    (
+        "crates/cli/src/coverage/upload_common.rs",
+        "the full commit sha and working-tree state of a coverage upload",
+    ),
+    (
+        "crates/cli/src/coverage/upload_inventory.rs",
+        "repository fixtures in its own tests",
+    ),
+    (
+        "crates/cli/src/coverage/upload_source_maps.rs",
+        "the origin remote and full commit sha of a source-map upload",
+    ),
+    (
+        "crates/cli/src/coverage/upload_static_findings.rs",
+        "repository fixtures in its own tests",
+    ),
+    (
+        "crates/cli/src/init.rs",
+        "hook scaffolding and the default branch it writes into a hook",
+    ),
+    (
+        "crates/cli/src/regression/baseline.rs",
+        "whether a baseline path is ignored, and the full commit sha",
+    ),
+];
+
+/// The CLI is a protocol adapter, so `fallow_engine::repo_refs` owns git ref and
+/// root detection. A second CLI copy is how `fallow security --base` and
+/// `fallow audit` drifted into resolving different base analysis roots for one
+/// repository (#2740), after the base-ref detection drifted the same way
+/// (#2699). Legitimate CLI git use stays legitimate: each such file is named in
+/// `CLI_GIT_SPAWN_OWNERS` with the fact it owns.
+#[test]
+fn cli_does_not_own_git_ref_or_root_detection() {
+    let base_worktree_path = "crates/cli/src/base_worktree.rs";
+    for source_path in rust_sources_under(["crates/cli/src"]) {
+        if source_path == "crates/cli/src/architecture_boundaries.rs" {
+            continue;
+        }
+        let source = read_source_without_line_comments(&source_path)
+            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+
+        assert!(
+            !source.contains("\"rev-parse\", \"--short\", \"HEAD\""),
+            "{source_path} probes the short HEAD sha; use fallow_engine::repo_refs::short_head_sha"
+        );
+        assert!(
+            source_path == base_worktree_path || !source.contains("--show-toplevel"),
+            "{source_path} resolves the repository top level; use fallow_engine::repo_refs::base_analysis_root, or {base_worktree_path} for worktree lifecycle work"
+        );
+
+        if is_cli_test_source(&source_path) {
+            continue;
+        }
+        assert!(
+            !source.contains("Command::new(\"git\")")
+                || CLI_GIT_SPAWN_OWNERS
+                    .iter()
+                    .any(|(owner, _)| *owner == source_path),
+            "{source_path} spawns git; route ref and root detection through fallow_engine::repo_refs, or name the fact it owns in CLI_GIT_SPAWN_OWNERS"
+        );
+    }
+
+    for (owner, fact) in CLI_GIT_SPAWN_OWNERS {
+        assert!(!fact.is_empty(), "{owner} must state the git fact it owns");
+        let source = read_source_without_line_comments(owner)
+            .unwrap_or_else(|error| panic!("read {owner}: {error}"));
+        assert!(
+            source.contains("Command::new(\"git\")"),
+            "{owner} no longer spawns git; remove its CLI_GIT_SPAWN_OWNERS entry"
+        );
+    }
+}
+
+/// Whether a CLI source file holds tests only. Test helpers may build
+/// repository fixtures with git.
+fn is_cli_test_source(source_path: &str) -> bool {
+    source_path.ends_with("_tests.rs") || source_path.ends_with("/tests.rs")
 }
 
 #[test]

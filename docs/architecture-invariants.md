@@ -56,6 +56,12 @@ The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
 - Shared child-process lifecycle behavior belongs in `fallow-process`; adapters
   must not fork their own timeout, process-tree setup, termination, or cleanup
   implementation.
+- `fallow-engine` owns git ref and root detection. `repo_refs` is the only owner
+  of base-ref detection, the short HEAD SHA and the base analysis root, and a
+  protocol adapter must call it instead of spawning git for those facts. A git
+  spawn in an adapter is for a fact the engine does not model, such as worktree
+  lifecycle or a coverage upload envelope, and the CLI boundary test names each
+  one.
 - Public contract crates should avoid CLI-only assumptions. A contract should
   still make sense for API, MCP, LSP, and NAPI consumers.
 
