@@ -106,13 +106,20 @@ COMPANIONS = (
 
 
 def companion_checkouts() -> list[tuple[Path, str, bool, list[Path]]]:
-    """Each companion checkout, the variable that names it, and its documents."""
+    """Each companion checkout, the variable that names it, and its documents.
+
+    A variable that is set names the companion even when its value is empty: an
+    environment that sets it asked for the check, so it must not be able to buy a
+    skip. An empty value carries no path, so the sibling guess still decides where
+    to look.
+    """
     sibling_of = main_checkout_root().parent
     checkouts = []
     for variable, directory, documents in COMPANIONS:
         override = os.environ.get(variable)
         root = Path(override) if override else sibling_of / directory
-        checkouts.append((root, variable, bool(override), [root / doc for doc in documents]))
+        named = override is not None
+        checkouts.append((root, variable, named, [root / doc for doc in documents]))
     return checkouts
 
 

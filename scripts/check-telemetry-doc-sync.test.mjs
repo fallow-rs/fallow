@@ -10,13 +10,32 @@ const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCRIPT = "scripts/check_telemetry_doc_sync.py";
 const CANONICAL = "docs/telemetry.md";
 
-const run = (cwd, env = {}) =>
-  spawnSync("python3", [SCRIPT], { cwd, encoding: "utf8", env: { ...process.env, ...env } });
+/** A run of the check; every variable in `remove` is absent from the child. */
+const run = (cwd, env = {}, remove = []) => {
+  const childEnv = { ...process.env, ...env };
+  for (const key of remove) {
+    delete childEnv[key];
+  }
+  return spawnSync("python3", [SCRIPT], { cwd, encoding: "utf8", env: childEnv });
+};
 
+/**
+ * `core.excludesFile` and `core.hooksPath` are neutralized so no machine-global
+ * ignore rule or hook can decide what this throwaway repository does, and `-f`
+ * stages paths a repository ignore rule would otherwise refuse.
+ */
 const git = (cwd, args) => {
   const result = spawnSync(
     "git",
-    ["-c", "core.excludesFile=/dev/null", "-c", "commit.gpgsign=false", ...args],
+    [
+      "-c",
+      "core.excludesFile=/dev/null",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      ...args,
+    ],
     {
       cwd,
       encoding: "utf8",
@@ -54,6 +73,19 @@ test("telemetry documentation parity fails closed when companions are absent", (
   assert.match(result.stderr, /expected companion doc not found/u);
 });
 
+test("telemetry documentation parity fails closed when a companion variable is set but empty", () => {
+  const root = mkdtempSync(join(tmpdir(), "fallow-telemetry-empty-"));
+  const checkout = createCheckout(root);
+
+  // Nothing sits beside this throwaway checkout, so standing down is the only
+  // other outcome. Setting the variable asked for the check, so it cannot skip.
+  const result = run(checkout, { FALLOW_DOCS_DIR: "", FALLOW_SKILLS_DIR: "" });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /expected companion doc not found/u);
+  assert.doesNotMatch(result.stdout, /skipped:/u);
+});
+
 test("telemetry documentation parity looks beside the main checkout, not beside a worktree", () => {
   const root = mkdtempSync(join(tmpdir(), "fallow-telemetry-worktree-"));
   const checkout = createCheckout(root);
@@ -63,11 +95,12 @@ test("telemetry documentation parity looks beside the main checkout, not beside 
   const worktree = join(checkout, ".worktrees", "topic");
   git(checkout, ["worktree", "add", "--quiet", "--detach", worktree, "HEAD"]);
 
-  // Neither directory holds a companion clone, so both runs stand down. What the
-  // assertion carries is WHERE each run looked: a worktree must resolve the
-  // companion beside the clone it belongs to, never beside itself.
+  // Neither directory holds a companion clone and neither variable is set, so
+  // both runs stand down. What the assertion carries is WHERE each run looked: a
+  // worktree must resolve the companion beside the clone it belongs to, never
+  // beside itself.
   for (const cwd of [checkout, worktree]) {
-    const result = run(cwd, { FALLOW_DOCS_DIR: "", FALLOW_SKILLS_DIR: "" });
+    const result = run(cwd, {}, ["FALLOW_DOCS_DIR", "FALLOW_SKILLS_DIR"]);
     assert.equal(result.status, 0, result.stderr);
     assert.match(
       result.stdout,

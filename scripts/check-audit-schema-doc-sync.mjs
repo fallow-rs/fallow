@@ -39,10 +39,12 @@ const readGitCommonDir = (repoRoot) => {
 /**
  * Where the companion documentation checkout is expected to live.
  *
- * `FALLOW_DOCS_DIR` wins. Otherwise the companion is a sibling of the main
- * checkout, which inside a linked worktree is not `repoRoot`: the worktree lives
- * under the main checkout, so resolving a sibling against it points at a
- * directory that never exists.
+ * `FALLOW_DOCS_DIR` wins when it carries a path. Otherwise the companion is a
+ * sibling of the main checkout, which inside a linked worktree is not `repoRoot`:
+ * the worktree lives under the main checkout, so resolving a sibling against it
+ * points at a directory that never exists. An empty value carries no path, so it
+ * falls back to the sibling; it still counts as naming the variable, which is
+ * what keeps the check failing closed.
  */
 export const companionDocsDir = ({ env = {}, gitCommonDir = null, repoRoot = REPO_ROOT } = {}) => {
   if (env.FALLOW_DOCS_DIR) {
@@ -155,7 +157,9 @@ export const runAuditSchemaDocCheck = ({
     };
   }
 
-  const named = docsDir !== undefined || Boolean(env.FALLOW_DOCS_DIR);
+  // Presence, not content: an environment that sets the variable to an empty
+  // string asked for the check, so it must not be able to buy a skip.
+  const named = docsDir !== undefined || "FALLOW_DOCS_DIR" in env;
   const resolvedDocsDir =
     docsDir === undefined
       ? companionDocsDir({

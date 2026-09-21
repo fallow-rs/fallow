@@ -172,6 +172,16 @@ test("a guessed companion checkout that is absent skips instead of reporting dri
     1,
   );
 
+  // A variable that is set but empty names no path, so the sibling guess still
+  // decides where to look, but it does ask for the check and cannot skip.
+  const empty = runAuditSchemaDocCheck({
+    env: { FALLOW_DOCS_DIR: "" },
+    gitCommonDir: ".git",
+    repoRoot: checkout,
+  });
+  assert.equal(empty.status, 1);
+  assert.match(empty.message, /expected companion doc not found/u);
+
   // A companion checkout that exists but has lost the document is drift, even
   // when the path was guessed.
   mkdirSync(named, { recursive: true });
