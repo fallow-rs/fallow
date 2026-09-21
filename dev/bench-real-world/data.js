@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789906082193,
+  "lastUpdate": 1789998217557,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "e96ae8e67c33c9b923483e9827424c93db2e4bab",
-          "message": "feat(security): flag use-client cones that reach server-only code (#1231)\n\nStage 2 of the Next.js RSC differentiated-detection program.\n\nExtends the opt-in `fallow security` `client-server-leak` rule (default `off`) with a second sink predicate: a `\"use client\"` file whose transitive static-import cone reaches **server-only code**, emitted as a distinct `server-only-import` candidate category on the same rule, suppress kind, and finding shape. fallow catches this without requiring the `server-only` poison package and before a build (Next.js only errors at build time when the marker is present).\n\n- **Narrow sink set** (FP-conservative, no DB-client heuristic): a `\"use server\"` module, a `server-only` import, or a named server-only API (`next/headers` `cookies`/`headers`/`draftMode`, `next/server`, node `fs`/`child_process`, both `node:` and bare forms).\n- **`next/dynamic(..., { ssr: false })` aware**: a server module reached only through the sanctioned client-only dynamic import is not a leak. The extract layer captures those import spans on `ModuleInfo.client_only_dynamic_import_spans` (CACHE_VERSION bump) and the BFS skips an edge reached only through them.\n- **Direct case**: a `\"use client\"` file that itself imports a server-only sink is reported with a single self-hop trace; the transitive emit is gated so it reports once.\n- Opt-in and candidate-framed (never a verified vulnerability); `security_findings` stays out of bare `fallow` / `audit`. `SecuritySchemaVersion` bumped to V7 since `client-server-leak` findings can now carry the `server-only-import` category.\n\nTeam review: rust, json-output, mcp reviewers (zero BLOCKs); the direct-case coverage gap, the V7 schema bump, stale doc/schema descriptions, a misleading fixture comment, and thin sink-predicate fixtures were all addressed with new tests. Full workspace test, clippy, fmt, doc, codegen, and the security smoke (10 findings, `schema_version: 7`, zero under bare `fallow`) green.",
-          "timestamp": "2026-06-13T09:39:29Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/e96ae8e67c33c9b923483e9827424c93db2e4bab"
-        },
-        "date": 1781344953082,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 290,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 226,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 481,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 398,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 263,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 235,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 750,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 671,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1696,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1454,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 1331,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 1246,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 1147,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 1033,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 12393,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 11302,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9259,6 +9157,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1020,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "d4264c27859c6b307fbebd269c969c0b107984ee",
+          "message": "fix(plugins): credit bundler entry packages and close the Nuxt autoImports precision gaps (#2745)\n\nA package named in a webpack, rspack or rsbuild entry, with or without a resource query, is credited as a dependency instead of becoming an entry pattern that matches nothing; glob-shaped entries stay entry patterns.\n\nNuxt autoImports: components under global/ and islands/ get the name Nuxt gives them, a config with a computed key, accessor or top-level spread keeps the convention entry patterns for that root, each workspace root is classified on its own, components: true, imports: {} and imports: { dirs: [] } count as the defaults they are, and a name imported or re-exported from #components or #imports is credited. #layers/<name>/ resolves as a path alias.\n\nCloses #2739\nCloses #2737",
+          "timestamp": "2026-09-21T12:15:43Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4264c27859c6b307fbebd269c969c0b107984ee"
+        },
+        "date": 1789998212549,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 307,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 206,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 309,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 618,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 409,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1743,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1226,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1327,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1021,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1332,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1127,
             "unit": "ms"
           }
         ]
