@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790030068859,
+  "lastUpdate": 1790032640535,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "48417c46faa284f18304c4f49f50a6edecdcfdb7",
-          "message": "fix(cli): resolve project-local fallow in lefthook (#2465)\n\nA real installed Git hook preserves its caller's PATH and does not add\n`node_modules/.bin`, so a project with fallow pinned locally could have the\ngenerated Lefthook job exit successfully without auditing anything. The job now\nprefers a global `fallow`, then the project-local launcher, then the Yarn\nPlug'n'Play binary, and still skips when there is none.\n\nThe Yarn arm passes the audit arguments through the separator yarn requires.\nMeasured on yarn 1.22.22, `yarn exec fallow audit --base HEAD` reaches the\nbinary as `audit` alone, so without it the hook would audit the default base\nwith no gate marker and say nothing about it.\n\nCloses #2464\n\nThanks to @PrinceD96 for the report and the implementation.",
-          "timestamp": "2026-08-31T13:33:06+02:00",
-          "tree_id": "42edcfbe7c0f368abcdba2585faa7f1a02f617f8",
-          "url": "https://github.com/fallow-rs/fallow/commit/48417c46faa284f18304c4f49f50a6edecdcfdb7"
-        },
-        "date": 1788176586271,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/7e2e7ad99634f2c7ccd359a6a3ea33b162e3d0e6"
         },
         "date": 1790030065284,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 480,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "234d24c8d1d8cb34bd22f166cddf48fd5dd59191",
+          "message": "feat(baseline): give saved baselines a kind and report an unrecognised one on every surface (#2749)\n\nEach saved baseline carries a top-level kind: dead-code, dupes or health. A baseline that another command saved loads as zero entries on all three commands, warns on stderr with both kinds and the path, and carries baseline_staleness.unrecognised_format. fallow dead-code no longer exits 2 on such a file. The stale-baseline gate trips on it, so --fail-on-stale-baseline fails the run, and gate_trips carries that rule. A save over a baseline of another kind is refused with exit 2. Audit reports every baseline it cannot read. The pull-request comment and the merge-request note carry the unrecognised-baseline sentence, the combined run gets the recheck-baseline next step, and the live github-summary render carries the gate outcomes.\n\nCloses #2738\nCloses #2735",
+          "timestamp": "2026-09-22T01:11:08+02:00",
+          "tree_id": "ce61633c08d0dda3ca253d3c7651587e7a4855e1",
+          "url": "https://github.com/fallow-rs/fallow/commit/234d24c8d1d8cb34bd22f166cddf48fd5dd59191"
+        },
+        "date": 1790032636867,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
