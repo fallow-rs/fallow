@@ -24,9 +24,14 @@ invariants in this file.
    [ "$enabled" = "true" ] || { echo "Release immutability is not enabled" >&2; exit 1; }
    ```
 
-   Require the `release` environment to admit `main` only and to be the only
-   home of the publication secrets. A repository-level copy is readable by a
-   workflow on any ref, which is what the environment exists to prevent:
+   Require the `release` environment to admit `main` only, and check where each
+   publication secret lives. GitHub never returns a secret value, so a secret
+   moves into the environment only when its value is entered again, which in
+   practice means at its next rotation. Until then it stays a repository
+   secret, readable by a workflow on any ref, and the environment does not
+   protect it: the check names those secrets instead of failing. Once a secret
+   is in the environment the repository copy must be gone, and the check fails
+   on a secret that exists at both levels or at neither:
 
    ```bash
    custom="$(gh api repos/fallow-rs/fallow/environments/release \
@@ -38,10 +43,15 @@ invariants in this file.
    repo_secrets="$(gh secret list --repo fallow-rs/fallow --json name --jq '.[].name')"
    env_secrets="$(gh secret list --repo fallow-rs/fallow --env release --json name --jq '.[].name')"
    for name in VSCE_PAT OVSX_PAT ED25519_BINARY_SIGNING_PRIVATE_KEY; do
-     if grep -qx "$name" <<<"$repo_secrets"; then
-       echo "$name is still a repository secret" >&2; exit 1
-     fi
-     grep -qx "$name" <<<"$env_secrets" || { echo "$name is missing from the release environment" >&2; exit 1; }
+     in_repo=0; in_env=0
+     grep -qx "$name" <<<"$repo_secrets" && in_repo=1
+     grep -qx "$name" <<<"$env_secrets" && in_env=1
+     case "${in_env}${in_repo}" in
+       10) ;;
+       11) echo "$name exists at both levels; delete the repository copy" >&2; exit 1 ;;
+       01) echo "NOTE: $name is a repository secret, unprotected by the release environment; move it at its next rotation" >&2 ;;
+       *) echo "$name is missing" >&2; exit 1 ;;
+     esac
    done
    ```
 4. Derive the semantic-version bump from every commit since the prior release
