@@ -7537,6 +7537,81 @@ fn audit_publishes_staleness_for_every_baseline_it_loaded() {
     );
 }
 
+/// An audit reports every baseline that is not the section's own, not the first
+/// one it finds. Its health note used to be missing entirely: the standalone
+/// command prints it at a site audit never reaches, so an audit pointed at
+/// another command's health baseline was silent about it while the dead-code and
+/// duplication baselines beside it said so (issue #2735).
+#[test]
+fn audit_reports_every_baseline_that_is_another_commands() {
+    let fixture = create_audit_fixture("baseline-kinds");
+    let dir = fixture.path();
+    let root = dir.to_str().expect("fixture path should be UTF-8");
+    let (dead_code_baseline, dupes_baseline, health_baseline) = save_audit_baselines(dir, root);
+
+    fs::write(
+        dir.join("src/added.ts"),
+        "export const added = (): number => 1;\n",
+    )
+    .unwrap();
+    commit_all(dir, "add a module");
+
+    // Every baseline handed to the section that did not write it.
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "HEAD~1",
+        "--dead-code-baseline",
+        dupes_baseline.to_str().expect("utf8"),
+        "--dupes-baseline",
+        health_baseline.to_str().expect("utf8"),
+        "--health-baseline",
+        dead_code_baseline.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let envelope = parse_json(&output);
+
+    for (section, wrote, reads) in [
+        (vec!["dead_code"], "dupes", "dead-code"),
+        (vec!["duplication"], "health", "dupes"),
+        (vec!["complexity", "summary"], "dead-code", "health"),
+    ] {
+        let staleness =
+            section.iter().fold(&envelope, |value, key| &value[*key])["baseline_staleness"].clone();
+        assert_eq!(
+            staleness["unrecognised_format"],
+            serde_json::Value::Bool(true),
+            "the {section:?} section must report the mismatch: {envelope}"
+        );
+        // The full pairing rather than one command name: each name appears in
+        // two of the three notes, so a missing note would otherwise stay
+        // invisible behind its neighbours.
+        assert!(
+            output.stderr.contains(&format!(
+                "was saved by `fallow {wrote}` and this is a `fallow {reads}` run"
+            )),
+            "the {reads} note must name the command that saved the file it was handed: {}",
+            output.stderr
+        );
+    }
+
+    // Audit judges no baseline, so the mismatch reaches the note and the
+    // envelope while the gate entry still stands down and the run still passes.
+    assert_eq!(
+        envelope["gate_outcomes"]["stale-baseline"]["status"], "skipped",
+        "{envelope}"
+    );
+    assert_ne!(
+        output.code, 2,
+        "a mismatch on an audit baseline is reported, not fatal: {}",
+        output.stderr
+    );
+}
+
 /// The gate entry describes a baseline that was loaded, so an audit without one
 /// must not claim a gate stood down.
 #[test]
