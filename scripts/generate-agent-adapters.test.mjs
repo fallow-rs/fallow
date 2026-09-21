@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
@@ -26,6 +27,32 @@ const createRepo = () => {
     "---\nname: agent-name\ndescription: Template.\n---\n\nTemplate body.\n",
   );
   return root;
+};
+
+/**
+ * `core.excludesFile` is neutralized so the machine's global ignore rules cannot
+ * decide what the test repository tracks, and `-f` stages paths a repository
+ * ignore rule would otherwise refuse.
+ */
+const git = (cwd, args) => {
+  const result = spawnSync("git", ["-c", "core.excludesFile=/dev/null", ...args], {
+    cwd,
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
+};
+
+/** A repository whose canonical sources are tracked and whose adapters are not. */
+const createTrackedRepo = () => {
+  const root = createRepo();
+  git(root, ["init", "--quiet"]);
+  git(root, ["add", "-f", "--", ".agents"]);
+  return root;
+};
+
+const removeCanonicalSources = (repoRoot) => {
+  rmSync(join(repoRoot, ".agents", "skills", "review"), { recursive: true });
+  rmSync(join(repoRoot, ".agents", "agents", "rust-reviewer.md"));
 };
 
 test("generates Claude adapters from canonical Agent Skills", () => {
@@ -92,6 +119,68 @@ test("agent check mode reports drift without overwriting it, and removes orphane
   ]);
   generateAgentAdapters({ repoRoot });
   assert.equal(existsSync(target), false);
+});
+
+test("leaves untracked generated adapters alone and names each one", () => {
+  const repoRoot = createTrackedRepo();
+  generateAgentAdapters({ repoRoot });
+  removeCanonicalSources(repoRoot);
+
+  const skipped = [];
+  assert.deepEqual(
+    generateAgentAdapters({ check: true, onSkip: (path) => skipped.push(path), repoRoot }),
+    [],
+  );
+  assert.deepEqual(skipped.toSorted(), [
+    ".claude/agents/rust-reviewer.md",
+    ".claude/skills/review/SKILL.md",
+  ]);
+
+  generateAgentAdapters({ repoRoot });
+  assert.equal(existsSync(join(repoRoot, ".claude", "skills", "review", "SKILL.md")), true);
+  assert.equal(existsSync(join(repoRoot, ".claude", "agents", "rust-reviewer.md")), true);
+});
+
+test("reports and removes a tracked adapter whose canonical source is gone", () => {
+  const repoRoot = createTrackedRepo();
+  generateAgentAdapters({ repoRoot });
+  git(repoRoot, ["add", "-f", "--", ".claude"]);
+  removeCanonicalSources(repoRoot);
+
+  const skipped = [];
+  assert.deepEqual(
+    generateAgentAdapters({ check: true, onSkip: (path) => skipped.push(path), repoRoot }),
+    [".claude/agents/rust-reviewer.md", ".claude/skills/review/SKILL.md"],
+  );
+  assert.deepEqual(skipped, []);
+
+  generateAgentAdapters({ repoRoot });
+  assert.equal(existsSync(join(repoRoot, ".claude", "skills", "review")), false);
+  assert.equal(existsSync(join(repoRoot, ".claude", "agents", "rust-reviewer.md")), false);
+});
+
+test("companion orphan ownership follows tracked content too", () => {
+  const repoRoot = createTrackedRepo();
+  generateAgentAdapters({ repoRoot });
+  const orphan = join(repoRoot, ".claude", "skills", "review", "references", "local.md");
+  mkdirSync(dirname(orphan), { recursive: true });
+  writeFileSync(orphan, "local note\n");
+
+  const skipped = [];
+  assert.deepEqual(
+    generateAgentAdapters({ check: true, onSkip: (path) => skipped.push(path), repoRoot }),
+    [],
+  );
+  assert.deepEqual(skipped, [".claude/skills/review/references/local.md"]);
+  generateAgentAdapters({ repoRoot });
+  assert.equal(existsSync(orphan), true);
+
+  git(repoRoot, ["add", "-f", "--", ".claude"]);
+  assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), [
+    ".claude/skills/review/references/local.md",
+  ]);
+  generateAgentAdapters({ repoRoot });
+  assert.equal(existsSync(orphan), false);
 });
 
 test("rejects agent filename and frontmatter name drift", () => {
