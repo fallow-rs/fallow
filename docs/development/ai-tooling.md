@@ -34,6 +34,13 @@ The generator owns the Claude adapter bytes and marks them as generated.
 Hand-edit the canonical `.agents/skills` or `.agents/agents` source, regenerate,
 then commit both surfaces. CI runs check mode and rejects drift.
 
+The generator owns tracked adapters only. A generated file under `.claude` that
+git does not track is somebody's local host directory, not repository content, so
+check mode names it and leaves it alone and generate mode never deletes it. The
+generated marker alone cannot tell the two apart, because a directory copied from
+a released skill contract carries the same marker. Where git cannot answer, every
+marked file is treated as repository content, as before.
+
 Do not hand-maintain equivalent Claude and Codex workflow prose. Host-specific
 frontmatter or discovery metadata belongs in the generator.
 
