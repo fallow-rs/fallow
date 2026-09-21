@@ -20,7 +20,7 @@ use fallow_types::extract::ExportName;
 use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind, PropertyKey, PropertyKind};
 
 use super::config_parser;
-use super::{Plugin, PluginResult};
+use super::{Plugin, PluginResult, has_glob_syntax};
 
 const ENABLERS: &[&str] = &["nuxt"];
 
@@ -708,10 +708,6 @@ fn imports_dir_pattern(normalized: &str) -> String {
     } else {
         format!("{normalized}/*.{{ts,tsx,js,jsx,mts,cts,mjs,cjs}}")
     }
-}
-
-fn has_glob_syntax(pattern: &str) -> bool {
-    pattern.contains('*') || pattern.contains('?') || pattern.contains('[') || pattern.contains('{')
 }
 
 fn path_looks_like_file_pattern(pattern: &str) -> bool {

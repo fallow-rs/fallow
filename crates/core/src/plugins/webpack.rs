@@ -299,6 +299,26 @@ mod tests {
     }
 
     #[test]
+    fn resolve_config_keeps_glob_shaped_entries_as_patterns() {
+        let source = r#"
+            module.exports = {
+                entry: ["src/glob-like/**", "src/pages/*.entry.ts", "src/{a,b}/main"],
+            };
+        "#;
+        let plugin = WebpackPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/webpack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec!["src/glob-like/**", "src/pages/*.entry.ts", "src/{a,b}/main"]
+        );
+        assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
     fn resolve_config_keeps_relative_and_absolute_entries_as_patterns() {
         let source = r#"
             module.exports = {

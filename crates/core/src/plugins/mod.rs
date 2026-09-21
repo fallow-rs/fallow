@@ -223,9 +223,18 @@ fn normalize_entry_pattern(pattern: String) -> String {
 /// A bundler resolves a value without a leading `./`, `../` or `/` and without a
 /// source extension through module resolution, so it names a package. Both
 /// Module Federation `exposes` targets and bundler `entry` values are read this
-/// way.
+/// way. A value carrying glob syntax is a path in every case: no module
+/// resolution accepts a glob, so `src/pages/**` stays an entry pattern.
 fn names_module_request(value: &str) -> bool {
-    config_parser::is_package_specifier(value) && !has_source_extension(value)
+    config_parser::is_package_specifier(value)
+        && !has_glob_syntax(value)
+        && !has_source_extension(value)
+}
+
+/// Whether a config value carries glob metacharacters, which makes it a pattern
+/// over project files rather than a single path or module request.
+fn has_glob_syntax(value: &str) -> bool {
+    value.contains('*') || value.contains('?') || value.contains('[') || value.contains('{')
 }
 
 /// Whether a config value carries an extension discovery analyzes. Discovery's
