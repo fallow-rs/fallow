@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
   checkAuditSchemaDoc,
+  companionDocsDir,
   expectedAuditSchemaVersions,
   parseRustSchemaVersion,
   runAuditSchemaDocCheck,
@@ -109,6 +110,74 @@ test("audit documentation fails closed on missing or extra schema contexts", () 
       }),
     /exactly two contextual schema versions/u,
   );
+});
+
+test("the companion checkout resolves as a sibling of the main checkout", () => {
+  assert.equal(
+    companionDocsDir({ gitCommonDir: ".git", repoRoot: "/checkouts/fallow" }),
+    "/checkouts/fallow-docs",
+  );
+  // A linked worktree lives under the main checkout, so only the common git
+  // directory names the checkout whose sibling the companion is.
+  assert.equal(
+    companionDocsDir({
+      gitCommonDir: "/checkouts/fallow/.git",
+      repoRoot: "/checkouts/fallow/.worktrees/topic",
+    }),
+    "/checkouts/fallow-docs",
+  );
+  assert.equal(
+    companionDocsDir({ gitCommonDir: null, repoRoot: "/checkouts/fallow" }),
+    "/checkouts/fallow-docs",
+  );
+  for (const gitCommonDir of [".git", "/checkouts/fallow/.git", null]) {
+    assert.equal(
+      companionDocsDir({
+        env: { FALLOW_DOCS_DIR: "/elsewhere/docs" },
+        gitCommonDir,
+        repoRoot: "/checkouts/fallow/.worktrees/topic",
+      }),
+      "/elsewhere/docs",
+    );
+  }
+});
+
+test("a guessed companion checkout that is absent skips instead of reporting drift", () => {
+  const root = mkdtempSync(join(tmpdir(), "fallow-audit-schema-skip-"));
+  const checkout = join(root, "checkout");
+  mkdirSync(join(checkout, "crates", "output", "src"), { recursive: true });
+  writeFileSync(
+    join(checkout, "crates", "output", "src", "root_envelopes.rs"),
+    "pub const AUDIT_SCHEMA_VERSION: u32 = 11;\n",
+  );
+  writeFileSync(
+    join(checkout, "crates", "output", "src", "check.rs"),
+    "pub const CHECK_SCHEMA_VERSION: u32 = 9;\n",
+  );
+
+  const skipped = runAuditSchemaDocCheck({ env: {}, gitCommonDir: ".git", repoRoot: checkout });
+  assert.equal(skipped.status, 0);
+  assert.match(skipped.message, /^skipped: no companion documentation checkout at /u);
+  assert.match(skipped.message, /FALLOW_DOCS_DIR/u);
+
+  // A named companion keeps failing closed, so continuous integration is unchanged.
+  const named = join(root, "fallow-docs");
+  assert.equal(runAuditSchemaDocCheck({ docsDir: named, env: {}, repoRoot: checkout }).status, 1);
+  assert.equal(
+    runAuditSchemaDocCheck({
+      env: { FALLOW_DOCS_DIR: named },
+      gitCommonDir: ".git",
+      repoRoot: checkout,
+    }).status,
+    1,
+  );
+
+  // A companion checkout that exists but has lost the document is drift, even
+  // when the path was guessed.
+  mkdirSync(named, { recursive: true });
+  const present = runAuditSchemaDocCheck({ env: {}, gitCommonDir: ".git", repoRoot: checkout });
+  assert.equal(present.status, 1);
+  assert.match(present.message, /expected companion doc not found/u);
 });
 
 test("audit documentation parity fails closed when the companion is absent", () => {
