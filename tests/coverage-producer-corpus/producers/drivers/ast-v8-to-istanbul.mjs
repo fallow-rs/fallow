@@ -9,7 +9,7 @@
 import { pathToFileURL } from "node:url";
 
 import { parse } from "acorn";
-import convert from "ast-v8-to-istanbul";
+import { convert } from "ast-v8-to-istanbul";
 
 import { collectV8Coverage } from "../lib/execute.mjs";
 
