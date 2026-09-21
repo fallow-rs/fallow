@@ -115,6 +115,202 @@ fn root_arg(dir: &TempDir) -> &str {
     dir.path().to_str().expect("temp path is UTF-8")
 }
 
+/// Save one baseline per command over the same project, the state a repository
+/// that gates on all three has on disk.
+fn save_baseline(command: &str, project: &TempDir, path: &Path) {
+    let mut args = vec![command, "--root", root_arg(project)];
+    if command == "health" {
+        args.push("--complexity");
+    }
+    args.extend([
+        "--format",
+        "json",
+        "--quiet",
+        "--save-baseline",
+        path.to_str().expect("utf8"),
+    ]);
+    let saved = run(&args);
+    assert!(
+        saved.code == 0 || saved.code == 1,
+        "saving a {command} baseline should not error: {}",
+        saved.stderr
+    );
+}
+
+/// Compare `command` against `path`, with the gate armed when asked.
+fn compare_with_baseline(
+    command: &str,
+    project: &TempDir,
+    path: &Path,
+    gate: bool,
+) -> CommandOutput {
+    let mut args = vec![command, "--root", root_arg(project)];
+    if command == "health" {
+        args.push("--complexity");
+    }
+    args.extend([
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        path.to_str().expect("utf8"),
+    ]);
+    if gate {
+        args.push("--fail-on-stale-baseline");
+    }
+    run(&args)
+}
+
+/// The staleness object each command publishes, which sits at the root
+/// everywhere but health.
+fn staleness_of(envelope: &Value, command: &str) -> Value {
+    if command == "health" {
+        envelope["summary"]["baseline_staleness"].clone()
+    } else {
+        envelope["baseline_staleness"].clone()
+    }
+}
+
+/// Every pairing of a baseline with a command that did not write it: the file
+/// says which command saved it, so each of the three reports the mismatch
+/// instead of one of them crashing and the other two going green (#2738).
+#[test]
+fn a_baseline_another_command_saved_suppresses_nothing_on_all_three_commands() {
+    let project = cloned_project();
+    let commands = ["dead-code", "dupes", "health"];
+    let mut baselines = Vec::new();
+    for command in commands {
+        let path = project.path().join(format!("{command}-baseline.json"));
+        save_baseline(command, &project, &path);
+        baselines.push((command, path));
+    }
+
+    for (wrote, path) in &baselines {
+        for reads in commands {
+            if reads == *wrote {
+                continue;
+            }
+            let output = compare_with_baseline(reads, &project, path, false);
+            let envelope = parse_json(&output);
+            let staleness = staleness_of(&envelope, reads);
+            assert_eq!(
+                staleness["unrecognised_format"], true,
+                "{reads} must report a {wrote} baseline as a file it cannot read: {envelope}"
+            );
+            assert_eq!(
+                staleness["baseline_entries"], 0,
+                "and it suppresses nothing: {envelope}"
+            );
+            assert_eq!(
+                staleness["gate_trips"], true,
+                "and the gate rule holds, so an armed repository hears about it: {envelope}"
+            );
+            assert!(
+                output.stderr.contains(&format!("`fallow {wrote}`"))
+                    && output.stderr.contains(&format!("`fallow {reads}`")),
+                "the note names the command that saved it and the one reading it: {}",
+                output.stderr
+            );
+            assert_eq!(
+                output.code, 0,
+                "without the gate the exit code does not move: {}",
+                output.stderr
+            );
+
+            let gated = compare_with_baseline(reads, &project, path, true);
+            assert_eq!(
+                gated.code, 1,
+                "with the gate armed the run fails instead of gating on a file nobody reads: {}",
+                gated.stderr
+            );
+            assert_eq!(
+                gate(&parse_json(&gated), "stale-baseline")["status"],
+                "fail",
+                "and the published verdict agrees with the exit code: {}",
+                gated.stdout
+            );
+        }
+    }
+}
+
+/// A baseline the previous release saved carries no `kind`, so the keys decide,
+/// and all three commands must read their own exactly as they do today.
+#[test]
+fn a_baseline_saved_before_the_kind_member_still_loads_on_its_own_command() {
+    let project = cloned_project();
+    for (command, body) in [
+        (
+            "dead-code",
+            r#"{"unused_files":[],"unused_exports":[],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[]}"#,
+        ),
+        (
+            "dupes",
+            r#"{"clone_groups":[],"clone_fingerprints":[],"normalized_clone_fingerprints":[]}"#,
+        ),
+        (
+            "health",
+            r#"{"runtime_coverage_findings":[],"target_keys":[]}"#,
+        ),
+    ] {
+        let path = project.path().join(format!("legacy-{command}.json"));
+        std::fs::write(&path, body).expect("legacy baseline");
+        let output = compare_with_baseline(command, &project, &path, true);
+        let envelope = parse_json(&output);
+        let staleness = staleness_of(&envelope, command);
+        assert!(
+            staleness["unrecognised_format"].is_null(),
+            "a kind-less baseline of this command's own format is not a foreign file: {envelope}"
+        );
+        assert_eq!(
+            staleness["gate_trips"], false,
+            "an empty baseline has no entry to go unmatched: {envelope}"
+        );
+        assert_eq!(
+            output.code, 0,
+            "and the armed gate passes: {}",
+            output.stderr
+        );
+    }
+}
+
+/// A `--save-baseline` aimed at another command's file would overwrite it with
+/// no way back, so it is refused before anything is written.
+#[test]
+fn a_save_over_another_commands_baseline_is_refused() {
+    let project = cloned_project();
+    let path = project.path().join("shared-baseline.json");
+    save_baseline("dead-code", &project, &path);
+    let written = std::fs::read_to_string(&path).expect("baseline file");
+
+    for command in ["dupes", "health"] {
+        let mut args = vec![command, "--root", root_arg(&project)];
+        if command == "health" {
+            args.push("--complexity");
+        }
+        args.extend(["--save-baseline", path.to_str().expect("utf8")]);
+        let output = run(&args);
+        assert_eq!(
+            output.code, 2,
+            "a {command} save over a dead-code baseline is refused: {}",
+            output.stderr
+        );
+        assert!(
+            output.stderr.contains("`fallow dead-code`")
+                && output.stderr.contains(&format!("`fallow {command}`"))
+                && output.stderr.contains(&path.display().to_string()),
+            "the refusal names both kinds and the path: {}",
+            output.stderr
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("baseline file"),
+            written,
+            "and the file it refused to overwrite is untouched"
+        );
+    }
+
+    save_baseline("dead-code", &project, &path);
+}
+
 fn save_regression_baseline(root: &Path, file: &str) {
     let out = run(&[
         "dead-code",
@@ -1114,39 +1310,25 @@ fn a_narrowed_run_with_no_findings_still_points_at_the_unscoped_recheck() {
     );
 }
 
-/// A baseline with no entries this command recognises suppresses nothing, and
-/// every verdict that follows is green and honest: the advisory has nothing to
-/// judge, so `gate_trips` is false and the gate reports `pass`. A repository
-/// that pointed `--baseline` at a baseline another command saved, or at an
-/// empty file, would gate on it forever and never be told.
+/// A baseline with no entries this command recognises suppresses nothing, so the
+/// run says so and the gate rule holds: a repository that pointed `--baseline`
+/// at a baseline another command saved, or at an empty file, would otherwise
+/// gate on it forever and never be told.
 ///
-/// Each command has its own format, and the three do not agree on what a
-/// foreign file means: `dupes` and `health` give every field a serde default,
-/// so any JSON object loads as zero entries, while `dead-code` rejects one
-/// today because five of its fields carry no default. The two that accept the
-/// file separate it from their own empty baseline by the keys it carries, so
-/// the note is asserted on both of them, and its absence on a legitimately
-/// empty baseline is asserted beside it.
+/// The file here carries no `kind`, which is what a baseline saved before that
+/// member existed looks like, so the keys decide and a file with none of this
+/// format's keys is unrecognised. The kind-based reading is pinned by
+/// [`a_baseline_another_command_saved_suppresses_nothing_on_all_three_commands`].
 #[test]
 fn a_dupes_run_says_so_when_the_baseline_is_another_commands() {
     let project = orphan_project(2);
-    let dead_code_baseline = project.path().join("dead-code-baseline.json");
-    let baseline_arg = dead_code_baseline.to_str().expect("utf8");
-    let saved = run(&[
-        "dead-code",
-        "--root",
-        root_arg(&project),
-        "--format",
-        "json",
-        "--quiet",
-        "--save-baseline",
-        baseline_arg,
-    ]);
-    assert!(
-        saved.code == 0 || saved.code == 1,
-        "saving a dead-code baseline should not error: {}",
-        saved.stderr
-    );
+    let legacy_dead_code_baseline = project.path().join("dead-code-baseline.json");
+    let baseline_arg = legacy_dead_code_baseline.to_str().expect("utf8");
+    std::fs::write(
+        &legacy_dead_code_baseline,
+        r#"{"unused_files":["src/orphan0.ts"],"unused_exports":[],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[]}"#,
+    )
+    .expect("legacy dead-code baseline");
 
     let output = run(&[
         "dupes",
@@ -1157,7 +1339,6 @@ fn a_dupes_run_says_so_when_the_baseline_is_another_commands() {
         "--quiet",
         "--baseline",
         baseline_arg,
-        "--fail-on-stale-baseline",
     ]);
     let envelope = parse_json(&output);
     assert_eq!(
@@ -1166,8 +1347,8 @@ fn a_dupes_run_says_so_when_the_baseline_is_another_commands() {
     );
     assert_eq!(
         gate(&envelope, "stale-baseline")["status"],
-        "pass",
-        "a baseline with nothing in it cannot report a stale entry: {envelope}"
+        "fail",
+        "and a file nothing read cannot report a pass: {envelope}"
     );
     assert!(
         output
@@ -1179,32 +1360,22 @@ fn a_dupes_run_says_so_when_the_baseline_is_another_commands() {
     );
     assert_eq!(
         output.code, 0,
-        "a legitimately empty baseline is a real state, so the exit code does \
-         not move: {}",
+        "the verdict is published either way and only the flag fails a run: {}",
         output.stderr
     );
 }
 
+/// The health half of the same kind-less reading.
 #[test]
 fn a_health_run_says_so_when_the_baseline_is_another_commands() {
     let project = cloned_project();
-    let dupes_baseline = project.path().join("dupes-baseline.json");
-    let baseline_arg = dupes_baseline.to_str().expect("utf8");
-    let saved = run(&[
-        "dupes",
-        "--root",
-        root_arg(&project),
-        "--format",
-        "json",
-        "--quiet",
-        "--save-baseline",
-        baseline_arg,
-    ]);
-    assert!(
-        saved.code == 0 || saved.code == 1,
-        "saving a duplication baseline should not error: {}",
-        saved.stderr
-    );
+    let legacy_dupes_baseline = project.path().join("dupes-baseline.json");
+    let baseline_arg = legacy_dupes_baseline.to_str().expect("utf8");
+    std::fs::write(
+        &legacy_dupes_baseline,
+        r#"{"clone_groups":[],"clone_fingerprints":[],"normalized_clone_fingerprints":[]}"#,
+    )
+    .expect("legacy duplication baseline");
 
     let output = run(&[
         "health",

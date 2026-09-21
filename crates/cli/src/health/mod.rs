@@ -796,13 +796,34 @@ fn report_loaded_baseline(result: &HealthResult, baseline_path: Option<&std::pat
     let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
         return;
     };
-    crate::baseline_gate::note_unrecognised_baseline(baseline_path, staleness.unrecognised_format);
+    note_unrecognised_health_baseline(result, baseline_path);
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: "health",
         path: path.display().to_string(),
         baseline_entries: staleness.baseline_entries,
         scope_reasons: staleness.scope_reasons,
     });
+}
+
+/// Say that the loaded baseline is not a health baseline.
+///
+/// Split from [`report_loaded_baseline`] because `fallow audit` needs the note
+/// and must not get the `recheck-baseline` record beside it: the audit envelope
+/// is not health's, so a `fallow health` next step on it would point at the
+/// wrong report. `dupes` and `dead-code` reach their notes through their own
+/// load sites, which audit shares.
+pub fn note_unrecognised_health_baseline(
+    result: &HealthResult,
+    baseline_path: Option<&std::path::Path>,
+) {
+    let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
+        return;
+    };
+    crate::baseline_gate::note_unrecognised_baseline(
+        baseline_path,
+        staleness.unrecognised_format,
+        fallow_engine::baseline::BaselineKind::Health,
+    );
 }
 
 /// Say that `--report-only` suppressed the gate, so a job that passes both
@@ -830,10 +851,8 @@ fn stale_baseline_gate_failed(result: &HealthResult, options: HealthPrintOptions
     let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
         return false;
     };
-    crate::baseline_gate::gate_failed_from_counts(
-        staleness.baseline_entries,
-        staleness.matched_entries,
-        staleness.change_scoped,
+    crate::baseline_gate::gate_failed_from_envelope(
+        staleness,
         options.baseline_path,
         options.gates.fail_on_stale_baseline,
         crate::baseline_gate::HEALTH_NOUN,

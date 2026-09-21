@@ -2049,6 +2049,26 @@ fn baseline_staleness_fixture(
     }
 }
 
+/// A baseline this command could not read as its own: zero entries, so no
+/// advisory, and `gate_trips` from the recognition verdict rather than from the
+/// counts. The fixture is the shape that must NOT move the four snapshots above,
+/// which hardcode `unrecognised_format: false`.
+fn unrecognised_baseline_fixture() -> BaselineStaleness {
+    BaselineStaleness {
+        baseline_entries: 0,
+        matched_entries: 0,
+        stale_entries: 0,
+        current_findings: 6,
+        change_scoped: false,
+        stale: false,
+        warning: BaselineStalenessAdvisory::None,
+        gate_trips: true,
+        moved_entries: 0,
+        unrecognised_format: true,
+        scope_reasons: BaselineScopeReasons::empty(),
+    }
+}
+
 /// One finding rather than the full sample set: these snapshots exist to pin
 /// the status note, and a body carrying every rule would move all four of them
 /// whenever an unrelated message changes.
@@ -2108,6 +2128,24 @@ fn fresh_baseline_pr_comment(provider: Provider) -> String {
         &baseline_staleness_fixture(BaselineStalenessAdvisory::None, 8, false),
         provider,
     )
+}
+
+/// The sticky comment is the surface people read, so a baseline pointed at the
+/// wrong file says so there and not only in the step log (issue #2735).
+#[test]
+fn pr_comment_github_unrecognised_baseline_snapshot() {
+    insta::assert_snapshot!(
+        "pr_comment_github_unrecognised_baseline",
+        baseline_pr_comment(&unrecognised_baseline_fixture(), Provider::Github)
+    );
+}
+
+#[test]
+fn pr_comment_gitlab_unrecognised_baseline_snapshot() {
+    insta::assert_snapshot!(
+        "pr_comment_gitlab_unrecognised_baseline",
+        baseline_pr_comment(&unrecognised_baseline_fixture(), Provider::Gitlab)
+    );
 }
 
 #[test]

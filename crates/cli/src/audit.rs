@@ -3111,7 +3111,15 @@ fn run_audit_health<'a>(
         crate::health::execute_health(&health_opts)
     };
     match health_run {
-        Ok(r) => Ok(Some(r)),
+        Ok(r) => {
+            // The standalone command says this at its own print site, which
+            // audit never reaches, so an audit pointed at another command's
+            // health baseline was the one of its three that stayed silent about
+            // it. The dead-code and duplication notes come from the load sites
+            // audit shares.
+            crate::health::note_unrecognised_health_baseline(&r, opts.health_baseline);
+            Ok(Some(r))
+        }
         Err(code) => Err(code),
     }
 }

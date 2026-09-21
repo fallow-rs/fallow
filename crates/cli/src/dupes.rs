@@ -530,6 +530,12 @@ fn save_duplication_baseline(
         return Ok(());
     };
 
+    if let Some(refusal) = fallow_engine::baseline::refuse_baseline_kind_overwrite(
+        path,
+        fallow_engine::baseline::BaselineKind::Dupes,
+    ) {
+        return Err(emit_error(&refusal, 2, opts.output));
+    }
     let json = serialize_duplication_baseline(report, config, opts.output)?;
     ensure_duplication_baseline_parent(path, opts.output)?;
     if let Err(e) = std::fs::write(path, json) {
@@ -606,7 +612,11 @@ fn apply_duplication_baseline(
         eprintln!("Comparing against duplication baseline: {}", path.display());
         warn_on_duplication_baseline_staleness(staleness, path);
     }
-    crate::baseline_gate::note_unrecognised_baseline(Some(path), unrecognised_format);
+    crate::baseline_gate::note_unrecognised_baseline(
+        Some(path),
+        unrecognised_format,
+        fallow_engine::baseline::BaselineKind::Dupes,
+    );
 
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: "dupes",
@@ -650,7 +660,9 @@ fn duplication_comparison_scope_reasons(
 /// The loaded baseline, and whether the file was written by another command:
 /// every field of this format has a serde default, so a foreign JSON object
 /// loads as zero clone groups and is otherwise indistinguishable from a
-/// baseline saved on a project with no duplication.
+/// baseline saved on a project with no duplication. The file's own `kind`
+/// answers when it carries one, and the keys answer for a baseline saved before
+/// that member existed.
 fn read_duplication_baseline(
     path: &std::path::Path,
     output: OutputFormat,
@@ -669,9 +681,12 @@ fn read_duplication_baseline(
             output,
         )
     })?;
-    let unrecognised_format = !fallow_engine::baseline::declares_baseline_format(
-        &json,
-        DuplicationBaselineData::DECLARED_KEYS,
+    let unrecognised_format = !matches!(
+        fallow_engine::baseline::classify_baseline_file(
+            &json,
+            fallow_engine::baseline::BaselineKind::Dupes
+        ),
+        fallow_engine::baseline::BaselineFileKind::Own
     );
     Ok((data, unrecognised_format))
 }

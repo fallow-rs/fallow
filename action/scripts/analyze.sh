@@ -784,12 +784,21 @@ BASELINE_STALENESS_JQ='.baseline_staleness // .summary.baseline_staleness // .ch
 
 # Read one member of the staleness object from an envelope file. Prints nothing
 # when the object or the member is absent.
+#
+# `section` selects which staleness object to read: empty for the single-analysis
+# commands, whose object the `//` chain finds, or one section prefix for `audit`,
+# which carries up to three and whose first-match chain would report one of them
+# under every label.
 read_staleness_field() {
-  local file=$1 field=$2
+  local file=$1 field=$2 section=${3:-}
+  local selector="${BASELINE_STALENESS_JQ}"
+  if [ -n "$section" ]; then
+    selector="${section}.baseline_staleness // empty"
+  fi
   # `// empty` cannot be used here: jq treats `false` as absent, which would
   # silently blank `change_scoped: false` and `gate_trips: false`.
   jq -r --arg field "$field" \
-    "(${BASELINE_STALENESS_JQ}) | if has(\$field) then .[\$field] else empty end" \
+    "(${selector}) | if has(\$field) then .[\$field] else empty end" \
     "$file" 2>/dev/null || true
 }
 
@@ -1025,7 +1034,7 @@ fi
 # is silent unless the gate flag was passed. The unreachable-combination check
 # at input validation already rejects `command: audit` with the gate.
 audit_baseline_notices() {
-  local file=$1 row label command input entries unrecognised path
+  local file=$1 row label command input section entries unrecognised path
   # label:jq-prefix:command:input-variable. The label names the envelope
   # section a reader goes looking in; the command is what they have to run, and
   # the two differ:
@@ -1037,14 +1046,18 @@ audit_baseline_notices() {
     'complexity:.complexity.summary:health:INPUT_HEALTH_BASELINE'
   do
     label=${row%%:*}
+    section=$(printf '%s' "$row" | cut -d: -f2)
     command=$(printf '%s' "$row" | cut -d: -f3)
     input=${row##*:}
-    entries=$(jq -r "($(printf '%s' "$row" | cut -d: -f2).baseline_staleness // empty) | .baseline_entries // empty" "$file" 2>/dev/null || true)
+    # Through the shared reader, which guards with `has`: the inline `// empty`
+    # this loop used blanked a literal `false`, so a section reporting
+    # `unrecognised_format: false` read the same as one that reported nothing.
+    entries=$(read_staleness_field "$file" baseline_entries "$section")
     # Absent means that baseline was never loaded, which is not worth a line.
     if [ -z "$entries" ]; then
       continue
     fi
-    unrecognised=$(jq -r "($(printf '%s' "$row" | cut -d: -f2).baseline_staleness // empty) | .unrecognised_format // empty" "$file" 2>/dev/null || true)
+    unrecognised=$(read_staleness_field "$file" unrecognised_format "$section")
     # Audit resolves all three from project config as well as from inputs, so
     # there is not always a path to echo back.
     path=$(eval "printf '%s' \"\${${input}:-}\"")
@@ -1068,33 +1081,33 @@ if [ "$INPUT_COMMAND" = "audit" ]; then
   audit_baseline_notices "$RESULTS_FILE"
 fi
 
-# A baseline written by another command suppresses nothing, so every verdict
-# below reads green honestly and says nothing at all: the advisory is silent
-# because there was nothing to judge, and the gate passes because no entry went
-# unmatched. A repository that pointed `baseline` at the wrong file would
-# otherwise gate on it forever. Sits beside the branches below rather than
-# inside them, because such a run falls through the advisory `case` to its
-# silent arm. Distinct from the `-z` branch above, which means the run reported
-# no staleness at all.
+# A baseline written by another command suppresses nothing, so the counts below
+# are all zero and read exactly like a baseline saved on a project that had
+# nothing to record. A repository that pointed `baseline` at the wrong file
+# would otherwise gate on it forever. Distinct from the `-z` branch above, which
+# means the run reported no staleness at all.
+#
+# Ahead of the advisory rather than beside it: the binary now trips the gate on
+# such a file, so the `*)` arm below would add "0 of 0 baseline entries matched
+# nothing this run" next to the line that says what is actually wrong.
 #
 # Keyed on the binary's own verdict rather than on a zero entry count, which a
 # baseline saved on a green main with nothing to record carries too: warning on
 # every run about a correctly saved baseline is noise the repository cannot turn
 # off. Not gated on the `baseline` input either, so a baseline passed through
 # `args` earns the same line; the path is named only when this script knows it.
+#
+# The advisory and the gate answer different questions and legitimately
+# disagree, so warn on either. A rotted baseline on a project with nothing left
+# to report is `warning: none` with `gate_trips: true`, and that is exactly the
+# case issue #2673 was filed about.
 if [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
   if [ -n "${INPUT_BASELINE:-}" ]; then
     echo "::warning::fallow: the baseline at ${INPUT_BASELINE} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
   else
     echo "::warning::fallow: the loaded baseline has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
   fi
-fi
-
-# The advisory and the gate answer different questions and legitimately
-# disagree, so warn on either. A rotted baseline on a project with nothing left
-# to report is `warning: none` with `gate_trips: true`, and that is exactly the
-# case issue #2673 was filed about.
-if [ -n "$BASELINE_ENTRIES" ]; then
+elif [ -n "$BASELINE_ENTRIES" ]; then
   case "$BASELINE_ADVISORY" in
     partial)
       echo "::warning::fallow: baseline is partially stale: ${BASELINE_STALE_ENTRIES} of ${BASELINE_ENTRIES} entries matched nothing this run, so it protects less than what was saved. Re-save it with the save-baseline input."
@@ -1294,6 +1307,13 @@ record_gate_failure() {
   # are user-facing strings a repository may already match on.
   case "$gate" in
     stale-baseline)
+      # The gate also trips on a file this command cannot read as its own, whose
+      # counts are all zero: re-saving is not the remedy there, and "0 of 0
+      # entries matched nothing" names nothing the reader can act on.
+      if [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
+        GATE_FAILURES+=("Fallow baseline gate failed: the baseline ${INPUT_BASELINE:-passed to this run} has no entries this command recognises, so it suppresses nothing. Point the baseline input at this command's own baseline, or set fail-on-stale-baseline: false.")
+        return
+      fi
       GATE_FAILURES+=("Fallow baseline gate failed: ${BASELINE_STALE_ENTRIES} of ${BASELINE_ENTRIES} entries in ${INPUT_BASELINE} matched nothing this run. Re-save the baseline, or set fail-on-stale-baseline: false.")
       return
       ;;
@@ -1629,6 +1649,7 @@ fi
     "baseline_change_scoped=${BASELINE_CHANGE_SCOPED}" \
     "baseline_scope_reasons=${BASELINE_SCOPE_REASONS}" \
     "baseline_unrecognised=${BASELINE_UNRECOGNISED}" \
+    "baseline_path=${INPUT_BASELINE:-}" \
     "baseline_gate_trips=${BASELINE_GATE_TRIPS}" \
     "gates_failed=$(join_gate_names "${GATE_FAILED_NAMES[@]:-}")" \
     "gates_warned=$(join_gate_names "${GATE_WARNED_NAMES[@]:-}")" \

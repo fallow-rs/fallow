@@ -237,11 +237,18 @@ fn baseline_warning(
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        return Some(format!(
+        let mut message = format!(
             "Baseline staleness: {subject} has no entries this command recognises. It may be a \
              baseline saved by another command, or an empty file. Either way it suppresses \
              nothing."
-        ));
+        );
+        // The gate rule holds on such a file, so the clause belongs here too:
+        // without it an agent reads a sentence about a harmless empty file while
+        // the same run would fail a repository that armed the gate.
+        if gate_trips {
+            message.push_str(" --fail-on-stale-baseline fails a run in this state.");
+        }
+        return Some(message);
     }
     if advisory == "none" && !gate_trips {
         return unjudged_baseline_warning(staleness, &subject, &total, baseline_entries);
@@ -702,6 +709,25 @@ mod tests {
             "Baseline staleness: the loaded baseline has no entries this command recognises. It \
              may be a baseline saved by another command, or an empty file. Either way it \
              suppresses nothing."
+        );
+    }
+
+    /// The gate rule holds on such a file, so the sentence carries the clause the
+    /// count sentences carry. Without it an agent reads about a harmless empty
+    /// file while the same run fails a repository that armed the gate.
+    #[test]
+    fn a_baseline_with_no_recognised_entries_says_the_gate_fails_on_it() {
+        let mut unrecognised = staleness("none", 0, 0, true);
+        unrecognised["unrecognised_format"] = serde_json::json!(true);
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dupes",
+            "baseline_staleness": unrecognised,
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].ends_with(" --fail-on-stale-baseline fails a run in this state."),
+            "{warnings:?}"
         );
     }
 

@@ -22,6 +22,23 @@ pub(super) struct HealthBaselineSaveInput<'a> {
     pub(super) mode_explicit: bool,
 }
 
+/// Refuse a save aimed at a baseline another command wrote, which this save
+/// would overwrite with a health baseline and destroy.
+///
+/// Checked before [`check_identity_overwrite`], which reads the same file
+/// through `HealthBaselineData` and swallows a parse failure: a foreign file
+/// that happens to parse carries no identity buckets, so that guard would let
+/// this save through.
+fn check_kind_overwrite(save_path: &std::path::Path) -> Result<(), HealthError> {
+    match crate::baseline::refuse_baseline_kind_overwrite(
+        save_path,
+        crate::baseline::BaselineKind::Health,
+    ) {
+        Some(refusal) => Err(HealthError::message(refusal, 2)),
+        None => Ok(()),
+    }
+}
+
 /// Refuse a defaulted count save over a baseline that carries identity
 /// buckets: the count save would silently drop them, and the loss only
 /// surfaces later, when an identity-mode comparison on another machine
@@ -70,6 +87,7 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
         mode,
         mode_explicit,
     } = *input;
+    check_kind_overwrite(save_path)?;
     check_identity_overwrite(save_path, mode, mode_explicit)?;
     let baseline = HealthBaselineData::from_findings(
         findings,
@@ -134,7 +152,18 @@ pub(super) fn load_health_baseline(
         .map_err(|e| HealthError::message(format!("failed to read health baseline: {e}"), 2))?;
     let baseline: HealthBaselineData = serde_json::from_str(&json)
         .map_err(|e| HealthError::message(format!("failed to parse health baseline: {e}"), 2))?;
-    if mode == HealthBaselineMode::Identity && baseline.lacks_identity_data() {
+    // A file this command did not write carries no identity buckets either, so
+    // without this the identity mode would reject another command's baseline
+    // with advice to re-save it in identity mode, instead of saying it is not a
+    // health baseline at all.
+    let unrecognised_format = !matches!(
+        crate::baseline::classify_baseline_file(&json, crate::baseline::BaselineKind::Health),
+        crate::baseline::BaselineFileKind::Own
+    );
+    if !unrecognised_format
+        && mode == HealthBaselineMode::Identity
+        && baseline.lacks_identity_data()
+    {
         return Err(HealthError::message(
             format!(
                 "health baseline {} carries no finding identities, so --baseline-mode identity \
@@ -161,10 +190,7 @@ pub(super) fn load_health_baseline(
         matched_entries: overlap.matched_entries,
         moved_entries: overlap.moved_entries,
         current_findings: before,
-        unrecognised_format: !crate::baseline::declares_baseline_format(
-            &json,
-            HealthBaselineData::DECLARED_KEYS,
-        ),
+        unrecognised_format,
         scope_reasons,
     };
     let staleness = staleness_from_counts(&counts);
@@ -230,8 +256,9 @@ struct StalenessCounts {
     /// found nothing to compare, either because the project is clean or the
     /// scope was empty, so staleness cannot be judged and `stale` stays false.
     current_findings: usize,
-    /// True when the file carried no key the health baseline format writes, so
-    /// it is another command's baseline rather than an empty health one.
+    /// True when the file is another command's baseline rather than an empty
+    /// health one: it names another command, or it names none and carries no key
+    /// the health format writes.
     unrecognised_format: bool,
     /// Which channels narrowed this run. `change_scoped` is derived from it, so
     /// the boolean and the published array cannot disagree.

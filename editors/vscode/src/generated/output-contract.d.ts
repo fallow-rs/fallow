@@ -5398,13 +5398,21 @@ change_scoped: boolean
 stale: boolean
 warning: BaselineStalenessAdvisory
 /**
- * True exactly when
- * `!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`,
- * which is the rule `--fail-on-stale-baseline` applies. Deliberately
- * stricter than `stale`: any unmatched entry counts. It describes the
- * baseline, not the run's exit code: `health --report-only` is an explicit
- * request never to fail, so that run exits 0 and says so on stderr while
- * still reporting `gate_trips: true` here.
+ * True exactly when `unrecognised_format` is true, or
+ * `!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`.
+ * That is the rule `--fail-on-stale-baseline` applies. Deliberately
+ * stricter than `stale`: any unmatched entry counts, and so does a file
+ * this command could not read as its own, which protects nothing at all.
+ * The second half is suppressed by `change_scoped` and the first is not:
+ * which command wrote a file does not depend on how much of the project
+ * the run looked at.
+ *
+ * It describes the baseline, not the run's exit code: `health
+ * --report-only` is an explicit request never to fail, so that run exits 0
+ * and says so on stderr while still reporting `gate_trips: true` here, and
+ * `fallow audit` never judges a baseline at all, so its
+ * `gate_outcomes["stale-baseline"]` stands down beside a section that
+ * reports `true`.
  */
 gate_trips: boolean
 /**
@@ -5415,17 +5423,18 @@ gate_trips: boolean
  */
 moved_entries: number
 /**
- * True when the loaded file carries no key this command's own baseline
- * format writes, so it is a baseline another command saved or an object
- * with nothing of this command's in it. Read this, not
+ * True when the loaded file is not a baseline of the command that read it:
+ * it names another command in its top-level `kind`, or it names none and
+ * carries no key this command's own format writes. Read this, not
  * `baseline_entries == 0`, before telling anyone their baseline is the
  * wrong file: a baseline saved from a project that had nothing to record
  * is legitimately empty and is not a mistake.
  *
  * Present only when true, so an envelope from a run that loaded its own
- * baseline is unchanged. `dead-code` never sets it: five of its baseline
- * fields have no serde default, so a file that is not one fails to load
- * with exit 2 long before this.
+ * baseline is unchanged. All three commands set it, including `dead-code`,
+ * which classifies the file before its required fields could reject it.
+ * A file with no `kind` is the reading a baseline saved before that member
+ * existed gets, which is why the keys remain the fallback.
  */
 unrecognised_format?: boolean
 /**
