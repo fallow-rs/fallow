@@ -539,12 +539,16 @@ fn federation_key_declarations<'a>(
             declarations.push(KeyDeclaration::Mapping(mapping));
             continue;
         }
-        let targets = config_parser::expression_to_string_or_array(expr);
-        if targets.is_empty() {
+        // A bundler reads an element as one module request. A glob and a nested
+        // array are neither a request nor a mapping, so each one is unread
+        // rather than a literal path.
+        let target = config_parser::expression_to_string(expr)
+            .filter(|target| !super::has_glob_syntax(target));
+        let Some(target) = target else {
             has_unread_element = true;
             continue;
-        }
-        declarations.extend(targets.into_iter().map(KeyDeclaration::Target));
+        };
+        declarations.push(KeyDeclaration::Target(target));
     }
     if has_unread_element {
         push_unique(
@@ -962,6 +966,26 @@ mod tests {
         assert!(declarations.is_empty(), "got {declarations:?}");
     }
 
+    /// A bundler reads an `exposes` element as one module request. An element
+    /// that holds glob syntax, a nested array or a non-string value is not a
+    /// request, so the advisory names the key instead of a literal path.
+    #[test]
+    fn exposes_array_elements_that_are_not_a_request_are_reported() {
+        for source in [
+            r"export default { exposes: ['./src/*.tsx'] };",
+            r"export default { exposes: [['./src/Button.tsx']] };",
+            r"export default { exposes: [42] };",
+        ] {
+            let (config, declarations) = standalone(source);
+            assert_eq!(config, FederationConfig::default(), "source: {source}");
+            assert_eq!(
+                declarations,
+                unread(FederationKey::Exposes, UnreadReason::Entries),
+                "source: {source}"
+            );
+        }
+    }
+
     #[test]
     fn exposes_array_element_without_a_readable_target_is_reported() {
         let (config, declarations) = standalone(
@@ -1283,18 +1307,101 @@ mod tests {
         assert!(computed.is_empty(), "got {computed:?}");
     }
 
-    /// One options object read through two positions stays one declaration.
+    /// Two calls at two positions that share one options `const` register one
+    /// target.
     #[test]
-    fn the_same_call_read_twice_registers_one_target() {
+    fn two_calls_that_share_one_options_const_register_one_target() {
         let (config, _) = bundler(
             r"
-            const federationPlugin = new ModuleFederationPlugin({
-                exposes: { './Button': './src/Button.tsx' },
-            });
-            module.exports = { plugins: [federationPlugin, federationPlugin] };
+            const mfConfig = { exposes: { './Button': './src/Button.tsx' } };
+            module.exports = {
+                plugins: [new ModuleFederationPlugin(mfConfig)],
+                webpack(config) {
+                    config.plugins.push(new ModuleFederationPlugin(mfConfig));
+                    return config;
+                },
+            };
             ",
         );
         assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
+    }
+
+    /// A `const` inside the `webpack(config)` hook shadows the top-level `const`
+    /// of the same name, so the top-level object is not the object at the call.
+    #[test]
+    fn a_shadowed_options_name_is_not_read() {
+        let (config, computed) = bundler(
+            r"
+            const mfConfig = { exposes: { './Top': './src/Top.tsx' } };
+            module.exports = {
+                webpack(config) {
+                    const mfConfig = { exposes: { './Hook': './src/Hook.tsx' } };
+                    config.plugins.push(new ModuleFederationPlugin(mfConfig));
+                    return config;
+                },
+            };
+            ",
+        );
+        assert_eq!(config, FederationConfig::default());
+        assert!(computed.is_empty(), "got {computed:?}");
+    }
+
+    /// A parameter that carries the options is a different binding than the
+    /// top-level `const` of the same name.
+    #[test]
+    fn an_options_parameter_is_not_read() {
+        let (config, computed) = bundler(
+            r"
+            const options = { exposes: { './Top': './src/Top.tsx' } };
+            function make(options) {
+                return new ModuleFederationPlugin(options);
+            }
+            module.exports = { plugins: [make(buildOptions())] };
+            ",
+        );
+        assert_eq!(config, FederationConfig::default());
+        assert!(computed.is_empty(), "got {computed:?}");
+    }
+
+    /// A binding that the config writes to does not hold its initializer at the
+    /// call, so a reassignment and a member write both stop the read.
+    #[test]
+    fn options_that_the_config_writes_to_are_not_read() {
+        for source in [
+            r"
+            let mfConfig = { exposes: { './A': './src/A.tsx' } };
+            mfConfig = buildConfig();
+            module.exports = { plugins: [new ModuleFederationPlugin(mfConfig)] };
+            ",
+            r"
+            const mfConfig = { exposes: { './Old': './src/Old.tsx' } };
+            delete mfConfig.exposes['./Old'];
+            module.exports = { plugins: [new ModuleFederationPlugin(mfConfig)] };
+            ",
+            r"
+            const mfConfig = { exposes: { './A': './src/A.tsx' } };
+            mfConfig.exposes['./B'] = './src/B.tsx';
+            module.exports = { plugins: [new ModuleFederationPlugin(mfConfig)] };
+            ",
+        ] {
+            let (config, computed) = bundler(source);
+            assert_eq!(config, FederationConfig::default(), "source: {source}");
+            assert!(computed.is_empty(), "source: {source}");
+        }
+    }
+
+    /// A `var` is function scoped and hoisted, so its initializer is not the
+    /// value at the call.
+    #[test]
+    fn options_bound_by_var_are_not_read() {
+        let (config, computed) = bundler(
+            r"
+            var mfConfig = { exposes: { './Button': './src/Button.tsx' } };
+            module.exports = { plugins: [new ModuleFederationPlugin(mfConfig)] };
+            ",
+        );
+        assert_eq!(config, FederationConfig::default());
+        assert!(computed.is_empty(), "got {computed:?}");
     }
 
     /// The callee name alone never activates the reader. A widened search must

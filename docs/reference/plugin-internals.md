@@ -86,19 +86,28 @@ Federation plugin call inside a webpack, rspack, rsbuild, vite or `next.config.*
 file. A call is found wherever it sits in the config program, because a plugin
 list is a nested array, a variable, a tool-specific key such as
 `tools.rspack.plugins`, or a hook body such as the Next.js `webpack(config)`
-hook as often as it is a literal array. The walk runs over the config AST the
-plugin already parsed, so no file is parsed twice.
+hook as often as it is a literal array. The walk runs over the AST that the
+plugin's `read` already parsed, so the reader adds no parse of its own.
 
 Position must never be the accept gate. A call is read only when the callee name
 is a known Federation plugin AND the first argument is an object that declares
 `exposes` or `remotes`. Without the shape gate a library that exports a
 same-named function would seed entry points in a project that does not use
-Module Federation. An argument that only names a top-level `const` in the same
-file resolves through the config parser, because that is the common real shape.
+Module Federation. An argument that only names a `const` resolves through the
+config parser, because that is the common real shape. The parser resolves the
+name only when the program holds one binding of it, as a top-level `const` or
+`let` with an object literal, and no expression writes to the binding or to one
+of its members. A name that a hook body or a parameter declares again, and a
+binding that a later statement reassigns or mutates, name another object at the
+call, so the resolver declines. A declined argument is silent, as any other
+unreadable first argument is.
 
 The array form of `exposes` is read. A bundler uses a string element both as the
 public name and as the module request, and an object element goes through the
-same mapping reader as the object form. The array form of `remotes` stays
+same mapping reader as the object form. An element that holds glob syntax, a
+nested array or a value that is not a string joins the `unreadable-entries`
+advisory, because a bundler resolves one element as one request. The array form
+of `remotes` stays
 unread: a bundler derives the request scope of an element from the whole
 container location, so the alias is not a bare specifier a provider rule can
 cover, and splitting the element on `@` would provide a specifier the bundler
