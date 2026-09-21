@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789993534683,
+  "lastUpdate": 1790028145212,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "fa40ef0946a90523ba1a7eb1366db0166b9cdd2d",
-          "message": "fix(mcp): bound the Code Mode call trace\n\nMemoization gave a snippet a way to grow the response without limit. A memo\nhit spends no max_host_calls slot and no output budget, by design, but it\nstill appended an entry to calls[], and nothing bounded that array. A loop of\n5000 identical cached calls produced a 430 KB response carrying a four-byte\nresult, with every documented limit reporting as respected, which reads as\ncompliant and is worse for it. Before memoization the same loop stopped at\neight entries because the budget was derived from calls[] length, so this\narrived with the memo cache rather than preceding it.\n\ncalls[] now stops at max_recorded_calls entries, reported in limits. Past the\nbound the host calls still run and still return, so bounding the trace never\nchanges what the snippet sees; only the trace entries are dropped, and the\nadditive calls_omitted field reports how many. It is absent when nothing was\ndropped, so an ordinary response keeps the shape its consumers already parse.\nThe same loop now returns 5836 bytes with 64 entries and calls_omitted 4936,\nasserted by test rather than left to inspection.\n\ndocs/reference/mcp-internals.md said the rejection budget was what kept a\nsnippet from growing calls[] without limit. It never did, for memo hits.\nCorrected, with the trace bound documented alongside it.",
-          "timestamp": "2026-09-01T12:24:58+02:00",
-          "tree_id": "429de7eea2934d4379bf30827f2ef0c77f2e158f",
-          "url": "https://github.com/fallow-rs/fallow/commit/fa40ef0946a90523ba1a7eb1366db0166b9cdd2d"
-        },
-        "date": 1788258870386,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d4264c27859c6b307fbebd269c969c0b107984ee"
         },
         "date": 1789993530458,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4cec981c7cafc6d6d6f87127011c58b021fc23e0",
+          "message": "docs(release): let the preflight name repository secrets instead of blocking on them (#2747)\n\nGitHub never returns a secret value, so a publication secret can move into the release environment only when its value is entered again, in practice at its next rotation. The preflight now passes with a note that names each secret still at repository level as unprotected by the environment, and fails on a secret that exists at both levels or at neither.",
+          "timestamp": "2026-09-21T23:45:25+02:00",
+          "tree_id": "d4eb00354d3b74eec4d55af981d273adedf965c5",
+          "url": "https://github.com/fallow-rs/fallow/commit/4cec981c7cafc6d6d6f87127011c58b021fc23e0"
+        },
+        "date": 1790028141486,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
