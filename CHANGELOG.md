@@ -61,14 +61,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and its subpaths count as provided by the remote container, which stops
   `import('checkout/Button')` from being reported as an unlisted dependency.
   That holds only under the directory of the config that declared the alias.
-  Both keys are read from `module-federation.config.{ts,js,mjs,cjs,mts,cts}`
-  and from inline plugin options in webpack, rspack, rsbuild and vite configs.
-  Exposed files follow `includeEntryExports` like any other entry point. A
-  value fallow cannot read statically (a non-literal object, a spread, the
-  array form, a non-string target) is named on stderr together with the config
-  key that covers the gap. Not read yet: `shared`, runtime `registerRemotes`
-  and `loadRemote` calls, and Federation options registered outside the
-  top-level `plugins` array, such as a Next.js `webpack(config)` hook
+  Exposed files follow `includeEntryExports` like any other entry point.
+
+  Both keys are read from `module-federation.config.{ts,js,mjs,cjs,mts,cts}` and
+  from a Federation plugin call in a webpack, rspack, rsbuild, vite or
+  `next.config.*` file, wherever that call sits: a nested plugin array, a plugin
+  list a variable holds, a key such as `tools.rspack.plugins`, or a Next.js
+  `webpack(config)` hook. Options a `const` in the same file holds are read, and
+  so is the array form of `exposes`. A value fallow cannot read statically is
+  reported with the config key that covers the gap. Not read yet: `shared`,
+  runtime `registerRemotes` and `loadRemote` calls, and the array form of
+  `remotes`, whose alias a bundler derives from the whole container location
   ([#2698](https://github.com/fallow-rs/fallow/issues/2698)).
 
 - **A run now says on the wire when it widened, measured an empty scope, or

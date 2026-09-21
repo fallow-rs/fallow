@@ -79,6 +79,33 @@ registry's empty-result gate. The reason token is a kebab-case string from an
 open set, and the sentence is composed once in `fallow-types` from the plugin,
 the key and that token, so a plugin contributes no prose.
 
+## Reading Module Federation options
+
+One reader serves the standalone `module-federation.config.*` file and the
+Federation plugin call inside a webpack, rspack, rsbuild, vite or `next.config.*`
+file. A call is found wherever it sits in the config program, because a plugin
+list is a nested array, a variable, a tool-specific key such as
+`tools.rspack.plugins`, or a hook body such as the Next.js `webpack(config)`
+hook as often as it is a literal array. The walk runs over the config AST the
+plugin already parsed, so no file is parsed twice.
+
+Position must never be the accept gate. A call is read only when the callee name
+is a known Federation plugin AND the first argument is an object that declares
+`exposes` or `remotes`. Without the shape gate a library that exports a
+same-named function would seed entry points in a project that does not use
+Module Federation. An argument that only names a top-level `const` in the same
+file resolves through the config parser, because that is the common real shape.
+
+The array form of `exposes` is read. A bundler uses a string element both as the
+public name and as the module request, and an object element goes through the
+same mapping reader as the object form. The array form of `remotes` stays
+unread: a bundler derives the request scope of an element from the whole
+container location, so the alias is not a bare specifier a provider rule can
+cover, and splitting the element on `@` would provide a specifier the bundler
+does not route to the remote. That declaration keeps its `array-form` advisory.
+
+Also unread: `shared`, and the runtime `registerRemotes` and `loadRemote` calls.
+
 ## Config paths read from a nested config
 
 A path read out of a config file resolves against that file's directory unless
