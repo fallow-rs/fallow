@@ -315,12 +315,13 @@ fn named_imports_from_nuxt_virtual_modules_credit_their_convention_files() {
     for reachable in [
         "app/components/UsedCard.vue",
         "app/components/DialogCard.vue",
+        "app/components/PanelCard.vue",
         "app/composables/useUsed.ts",
     ] {
         assert!(
             !unused.contains(&reachable.to_string()),
-            "{reachable} is named in an import from #components or #imports and \
-             must be credited, got: {unused:?}"
+            "{reachable} is named in an import or re-export from #components or \
+             #imports and must be credited, got: {unused:?}"
         );
     }
 
@@ -344,6 +345,7 @@ fn flag_off_keeps_virtual_module_import_siblings_alive() {
     for kept in [
         "app/components/UsedCard.vue",
         "app/components/DialogCard.vue",
+        "app/components/PanelCard.vue",
         "app/components/DeadCard.vue",
         "app/composables/useUsed.ts",
         "app/composables/useDead.ts",

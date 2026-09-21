@@ -54,19 +54,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Nuxt `autoImports` reads the `global/` and `islands/` component
-  directories, computed config keys, and one config per workspace root.** A
-  component under `components/global/` or `components/islands/` is named after
-  its own directory, so `components/global/Foo.vue` is `<Foo>` and keeps its
-  credit. A `nuxt.config` that carries any top-level key fallow cannot read
-  statically, a computed key, an accessor or a spread such as
-  `{ ...base, devtools: {} }`, keeps the convention entry patterns for both
-  components and composables. In a monorepo each workspace root is classified on
-  its own, so one custom config no longer switches the flag off for every app,
-  and `components: true`, `imports: {}` and `imports: { dirs: [] }` count as the
-  Nuxt defaults. A name imported by hand from `#components` or `#imports` now
-  credits its convention file, the credit a template tag and a bare call already
-  earned. Exit codes are unchanged
+- **Nuxt `autoImports` covers the `global/` and `islands/` component
+  directories, a config key it cannot read statically, and one config per
+  workspace root.** A component under `components/global/` or
+  `components/islands/` is named after its own directory, so
+  `components/global/Foo.vue` is `<Foo>` and keeps its credit. A `nuxt.config`
+  whose top level carries a spread, a computed key or an accessor keeps the
+  convention entry patterns for that root, and a name imported or re-exported
+  from `#components` or `#imports` credits its convention file the way a
+  template tag already does.
+
+  In a monorepo each workspace root is classified on its own, so one custom
+  config no longer switches the flag off for every app. `components: true`,
+  `imports: {}` and `imports: { dirs: [] }` count as the Nuxt defaults, and
+  `#layers/<name>/` resolves into the root `layers/` tree. Exit codes are
+  unchanged
   (Closes [#2737](https://github.com/fallow-rs/fallow/issues/2737)).
 
 - **A package named in a bundler `entry` is credited as a dependency instead of

@@ -627,20 +627,32 @@ fn synthesize_auto_import_edges(
 /// already credit (issue #2737).
 const AUTO_IMPORT_VIRTUAL_MODULES: &[&str] = &["#components", "#imports"];
 
-/// The names a module imports by name from an auto-import virtual module.
+/// The names a module takes by name from an auto-import virtual module, whether
+/// it imports them or re-exports them.
+///
+/// A star re-export and a namespace import name nothing, so neither credits a
+/// convention file.
 fn virtual_auto_import_names(module: &ModuleInfo) -> Vec<&str> {
-    module
+    let imported = module
         .imports
         .iter()
-        .filter(|import| {
-            import.source.starts_with('#')
-                && AUTO_IMPORT_VIRTUAL_MODULES.contains(&import.source.as_str())
-        })
+        .filter(|import| is_auto_import_virtual_module(&import.source))
         .filter_map(|import| match &import.imported_name {
             ImportedName::Named(name) => Some(name.as_str()),
             _ => None,
-        })
-        .collect()
+        });
+    let re_exported = module
+        .re_exports
+        .iter()
+        .filter(|re_export| is_auto_import_virtual_module(&re_export.source))
+        .map(|re_export| re_export.imported_name.as_str())
+        .filter(|name| *name != "*");
+    imported.chain(re_exported).collect()
+}
+
+/// Whether a specifier names one of the framework's auto-import modules.
+fn is_auto_import_virtual_module(source: &str) -> bool {
+    source.starts_with('#') && AUTO_IMPORT_VIRTUAL_MODULES.contains(&source)
 }
 
 /// Add the synthetic edges one referenced name earns from the auto-import table.
