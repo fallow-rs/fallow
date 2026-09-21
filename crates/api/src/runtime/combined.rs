@@ -496,6 +496,10 @@ fn combined_next_steps(
         has_external_plugins: !fallow_config::discover_external_plugins(root, &[]).is_empty(),
         has_unused_files: dead_code
             .is_some_and(|dead_code| !dead_code.output.results.unused_files.is_empty()),
+        // The programmatic runtime has no process-wide record of a loaded
+        // baseline to read, and its caller passes the paths itself, so there is
+        // nothing to point a re-check at here.
+        baseline_recheck: None,
     })
 }
 

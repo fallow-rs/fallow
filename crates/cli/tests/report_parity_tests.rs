@@ -960,3 +960,58 @@ fn impact_rerun_is_byte_identical() {
     let args = analysis_args(Some("impact"), root, "json", &[]);
     assert_rerun_is_byte_identical(root, &args, env, "impact");
 }
+
+/// The combined comment is the one surface `fallow report --from` does not
+/// reproduce, and the exclusion above is easy to read as an oversight. Naming the
+/// divergence pins it: the combined renderer carries a multi-gate presentation
+/// the generic saved renderer has no input for, so a combined body is produced by
+/// the direct run and reproduced by `report --from` only for the machine formats.
+///
+/// A repository that needs a combined comment rendered from a saved envelope runs
+/// `fallow report --from` and gets the generic body, which is a documented
+/// difference rather than a parity failure (issue #2735).
+#[test]
+fn a_combined_comment_diverges_from_the_saved_render_by_design() {
+    let root = workspace_fixture("tests/fixtures/basic-project");
+    let json = run(&root, &analysis_args(None, &root, "json", &[]));
+    assert!(
+        matches!(json.status.code(), Some(0 | 1)),
+        "combined analysis failed: {}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let saved_dir = tempfile::tempdir().expect("saved report tempdir");
+    let saved_path = saved_dir.path().join("results.json");
+    std::fs::write(&saved_path, &json.stdout).expect("write saved report");
+
+    for format in ["pr-comment-github", "pr-comment-gitlab"] {
+        let direct = run(&root, &analysis_args(None, &root, format, &[]));
+        let saved = run(
+            &root,
+            &[
+                "report".to_string(),
+                "--from".to_string(),
+                saved_path.display().to_string(),
+                "--root".to_string(),
+                root.display().to_string(),
+                "--quiet".to_string(),
+                "--format".to_string(),
+                format.to_string(),
+            ],
+        );
+        assert!(
+            saved.status.success(),
+            "saved {format} failed: {}",
+            String::from_utf8_lossy(&saved.stderr)
+        );
+        assert!(
+            matches!(direct.status.code(), Some(0 | 1)),
+            "direct {format} failed: {}",
+            String::from_utf8_lossy(&direct.stderr)
+        );
+        assert_ne!(
+            saved.stdout, direct.stdout,
+            "if a combined {format} ever matches its saved render, add it to the parity list \
+             above instead of leaving this test to assert a difference that no longer exists"
+        );
+    }
+}

@@ -1310,6 +1310,55 @@ fn a_narrowed_run_with_no_findings_still_points_at_the_unscoped_recheck() {
     );
 }
 
+/// The bare combined run baselines its dead-code sub-pass, so a narrowed one
+/// loads a baseline it cannot judge and has to point at the run that can. It was
+/// the only shape of the four that did not (issue #2735).
+#[test]
+fn a_narrowed_combined_run_points_at_the_unscoped_recheck() {
+    let project = orphan_project(2);
+    let baseline = project.path().join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf8");
+    save_baseline("dead-code", &project, &baseline);
+
+    // The positional path narrows the run to the entry point, which the baseline
+    // never recorded, so nothing matches and neither the advisory nor the gate
+    // can speak.
+    let args = [
+        "src/index.ts",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        baseline_arg,
+    ];
+    let envelope = parse_json(&run(&args));
+    let steps = envelope["next_steps"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a narrowed combined run offers a pointer: {envelope}"));
+    let recheck = steps
+        .iter()
+        .find(|step| step["id"] == "recheck-baseline")
+        .unwrap_or_else(|| panic!("expected a recheck-baseline entry, got {envelope}"));
+    let command = recheck["command"].as_str().expect("command is a string");
+    assert!(
+        command.starts_with("fallow dead-code --baseline "),
+        "combined baselines its dead-code sub-pass, so the pointer names that command: {command}"
+    );
+
+    // The step's command carries `--baseline` and nothing else, so with the diff
+    // exported it would come back just as narrow and offer itself again.
+    let with_diff = parse_json(&run_with_env(&args, &[("FALLOW_DIFF_FILE", baseline_arg)]));
+    let suppressed = with_diff["next_steps"]
+        .as_array()
+        .is_none_or(|steps| !steps.iter().any(|step| step["id"] == "recheck-baseline"));
+    assert!(
+        suppressed,
+        "a diff that survives the printed command must suppress the step: {with_diff}"
+    );
+}
+
 /// A baseline with no entries this command recognises suppresses nothing, so the
 /// run says so and the gate rule holds: a repository that pointed `--baseline`
 /// at a baseline another command saved, or at an empty file, would otherwise

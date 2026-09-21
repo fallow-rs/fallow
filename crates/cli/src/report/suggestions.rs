@@ -250,6 +250,11 @@ pub fn build_combined_next_steps(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    // A combined run baselines its dead-code sub-pass only, which records itself
+    // under that command's name, so this is the lookup and the step names
+    // `fallow dead-code`. Without it a combined run with a narrowed scope was the
+    // one shape that loaded a baseline and offered no way to judge it.
+    let loaded_baseline = crate::output_runtime::loaded_baseline_for("dead-code");
     build_combined_next_steps_contract(&CombinedNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
         has_dead_code_findings: results.is_some_and(|r| r.total_issues() > 0),
@@ -262,6 +267,7 @@ pub fn build_combined_next_steps(
         audit_changed: audit_changed_applicable(root),
         has_external_plugins: has_external_plugins(root),
         has_unused_files: results.is_some_and(|r| !r.unused_files.is_empty()),
+        baseline_recheck: loaded_baseline.as_ref().and_then(baseline_recheck_input),
     })
 }
 
