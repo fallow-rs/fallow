@@ -52,6 +52,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   top-level `plugins` array, such as a Next.js `webpack(config)` hook
   ([#2698](https://github.com/fallow-rs/fallow/issues/2698)).
 
+- **A run now says on the wire when it widened, measured an empty scope, or
+  skipped hotspots.** `fallow flags` and `fallow suppressions` carry
+  `request_outcomes` with their `changed-since` entry, so an unresolvable ref no
+  longer widens the report with only a stderr line to say so. An applied
+  `diff-filter` carries `scope_size`, and `0` means the diff parsed no added
+  lines, so a report with no findings says nothing was analyzable rather than
+  that the code is clean; the GitHub Action and the GitLab template warn once on
+  that case. `hotspots-skipped` carries a `cause`, adding `invalid-since` and
+  `churn-file-unreadable` to the existing `not-a-repository`.
+  `fallow security --sarif-file` carries the `sarif-file` entry on success. Exit
+  codes are unchanged
+  (Closes [#2734](https://github.com/fallow-rs/fallow/issues/2734)).
+
 ### Fixed
 
 - **The MCP `audit` and `decision_surface` tools auto-detect a base ref again.**
