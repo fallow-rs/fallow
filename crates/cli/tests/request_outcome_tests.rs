@@ -863,6 +863,88 @@ fn a_written_sarif_file_reports_applied_with_its_path() {
     assert!(sarif.is_file(), "the file the entry claims must exist");
 }
 
+/// `fallow security` owns its own SARIF writer, whose fate is settled AFTER the
+/// envelope is assembled. Nothing said the document was written, so a consumer
+/// could not tell a run that produced the artefact from one never asked for it.
+///
+/// The entry's path is canonicalized here because `requested` is echoed as the
+/// user spelled it, and a temp root reached through a symlink otherwise makes the
+/// assertion pass on one platform and fail on the other.
+#[test]
+fn a_security_run_reports_the_sarif_file_it_wrote() {
+    let project = project();
+    let canonical = project.path().canonicalize().expect("canonical root");
+    let root = canonical.to_str().expect("utf8");
+    let sarif = canonical.join("out").join("security.sarif");
+    let sarif_arg = sarif.to_str().expect("utf8");
+    let out = run(&[
+        "security",
+        "--root",
+        root,
+        "--sarif-file",
+        sarif_arg,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let envelope = parse_json(&out);
+    let entry = request(&envelope, "sarif-file");
+    assert_eq!(entry["status"], "applied", "{entry}");
+    assert_eq!(entry["requested"], sarif_arg);
+    assert_eq!(entry["affects"], "artifact", "{entry}");
+    assert!(
+        entry["reason"].is_null() && entry["message"].is_null(),
+        "an honoured request carries neither: {entry}"
+    );
+    assert!(
+        entry.get("scope_size").is_none(),
+        "an artefact request narrows nothing and measures no scope: {entry}"
+    );
+    assert!(sarif.is_file(), "the file the entry claims must exist");
+}
+
+/// This command's writer exits 2 rather than warning and continuing, which the
+/// issue asks to keep: the error document is the report, and it names the cause.
+#[cfg(unix)]
+#[test]
+fn a_security_sarif_write_failure_still_exits_two_with_the_error_document() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = project();
+    let canonical = project.path().canonicalize().expect("canonical root");
+    let root = canonical.to_str().expect("utf8");
+    let locked = canonical.join("locked");
+    std::fs::create_dir_all(&locked).expect("locked dir");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
+        .expect("drop write permission");
+
+    let out = run(&[
+        "security",
+        "--root",
+        root,
+        "--sarif-file",
+        locked.join("security.sarif").to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        out.code, 2,
+        "this command refuses rather than continuing: {}{}",
+        out.stdout, out.stderr
+    );
+    let envelope = parse_json(&out);
+    assert_eq!(envelope["error"], true, "{envelope}");
+    let message = envelope["message"].as_str().expect("an error document");
+    assert!(
+        message.contains("Failed to write SARIF file"),
+        "the document names what failed: {message}"
+    );
+
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
+        .expect("restore permission");
+}
+
 /// The defect itself: the document on stdout is complete, the exit code is the
 /// one the findings produced, and until now nothing anywhere said the SARIF
 /// artefact a consumer uploads was never written.

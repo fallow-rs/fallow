@@ -221,7 +221,7 @@ pub fn run_blind_spots(opts: &SecurityOptions<'_>) -> ExitCode {
 /// advisory). Unsupported output formats exit 2.
 pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     let started = Instant::now();
-    let (output, effective_severities) = match build_security_command_output(opts, started) {
+    let (mut output, effective_severities) = match build_security_command_output(opts, started) {
         Ok(output) => output,
         Err(code) => return code,
     };
@@ -230,6 +230,11 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     if let Err(code) = maybe_write_security_sarif(opts, &output) {
         return code;
     }
+    // The envelope was assembled before the SARIF write, so its
+    // `request_outcomes` predates the entry that write records. Re-read it here,
+    // which is the one point where the artefact's fate is known and the report
+    // has not yet been rendered (issue #2734).
+    output.request_outcomes = crate::requests::request_outcomes();
 
     let rendered = render_security_output(opts, &output);
     // The annotation stream is legitimately empty on a clean run; other
@@ -818,16 +823,32 @@ fn security_gate_output(mode: SecurityGateMode, finding_count: usize) -> Securit
     }
 }
 
+/// Write the SARIF document `--sarif-file` asked for, and record what became of
+/// that request either way.
+///
+/// This command's writer exits 2 on failure, unlike the dead-code family's,
+/// which warns and continues. The failure is still recorded before the exit: one
+/// writer per reason token means the error document and the entry can never
+/// state different causes, and a reader of the record does not have to know
+/// which command produced it.
 fn maybe_write_security_sarif(
     opts: &SecurityOptions<'_>,
     output: &SecurityOutput,
 ) -> Result<(), ExitCode> {
-    if let Some(path) = opts.sarif_file
-        && let Err(message) = write_sarif_file(output, path)
-    {
-        return Err(emit_error(&message, 2, opts.output));
+    let Some(path) = opts.sarif_file else {
+        return Ok(());
+    };
+    match write_sarif_file(output, path) {
+        Ok(()) => {
+            crate::requests::record_sarif_file_applied(path);
+            Ok(())
+        }
+        Err(failure) => {
+            let message = failure.message(path);
+            crate::requests::record_sarif_file_failure(path, failure.reason(), message.clone());
+            Err(emit_error(&message, 2, opts.output))
+        }
     }
-    Ok(())
 }
 
 fn render_security_output(opts: &SecurityOptions<'_>, output: &SecurityOutput) -> String {
@@ -2364,19 +2385,52 @@ fn blind_spot_suggestion(
     }
 }
 
-fn write_sarif_file(output: &SecurityOutput, path: &Path) -> Result<(), String> {
+/// Why a `--sarif-file` write did not happen on this command.
+///
+/// The reason tokens match the ones `check::output` records for the same two
+/// failures, so a consumer reading `request_outcomes["sarif-file"].reason` gets
+/// one vocabulary whichever command wrote the file. The prose is unchanged from
+/// what this command has always printed.
+#[derive(Debug)]
+enum SecuritySarifWriteFailure {
+    /// The target's directory could not be created, so nothing was written.
+    DirectoryCreate { error: String },
+    /// The directory exists and the document still could not be written there.
+    Write { error: String },
+}
+
+impl SecuritySarifWriteFailure {
+    const fn reason(&self) -> &'static str {
+        match self {
+            Self::DirectoryCreate { .. } => "directory-create-failed",
+            Self::Write { .. } => "write-failed",
+        }
+    }
+
+    fn message(&self, path: &Path) -> String {
+        let path = path.display();
+        match self {
+            Self::DirectoryCreate { error } => {
+                format!("Failed to create directory for SARIF file {path}: {error}")
+            }
+            Self::Write { error } => format!("Failed to write SARIF file {path}: {error}"),
+        }
+    }
+}
+
+fn write_sarif_file(output: &SecurityOutput, path: &Path) -> Result<(), SecuritySarifWriteFailure> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
         std::fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "Failed to create directory for SARIF file {}: {err}",
-                path.display()
-            )
+            SecuritySarifWriteFailure::DirectoryCreate {
+                error: err.to_string(),
+            }
         })?;
     }
-    std::fs::write(path, render_sarif(output))
-        .map_err(|err| format!("Failed to write SARIF file {}: {err}", path.display()))
+    std::fs::write(path, render_sarif(output)).map_err(|err| SecuritySarifWriteFailure::Write {
+        error: err.to_string(),
+    })
 }
 
 /// One-line gate verdict header. Leads with the ACTION ("REVIEW REQUIRED") and
