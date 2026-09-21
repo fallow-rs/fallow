@@ -67,8 +67,11 @@ never pushed as an entry pattern. An entry pattern is a glob over project files,
 so a value a bundler resolves through module resolution, one without a leading
 `./`, `../` or `/` and without a source extension, would match no file while its
 package still needs the credit. A value carrying glob syntax is exempt: no module
-resolution accepts a glob, so `src/pages/**` stays a pattern. Bundler `entry`
-values and Module Federation `exposes` targets share one predicate for this.
+resolution accepts a glob, so `src/pages/**` stays a pattern. A trailing resource
+query is dropped first, because a bundler hands it to the loader rather than
+resolving it as part of the request, so `pkg/client?reload=true` credits `pkg`
+while the `?` of `src/pag?.ts` still marks a glob. Bundler `entry` values and
+Module Federation `exposes` targets share one predicate for this.
 
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that

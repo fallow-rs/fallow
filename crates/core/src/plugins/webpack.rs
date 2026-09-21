@@ -299,10 +299,39 @@ mod tests {
     }
 
     #[test]
+    fn resolve_config_entry_module_request_keeps_its_resource_query_out_of_the_package() {
+        let source = r#"
+            module.exports = {
+                entry: [
+                    "webpack-hot-middleware/client?reload=true",
+                    "react-hot-loader/patch",
+                    "./src/index.ts",
+                ],
+            };
+        "#;
+        let plugin = WebpackPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/webpack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/index.ts"]);
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"webpack-hot-middleware".to_string()));
+        assert!(deps.contains(&"react-hot-loader".to_string()));
+    }
+
+    #[test]
     fn resolve_config_keeps_glob_shaped_entries_as_patterns() {
         let source = r#"
             module.exports = {
-                entry: ["src/glob-like/**", "src/pages/*.entry.ts", "src/{a,b}/main"],
+                entry: [
+                    "src/glob-like/**",
+                    "src/pages/*.entry.ts",
+                    "src/{a,b}/main",
+                    "src/pag?.ts",
+                    "src/pag?/main",
+                ],
             };
         "#;
         let plugin = WebpackPlugin;
@@ -313,7 +342,13 @@ mod tests {
         );
         assert_eq!(
             result.entry_patterns,
-            vec!["src/glob-like/**", "src/pages/*.entry.ts", "src/{a,b}/main"]
+            vec![
+                "src/glob-like/**",
+                "src/pages/*.entry.ts",
+                "src/{a,b}/main",
+                "src/pag?.ts",
+                "src/pag?/main",
+            ]
         );
         assert!(result.referenced_dependencies.is_empty());
     }

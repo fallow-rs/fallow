@@ -76,8 +76,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing and the package could be reported as an unused dependency. A value
   without a leading `./`, without glob syntax and without a source extension now
   credits its package, the rule Module Federation `exposes` targets already
-  follow. Relative values, absolute values and glob patterns are unchanged. Exit
-  codes are unchanged
+  follow.
+
+  A resource query belongs to the loader rather than to the path, so
+  `webpack-hot-middleware/client?reload=true` credits `webpack-hot-middleware`.
+  Relative values, absolute values and glob patterns are unchanged. Exit codes
+  are unchanged
   (Closes [#2739](https://github.com/fallow-rs/fallow/issues/2739)).
 
 - **The MCP `audit` and `decision_surface` tools auto-detect a base ref again.**

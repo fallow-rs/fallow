@@ -451,10 +451,10 @@ fn classify_exposed_target(target: &str, config: &mut FederationConfig) {
     if trimmed.is_empty() {
         return;
     }
-    if super::names_module_request(trimmed) {
+    if let Some(request) = super::module_request(trimmed) {
         push_unique(
             &mut config.exposed_packages,
-            crate::resolve::extract_package_name(trimmed),
+            crate::resolve::extract_package_name(request),
         );
         return;
     }
