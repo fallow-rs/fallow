@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789937539929,
+  "lastUpdate": 1789990542192,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "d0ebe05d32fa21bdb2ba7af3a02ef1c8efdde620",
-          "message": "chore(docker): pin FALLOW_VERSION 3.21.0 with refreshed checksums",
-          "timestamp": "2026-08-31T02:45:21+02:00",
-          "tree_id": "c3ea82b32c10073b069cbde044f0d614e93e14bc",
-          "url": "https://github.com/fallow-rs/fallow/commit/d0ebe05d32fa21bdb2ba7af3a02ef1c8efdde620"
-        },
-        "date": 1788137487988,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9741461,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49391,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1189575,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8442,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8480,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "731a504da976f1a8f4ce08bf08c2defd961e5f44",
+          "message": "feat(output): carry the request outcomes and skip causes four commands left on stderr (#2743)\n\nfallow flags and fallow suppressions carry request_outcomes with the changed-since entry. An applied diff-filter request carries scope_size, so a diff with no added lines reads as an empty scope on every consumer: the JSON envelope, the Action and GitLab logs, the MCP warnings, and the comment, review and summary bodies. hotspots-skipped carries a cause for a malformed --since and an unreadable churn file as well as a missing repository. fallow security --sarif-file carries the sarif-file entry. Exit codes are unchanged.\n\nCloses #2734",
+          "timestamp": "2026-09-21T13:27:22+02:00",
+          "tree_id": "ec39db9de0c07dfd63efca0e42efec8559ece446",
+          "url": "https://github.com/fallow-rs/fallow/commit/731a504da976f1a8f4ce08bf08c2defd961e5f44"
+        },
+        "date": 1789990537599,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10078392,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51547,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1193875,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8444,
             "unit": "allocations"
           }
         ]
