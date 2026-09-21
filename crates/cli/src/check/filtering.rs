@@ -21,8 +21,7 @@ pub fn filter_to_workspaces(
 }
 
 pub use fallow_engine::changed_files::{
-    changed_files as try_get_changed_files,
-    filter_results_by_changed_files as filter_changed_files, get_changed_files,
+    changed_files as try_get_changed_files, filter_results_by_changed_files as filter_changed_files,
 };
 
 /// Drop findings whose source line is not inside an added hunk of the

@@ -20029,6 +20029,17 @@
           "description": "Wall-clock analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the run was asked to narrow and whether it did. See\n[`crate::RequestOutcomes`] for the full contract.\n\n`fallow flags` accepts `--changed-since`, and an unresolvable ref widens\nthe scan to the whole project rather than failing the run. Until this\nmember existed the only account of that was a stderr line, which `--quiet`\nremoves, so a flag inventory read as scoped to the change could silently\nbe the whole project's (issue #2734).\n\nThe command applies no diff filter, so the object carries the\n`changed-since` entry only. Omitted when the run was asked for nothing,\nwhich keeps a scan that passed no narrowing flag byte-identical and moves\nno `schema_version`."
+        },
         "feature_flags": {
           "type": "array",
           "items": {
@@ -20655,6 +20666,17 @@
         "schema_version": {
           "description": "Schema version of this envelope.",
           "$ref": "#/definitions/SuppressionInventorySchemaVersion"
+        },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the run was asked to narrow and whether it did. See\n[`crate::RequestOutcomes`] for the full contract.\n\n`fallow suppressions` accepts `--changed-since`, and an unresolvable ref\nwidens the inventory to the whole project rather than failing the run.\nUntil this member existed the only account of that was a stderr line,\nwhich `--quiet` removes, so an inventory read as scoped to the change\ncould silently be the whole project's (issue #2734).\n\nThe command applies no diff filter, so the object carries the\n`changed-since` entry only. Omitted when the run was asked for nothing,\nwhich keeps an inventory that passed no narrowing flag byte-identical and\nleaves `schema_version` at `1`."
         },
         "summary": {
           "description": "Project-level totals over the scoped inventory.",

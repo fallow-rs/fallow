@@ -4341,8 +4341,8 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         first.attribution
     );
 
-    let changed_files =
-        crate::check::get_changed_files(root, "HEAD").expect("changed files should resolve");
+    let changed_files = fallow_engine::changed_files::get_changed_files(root, "HEAD")
+        .expect("changed files should resolve");
     let key = audit_base_snapshot_cache_key(&opts, "HEAD", &changed_files)
         .expect("cache key should compute")
         .expect("cache key should exist");

@@ -13341,6 +13341,22 @@ schema_version: FeatureFlagsSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
+ * What the run was asked to narrow and whether it did. See
+ * [`crate::RequestOutcomes`] for the full contract.
+ *
+ * `fallow flags` accepts `--changed-since`, and an unresolvable ref widens
+ * the scan to the whole project rather than failing the run. Until this
+ * member existed the only account of that was a stderr line, which `--quiet`
+ * removes, so a flag inventory read as scoped to the change could silently
+ * be the whole project's (issue #2734).
+ *
+ * The command applies no diff filter, so the object carries the
+ * `changed-since` entry only. Omitted when the run was asked for nothing,
+ * which keeps a scan that passed no narrowing flag byte-identical and moves
+ * no `schema_version`.
+ */
+request_outcomes?: (RequestOutcomes | null)
+/**
  * Detected feature-flag findings.
  */
 feature_flags: FeatureFlagFinding[]
@@ -14676,6 +14692,22 @@ invalid_value?: (string | null)
  */
 export interface SuppressionInventoryOutput {
 schema_version: SuppressionInventorySchemaVersion
+/**
+ * What the run was asked to narrow and whether it did. See
+ * [`crate::RequestOutcomes`] for the full contract.
+ *
+ * `fallow suppressions` accepts `--changed-since`, and an unresolvable ref
+ * widens the inventory to the whole project rather than failing the run.
+ * Until this member existed the only account of that was a stderr line,
+ * which `--quiet` removes, so an inventory read as scoped to the change
+ * could silently be the whole project's (issue #2734).
+ *
+ * The command applies no diff filter, so the object carries the
+ * `changed-since` entry only. Omitted when the run was asked for nothing,
+ * which keeps an inventory that passed no narrowing flag byte-identical and
+ * leaves `schema_version` at `1`.
+ */
+request_outcomes?: (RequestOutcomes | null)
 summary: SuppressionInventorySummary
 /**
  * Per-file suppression listings, sorted by path then line.

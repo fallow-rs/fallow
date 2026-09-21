@@ -143,6 +143,15 @@ fn a_run_asked_for_nothing_emits_no_request_outcomes_key() {
         vec!["dupes", "--root", root, "--format", "json", "--quiet"],
         vec!["health", "--root", root, "--format", "json", "--quiet"],
         vec!["security", "--root", root, "--format", "json", "--quiet"],
+        vec!["flags", "--root", root, "--format", "json", "--quiet"],
+        vec![
+            "suppressions",
+            "--root",
+            root,
+            "--format",
+            "json",
+            "--quiet",
+        ],
         vec!["--root", root, "--format", "json", "--quiet"],
     ] {
         let envelope = parse_json(&run(&args));
@@ -166,6 +175,8 @@ fn an_unresolvable_changed_since_reports_not_applied_on_every_carrying_command()
         vec!["dupes"],
         vec!["health"],
         vec!["security"],
+        vec!["flags"],
+        vec!["suppressions"],
         vec![],
     ] {
         let mut args = command.clone();
@@ -498,6 +509,64 @@ fn an_honoured_request_reports_applied_with_no_reason_and_no_message() {
             .starts_with("--diff-file "),
         "the label names the channel as the user spelled it: {entry}"
     );
+}
+
+/// The two inventory commands resolve the same ref as the analysis commands and
+/// widen the same way, and until now neither said so anywhere but stderr. A
+/// resolvable ref reports the positive case, which is what lets a reader treat
+/// the inventory as scoped.
+#[test]
+fn the_inventory_commands_report_a_resolved_ref_as_applied() {
+    let repo = committed_project();
+    let root = root_arg(&repo);
+    for command in ["flags", "suppressions"] {
+        let envelope = parse_json(&run(&[
+            command,
+            "--root",
+            root,
+            "--changed-since",
+            "HEAD",
+            "--format",
+            "json",
+            "--quiet",
+        ]));
+        let entry = request(&envelope, "changed-since");
+        assert_eq!(entry["status"], "applied", "`{command}`: {entry}");
+        assert_eq!(entry["requested"], "HEAD");
+        assert!(
+            entry["reason"].is_null() && entry["message"].is_null(),
+            "`{command}` did what it was told and states nothing else: {entry}"
+        );
+    }
+}
+
+/// The trap the fix has to avoid: the CLI resolves the diff source for EVERY
+/// command before dispatch, and neither of these two applies a diff filter. A
+/// broader reader would publish `diff-filter: applied` and claim a narrowing
+/// that never happened, which is worse than the silence it replaced.
+#[test]
+fn the_inventory_commands_never_claim_a_diff_filter_they_do_not_apply() {
+    let project = project();
+    let root_path = project.path();
+    let root = root_arg(&project);
+    let diff = placeable_diff(root_path);
+    for command in ["flags", "suppressions"] {
+        let envelope = parse_json(&run(&[
+            command,
+            "--root",
+            root,
+            "--diff-file",
+            &diff,
+            "--format",
+            "json",
+            "--quiet",
+        ]));
+        assert!(
+            envelope["request_outcomes"]["diff-filter"].is_null(),
+            "`{command}` applies no diff filter and must claim none: {}",
+            envelope["request_outcomes"]
+        );
+    }
 }
 
 /// The scope a filter left, when the run measured it. An empty scope is the

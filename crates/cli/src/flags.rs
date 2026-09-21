@@ -100,8 +100,11 @@ fn apply_flag_scopes(
     flags: &mut Vec<FeatureFlag>,
     opts: &FlagsOptions<'_>,
 ) -> Result<(), ExitCode> {
+    // The recording resolver, not the printing one: an unresolvable ref widens
+    // this report to the whole project, and the stderr line it prints is gone
+    // under `--quiet` (issue #2734). The printed body is identical either way.
     if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = crate::check::get_changed_files(opts.root, git_ref)
+        && let Some(changed) = crate::requests::resolve_changed_since(opts.root, git_ref)
     {
         flags.retain(|f| changed.contains(&f.path));
     }
@@ -680,6 +683,10 @@ fn print_flags_json(
             flags,
             root: &config.root,
             workspace_diagnostics,
+            // The `changed-since` channel only: `init_cli_diff_filter` runs
+            // before dispatch for every command, so the broader reader would
+            // publish an applied `diff-filter` this command never consulted.
+            request_outcomes: crate::requests::changed_since_request_outcomes(),
             meta: explain.then(fallow_output::feature_flags_meta),
         });
     let output = fallow_output::serialize_feature_flags_json_output(

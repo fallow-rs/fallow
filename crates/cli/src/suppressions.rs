@@ -72,6 +72,10 @@ pub fn run_suppressions(opts: &SuppressionsOptions<'_>) -> ExitCode {
         // findings are safe to pass unscoped.
         stale: &results.stale_suppressions,
         root: &session.config().root,
+        // The `changed-since` channel only: `init_cli_diff_filter` runs before
+        // dispatch for every command, so the broader reader would publish an
+        // applied `diff-filter` this command never consulted.
+        request_outcomes: crate::requests::changed_since_request_outcomes(),
     });
 
     let elapsed = start.elapsed();
@@ -117,8 +121,11 @@ fn apply_suppression_scopes(
     active: &mut Vec<ActiveSuppression>,
     opts: &SuppressionsOptions<'_>,
 ) -> Result<(), ExitCode> {
+    // The recording resolver, for the same reason `fallow flags` uses it: an
+    // unresolvable ref widens this inventory to the whole project, and only the
+    // envelope survives `--quiet` (issue #2734).
     if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = crate::check::get_changed_files(opts.root, git_ref)
+        && let Some(changed) = crate::requests::resolve_changed_since(opts.root, git_ref)
     {
         active.retain(|s| changed.contains(&s.path));
     }

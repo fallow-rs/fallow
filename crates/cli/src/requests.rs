@@ -103,6 +103,26 @@ pub fn record_sarif_file_failure(path: &Path, reason: &str, message: String) {
 /// Reads each channel where it is produced rather than taking them as
 /// parameters, so a command that grows another request cannot publish a
 /// half-filled object by forgetting to thread one through.
+/// This run's `request_outcomes` limited to the `changed-since` channel, or
+/// `None` when no ref was resolved.
+///
+/// For the commands that resolve a ref and apply no diff filter of their own.
+/// `init_cli_diff_filter` runs for EVERY command, so `--diff-file` populates the
+/// diff record before dispatch; a command that never consults that index would
+/// publish `diff-filter: applied` from [`request_outcomes`] and claim a
+/// narrowing it did not perform. Named after what it publishes rather than
+/// after the command that needs it, so a third caller reads the guarantee off
+/// the name (issue #2734).
+#[must_use]
+pub fn changed_since_request_outcomes() -> Option<RequestOutcomes> {
+    let mut requests = RequestOutcomes::new();
+    requests.insert_if(
+        RequestName::ChangedSince,
+        CHANGED_SINCE_OUTCOME.get().cloned(),
+    );
+    requests.into_option()
+}
+
 #[must_use]
 pub fn request_outcomes() -> Option<RequestOutcomes> {
     let mut requests = RequestOutcomes::new();

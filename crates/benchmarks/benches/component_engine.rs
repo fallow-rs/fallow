@@ -313,6 +313,7 @@ fn suppression_inventory_json(fixture: &WarmEngineFixture) -> serde_json::Value 
         active: &analysis.results.active_suppressions,
         stale: &analysis.results.stale_suppressions,
         root: &fixture.fixture.root,
+        request_outcomes: None,
     });
     serialize_suppression_inventory_json_output(output, RootEnvelopeMode::Tagged, None)
         .expect("suppression inventory JSON serialization succeeds")

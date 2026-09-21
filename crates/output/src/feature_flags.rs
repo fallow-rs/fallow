@@ -41,6 +41,9 @@ pub struct FeatureFlagsOutputInput<'a> {
     /// Workspace- and source-discovery diagnostics the run recorded. Passed
     /// absolute; the builder relativizes them against `root`.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// What became of the narrowing requests the run received, or `None` when
+    /// it received none.
+    pub request_outcomes: Option<crate::RequestOutcomes>,
     /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<FeatureFlagsMeta>,
 }
@@ -57,6 +60,21 @@ pub struct FeatureFlagsOutput {
     pub version: ToolVersion,
     /// Wall-clock analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// What the run was asked to narrow and whether it did. See
+    /// [`crate::RequestOutcomes`] for the full contract.
+    ///
+    /// `fallow flags` accepts `--changed-since`, and an unresolvable ref widens
+    /// the scan to the whole project rather than failing the run. Until this
+    /// member existed the only account of that was a stderr line, which `--quiet`
+    /// removes, so a flag inventory read as scoped to the change could silently
+    /// be the whole project's (issue #2734).
+    ///
+    /// The command applies no diff filter, so the object carries the
+    /// `changed-since` entry only. Omitted when the run was asked for nothing,
+    /// which keeps a scan that passed no narrowing flag byte-identical and moves
+    /// no `schema_version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_outcomes: Option<crate::RequestOutcomes>,
     /// Detected feature-flag findings.
     pub feature_flags: Vec<FeatureFlagFinding>,
     /// Number of entries in `feature_flags`.
@@ -249,6 +267,7 @@ pub fn build_feature_flags_output(input: FeatureFlagsOutputInput<'_>) -> Feature
         schema_version: SchemaVersion(input.schema_version),
         version: ToolVersion(input.version),
         elapsed_ms: ElapsedMs(input.elapsed.as_millis() as u64),
+        request_outcomes: input.request_outcomes,
         feature_flags,
         total_flags: input.flags.len(),
         workspace_diagnostics,
@@ -393,6 +412,7 @@ mod tests {
             flags: &[flag()],
             root: Path::new("/repo"),
             workspace_diagnostics: Vec::new(),
+            request_outcomes: None,
             meta: Some(feature_flags_meta()),
         });
 
@@ -429,6 +449,7 @@ mod tests {
             flags: &[flag()],
             root: Path::new("/repo"),
             workspace_diagnostics: Vec::new(),
+            request_outcomes: None,
             meta: None,
         });
 
@@ -464,6 +485,7 @@ mod tests {
                     size_bytes: 9_000_000,
                 },
             )],
+            request_outcomes: None,
             meta: None,
         });
 
@@ -489,6 +511,7 @@ mod tests {
             flags: &[flag()],
             root: Path::new("/repo"),
             workspace_diagnostics: Vec::new(),
+            request_outcomes: None,
             meta: None,
         });
 

@@ -34,6 +34,21 @@ pub enum SuppressionInventorySchemaVersion {
 pub struct SuppressionInventoryOutput {
     /// Schema version of this envelope.
     pub schema_version: SuppressionInventorySchemaVersion,
+    /// What the run was asked to narrow and whether it did. See
+    /// [`crate::RequestOutcomes`] for the full contract.
+    ///
+    /// `fallow suppressions` accepts `--changed-since`, and an unresolvable ref
+    /// widens the inventory to the whole project rather than failing the run.
+    /// Until this member existed the only account of that was a stderr line,
+    /// which `--quiet` removes, so an inventory read as scoped to the change
+    /// could silently be the whole project's (issue #2734).
+    ///
+    /// The command applies no diff filter, so the object carries the
+    /// `changed-since` entry only. Omitted when the run was asked for nothing,
+    /// which keeps an inventory that passed no narrowing flag byte-identical and
+    /// leaves `schema_version` at `1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_outcomes: Option<crate::RequestOutcomes>,
     /// Project-level totals over the scoped inventory.
     pub summary: SuppressionInventorySummary,
     /// Per-file suppression listings, sorted by path then line.
@@ -129,7 +144,7 @@ pub enum SuppressionInventoryOrigin {
 }
 
 /// Inputs for building `fallow suppressions --format json`.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct SuppressionInventoryOutputInput<'a> {
     /// Scoped active suppressions (absolute paths).
     pub active: &'a [ActiveSuppression],
@@ -138,6 +153,9 @@ pub struct SuppressionInventoryOutputInput<'a> {
     pub stale: &'a [StaleSuppression],
     /// Project root used to relativize paths.
     pub root: &'a Path,
+    /// What became of the narrowing requests the run received, or `None` when
+    /// it received none.
+    pub request_outcomes: Option<crate::RequestOutcomes>,
 }
 
 /// Build the typed suppression inventory envelope: sort by `(path, line)`,
@@ -159,6 +177,7 @@ pub fn build_suppression_inventory_output(
 
     SuppressionInventoryOutput {
         schema_version: SuppressionInventorySchemaVersion::V1,
+        request_outcomes: input.request_outcomes,
         summary,
         files,
     }
@@ -324,6 +343,7 @@ mod tests {
             active: &actives,
             stale: &[],
             root: Path::new("/repo"),
+            request_outcomes: None,
         });
 
         assert_eq!(output.summary.total, 3);
@@ -351,6 +371,7 @@ mod tests {
             active: &actives,
             stale: &[],
             root: Path::new("/repo"),
+            request_outcomes: None,
         });
 
         let by_kind = &output.summary.by_kind;
@@ -380,6 +401,7 @@ mod tests {
             active: &actives,
             stale: &stales,
             root: Path::new("/repo"),
+            request_outcomes: None,
         });
 
         assert_eq!(output.summary.stale, 1);
@@ -398,6 +420,7 @@ mod tests {
             active: &actives,
             stale: &[],
             root: Path::new("/repo"),
+            request_outcomes: None,
         });
 
         let value = serialize_suppression_inventory_json_output(
@@ -430,6 +453,7 @@ mod tests {
             active: &actives,
             stale: &[],
             root: Path::new("/repo"),
+            request_outcomes: None,
         });
 
         let value =
