@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Saved baselines say which command wrote them.** Every baseline
+  `--save-baseline` writes now carries a top-level `kind` of `dead-code`,
+  `dupes` or `health`, so a file states which command can read it. A baseline
+  saved by an earlier release carries no `kind` and still loads on all three
+  commands, and a baseline saved now loads on an older binary.
+
+  A run pointed at a baseline another command saved warns on stderr, naming both
+  commands and the path, carries `unrecognised_format: true` and suppresses
+  nothing. `dead-code` used to exit 2 on such a file while `dupes` and `health`
+  went green on it; all three now warn. A file that suppresses nothing also
+  trips `--fail-on-stale-baseline`, which reaches the comment, the job summary,
+  both CI integrations and the MCP gate sentences. Exit codes are unchanged
+  without that flag. A `--save-baseline` aimed at a file another command wrote
+  is refused with exit 2 instead of destroying it: save each command's baseline
+  to its own path
+  (Closes [#2738](https://github.com/fallow-rs/fallow/issues/2738)).
+
+- **A baseline nothing recognises reaches the comment and the note.** The sticky
+  pull-request comment, the merge-request note and the MCP gate sentences say
+  that the loaded baseline has no entries the command recognises, before the
+  staleness advisory, whose two counts are both zero on such a file. The GitHub
+  job summary names the file, through the new `baseline-path` action output.
+
+  A bare `fallow` run that loaded a baseline and was narrowed only by flags a
+  repeat can drop now carries the `recheck-baseline` next step the three
+  standalone commands already had. `fallow audit` prints the recognition note
+  for its health baseline too, so all three of its baselines say the same thing
+  (Closes [#2735](https://github.com/fallow-rs/fallow/issues/2735)).
+
 - **`baseline_staleness` reports what narrowed the run.** A run scoped to part
   of the project cannot judge a whole-project baseline, so the staleness
   advisory and `fail-on-stale-baseline` stand down on it. Until now the envelope
