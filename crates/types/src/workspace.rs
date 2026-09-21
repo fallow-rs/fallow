@@ -1350,19 +1350,24 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             key,
             reason,
         } => {
-            let cause = if reason == "config-property-unreadable" {
+            // Two causes, one effect, one remedy. Each cause gets its own
+            // sentence: the cause and the effect on the findings are separate
+            // facts, and one sentence with two `so` clauses states neither fact
+            // clearly.
+            let effect = "`autoImports` kept the convention entry patterns for that surface, and \
+                          fallow reports no unused file there. Write the setting as static \
+                          literals, or remove the key to use the framework defaults.";
+            if reason == "config-property-unreadable" {
                 format!(
-                    "a top-level property in '{display}' is not statically readable, so the \
-                     `{key}` surface cannot be classified"
+                    "Plugin '{plugin}': fallow cannot read a top-level property in '{display}', so \
+                     it cannot classify the `{key}` surface. {effect}"
                 )
             } else {
-                format!("`{key}` in '{display}' is present and its effect is not modeled")
-            };
-            format!(
-                "Plugin '{plugin}': {cause}, so autoImports kept that surface's convention entry \
-                 patterns and an unreferenced file there is not reported as unused. Write the \
-                 setting as static literals, or remove the key to use the framework defaults."
-            )
+                format!(
+                    "Plugin '{plugin}': fallow does not model the effect of `{key}` in \
+                     '{display}'. {effect}"
+                )
+            }
         }
         WorkspaceDiagnosticKind::ExcludedByDefaultIgnore {
             pattern,
@@ -2561,26 +2566,34 @@ mod tests {
     }
 
     /// A surface whose own key fallow cannot model and a config file whose
-    /// top-level property it cannot read need different remedies, so the two
-    /// tokens must not render the same sentence.
+    /// top-level property it cannot read need different remedies. The two tokens
+    /// render different causes, and each cause states one fact per sentence.
     #[test]
     fn the_not_modeled_reasons_render_different_causes() {
         let key = plugin_not_modeled("components", "key-effect-not-modeled");
         assert!(
-            key.message.contains(
-                "`components` in 'nuxt.config.ts' is present and its effect is not \
-                           modeled"
-            ) && key.message.contains("autoImports"),
+            key.message
+                .contains("fallow does not model the effect of `components` in 'nuxt.config.ts'.")
+                && key
+                    .message
+                    .contains("`autoImports` kept the convention entry patterns"),
             "{}",
             key.message
         );
         let property = plugin_not_modeled("imports", "config-property-unreadable");
         assert!(
-            property
-                .message
-                .contains("a top-level property in 'nuxt.config.ts' is not statically readable")
-                && property.message.contains("`imports` surface"),
+            property.message.contains(
+                "fallow cannot read a top-level property in 'nuxt.config.ts', so it cannot \
+                 classify the `imports` surface. `autoImports` kept the convention entry patterns \
+                 for that surface, and fallow reports no unused file there."
+            ),
             "{}",
+            property.message
+        );
+        assert_eq!(
+            property.message.matches(", so ").count(),
+            1,
+            "one cause per sentence: {}",
             property.message
         );
     }

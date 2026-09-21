@@ -2120,13 +2120,37 @@ fn plugin_stage_diagnostics_have_one_writer_at_the_end_of_the_plugin_run() {
 
     let core =
         read_source_without_line_comments("crates/core/src/lib.rs").expect("read core library");
-    assert!(
-        core.contains(
-            "gate_auto_import_entry_patterns(&mut result, config, workspaces);\n    \
-             record_plugin_config_diagnostics(&result, &config.root);"
-        ),
-        "the write must follow the auto-import gate, or a surface the gate reports is missing \
-         from the set"
+    // run_plugins has two exits: the early return for a project with no
+    // workspaces, and the tail after the workspace merge. Both exits gate the
+    // auto-import surfaces and then write. This guard matches on the calls, not
+    // on their indentation, which differs between the two exits.
+    const GATE: &str = "gate_auto_import_entry_patterns(&mut result, config, workspaces);";
+    const WRITE: &str = "record_plugin_config_diagnostics(&result, &config.root);";
+    let body = core
+        .split_once("fn run_plugins(")
+        .expect("run_plugins in the core library")
+        .1
+        .split_once("\nfn ")
+        .expect("an item after run_plugins")
+        .0;
+    let gates = body.matches(GATE).count();
+    let exits = body.matches("Ok(result)").count();
+    let pairs = body
+        .split(GATE)
+        .skip(1)
+        .filter(|tail| tail.trim_start().starts_with(WRITE))
+        .count();
+    assert!(gates > 0, "run_plugins must gate the auto-import surfaces");
+    assert_eq!(
+        gates, exits,
+        "every run_plugins exit must gate the auto-import surfaces, the no-workspace early return \
+         included. An exit without the gate drops the Nuxt surfaces from the set"
+    );
+    assert_eq!(
+        pairs, gates,
+        "the plugin-stage write must follow each gate call directly, in the no-workspace early \
+         return and in the tail after the workspace merge. A gated surface that nothing writes \
+         reaches no envelope"
     );
 }
 
