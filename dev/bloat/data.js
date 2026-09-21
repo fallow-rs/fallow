@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789991527953,
+  "lastUpdate": 1789993874346,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "fe3fdd2321d3445df6695126a3d29a77384ac533",
-          "message": "fix(health): match Istanbul coverage by body location and skip bodyless declarations (#2443)\n\nOverload signatures, abstract members, and `declare function` declarations no longer count as functions, so function counts drop for every file that carries them and its file score moves without any code change. A file whose declarations are all bodyless leaves the file-score table entirely.\n\nCoverage matching improves at the same time: each coverage-map function entry now contributes up to three candidate positions (the producer's own, the declaration start, and the body start), so a function whose only structural match was its body location scores against real coverage instead of a static estimate. Because an expression-bodied arrow's recorded body is the next arrow in a curried chain, a body-start candidate yields to a declaration at the same position, which keeps every arrow of a middleware chain, a higher-order component, or a curried class property matchable.\n\nRegression baselines are unaffected. Re-save health baselines if you run with `--coverage`, because a newly matched function can cross the CRAP ceiling.\n\nThanks to @PrinceD96 for the report and the contribution.\n\nCloses #2442",
-          "timestamp": "2026-08-28T01:18:22+02:00",
-          "tree_id": "f91a88e6e20b319d0ffef97e69fd76eea960cc70",
-          "url": "https://github.com/fallow-rs/fallow/commit/fe3fdd2321d3445df6695126a3d29a77384ac533"
-        },
-        "date": 1787873632617,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 544378528,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21309512,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 27774504,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 41667720,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43661240,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4264c27859c6b307fbebd269c969c0b107984ee",
+          "message": "fix(plugins): credit bundler entry packages and close the Nuxt autoImports precision gaps (#2745)\n\nA package named in a webpack, rspack or rsbuild entry, with or without a resource query, is credited as a dependency instead of becoming an entry pattern that matches nothing; glob-shaped entries stay entry patterns.\n\nNuxt autoImports: components under global/ and islands/ get the name Nuxt gives them, a config with a computed key, accessor or top-level spread keeps the convention entry patterns for that root, each workspace root is classified on its own, components: true, imports: {} and imports: { dirs: [] } count as the defaults they are, and a name imported or re-exported from #components or #imports is credited. #layers/<name>/ resolves as a path alias.\n\nCloses #2739\nCloses #2737",
+          "timestamp": "2026-09-21T14:15:43+02:00",
+          "tree_id": "38b1e5a0bba36bb6b69c4d828010e925328fe1ba",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4264c27859c6b307fbebd269c969c0b107984ee"
+        },
+        "date": 1789993870292,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 576194536,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21622008,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28722136,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43665432,
             "unit": "bytes"
           }
         ]
