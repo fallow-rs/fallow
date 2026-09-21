@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789967685712,
+  "lastUpdate": 1789986433317,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "702aaca8c7f81108ac85c702c31c5ca0d1b54325",
-          "message": "fix(mcp): keep Code Mode refusals free of process-cleanup noise\n\nThe output-cap refusal and the deadline message are contract strings: the\nsnippet acts on them and the code_execute response envelope documents them.\nBoth were built with with_cleanup_errors, which appends best-effort\nprocess-teardown diagnostics, so on macOS a refusal intermittently read \"code\nmode host output exceeded 500 bytes; cleanup errors: failed to terminate\nsubprocess tree: Operation not permitted (os error 1)\". Terminating the\nprocess group is a cleanup concern, not part of the host call's outcome, and\nit fails whenever the leader has already become an unreaped zombie.\n\nThose two messages now keep their exact wording and the cleanup errors go to\ntracing::warn instead. Operational failures still carry their cleanup context\ninline, and structured programmatic errors still gain their cleanup_errors\nfield, so nothing is lost from a channel where it belongs. Three unit tests\npin the split.\n\nFollow-up to #2498, whose description claimed its crates/process change took\nthis from 1 failure in 15 runs to 0 in 15. That measurement was invalid: the\nload generators from the first half were still running during the second. Both\nvariants prebuilt and alternated under one constant load give 3 in 20 before\nthat change and 2 in 20 after, so it does not close the window; it remains\ncorrect on its own merit. With this change the message cannot vary by\nconstruction.",
-          "timestamp": "2026-08-31T23:08:51+02:00",
-          "tree_id": "94e9adcaa7cc7e4e7577a5c2c429ca1bbadbbe21",
-          "url": "https://github.com/fallow-rs/fallow/commit/702aaca8c7f81108ac85c702c31c5ca0d1b54325"
-        },
-        "date": 1788211057731,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0ba3bc3644dea4474f37ca8b91d9aea497b41815"
         },
         "date": 1789967682461,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f6265843f78ec62f6168c2dc0d8097b407946f0e",
+          "message": "chore(scripts): make the local repository checks pass outside CI (#2742)\n\nThe lint, agent adapter and companion parity checks failed on a developer machine for environment reasons while CI stayed green. The corpus driver imports the converter by name, adapter ownership is judged by tracked content (generate mode no longer deletes untracked local skill directories), and the parity checks resolve companion checkouts from the main checkout and only skip when the guessed default is absent.\n\nCloses #2741",
+          "timestamp": "2026-09-21T12:18:02+02:00",
+          "tree_id": "90e3a2d9178543efbc9370784997e77ef3c771c6",
+          "url": "https://github.com/fallow-rs/fallow/commit/f6265843f78ec62f6168c2dc0d8097b407946f0e"
+        },
+        "date": 1789986429814,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
