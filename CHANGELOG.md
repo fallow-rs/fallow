@@ -54,6 +54,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A package named in a bundler `entry` is credited as a dependency instead of
+  becoming an entry glob.** webpack, rspack and rsbuild read `entry` and
+  `source.entry` values that are bare module requests, such as
+  `react-hot-loader/patch`. Such a value named no file, so the pattern matched
+  nothing and the package could be reported as an unused dependency. A value
+  without a leading `./` and without a source extension now credits its package,
+  the rule Module Federation `exposes` targets already follow. Relative and
+  absolute values are unchanged. Exit codes are unchanged
+  (Closes [#2739](https://github.com/fallow-rs/fallow/issues/2739)).
+
 - **The MCP `audit` and `decision_surface` tools auto-detect a base ref again.**
   Since 3.1.0, calling either tool without `base` on a repository with a remote
   failed with `FALLOW_CHANGED_FILES_FAILED`, because the auto-detected ref kept

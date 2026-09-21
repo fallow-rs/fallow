@@ -345,24 +345,12 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
     // Bracketed route filenames are the Next.js convention, so an unescaped
     // target would both miss the exposed file and credit an unrelated one.
     let escaped = globset::escape(&normalized);
-    if has_source_extension(&normalized) {
+    if super::has_source_extension(&normalized) {
         result.push_entry_pattern(escaped);
         return;
     }
     result.push_entry_pattern(format!("{escaped}.{EXPOSE_EXTENSIONS}"));
     result.push_entry_pattern(format!("{escaped}/index.{EXPOSE_EXTENSIONS}"));
-}
-
-/// Whether an `exposes` target names a file rather than a module request or an
-/// extensionless path. Discovery's own extension set decides, so a target
-/// naming a file type discovery does not analyze stays a module request.
-fn has_source_extension(target: &str) -> bool {
-    Path::new(target)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            crate::discover::SOURCE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
-        })
 }
 
 fn read(
@@ -463,7 +451,7 @@ fn classify_exposed_target(target: &str, config: &mut FederationConfig) {
     if trimmed.is_empty() {
         return;
     }
-    if config_parser::is_package_specifier(trimmed) && !has_source_extension(trimmed) {
+    if super::names_module_request(trimmed) {
         push_unique(
             &mut config.exposed_packages,
             crate::resolve::extract_package_name(trimmed),

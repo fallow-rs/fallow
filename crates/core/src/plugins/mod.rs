@@ -159,6 +159,31 @@ impl PluginResult {
         );
     }
 
+    /// Route each config value to the surface that can use it: a value naming a
+    /// module request credits its package, every other value becomes an entry
+    /// pattern.
+    ///
+    /// A bundler `entry` accepts a project file and a bare module request such as
+    /// `react-hot-loader/patch` in the same list. A module request names no file,
+    /// so a glob built from it matches nothing while the package still needs
+    /// dependency credit. Module Federation `exposes` targets already split the
+    /// two this way (issue #2706); bundler entries now do too (issue #2739).
+    fn extend_entry_patterns_or_dependencies<I, S>(&mut self, values: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for value in values {
+            let value = value.into();
+            if names_module_request(&value) {
+                self.referenced_dependencies
+                    .push(crate::resolve::extract_package_name(&value));
+                continue;
+            }
+            self.push_entry_pattern(value);
+        }
+    }
+
     fn push_used_export_rule(
         &mut self,
         pattern: impl Into<String>,
@@ -190,6 +215,29 @@ fn normalize_entry_pattern(pattern: String) -> String {
         .strip_prefix("./")
         .map(str::to_owned)
         .unwrap_or(pattern)
+}
+
+/// Whether a config value names a module request rather than a file in the
+/// project.
+///
+/// A bundler resolves a value without a leading `./`, `../` or `/` and without a
+/// source extension through module resolution, so it names a package. Both
+/// Module Federation `exposes` targets and bundler `entry` values are read this
+/// way.
+fn names_module_request(value: &str) -> bool {
+    config_parser::is_package_specifier(value) && !has_source_extension(value)
+}
+
+/// Whether a config value carries an extension discovery analyzes. Discovery's
+/// own extension set decides, so a value naming a file type discovery does not
+/// analyze stays a module request.
+fn has_source_extension(value: &str) -> bool {
+    Path::new(value)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            crate::discover::SOURCE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
+        })
 }
 
 /// A file-pattern rule with optional exclusion globs plus path-level or

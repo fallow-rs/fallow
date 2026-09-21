@@ -62,6 +62,13 @@ value before pushing it as a pattern. Bracketed route filenames and `*` in a
 path would otherwise both miss the named file and cover files the config does
 not name.
 
+A config value that names a module request is credited as a dependency and is
+never pushed as an entry pattern. An entry pattern is a glob over project files,
+so a value a bundler resolves through module resolution, one without a leading
+`./`, `../` or `/` and without a source extension, would match no file while its
+package still needs the credit. Bundler `entry` values and Module Federation
+`exposes` targets share one predicate for this.
+
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that
 reads a config at any depth must push the resolved path onto

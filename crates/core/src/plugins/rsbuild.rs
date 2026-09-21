@@ -35,7 +35,7 @@ define_plugin! {
             config_path,
             &["source", "entry"],
         );
-        result.extend_entry_patterns(entries);
+        result.extend_entry_patterns_or_dependencies(entries);
 
         let plugin_requires =
             config_parser::extract_config_require_strings(source, config_path, "plugins");
@@ -107,6 +107,31 @@ mod tests {
         );
         assert!(has_entry_pattern(&result, "src/main.tsx"));
         assert!(has_entry_pattern(&result, "src/admin.tsx"));
+    }
+
+    #[test]
+    fn resolve_config_entry_module_request_is_credited_as_dependency() {
+        let source = r#"
+            export default {
+                source: {
+                    entry: {
+                        index: ["react-hot-loader/patch", "./src/index.tsx"],
+                    },
+                },
+            };
+        "#;
+        let plugin = RsbuildPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/rsbuild.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/index.tsx"]);
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"react-hot-loader".to_string())
+        );
     }
 
     #[test]
