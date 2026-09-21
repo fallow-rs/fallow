@@ -155,6 +155,13 @@ impl BaselineStaleness {
     /// nothing more. `change_scoped` and `scope_reasons` must agree, which is
     /// why every caller derives the boolean from the same reason set it passes
     /// here.
+    ///
+    /// `unrecognised_format` widens `gate_trips` here, at the single site that
+    /// builds it, so the opt-in gate, the exit code, every CI surface that reads
+    /// the boolean and the MCP sentences move together: a file this command
+    /// cannot read as its own suppresses nothing, which no count can express.
+    /// Unlike the count rule it is not suppressed by `change_scoped`, because
+    /// telling a foreign file from this command's own needs no project-wide run.
     #[must_use]
     pub fn to_envelope(
         &self,
@@ -184,7 +191,7 @@ impl BaselineStaleness {
                     fallow_output::BaselineStalenessAdvisory::Partial
                 }
             },
-            gate_trips: self.trips_gate(),
+            gate_trips: self.trips_gate() || unrecognised_format,
             moved_entries,
             unrecognised_format,
             scope_reasons,
@@ -225,9 +232,127 @@ pub fn declares_baseline_format(json: &str, declared_keys: &[&str]) -> bool {
     declared_keys.iter().any(|key| object.contains_key(*key))
 }
 
+/// Which command saved a baseline file.
+///
+/// Written as the top-level `kind` of every baseline this version saves, spelled
+/// exactly as the envelope root kinds, so a file states which command can read
+/// it instead of leaving three formats to be told apart by the keys they happen
+/// to carry. A file saved before the member exists carries no `kind`, which
+/// [`classify_baseline_file`] falls back from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BaselineKind {
+    /// Saved by `fallow dead-code` (or `fallow check`).
+    DeadCode,
+    /// Saved by `fallow dupes`.
+    Dupes,
+    /// Saved by `fallow health`.
+    Health,
+}
+
+impl BaselineKind {
+    /// The token this kind is written as, which is also the command to run.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DeadCode => "dead-code",
+            Self::Dupes => "dupes",
+            Self::Health => "health",
+        }
+    }
+
+    /// The keys that identify this format in a file carrying no `kind`.
+    #[must_use]
+    pub const fn declared_keys(self) -> &'static [&'static str] {
+        match self {
+            Self::DeadCode => BaselineData::REQUIRED_KEYS,
+            Self::Dupes => DuplicationBaselineData::DECLARED_KEYS,
+            Self::Health => HealthBaselineData::DECLARED_KEYS,
+        }
+    }
+}
+
+/// What a saved baseline file is, read as one command's format.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BaselineFileKind {
+    /// This command's own baseline: it names this command in `kind`, or it
+    /// carries no `kind` and at least one key of this command's format.
+    Own,
+    /// A baseline another command saved, carrying the `kind` as written so a
+    /// message can quote it, including a token only a newer fallow writes.
+    Foreign(String),
+    /// No `kind` and no key of this command's format: a baseline another
+    /// command saved before `kind` existed, or an object with nothing of this
+    /// command's in it.
+    Unrecognised,
+    /// Not a JSON object, so it says nothing about which command wrote it and
+    /// the caller's own parse error is the honest report.
+    NotAnObject,
+}
+
+/// Why a `--save-baseline` must not overwrite the file at `save_path`, or `None`
+/// when the save may proceed.
+///
+/// A save serializes a fresh struct over the whole file, so one command's save
+/// aimed at another command's baseline destroys it with nothing left to recover
+/// from. Read from the destination's own `kind`: a file saved before that member
+/// existed carries nothing to identify it and is still overwritten silently, and
+/// an unreadable or absent destination is not a guard condition, exactly as the
+/// health identity-overwrite guard treats one.
+#[must_use]
+pub fn refuse_baseline_kind_overwrite(save_path: &Path, saving: BaselineKind) -> Option<String> {
+    let existing = std::fs::read_to_string(save_path).ok()?;
+    let BaselineFileKind::Foreign(found) = classify_baseline_file(&existing, saving) else {
+        return None;
+    };
+    Some(format!(
+        "refusing to overwrite the baseline at {}: it was saved by `fallow {found}` and this is a \
+         `fallow {}` save, which would destroy it. Save each command's baseline to its own path.",
+        save_path.display(),
+        saving.as_str(),
+    ))
+}
+
+/// Which command a saved baseline file belongs to, read as `expected`'s format.
+///
+/// `kind` decides whenever the file carries one, which is every baseline saved
+/// from this version onward. A file without one predates the member, so the keys
+/// it carries decide instead, exactly as [`declares_baseline_format`] documents.
+///
+/// Reads the raw file rather than a deserialized struct, because the one format
+/// with required fields (`dead-code`) has to answer this before its own parse
+/// error hides the answer.
+#[must_use]
+pub fn classify_baseline_file(json: &str, expected: BaselineKind) -> BaselineFileKind {
+    let Ok(serde_json::Value::Object(object)) = serde_json::from_str::<serde_json::Value>(json)
+    else {
+        return BaselineFileKind::NotAnObject;
+    };
+    match object.get("kind").and_then(serde_json::Value::as_str) {
+        Some(token) if token == expected.as_str() => BaselineFileKind::Own,
+        Some(token) => BaselineFileKind::Foreign(token.to_owned()),
+        // A `kind` that is not a string is no statement about the writer, so the
+        // keys answer as they do for a file that carries no `kind` at all.
+        None => {
+            if declares_baseline_format(json, expected.declared_keys()) {
+                BaselineFileKind::Own
+            } else {
+                BaselineFileKind::Unrecognised
+            }
+        }
+    }
+}
+
 /// Baseline data for comparison.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct BaselineData {
+    /// The command that saved this file, written on every save and never read
+    /// back through this struct: [`classify_baseline_file`] reads it off the raw
+    /// file, before the required fields below can reject another command's
+    /// baseline. `skip_deserializing` keeps a `kind` only a newer fallow writes
+    /// from turning a loadable file into a parse error.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    kind: Option<BaselineKind>,
     /// Compatibility identity for the analysis that produced this baseline.
     /// Legacy baselines deserialize as syntactic and are never silently
     /// compared with type-aware output.
@@ -367,6 +492,19 @@ pub struct BaselineData {
 }
 
 impl BaselineData {
+    /// The keys a dead-code baseline cannot load without. They carry no serde
+    /// default, so a file that deserializes into this struct carries all of
+    /// them, and a file carrying none of them is not a dead-code baseline
+    /// however it is spelled. Deliberately a subset of what the format writes:
+    /// the rest are optional and say nothing about which command wrote the file.
+    pub const REQUIRED_KEYS: &'static [&'static str] = &[
+        "unused_files",
+        "unused_exports",
+        "unused_types",
+        "unused_dependencies",
+        "unused_dev_dependencies",
+    ];
+
     /// Build baseline keys from analysis results under the syntactic analysis
     /// identity (the default for runs without semantic analysis).
     pub fn from_results(results: &crate::results::AnalysisResults, root: &Path) -> Self {
@@ -392,6 +530,7 @@ impl BaselineData {
         let catalog = baseline_catalog_keys(results, root);
 
         Self {
+            kind: Some(BaselineKind::DeadCode),
             analysis_identity,
             unused_files: file_exports.unused_files,
             unused_exports: file_exports.unused_exports,
@@ -1711,6 +1850,10 @@ pub fn filter_new_issues(
 /// the normalized field. This makes baselines readable in both directions.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct DuplicationBaselineData {
+    /// The command that saved this file. See [`BaselineData::kind`] for why it
+    /// is written but never read back through this struct.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    kind: Option<BaselineKind>,
     /// Legacy clone group keys: sorted list of `file:start-end` per group.
     #[serde(default)]
     pub clone_groups: Vec<String>,
@@ -1735,6 +1878,7 @@ impl DuplicationBaselineData {
         let fingerprints =
             crate::duplicates::CloneFingerprintSet::from_groups(&report.clone_groups);
         Self {
+            kind: Some(BaselineKind::Dupes),
             clone_groups: report
                 .clone_groups
                 .iter()
@@ -1891,6 +2035,10 @@ pub fn recompute_stats(report: &DuplicationReport) -> crate::duplicates::Duplica
 /// binaries.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct HealthBaselineData {
+    /// The command that saved this file. See [`BaselineData::kind`] for why it
+    /// is written but never read back through this struct.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub(crate) kind: Option<BaselineKind>,
     /// Legacy health baseline keys: `relative_path:function_name:line`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) findings: Vec<String>,
@@ -2010,6 +2158,7 @@ impl HealthBaselineData {
         root: &Path,
     ) -> Self {
         Self {
+            kind: Some(BaselineKind::Health),
             findings: Vec::new(),
             finding_counts: health_finding_counts(findings, root, HealthBaselineMode::Count),
             identity_finding_counts: HealthFindingCountMap::new(),
@@ -2854,6 +3003,7 @@ mod tests {
     #[test]
     fn filter_keeps_new_issues_not_in_baseline() {
         let baseline = BaselineData {
+            kind: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             unused_files: vec!["src/old.ts".to_string()],
             unused_exports: vec![],
@@ -2920,6 +3070,7 @@ mod tests {
     #[test]
     fn filter_with_empty_baseline_keeps_all() {
         let baseline = BaselineData {
+            kind: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             unused_files: vec![],
             unused_exports: vec![],
@@ -2973,6 +3124,7 @@ mod tests {
     #[test]
     fn filter_new_exports_by_file_and_name() {
         let baseline = BaselineData {
+            kind: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             unused_files: vec![],
             unused_exports: vec!["src/utils.ts:helperA".to_string()],
@@ -3160,15 +3312,20 @@ mod tests {
     /// The key list is what separates a foreign file from a legitimately empty
     /// baseline, so a field added to the format without a key here would make
     /// its own saved baseline read as foreign.
+    ///
+    /// `kind` is compared out rather than added: it is the one key every format
+    /// writes, so listing it would make each format declare all three and turn
+    /// the key fallback into a coin flip for files that carry no `kind`.
     #[test]
     fn the_declared_keys_are_every_key_each_format_writes() {
         let duplication = DuplicationBaselineData {
+            kind: Some(BaselineKind::Dupes),
             clone_groups: vec!["src/a.ts:1-10".to_owned()],
             clone_fingerprints: vec!["abc".to_owned()],
             normalized_clone_fingerprints: vec!["def".to_owned()],
         };
         assert_eq!(
-            serialized_keys(&duplication),
+            serialized_keys_without_kind(&duplication),
             DuplicationBaselineData::DECLARED_KEYS
         );
 
@@ -3178,6 +3335,7 @@ mod tests {
         ))
         .collect();
         let health = HealthBaselineData {
+            kind: Some(BaselineKind::Health),
             findings: vec!["src/a.ts:run:1".to_owned()],
             finding_counts: counts.clone(),
             identity_finding_counts: counts,
@@ -3185,16 +3343,209 @@ mod tests {
             runtime_coverage_source_hashes: vec!["src/a.ts\0run\0hash".to_owned()],
             target_keys: vec!["src/a.ts:complexity".to_owned()],
         };
-        assert_eq!(serialized_keys(&health), HealthBaselineData::DECLARED_KEYS);
+        assert_eq!(
+            serialized_keys_without_kind(&health),
+            HealthBaselineData::DECLARED_KEYS
+        );
+
+        for list in [
+            DuplicationBaselineData::DECLARED_KEYS,
+            HealthBaselineData::DECLARED_KEYS,
+            BaselineData::REQUIRED_KEYS,
+        ] {
+            assert!(
+                !list.contains(&"kind"),
+                "no format may declare the key every format writes: {list:?}"
+            );
+        }
     }
 
-    fn serialized_keys<T: serde::Serialize>(value: &T) -> Vec<String> {
+    /// The five keys the dead-code format cannot load without, which is what
+    /// makes "carries none of them" a safe reading of "not a dead-code
+    /// baseline". Derived from the format rather than restated, so a field that
+    /// loses its serde default has to be listed.
+    #[test]
+    fn the_required_dead_code_keys_are_the_ones_without_a_serde_default() {
+        let json = serde_json::to_string(&BaselineData::from_results(
+            &crate::results::AnalysisResults::default(),
+            Path::new("/project"),
+        ))
+        .expect("baseline serializes");
+        let serde_json::Value::Object(object) =
+            serde_json::from_str::<serde_json::Value>(&json).expect("object")
+        else {
+            panic!("a baseline serializes as an object");
+        };
+
+        for key in object.keys() {
+            let mut without = object.clone();
+            without.remove(key);
+            let loads =
+                serde_json::from_value::<BaselineData>(serde_json::Value::Object(without)).is_ok();
+            assert_eq!(
+                !loads,
+                BaselineData::REQUIRED_KEYS.contains(&key.as_str()),
+                "REQUIRED_KEYS must list exactly the keys a load cannot do without, and {key} \
+                 disagrees"
+            );
+        }
+    }
+
+    #[test]
+    fn every_saved_baseline_names_the_command_that_wrote_it() {
+        let dead_code = serde_json::to_string(&BaselineData::from_results(
+            &crate::results::AnalysisResults::default(),
+            Path::new("/project"),
+        ))
+        .expect("baseline serializes");
+        let dupes = serde_json::to_string(&DuplicationBaselineData::from_report(
+            &make_duplication_report(Vec::new()),
+            Path::new("/project"),
+        ))
+        .expect("baseline serializes");
+        let health = serde_json::to_string(&HealthBaselineData::from_findings(
+            &[],
+            &[],
+            &[],
+            Path::new("/project"),
+        ))
+        .expect("baseline serializes");
+
+        for (json, kind) in [
+            (&dead_code, BaselineKind::DeadCode),
+            (&dupes, BaselineKind::Dupes),
+            (&health, BaselineKind::Health),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(json).expect("object")["kind"],
+                serde_json::json!(kind.as_str()),
+                "a saved baseline states which command wrote it: {json}"
+            );
+            assert_eq!(classify_baseline_file(json, kind), BaselineFileKind::Own);
+            for other in [
+                BaselineKind::DeadCode,
+                BaselineKind::Dupes,
+                BaselineKind::Health,
+            ] {
+                if other == kind {
+                    continue;
+                }
+                assert_eq!(
+                    classify_baseline_file(json, other),
+                    BaselineFileKind::Foreign(kind.as_str().to_owned()),
+                    "and every other command reads it as that command's: {json}"
+                );
+            }
+        }
+    }
+
+    /// A baseline saved by the previous release carries no `kind`, so the keys
+    /// decide, which is exactly today's behaviour and must stay it.
+    #[test]
+    fn a_baseline_without_a_kind_is_classified_by_its_keys() {
+        let dupes =
+            r#"{"clone_groups":[],"clone_fingerprints":[],"normalized_clone_fingerprints":[]}"#;
+        let health = r#"{"runtime_coverage_findings":[],"target_keys":[]}"#;
+        let dead_code = r#"{"unused_files":[],"unused_exports":[],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[]}"#;
+
+        for (json, own) in [
+            (dupes, BaselineKind::Dupes),
+            (health, BaselineKind::Health),
+            (dead_code, BaselineKind::DeadCode),
+        ] {
+            assert_eq!(classify_baseline_file(json, own), BaselineFileKind::Own);
+            for other in [
+                BaselineKind::DeadCode,
+                BaselineKind::Dupes,
+                BaselineKind::Health,
+            ] {
+                if other == own {
+                    continue;
+                }
+                assert_eq!(
+                    classify_baseline_file(json, other),
+                    BaselineFileKind::Unrecognised,
+                    "a file with no kind and none of this format's keys is unrecognised, not \
+                     attributed to a command it never named: {json}"
+                );
+            }
+        }
+    }
+
+    /// Only the file's own statement is trusted. A `kind` a newer fallow writes
+    /// must read as another command's file rather than as a parse error, and a
+    /// `kind` that is not a string is no statement at all.
+    #[test]
+    fn an_unreadable_kind_never_becomes_a_parse_error() {
+        assert_eq!(
+            classify_baseline_file(r#"{"kind":"security"}"#, BaselineKind::Dupes),
+            BaselineFileKind::Foreign("security".to_owned())
+        );
+        assert_eq!(
+            classify_baseline_file(r#"{"kind":7,"clone_groups":[]}"#, BaselineKind::Dupes),
+            BaselineFileKind::Own
+        );
+        assert_eq!(
+            classify_baseline_file("[]", BaselineKind::Dupes),
+            BaselineFileKind::NotAnObject
+        );
+        assert_eq!(
+            classify_baseline_file("not json", BaselineKind::DeadCode),
+            BaselineFileKind::NotAnObject
+        );
+        assert!(
+            serde_json::from_str::<DuplicationBaselineData>(r#"{"kind":"security"}"#).is_ok(),
+            "a kind only a newer fallow writes must not break a load"
+        );
+    }
+
+    #[test]
+    fn a_save_is_refused_only_over_another_commands_baseline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("baseline.json");
+
+        assert!(
+            refuse_baseline_kind_overwrite(&path, BaselineKind::Dupes).is_none(),
+            "there is nothing to destroy yet"
+        );
+
+        std::fs::write(
+            &path,
+            serde_json::to_string(&DuplicationBaselineData::from_report(
+                &make_duplication_report(Vec::new()),
+                Path::new("/project"),
+            ))
+            .expect("baseline serializes"),
+        )
+        .expect("write");
+        assert!(
+            refuse_baseline_kind_overwrite(&path, BaselineKind::Dupes).is_none(),
+            "re-saving over its own file is the documented workflow"
+        );
+        let message = refuse_baseline_kind_overwrite(&path, BaselineKind::Health)
+            .expect("a health save over a duplication baseline is refused");
+        assert!(message.contains("`fallow dupes`"), "{message}");
+        assert!(message.contains("`fallow health`"), "{message}");
+        assert!(message.contains(&path.display().to_string()), "{message}");
+
+        std::fs::write(&path, "{}").expect("write");
+        assert!(
+            refuse_baseline_kind_overwrite(&path, BaselineKind::Health).is_none(),
+            "a file with nothing to identify it carries no claim to protect"
+        );
+    }
+
+    fn serialized_keys_without_kind<T: serde::Serialize>(value: &T) -> Vec<String> {
         let serde_json::Value::Object(object) =
             serde_json::to_value(value).expect("baseline serializes")
         else {
             panic!("a baseline serializes as an object");
         };
-        object.keys().cloned().collect()
+        object
+            .keys()
+            .filter(|key| key.as_str() != "kind")
+            .cloned()
+            .collect()
     }
 
     #[test]
@@ -3347,6 +3698,7 @@ mod tests {
         );
         let legacy_key = legacy_clone_group_fingerprint_key(&group);
         let baseline = DuplicationBaselineData {
+            kind: None,
             clone_groups: Vec::new(),
             clone_fingerprints: vec![legacy_key.clone()],
             normalized_clone_fingerprints: Vec::new(),
@@ -3604,6 +3956,7 @@ mod tests {
     fn health_baseline_legacy_findings_still_load() {
         let root = PathBuf::from("/project");
         let baseline = HealthBaselineData {
+            kind: None,
             findings: vec!["src/utils.ts:parseExpression:42".to_owned()],
             finding_counts: BTreeMap::new(),
             identity_finding_counts: BTreeMap::new(),
@@ -3985,6 +4338,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let findings = vec![make_health_finding(&root, "parseExpression", 42)];
         let baseline = HealthBaselineData {
+            kind: None,
             findings: vec![],
             finding_counts: BTreeMap::new(),
             identity_finding_counts: BTreeMap::new(),
