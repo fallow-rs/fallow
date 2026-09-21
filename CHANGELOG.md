@@ -119,6 +119,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The GitHub Action and the GitLab template keep the cause of a failed
+  envelope read in the job log.** Both integrations discarded the stderr of the
+  `jq` and `git` calls that read the saved envelope and derive the change scope.
+  An envelope member of the wrong type then produced an empty value, and the run
+  went green with no cause in the log. A failure now replays into the log, behind
+  `::debug::` on GitHub, so a truncated envelope explains an empty summary. A run
+  without failures logs what it logged before, and you change nothing.
+
+  `fallow security --base` and `fallow audit` also resolve the base analysis root
+  through one implementation, which warns on stderr when it cannot remap the
+  analysis root into the base worktree. The `security` copy was silent there and
+  compared the root as the caller spelled it, so a root spelled through a
+  symbolic link could widen the base snapshot to the whole base worktree. Every
+  entry point resolves the root before the analysis starts, so the widening did
+  not reach a run. Exit codes are unchanged
+  (Closes [#2740](https://github.com/fallow-rs/fallow/issues/2740)).
+
 - **Nuxt `autoImports` covers the `global/` and `islands/` component
   directories, a config key it cannot read statically, and one config per
   workspace root.** A component under `components/global/` or

@@ -93,10 +93,14 @@ an exit code.
   reintroduce base-ref detection, or a git probe serving it, outside
   `repo_refs`; every probe there returns trimmed, non-empty stdout, because
   callers feed the values back to git as refs and compare them as paths.
-  Unrelated CLI-local probes stay where they are: `get_head_sha` in
-  `crates/cli/src/audit_base_ref.rs`, the base-worktree helpers in
-  `crates/cli/src/base_worktree.rs`, and the hook scaffolding in
-  `crates/cli/src/init.rs`.
+  The short HEAD SHA and the base analysis root are engine-owned for the same
+  reason: `repo_refs::short_head_sha` and `repo_refs::base_analysis_root` are
+  the single owners, and the CLI, the engine vital signs and the typed routes
+  call them. `base_analysis_root` compares real paths on both sides, because a
+  caller can spell the root through a symbolic link while git reports the
+  resolved top level (#2740). Unrelated CLI-local probes stay where they are:
+  the base-worktree helpers in `crates/cli/src/base_worktree.rs` and the hook
+  scaffolding in `crates/cli/src/init.rs`.
 - A base analysis root that the base commit does not contain is a normal audit
   shape, not a caller error. `repo_refs::resolve_base_analysis_root` reports it,
   and the typed `audit` and `decision_surface` routes take an empty base

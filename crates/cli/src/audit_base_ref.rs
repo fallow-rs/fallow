@@ -1,25 +1,8 @@
 use std::process::ExitCode;
 
-use fallow_engine::changed_files::clear_ambient_git_env;
-
 use crate::error::emit_error;
 
 use super::AuditOptions;
-
-/// Get the short SHA of HEAD for the scope display line.
-pub fn get_head_sha(root: &std::path::Path) -> Option<String> {
-    let mut command = std::process::Command::new("git");
-    command
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().ok()?;
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
-    }
-}
 
 /// Parse a raw `FALLOW_AUDIT_BASE` value: trim, treat empty / whitespace-only as
 /// unset. Pure helper so the trimming logic is testable without mutating env.

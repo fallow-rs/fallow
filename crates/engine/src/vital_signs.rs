@@ -626,24 +626,6 @@ pub(crate) fn build_counts(input: &VitalSignsInput<'_>) -> VitalSignsCounts {
     }
 }
 
-/// Get the current git SHA (short form).
-#[expect(
-    clippy::disallowed_methods,
-    reason = "trusted git spawn with ambient repo-state env stripped, matching the core git spawn policy"
-)]
-fn git_sha(root: &Path) -> Option<String> {
-    let mut command = std::process::Command::new("git");
-    command
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    command
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-}
-
 /// Get the current git branch name.
 #[expect(
     clippy::disallowed_methods,
@@ -685,7 +667,7 @@ pub(crate) fn build_snapshot(
         snapshot_schema_version: SNAPSHOT_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
         timestamp: now,
-        git_sha: git_sha(root),
+        git_sha: crate::repo_refs::short_head_sha(root),
         git_branch: git_branch(root),
         shallow_clone,
         vital_signs,

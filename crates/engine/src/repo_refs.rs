@@ -1177,6 +1177,15 @@ impl Drop for TemporaryBaseWorktree {
 }
 
 /// Resolve the analysis root inside a detached base worktree.
+///
+/// This is the one implementation for `fallow audit`, `fallow security --base`
+/// and the typed routes. Both sides of the prefix comparison are real paths,
+/// because a caller can spell the root through a symbolic link (`/tmp` on
+/// macOS resolves to `/private/tmp`) while git reports the resolved top level.
+/// A comparison across the two path spaces fails, and the base snapshot then
+/// covers the whole base worktree while the head snapshot stays scoped. Only
+/// the relative remainder joins `base_worktree_root`, so no canonical spelling
+/// reaches the result.
 #[must_use]
 pub fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf {
     let Some(git_root) = git_toplevel(current_root) else {
@@ -1366,8 +1375,15 @@ fn git_ref_exists(root: &Path, reference: &str) -> bool {
     run_git(root, &["rev-parse", "--verify", "--quiet", reference]).is_some()
 }
 
+/// The repository top level as a real path.
+///
+/// Git resolves symbolic links in the toplevel it reports on every host
+/// checked, so the extra canonicalization is a by-construction guard rather
+/// than a behavior change. It keeps both sides of the prefix comparison in
+/// `base_analysis_root` in one path space.
 fn git_toplevel(root: &Path) -> Option<PathBuf> {
-    run_git(root, &["rev-parse", "--show-toplevel"]).map(PathBuf::from)
+    let toplevel = PathBuf::from(run_git(root, &["rev-parse", "--show-toplevel"])?);
+    Some(dunce::canonicalize(&toplevel).unwrap_or(toplevel))
 }
 
 fn git_upstream_ref(root: &Path) -> Option<String> {
@@ -1705,6 +1721,13 @@ mod tests {
         assert!(!sha.is_empty());
     }
 
+    #[test]
+    fn short_head_sha_is_absent_outside_a_git_repo() {
+        let temp = tempfile::tempdir().expect("temp dir");
+
+        assert_eq!(short_head_sha(temp.path()), None);
+    }
+
     /// Regression for issue #2699: the detected ref is handed straight back to
     /// git as a diff target, so it must carry no line ending. Without the
     /// trimmed probe contract the upstream is `origin/main\n`, the merge-base
@@ -1942,6 +1965,30 @@ mod tests {
 
         assert_eq!(
             base_analysis_root(&app_root, &base_worktree),
+            base_worktree.join("apps").join("mobile")
+        );
+    }
+
+    /// A caller can spell the analysis root through a symbolic link, and git
+    /// reports the resolved top level. The two path spaces must meet, or the
+    /// prefix comparison fails and the base snapshot covers the whole base
+    /// worktree while the head snapshot stays scoped (issue #2740).
+    #[cfg(unix)]
+    #[test]
+    fn base_analysis_root_maps_a_symlinked_root_spelling() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let real_parent = temp.path().join("real");
+        let repo = real_parent.join("repo");
+        init_repo(&repo);
+        let app_root = repo.join("apps").join("mobile");
+        fs::create_dir_all(&app_root).expect("create app root");
+        let linked_parent = temp.path().join("linked");
+        std::os::unix::fs::symlink(&real_parent, &linked_parent).expect("link the parent");
+        let base_worktree = temp.path().join("base-worktree");
+
+        let linked_app_root = linked_parent.join("repo").join("apps").join("mobile");
+        assert_eq!(
+            base_analysis_root(&linked_app_root, &base_worktree),
             base_worktree.join("apps").join("mobile")
         );
     }

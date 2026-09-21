@@ -1189,7 +1189,7 @@ fn compute_base_security_snapshot(
             opts.output,
         ));
     };
-    let base_root = base_analysis_root(opts.root, worktree.path());
+    let base_root = fallow_engine::repo_refs::base_analysis_root(opts.root, worktree.path());
     let current_config_path = opts
         .config_path
         .clone()
@@ -1413,16 +1413,6 @@ fn save_cached_security_base_snapshot(
         return;
     }
     let _ = tmp.persist(security_base_snapshot_cache_file(config, key));
-}
-
-fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf {
-    if current_root.is_absolute()
-        && let Some(git_root) = crate::base_worktree::git_toplevel(current_root)
-        && let Ok(relative) = current_root.strip_prefix(git_root)
-    {
-        return base_worktree_root.join(relative);
-    }
-    base_worktree_root.to_path_buf()
 }
 
 fn remap_cache_dir_for_base_worktree(

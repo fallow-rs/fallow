@@ -2,7 +2,7 @@ use crate::check::CheckResult;
 use crate::dupes::DupesResult;
 use crate::health::HealthResult;
 
-use fallow_engine::changed_files::clear_ambient_git_env;
+use fallow_engine::repo_refs::short_head_sha;
 
 use super::CombinedOptions;
 
@@ -45,21 +45,6 @@ fn is_whole_project_run(opts: &CombinedOptions<'_>) -> bool {
         && opts.production_health != Some(true)
         && opts.production_dupes != Some(true);
     all_analyses && no_scope_narrowing && no_diff_filter && no_production
-}
-
-/// Get the current short git SHA, or None outside a git repo. Mirrors
-/// `vital_signs`'s private helper; kept local to avoid widening its visibility.
-fn combined_git_sha(root: &std::path::Path) -> Option<String> {
-    let mut command = std::process::Command::new("git");
-    command
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(root);
-    clear_ambient_git_env(&mut command);
-    command
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
 }
 
 /// Best-effort whole-project Impact recording. No-op unless impact is enabled
@@ -108,7 +93,7 @@ pub(super) fn record_combined_impact(
     crate::impact::record_combined_run(
         opts.root,
         counts,
-        combined_git_sha(opts.root).as_deref(),
+        short_head_sha(opts.root).as_deref(),
         env!("CARGO_PKG_VERSION"),
         &crate::vital_signs::chrono_timestamp(),
         Some(&attribution),
