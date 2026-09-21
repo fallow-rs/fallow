@@ -23,6 +23,27 @@ invariants in this file.
      repos/fallow-rs/fallow/immutable-releases --jq '.enabled')"
    [ "$enabled" = "true" ] || { echo "Release immutability is not enabled" >&2; exit 1; }
    ```
+
+   Require the `release` environment to admit `main` only and to be the only
+   home of the publication secrets. A repository-level copy is readable by a
+   workflow on any ref, which is what the environment exists to prevent:
+
+   ```bash
+   custom="$(gh api repos/fallow-rs/fallow/environments/release \
+     --jq '.deployment_branch_policy.custom_branch_policies')"
+   [ "$custom" = "true" ] || { echo "release environment has no custom branch policy" >&2; exit 1; }
+   branches="$(gh api repos/fallow-rs/fallow/environments/release/deployment-branch-policies \
+     --jq '[.branch_policies[].name] | join(",")')"
+   [ "$branches" = "main" ] || { echo "release environment admits: ${branches:-nothing}" >&2; exit 1; }
+   repo_secrets="$(gh secret list --repo fallow-rs/fallow --json name --jq '.[].name')"
+   env_secrets="$(gh secret list --repo fallow-rs/fallow --env release --json name --jq '.[].name')"
+   for name in VSCE_PAT OVSX_PAT ED25519_BINARY_SIGNING_PRIVATE_KEY; do
+     if grep -qx "$name" <<<"$repo_secrets"; then
+       echo "$name is still a repository secret" >&2; exit 1
+     fi
+     grep -qx "$name" <<<"$env_secrets" || { echo "$name is missing from the release environment" >&2; exit 1; }
+   done
+   ```
 4. Derive the semantic-version bump from every commit since the prior release
    unless the user supplied an explicit bump. Confirm a major bump before
    mutating versions unless the user explicitly requested it.

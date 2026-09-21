@@ -150,6 +150,13 @@ jobs:
   publish-crates:
     name: Publish Rust crates
     needs: [release-verified, release-assets]
+    # Every credential-bearing job runs in the `release` environment. Its
+    # deployment branch policy admits `main` only, so a copy of this workflow
+    # dispatched from another ref gets neither the environment secrets nor an
+    # OIDC token that an environment-pinned trusted publisher accepts. The
+    # ref check in release-context lives in this file and protects against
+    # mistakes, not against an edited copy.
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -238,6 +245,8 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     needs: release-context
+    # Holds the binary signing key, which exists only as an environment secret.
+    environment: release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
     container: ${{ matrix.container }}
@@ -1157,6 +1166,7 @@ jobs:
     #   approves the stage on npm with 2FA.
     # Anything that needs `npm ci` or runs dependency code belongs in npm-prep.
     needs: [npm-prep, release-assets]
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -1587,6 +1597,7 @@ jobs:
   vscode-publish-marketplace:
     name: Publish VS Code Marketplace targets
     needs: [vscode-prep, vscode-host-smoke, release-assets]
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions: {}
@@ -1670,6 +1681,7 @@ jobs:
   vscode-publish-open-vsx:
     name: Publish Open VSX targets
     needs: [vscode-prep, vscode-host-smoke, release-assets]
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions: {}

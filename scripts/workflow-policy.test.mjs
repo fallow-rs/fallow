@@ -597,6 +597,45 @@ test("release stages the fallow npm root for maintainer approval", () => {
   assert.match(security, /exactly one `npm stage publish` call/u);
 });
 
+test("release credential jobs run in the main-only release environment", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
+  const security = readFileSync("docs/development/release-security.md", "utf8");
+  const credentialJobs = [
+    "build",
+    "npm-publish",
+    "publish-crates",
+    "vscode-publish-marketplace",
+    "vscode-publish-open-vsx",
+  ];
+  const jobNames = Array.from(
+    indentedBlock(workflow, "jobs", 0).matchAll(/^ {2}([a-z][a-z0-9-]*):$/gmu),
+    (match) => match[1],
+  );
+  const environmentJobs = [];
+
+  for (const name of jobNames) {
+    const job = indentedBlock(workflow, name, 2);
+    const inEnvironment = /^ {4}environment: release$/mu.test(job);
+    const holdsCredentials =
+      /\$\{\{\s*secrets\.(?!GITHUB_TOKEN\b)/u.test(job) || /^\s+id-token: write$/mu.test(job);
+
+    if (inEnvironment) {
+      environmentJobs.push(name);
+    }
+    assert.ok(
+      !holdsCredentials || inEnvironment,
+      `${name} holds publication credentials outside the release environment`,
+    );
+    assert.doesNotMatch(job, /^ {4}environment:(?! release$)/mu);
+  }
+
+  assert.deepEqual(environmentJobs.toSorted(), credentialJobs);
+  assert.match(procedure, /environments\/release\/deployment-branch-policies/u);
+  assert.match(procedure, /is still a repository secret/u);
+  assert.match(security, /Its deployment branch policy admits `main` only/u);
+});
+
 test("release keeps the version tag last and requires curated public notes", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const context = indentedBlock(workflow, "release-context", 2);
