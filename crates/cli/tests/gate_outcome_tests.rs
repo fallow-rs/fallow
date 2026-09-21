@@ -273,6 +273,47 @@ fn a_baseline_saved_before_the_kind_member_still_loads_on_its_own_command() {
     }
 }
 
+/// The classification runs before the parse, and it must not soften the parse. A
+/// broken dead-code baseline is still a fatal input. A read of it as an empty
+/// baseline would drop every entry it holds.
+#[test]
+fn a_broken_dead_code_baseline_is_still_fatal_rather_than_read_as_empty() {
+    let project = orphan_project(2);
+    for (name, body) in [
+        ("not-json.json", "not json at all"),
+        ("an-array.json", "[]"),
+        // Carries dead-code keys, so it is this command's own baseline, and three
+        // of the format's required fields are missing.
+        (
+            "partial.json",
+            r#"{"kind":"dead-code","unused_files":["src/orphan0.ts"],"unused_exports":[]}"#,
+        ),
+    ] {
+        let path = project.path().join(name);
+        std::fs::write(&path, body).expect("write baseline");
+        let output = run(&[
+            "dead-code",
+            "--root",
+            root_arg(&project),
+            "--format",
+            "json",
+            "--quiet",
+            "--baseline",
+            path.to_str().expect("utf8"),
+        ]);
+        assert_eq!(
+            output.code, 2,
+            "{name} is a broken baseline, not another command's: {}",
+            output.stdout
+        );
+        assert!(
+            output.stdout.contains("failed to parse baseline"),
+            "{name} must report the parse failure: {}",
+            output.stdout
+        );
+    }
+}
+
 /// A `--save-baseline` aimed at another command's file would overwrite it with
 /// no way back, so it is refused before anything is written.
 #[test]
@@ -309,6 +350,42 @@ fn a_save_over_another_commands_baseline_is_refused() {
     }
 
     save_baseline("dead-code", &project, &path);
+}
+
+/// The destination is known before anything is analyzed, so the refusal costs
+/// nothing rather than a full run thrown away at its last step.
+///
+/// The test uses a scope the analysis itself rejects, which is the one fact that
+/// separates the two orders. `--workspace` on a project with no workspaces fails
+/// during scope resolution. The refusal therefore comes first only when the
+/// command decides it before the analysis. `dupes` is not in the loop, because it
+/// compares and saves before any scope resolution.
+#[test]
+fn a_save_over_another_commands_baseline_is_refused_before_the_analysis_runs() {
+    let project = cloned_project();
+    let path = project.path().join("preflight-baseline.json");
+    save_baseline("dupes", &project, &path);
+
+    for command in ["dead-code", "health"] {
+        let mut args = vec![command, "--root", root_arg(&project)];
+        if command == "health" {
+            args.push("--complexity");
+        }
+        args.extend([
+            "--workspace",
+            "no-such-package",
+            "--save-baseline",
+            path.to_str().expect("utf8"),
+        ]);
+        let output = run(&args);
+        assert_eq!(output.code, 2, "{}", output.stderr);
+        assert!(
+            output.stderr.contains("refusing to overwrite the baseline"),
+            "the destination is known at argument time, so the refusal precedes \
+             the scope resolution the analysis does: {}",
+            output.stderr
+        );
+    }
 }
 
 fn save_regression_baseline(root: &Path, file: &str) {
@@ -1405,6 +1482,15 @@ fn a_dupes_run_says_so_when_the_baseline_is_another_commands() {
             .contains("has no entries this command recognises"),
         "the fact must reach stderr even under --quiet, because it appears in \
          no human report and --ci implies --quiet: {}",
+        output.stderr
+    );
+    // Hedged, because the file may equally be an empty object of nobody's, which
+    // no remedy fits. A note with no remedy at all leaves the reader to guess.
+    assert!(
+        output.stderr.contains(
+            "If another command saved it, point --baseline at this command's own baseline."
+        ),
+        "the fallback note offers a remedy too: {}",
         output.stderr
     );
     assert_eq!(

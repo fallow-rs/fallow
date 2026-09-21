@@ -67,6 +67,10 @@ pub struct DupesOptions<'a> {
     pub scope: Option<std::path::PathBuf>,
     pub top: Option<usize>,
     pub baseline_path: Option<&'a std::path::Path>,
+    /// Which argument carried `baseline_path`, so the note about a baseline
+    /// another command saved names an argument this run accepts. `fallow audit`
+    /// passes `--dupes-baseline`; every other caller passes `--baseline`.
+    pub baseline_flag: &'a str,
     pub save_baseline_path: Option<&'a std::path::Path>,
     /// Fail the run when a loaded `baseline_path` has entries that match
     /// nothing.
@@ -596,7 +600,8 @@ fn apply_duplication_baseline(
         return Ok(None);
     };
 
-    let (baseline_data, unrecognised_format) = read_duplication_baseline(path, opts.output)?;
+    let (baseline_data, saved_by, unrecognised_format) =
+        read_duplication_baseline(path, opts.output)?;
     let baseline_entries = baseline_data.entry_count();
     let before = report.clone_groups.len();
     *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
@@ -615,7 +620,9 @@ fn apply_duplication_baseline(
     crate::baseline_gate::note_unrecognised_baseline(
         Some(path),
         unrecognised_format,
+        saved_by.as_deref(),
         fallow_engine::baseline::BaselineKind::Dupes,
+        opts.baseline_flag,
     );
 
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
@@ -629,6 +636,7 @@ fn apply_duplication_baseline(
         path: path.to_path_buf(),
         scope_reasons,
         unrecognised_format,
+        saved_by,
     }))
 }
 
@@ -657,8 +665,10 @@ fn duplication_comparison_scope_reasons(
         .insert_if(config.production, ScopeReason::Production)
 }
 
-/// The loaded baseline, and whether the file was written by another command:
-/// every field of this format has a serde default, so a foreign JSON object
+/// The loaded baseline, the command that saved it when the file names one other
+/// than `dupes`, and whether another command saved the file.
+///
+/// Every field of this format has a serde default, so a foreign JSON object
 /// loads as zero clone groups and is otherwise indistinguishable from a
 /// baseline saved on a project with no duplication. The file's own `kind`
 /// answers when it carries one, and the keys answer for a baseline saved before
@@ -666,7 +676,7 @@ fn duplication_comparison_scope_reasons(
 fn read_duplication_baseline(
     path: &std::path::Path,
     output: OutputFormat,
-) -> Result<(DuplicationBaselineData, bool), ExitCode> {
+) -> Result<(DuplicationBaselineData, Option<String>, bool), ExitCode> {
     let json = std::fs::read_to_string(path).map_err(|e| {
         emit_error(
             &format!("failed to read duplication baseline: {e}"),
@@ -681,14 +691,16 @@ fn read_duplication_baseline(
             output,
         )
     })?;
-    let unrecognised_format = !matches!(
-        fallow_engine::baseline::classify_baseline_file(
-            &json,
-            fallow_engine::baseline::BaselineKind::Dupes
-        ),
-        fallow_engine::baseline::BaselineFileKind::Own
+    let classified = fallow_engine::baseline::classify_baseline_file(
+        &json,
+        fallow_engine::baseline::BaselineKind::Dupes,
     );
-    Ok((data, unrecognised_format))
+    let saved_by = match classified {
+        fallow_engine::baseline::BaselineFileKind::Foreign(ref found) => Some(found.clone()),
+        _ => None,
+    };
+    let unrecognised_format = !matches!(classified, fallow_engine::baseline::BaselineFileKind::Own);
+    Ok((data, saved_by, unrecognised_format))
 }
 
 /// Warn when a loaded duplication baseline no longer describes the current
@@ -825,6 +837,13 @@ pub fn print_dupes_result(
 }
 
 pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
+    if let Some(code) = crate::baseline_gate::refuse_save_before_analysis(
+        opts.save_baseline_path,
+        fallow_engine::baseline::BaselineKind::Dupes,
+        opts.output,
+    ) {
+        return code;
+    }
     let result = match execute_dupes(opts) {
         Ok(r) => r,
         Err(code) => return code,
@@ -980,7 +999,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     let stale_baseline_failed = crate::baseline_gate::gate_failed(
         result.baseline_staleness.as_ref(),
         result.fail_on_stale_baseline,
-        crate::baseline_gate::DUPES_NOUN,
+        fallow_engine::baseline::BaselineKind::Dupes,
     );
 
     if threshold_exceeded || stale_baseline_failed {
@@ -1212,6 +1231,7 @@ mod tests {
             ignore_imports: None,
             top: None,
             baseline_path: None,
+            baseline_flag: "--baseline",
             save_baseline_path: None,
             fail_on_stale_baseline: false,
             production: false,

@@ -21,9 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   went green on it; all three now warn. A file that suppresses nothing also
   trips `--fail-on-stale-baseline`, which reaches the comment, the job summary,
   both CI integrations and the MCP gate sentences. Exit codes are unchanged
-  without that flag. A `--save-baseline` aimed at a file another command wrote
-  is refused with exit 2 instead of destroying it: save each command's baseline
-  to its own path
+  without that flag. `fallow` refuses a `--save-baseline` that points at a file
+  another command wrote. It exits 2 before the analysis runs and keeps the file.
+  Save each command's baseline to its own path
   (Closes [#2738](https://github.com/fallow-rs/fallow/issues/2738)).
 
 - **A baseline nothing recognises reaches the comment and the note.** The sticky
@@ -91,8 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comment, review and summary bodies each say so once.
   `hotspots-skipped` carries a `cause`, adding `invalid-since` and
   `churn-file-unreadable` to the existing `not-a-repository`.
-  `fallow security --sarif-file` carries the `sarif-file` entry on success. Exit
-  codes are unchanged
+  `fallow security --sarif-file` carries the `sarif-file` entry on success. A live
+  `--format github-summary` or `--format github-annotations` run for dead-code now
+  carries the gate inventory and the baseline advisory. Until now those two
+  surfaces received them only through `fallow report --from`. Exit codes are
+  unchanged
   (Closes [#2734](https://github.com/fallow-rs/fallow/issues/2734)).
 
 ### Fixed

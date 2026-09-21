@@ -454,13 +454,17 @@ fn print_check_github_format(
         ctx.elapsed,
         ctx.config_fixable,
         None,
-        // Only the request outcomes: this envelope is a render input for the
-        // GitHub-native targets and has never carried the baseline or the
-        // gates. Whether the run did what it was asked belongs here anyway,
-        // because the annotation stream and the job summary are where a
-        // reviewer reads the scope (issues #2687, #2688).
+        // This envelope is a render input for the GitHub-native targets, so it
+        // carries exactly what those two surfaces state: the scope the run
+        // covered (issues #2687, #2688), the gate inventory, and this run's view
+        // of the loaded baseline. Leaving the last two defaulted made the
+        // `Gate outcomes:` line and the baseline advisory reachable only through
+        // `fallow report --from`, so a direct run and a re-render of its own
+        // envelope disagreed (issue #2734).
         fallow_api::CheckJsonExtraOutputs {
             request_outcomes: crate::requests::request_outcomes(),
+            baseline_staleness: ctx.baseline_staleness,
+            gate_outcomes: ctx.gate_outcomes.clone(),
             ..Default::default()
         },
         ctx.workspace_diagnostics,

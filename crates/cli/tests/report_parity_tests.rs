@@ -168,6 +168,26 @@ fn saved_reports_preserve_native_health_duplication_and_combined_output() {
     );
 }
 
+/// The two GitHub-native targets build their own render input. They do not read
+/// the report the JSON format serializes. A member the live call leaves out is
+/// therefore absent from the body they write, and `report --from` renders it from
+/// the saved envelope.
+///
+/// They are not in the byte-parity list, because both bodies carry the run's
+/// elapsed time, and two runs never share one value. This test asserts the verdict
+/// line on its own instead.
+fn assert_live_github_native_states_the_gate(root: &Path, extra: &[&str]) {
+    for format in ["github-summary", "github-annotations"] {
+        let direct = run(root, &analysis_args(Some("check"), root, format, extra));
+        assert!(matches!(direct.status.code(), Some(0 | 1)), "{format}");
+        let rendered = String::from_utf8_lossy(&direct.stdout);
+        assert!(
+            rendered.contains("stale-baseline"),
+            "the live {format} render must state the gate it failed: {rendered}"
+        );
+    }
+}
+
 /// The baseline advisory and the gate rows are rendered from typed state on a
 /// direct run and read back off the envelope by `report --from`. This is the
 /// one test that catches a divergence between the two, and the integrations
@@ -219,6 +239,8 @@ fn saved_stale_baseline_surfaces_match_direct_rendering() {
         "--fail-on-stale-baseline",
     ];
     assert_saved_report_parity_with_args(root, Some("check"), &baseline_args);
+
+    assert_live_github_native_states_the_gate(root, &baseline_args);
 
     // The bodies agreeing is only half of the render: the Check Run the action
     // posts is built from the decision sidecar, whose gate rows the saved path

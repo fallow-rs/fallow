@@ -2941,6 +2941,7 @@ fn run_audit_check<'a>(
         diff_index: None,
         use_shared_diff_index: true,
         baseline: opts.dead_code_baseline,
+        baseline_flag: "--dead-code-baseline",
         save_baseline: None,
         // The gate is answered once by `note_stale_baseline_gate_inert`;
         // this sub-pass is change-scoped and could only stand down again.
@@ -3058,6 +3059,7 @@ fn build_audit_dupes_options<'a>(
         ignore_imports: Some(dupes_cfg.ignore_imports),
         top: None,
         baseline_path: opts.dupes_baseline,
+        baseline_flag: "--dupes-baseline",
         save_baseline_path: None,
         // See the dead-code sub-pass: audit answers the flag once itself.
         fail_on_stale_baseline: false,
@@ -3117,7 +3119,11 @@ fn run_audit_health<'a>(
             // health baseline was the one of its three that stayed silent about
             // it. The dead-code and duplication notes come from the load sites
             // audit shares.
-            crate::health::note_unrecognised_health_baseline(&r, opts.health_baseline);
+            crate::health::note_unrecognised_health_baseline(
+                &r,
+                opts.health_baseline,
+                "--health-baseline",
+            );
             Ok(Some(r))
         }
         Err(code) => Err(code),

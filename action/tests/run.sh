@@ -3372,7 +3372,8 @@ if [ "${MOCK_AUDIT_BASELINES:-}" = "1" ]; then
   exit 0
 fi
 # The same shape with every section stating its recognition verdict outright,
-# including the literal `false` the audit loop's old inline `// empty` blanked.
+# including a literal `false`, which the shared reader keeps distinct from an
+# absent member.
 if [ "${MOCK_AUDIT_BASELINES:-}" = "2" ]; then
   printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":false,"scope_reasons":["changed-since"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
   exit 0

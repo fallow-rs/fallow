@@ -75,7 +75,9 @@ fn advisory_sentence(staleness: &Value, analysis: Option<&str>) -> Option<String
     // Checked before the advisory arms, and before the `gate_trips` fallback the
     // same file now reaches: its counts are all zero, so that arm would render
     // "0 of 0 saved entries matched nothing this run" next to a baseline whose
-    // problem is that nothing read it. Word for word the job summary's line.
+    // problem is that nothing read it. Word for word the job summary's line for a
+    // baseline whose path the Action never saw. The summary names the file when it
+    // has one. This renderer never can, because the envelope carries no path.
     if staleness
         .get("unrecognised_format")
         .and_then(Value::as_bool)
@@ -206,7 +208,8 @@ mod tests {
     /// A file this command could not read as its own now trips the gate, so
     /// without its own arm the `gate_trips` fallback would render "0 of 0 saved
     /// entries matched nothing this run" for a baseline whose problem is that
-    /// nothing read it. Word for word the job summary's line.
+    /// nothing read it. Word for word the job summary's pathless line; the
+    /// summary names the file when the Action published a path for it.
     #[test]
     fn a_baseline_nothing_recognises_gets_its_own_sentence() {
         let mut object = staleness("none", 0, 0, true);

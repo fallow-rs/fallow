@@ -1049,9 +1049,11 @@ audit_baseline_notices() {
     section=$(printf '%s' "$row" | cut -d: -f2)
     command=$(printf '%s' "$row" | cut -d: -f3)
     input=${row##*:}
-    # Through the shared reader, which guards with `has`: the inline `// empty`
-    # this loop used blanked a literal `false`, so a section reporting
-    # `unrecognised_format: false` read the same as one that reported nothing.
+    # Through the shared reader, so this loop reads a member the same way the
+    # single-analysis path does. The reader guards with `has`, which keeps a
+    # literal `false` distinct from an absent member. The inline `// empty` it
+    # replaces collapsed the two. No consumer here saw a difference, because each
+    # one compares the value against the string `true`.
     entries=$(read_staleness_field "$file" baseline_entries "$section")
     # Absent means that baseline was never loaded, which is not worth a line.
     if [ -z "$entries" ]; then

@@ -84,7 +84,7 @@ fn machine_combined_code_with_stale_baseline_gate(
     let failed = crate::baseline_gate::gate_failed(
         check_result.and_then(|result| result.baseline_staleness.as_ref()),
         opts.fail_on_stale_baseline,
-        crate::baseline_gate::DEAD_CODE_NOUN,
+        fallow_engine::baseline::BaselineKind::DeadCode,
     );
     if failed { code.max(1) } else { code }
 }
@@ -680,6 +680,7 @@ fn print_health_section(
             explain: opts.explain,
             gates: fallow_engine::health::HealthGateOptions::default(),
             baseline_path: None,
+            baseline_saved_by: None,
             summary: opts.summary,
             summary_heading: !show_headers,
             show_explain_tip: false,

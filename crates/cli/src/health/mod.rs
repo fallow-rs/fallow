@@ -196,10 +196,17 @@ fn health_err_to_exit(error: HealthError, output: OutputFormat) -> ExitCode {
 }
 
 /// Load config for a health run, validating coverage-root and churn-file inputs
-/// up front (loud exit 2 on a malformed input).
+/// and the baseline destination up front (loud exit 2 on a malformed input).
 pub fn load_health_config(
     opts: &HealthOptions<'_>,
 ) -> Result<(fallow_config::ResolvedConfig, f64), ExitCode> {
+    if let Some(code) = crate::baseline_gate::refuse_save_before_analysis(
+        opts.save_baseline,
+        fallow_engine::baseline::BaselineKind::Health,
+        opts.output,
+    ) {
+        return Err(code);
+    }
     fallow_engine::health::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
         .map_err(|e| emit_error(&e, 2, opts.output))?;
     validate_health_churn_file(opts).map_err(|e| health_err_to_exit(e, opts.output))?;
@@ -445,7 +452,7 @@ pub fn run_health(
     if let Some(ref timings) = result.timings {
         report::print_health_performance(timings, opts.output, json_style);
     }
-    report_loaded_baseline(&result, opts.baseline);
+    let baseline_saved_by = report_loaded_baseline(&result, opts.baseline);
     let code = print_health_result(
         &result,
         HealthPrintOptions {
@@ -453,6 +460,7 @@ pub fn run_health(
             explain: opts.explain,
             gates: opts.gates,
             baseline_path: opts.baseline,
+            baseline_saved_by: baseline_saved_by.as_deref(),
             summary: opts.summary,
             summary_heading: true,
             show_explain_tip: true,
@@ -559,6 +567,11 @@ pub struct HealthPrintOptions<'a> {
     /// to re-save. `None` when no baseline was loaded, which makes the gate
     /// inert.
     pub baseline_path: Option<&'a std::path::Path>,
+    /// The command that saved the loaded baseline, when it names one other than
+    /// `health`. The load note resolves it once and passes it here, so the gate
+    /// line names the same writer and reads no file. `None` on the routes that
+    /// print no note. Those routes arm no gate either.
+    pub baseline_saved_by: Option<&'a str>,
     pub summary: bool,
     pub summary_heading: bool,
     pub show_explain_tip: bool,
@@ -789,20 +802,23 @@ fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_
 /// `audit` and the combined run build their next steps from their own builders
 /// and would otherwise offer a `health` path on an envelope that is not
 /// health's.
-fn report_loaded_baseline(result: &HealthResult, baseline_path: Option<&std::path::Path>) {
-    let Some(path) = baseline_path else {
-        return;
-    };
-    let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
-        return;
-    };
-    note_unrecognised_health_baseline(result, baseline_path);
+/// Returns the command that saved the loaded file, when it names one other than
+/// `health`. The gate line then names the same writer as this note, and reads no
+/// file.
+fn report_loaded_baseline(
+    result: &HealthResult,
+    baseline_path: Option<&std::path::Path>,
+) -> Option<String> {
+    let path = baseline_path?;
+    let staleness = result.report.summary.baseline_staleness.as_ref()?;
+    let saved_by = note_unrecognised_health_baseline(result, baseline_path, "--baseline");
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: "health",
         path: path.display().to_string(),
         baseline_entries: staleness.baseline_entries,
         scope_reasons: staleness.scope_reasons,
     });
+    saved_by
 }
 
 /// Say that the loaded baseline is not a health baseline.
@@ -812,18 +828,47 @@ fn report_loaded_baseline(result: &HealthResult, baseline_path: Option<&std::pat
 /// is not health's, so a `fallow health` next step on it would point at the
 /// wrong report. `dupes` and `dead-code` reach their notes through their own
 /// load sites, which audit shares.
+///
+/// `flag` is the argument that carried the path: `--health-baseline` on an audit
+/// and `--baseline` on the standalone command.
+///
+/// Returns the command that saved the file, when it names one other than
+/// `health`. The engine classifies this one command's baseline, and the bytes are
+/// gone before the CLI prints under `--quiet`. So this function reads the file
+/// once and passes the answer to the gate.
 pub fn note_unrecognised_health_baseline(
     result: &HealthResult,
     baseline_path: Option<&std::path::Path>,
-) {
-    let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
-        return;
-    };
+    flag: &str,
+) -> Option<String> {
+    let staleness = result.report.summary.baseline_staleness.as_ref()?;
+    let path = baseline_path?;
+    if !staleness.unrecognised_format {
+        return None;
+    }
+    let saved_by = saved_by_another_command(path);
     crate::baseline_gate::note_unrecognised_baseline(
-        baseline_path,
-        staleness.unrecognised_format,
+        Some(path),
+        true,
+        saved_by.as_deref(),
         fallow_engine::baseline::BaselineKind::Health,
+        flag,
     );
+    saved_by
+}
+
+/// The `kind` a baseline file names, when it names a command other than
+/// `health`. `None` for a file that names none, which is every baseline saved
+/// before the member existed, and for a file that can no longer be read.
+fn saved_by_another_command(path: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    match fallow_engine::baseline::classify_baseline_file(
+        &content,
+        fallow_engine::baseline::BaselineKind::Health,
+    ) {
+        fallow_engine::baseline::BaselineFileKind::Foreign(found) => Some(found),
+        _ => None,
+    }
 }
 
 /// Say that `--report-only` suppressed the gate, so a job that passes both
@@ -835,7 +880,11 @@ fn note_stale_baseline_gate_stood_down(result: &HealthResult, options: HealthPri
     let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
         return;
     };
-    if staleness.baseline_entries == 0 {
+    // A baseline with no entries gives the gate nothing to judge, so no gate
+    // stands down. A file this command cannot read as its own carries the same
+    // zero, and there the gate rule holds. `--report-only` then suppresses a real
+    // verdict, and it must say so.
+    if staleness.baseline_entries == 0 && !staleness.unrecognised_format {
         return;
     }
     crate::baseline_gate::note_stood_down(
@@ -855,7 +904,8 @@ fn stale_baseline_gate_failed(result: &HealthResult, options: HealthPrintOptions
         staleness,
         options.baseline_path,
         options.gates.fail_on_stale_baseline,
-        crate::baseline_gate::HEALTH_NOUN,
+        options.baseline_saved_by,
+        fallow_engine::baseline::BaselineKind::Health,
     )
 }
 
@@ -1104,6 +1154,7 @@ mod tests {
                     fail_on_stale_baseline: false,
                 },
                 baseline_path: None,
+                baseline_saved_by: None,
                 summary: false,
                 summary_heading: true,
                 show_explain_tip: true,
@@ -1279,6 +1330,7 @@ mod tests {
                     explain: false,
                     gates: HealthGateOptions::default(),
                     baseline_path: None,
+                    baseline_saved_by: None,
                     summary: false,
                     summary_heading: true,
                     show_explain_tip: true,

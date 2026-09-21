@@ -2916,6 +2916,128 @@ fn health_baseline_save_mode_controls_written_buckets() {
     );
 }
 
+/// A file another command saved carries no identity buckets either. Without the
+/// recognition check, `--baseline-mode identity` rejects it and asks for a re-save
+/// in identity mode, which is the wrong remedy. Its own baseline without those
+/// buckets still exits 2, because there the remedy is right.
+#[test]
+fn identity_mode_names_another_commands_baseline_instead_of_the_missing_buckets() {
+    let dir = hotspot_project("firstHotspot");
+    // A real count-mode health baseline with a rewritten `kind`, which is the
+    // shape the exception exists for. The file carries count buckets, so the
+    // missing-identities rule holds on it, and `kind` names another command. A
+    // baseline from a later release arrives the same way.
+    let own_count_mode = dir.path().join("own-count-baseline.json");
+    run_health_with_baseline(
+        dir.path(),
+        &["--save-baseline", own_count_mode.to_str().unwrap()],
+    );
+    let foreign = dir.path().join("foreign-kind-baseline.json");
+    let mut body: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&own_count_mode).unwrap()).unwrap();
+    assert!(
+        !body["finding_counts"]
+            .as_object()
+            .expect("a count-mode save records count buckets")
+            .is_empty(),
+        "the fixture has to carry count buckets, or the identity rule never applies: {body}"
+    );
+    body["kind"] = serde_json::Value::String("dupes".to_owned());
+    write_file(&foreign, &serde_json::to_string(&body).unwrap());
+
+    let output = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--baseline",
+            foreign.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+    let rendered = redact_all(&format!("{}\n{}", output.stdout, output.stderr), dir.path());
+    // Exit 1 is the default findings gate on a baseline that suppressed nothing.
+    // Exit 2 would be the identity rejection, which is what must not happen.
+    assert_ne!(
+        output.code, 2,
+        "a file this command never wrote is reported, not fatal: {rendered}"
+    );
+    let envelope = parse_json(&output);
+    assert_eq!(
+        envelope["summary"]["baseline_staleness"]["unrecognised_format"],
+        serde_json::Value::Bool(true),
+        "{envelope}"
+    );
+    assert!(
+        !rendered.contains("carries no finding identities"),
+        "the identity advice is the wrong remedy for another command's file: {rendered}"
+    );
+    assert!(
+        output
+            .stderr
+            .contains("`fallow dupes` saved the baseline at"),
+        "the note names the command that wrote it: {}",
+        output.stderr
+    );
+
+    let rejected = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--baseline",
+            own_count_mode.to_str().unwrap(),
+            "--baseline-mode",
+            "identity",
+        ],
+    );
+    let rejected_text = redact_all(
+        &format!("{}\n{}", rejected.stdout, rejected.stderr),
+        dir.path(),
+    );
+    assert_eq!(
+        rejected.code, 2,
+        "its own baseline without identities still cannot be compared: {rejected_text}"
+    );
+    assert!(
+        rejected_text.contains("carries no finding identities"),
+        "and there the re-save advice is the right remedy: {rejected_text}"
+    );
+}
+
+/// `--report-only` is a request never to fail a run. A gate that obeys it in
+/// silence leaves a green job with nothing to act on. A file this command cannot
+/// read as its own carries zero entries, and the gate now trips on that state.
+#[test]
+fn report_only_says_it_stood_the_gate_down_on_another_commands_baseline() {
+    let dir = hotspot_project("firstHotspot");
+    let foreign = dir.path().join("dupes-baseline.json");
+    write_file(
+        &foreign,
+        r#"{"kind":"dupes","clone_groups":[],"clone_fingerprints":[],"normalized_clone_fingerprints":[]}"#,
+    );
+
+    let output = run_health_with_baseline(
+        dir.path(),
+        &[
+            "--baseline",
+            foreign.to_str().unwrap(),
+            "--fail-on-stale-baseline",
+            "--report-only",
+        ],
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "--report-only never fails a run: {}",
+        redact_all(&output.stderr, dir.path())
+    );
+    assert!(
+        output
+            .stderr
+            .contains("--fail-on-stale-baseline did not run: --report-only never fails a run"),
+        "a suppressed verdict must say so: {}",
+        output.stderr
+    );
+}
+
 /// A defaulted count save must not clobber a baseline that carries identity
 /// buckets: forgetting `--baseline-mode identity` on a re-save would silently
 /// drop them and only fail later, in CI, on the next identity comparison

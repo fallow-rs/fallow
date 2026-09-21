@@ -225,8 +225,15 @@ pub const fn stale_baseline_gate_trips(
 /// caller gets here.
 #[must_use]
 pub fn declares_baseline_format(json: &str, declared_keys: &[&str]) -> bool {
-    let Ok(serde_json::Value::Object(object)) = serde_json::from_str::<serde_json::Value>(json)
-    else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return false;
+    };
+    value_declares_baseline_format(&value, declared_keys)
+}
+
+/// [`declares_baseline_format`] for a caller that has already parsed the file.
+fn value_declares_baseline_format(value: &serde_json::Value, declared_keys: &[&str]) -> bool {
+    let Some(object) = value.as_object() else {
         return false;
     };
     declared_keys.iter().any(|key| object.contains_key(*key))
@@ -324,8 +331,23 @@ pub fn refuse_baseline_kind_overwrite(save_path: &Path, saving: BaselineKind) ->
 /// error hides the answer.
 #[must_use]
 pub fn classify_baseline_file(json: &str, expected: BaselineKind) -> BaselineFileKind {
-    let Ok(serde_json::Value::Object(object)) = serde_json::from_str::<serde_json::Value>(json)
-    else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return BaselineFileKind::NotAnObject;
+    };
+    classify_baseline_value(&value, expected)
+}
+
+/// [`classify_baseline_file`] for a caller that parses the file itself.
+///
+/// The `dead-code` read needs both this answer and the deserialized struct, and
+/// its format is the one with required fields, so it parses once into a value and
+/// asks here rather than paying for a second parse of the same bytes.
+#[must_use]
+pub fn classify_baseline_value(
+    value: &serde_json::Value,
+    expected: BaselineKind,
+) -> BaselineFileKind {
+    let Some(object) = value.as_object() else {
         return BaselineFileKind::NotAnObject;
     };
     match object.get("kind").and_then(serde_json::Value::as_str) {
@@ -334,7 +356,7 @@ pub fn classify_baseline_file(json: &str, expected: BaselineKind) -> BaselineFil
         // A `kind` that is not a string is no statement about the writer, so the
         // keys answer as they do for a file that carries no `kind` at all.
         None => {
-            if declares_baseline_format(json, expected.declared_keys()) {
+            if value_declares_baseline_format(value, expected.declared_keys()) {
                 BaselineFileKind::Own
             } else {
                 BaselineFileKind::Unrecognised

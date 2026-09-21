@@ -7575,10 +7575,15 @@ fn audit_reports_every_baseline_that_is_another_commands() {
     ]);
     let envelope = parse_json(&output);
 
-    for (section, wrote, reads) in [
-        (vec!["dead_code"], "dupes", "dead-code"),
-        (vec!["duplication"], "health", "dupes"),
-        (vec!["complexity", "summary"], "dead-code", "health"),
+    for (section, wrote, reads, file) in [
+        (vec!["dead_code"], "dupes", "dead-code", &dupes_baseline),
+        (vec!["duplication"], "health", "dupes", &health_baseline),
+        (
+            vec!["complexity", "summary"],
+            "dead-code",
+            "health",
+            &dead_code_baseline,
+        ),
     ] {
         let staleness =
             section.iter().fold(&envelope, |value, key| &value[*key])["baseline_staleness"].clone();
@@ -7587,14 +7592,32 @@ fn audit_reports_every_baseline_that_is_another_commands() {
             serde_json::Value::Bool(true),
             "the {section:?} section must report the mismatch: {envelope}"
         );
-        // The full pairing rather than one command name: each name appears in
-        // two of the three notes, so a missing note would otherwise stay
-        // invisible behind its neighbours.
+        // The writer together with the path, not the writer alone. Each command
+        // name appears in two of the three notes, so a missing note would hide
+        // behind its neighbours.
         assert!(
             output.stderr.contains(&format!(
-                "was saved by `fallow {wrote}` and this is a `fallow {reads}` run"
+                "`fallow {wrote}` saved the baseline at {}",
+                file.display()
             )),
-            "the {reads} note must name the command that saved the file it was handed: {}",
+            "the {reads} note must name the command that saved the file it read: {}",
+            output.stderr
+        );
+    }
+
+    // Each audit baseline arrives through its own flag, so the remedy names the
+    // one the reader passed rather than `--baseline`, which `fallow audit` does
+    // not accept.
+    for flag in [
+        "--dead-code-baseline",
+        "--dupes-baseline",
+        "--health-baseline",
+    ] {
+        assert!(
+            output
+                .stderr
+                .contains(&format!("Point {flag} at this command's own baseline.")),
+            "the note must name the flag that carried the file: {}",
             output.stderr
         );
     }
