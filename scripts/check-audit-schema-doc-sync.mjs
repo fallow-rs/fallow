@@ -1,13 +1,58 @@
 #!/usr/bin/env node
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const AUDIT_SOURCE_PATH = "crates/output/src/root_envelopes.rs";
 const CHECK_SOURCE_PATH = "crates/output/src/check.rs";
 const AUDIT_DOC_PATH = "cli/audit.mdx";
+const COMPANION_DOCS_NAME = "fallow-docs";
+
+/**
+ * `git rev-parse --git-common-dir` for this checkout, or `null` when git cannot
+ * answer. The value is relative (`.git`) in a primary checkout and absolute in a
+ * linked worktree, and both spellings reduce to the main checkout.
+ *
+ * `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` are stripped so an ambient
+ * value from a hook or a wrapping tool cannot answer for another repository.
+ */
+const readGitCommonDir = (repoRoot) => {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  const result = spawnSync("git", ["rev-parse", "--git-common-dir"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env,
+  });
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+  const value = result.stdout.trim();
+  return value.length > 0 ? value : null;
+};
+
+/**
+ * Where the companion documentation checkout is expected to live.
+ *
+ * `FALLOW_DOCS_DIR` wins when it carries a path. Otherwise the companion is a
+ * sibling of the main checkout, which inside a linked worktree is not `repoRoot`:
+ * the worktree lives under the main checkout, so resolving a sibling against it
+ * points at a directory that never exists. An empty value carries no path, so it
+ * falls back to the sibling; it still counts as naming the variable, which is
+ * what keeps the check failing closed.
+ */
+export const companionDocsDir = ({ env = {}, gitCommonDir = null, repoRoot = REPO_ROOT } = {}) => {
+  if (env.FALLOW_DOCS_DIR) {
+    return resolve(env.FALLOW_DOCS_DIR);
+  }
+  const checkoutRoot = gitCommonDir === null ? repoRoot : dirname(resolve(repoRoot, gitCommonDir));
+  return resolve(checkoutRoot, "..", COMPANION_DOCS_NAME);
+};
 
 export const parseRustSchemaVersion = (source, constantName) => {
   const pattern = new RegExp(`^pub const ${constantName}: u32 = ([0-9]+);$`, "gmu");
@@ -94,8 +139,10 @@ export const checkAuditSchemaDoc = ({ document, expected }) => {
 };
 
 export const runAuditSchemaDocCheck = ({
+  docsDir,
+  env = process.env,
+  gitCommonDir,
   repoRoot = REPO_ROOT,
-  docsDir = process.env.FALLOW_DOCS_DIR ?? resolve(REPO_ROOT, "../fallow-docs"),
 } = {}) => {
   let expected;
   try {
@@ -110,7 +157,30 @@ export const runAuditSchemaDocCheck = ({
     };
   }
 
-  const docPath = resolve(docsDir, AUDIT_DOC_PATH);
+  // Presence, not content: an environment that sets the variable to an empty
+  // string asked for the check, so it must not be able to buy a skip.
+  const named = docsDir !== undefined || "FALLOW_DOCS_DIR" in env;
+  const resolvedDocsDir =
+    docsDir === undefined
+      ? companionDocsDir({
+          env,
+          gitCommonDir: gitCommonDir === undefined ? readGitCommonDir(repoRoot) : gitCommonDir,
+          repoRoot,
+        })
+      : resolve(docsDir);
+
+  // Only a guessed checkout that is not there at all stands down: that is a
+  // maintainer who has not cloned the companion, not documentation drift. A
+  // named checkout, and any checkout that exists, still fails closed, so a
+  // document that moved or was renamed is still reported.
+  if (!named && !existsSync(resolvedDocsDir)) {
+    return {
+      status: 0,
+      message: `skipped: no companion documentation checkout at ${resolvedDocsDir}; set FALLOW_DOCS_DIR to check parity`,
+    };
+  }
+
+  const docPath = resolve(resolvedDocsDir, AUDIT_DOC_PATH);
   if (!existsSync(docPath)) {
     return { status: 1, message: `DRIFT: expected companion doc not found: ${docPath}` };
   }

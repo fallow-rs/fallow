@@ -8,6 +8,7 @@
  * under `.claude/skills` and `.claude/agents`.
  */
 
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -31,6 +32,49 @@ const parseFrontmatter = (text, sourcePath) => {
 
 const renderAdapter = ({ body, frontmatter }, marker) =>
   `---\n${frontmatter}\n---\n${marker}\n${body}`;
+
+/**
+ * Repository-relative paths under `.claude` that the index tracks, or `null`
+ * when git cannot answer.
+ *
+ * Ownership of an adapter is a property of repository content, not of what
+ * happens to sit on disk. A host keeps its own skill and agent directories
+ * under `.claude`, and those carry the same generated marker once they were
+ * copied from a released contract, so the marker alone cannot tell a stale
+ * adapter from someone's local file. `null` means unknown, never "nothing is
+ * tracked": the caller then falls back to judging by marker alone.
+ *
+ * `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` are stripped so an ambient
+ * value from a hook or a wrapping tool cannot point the query at another
+ * repository's index. Paths come back relative to `repoRoot`, which is what the
+ * lookup key is: a checkout that sits inside another repository is not that
+ * repository's top level, so a top-relative spelling would match nothing.
+ */
+const trackedAdapterPaths = (repoRoot) => {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  const result = spawnSync("git", ["ls-files", "-z", "--", ".claude"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+  return new Set(result.stdout.split("\0").filter((path) => path.length > 0));
+};
+
+/** Repository-relative path in the forward-slash spelling git reports. */
+const repoPath = (repoRoot, path) => relative(repoRoot, path).replaceAll("\\", "/");
+
+/**
+ * Whether a generated file that has no canonical source is this repository's to
+ * report and to delete. An untracked file is not repository content.
+ */
+const isTracked = (tracked, relativePath) => tracked === null || tracked.has(relativePath);
 
 const canonicalSkills = (repoRoot = REPO_ROOT) => {
   const sourceRoot = join(repoRoot, ".agents", "skills");
@@ -88,7 +132,7 @@ const companionFiles = (skillDir, prefix = "") => {
   });
 };
 
-const generateSkillAdapters = (repoRoot, check) => {
+const generateSkillAdapters = (repoRoot, check, tracked, onSkip) => {
   const skills = canonicalSkills(repoRoot);
   const drifted = [];
   for (const skill of skills) {
@@ -128,7 +172,12 @@ const generateSkillAdapters = (repoRoot, check) => {
         continue;
       }
       const orphanPath = join(dirname(destination), orphan);
-      drifted.push(relative(repoRoot, orphanPath));
+      const orphanRelative = repoPath(repoRoot, orphanPath);
+      if (!isTracked(tracked, orphanRelative)) {
+        onSkip(orphanRelative);
+        continue;
+      }
+      drifted.push(orphanRelative);
       if (!check) {
         rmSync(orphanPath, { force: true });
       }
@@ -137,7 +186,12 @@ const generateSkillAdapters = (repoRoot, check) => {
 
   const names = new Set(skills.map(({ name }) => name));
   for (const stalePath of staleGeneratedSkillAdapters(repoRoot, names)) {
-    drifted.push(relative(repoRoot, stalePath));
+    const staleRelative = repoPath(repoRoot, stalePath);
+    if (!isTracked(tracked, staleRelative)) {
+      onSkip(staleRelative);
+      continue;
+    }
+    drifted.push(staleRelative);
     if (!check) {
       rmSync(dirname(stalePath), { recursive: true, force: true });
     }
@@ -183,7 +237,7 @@ const staleGeneratedAgentAdapters = (repoRoot, names) => {
     .filter((path) => readFileSync(path, "utf8").includes(AGENT_GENERATED_MARKER));
 };
 
-const generateAgentDefinitionAdapters = (repoRoot, check) => {
+const generateAgentDefinitionAdapters = (repoRoot, check, tracked, onSkip) => {
   const agents = canonicalAgents(repoRoot);
   const drifted = [];
   for (const agent of agents) {
@@ -201,7 +255,12 @@ const generateAgentDefinitionAdapters = (repoRoot, check) => {
 
   const names = new Set(agents.map(({ name }) => name));
   for (const stalePath of staleGeneratedAgentAdapters(repoRoot, names)) {
-    drifted.push(relative(repoRoot, stalePath));
+    const staleRelative = repoPath(repoRoot, stalePath);
+    if (!isTracked(tracked, staleRelative)) {
+      onSkip(staleRelative);
+      continue;
+    }
+    drifted.push(staleRelative);
     if (!check) {
       rmSync(stalePath, { force: true });
     }
@@ -209,10 +268,15 @@ const generateAgentDefinitionAdapters = (repoRoot, check) => {
   return drifted;
 };
 
-export const generateAgentAdapters = ({ check = false, repoRoot = REPO_ROOT } = {}) => {
+export const generateAgentAdapters = ({
+  check = false,
+  onSkip = () => {},
+  repoRoot = REPO_ROOT,
+} = {}) => {
+  const tracked = trackedAdapterPaths(repoRoot);
   const drifted = [
-    ...generateSkillAdapters(repoRoot, check),
-    ...generateAgentDefinitionAdapters(repoRoot, check),
+    ...generateSkillAdapters(repoRoot, check, tracked, onSkip),
+    ...generateAgentDefinitionAdapters(repoRoot, check, tracked, onSkip),
   ];
   return drifted.toSorted();
 };
@@ -223,7 +287,11 @@ const main = (argv = process.argv.slice(2)) => {
     throw new Error(`unknown argument: ${unknown[0]}`);
   }
   const check = argv.includes("--check");
-  const drifted = generateAgentAdapters({ check });
+  const skipped = [];
+  const drifted = generateAgentAdapters({ check, onSkip: (path) => skipped.push(path) });
+  for (const path of skipped.toSorted()) {
+    console.log(`untracked, left alone: ${path}`);
+  }
   for (const path of drifted) {
     console.log(`${check ? "stale" : "generated"}: ${path}`);
   }
