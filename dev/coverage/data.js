@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790028145212,
+  "lastUpdate": 1790030945206,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c3c701f6783ac5798cd70fcd0aa47cdd3e812e49",
-          "message": "feat(viz): analysis lenses with explicit availability states (#2515)\n\nSupersedes the #2411 draft, rebased onto current main with the contract surfaces\nclosed and the validation that branch never had.\n\nfallow viz covered four analyses; everything else fallow computes rendered as\nnothing, and an analysis that was switched off, not applicable, or unavailable\nlooked identical to one that ran and found no problems. Six primary lenses plus\nan adaptive More menu now carry an explicit availability state with a reason.\n\nThe security helpers move into crates/security rather than being duplicated:\nforce_security_rules, sarif_rule_id, fnv_hex and security_finding_id all existed\nat the merge base in the CLI, and this hoists them so the cross-crate viz lens\nshares one implementation, deleting 54 lines from the CLI.\n\nThree contract surfaces are corrected. The published skill contract still said\nviz had four lenses, in a curated cell that generate:contracts:check preserves\nverbatim, so CI passed while the text was false and the vendor job republished\nit to the companion repo. The coverage variables now name viz, including in the\nguard test that asserts the honoring surfaces. VIZ_SCHEMA_VERSION is dropped\nrather than gated, because render_html inlines the CSS, JS and payload into one\nfile so producer and consumer can never skew.\n\nAnd the gap the feature exists to close: viz passed runtime_coverage: None while\nthe Health lens could still report complete. Health now derives that state from\nthe report through a reason constant shared with the Security lens, so the two\ncannot drift.\n\nThe vendor gate is red by construction until fallow-skills carries the same\nskill text; the companion follows immediately.",
-          "timestamp": "2026-09-01T13:21:53+02:00",
-          "tree_id": "fb7ae0cc13676a638164f82711c6f5ee40510305",
-          "url": "https://github.com/fallow-rs/fallow/commit/c3c701f6783ac5798cd70fcd0aa47cdd3e812e49"
-        },
-        "date": 1788262275680,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/4cec981c7cafc6d6d6f87127011c58b021fc23e0"
         },
         "date": 1790028141486,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7e2e7ad99634f2c7ccd359a6a3ea33b162e3d0e6",
+          "message": "feat(plugins): record a plugin config fallow cannot read as a workspace diagnostic (#2748)\n\nA framework plugin that cannot read a config statically records a workspace_diagnostics entry. plugin-config-unreadable covers a Module Federation exposes or remotes key that is not a static object literal; it sets degrades_analysis, so the Action, the GitLab template and the MCP warnings report degraded inputs. plugin-effect-not-modeled covers a Nuxt autoImports surface that kept its convention entry patterns; it does not degrade the analysis and prints nothing. Both carry plugin, key and reason, with the config file in path. The stderr line for an unreadable key gains the fallow: prefix. Exit codes are unchanged.\n\nCloses #2736",
+          "timestamp": "2026-09-22T00:28:05+02:00",
+          "tree_id": "ac5030a20efa7a218729cb54898dbf043b672274",
+          "url": "https://github.com/fallow-rs/fallow/commit/7e2e7ad99634f2c7ccd359a6a3ea33b162e3d0e6"
+        },
+        "date": 1790030941704,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
