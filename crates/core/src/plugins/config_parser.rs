@@ -1332,7 +1332,7 @@ fn unwrap_to_identifier_name<'a>(expr: &'a Expression<'a>) -> Option<&'a str> {
 ///
 /// Handles `const config = { ... }`, `const config: Type = { ... }`,
 /// and `const config = defineConfig({ ... })`.
-fn find_variable_init_object<'a>(
+pub(crate) fn find_variable_init_object<'a>(
     program: &'a Program,
     name: &str,
 ) -> Option<&'a ObjectExpression<'a>> {
@@ -1349,6 +1349,23 @@ fn find_variable_init_object<'a>(
         }
     }
     None
+}
+
+/// Resolve an expression to an object literal, through a top-level `const` in
+/// the same file when the expression only names one.
+///
+/// `new ModuleFederationPlugin(mfConfig)` is the common shape for plugin options
+/// that a config declares above the plugin list. A reader that accepts the
+/// inline object only reads nothing there.
+pub(crate) fn resolve_object_expression<'a>(
+    program: &'a Program<'a>,
+    expr: &'a Expression<'a>,
+) -> Option<&'a ObjectExpression<'a>> {
+    if let Some(obj) = object_expression(expr) {
+        return Some(obj);
+    }
+    let name = unwrap_to_identifier_name(expr)?;
+    find_variable_init_object(program, name)
 }
 
 /// Resolve a config object that is passed as a NAMED CONST to a wrapper call:

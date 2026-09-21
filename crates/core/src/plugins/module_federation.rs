@@ -2,9 +2,11 @@
 //!
 //! Federation options reach a build in two shapes. A standalone
 //! `module-federation.config.*` file default-exports the options object and is
-//! owned by this plugin. The same options also appear inline in a bundler
-//! config's `plugins` array, which the webpack, rspack, rsbuild and vite
-//! plugins read through [`apply_bundler_plugin_options`].
+//! owned by this plugin. The same options also reach a Federation plugin call
+//! inside a bundler config, which the webpack, rspack, rsbuild, vite and
+//! Next.js plugins read through [`apply_bundler_plugin_options`]. A call is read
+//! wherever it sits in the config, because a plugin list is nested, held by a
+//! variable, or built inside a hook as often as it is a literal array.
 //!
 //! Reading is syntactic. `exposes` targets become entry-point globs so an
 //! exposed module is not mistaken for dead code, and `remotes` aliases become
@@ -15,8 +17,10 @@
 use std::path::Path;
 
 use oxc_ast::ast::{
-    Argument, ArrayExpression, Expression, ObjectExpression, ObjectPropertyKind, PropertyKey,
+    Argument, CallExpression, Expression, NewExpression, ObjectExpression, ObjectPropertyKind,
+    Program, PropertyKey,
 };
+use oxc_ast_visit::{Visit, walk};
 
 use super::config_parser;
 use super::{Plugin, PluginResult, ProvidedDependencyRule};
@@ -40,9 +44,11 @@ const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 
 /// Callee names that receive Module Federation options inline in a bundler
 /// config: `ModuleFederationPlugin` for webpack and rspack,
-/// `pluginModuleFederation` for rsbuild, `federation` for vite.
+/// `pluginModuleFederation` for rsbuild, `federation` for vite,
+/// `NextFederationPlugin` for Next.js.
 const FEDERATION_CALLEES: &[&str] = &[
     "ModuleFederationPlugin",
+    "NextFederationPlugin",
     "moduleFederationPlugin",
     "pluginModuleFederation",
     "federation",
@@ -69,9 +75,10 @@ struct FederationConfig {
 }
 
 /// Where to look for Federation options in one config file.
-struct FederationSites<'a> {
-    /// Config-object paths that may hold a `plugins` array.
-    pub plugin_arrays: &'a [&'a [&'a str]],
+struct FederationSites {
+    /// Read the options of every Federation plugin call in the file, at any
+    /// position.
+    pub read_plugin_calls: bool,
     /// Read `exposes` / `remotes` off the config object itself, as the
     /// standalone `module-federation.config.*` file declares them.
     pub read_config_object: bool,
@@ -197,7 +204,7 @@ fn extract(
     source: &str,
     location: &ConfigLocation<'_>,
     plugin_label: &str,
-    sites: &FederationSites<'_>,
+    sites: &FederationSites,
 ) -> FederationConfig {
     let (config, unread) = read(source, location.config_path, sites);
     for declaration in unread {
@@ -218,14 +225,14 @@ fn apply_from_source(
     source: &str,
     location: &ConfigLocation<'_>,
     plugin_label: &str,
-    sites: &FederationSites<'_>,
+    sites: &FederationSites,
 ) {
     let config = extract(result, source, location, plugin_label, sites);
     apply(result, &config, location);
 }
 
-/// Read inline Federation options from a bundler config's top-level `plugins`
-/// array and register what they declare.
+/// Read the Federation options of every Federation plugin call in a bundler
+/// config and register what they declare.
 ///
 /// `context` is a project-relative base directory that replaces the config
 /// directory when resolving a relative `exposes` target, as webpack's `context`
@@ -248,7 +255,7 @@ pub(super) fn apply_bundler_plugin_options(
         },
         plugin_label,
         &FederationSites {
-            plugin_arrays: &[&["plugins"]],
+            read_plugin_calls: true,
             read_config_object: false,
         },
     );
@@ -304,42 +311,79 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
 fn read(
     source: &str,
     config_path: &Path,
-    sites: &FederationSites<'_>,
+    sites: &FederationSites,
 ) -> (FederationConfig, Vec<UnreadDeclaration>) {
     config_parser::extract_from_source(source, config_path, |program| {
-        let config_object = config_parser::find_config_object(program)?;
-        let mut config = FederationConfig::default();
-        let mut unread = Vec::new();
+        let mut collector = FederationCallCollector::new(program);
 
-        if sites.read_config_object {
-            read_options(config_object, &mut config, &mut unread);
+        if sites.read_config_object
+            && let Some(config_object) = config_parser::find_config_object(program)
+        {
+            collector.read_options(config_object);
+        }
+        if sites.read_plugin_calls {
+            collector.visit_program(program);
         }
 
-        for path in sites.plugin_arrays {
-            let Some(plugins) = nested_array(config_object, path) else {
-                continue;
-            };
-            for element in &plugins.elements {
-                if let Some(expr) = element.as_expression()
-                    && let Some(options) = federation_options(expr)
-                {
-                    read_options(options, &mut config, &mut unread);
-                }
-            }
-        }
-
-        Some((config, unread))
+        Some((collector.config, collector.unread))
     })
     .unwrap_or_default()
 }
 
-fn read_options(
-    options: &ObjectExpression<'_>,
-    config: &mut FederationConfig,
-    unread: &mut Vec<UnreadDeclaration>,
-) {
-    read_exposes(options, config, unread);
-    read_remotes(options, config, unread);
+/// Every Federation plugin call in one config program, at any position.
+///
+/// A bundler config holds its plugin list in a literal array, in a nested array,
+/// in a variable, under a tool-specific key, or inside a hook that receives the
+/// config. One walk covers all of them, and the accept gate stays the callee name
+/// plus an options object that declares a Federation key.
+struct FederationCallCollector<'a> {
+    program: &'a Program<'a>,
+    config: FederationConfig,
+    unread: Vec<UnreadDeclaration>,
+}
+
+impl<'a> FederationCallCollector<'a> {
+    fn new(program: &'a Program<'a>) -> Self {
+        Self {
+            program,
+            config: FederationConfig::default(),
+            unread: Vec::new(),
+        }
+    }
+
+    fn read_options(&mut self, options: &ObjectExpression<'_>) {
+        read_exposes(options, &mut self.config, &mut self.unread);
+        read_remotes(options, &mut self.config, &mut self.unread);
+    }
+
+    fn read_plugin_call(&mut self, callee: &Expression<'a>, arguments: &[Argument<'a>]) {
+        if !is_federation_callee(callee) {
+            return;
+        }
+        let Some(options) = arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .and_then(|expr| config_parser::resolve_object_expression(self.program, expr))
+        else {
+            return;
+        };
+        if !declares_federation_keys(options) {
+            return;
+        }
+        self.read_options(options);
+    }
+}
+
+impl<'a> Visit<'a> for FederationCallCollector<'a> {
+    fn visit_new_expression(&mut self, new_expression: &NewExpression<'a>) {
+        self.read_plugin_call(&new_expression.callee, &new_expression.arguments);
+        walk::walk_new_expression(self, new_expression);
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        self.read_plugin_call(&call.callee, &call.arguments);
+        walk::walk_call_expression(self, call);
+    }
 }
 
 fn read_exposes(
@@ -347,21 +391,27 @@ fn read_exposes(
     config: &mut FederationConfig,
     unread: &mut Vec<UnreadDeclaration>,
 ) {
-    let Some(mapping) = federation_key_object(options, FederationKey::Exposes, unread) else {
-        return;
-    };
     let mut has_unread_entry = false;
-    for property in &mapping.properties {
-        let ObjectPropertyKind::ObjectProperty(property) = property else {
-            continue;
+    for declaration in federation_key_declarations(options, FederationKey::Exposes, unread) {
+        let mapping = match declaration {
+            KeyDeclaration::Target(target) => {
+                classify_exposed_target(&target, config);
+                continue;
+            }
+            KeyDeclaration::Mapping(mapping) => mapping,
         };
-        let targets = exposed_target_strings(&property.value);
-        if targets.is_empty() {
-            has_unread_entry = true;
-            continue;
-        }
-        for target in targets {
-            classify_exposed_target(&target, config);
+        for property in &mapping.properties {
+            let ObjectPropertyKind::ObjectProperty(property) = property else {
+                continue;
+            };
+            let targets = exposed_target_strings(&property.value);
+            if targets.is_empty() {
+                has_unread_entry = true;
+                continue;
+            }
+            for target in targets {
+                classify_exposed_target(&target, config);
+            }
         }
     }
     if has_unread_entry {
@@ -411,38 +461,110 @@ fn read_remotes(
     config: &mut FederationConfig,
     unread: &mut Vec<UnreadDeclaration>,
 ) {
-    let Some(mapping) = federation_key_object(options, FederationKey::Remotes, unread) else {
-        return;
-    };
-    for property in &mapping.properties {
-        let ObjectPropertyKind::ObjectProperty(property) = property else {
+    for declaration in federation_key_declarations(options, FederationKey::Remotes, unread) {
+        let KeyDeclaration::Mapping(mapping) = declaration else {
             continue;
         };
-        if let Some(alias) = property_key_name(&property.key)
-            && is_remote_alias(&alias)
-        {
-            push_unique(&mut config.remote_aliases, alias);
+        for property in &mapping.properties {
+            let ObjectPropertyKind::ObjectProperty(property) = property else {
+                continue;
+            };
+            if let Some(alias) = property_key_name(&property.key)
+                && is_remote_alias(&alias)
+            {
+                push_unique(&mut config.remote_aliases, alias);
+            }
         }
     }
 }
 
-/// Resolve one Federation key to its object literal, recording why the
+/// One readable declaration under a Federation key.
+enum KeyDeclaration<'a> {
+    /// An object literal that maps a public name to a target.
+    Mapping(&'a ObjectExpression<'a>),
+    /// A single target, from the array form. A bundler uses the element both as
+    /// the public name and as the module request.
+    Target(String),
+}
+
+/// Resolve one Federation key to the declarations it holds, recording why the
 /// declaration is not fully readable when that is the case.
-fn federation_key_object<'a>(
+///
+/// The object form gives one mapping. The array form gives one declaration per
+/// element, except under `remotes`, whose array form stays unread: a bundler
+/// derives the request scope of an element from the whole container location,
+/// which is never a bare specifier a provider rule can cover.
+fn federation_key_declarations<'a>(
     options: &'a ObjectExpression<'a>,
     key: FederationKey,
     unread: &mut Vec<UnreadDeclaration>,
-) -> Option<&'a ObjectExpression<'a>> {
-    let value = config_parser::property_expr(options, key.name())?;
-    let Some(mapping) = config_parser::object_expression(value) else {
-        let reason = if config_parser::array_expression(value).is_some() {
-            UnreadReason::ArrayForm
-        } else {
-            UnreadReason::NotObjectLiteral
-        };
-        push_unique(unread, UnreadDeclaration { key, reason });
-        return None;
+) -> Vec<KeyDeclaration<'a>> {
+    let Some(value) = config_parser::property_expr(options, key.name()) else {
+        return Vec::new();
     };
+    if let Some(mapping) = config_parser::object_expression(value) {
+        record_spread(mapping, key, unread);
+        return vec![KeyDeclaration::Mapping(mapping)];
+    }
+    let Some(array) = config_parser::array_expression(value) else {
+        push_unique(
+            unread,
+            UnreadDeclaration {
+                key,
+                reason: UnreadReason::NotObjectLiteral,
+            },
+        );
+        return Vec::new();
+    };
+    if key == FederationKey::Remotes {
+        push_unique(
+            unread,
+            UnreadDeclaration {
+                key,
+                reason: UnreadReason::ArrayForm,
+            },
+        );
+        return Vec::new();
+    }
+
+    let mut declarations = Vec::new();
+    let mut has_unread_element = false;
+    for element in &array.elements {
+        let Some(expr) = element.as_expression() else {
+            has_unread_element = true;
+            continue;
+        };
+        if let Some(mapping) = config_parser::object_expression(expr) {
+            record_spread(mapping, key, unread);
+            declarations.push(KeyDeclaration::Mapping(mapping));
+            continue;
+        }
+        let targets = config_parser::expression_to_string_or_array(expr);
+        if targets.is_empty() {
+            has_unread_element = true;
+            continue;
+        }
+        declarations.extend(targets.into_iter().map(KeyDeclaration::Target));
+    }
+    if has_unread_element {
+        push_unique(
+            unread,
+            UnreadDeclaration {
+                key,
+                reason: UnreadReason::Entries,
+            },
+        );
+    }
+    declarations
+}
+
+/// Record that a mapping spreads a value, which means it may declare more than
+/// what was read.
+fn record_spread(
+    mapping: &ObjectExpression<'_>,
+    key: FederationKey,
+    unread: &mut Vec<UnreadDeclaration>,
+) {
     if mapping
         .properties
         .iter()
@@ -456,7 +578,6 @@ fn federation_key_object<'a>(
             },
         );
     }
-    Some(mapping)
 }
 
 /// Whether the options object declares a Federation key. The shape gate keeps a
@@ -466,22 +587,6 @@ fn federation_key_object<'a>(
 fn declares_federation_keys(options: &ObjectExpression<'_>) -> bool {
     config_parser::property_expr(options, "exposes").is_some()
         || config_parser::property_expr(options, "remotes").is_some()
-}
-
-fn federation_options<'a>(expr: &'a Expression<'a>) -> Option<&'a ObjectExpression<'a>> {
-    let (callee, arguments) = match unwrap_expression(expr) {
-        Expression::NewExpression(new_expr) => (&new_expr.callee, &new_expr.arguments),
-        Expression::CallExpression(call) => (&call.callee, &call.arguments),
-        _ => return None,
-    };
-    if !is_federation_callee(callee) {
-        return None;
-    }
-    let options = arguments
-        .first()
-        .and_then(Argument::as_expression)
-        .and_then(config_parser::object_expression)?;
-    declares_federation_keys(options).then_some(options)
 }
 
 fn is_federation_callee(callee: &Expression<'_>) -> bool {
@@ -502,18 +607,6 @@ fn unwrap_expression<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
         }
         _ => expr,
     }
-}
-
-fn nested_array<'a>(
-    obj: &'a ObjectExpression<'a>,
-    path: &[&str],
-) -> Option<&'a ArrayExpression<'a>> {
-    let (last, parents) = path.split_last()?;
-    let mut current = obj;
-    for key in parents {
-        current = config_parser::property_object(current, key)?;
-    }
-    config_parser::property_expr(current, last).and_then(config_parser::array_expression)
 }
 
 fn property_key_name(key: &PropertyKey<'_>) -> Option<String> {
@@ -559,7 +652,7 @@ define_plugin! {
             &location,
             "module-federation",
             &FederationSites {
-                plugin_arrays: &[],
+                read_plugin_calls: false,
                 read_config_object: true,
             },
         );
@@ -603,8 +696,21 @@ mod tests {
             source,
             Path::new(CONFIG),
             &FederationSites {
-                plugin_arrays: &[],
+                read_plugin_calls: false,
                 read_config_object: true,
+            },
+        )
+    }
+
+    /// Read a bundler config the way every bundler plugin does: plugin calls
+    /// only, wherever they sit.
+    fn bundler(source: &str) -> (FederationConfig, Vec<UnreadDeclaration>) {
+        read(
+            source,
+            Path::new("webpack.config.js"),
+            &FederationSites {
+                read_plugin_calls: true,
+                read_config_object: false,
             },
         )
     }
@@ -824,14 +930,65 @@ mod tests {
         );
     }
 
+    /// A bundler uses a string element of the `exposes` array both as the public
+    /// name and as the module request, so the element is a target.
     #[test]
-    fn array_form_is_reported_as_a_shape_rather_than_as_computed() {
+    fn exposes_array_form_reads_string_elements() {
         let (config, declarations) =
-            standalone(r"export default { exposes: ['./src/Button.tsx'] };");
-        assert!(config.exposed_targets.is_empty());
+            standalone(r"export default { exposes: ['./src/Button.tsx', 'shared-utils'] };");
+        assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
+        assert_eq!(config.exposed_packages, vec!["shared-utils".to_string()]);
+        assert!(declarations.is_empty(), "got {declarations:?}");
+    }
+
+    /// An object element of the array goes through the same mapping reader as
+    /// the object form, entry descriptor included.
+    #[test]
+    fn exposes_array_form_reads_object_elements() {
+        let (config, declarations) = standalone(
+            r"
+            export default {
+                exposes: [
+                    { './Button': './src/Button.tsx' },
+                    { './Card': { import: './src/Card.tsx' } },
+                ],
+            };
+            ",
+        );
+        assert_eq!(
+            config.exposed_targets,
+            vec!["./src/Button.tsx".to_string(), "./src/Card.tsx".to_string()]
+        );
+        assert!(declarations.is_empty(), "got {declarations:?}");
+    }
+
+    #[test]
+    fn exposes_array_element_without_a_readable_target_is_reported() {
+        let (config, declarations) = standalone(
+            r"
+            const widget = './src/Widget.tsx';
+            export default { exposes: ['./src/Button.tsx', widget] };
+            ",
+        );
+        assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
         assert_eq!(
             declarations,
-            unread(FederationKey::Exposes, UnreadReason::ArrayForm)
+            unread(FederationKey::Exposes, UnreadReason::Entries)
+        );
+    }
+
+    /// A bundler derives the request scope of a `remotes` array element from the
+    /// whole container location, which is never a bare specifier a provider rule
+    /// can cover, so the array form of `remotes` stays unread.
+    #[test]
+    fn remotes_array_form_is_not_read() {
+        let (config, declarations) = standalone(
+            r"export default { remotes: ['checkout@https://example.test/remoteEntry.js'] };",
+        );
+        assert!(config.remote_aliases.is_empty());
+        assert_eq!(
+            declarations,
+            unread(FederationKey::Remotes, UnreadReason::ArrayForm)
         );
     }
 
@@ -995,7 +1152,8 @@ mod tests {
 
     #[test]
     fn inline_plugin_options_are_read_from_a_plugins_array() {
-        let source = r"
+        let (config, computed) = bundler(
+            r"
             const { ModuleFederationPlugin } = require('webpack').container;
             module.exports = {
                 plugins: [
@@ -1006,14 +1164,7 @@ mod tests {
                     }),
                 ],
             };
-        ";
-        let (config, computed) = read(
-            source,
-            Path::new("webpack.config.js"),
-            &FederationSites {
-                plugin_arrays: &[&["plugins"]],
-                read_config_object: false,
-            },
+            ",
         );
         assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
         assert_eq!(config.remote_aliases, vec!["checkout".to_string()]);
@@ -1022,7 +1173,7 @@ mod tests {
 
     #[test]
     fn member_expression_callee_is_recognised() {
-        let (config, _) = read(
+        let (config, _) = bundler(
             r"
             module.exports = {
                 plugins: [
@@ -1032,30 +1183,141 @@ mod tests {
                 ],
             };
             ",
-            Path::new("webpack.config.js"),
-            &FederationSites {
-                plugin_arrays: &[&["plugins"]],
-                read_config_object: false,
-            },
         );
         assert_eq!(config.exposed_targets, vec!["./src/B.tsx".to_string()]);
     }
 
+    /// Vite flattens a nested plugin array, so a Federation call one level down
+    /// is part of the same build.
+    #[test]
+    fn federation_options_in_a_nested_plugin_array_are_read() {
+        let (config, computed) = bundler(
+            r"
+            export default defineConfig({
+                plugins: [
+                    [react(), federation({ exposes: { './Button': './src/Button.tsx' } })],
+                    other(),
+                ],
+            });
+            ",
+        );
+        assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
+        assert!(computed.is_empty(), "got {computed:?}");
+    }
+
+    /// A Next.js config registers the plugin inside the `webpack(config)` hook,
+    /// which no config-object path reaches.
+    #[test]
+    fn federation_options_outside_the_plugins_array_are_read() {
+        let (config, computed) = bundler(
+            r"
+            module.exports = {
+                webpack(config, options) {
+                    config.plugins.push(
+                        new NextFederationPlugin({
+                            name: 'shop',
+                            exposes: { './pages-map': './pages-map.js' },
+                        }),
+                    );
+                    return config;
+                },
+            };
+            ",
+        );
+        assert_eq!(config.exposed_targets, vec!["./pages-map.js".to_string()]);
+        assert!(computed.is_empty(), "got {computed:?}");
+    }
+
+    #[test]
+    fn federation_options_from_a_plugins_identifier_are_read() {
+        let (config, _) = bundler(
+            r"
+            const plugins = [
+                new ModuleFederationPlugin({ exposes: { './Button': './src/Button.tsx' } }),
+            ];
+            module.exports = { plugins };
+            ",
+        );
+        assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
+    }
+
+    /// An rsbuild config holds its rspack plugin list under `tools.rspack`.
+    #[test]
+    fn federation_options_under_a_tool_key_are_read() {
+        let (config, _) = bundler(
+            r"
+            export default {
+                tools: {
+                    rspack: {
+                        plugins: [
+                            new ModuleFederationPlugin({
+                                exposes: { './Button': './src/Button.tsx' },
+                            }),
+                        ],
+                    },
+                },
+            };
+            ",
+        );
+        assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
+    }
+
+    /// Options held by a `const` above the plugin list are the most common real
+    /// shape, so the reader resolves a same-file binding.
+    #[test]
+    fn federation_options_bound_to_a_local_const_are_read() {
+        let (config, computed) = bundler(
+            r"
+            const mfConfig = {
+                name: 'host',
+                exposes: { './Button': './src/Button.tsx' },
+                remotes: { checkout: 'checkout@https://example.test/remoteEntry.js' },
+            };
+            module.exports = {
+                plugins: [new ModuleFederationPlugin(mfConfig)],
+            };
+            ",
+        );
+        assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
+        assert_eq!(config.remote_aliases, vec!["checkout".to_string()]);
+        assert!(computed.is_empty(), "got {computed:?}");
+    }
+
+    /// One options object read through two positions stays one declaration.
+    #[test]
+    fn the_same_call_read_twice_registers_one_target() {
+        let (config, _) = bundler(
+            r"
+            const federationPlugin = new ModuleFederationPlugin({
+                exposes: { './Button': './src/Button.tsx' },
+            });
+            module.exports = { plugins: [federationPlugin, federationPlugin] };
+            ",
+        );
+        assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
+    }
+
+    /// The callee name alone never activates the reader. A widened search must
+    /// keep the shape gate, or a library that happens to export `federation`
+    /// registers entry points for an unrelated project.
     #[test]
     fn plugin_call_without_federation_keys_is_inert() {
         for source in [
             r"module.exports = { plugins: [new ModuleFederationPlugin({ name: 'x' })] };",
             r"module.exports = { plugins: [somethingElse({ exposes: { './a': './src/a.ts' } })] };",
             r"module.exports = { plugins: [federation(mfConfig)] };",
+            r"module.exports = { plugins: [federation('graphql-schema', { batch: true })] };",
+            r"
+            const options = { registry: './src/registry.ts' };
+            module.exports = { plugins: [federation(options)] };
+            ",
+            r"
+            export default defineConfig({
+                plugins: [[federation(), other()]],
+            });
+            ",
         ] {
-            let (config, computed) = read(
-                source,
-                Path::new("webpack.config.js"),
-                &FederationSites {
-                    plugin_arrays: &[&["plugins"]],
-                    read_config_object: false,
-                },
-            );
+            let (config, computed) = bundler(source);
             assert_eq!(config, FederationConfig::default(), "source: {source}");
             assert!(computed.is_empty(), "source: {source}");
         }
