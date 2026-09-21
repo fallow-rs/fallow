@@ -57,10 +57,6 @@ const EXPOSE_EXTENSIONS: &str = "{ts,tsx,mts,cts,gts,js,jsx,mjs,cjs,gjs,vue,svel
 /// remote.
 const SCOPE_SUFFIX: &str = "**/*";
 
-/// Stand-in name for an `exposes` entry whose key is itself computed, so a
-/// diagnostic can still count the entry.
-const COMPUTED_ENTRY_KEY: &str = "<computed>";
-
 /// What one Federation options object statically declares.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct FederationConfig {
@@ -114,12 +110,6 @@ impl ConfigLocation<'_> {
             .then(|| config_parser::path_to_config_string(self.config_path))
     }
 
-    /// Project-relative path of the config file, for messages.
-    fn label(&self) -> String {
-        self.relative_config_path()
-            .unwrap_or_else(|| self.config_path.display().to_string())
-    }
-
     /// Glob covering the directory that declared the remote.
     ///
     /// A config file governs the tree it sits in, so a config inside a
@@ -155,28 +145,14 @@ impl FederationKey {
             Self::Remotes => "remotes",
         }
     }
-
-    const fn consequence(self) -> &'static str {
-        match self {
-            Self::Exposes => "the targets are not registered as entry points",
-            Self::Remotes => "the aliases are not treated as provided by a remote container",
-        }
-    }
-
-    /// The configuration key that covers what the reader could not read.
-    const fn advice(self) -> &'static str {
-        match self {
-            Self::Exposes => "Name the exposed files in `dynamicallyLoaded`.",
-            Self::Remotes => {
-                "Name the aliases in `ignoreDependencies`, or declare them as the keys of an \
-                 object literal, whose values may be computed."
-            }
-        }
-    }
 }
 
 /// Why a Federation key declaration could not be read in full.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The consequence and the remedy are rendered by the shared diagnostic
+/// message, keyed on the token each variant maps to, so the vocabulary lives at
+/// the one place every workspace diagnostic is rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnreadReason {
     /// The value is not an object literal.
     NotObjectLiteral,
@@ -185,82 +161,54 @@ enum UnreadReason {
     /// The object literal spreads a value that is not statically readable, so
     /// it may declare more than what was read.
     Spread,
-    /// Entry keys whose value holds no statically readable string.
-    Entries(Vec<String>),
+    /// At least one entry's value holds no statically readable string.
+    Entries,
 }
 
 /// One Federation key declaration that was present but not fully readable.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct UnreadDeclaration {
     key: FederationKey,
     reason: UnreadReason,
 }
 
-/// How many entry keys a diagnostic names before it falls back to a count.
-const ENTRY_SAMPLE: usize = 3;
-
-impl UnreadDeclaration {
-    fn message(&self, plugin_label: &str, config_label: &str) -> String {
-        let key = self.key.name();
-        let situation = match &self.reason {
-            UnreadReason::NotObjectLiteral => {
-                format!("`{key}` in '{config_label}' is not a static object literal")
-            }
-            UnreadReason::ArrayForm => {
-                format!("`{key}` in '{config_label}' uses the array form, which is not read yet")
-            }
-            UnreadReason::Spread => format!(
-                "`{key}` in '{config_label}' spreads a value that is not statically readable"
-            ),
-            UnreadReason::Entries(names) => {
-                let (subject, verb) = if names.len() == 1 {
-                    ("entry", "holds")
-                } else {
-                    ("entries", "hold")
-                };
-                format!(
-                    "the `{key}` {subject} {} in '{config_label}' {verb} no statically readable \
-                     value",
-                    entry_sample(names)
-                )
-            }
-        };
-        format!(
-            "Plugin '{plugin_label}': {situation}, so {}. {}",
-            self.key.consequence(),
-            self.key.advice(),
-        )
-    }
-}
-
-fn entry_sample(names: &[String]) -> String {
-    let sample = names
-        .iter()
-        .take(ENTRY_SAMPLE)
-        .map(|name| format!("`{name}`"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    match names.len().saturating_sub(ENTRY_SAMPLE) {
-        0 => sample,
-        rest => format!("{sample} and {rest} more"),
+impl UnreadReason {
+    /// The kebab-case token that reaches the wire. The shared renderer builds
+    /// the situation clause from it.
+    const fn token(self) -> &'static str {
+        match self {
+            Self::NotObjectLiteral => "not-object-literal",
+            Self::ArrayForm => "array-form",
+            Self::Spread => "spread",
+            Self::Entries => "unreadable-entries",
+        }
     }
 }
 
 /// Read every statically available Federation options object in `source`,
-/// warning once per config file for each `exposes` or `remotes` declaration that
-/// is present but not fully readable.
+/// recording one advisory per `exposes` or `remotes` declaration that is present
+/// but not fully readable.
+///
+/// The plugin records the fact and never prints it: one renderer owns the
+/// sentence, and one registry owns the deduplication, so a combined run states
+/// it once and a consumer reading the envelope sees it at all (issue #2736).
 fn extract(
+    result: &mut PluginResult,
     source: &str,
     location: &ConfigLocation<'_>,
     plugin_label: &str,
     sites: &FederationSites<'_>,
 ) -> FederationConfig {
     let (config, unread) = read(source, location.config_path, sites);
-    if !unread.is_empty() {
-        let config_label = location.label();
-        for declaration in unread {
-            tracing::warn!("{}", declaration.message(plugin_label, &config_label));
-        }
+    for declaration in unread {
+        result
+            .config_diagnostics
+            .push(super::PluginConfigDiagnostic::unreadable(
+                location.config_path,
+                plugin_label,
+                declaration.key.name(),
+                declaration.reason.token(),
+            ));
     }
     config
 }
@@ -272,7 +220,7 @@ fn apply_from_source(
     plugin_label: &str,
     sites: &FederationSites<'_>,
 ) {
-    let config = extract(source, location, plugin_label, sites);
+    let config = extract(result, source, location, plugin_label, sites);
     apply(result, &config, location);
 }
 
@@ -402,29 +350,26 @@ fn read_exposes(
     let Some(mapping) = federation_key_object(options, FederationKey::Exposes, unread) else {
         return;
     };
-    let mut unread_entries = Vec::new();
+    let mut has_unread_entry = false;
     for property in &mapping.properties {
         let ObjectPropertyKind::ObjectProperty(property) = property else {
             continue;
         };
         let targets = exposed_target_strings(&property.value);
         if targets.is_empty() {
-            push_unique(
-                &mut unread_entries,
-                property_key_name(&property.key).unwrap_or_else(|| COMPUTED_ENTRY_KEY.to_string()),
-            );
+            has_unread_entry = true;
             continue;
         }
         for target in targets {
             classify_exposed_target(&target, config);
         }
     }
-    if !unread_entries.is_empty() {
+    if has_unread_entry {
         push_unique(
             unread,
             UnreadDeclaration {
                 key: FederationKey::Exposes,
-                reason: UnreadReason::Entries(unread_entries),
+                reason: UnreadReason::Entries,
             },
         );
     }
@@ -858,7 +803,7 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_whose_target_is_not_readable_is_reported_by_name() {
+    fn an_entry_whose_target_is_not_readable_is_reported_once_beside_its_siblings() {
         let (config, declarations) = standalone(
             r"
             const widget = './src/Widget.tsx';
@@ -874,10 +819,8 @@ mod tests {
         assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
         assert_eq!(
             declarations,
-            unread(
-                FederationKey::Exposes,
-                UnreadReason::Entries(vec!["./Widget".to_string(), "./Card".to_string()]),
-            )
+            unread(FederationKey::Exposes, UnreadReason::Entries),
+            "two unreadable entries under one key are one advisory"
         );
     }
 
@@ -892,50 +835,122 @@ mod tests {
         );
     }
 
+    /// The reader records a fact, and the shared renderer turns it into the
+    /// sentence, so each shape has to reach the wire as its own token.
     #[test]
-    fn diagnostics_name_a_configuration_key_that_exists() {
-        let exposes = UnreadDeclaration {
-            key: FederationKey::Exposes,
-            reason: UnreadReason::NotObjectLiteral,
-        }
-        .message("module-federation", "module-federation.config.ts");
-        assert!(exposes.contains("`dynamicallyLoaded`"), "{exposes}");
-        assert!(!exposes.contains("entryPoints"), "{exposes}");
+    fn each_unread_shape_carries_its_own_reason_token() {
+        assert_eq!(UnreadReason::NotObjectLiteral.token(), "not-object-literal");
+        assert_eq!(UnreadReason::ArrayForm.token(), "array-form");
+        assert_eq!(UnreadReason::Spread.token(), "spread");
+        assert_eq!(UnreadReason::Entries.token(), "unreadable-entries");
+    }
 
-        let remotes = UnreadDeclaration {
-            key: FederationKey::Remotes,
-            reason: UnreadReason::ArrayForm,
-        }
-        .message("webpack", "webpack.config.js");
-        assert!(remotes.contains("`ignoreDependencies`"), "{remotes}");
-        assert!(remotes.contains("array form"), "{remotes}");
-        assert!(
-            !remotes.contains("not a static object literal"),
-            "{remotes}"
+    /// The advisory names the config file that was read and the plugin that
+    /// read it, and the standalone reader names itself.
+    #[test]
+    fn an_unreadable_key_records_a_diagnostic_on_its_config_file() {
+        let result = resolve(r"export default { exposes: computeExposes() };");
+        assert_eq!(result.config_diagnostics.len(), 1);
+        let diagnostic = &result.config_diagnostics[0];
+        assert_eq!(diagnostic.config_path, Path::new(CONFIG));
+        assert_eq!(diagnostic.plugin, "module-federation");
+        assert_eq!(diagnostic.key, "exposes");
+        assert_eq!(diagnostic.reason, "not-object-literal");
+        assert_eq!(
+            diagnostic.effect,
+            super::super::PluginConfigEffect::Unreadable
         );
+    }
 
-        let entries = UnreadDeclaration {
-            key: FederationKey::Exposes,
-            reason: UnreadReason::Entries(
-                ["./a", "./b", "./c", "./d"]
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
-            ),
-        }
-        .message("module-federation", "module-federation.config.ts");
-        assert!(
-            entries.contains("entries `./a`, `./b`, `./c` and 1 more"),
-            "{entries}"
+    /// Two unreadable keys in one config file are two advisories: they share a
+    /// kind and a path, and only the payload tells them apart.
+    #[test]
+    fn both_unreadable_keys_in_one_config_are_recorded() {
+        let result = resolve(
+            r"
+            export default {
+                exposes: makeExposes(),
+                remotes: { ...envRemotes },
+            };
+            ",
         );
+        let recorded: Vec<(&str, &str)> = result
+            .config_diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.key.as_str(), diagnostic.reason.as_str()))
+            .collect();
+        assert_eq!(
+            recorded,
+            vec![("exposes", "not-object-literal"), ("remotes", "spread")],
+            "{:?}",
+            result.config_diagnostics
+        );
+    }
 
-        let one = UnreadDeclaration {
-            key: FederationKey::Exposes,
-            reason: UnreadReason::Entries(vec!["./a".to_string()]),
-        }
-        .message("module-federation", "module-federation.config.ts");
-        assert!(one.contains("entry `./a`"), "{one}");
-        assert!(one.contains("holds no statically readable value"), "{one}");
+    /// A config the reader understands in full records nothing, so a consumer
+    /// warning on the kind warns about something.
+    #[test]
+    fn a_readable_config_records_no_diagnostic() {
+        let result = resolve(
+            r"
+            export default {
+                exposes: { './Button': './src/Button.tsx' },
+                remotes: { checkout: 'checkout@https://example.test/remoteEntry.js' },
+            };
+            ",
+        );
+        assert!(
+            result.config_diagnostics.is_empty(),
+            "{:?}",
+            result.config_diagnostics
+        );
+    }
+
+    /// The same reader serves four bundler plugins through inline options, and
+    /// the config file the user must edit is the bundler's, so the advisory
+    /// names the bundler plugin rather than the reader.
+    #[test]
+    fn inline_bundler_options_record_under_the_bundler_plugin() {
+        let mut result = PluginResult::default();
+        let config_path = Path::new("/project/webpack.config.js");
+        apply_bundler_plugin_options(
+            &mut result,
+            r"
+            module.exports = {
+                plugins: [new ModuleFederationPlugin({ remotes: envRemotes() })],
+            };
+            ",
+            config_path,
+            Path::new("/project"),
+            None,
+            "webpack",
+        );
+        assert_eq!(result.config_diagnostics.len(), 1);
+        let diagnostic = &result.config_diagnostics[0];
+        assert_eq!(diagnostic.plugin, "webpack");
+        assert_eq!(diagnostic.key, "remotes");
+        assert_eq!(diagnostic.config_path, config_path);
+    }
+
+    /// A config whose ONLY contribution is an advisory must not be discarded by
+    /// the registry's empty-result gate, which is how a bundler config with a
+    /// computed `remotes` map and nothing else reaches the report.
+    #[test]
+    fn a_result_carrying_only_a_diagnostic_is_not_empty() {
+        let mut result = PluginResult::default();
+        assert!(result.is_empty());
+        result
+            .config_diagnostics
+            .push(super::super::PluginConfigDiagnostic::unreadable(
+                Path::new("/project/webpack.config.js"),
+                "webpack",
+                "remotes",
+                "not-object-literal",
+            ));
+        assert!(
+            !result.is_empty(),
+            "the advisory is the whole contribution of this config"
+        );
     }
 
     #[test]

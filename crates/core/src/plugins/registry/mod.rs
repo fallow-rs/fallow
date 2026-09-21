@@ -347,6 +347,10 @@ pub struct AggregatedPluginResult {
     pub framework_static_dir_mappings: Vec<(PathBuf, String)>,
     /// File-scoped dependency provider rules from active plugins.
     pub provided_dependencies: Vec<ProvidedDependencyRule>,
+    /// Advisories about the config files active plugins read. Converted to
+    /// workspace diagnostics once, at the end of the plugin run, where the
+    /// project root is known.
+    pub config_diagnostics: Vec<super::PluginConfigDiagnostic>,
 }
 
 /// Append `incoming` string items to `target`, skipping values already present
@@ -386,7 +390,9 @@ impl AggregatedPluginResult {
     /// Fields that carry package names, absolute paths, or import-specifier
     /// boundaries (referenced/tooling deps, setup files, static dir mappings,
     /// auto-imports, virtual prefixes/suffixes, generated patterns) are left
-    /// untouched, matching the pre-#444 merge loop.
+    /// untouched, matching the pre-#444 merge loop. `config_diagnostics` is one
+    /// of those: it holds the ABSOLUTE path of the config file a plugin read,
+    /// which needs no prefix to name the right file from the monorepo root.
     pub(crate) fn apply_workspace_prefix(&mut self, ws_prefix: &str) {
         for (rule, _) in &mut self.entry_patterns {
             *rule = rule.prefixed(ws_prefix);
@@ -451,6 +457,7 @@ impl AggregatedPluginResult {
             static_dir_mappings,
             framework_static_dir_mappings,
             provided_dependencies,
+            config_diagnostics,
         } = other;
 
         self.entry_patterns.extend(entry_patterns);
@@ -492,6 +499,11 @@ impl AggregatedPluginResult {
         self.framework_static_dir_mappings
             .extend(framework_static_dir_mappings);
         self.provided_dependencies.extend(provided_dependencies);
+        for diagnostic in config_diagnostics {
+            if !self.config_diagnostics.contains(&diagnostic) {
+                self.config_diagnostics.push(diagnostic);
+            }
+        }
     }
 }
 

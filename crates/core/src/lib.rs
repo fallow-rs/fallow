@@ -2379,6 +2379,7 @@ fn run_plugins(
 
     if workspaces.is_empty() {
         gate_auto_import_entry_patterns(&mut result, config, workspaces);
+        record_plugin_config_diagnostics(&result, &config.root);
         return Ok(result);
     }
 
@@ -2395,8 +2396,30 @@ fn run_plugins(
     merge_workspace_plugin_results(&mut result, ws_results)?;
 
     gate_auto_import_entry_patterns(&mut result, config, workspaces);
+    record_plugin_config_diagnostics(&result, &config.root);
 
     Ok(result)
+}
+
+/// Publish the plugin stage's advisories: one registry write per analysis, after
+/// the workspace merge and the auto-import gate, which is the single point where
+/// every plugin result has converged on the project root.
+///
+/// Always called, including with nothing to publish, because the write REPLACES
+/// the previous run's set: a config the user fixed drops out on the next run
+/// rather than persisting through a watch-mode rerun or a long-lived session.
+///
+/// Plugin config parsing is not cached (each analysis re-reads every config file
+/// from disk and feeds only the plugin config hash), so a warm graph cache
+/// carries these entries exactly like a cold one.
+fn record_plugin_config_diagnostics(result: &plugins::AggregatedPluginResult, root: &Path) {
+    let diagnostics = result
+        .config_diagnostics
+        .iter()
+        .cloned()
+        .map(|diagnostic| diagnostic.into_workspace_diagnostic(root))
+        .collect();
+    let _ = fallow_config::record_plugin_config_diagnostics(root, diagnostics);
 }
 
 type WorkspacePluginResult = Result<
@@ -2531,6 +2554,12 @@ fn workspace_prefix(root: &Path, workspace_root: &Path) -> String {
 /// root, and a pattern is judged by the config of the root whose prefix it
 /// carries. One custom `nuxt.config` in a monorepo therefore no longer keeps
 /// every other app's patterns. See issue #2737.
+///
+/// A surface that KEPT its patterns records one advisory per root and surface,
+/// because the user enabled `autoImports` and did not get the findings it
+/// promises on that surface, and nothing else said so. Only a surface whose
+/// patterns were actually retained is recorded: a root whose `nuxt.config` fallow
+/// models has nothing to report. See issue #2736.
 fn gate_auto_import_entry_patterns(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
@@ -2552,24 +2581,58 @@ fn gate_auto_import_entry_patterns(
             )
         })
         .collect();
+    let mut retained: Vec<plugins::PluginConfigDiagnostic> = Vec::new();
     result.entry_patterns.retain(|(rule, plugin)| {
         if plugin != "nuxt" {
             return true;
         }
         let setting =
             settings_for_entry_pattern(&root_settings, &workspace_settings, &rule.pattern);
-        if !setting.components.is_custom()
-            && plugins::nuxt::is_component_entry_pattern(&rule.pattern)
-        {
-            return false;
+        if plugins::nuxt::is_component_entry_pattern(&rule.pattern) {
+            if !setting.components.is_custom() {
+                return false;
+            }
+            record_retained_auto_import_surface(&mut retained, setting, "components");
+            return true;
         }
-        if !setting.scripts.is_custom()
-            && plugins::nuxt::is_script_auto_import_entry_pattern(&rule.pattern)
-        {
-            return false;
+        if plugins::nuxt::is_script_auto_import_entry_pattern(&rule.pattern) {
+            if !setting.scripts.is_custom() {
+                return false;
+            }
+            record_retained_auto_import_surface(&mut retained, setting, "imports");
+            return true;
         }
         true
     });
+    result.config_diagnostics.extend(retained);
+}
+
+/// The reason token for a surface that kept its patterns: a config file with a
+/// property this reader cannot resolve statically needs the property fixed
+/// before any surface in it can be classified, so it is named separately from a
+/// surface whose own value is the thing fallow does not model.
+const AUTO_IMPORT_PROPERTY_UNREADABLE: &str = "config-property-unreadable";
+const AUTO_IMPORT_KEY_NOT_MODELED: &str = "key-effect-not-modeled";
+
+/// Record one advisory per `nuxt.config` and surface, however many patterns that
+/// surface kept.
+fn record_retained_auto_import_surface(
+    retained: &mut Vec<plugins::PluginConfigDiagnostic>,
+    setting: &plugins::nuxt::AutoImportSettings,
+    key: &str,
+) {
+    let Some(config_path) = setting.config_path.as_deref() else {
+        return;
+    };
+    let reason = if setting.unreadable_property {
+        AUTO_IMPORT_PROPERTY_UNREADABLE
+    } else {
+        AUTO_IMPORT_KEY_NOT_MODELED
+    };
+    let diagnostic = plugins::PluginConfigDiagnostic::not_modeled(config_path, "nuxt", key, reason);
+    if !retained.contains(&diagnostic) {
+        retained.push(diagnostic);
+    }
 }
 
 /// Pick the settings of the root that owns an entry pattern: the workspace with
@@ -2823,9 +2886,9 @@ mod tests {
     use super::{
         AnalysisSession, bucket_files_by_workspace, bucket_files_by_workspace_roots,
         collect_config_search_roots, credit_workspace_package_usage, default_config,
-        format_undeclared_workspace_warning, parse_analysis_modules, plugin_config_hash,
-        resolver_options_hash, settings_for_entry_pattern, warn_undeclared_workspaces,
-        workspace_prefix,
+        format_undeclared_workspace_warning, gate_auto_import_entry_patterns,
+        parse_analysis_modules, plugin_config_hash, resolver_options_hash,
+        settings_for_entry_pattern, warn_undeclared_workspaces, workspace_prefix,
     };
     use std::path::{Path, PathBuf};
     use std::time::Instant;
@@ -2851,6 +2914,8 @@ mod tests {
         crate::plugins::nuxt::AutoImportSettings {
             components,
             scripts: crate::plugins::nuxt::AutoImportSetting::Default,
+            config_path: Some(std::path::PathBuf::from("nuxt.config.ts")),
+            unreadable_property: false,
         }
     }
 
@@ -2906,6 +2971,130 @@ mod tests {
         assert_eq!(
             setting.components,
             crate::plugins::nuxt::AutoImportSetting::Custom
+        );
+    }
+
+    /// Build a project root holding one `nuxt.config.ts` and a plugin result
+    /// carrying the two gated convention entry patterns.
+    fn nuxt_gate_fixture(
+        config_source: &str,
+    ) -> (tempfile::TempDir, crate::plugins::AggregatedPluginResult) {
+        let dir = tempfile::tempdir().expect("temp project");
+        std::fs::write(dir.path().join("nuxt.config.ts"), config_source).expect("nuxt config");
+        let mut result = crate::plugins::AggregatedPluginResult::default();
+        result.active_plugins.push("nuxt".to_string());
+        for pattern in [
+            "app/components/**/*.{vue,ts,tsx,js,jsx}",
+            "app/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+        ] {
+            result.entry_patterns.push((
+                crate::plugins::PathRule::new(pattern.to_string()),
+                "nuxt".to_string(),
+            ));
+        }
+        (dir, result)
+    }
+
+    fn gate(root: &Path, result: &mut crate::plugins::AggregatedPluginResult) {
+        let config = fallow_config::FallowConfig {
+            auto_imports: true,
+            ..fallow_config::FallowConfig::default()
+        };
+        let resolved = config.resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Json,
+            1,
+            false,
+            true,
+            None,
+        );
+        assert!(resolved.auto_imports, "the gate only runs when opted in");
+        gate_auto_import_entry_patterns(result, &resolved, &[]);
+    }
+
+    /// A surface that kept its patterns records one advisory naming the config
+    /// file, the surface and why, because the user asked for the findings that
+    /// surface no longer produces (issue #2736).
+    #[test]
+    fn a_retained_auto_import_surface_records_one_advisory_per_surface() {
+        let (project, mut result) =
+            nuxt_gate_fixture("export default { components: { dirs: ['~/ui'] } };\n");
+        gate(project.path(), &mut result);
+
+        let recorded: Vec<(&str, &str, &str)> = result
+            .config_diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.plugin.as_str(),
+                    diagnostic.key.as_str(),
+                    diagnostic.reason.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            recorded,
+            vec![("nuxt", "components", "key-effect-not-modeled")],
+            "only the surface that kept its patterns is reported: {:?}",
+            result.config_diagnostics
+        );
+        assert_eq!(
+            result.config_diagnostics[0].config_path,
+            project.path().join("nuxt.config.ts")
+        );
+        assert_eq!(
+            result.entry_patterns.len(),
+            1,
+            "the modeled surface still loses its patterns: {:?}",
+            result.entry_patterns
+        );
+    }
+
+    /// A top-level property this reader cannot resolve stands both surfaces
+    /// down, and the remedy is the property rather than either surface, so it
+    /// carries its own reason token.
+    #[test]
+    fn an_unreadable_top_level_property_reports_both_surfaces_with_its_own_reason() {
+        let (project, mut result) =
+            nuxt_gate_fixture("export default { ...baseConfig, modules: [] };\n");
+        gate(project.path(), &mut result);
+
+        let recorded: Vec<(&str, &str)> = result
+            .config_diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.key.as_str(), diagnostic.reason.as_str()))
+            .collect();
+        assert_eq!(
+            recorded,
+            vec![
+                ("components", "config-property-unreadable"),
+                ("imports", "config-property-unreadable"),
+            ],
+            "{:?}",
+            result.config_diagnostics
+        );
+        assert_eq!(
+            result.entry_patterns.len(),
+            2,
+            "a spread keeps every gated pattern"
+        );
+    }
+
+    /// A config fallow models fully loses its patterns and reports nothing, so
+    /// the advisory fires only where a finding was actually suppressed.
+    #[test]
+    fn a_modeled_nuxt_config_records_no_advisory() {
+        let (project, mut result) = nuxt_gate_fixture("export default { modules: [] };\n");
+        gate(project.path(), &mut result);
+        assert!(
+            result.config_diagnostics.is_empty(),
+            "{:?}",
+            result.config_diagnostics
+        );
+        assert!(
+            result.entry_patterns.is_empty(),
+            "both modeled surfaces lose their patterns: {:?}",
+            result.entry_patterns
         );
     }
 
