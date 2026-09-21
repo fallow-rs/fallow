@@ -632,7 +632,8 @@ test("release credential jobs run in the main-only release environment", () => {
 
   assert.deepEqual(environmentJobs.toSorted(), credentialJobs);
   assert.match(procedure, /environments\/release\/deployment-branch-policies/u);
-  assert.match(procedure, /is still a repository secret/u);
+  assert.match(procedure, /exists at both levels; delete the repository copy/u);
+  assert.match(procedure, /unprotected by the release environment/u);
   assert.match(security, /Its deployment branch policy admits `main` only/u);
 });
 

@@ -94,6 +94,108 @@ const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "velite",
 ];
 
+/// Which workspace diagnostic kind a plugin-stage advisory becomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginConfigEffect {
+    /// The plugin could not read the key in full, so part of what it declares
+    /// never reached the analysis.
+    Unreadable,
+    /// The plugin read the key and does not model its effect, so a modeled
+    /// default the run would otherwise have applied stood down.
+    NotModeled,
+}
+
+/// One advisory about a config file a plugin read, before it becomes a
+/// [`fallow_config::WorkspaceDiagnostic`].
+///
+/// A plugin knows the fact (which config file, which key, why) but not the root
+/// the message renders against: in a workspace run its own `root` is the package
+/// root, while the diagnostic's path and message are project-root-relative. The
+/// conversion therefore happens once, where every plugin result has converged on
+/// the project root, and `config_path` is kept ABSOLUTE until then so the
+/// registry's canonical dedupe and the serialized root-relative form both work
+/// from one value (issue #2736).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginConfigDiagnostic {
+    /// Absolute path of the config file that was read.
+    pub config_path: PathBuf,
+    /// The plugin that read it, as it labels itself. Module Federation options
+    /// reach four bundler plugins inline, and each names itself rather than the
+    /// reader, because the config file the user must edit is the bundler's.
+    pub plugin: String,
+    /// The config key the advisory is about (`exposes`, `remotes`,
+    /// `components`, `imports`).
+    pub key: String,
+    /// Why, as a kebab-case token from the resulting kind's open set.
+    pub reason: String,
+    /// Which workspace diagnostic kind this becomes.
+    pub effect: PluginConfigEffect,
+}
+
+impl PluginConfigDiagnostic {
+    /// Build an advisory about a key a plugin could not read in full.
+    pub(super) fn unreadable(
+        config_path: &Path,
+        plugin: &str,
+        key: &str,
+        reason: &'static str,
+    ) -> Self {
+        Self {
+            config_path: config_path.to_path_buf(),
+            plugin: plugin.to_owned(),
+            key: key.to_owned(),
+            reason: reason.to_owned(),
+            effect: PluginConfigEffect::Unreadable,
+        }
+    }
+
+    /// Build an advisory about a key whose effect the plugin does not model.
+    pub(super) fn not_modeled(
+        config_path: &Path,
+        plugin: &str,
+        key: &str,
+        reason: &'static str,
+    ) -> Self {
+        Self {
+            config_path: config_path.to_path_buf(),
+            plugin: plugin.to_owned(),
+            key: key.to_owned(),
+            reason: reason.to_owned(),
+            effect: PluginConfigEffect::NotModeled,
+        }
+    }
+
+    /// Render this advisory against the PROJECT root, which is the root every
+    /// consumer's paths are relative to.
+    #[must_use]
+    pub fn into_workspace_diagnostic(self, root: &Path) -> fallow_config::WorkspaceDiagnostic {
+        let Self {
+            config_path,
+            plugin,
+            key,
+            reason,
+            effect,
+        } = self;
+        let kind = match effect {
+            PluginConfigEffect::Unreadable => {
+                fallow_config::WorkspaceDiagnosticKind::PluginConfigUnreadable {
+                    plugin,
+                    key,
+                    reason,
+                }
+            }
+            PluginConfigEffect::NotModeled => {
+                fallow_config::WorkspaceDiagnosticKind::PluginEffectNotModeled {
+                    plugin,
+                    key,
+                    reason,
+                }
+            }
+        };
+        fallow_config::WorkspaceDiagnostic::new(root, config_path, kind)
+    }
+}
+
 /// Result of resolving a plugin's config file.
 #[derive(Debug, Default)]
 pub struct PluginResult {
@@ -139,6 +241,10 @@ pub struct PluginResult {
     /// File-scoped dependency providers. Matching imports are considered
     /// available from the framework runtime and are not unlisted dependencies.
     provided_dependencies: Vec<ProvidedDependencyRule>,
+    /// Advisories about the config file this result was read from. A plugin
+    /// records the fact here instead of printing it, so it reaches the report
+    /// and every consumer rather than only a stderr line.
+    config_diagnostics: Vec<PluginConfigDiagnostic>,
 }
 
 impl PluginResult {
@@ -193,9 +299,16 @@ impl PluginResult {
             .push(UsedExportRule::new(pattern, exports));
     }
 
+    /// Whether this result contributes nothing, which lets the registry skip a
+    /// config file entirely.
+    ///
+    /// A config that yields only a diagnostic is NOT empty: an unreadable
+    /// `exposes` in a config that declares nothing else is exactly the case the
+    /// advisory exists for, and skipping the result would drop it.
     #[must_use]
     const fn is_empty(&self) -> bool {
-        self.entry_patterns.is_empty()
+        self.config_diagnostics.is_empty()
+            && self.entry_patterns.is_empty()
             && self.used_exports.is_empty()
             && self.used_class_members.is_empty()
             && self.referenced_dependencies.is_empty()

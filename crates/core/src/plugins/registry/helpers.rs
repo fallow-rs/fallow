@@ -688,6 +688,11 @@ fn merge_plugin_result_fields(
     result
         .provided_dependencies
         .extend(plugin_result.provided_dependencies);
+    for diagnostic in plugin_result.config_diagnostics {
+        if !result.config_diagnostics.contains(&diagnostic) {
+            result.config_diagnostics.push(diagnostic);
+        }
+    }
 }
 
 /// Check if a plugin already has a config file matched against discovered files.

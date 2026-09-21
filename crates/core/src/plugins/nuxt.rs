@@ -1124,6 +1124,17 @@ pub struct AutoImportSettings {
     pub components: AutoImportSetting,
     /// Classification of the `imports:` (composable and util) surface.
     pub scripts: AutoImportSetting,
+    /// The `nuxt.config` these verdicts were read from, absent for a root that
+    /// has none. Carried so the advisory a retained surface records names the
+    /// file the user has to edit: a monorepo classifies each root on its own,
+    /// and the gate that consumes the verdict holds patterns, not paths.
+    pub config_path: Option<PathBuf>,
+    /// `true` when a top-level property this reader cannot resolve statically
+    /// is what put a surface on [`AutoImportSetting::Custom`], rather than the
+    /// surface's own key. The two need different remedies: a spread or computed
+    /// key has to become static properties before any surface in that file can
+    /// be classified at all.
+    pub unreadable_property: bool,
 }
 
 impl AutoImportSettings {
@@ -1132,7 +1143,23 @@ impl AutoImportSettings {
         Self {
             components: AutoImportSetting::Default,
             scripts: AutoImportSetting::Default,
+            config_path: None,
+            unreadable_property: false,
         }
+    }
+
+    /// Whether either surface is more conservative than `other`'s.
+    fn is_stricter_than(&self, other: &Self) -> bool {
+        rank(self.components) > rank(other.components) || rank(self.scripts) > rank(other.scripts)
+    }
+}
+
+/// Conservatism rank, so a fold can say which of two verdicts is stricter.
+const fn rank(setting: AutoImportSetting) -> u8 {
+    match setting {
+        AutoImportSetting::Default => 0,
+        AutoImportSetting::Disabled => 1,
+        AutoImportSetting::Custom => 2,
     }
 }
 
@@ -1140,6 +1167,10 @@ impl AutoImportSettings {
 ///
 /// Reads and parses each candidate config once and folds the per-file verdicts
 /// by conservatism. See [`AutoImportSetting`] for the classification rules.
+///
+/// `config_path` and `unreadable_property` describe the file that produced the
+/// strictest verdict, which is the file a reader has to edit; the first config
+/// read supplies them when no file is stricter than another.
 pub fn auto_import_settings(root: &Path) -> AutoImportSettings {
     let mut settings = AutoImportSettings::defaults();
     for name in ["nuxt.config.ts", "nuxt.config.js"] {
@@ -1148,6 +1179,10 @@ pub fn auto_import_settings(root: &Path) -> AutoImportSettings {
             continue;
         };
         let file = classify_config_source(&source, &path);
+        if settings.config_path.is_none() || file.is_stricter_than(&settings) {
+            settings.config_path.clone_from(&file.config_path);
+            settings.unreadable_property = file.unreadable_property;
+        }
         settings.components = settings.components.most_conservative(file.components);
         settings.scripts = settings.scripts.most_conservative(file.scripts);
     }
@@ -1164,13 +1199,19 @@ fn classify_config_source(source: &str, path: &Path) -> AutoImportSettings {
     let proof = read_config_proof(source, path);
     let components_key = proof.unresolvable || source_has_components_key(source);
     let imports_key = proof.unresolvable || source_has_imports_key(source);
+    let read = AutoImportSettings {
+        config_path: Some(path.to_path_buf()),
+        unreadable_property: proof.unresolvable,
+        ..AutoImportSettings::defaults()
+    };
     if !components_key && !imports_key {
-        return AutoImportSettings::defaults();
+        return read;
     }
 
     AutoImportSettings {
         components: surface_setting(components_key, proof.components_disabled),
         scripts: surface_setting(imports_key, proof.scripts_disabled),
+        ..read
     }
 }
 

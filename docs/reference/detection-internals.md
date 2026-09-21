@@ -496,6 +496,37 @@ directory removes the matched segment and the files become visible: that is the
 keeps matching at every root, so re-rooting re-excludes the same file; those
 entries say so and point at renaming instead.
 
+## The plugin stage as a diagnostic stage
+
+Framework plugins are the fifth stage that writes `workspace_diagnostics[]`,
+beside workspace discovery, source discovery, the analyze stage and the health
+pipeline, and it has its own predicate
+(`WorkspaceDiagnosticKind::is_plugin_stage`) for the same reason the other two
+late stages do. Plugins run in the dead-code prelude, after the config-load
+stash, so `stash_workspace_diagnostics` has to preserve their entries across
+combined mode's per-analysis config re-loads; and they run INSIDE the pass that
+clears the analyze stage on entry, so classifying a plugin kind as
+analysis-stage would wipe it mid-run.
+
+Its refresh rule is a single replace rather than a clear plus an append.
+`record_plugin_config_diagnostics` retains every non-plugin entry, extends with
+the deduplicated new set, and emits the stderr lines, under one lock, and it runs
+even with nothing to record, so a config the user fixed drops out on the next
+run. There is exactly one writer, at the end of the plugin run, because that is
+where the root and workspace plugin results have converged; a writer inside a
+workspace run would publish a partial set, and a second writer would be replaced
+by the first.
+
+Plugin config parsing is not cached: every analysis re-reads each config from
+disk and feeds only the plugin config hash, so these entries are identical on a
+warm and a cold cache and need no cache-version bump or mirror field. `fallow
+list` runs plugins on its own inventory path and records nothing, so
+`fallow list --workspaces` carries no plugin-stage entry.
+
+The stderr dedupe keys on the rendered message, not on the kind id plus the
+path. One config file can hold two unreadable keys, which is two entries under
+one kind on one path, and an id-and-path key printed only the first.
+
 The ignore filter in `crates/core/src/discover/walk.rs` runs before the walker
 splits a path into the source set and the config-candidate channel, so an
 excluded path reaches neither. A framework config under an ignored segment,

@@ -38,6 +38,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for its health baseline too, so all three of its baselines say the same thing
   (Closes [#2735](https://github.com/fallow-rs/fallow/issues/2735)).
 
+- **A config a plugin cannot use now reaches the report.** The Module Federation
+  reader cannot always read `exposes` or `remotes` in full. Such a run now
+  carries a `plugin-config-unreadable` entry in `workspace_diagnostics[]` that
+  names the plugin, the config file, the key and the reason. Two unreadable keys
+  in one file give two entries. Until now the reader used stderr only, and a
+  consumer of `--quiet --format json` saw nothing. The entry carries
+  `degrades_analysis: true`, so the run reports degraded inputs in CI: the GitHub
+  Action and the GitLab template name the kind in their existing degraded-inputs
+  warning, and you change nothing.
+
+  A `nuxt.config` with a `components:` or `imports:` block that fallow does not
+  model keeps the convention entry patterns for that surface, so the
+  `autoImports` option has no effect there. Such a run now carries a
+  `plugin-effect-not-modeled` entry per config file and surface. That kind does
+  not degrade the analysis and warns on no channel. The stderr wording stays the
+  same, but the line now carries the `fallow: ` prefix of every other diagnostic.
+  Exit codes are unchanged
+  (Closes [#2736](https://github.com/fallow-rs/fallow/issues/2736)).
+
 - **`baseline_staleness` reports what narrowed the run.** A run scoped to part
   of the project cannot judge a whole-project baseline, so the staleness
   advisory and `fail-on-stale-baseline` stand down on it. Until now the envelope

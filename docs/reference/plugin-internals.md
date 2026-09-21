@@ -50,6 +50,35 @@ The rule suppresses unlisted-dependency findings only. It does not change
 resolution, so a real installed package, a path alias, or a workspace package
 with the same name still wins, and the import keeps crediting that package.
 
+## Advisories about a config a plugin could not use
+
+A plugin never prints an advisory about the config it read. It pushes a
+`PluginConfigDiagnostic` onto its `PluginResult`, and the end of the plugin run
+converts the set once and writes it to the workspace-diagnostic registry as a
+plugin-stage kind. Two reasons:
+
+- A plugin knows the fact but not the root the message renders against. In a
+  workspace run its own `root` is the package root, while the diagnostic's path
+  and message are project-root-relative. Keep the config path ABSOLUTE in the
+  advisory so the registry's canonical dedupe and the serialized root-relative
+  form both work from one value, and leave it out of the workspace-prefix pass.
+- A `tracing::warn!` from inside a plugin reaches no envelope, no CI consumer and
+  no dedupe, so a combined run printed it once per analysis and
+  `--quiet --format json` never saw it at all.
+
+Two kinds exist. Use `plugin-config-unreadable` when a declaration the user
+wrote did not reach the analysis, which degrades the run and warns on stderr.
+Use `plugin-effect-not-modeled` when the config was readable and fallow stood a
+modeled default down instead, which loses nothing measurable, warns on no
+channel, and must not fire on every run of a project that cannot change its
+config. Record either one only where a finding was actually affected: a surface
+whose patterns were retained, not every root that has a config file.
+
+A result that carries only an advisory is not empty, so it survives the
+registry's empty-result gate. The reason token is a kebab-case string from an
+open set, and the sentence is composed once in `fallow-types` from the plugin,
+the key and that token, so a plugin contributes no prose.
+
 ## Config paths read from a nested config
 
 A path read out of a config file resolves against that file's directory unless

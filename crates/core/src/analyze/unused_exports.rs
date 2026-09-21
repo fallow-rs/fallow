@@ -2856,6 +2856,7 @@ mod tests {
             static_dir_mappings: vec![],
             framework_static_dir_mappings: vec![],
             provided_dependencies: vec![],
+            config_diagnostics: vec![],
         }
     }
 
