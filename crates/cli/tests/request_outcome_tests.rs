@@ -762,6 +762,60 @@ fn the_rendered_pr_comment_body_names_the_unapplied_request() {
     );
 }
 
+/// The opposite shape on the same surface: the filter applied, over a scope it
+/// measured as empty, so every finding filtered out and the comment under this
+/// line is clean because nothing reached the analysis. The reviewer has no other
+/// way to tell that from a clean project.
+#[test]
+fn the_rendered_pr_comment_body_says_an_applied_filter_measured_an_empty_scope() {
+    let project = project();
+    let root_path = project.path();
+    let root = root_arg(&project);
+
+    let empty = root_path.join("deletion-only.diff");
+    std::fs::write(
+        &empty,
+        "diff --git a/src/gone.ts b/src/gone.ts\n\
+         deleted file mode 100644\n\
+         --- a/src/gone.ts\n\
+         +++ /dev/null\n\
+         @@ -1,1 +0,0 @@\n\
+         -export const gone = (): number => 3;\n",
+    )
+    .expect("deletion-only diff");
+    let out = run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--diff-file",
+        empty.to_str().expect("utf8"),
+        "--format",
+        "pr-comment-github",
+        "--quiet",
+    ]);
+    assert!(
+        out.stdout
+            .contains("Request outcomes: applied diff-filter."),
+        "the body must state the honoured request: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("applied over an empty scope"),
+        "and that the scope it applied over was empty: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("nothing in it was analyzable"),
+        "and what that means for the clean report under it: {}",
+        out.stdout
+    );
+    assert!(
+        !out.stdout.contains("wider than requested"),
+        "nothing stood down, so the widened clause must not fire: {}",
+        out.stdout
+    );
+}
+
 /// The comment and review steps of both shipped integrations download the diff
 /// themselves and re-render a saved envelope with `report --from --quiet`, so
 /// the filter that decides which findings become inline comments is resolved in

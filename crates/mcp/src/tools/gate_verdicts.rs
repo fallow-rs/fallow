@@ -170,6 +170,7 @@ fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
     warnings.extend(gate_warnings(root, baseline_reported));
     warnings.extend(degraded_analysis_warning(root));
     warnings.extend(unapplied_request_warning(root));
+    warnings.extend(empty_scope_request_warning(root));
     warnings
 }
 
@@ -517,6 +518,39 @@ fn unapplied_request_warning(root: &Map<String, Value>) -> Option<String> {
         ));
     }
     (!sentences.is_empty()).then(|| sentences.join(" "))
+}
+
+/// One sentence for a narrowing request the run DID apply over a scope it
+/// measured as empty.
+///
+/// The opposite shape of [`unapplied_request_warning`], and the one a clean
+/// report cannot state for itself: every finding filters out of an empty scope,
+/// so the agent is handed a report with nothing in it for a run that analyzed
+/// nothing. Keyed on `scope_size == 0` beside `status == "applied"`, so an
+/// envelope from a binary that publishes no such member says nothing here.
+///
+/// Restricted to `affects == "scope"`: a request that writes a file beside the
+/// report never narrows what was analyzed, so a size it measured says nothing
+/// about the findings.
+fn empty_scope_request_warning(root: &Map<String, Value>) -> Option<String> {
+    let requests = root.get("request_outcomes")?.as_object()?;
+    let empty: Vec<&str> = requests
+        .iter()
+        .filter(|(_, outcome)| {
+            outcome.get("status").and_then(Value::as_str) == Some("applied")
+                && outcome.get("affects").and_then(Value::as_str) == Some("scope")
+                && outcome.get("scope_size").and_then(Value::as_u64) == Some(0)
+        })
+        .map(|(name, _)| name.as_str())
+        .collect();
+    (!empty.is_empty()).then(|| {
+        format!(
+            "Requests applied over an empty scope: {}. No finding can survive a scope that \
+             measured nothing, so this report is clean because nothing in it was analyzable, not \
+             because the code is clean; check the diff or ref the run was given.",
+            empty.join(", ")
+        )
+    })
 }
 
 fn degrading_kinds(diagnostics: &[Value]) -> BTreeMap<&str, usize> {
@@ -1205,22 +1239,67 @@ mod tests {
     }
 
     /// A run that applied everything it was asked adds nothing, so the object
-    /// appearing on every scoped CI run cannot make every response noisy.
+    /// appearing on every scoped CI run cannot make every response noisy. A
+    /// measured non-empty scope and an unmeasured one are both silent.
     #[test]
     fn a_run_that_applied_everything_it_was_asked_adds_no_warning() {
         let envelope = serde_json::json!({
             "kind": "dead-code",
             "request_outcomes": {
+                "changed-since": {
+                    "status": "applied",
+                    "affects": "scope",
+                    "requested": "origin/main"
+                },
                 "diff-filter": {
                     "status": "applied",
                     "affects": "scope",
-                    "requested": "--diff-stdin"
+                    "requested": "--diff-stdin",
+                    "scope_size": 12
                 }
             },
         });
         assert!(
             annotate_envelope(&envelope.to_string()).is_none(),
             "nothing to add must pass the original bytes through"
+        );
+    }
+
+    /// The Action and the GitLab template warn on this shape, and MCP runs the
+    /// CLI with `--quiet`, so without this sentence the agent is handed a clean
+    /// report for a run that analyzed nothing.
+    #[test]
+    fn a_narrowing_request_applied_over_an_empty_scope_says_the_report_covered_nothing() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dead-code",
+            "request_outcomes": {
+                "diff-filter": {
+                    "status": "applied",
+                    "affects": "scope",
+                    "requested": "--diff-stdin",
+                    "scope_size": 0
+                },
+                "sarif-file": {
+                    "status": "applied",
+                    "affects": "artifact",
+                    "requested": "out.sarif",
+                    "scope_size": 0
+                }
+            },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("Requests applied over an empty scope: diff-filter."),
+            "{warnings:?}"
+        );
+        assert!(
+            !warnings[0].contains("sarif-file"),
+            "a file written beside the report narrows nothing: {warnings:?}"
+        );
+        assert!(
+            !warnings[0].contains("WIDER"),
+            "the report is not wider than asked, it is empty: {warnings:?}"
         );
     }
 

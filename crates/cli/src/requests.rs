@@ -97,12 +97,6 @@ pub fn record_sarif_file_failure(path: &Path, reason: &str, message: String) {
     ));
 }
 
-/// This run's `request_outcomes` object, or `None` when it was asked for
-/// nothing.
-///
-/// Reads each channel where it is produced rather than taking them as
-/// parameters, so a command that grows another request cannot publish a
-/// half-filled object by forgetting to thread one through.
 /// This run's `request_outcomes` limited to the `changed-since` channel, or
 /// `None` when no ref was resolved.
 ///
@@ -123,6 +117,12 @@ pub fn changed_since_request_outcomes() -> Option<RequestOutcomes> {
     requests.into_option()
 }
 
+/// This run's `request_outcomes` object, or `None` when it was asked for
+/// nothing.
+///
+/// Reads each channel where it is produced rather than taking them as
+/// parameters, so a command that grows another request cannot publish a
+/// half-filled object by forgetting to thread one through.
 #[must_use]
 pub fn request_outcomes() -> Option<RequestOutcomes> {
     let mut requests = RequestOutcomes::new();

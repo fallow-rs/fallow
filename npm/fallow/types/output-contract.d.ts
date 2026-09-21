@@ -5553,6 +5553,10 @@ requested: string
  * is keyed under, never across names, and read an absent member as "not
  * measured" rather than as zero.
  *
+ * The count is what the run INDEXED rather than the true total:
+ * `diff-filter` indexes at most one million added lines and reports that
+ * cap for a larger diff, so read any non-zero value as a lower bound.
+ *
  * `0` is the case this member exists for: a request that applied over an
  * EMPTY scope. Every finding then filters out and the report reads clean,
  * so a consumer that sees no findings beside `scope_size: 0` learns that

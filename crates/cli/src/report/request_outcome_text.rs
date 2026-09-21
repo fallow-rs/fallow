@@ -23,6 +23,11 @@
 //! asked for, while a secondary artifact that was not written says nothing
 //! about the report's scope at all. One sentence for both classes would state
 //! something false about whichever one did not happen.
+//!
+//! An applied entry may also carry `scope_size`, and `0` means the narrowing it
+//! performed left nothing to analyze. That is stated as well: a report with no
+//! findings reads as a clean result, and nothing else in the body says the scope
+//! it was computed over was empty.
 
 use serde_json::Value;
 
@@ -32,6 +37,7 @@ struct RequestLine {
     status: String,
     affects: Option<String>,
     reason: Option<String>,
+    scope_size: Option<u64>,
 }
 
 impl RequestLine {
@@ -48,19 +54,33 @@ impl RequestLine {
         self.status == "applied"
     }
 
-    /// Whether an unapplied entry means the report widened.
+    /// Whether this entry describes the report's scope rather than a file
+    /// written beside it. Unapplied, that means the report widened; applied over
+    /// an empty scope, that it covers nothing.
     ///
     /// An entry that does not say is not assumed to narrow: the class travels
     /// with every entry this build emits, so a missing or unrecognised value
     /// comes from a producer this build does not know, and claiming a widened
     /// report on its behalf is the defect `affects` exists to remove.
-    fn widens_report(&self) -> bool {
+    fn affects_scope(&self) -> bool {
         self.affects.as_deref() == Some("scope")
     }
 
     /// Whether an unapplied entry means a requested file was not written.
     fn withholds_artifact(&self) -> bool {
         self.affects.as_deref() == Some("artifact")
+    }
+
+    /// Whether this entry narrowed the run to a scope it measured as empty.
+    ///
+    /// The opposite shape of a scope request that stood down, and the case a
+    /// clean report cannot state for itself: every finding filters out of an
+    /// empty scope, so a reader takes the emptiness for a clean result. An
+    /// envelope from a producer that measures no size says nothing here, which
+    /// keeps a saved envelope written before the member existed rendering as it
+    /// always did.
+    fn applied_over_empty_scope(&self) -> bool {
+        self.applied() && self.affects_scope() && self.scope_size == Some(0)
     }
 }
 
@@ -86,6 +106,7 @@ fn read_request_outcomes(envelope: &Value) -> Vec<RequestLine> {
                     .get("reason")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                scope_size: entry.get("scope_size").and_then(Value::as_u64),
             })
         })
         .collect()
@@ -119,13 +140,27 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     // unapplied entry. A single sentence for the whole object told the reader
     // that a SARIF file which failed to write had widened the analysis, which
     // is the opposite of true and the thing a reviewer acts on.
-    if unapplied.iter().any(|request| request.widens_report()) {
+    if unapplied.iter().any(|request| request.affects_scope()) {
         line.push_str(" Anything not applied means this report is wider than requested.");
     }
     if unapplied.iter().any(|request| request.withholds_artifact()) {
         line.push_str(
             " A requested output file was not written, so anything reading it has nothing \
              to read; the report itself is unaffected.",
+        );
+    }
+    // The applied half of the same misreading: a narrowing request that DID
+    // apply, over a scope it measured as empty. Every finding filters out, so
+    // the report under this line is clean because nothing reached the analysis,
+    // and the Action and the merge-request template state the same fact from the
+    // envelope they captured (issue #2734).
+    if applied
+        .iter()
+        .any(|request| request.applied_over_empty_scope())
+    {
+        line.push_str(
+            " A narrowing request applied over an empty scope, so this report is clean \
+             because nothing in it was analyzable; check the diff or ref this run was given.",
         );
     }
     Some(line)
@@ -273,6 +308,62 @@ mod tests {
         assert_eq!(
             summary_line(&value).expect("a request was received"),
             "Request outcomes: applied diff-filter."
+        );
+    }
+
+    /// A measured, non-empty scope adds nothing, so a healthy scoped run reads
+    /// exactly as it did before the member existed.
+    #[test]
+    fn a_measured_non_empty_scope_adds_no_clause() {
+        let value = envelope(&serde_json::json!({
+            "diff-filter": {
+                "status": "applied",
+                "affects": "scope",
+                "requested": "--diff-file pr.diff",
+                "scope_size": 12
+            }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("a request was received"),
+            "Request outcomes: applied diff-filter."
+        );
+    }
+
+    /// The fact a clean report cannot state for itself: the narrowing applied,
+    /// and left nothing for the analysis to see.
+    #[test]
+    fn an_applied_request_over_an_empty_scope_says_the_report_covered_nothing() {
+        let value = envelope(&serde_json::json!({
+            "diff-filter": {
+                "status": "applied",
+                "affects": "scope",
+                "requested": "--diff-file pr.diff",
+                "scope_size": 0
+            }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("a request was received"),
+            "Request outcomes: applied diff-filter. \
+             A narrowing request applied over an empty scope, so this report is clean \
+             because nothing in it was analyzable; check the diff or ref this run was given."
+        );
+    }
+
+    /// A file written beside the report narrows nothing, so a size measured on
+    /// one of those entries says nothing about what the findings cover.
+    #[test]
+    fn an_empty_scope_on_an_artifact_request_claims_nothing() {
+        let value = envelope(&serde_json::json!({
+            "sarif-file": {
+                "status": "applied",
+                "affects": "artifact",
+                "requested": "out.sarif",
+                "scope_size": 0
+            }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("a request was received"),
+            "Request outcomes: applied sarif-file."
         );
     }
 
