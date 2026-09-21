@@ -27,7 +27,7 @@
     reason = "the gate explains a non-zero exit on stderr, like the other CLI gates"
 )]
 
-use fallow_engine::baseline::{BaselineStaleness, stale_baseline_gate_trips};
+use fallow_engine::baseline::{BaselineKind, BaselineStaleness, stale_baseline_gate_trips};
 use std::path::{Path, PathBuf};
 
 /// A loaded baseline's staleness together with the file it was read from, so
@@ -44,6 +44,14 @@ pub struct LoadedBaselineStaleness {
     /// writes, so it is another command's baseline rather than an empty one of
     /// this command's.
     pub unrecognised_format: bool,
+    /// The command named in the file's `kind`, when it names one other than the
+    /// command that read it. `None` for a baseline saved before that member
+    /// existed, where nothing in the file says who wrote it.
+    ///
+    /// The load site sets this, and no print site reads the file again. The note
+    /// and the gate line both name that command. Two reads of the same path can
+    /// give two answers, and the two sentences appear together.
+    pub saved_by: Option<String>,
 }
 
 impl LoadedBaselineStaleness {
@@ -57,37 +65,47 @@ impl LoadedBaselineStaleness {
 
 /// What each command calls the things its baseline entries describe.
 /// Matches the noun the command's own staleness warning already uses.
-pub const DEAD_CODE_NOUN: &str = "issue";
-pub const DUPES_NOUN: &str = "clone group";
-pub const HEALTH_NOUN: &str = "finding";
+const fn entry_noun(expected: BaselineKind) -> &'static str {
+    match expected {
+        BaselineKind::DeadCode => "issue",
+        BaselineKind::Dupes => "clone group",
+        BaselineKind::Health => "finding",
+    }
+}
 
 /// Evaluate the gate for a loaded baseline, print what it decided, and report
 /// whether it fired.
-pub fn gate_failed(loaded: Option<&LoadedBaselineStaleness>, enabled: bool, noun: &str) -> bool {
+pub fn gate_failed(
+    loaded: Option<&LoadedBaselineStaleness>,
+    enabled: bool,
+    expected: BaselineKind,
+) -> bool {
     if !enabled {
         return false;
     }
     let Some(loaded) = loaded else {
         return false;
     };
-    report_gate(
-        loaded.staleness.entries,
-        loaded.staleness.matched,
-        loaded.staleness.change_scoped,
-        &loaded.path,
-        noun,
-    )
+    report_gate(&GateReport {
+        entries: loaded.staleness.entries,
+        matched: loaded.staleness.matched,
+        change_scoped: loaded.staleness.change_scoped,
+        unrecognised_format: loaded.unrecognised_format,
+        saved_by: loaded.saved_by.as_deref(),
+        path: &loaded.path,
+        expected,
+    })
 }
 
-/// [`gate_failed`] for callers that carry the counts in their own output type
-/// instead of a [`LoadedBaselineStaleness`].
-pub fn gate_failed_from_counts(
-    entries: usize,
-    matched: usize,
-    change_scoped: bool,
+/// [`gate_failed`] for a caller that holds the published envelope object rather
+/// than a [`LoadedBaselineStaleness`], which is `health`: its load happens in the
+/// engine and the report is what comes back.
+pub fn gate_failed_from_envelope(
+    staleness: &fallow_output::BaselineStaleness,
     path: Option<&Path>,
     enabled: bool,
-    noun: &str,
+    saved_by: Option<&str>,
+    expected: BaselineKind,
 ) -> bool {
     if !enabled {
         return false;
@@ -95,7 +113,32 @@ pub fn gate_failed_from_counts(
     let Some(path) = path else {
         return false;
     };
-    report_gate(entries, matched, change_scoped, path, noun)
+    report_gate(&GateReport {
+        entries: staleness.baseline_entries,
+        matched: staleness.matched_entries,
+        change_scoped: staleness.change_scoped,
+        unrecognised_format: staleness.unrecognised_format,
+        saved_by,
+        path,
+        expected,
+    })
+}
+
+/// Refuse a `--save-baseline` aimed at a baseline another command wrote, before
+/// the analysis runs.
+///
+/// The command knows the destination at argument time, so the refusal costs no
+/// analysis. The save site keeps the same check, because it owns the file and the
+/// destination can change during the run. This check only decides when the user
+/// reads the refusal.
+#[must_use]
+pub fn refuse_save_before_analysis(
+    save_path: Option<&Path>,
+    saving: BaselineKind,
+    output: fallow_config::OutputFormat,
+) -> Option<std::process::ExitCode> {
+    let refusal = fallow_engine::baseline::refuse_baseline_kind_overwrite(save_path?, saving)?;
+    Some(crate::error::emit_error(&refusal, 2, output))
 }
 
 /// Say that a run which asked for the gate deliberately did not apply it,
@@ -121,36 +164,65 @@ pub fn note_stood_down(path: Option<&Path>, enabled: bool, reason: &str) {
 
 /// Say that a loaded baseline is not written in this command's format.
 ///
-/// Such a file suppresses nothing, and every downstream verdict follows from
-/// that honestly: the advisory is silent because there is nothing to judge, and
-/// the gate reports `pass` because no entry went unmatched. The run is
-/// therefore green forever, which is the correct reading of the numbers and the
-/// wrong answer for a repository that pointed `--baseline` at the wrong file.
+/// Such a file suppresses nothing, so the run names the mistake instead of
+/// gating on a file it never read: the advisory has nothing to judge and the
+/// counts are all zero, which without this line reads exactly like a project
+/// that had nothing to record.
 ///
-/// `dupes` and `health` give every baseline field a serde default, so any JSON
-/// object deserializes into them with zero entries; the caller separates a
-/// foreign file from one of this command's own by the keys it carries, because
-/// a baseline saved from a project that had nothing to record is legitimately
-/// empty and telling that repository it picked the wrong file would be wrong on
-/// every run.
+/// Every baseline from this version onward names the command that wrote it.
+/// `saved_by` carries that name from the load site, the only place that holds the
+/// file's bytes. A file that names no command predates the member, and it gets the
+/// hedged wording. An empty file of no command's gets the same wording, because
+/// from here the two files are the same.
+///
+/// `flag` is the argument that carried the path. `fallow audit` loads up to three
+/// baselines through per-command flags, so a fixed `--baseline` would name an
+/// argument that run does not accept.
 ///
 /// Prints regardless of `--quiet`, for the reason [`report_gate`] documents:
 /// the fact appears in no human report, and `--ci` implies `--quiet`, which is
-/// exactly the configuration where a silently green gate matters. The exit code
-/// does not move, because a file nobody can read as a baseline is a
-/// configuration mistake rather than a finding.
-pub fn note_unrecognised_baseline(path: Option<&Path>, unrecognised_format: bool) {
+/// exactly the configuration where a silently green gate matters.
+pub fn note_unrecognised_baseline(
+    path: Option<&Path>,
+    unrecognised_format: bool,
+    saved_by: Option<&str>,
+    expected: BaselineKind,
+    flag: &str,
+) {
     if !unrecognised_format {
         return;
     }
     let Some(path) = path else {
         return;
     };
+    if let Some(found) = saved_by {
+        eprintln!(
+            "Note: `fallow {found}` saved the baseline at {}. This run reads it as a \
+             `fallow {}` baseline, so it suppresses nothing. Point {flag} at this command's own \
+             baseline.",
+            path.display(),
+            expected.as_str(),
+        );
+        return;
+    }
     eprintln!(
         "Note: the baseline at {} has no entries this command recognises. It may be a baseline \
-         saved by another command, or an empty file. Either way it suppresses nothing.",
+         saved by another command, or an empty file. Either way it suppresses nothing. If another \
+         command saved it, point {flag} at this command's own baseline.",
         path.display(),
     );
+}
+
+/// One loaded baseline as the gate reads it: the counts it compares, the
+/// recognition verdict that overrides them, and what the file turned out to be.
+struct GateReport<'a> {
+    entries: usize,
+    matched: usize,
+    change_scoped: bool,
+    unrecognised_format: bool,
+    saved_by: Option<&'a str>,
+    path: &'a Path,
+    expected: BaselineKind,
 }
 
 /// Print the gate's verdict for one loaded baseline and report whether it
@@ -164,13 +236,43 @@ pub fn note_unrecognised_baseline(path: Option<&Path>, unrecognised_format: bool
 /// `--ci` implies `--quiet`, which is exactly the configuration where that
 /// matters. Machine consumers read `baseline_staleness.gate_trips` from the
 /// envelope instead of this line.
-fn report_gate(
-    entries: usize,
-    matched: usize,
-    change_scoped: bool,
-    path: &Path,
-    noun: &str,
-) -> bool {
+fn report_gate(report: &GateReport<'_>) -> bool {
+    let GateReport {
+        entries,
+        matched,
+        change_scoped,
+        unrecognised_format,
+        saved_by,
+        path,
+        expected,
+    } = *report;
+    let noun = entry_noun(expected);
+    // A file this command cannot read as its own suppresses nothing, which the
+    // counts cannot say: they are all zero, exactly as they are for a baseline
+    // saved from a project that had nothing to record. A repository that armed
+    // the gate asked to hear about a baseline that protects nothing, so this
+    // fires ahead of the count rule and is not suppressed by a narrowed scope,
+    // which changes nothing about which command wrote the file.
+    //
+    // Reads the classification from the load site, so this line and the note
+    // above it name the same writer.
+    if unrecognised_format {
+        match saved_by {
+            Some(found) => eprintln!(
+                "Baseline gate failed: `fallow {found}` saved the baseline {}. This run reads it \
+                 as a `fallow {}` baseline, so it suppresses nothing. Point --baseline at this \
+                 command's own baseline.",
+                path.display(),
+                expected.as_str(),
+            ),
+            None => eprintln!(
+                "Baseline gate failed: the baseline {} has no entries this command recognises. It \
+                 suppresses nothing. Point --baseline at this command's own baseline.",
+                path.display(),
+            ),
+        }
+        return true;
+    }
     if !stale_baseline_gate_trips(entries, matched, change_scoped) {
         // A run narrowed to part of the project is the one case where the flag
         // was asked for and still cannot answer. Saying so is the difference

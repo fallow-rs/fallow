@@ -126,6 +126,10 @@ pub struct CombinedNextStepsInput<'a> {
     pub has_external_plugins: bool,
     /// The run reported unused files (the signal a plugin may be misconfigured).
     pub has_unused_files: bool,
+    /// The loaded baseline this run was too narrow to judge, when there is one.
+    /// A combined run baselines its dead-code sub-pass only, so this is that
+    /// sub-pass's baseline and the step it produces names `fallow dead-code`.
+    pub baseline_recheck: Option<BaselineRecheckInput<'a>>,
 }
 
 /// Runtime-independent inputs for audit next steps.
@@ -295,16 +299,19 @@ pub fn build_combined_next_steps(input: &CombinedNextStepsInput<'_>) -> Vec<Next
     if !input.suggestions_enabled {
         return Vec::new();
     }
+    let recheck = recheck_baseline(input.baseline_recheck);
     let has_findings = input.has_dead_code_findings
         || !input.clone_fingerprints.is_empty()
         || input.has_complexity_findings;
     if !has_findings {
-        return impact_digest_step(input.impact_digest)
+        return recheck
             .into_iter()
+            .chain(impact_digest_step(input.impact_digest))
             .collect();
     }
 
     let mut steps: Vec<NextStep> = [
+        recheck,
         verify_plugins(input.has_external_plugins && input.has_unused_files),
         setup_pointer(input.offer_setup),
         impact_digest_step(input.impact_digest),
@@ -631,6 +638,7 @@ mod tests {
             audit_changed: false,
             has_external_plugins: false,
             has_unused_files: false,
+            baseline_recheck: None,
         }
     }
 
@@ -928,6 +936,7 @@ mod tests {
             audit_changed: true,
             has_external_plugins: false,
             has_unused_files: false,
+            baseline_recheck: None,
         });
 
         assert!(steps.is_empty());
@@ -1149,6 +1158,47 @@ mod tests {
             steps[0].command,
             "fallow health --baseline .fallow-baseline.json"
         );
+    }
+
+    /// The combined run was the one shape that could load a baseline and offer no
+    /// way to judge it: it baselines its dead-code sub-pass, so the step names
+    /// that command (issue #2735).
+    #[test]
+    fn a_narrowed_combined_run_offers_the_baseline_recheck() {
+        let steps = build_combined_next_steps(&CombinedNextStepsInput {
+            baseline_recheck: Some(narrowed_baseline("dead-code")),
+            ..combined_input(&[])
+        });
+
+        assert_eq!(
+            steps
+                .iter()
+                .map(|step| step.id.as_str())
+                .collect::<Vec<_>>(),
+            ["recheck-baseline"],
+            "a combined run with nothing to report is still a run that loaded a baseline"
+        );
+        assert_eq!(
+            steps[0].command,
+            "fallow dead-code --baseline .fallow-baseline.json"
+        );
+        assert_valid(&steps[0]);
+    }
+
+    #[test]
+    fn the_baseline_recheck_leads_a_combined_run_that_triggers_everything() {
+        let fingerprints = ["dup:aaaaaaaa"];
+        let steps = build_combined_next_steps(&CombinedNextStepsInput {
+            has_dead_code_findings: true,
+            has_complexity_findings: true,
+            offer_setup: true,
+            impact_digest: Some(digest(2, 1)),
+            audit_changed: true,
+            baseline_recheck: Some(narrowed_baseline("dead-code")),
+            ..combined_input(&fingerprints)
+        });
+
+        assert_eq!(steps[0].id, "recheck-baseline");
     }
 
     #[test]

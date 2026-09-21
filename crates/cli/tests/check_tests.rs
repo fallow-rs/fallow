@@ -3613,11 +3613,14 @@ fn gate_trips_equals_the_rule_the_exit_gate_applies() {
         let entries = staleness["baseline_entries"].as_u64().expect("entries");
         let matched = staleness["matched_entries"].as_u64().expect("matched");
         let change_scoped = staleness["change_scoped"].as_bool().expect("scoped");
-        let expected = !change_scoped && entries > 0 && matched < entries;
+        let unrecognised = staleness["unrecognised_format"]
+            .as_bool()
+            .unwrap_or_default();
+        let expected = unrecognised || (!change_scoped && entries > 0 && matched < entries);
         assert_eq!(
             staleness["gate_trips"], expected,
-            "gate_trips must equal !change_scoped && entries > 0 && matched < entries for \
-             saved={saved} remaining={remaining} extra={extra:?}"
+            "gate_trips must equal unrecognised_format || (!change_scoped && entries > 0 && \
+             matched < entries) for saved={saved} remaining={remaining} extra={extra:?}"
         );
 
         // And it must equal what the exit gate actually does.

@@ -132,14 +132,19 @@ append_baseline_advisory() {
   [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
   [ -n "${FALLOW_BASELINE_ENTRIES:-}" ] || return 0
   local line=""
-  # Checked before the advisory: a baseline written by another command earns
-  # every green verdict below honestly and says nothing, so the advisory `case`
-  # would fall through to its silent arm. The path is not in this step's env
-  # (see action.yml), so the line omits it; the step log carries it. Keyed on
-  # the binary's verdict rather than on a zero entry count, which a baseline
-  # saved on a project with nothing to record carries too.
+  # Checked before the advisory: such a file carries zero entries, so the
+  # advisory arms below would read "0 of 0 saved entries matched nothing this
+  # run" next to the line that says what is actually wrong. Keyed on the
+  # binary's verdict rather than on a zero entry count, which a baseline saved
+  # on a project with nothing to record carries too. The path comes from the
+  # analyze step, and is empty for a baseline that reached the run through the
+  # `args` input, where the action never sees it.
   if [ "${FALLOW_BASELINE_UNRECOGNISED:-}" = "true" ]; then
-    line="> **Baseline recognises nothing.** The baseline has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+    if [ -n "${FALLOW_BASELINE_PATH:-}" ]; then
+      line="> **Baseline recognises nothing.** The baseline at \`${FALLOW_BASELINE_PATH}\` has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+    else
+      line="> **Baseline recognises nothing.** The baseline has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+    fi
     printf '%s\n\n' "$line" >> "$GITHUB_STEP_SUMMARY"
     return 0
   fi

@@ -2434,6 +2434,18 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DETAILS_FILE" "com
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "--envelope" "comment.sh passes typed PR comment envelope when present"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh checks reconcile apply errors"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
+# The runner rejects a manifest that is not valid YAML before any step runs, and the
+# substring assertions below cannot see that: an apostrophe inside a single-quoted
+# description is enough. Ruby ships with macOS and with the hosted Linux runners.
+if command -v ruby > /dev/null 2>&1; then
+  if ruby -ryaml -e 'YAML.load_file(ARGV[0]).fetch("outputs")' "$DIR/../../action.yml" > /dev/null 2>&1; then
+    pass "action.yml parses as YAML"
+  else
+    fail "action.yml parses as YAML" "the manifest does not load; check the quoting of the last edited description"
+  fi
+else
+  echo "  - action.yml parse check skipped: ruby is not installed"
+fi
 assert_contains "$(cat "$DIR/../../action.yml")" "review-guidance:" "action.yml exposes review-guidance input"
 assert_contains "$(cat "$DIR/../../action.yml")" "FALLOW_REVIEW_GUIDANCE: \${{ inputs.review-guidance }}" "action.yml maps review-guidance to env"
 assert_contains "$(cat "$DIR/../../action.yml")" "review-id:" "action.yml exposes review-id input"
@@ -3390,6 +3402,13 @@ if [ "${MOCK_AUDIT_BASELINES:-}" = "1" ]; then
   printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
   exit 0
 fi
+# The same shape with every section stating its recognition verdict outright,
+# including a literal `false`, which the shared reader keeps distinct from an
+# absent member.
+if [ "${MOCK_AUDIT_BASELINES:-}" = "2" ]; then
+  printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":false,"scope_reasons":["changed-since"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
+  exit 0
+fi
 if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ] && [ "$scoped" = "false" ]; then
   printf 'not json at all\n'
   exit 2
@@ -3413,7 +3432,11 @@ stale_flag=false
 if [ "$advisory" != "none" ]; then stale_flag=true; fi
 unrecognised=""
 if [ "${MOCK_UNRECOGNISED:-}" = "1" ]; then
+  # The binary trips the gate on a file it cannot read as its own baseline, so
+  # the mock carries the same pairing; a fixture that reported the old
+  # gate_trips: false would test an envelope fallow no longer produces.
   unrecognised=',"unrecognised_format":true'
+  gate_trips=true
 fi
 printf '{"schema_version":9,"total_issues":%s,"baseline_staleness":{"baseline_entries":%s,"matched_entries":%s,"stale_entries":%s,"current_findings":%s,"change_scoped":false,"stale":%s,"warning":"%s","gate_trips":%s%s}}\n' \
   "${MOCK_TOTAL_ISSUES:-0}" "$entries" "$matched" "$stale" "$findings" "$stale_flag" "$advisory" "$gate_trips" "$unrecognised"
@@ -3748,22 +3771,39 @@ run_stale_summary "typed" HAS_NATIVE_REPORT="false" \
   FALLOW_PR_COMMENT_ENVELOPE_FILE="envelope.json"
 run_stale_summary "jq fallback" HAS_NATIVE_REPORT="false"
 
-# 15. A baseline written by another command suppresses nothing, so every
-# verdict reads green honestly and the advisory `case` falls through to its
-# silent arm. The branch reads the binary's own verdict rather than the entry
-# count, so the command here is only the one this mock's envelope shape models;
-# the wrong-kind case that motivates it is pinned per command in the Rust
-# integration tests. The step log names the path; the summary has no variable
-# for it.
+# 15. A baseline written by another command suppresses nothing, so the run says
+# so and an armed gate fails on it. The branch reads the binary's own verdict
+# rather than the entry count, so the command here is only the one this mock's
+# envelope shape models; the wrong-kind case that motivates it is pinned per
+# command in the Rust integration tests.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="wrong-kind.json" \
   MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
   MOCK_UNRECOGNISED="1" INPUT_FAIL_ON_STALE_BASELINE="true"
 assert_contains "$STALE_STDOUT" "::warning::fallow: the baseline at wrong-kind.json has no entries this command recognises" \
   "stale gate: a baseline that recognises nothing is called out"
-if [ "$STALE_EXIT" -eq 0 ]; then
-  pass "stale gate: an unreadable baseline is a real state and does not fail the job"
+assert_not_contains "$STALE_STDOUT" "0 of 0 baseline entries matched nothing" \
+  "stale gate: the count advisory stands aside for the recognition warning"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed: the baseline wrong-kind.json has no entries this command recognises" \
+  "stale gate: the armed gate names the recognition failure, not a count"
+if [ "$STALE_EXIT" -eq 1 ]; then
+  pass "stale gate: an armed gate fails on a baseline nothing recognises"
 else
-  fail "stale gate: an unreadable baseline is a real state and does not fail the job" "exit ${STALE_EXIT}"
+  fail "stale gate: an armed gate fails on a baseline nothing recognises" "exit ${STALE_EXIT}"
+fi
+
+# Without the input the verdict is published and nothing fails, which is the
+# contract every gate keeps.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="wrong-kind.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
+  MOCK_UNRECOGNISED="1"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_unrecognised=true" \
+  "stale gate: the recognition verdict reaches the step outputs"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_path=wrong-kind.json" \
+  "stale gate: the path reaches the step outputs for the job summary"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "stale gate: a baseline nothing recognises does not fail a job that armed no gate"
+else
+  fail "stale gate: a baseline nothing recognises does not fail a job that armed no gate" "exit ${STALE_EXIT}"
 fi
 
 # A baseline passed through the `args` input never reaches INPUT_BASELINE, so
@@ -3790,6 +3830,13 @@ assert_not_contains "$STALE_STDOUT" "has no entries this command recognises" \
 STALE_SUMMARY_EXPECTED="Baseline recognises nothing" \
   run_stale_summary "unrecognised" HAS_NATIVE_REPORT="true" \
   FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true"
+
+# The job summary is the surface people read, so it names the file rather than
+# leaving the path to the step log (issue #2735).
+STALE_SUMMARY_EXPECTED='The baseline at `baselines/dead-code.json` has no entries' \
+  run_stale_summary "unrecognised with a path" HAS_NATIVE_REPORT="true" \
+  FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true" \
+  FALLOW_BASELINE_PATH="baselines/dead-code.json"
 
 STALE_SUMMARY_EXPECTED="" \
   run_stale_summary "own empty baseline" HAS_NATIVE_REPORT="true" \
@@ -3820,6 +3867,19 @@ if [ "$STALE_EXIT" -eq 0 ]; then
 else
   fail "audit baselines: naming an inert baseline does not fail the job" "exit ${STALE_EXIT}"
 fi
+
+# Each section's own recognition verdict decides its line, including a section
+# that states `false` outright: the loop reads it through the shared reader,
+# whose `has` guard keeps a literal `false` from reading as an absent member.
+run_stale_analyze INPUT_COMMAND="audit" MOCK_AUDIT_BASELINES="2" \
+  INPUT_DEAD_CODE_BASELINE="audit/dc.json" \
+  INPUT_HEALTH_BASELINE="audit/he.json"
+assert_contains "$STALE_STDOUT" "::notice::fallow: the dead-code baseline (audit/dc.json) has 12 entries and was not judged" \
+  "audit baselines: a section that reports recognition false keeps the inert-baseline notice"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the complexity baseline at audit/he.json has no entries this command recognises" \
+  "audit baselines: and the section beside it still earns the recognition warning"
+assert_not_contains "$STALE_STDOUT" "the dead-code baseline at audit/dc.json has no entries" \
+  "audit baselines: a recognised baseline is never called the wrong file"
 
 # Audit resolves all three from project config as well as from inputs, so there
 # is not always a path to echo back.

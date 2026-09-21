@@ -72,6 +72,23 @@ fn advisory_sentence(staleness: &Value, analysis: Option<&str>) -> Option<String
     let entries = count(staleness, "baseline_entries");
     let stale = count(staleness, "stale_entries");
     let subject = subject(analysis);
+    // Checked before the advisory arms, and before the `gate_trips` fallback the
+    // same file now reaches: its counts are all zero, so that arm would render
+    // "0 of 0 saved entries matched nothing this run" next to a baseline whose
+    // problem is that nothing read it. Word for word the job summary's line for a
+    // baseline whose path the Action never saw. The summary names the file when it
+    // has one. This renderer never can, because the envelope carries no path.
+    if staleness
+        .get("unrecognised_format")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Some(format!(
+            "**{subject} recognises nothing.** The baseline has no entries this command \
+             recognises. It may be a baseline saved by another command, or an empty file. Either \
+             way it suppresses nothing."
+        ));
+    }
     match warning {
         "partial" => Some(format!(
             "**{subject} is partially stale.** {stale} of {entries} saved entries matched \
@@ -188,6 +205,48 @@ mod tests {
         assert!(advisory_line(&envelope(&staleness("none", 8, 8, false))).is_none());
     }
 
+    /// A file this command could not read as its own now trips the gate, so
+    /// without its own arm the `gate_trips` fallback would render "0 of 0 saved
+    /// entries matched nothing this run" for a baseline whose problem is that
+    /// nothing read it. Word for word the job summary's pathless line; the
+    /// summary names the file when the Action published a path for it.
+    #[test]
+    fn a_baseline_nothing_recognises_gets_its_own_sentence() {
+        let mut object = staleness("none", 0, 0, true);
+        object["unrecognised_format"] = Value::Bool(true);
+        assert_eq!(
+            advisory_line(&envelope(&object)).expect("the file was not this command's"),
+            "**Baseline recognises nothing.** The baseline has no entries this command \
+             recognises. It may be a baseline saved by another command, or an empty file. Either \
+             way it suppresses nothing."
+        );
+    }
+
+    /// The counts are all zero on such a file, so the arm has to be keyed on the
+    /// member rather than on them: a baseline saved from a project that had
+    /// nothing to record carries the same zeros and is not a mistake.
+    #[test]
+    fn an_empty_baseline_of_this_commands_own_says_nothing() {
+        assert!(advisory_line(&envelope(&staleness("none", 0, 0, false))).is_none());
+    }
+
+    /// A multi-section run names which of its baselines was the wrong file.
+    #[test]
+    fn a_multi_section_envelope_names_the_baseline_nothing_recognises() {
+        let mut object = staleness("none", 0, 0, true);
+        object["unrecognised_format"] = Value::Bool(true);
+        let value = serde_json::json!({
+            "kind": "audit",
+            "complexity": { "summary": { "baseline_staleness": object } }
+        });
+        assert!(
+            advisory_line(&value)
+                .expect("a baseline was loaded")
+                .starts_with("**Complexity baseline recognises nothing.**"),
+            "{value}"
+        );
+    }
+
     /// A narrowed run compares a whole-project baseline against a slice of it,
     /// so both members are false by construction and the advisory must not
     /// invent rot the run could not measure.
@@ -252,11 +311,12 @@ mod tests {
     /// being byte-identical to a direct render.
     #[test]
     fn the_live_and_saved_advisories_agree() {
-        for (warning, matched, gate_trips) in [
-            (BaselineStalenessAdvisory::Partial, 3, true),
-            (BaselineStalenessAdvisory::ZeroOverlap, 0, true),
-            (BaselineStalenessAdvisory::None, 0, true),
-            (BaselineStalenessAdvisory::None, 8, false),
+        for (warning, matched, gate_trips, unrecognised_format) in [
+            (BaselineStalenessAdvisory::Partial, 3, true, false),
+            (BaselineStalenessAdvisory::ZeroOverlap, 0, true, false),
+            (BaselineStalenessAdvisory::None, 0, true, false),
+            (BaselineStalenessAdvisory::None, 8, false, false),
+            (BaselineStalenessAdvisory::None, 8, true, true),
         ] {
             let typed = BaselineStaleness {
                 baseline_entries: 8,
@@ -268,7 +328,7 @@ mod tests {
                 warning,
                 gate_trips,
                 moved_entries: 0,
-                unrecognised_format: false,
+                unrecognised_format,
                 scope_reasons: BaselineScopeReasons::empty(),
             };
             let envelope = serde_json::json!({ "baseline_staleness": typed });

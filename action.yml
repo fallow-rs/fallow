@@ -365,8 +365,11 @@ outputs:
     description: 'true when the loaded file carries no key the running command writes into its own baselines, so it is a baseline another command saved or an object with nothing of that command in it. Empty when no baseline was loaded, when the baseline belongs to the command that read it, or when the fallow version predates the member. A baseline saved on a project with nothing to record is empty and is NOT reported here.'
     value: ${{ steps.analyze.outputs.baseline_unrecognised }}
   baseline-gate-trips:
-    description: 'true when the baseline has entries that match nothing and the run could judge it, which is what fail-on-stale-baseline exits on. Gate on this in a downstream step to report staleness without failing the job.'
+    description: 'true when the baseline has entries that match nothing and the run could judge it, or when the loaded file is not this command''s own baseline. That is what fail-on-stale-baseline exits on. Gate on this in a downstream step to report staleness without failing the job.'
     value: ${{ steps.analyze.outputs.baseline_gate_trips }}
+  baseline-path:
+    description: 'The baseline the run compared against, as the baseline input spelled it. Empty when no baseline was loaded and when one reached the run through the args input, where this action never sees the path.'
+    value: ${{ steps.analyze.outputs.baseline_path }}
   gates-failed:
     description: 'Comma-separated names of the gates whose status is fail. A gate appears here whether or not its owning input made it fail the job.'
     value: ${{ steps.analyze.outputs.gates_failed }}
@@ -624,6 +627,7 @@ runs:
         FALLOW_BASELINE_ENTRIES: ${{ steps.analyze.outputs.baseline_entries }}
         FALLOW_BASELINE_GATE_TRIPS: ${{ steps.analyze.outputs.baseline_gate_trips }}
         FALLOW_BASELINE_UNRECOGNISED: ${{ steps.analyze.outputs.baseline_unrecognised }}
+        FALLOW_BASELINE_PATH: ${{ steps.analyze.outputs.baseline_path }}
         FALLOW_GATES_FAILED: ${{ steps.analyze.outputs.gates_failed }}
         FALLOW_GATES_WARNED: ${{ steps.analyze.outputs.gates_warned }}
         FALLOW_GATES_SKIPPED: ${{ steps.analyze.outputs.gates_skipped }}

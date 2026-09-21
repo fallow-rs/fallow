@@ -163,8 +163,9 @@ const CARRIER_KEYS: &[&str] = &[
 /// envelope rather than on what the caller passed.
 fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
     let noun = noun(root);
+    let gate_runs = stale_baseline_gate_runs(root);
     let mut warnings: Vec<String> = fallow_types::envelope_sites::baseline_staleness_objects(root)
-        .filter_map(|(staleness, analysis)| baseline_warning(staleness, analysis, noun))
+        .filter_map(|(staleness, analysis)| baseline_warning(staleness, analysis, noun, gate_runs))
         .collect();
     let baseline_reported = !warnings.is_empty();
     warnings.extend(gate_warnings(root, baseline_reported));
@@ -212,10 +213,16 @@ fn noun(root: &Map<String, Value>) -> &'static str {
 /// The remedy names the parameter rather than a path because the envelope
 /// carries no baseline path, and because `audit` resolves its three baselines
 /// from config, where there was never a parameter to echo back.
+///
+/// `gate_runs` decides whether the sentence carries the gate clause. The gate
+/// rule is a fact about the baseline. What `--fail-on-stale-baseline` does with it
+/// is a fact about the command. `fallow audit` rejects that flag, and its
+/// `stale-baseline` entry stands down for every baseline it loads.
 fn baseline_warning(
     staleness: &Value,
     analysis: Option<&str>,
     noun: &'static str,
+    gate_runs: bool,
 ) -> Option<String> {
     let advisory = staleness
         .get("warning")
@@ -237,11 +244,18 @@ fn baseline_warning(
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        return Some(format!(
+        let mut message = format!(
             "Baseline staleness: {subject} has no entries this command recognises. It may be a \
              baseline saved by another command, or an empty file. Either way it suppresses \
              nothing."
-        ));
+        );
+        // The gate rule holds on such a file, so the clause belongs here too:
+        // without it an agent reads a sentence about a harmless empty file while
+        // the same run would fail a repository that armed the gate.
+        if gate_trips && gate_runs {
+            message.push_str(" --fail-on-stale-baseline fails a run in this state.");
+        }
+        return Some(message);
     }
     if advisory == "none" && !gate_trips {
         return unjudged_baseline_warning(staleness, &subject, &total, baseline_entries);
@@ -260,11 +274,27 @@ fn baseline_warning(
             "Baseline staleness: {stale} of {total} in {subject} matched no current {noun}."
         ),
     };
-    if gate_trips {
+    if gate_trips && gate_runs {
         message.push_str(" --fail-on-stale-baseline fails a run in this state.");
     }
     message.push_str(" Re-save it with the save_baseline parameter (CLI --save-baseline).");
     Some(message)
+}
+
+/// Whether the command that produced this envelope runs the stale-baseline gate
+/// at all.
+///
+/// False only when the envelope says the gate stood down for every baseline it
+/// loaded. That command is `fallow audit`: every audit is change-scoped, the gate
+/// is inert by design, and the flag is rejected. An envelope with no entry
+/// predates `gate_outcomes` or armed no gate, and there the clause is correct.
+fn stale_baseline_gate_runs(root: &Map<String, Value>) -> bool {
+    root.get("gate_outcomes")
+        .and_then(Value::as_object)
+        .and_then(|gates| gates.get("stale-baseline"))
+        .and_then(|outcome| outcome.get("status"))
+        .and_then(Value::as_str)
+        != Some("skipped")
 }
 
 /// One sentence for a baseline this run could not judge at all, which neither
@@ -702,6 +732,75 @@ mod tests {
             "Baseline staleness: the loaded baseline has no entries this command recognises. It \
              may be a baseline saved by another command, or an empty file. Either way it \
              suppresses nothing."
+        );
+    }
+
+    /// The gate rule holds on such a file, so the sentence carries the clause the
+    /// count sentences carry. Without it an agent reads about a harmless empty
+    /// file while the same run fails a repository that armed the gate.
+    #[test]
+    fn a_baseline_with_no_recognised_entries_says_the_gate_fails_on_it() {
+        let mut unrecognised = staleness("none", 0, 0, true);
+        unrecognised["unrecognised_format"] = serde_json::json!(true);
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dupes",
+            "baseline_staleness": unrecognised,
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].ends_with(" --fail-on-stale-baseline fails a run in this state."),
+            "{warnings:?}"
+        );
+    }
+
+    /// `fallow audit` reports the gate rule on a file it cannot read as the
+    /// section's own. The same envelope reports the gate as stood down for every
+    /// baseline, because every audit is change-scoped and the flag is rejected.
+    /// The clause would name a flag that run never accepts.
+    #[test]
+    fn an_audit_baseline_says_nothing_about_a_gate_that_never_runs() {
+        let mut unrecognised = staleness("none", 0, 0, true);
+        unrecognised["unrecognised_format"] = serde_json::json!(true);
+        unrecognised["change_scoped"] = serde_json::json!(true);
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "audit",
+            "verdict": "pass",
+            "complexity": { "summary": { "baseline_staleness": unrecognised } },
+            "gate_outcomes": {
+                "stale-baseline": { "status": "skipped", "enforced": false },
+                "audit-verdict": { "status": "pass", "enforced": true },
+            },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("no entries this command recognises"),
+            "{warnings:?}"
+        );
+        assert!(
+            !warnings[0].contains("--fail-on-stale-baseline"),
+            "audit never runs that gate: {warnings:?}"
+        );
+    }
+
+    /// A command that does run the gate keeps the clause. The suppression above
+    /// therefore reads the published verdict, not the recognition member.
+    #[test]
+    fn a_standalone_run_whose_gate_reports_a_verdict_keeps_the_clause() {
+        let mut unrecognised = staleness("none", 0, 0, true);
+        unrecognised["unrecognised_format"] = serde_json::json!(true);
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dupes",
+            "baseline_staleness": unrecognised,
+            "gate_outcomes": {
+                "stale-baseline": { "status": "fail", "enforced": false },
+            },
+        }));
+
+        assert!(
+            warnings[0].ends_with(" --fail-on-stale-baseline fails a run in this state."),
+            "{warnings:?}"
         );
     }
 

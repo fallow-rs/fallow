@@ -329,6 +329,10 @@ pub struct CheckOptions<'a> {
     pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
     pub use_shared_diff_index: bool,
     pub baseline: Option<&'a std::path::Path>,
+    /// Which argument carried `baseline`, so the note about a baseline another
+    /// command saved names an argument this run accepts. `fallow audit` passes
+    /// `--dead-code-baseline`; every other caller passes `--baseline`.
+    pub baseline_flag: &'a str,
     pub save_baseline: Option<&'a std::path::Path>,
     /// Fail the run when a loaded `baseline` has entries that match nothing.
     pub fail_on_stale_baseline: bool,
@@ -1182,6 +1186,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         &BaselineIo {
             save_path: opts.save_baseline,
             load_path: opts.baseline,
+            load_flag: opts.baseline_flag,
             root: &config.root,
             quiet: opts.quiet,
             output: opts.output,
@@ -1235,6 +1240,7 @@ pub fn benchmark_dead_code_json(
         diff_index: None,
         use_shared_diff_index: true,
         baseline: None,
+        baseline_flag: "--baseline",
         save_baseline: None,
         fail_on_stale_baseline: false,
         sarif_file: None,
@@ -1432,7 +1438,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     let stale_baseline_failed = crate::baseline_gate::gate_failed(
         result.baseline_staleness.as_ref(),
         result.fail_on_stale_baseline,
-        crate::baseline_gate::DEAD_CODE_NOUN,
+        fallow_engine::baseline::BaselineKind::DeadCode,
     );
 
     if type_aware_failed {
@@ -1626,6 +1632,13 @@ fn print_unmatched_ignore_findings_note(result: &CheckResult, quiet: bool) {
 }
 
 pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
+    if let Some(code) = crate::baseline_gate::refuse_save_before_analysis(
+        opts.save_baseline,
+        fallow_engine::baseline::BaselineKind::DeadCode,
+        opts.output,
+    ) {
+        return code;
+    }
     let result = match execute_check(opts) {
         Ok(r) => r,
         Err(code) => return code,
@@ -1692,6 +1705,11 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
 struct BaselineIo<'a> {
     save_path: Option<&'a std::path::Path>,
     load_path: Option<&'a std::path::Path>,
+    /// The argument that carried `load_path`, for the note about a baseline
+    /// another command saved. `fallow audit` reads this command's baseline through
+    /// `--dead-code-baseline`, so a fixed `--baseline` would name an argument that
+    /// run does not accept.
+    load_flag: &'a str,
     root: &'a std::path::Path,
     quiet: bool,
     output: OutputFormat,
@@ -1767,6 +1785,12 @@ fn save_baseline_file(
     baseline_path: &std::path::Path,
     io: &BaselineIo<'_>,
 ) -> Result<(), ExitCode> {
+    if let Some(refusal) = fallow_engine::baseline::refuse_baseline_kind_overwrite(
+        baseline_path,
+        fallow_engine::baseline::BaselineKind::DeadCode,
+    ) {
+        return Err(emit_error(&refusal, 2, io.output));
+    }
     let baseline_data =
         BaselineData::from_results_with_identity(results, io.root, io.analysis_identity.clone());
     let mut json = serde_json::to_string_pretty(&baseline_data)
@@ -1804,7 +1828,16 @@ fn load_and_compare_baseline(
 ) -> Result<LoadedBaselineStaleness, ExitCode> {
     let content = std::fs::read_to_string(baseline_path)
         .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, io.output))?;
-    let baseline_data = serde_json::from_str::<BaselineData>(&content)
+    // One parse serves both the classification and the deserialization. The
+    // classification comes first, because this format has required fields. Serde
+    // rejects another command's baseline before anything can name the writer, and
+    // the parsed value avoids a second parse of the same bytes.
+    let parsed = serde_json::from_str::<serde_json::Value>(&content)
+        .map_err(|e| emit_error(&format!("failed to parse baseline: {e}"), 2, io.output))?;
+    if let Some(unreadable) = unreadable_baseline(&parsed, results, baseline_path, io) {
+        return Ok(unreadable);
+    }
+    let baseline_data = serde_json::from_value::<BaselineData>(parsed)
         .map_err(|e| emit_error(&format!("failed to parse baseline: {e}"), 2, io.output))?;
     let incompatible = baseline_data
         .analysis_identity()
@@ -1852,12 +1885,67 @@ fn load_and_compare_baseline(
         staleness,
         path: baseline_path.to_path_buf(),
         scope_reasons: io.scope_reasons,
-        // `BaselineData` leaves five fields without a serde default, from
-        // `unused_files` to `unused_dev_dependencies`, so a file that is not a
-        // dead-code baseline fails to parse above with exit 2 and never
-        // reaches here. A dead-code baseline that loads is always this
-        // command's own, however empty.
+        // Classified above, before the parse: a file that reaches here is this
+        // command's own baseline, however empty.
         unrecognised_format: false,
+        saved_by: None,
+    })
+}
+
+/// This run's view of a file that is not a dead-code baseline, or `None` when it
+/// is one and the strict parse owns the outcome.
+///
+/// Read from the raw file, before deserialization. Five of the format's fields
+/// carry no serde default, so another command's baseline fails to parse with
+/// exit 2 while `dupes` and `health` warn and carry on over the same mistake;
+/// classifying first is what makes the three agree (issue #2738). Invalid JSON
+/// and a dead-code baseline missing part of itself still take the parse error:
+/// those are a broken baseline, not somebody else's.
+///
+/// The file suppresses nothing, so the comparison is skipped entirely rather
+/// than run against an empty baseline: every finding stays in the report and the
+/// counts say the baseline carried no entry.
+fn unreadable_baseline(
+    parsed: &serde_json::Value,
+    results: &fallow_types::results::AnalysisResults,
+    baseline_path: &std::path::Path,
+    io: &BaselineIo<'_>,
+) -> Option<LoadedBaselineStaleness> {
+    use fallow_engine::baseline::{BaselineFileKind, BaselineKind, classify_baseline_value};
+
+    let saved_by = match classify_baseline_value(parsed, BaselineKind::DeadCode) {
+        BaselineFileKind::Own | BaselineFileKind::NotAnObject => return None,
+        BaselineFileKind::Foreign(found) => Some(found),
+        BaselineFileKind::Unrecognised => None,
+    };
+    let staleness = BaselineStaleness {
+        entries: 0,
+        matched: 0,
+        current_findings: results.total_issues(),
+        change_scoped: !io.scope_reasons.is_empty(),
+    };
+    if !io.quiet {
+        eprintln!("Comparing against baseline: {}", baseline_path.display());
+    }
+    crate::baseline_gate::note_unrecognised_baseline(
+        Some(baseline_path),
+        true,
+        saved_by.as_deref(),
+        BaselineKind::DeadCode,
+        io.load_flag,
+    );
+    crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
+        command: "dead-code",
+        path: baseline_path.display().to_string(),
+        baseline_entries: 0,
+        scope_reasons: io.scope_reasons,
+    });
+    Some(LoadedBaselineStaleness {
+        staleness,
+        path: baseline_path.to_path_buf(),
+        scope_reasons: io.scope_reasons,
+        unrecognised_format: true,
+        saved_by,
     })
 }
 
@@ -2240,6 +2328,7 @@ mod tests {
             &BaselineIo {
                 save_path: Some(&baseline_path),
                 load_path: None,
+                load_flag: "--baseline",
                 root: std::path::Path::new("/project"),
                 quiet: true,
                 output: OutputFormat::Json,

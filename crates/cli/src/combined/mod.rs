@@ -103,6 +103,15 @@ pub fn resolve_analyses(only: &[AnalysisKind], skip: &[AnalysisKind]) -> (bool, 
 }
 
 pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
+    // Combined saves through its dead-code sub-pass, which is the last step of a
+    // full three-analysis run.
+    if let Some(code) = crate::baseline_gate::refuse_save_before_analysis(
+        opts.save_baseline,
+        fallow_engine::baseline::BaselineKind::DeadCode,
+        opts.output,
+    ) {
+        return code;
+    }
     let start = Instant::now();
     let mut check_result: Option<CheckResult> = None;
     let mut dupes_result: Option<DupesResult> = None;
@@ -164,6 +173,7 @@ fn build_combined_check_options<'a>(
         diff_index: None,
         use_shared_diff_index: true,
         baseline: opts.baseline,
+        baseline_flag: "--baseline",
         save_baseline: opts.save_baseline,
         fail_on_stale_baseline: opts.fail_on_stale_baseline,
         sarif_file: opts.sarif_file,
@@ -497,6 +507,7 @@ fn build_combined_dupes_options<'a>(
         ignore_imports: opts.dupes_ignore_imports,
         top: None,
         baseline_path: None,
+        baseline_flag: "--baseline",
         save_baseline_path: None,
         fail_on_stale_baseline: false,
         production: opts.production_dupes.unwrap_or(opts.production),

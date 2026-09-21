@@ -26315,7 +26315,7 @@
         },
         "gate_trips": {
           "type": "boolean",
-          "description": "True exactly when\n`!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`,\nwhich is the rule `--fail-on-stale-baseline` applies. Deliberately\nstricter than `stale`: any unmatched entry counts. It describes the\nbaseline, not the run's exit code: `health --report-only` is an explicit\nrequest never to fail, so that run exits 0 and says so on stderr while\nstill reporting `gate_trips: true` here."
+          "description": "True exactly when `unrecognised_format` is true, or\n`!change_scoped && baseline_entries > 0 && matched_entries < baseline_entries`.\nThat is the rule `--fail-on-stale-baseline` applies. Deliberately\nstricter than `stale`: any unmatched entry counts, and so does a file\nthis command could not read as its own, which protects nothing at all.\nThe second half is suppressed by `change_scoped` and the first is not:\nwhich command wrote a file does not depend on how much of the project\nthe run looked at.\n\nIt describes the baseline, not the run's exit code: `health\n--report-only` is an explicit request never to fail, so that run exits 0\nand says so on stderr while still reporting `gate_trips: true` here, and\n`fallow audit` never judges a baseline at all, so its\n`gate_outcomes[\"stale-baseline\"]` stands down beside a section that\nreports `true`."
         },
         "moved_entries": {
           "type": "integer",
@@ -26323,7 +26323,7 @@
         },
         "unrecognised_format": {
           "type": "boolean",
-          "description": "True when the loaded file carries no key this command's own baseline\nformat writes, so it is a baseline another command saved or an object\nwith nothing of this command's in it. Read this, not\n`baseline_entries == 0`, before telling anyone their baseline is the\nwrong file: a baseline saved from a project that had nothing to record\nis legitimately empty and is not a mistake.\n\nPresent only when true, so an envelope from a run that loaded its own\nbaseline is unchanged. `dead-code` never sets it: five of its baseline\nfields have no serde default, so a file that is not one fails to load\nwith exit 2 long before this."
+          "description": "True when the loaded file is not a baseline of the command that read it:\nit names another command in its top-level `kind`, or it names none and\ncarries no key this command's own format writes. Read this, not\n`baseline_entries == 0`, before telling anyone their baseline is the\nwrong file: a baseline saved from a project that had nothing to record\nis legitimately empty and is not a mistake.\n\nPresent only when true, so an envelope from a run that loaded its own\nbaseline is unchanged. All three commands set it, including `dead-code`,\nwhich classifies the file before its required fields could reject it.\nA file with no `kind` is the reading a baseline saved before that member\nexisted gets, which is why the keys remain the fallback."
         },
         "scope_reasons": {
           "type": "array",
