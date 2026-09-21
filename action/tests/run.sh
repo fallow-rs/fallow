@@ -4080,7 +4080,32 @@ run_gate_analyze "$(gate_envelope '' "$REQUESTS_APPLIED_FIXTURE")" \
   INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
 assert_not_contains "$GATE_STDOUT" "could not apply" \
   "requests: a run that applied everything it was asked stays silent"
+assert_not_contains "$GATE_STDOUT" "empty scope" \
+  "requests: an applied request that measured nothing is not called empty"
 assert_requests_unapplied_empty "requests: the output is present and empty when everything applied"
+
+# #2734: the applied-but-empty scope. The unapplied selector must stay clear of
+# it (the request DID apply) while the advisory names it, because the clean
+# report underneath covered nothing.
+REQUESTS_EMPTY_SCOPE_FIXTURE='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-file pr.diff","scope_size":0}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_EMPTY_SCOPE_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "::warning::Fallow applied diff-filter over an empty scope" \
+  "requests: an applied request over an empty scope is advised"
+assert_not_contains "$GATE_STDOUT" "could not apply" \
+  "requests: an empty scope is not reported as an unapplied request"
+assert_requests_unapplied_empty "requests: the unapplied output stays empty for an empty scope"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "requests: an empty scope does not fail the job"
+else
+  fail "requests: an empty scope does not fail the job" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+
+REQUESTS_FULL_SCOPE_FIXTURE='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-file pr.diff","scope_size":12}}'
+run_gate_analyze "$(gate_envelope '' "$REQUESTS_FULL_SCOPE_FIXTURE")" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "empty scope" \
+  "requests: a measured non-empty scope stays silent"
 
 run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
 assert_not_contains "$GATE_STDOUT" "could not apply" \

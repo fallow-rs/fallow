@@ -1486,6 +1486,20 @@ REQUESTS_UNAPPLIED=$(jq -r '
 if [ -n "$REQUESTS_UNAPPLIED" ]; then
   echo "::warning::Fallow could not apply: ${REQUESTS_UNAPPLIED}. The findings below cover more of the project than was requested, so do not read this run as scoped to the change."
 fi
+# The opposite shape, and the one a green report cannot state for itself: a
+# narrowing request that DID apply, over a scope it measured as empty. Every
+# finding then filters out, so the clean report below covered nothing (issue
+# #2734). Keyed on `scope_size == 0` beside `status == "applied"`, so a binary
+# that publishes no such member says nothing here.
+REQUESTS_EMPTY_SCOPE=$(jq -r '
+  [ (.request_outcomes // {}) | to_entries[]
+    | select(.value.status == "applied" and .value.affects == "scope" and .value.scope_size == 0)
+    | .key ]
+  | join(", ")
+' "$RESULTS_FILE" 2>/dev/null || true)
+if [ -n "$REQUESTS_EMPTY_SCOPE" ]; then
+  echo "::warning::Fallow applied ${REQUESTS_EMPTY_SCOPE} over an empty scope, so no finding could survive it and the report below is clean because nothing was analyzable. Check the diff or ref this run was given before reading it as a clean result."
+fi
 
 if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' "$RESULTS_FILE" > /dev/null 2>&1; then
   EMPTY_ANALYSIS=true

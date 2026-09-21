@@ -5500,6 +5500,10 @@ reason?: (string | null)
  * whole object narrows the report tells its reader an unwritten SARIF file
  * widened the analysis, which is what `affects` exists to prevent.
  *
+ * `scope_size` is emitted for `diff-filter` only today, in added lines. A
+ * consumer reads the unit off the name, so a name that starts measuring its
+ * own scope in a later release needs no change here.
+ *
  * `invalid-ref` is reachable only through the programmatic API. The
  * `--changed-since` flag validates its value before a run starts and fails
  * with exit 2 and an error document, which is the right side to err on: a
@@ -5527,6 +5531,23 @@ affects: RequestEffect
  * other path-shaped field.
  */
 requested: string
+/**
+ * How much this request left in scope, in the request's own unit, when the
+ * run applied it AND measured that scope. Absent otherwise, including on
+ * every unapplied entry: a request that stood down narrowed nothing, so a
+ * number there would describe a scope nobody applied.
+ *
+ * The unit belongs to the name. `diff-filter` counts added lines, which is
+ * what its filter keeps a finding for. Read the unit off the name the entry
+ * is keyed under, never across names, and read an absent member as "not
+ * measured" rather than as zero.
+ *
+ * `0` is the case this member exists for: a request that applied over an
+ * EMPTY scope. Every finding then filters out and the report reads clean,
+ * so a consumer that sees no findings beside `scope_size: 0` learns that
+ * nothing was analyzable rather than that the code is clean.
+ */
+scope_size?: (number | null)
 /**
  * Why the request was not applied, as a kebab-case token. Present exactly
  * when `status` is not `applied`. The set is open per request name; the

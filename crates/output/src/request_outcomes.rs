@@ -154,6 +154,22 @@ pub struct RequestOutcome {
     /// consumer must not join it to the project root the way it joins every
     /// other path-shaped field.
     pub requested: String,
+    /// How much this request left in scope, in the request's own unit, when the
+    /// run applied it AND measured that scope. Absent otherwise, including on
+    /// every unapplied entry: a request that stood down narrowed nothing, so a
+    /// number there would describe a scope nobody applied.
+    ///
+    /// The unit belongs to the name. `diff-filter` counts added lines, which is
+    /// what its filter keeps a finding for. Read the unit off the name the entry
+    /// is keyed under, never across names, and read an absent member as "not
+    /// measured" rather than as zero.
+    ///
+    /// `0` is the case this member exists for: a request that applied over an
+    /// EMPTY scope. Every finding then filters out and the report reads clean,
+    /// so a consumer that sees no findings beside `scope_size: 0` learns that
+    /// nothing was analyzable rather than that the code is clean.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_size: Option<u64>,
     /// Why the request was not applied, as a kebab-case token. Present exactly
     /// when `status` is not `applied`. The set is open per request name; the
     /// names this build can emit are listed on [`RequestOutcomes`].
@@ -178,8 +194,27 @@ impl RequestOutcome {
             status: RequestStatus::Applied,
             affects: name.affects(),
             requested: requested.into(),
+            scope_size: None,
             reason: None,
             message: None,
+        }
+    }
+
+    /// A request the run honoured, whose remaining scope it also measured.
+    ///
+    /// `size` is in the unit [`RequestOutcome::scope_size`] documents for this
+    /// name. Use [`Self::applied`] where the run applies a request without
+    /// measuring what it left, so the member stays absent rather than claiming
+    /// a zero nobody counted.
+    #[must_use]
+    pub fn applied_with_scope_size(
+        name: RequestName,
+        requested: impl Into<String>,
+        size: u64,
+    ) -> Self {
+        Self {
+            scope_size: Some(size),
+            ..Self::applied(name, requested)
         }
     }
 
@@ -196,6 +231,7 @@ impl RequestOutcome {
             status: RequestStatus::NotApplied,
             affects: name.affects(),
             requested: requested.into(),
+            scope_size: None,
             reason: Some(reason.into()),
             message: Some(message.into()),
         }
@@ -230,6 +266,10 @@ impl RequestOutcome {
 /// `artifact` for this one. Select on it. A consumer that instead assumes the
 /// whole object narrows the report tells its reader an unwritten SARIF file
 /// widened the analysis, which is what `affects` exists to prevent.
+///
+/// `scope_size` is emitted for `diff-filter` only today, in added lines. A
+/// consumer reads the unit off the name, so a name that starts measuring its
+/// own scope in a later release needs no change here.
 ///
 /// `invalid-ref` is reachable only through the programmatic API. The
 /// `--changed-since` flag validates its value before a run starts and fails
@@ -392,6 +432,64 @@ mod tests {
         assert_eq!(RequestName::ChangedSince.affects(), RequestEffect::Scope);
         assert_eq!(RequestName::DiffFilter.affects(), RequestEffect::Scope);
         assert_eq!(RequestName::SarifFile.affects(), RequestEffect::Artifact);
+    }
+
+    /// An applied request that measured an empty scope is the case the member
+    /// exists for: `status` stays `applied`, because the filter DID apply, and
+    /// the zero is what tells a consumer the clean report covered nothing.
+    #[test]
+    fn an_empty_measured_scope_stays_applied_and_publishes_its_zero() {
+        let mut requests = RequestOutcomes::new();
+        requests.insert(
+            RequestName::DiffFilter,
+            RequestOutcome::applied_with_scope_size(
+                RequestName::DiffFilter,
+                "--diff-file pr.diff",
+                0,
+            ),
+        );
+        let value = serde_json::to_value(&requests).expect("request outcomes serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "diff-filter": {
+                    "status": "applied",
+                    "affects": "scope",
+                    "requested": "--diff-file pr.diff",
+                    "scope_size": 0
+                }
+            })
+        );
+    }
+
+    /// Absent is not zero. A request the run applied without counting what it
+    /// left carries no member, so a consumer cannot read "not measured" as "the
+    /// scope was empty".
+    #[test]
+    fn a_request_that_measured_nothing_carries_no_scope_size() {
+        let mut requests = RequestOutcomes::new();
+        requests.insert(
+            RequestName::ChangedSince,
+            RequestOutcome::applied(RequestName::ChangedSince, "origin/main"),
+        );
+        requests.insert(
+            RequestName::DiffFilter,
+            RequestOutcome::not_applied(
+                RequestName::DiffFilter,
+                "--diff-stdin",
+                "oversize",
+                "Ignored.",
+            ),
+        );
+        let value = serde_json::to_value(&requests).expect("request outcomes serialize");
+        assert!(
+            value["changed-since"].get("scope_size").is_none(),
+            "an unmeasured applied request carries no member: {value}"
+        );
+        assert!(
+            value["diff-filter"].get("scope_size").is_none(),
+            "a request that stood down narrowed nothing: {value}"
+        );
     }
 
     #[test]

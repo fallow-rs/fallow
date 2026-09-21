@@ -413,9 +413,14 @@ pub(crate) fn init_shared_diff(
         let label = src.label();
         match place_diff(src, root, candidate_bases, quiet) {
             Ok(loaded) => {
-                request = Some(fallow_output::RequestOutcome::applied(
+                // The added-line count travels as the scope the filter left,
+                // because `0` is the case a report cannot state for itself: the
+                // filter applied, every source-anchored finding dropped, and the
+                // clean document that follows covered nothing (issue #2734).
+                request = Some(fallow_output::RequestOutcome::applied_with_scope_size(
                     fallow_output::RequestName::DiffFilter,
                     label,
+                    loaded.index.added_line_count() as u64,
                 ));
                 Some(loaded)
             }
@@ -679,6 +684,17 @@ where
     kept
 }
 
+/// Filter against a diff read here rather than from the shared cache, for the
+/// one caller [`filter_issues_from_env`] documents: a process where
+/// `init_shared_diff` never ran.
+///
+/// Its three stand-downs print and record nothing, deliberately. This arm is
+/// reachable only when [`DIFF_REQUEST_OUTCOME`] has no writer, so there is no
+/// envelope being assembled in this process for an outcome to reach: an
+/// embedder builds its own report, and `request_outcomes()` is a CLI-layer
+/// projection. Recording here would file an outcome nobody reads while leaving
+/// the CLI path's own entry, written by `init_shared_diff`, as the only one that
+/// ever travels.
 #[must_use]
 fn filter_issues_from_path(
     issues: Vec<CiIssue>,

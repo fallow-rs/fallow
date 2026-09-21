@@ -1400,6 +1400,19 @@ variables:
       if [ -n "$REQUESTS_UNAPPLIED" ]; then
         echo "WARNING: Fallow could not apply: ${REQUESTS_UNAPPLIED}. The findings below cover more of the project than was requested, so do not read this run as scoped to the change."
       fi
+      # The opposite shape: a narrowing request that DID apply, over a scope it
+      # measured as empty. Every finding filters out, so the clean report below
+      # covered nothing. A binary that publishes no `scope_size` says nothing
+      # here.
+      REQUESTS_EMPTY_SCOPE=$(jq -r '
+        [ (.request_outcomes // {}) | to_entries[]
+          | select(.value.status == "applied" and .value.affects == "scope" and .value.scope_size == 0)
+          | .key ]
+        | join(", ")
+      ' fallow-results.json 2>/dev/null || true)
+      if [ -n "$REQUESTS_EMPTY_SCOPE" ]; then
+        echo "WARNING: Fallow applied ${REQUESTS_EMPTY_SCOPE} over an empty scope, so no finding could survive it and the report below is clean because nothing was analyzable. Check the diff or ref this run was given before reading it as a clean result."
+      fi
 
       if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' fallow-results.json > /dev/null 2>&1; then
         EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check FALLOW_ROOT, ignorePatterns, and any path or workspace filter."

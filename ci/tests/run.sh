@@ -2475,6 +2475,38 @@ OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   FALLOW_FAIL_ON_ISSUES=false) || true
 assert_not_contains "$OUT" "could not apply" \
   "gitlab requests: a run that applied everything it was asked stays silent"
+assert_not_contains "$OUT" "empty scope" \
+  "gitlab requests: an applied request that measured nothing is not called empty"
+
+# #2734: an applied request over a scope it measured as empty. The unapplied
+# line must stay clear of it while the advisory names it.
+EMPTY_SCOPE='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-file pr.diff","scope_size":0}}'
+ENVELOPE=$(gitlab_gate_envelope '' "$EMPTY_SCOPE")
+set +e
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false)
+GATE_STATUS=$?
+set -e
+assert_contains "$OUT" "WARNING: Fallow applied diff-filter over an empty scope" \
+  "gitlab requests: an applied request over an empty scope is advised"
+assert_not_contains "$OUT" "could not apply" \
+  "gitlab requests: an empty scope is not reported as an unapplied request"
+if [ "$GATE_STATUS" = "0" ]; then
+  pass "gitlab requests: an empty scope leaves the pipeline green"
+else
+  fail "gitlab requests: an empty scope leaves the pipeline green" "got $GATE_STATUS"
+fi
+
+FULL_SCOPE='"request_outcomes":{"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-file pr.diff","scope_size":12}}'
+ENVELOPE=$(gitlab_gate_envelope '' "$FULL_SCOPE")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "empty scope" \
+  "gitlab requests: a measured non-empty scope stays silent"
 
 ENVELOPE=$(gitlab_gate_envelope '')
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \

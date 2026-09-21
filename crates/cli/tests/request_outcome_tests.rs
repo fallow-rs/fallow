@@ -500,6 +500,99 @@ fn an_honoured_request_reports_applied_with_no_reason_and_no_message() {
     );
 }
 
+/// The scope a filter left, when the run measured it. An empty scope is the
+/// case a clean report cannot state for itself: the filter applied, so `status`
+/// stays `applied` and every consumer selector is unchanged, and the zero is
+/// what says the report covered nothing.
+#[test]
+fn an_applied_diff_filter_publishes_the_scope_it_left() {
+    let project = project();
+    let root_path = project.path();
+    let root = root_arg(&project);
+
+    let empty = root_path.join("deletion-only.diff");
+    std::fs::write(
+        &empty,
+        "diff --git a/src/gone.ts b/src/gone.ts\n\
+         deleted file mode 100644\n\
+         --- a/src/gone.ts\n\
+         +++ /dev/null\n\
+         @@ -1,1 +0,0 @@\n\
+         -export const gone = (): number => 3;\n",
+    )
+    .expect("deletion-only diff");
+    let envelope = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--diff-file",
+        empty.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    let entry = request(&envelope, "diff-filter");
+    assert_eq!(
+        entry["status"], "applied",
+        "an empty scope is a scope, not a stand-down: {entry}"
+    );
+    assert_eq!(
+        entry["scope_size"], 0,
+        "the report below covered nothing and must say so: {entry}"
+    );
+    assert!(
+        entry["reason"].is_null() && entry["message"].is_null(),
+        "an applied request carries neither: {entry}"
+    );
+
+    let placeable = placeable_diff(root_path);
+    let envelope = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--diff-file",
+        &placeable,
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    let entry = request(&envelope, "diff-filter");
+    assert_eq!(entry["status"], "applied", "{entry}");
+    assert_eq!(
+        entry["scope_size"], 1,
+        "a measured scope carries the real count, not a flag: {entry}"
+    );
+}
+
+/// Absent is not zero. A request nothing measured the scope of carries no
+/// member, so a consumer cannot read "not measured" as "the scope was empty".
+#[test]
+fn a_request_with_no_measured_scope_carries_no_scope_size() {
+    let project = project();
+    let root_path = project.path();
+    let root = root_arg(&project);
+    let foreign = foreign_diff(root_path);
+    let envelope = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--changed-since",
+        "refs/heads/does-not-exist",
+        "--diff-file",
+        &foreign,
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    for name in ["changed-since", "diff-filter"] {
+        let entry = request(&envelope, name);
+        assert!(
+            entry.get("scope_size").is_none(),
+            "`{name}` narrowed nothing and must not claim a scope: {entry}"
+        );
+    }
+}
+
 /// The test that would have caught the whole class. `$FALLOW_DIFF_FILE` plus
 /// `--quiet` is the exact shape the GitHub Action and the GitLab template use,
 /// and it is the one shape where the CLI prints nothing at all.
