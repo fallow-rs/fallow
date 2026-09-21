@@ -46,14 +46,16 @@ const renderAdapter = ({ body, frontmatter }, marker) =>
  *
  * `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` are stripped so an ambient
  * value from a hook or a wrapping tool cannot point the query at another
- * repository's index.
+ * repository's index. Paths come back relative to `repoRoot`, which is what the
+ * lookup key is: a checkout that sits inside another repository is not that
+ * repository's top level, so a top-relative spelling would match nothing.
  */
 const trackedAdapterPaths = (repoRoot) => {
   const env = { ...process.env };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
-  const result = spawnSync("git", ["ls-files", "-z", "--full-name", "--", ".claude"], {
+  const result = spawnSync("git", ["ls-files", "-z", "--", ".claude"], {
     cwd: repoRoot,
     encoding: "utf8",
     env,

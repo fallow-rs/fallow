@@ -8,8 +8,7 @@ import { mkdtempSync } from "node:fs";
 
 import { generateAgentAdapters } from "./generate-agent-adapters.mjs";
 
-const createRepo = () => {
-  const root = mkdtempSync(join(tmpdir(), "fallow-agent-adapters-"));
+const createRepo = (root = mkdtempSync(join(tmpdir(), "fallow-agent-adapters-"))) => {
   const skill = join(root, ".agents", "skills", "review");
   mkdirSync(skill, { recursive: true });
   writeFileSync(
@@ -145,6 +144,30 @@ test("reports and removes a tracked adapter whose canonical source is gone", () 
   const repoRoot = createTrackedRepo();
   generateAgentAdapters({ repoRoot });
   git(repoRoot, ["add", "-f", "--", ".claude"]);
+  removeCanonicalSources(repoRoot);
+
+  const skipped = [];
+  assert.deepEqual(
+    generateAgentAdapters({ check: true, onSkip: (path) => skipped.push(path), repoRoot }),
+    [".claude/agents/rust-reviewer.md", ".claude/skills/review/SKILL.md"],
+  );
+  assert.deepEqual(skipped, []);
+
+  generateAgentAdapters({ repoRoot });
+  assert.equal(existsSync(join(repoRoot, ".claude", "skills", "review")), false);
+  assert.equal(existsSync(join(repoRoot, ".claude", "agents", "rust-reviewer.md")), false);
+});
+
+test("a checkout nested in another repository judges ownership by its own paths", () => {
+  // Git reports paths relative to the top of the repository it answers for, which
+  // here is the outer one. Ownership is looked up by a path relative to the
+  // checkout, so a checkout that is not itself the repository top would read as
+  // entirely untracked: nothing stale, and nothing removed.
+  const outer = mkdtempSync(join(tmpdir(), "fallow-agent-adapters-nested-"));
+  git(outer, ["init", "--quiet"]);
+  const repoRoot = createRepo(join(outer, "inner"));
+  generateAgentAdapters({ repoRoot });
+  git(outer, ["add", "-f", "--", "."]);
   removeCanonicalSources(repoRoot);
 
   const skipped = [];
