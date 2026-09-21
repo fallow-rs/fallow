@@ -2086,6 +2086,50 @@ fn analysis_stage_diagnostics_are_recorded_only_from_the_dead_code_analyze_pass(
     }
 }
 
+/// Issue #2736: the plugin stage has exactly one registry writer, and it is the
+/// point where the root and workspace plugin results have converged.
+///
+/// A second writer would either publish a partial set (a workspace result before
+/// the merge) or be wiped by the first one, because the write REPLACES the
+/// stage's set so a fixed config drops out. The stage predicate in `fallow-types`
+/// forces a new KIND to be classified; nothing there notices a new writer, so pin
+/// the writer set here. `fallow list` runs plugins on its own path and
+/// deliberately records nothing, which is the gap this guard also documents.
+#[test]
+fn plugin_stage_diagnostics_have_one_writer_at_the_end_of_the_plugin_run() {
+    let exempt = [
+        "crates/config/src/workspace/diagnostics.rs",
+        "crates/cli/src/architecture_boundaries.rs",
+    ];
+    let mut writers: Vec<String> = rust_sources_under(["crates"])
+        .into_iter()
+        .filter(|path| !exempt.contains(&path.as_str()))
+        .filter(|path| {
+            read_source_without_line_comments(path)
+                .expect("read crate source")
+                .contains("record_plugin_config_diagnostics(")
+        })
+        .collect();
+    writers.sort();
+    assert_eq!(
+        writers,
+        ["crates/core/src/lib.rs"],
+        "the plugin stage writes its diagnostics once, at the end of the plugin run; a second \
+         writer publishes a partial set or is replaced by the first"
+    );
+
+    let core =
+        read_source_without_line_comments("crates/core/src/lib.rs").expect("read core library");
+    assert!(
+        core.contains(
+            "gate_auto_import_entry_patterns(&mut result, config, workspaces);\n    \
+             record_plugin_config_diagnostics(&result, &config.root);"
+        ),
+        "the write must follow the auto-import gate, or a surface the gate reports is missing \
+         from the set"
+    );
+}
+
 /// Issue #2366: source-discovery diagnostics must reach an analysis by value
 /// from its own walk, never by reading the process registry back.
 ///

@@ -655,6 +655,50 @@ kind: "ownership-unavailable"
 error: string
 kind: "trend-snapshot-unreadable"
 } | {
+/**
+ * The plugin that read the config, as it labels itself:
+ * `module-federation` for a standalone `module-federation.config.*`,
+ * or the bundler plugin (`webpack`, `rspack`, `rsbuild`, `vite`) that
+ * read the same options inline from its own config.
+ */
+plugin: string
+/**
+ * The config key that was present and not fully readable (`exposes`,
+ * `remotes`). The set is open.
+ */
+key: string
+/**
+ * Why it could not be read, as a kebab-case token:
+ * `not-object-literal`, `array-form`, `spread` or
+ * `unreadable-entries`. The set is open.
+ *
+ * The reason decides the remedy, which is why it is on the wire: a
+ * value that is not an object literal is fixed by writing one, while
+ * unreadable entries are fixed by naming those entries in the config
+ * option the message points at.
+ */
+reason: string
+kind: "plugin-config-unreadable"
+} | {
+/**
+ * The plugin that read the config, as it labels itself (`nuxt`).
+ */
+plugin: string
+/**
+ * The config key whose effect is not modeled (`components`,
+ * `imports`). The set is open.
+ */
+key: string
+/**
+ * Why the effect is not modeled, as a kebab-case token:
+ * `key-effect-not-modeled` when the key's own value is the reason,
+ * `config-property-unreadable` when a top-level property of the same
+ * config file could not be read statically, so no surface in it can
+ * be classified at all. The set is open.
+ */
+reason: string
+kind: "plugin-effect-not-modeled"
+} | {
 kind: "coverage-auto-detected"
 })
 /**
@@ -2934,10 +2978,12 @@ _meta?: (Meta | null)
  *   `source-parse-degraded`;
  * - dead-code analysis, from the dependency-catalog and override
  *   detectors: `malformed-pnpm-workspace-yaml`,
- *   `bun-lockb-override-resolution-skipped`.
+ *   `bun-lockb-override-resolution-skipped`;
+ * - framework plugins, while they read their own build configs:
+ *   `plugin-config-unreadable`, `plugin-effect-not-modeled`.
  *
- * Analysis-stage kinds therefore reach only the envelopes whose run
- * includes a dead-code analyze pass, never a standalone
+ * Analysis-stage and plugin-stage kinds therefore reach only the envelopes
+ * whose run includes a dead-code analyze pass, never a standalone
  * `fallow dupes --format json`. `path` is project-root-relative with
  * forward slashes; the array is omitted when empty. The same list is
  * repeated on each top-level command's envelope so single-command

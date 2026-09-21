@@ -3018,6 +3018,25 @@ else
 fi
 assert_contains "$(cat "$TYPED_SUMMARY_FILE")" "# Fallow typed summary" "summary.sh: typed envelope body wins"
 
+# #2736: the degraded note is read by a human who then looks for the cause, so
+# it must not claim files were skipped when the degrading kind is a config a
+# plugin could not read.
+DEGRADED_SUMMARY_FILE="$WORK_DIR/degraded-summary.md"
+OUT=$(cd "$WORK_DIR" && \
+  GITHUB_STEP_SUMMARY="$DEGRADED_SUMMARY_FILE" \
+  FALLOW_COMMAND="dead-code" \
+  ACTION_JQ_DIR="$JQ_DIR" \
+  FALLOW_ANALYSIS_DEGRADED="true" \
+  FALLOW_RESULTS_FILE=".var/fallow/fallow-results.json" \
+  FALLOW_SCOPED_RESULTS_FILE=".var/fallow/fallow-results-degraded.json" \
+  bash "$SCRIPTS_DIR/summary.sh" 2>&1)
+assert_contains "$(cat "$DEGRADED_SUMMARY_FILE")" "Analysis was degraded." \
+  "summary.sh: the degraded flag still writes its note"
+assert_contains "$(cat "$DEGRADED_SUMMARY_FILE")" "or from an input that did not load" \
+  "summary.sh: the note covers a degrading kind that is not about files"
+assert_not_contains "$(cat "$DEGRADED_SUMMARY_FILE")" "Some files never reached the analysis" \
+  "summary.sh: the note does not claim files were skipped"
+
 printf '{"annotations":[{"path":"src/a.ts","line":0,"level":"failure","title":"fallow/high-crap-score","message":"Needs work","raw_details":null},{"path":"src/b.ts","line":12,"level":"notice","title":"fallow/info","message":"FYI","raw_details":null}]}\n' > "$CUSTOM_ARTIFACTS/fallow-pr-decision.json"
 OUT=$(cd "$WORK_DIR" && \
   FALLOW_COMMAND="dead-code" \
@@ -4055,6 +4074,18 @@ assert_contains "$GATE_STDOUT" "hotspots-skipped (1), shallow-clone (1)" \
   "degraded: the health kinds are reported without a script change"
 assert_not_contains "$GATE_STDOUT" "coverage-auto-detected" \
   "degraded: auto-detected coverage is provenance and not a degraded run"
+
+# #2736: a framework plugin that could not read a build config reaches the same
+# aggregated warning through the same selector, and the quiet sibling kind stays
+# out of it.
+PLUGIN_DEGRADED='"workspace_diagnostics":[{"path":"module-federation.config.ts","kind":"plugin-config-unreadable","plugin":"module-federation","key":"exposes","reason":"not-object-literal","message":"m","degrades_analysis":true},{"path":"module-federation.config.ts","kind":"plugin-config-unreadable","plugin":"module-federation","key":"remotes","reason":"spread","message":"m","degrades_analysis":true},{"path":"nuxt.config.ts","kind":"plugin-effect-not-modeled","plugin":"nuxt","key":"components","reason":"key-effect-not-modeled","message":"m"}]'
+run_gate_analyze "$(gate_envelope '' "$PLUGIN_DEGRADED")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "plugin-config-unreadable (2)" \
+  "degraded: two unreadable keys in one config are counted separately"
+assert_not_contains "$GATE_STDOUT" "plugin-effect-not-modeled" \
+  "degraded: a config whose effect is not modeled lost nothing measurable"
+assert_contains "$GATE_OUTPUTS" "analysis_degraded=true" \
+  "degraded: a plugin config nobody could read sets the output"
 
 # #2687, #2688: the fact the CLI can only report on the wire, because this step
 # always runs it with --quiet and a machine format.

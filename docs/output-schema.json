@@ -951,7 +951,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one\nof the four minified-bundle globs) that removed candidate source files\nfrom the walk, which is designed behavior on generated output rather\nthan a degraded run, so it is advisory only and no finding inherits it.\nOne entry per pattern, never per file, so the array stays bounded on a\nproject of any size. Gitignored trees are pruned before the walk sees\nthem and count zero, and `**/node_modules/**` is never reported:\ninstalled dependencies are not the first-party source the kind is\nabout."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`;\n- framework plugins, while they read their own build configs:\n  `plugin-config-unreadable`, `plugin-effect-not-modeled`.\n\nAnalysis-stage and plugin-stage kinds therefore reach only the envelopes\nwhose run includes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one\nof the four minified-bundle globs) that removed candidate source files\nfrom the walk, which is designed behavior on generated output rather\nthan a degraded run, so it is advisory only and no finding inherits it.\nOne entry per pattern, never per file, so the array stays bounded on a\nproject of any size. Gitignored trees are pruned before the walk sees\nthem and count zero, and `**/node_modules/**` is never reported:\ninstalled dependencies are not the first-party source the kind is\nabout."
         },
         "next_steps": {
           "type": "array",
@@ -12020,6 +12020,62 @@
             "error"
           ],
           "description": "A saved health snapshot could not be read or parsed, so the trend is\ncomputed over fewer snapshots than the project has on disk and a\ndirection can flip on the missing point alone."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "plugin": {
+              "type": "string",
+              "description": "The plugin that read the config, as it labels itself:\n`module-federation` for a standalone `module-federation.config.*`,\nor the bundler plugin (`webpack`, `rspack`, `rsbuild`, `vite`) that\nread the same options inline from its own config."
+            },
+            "key": {
+              "type": "string",
+              "description": "The config key that was present and not fully readable (`exposes`,\n`remotes`). The set is open."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why it could not be read, as a kebab-case token:\n`not-object-literal`, `array-form`, `spread` or\n`unreadable-entries`. The set is open.\n\nThe reason decides the remedy, which is why it is on the wire: a\nvalue that is not an object literal is fixed by writing one, while\nunreadable entries are fixed by naming those entries in the config\noption the message points at."
+            },
+            "kind": {
+              "type": "string",
+              "const": "plugin-config-unreadable"
+            }
+          },
+          "required": [
+            "kind",
+            "plugin",
+            "key",
+            "reason"
+          ],
+          "description": "A framework plugin read a build config and could not read one of its\nkeys in full, so part of what the key declares never reached the\nanalysis. `path` names the config file.\n\nThe reader is syntactic, so a key whose value is computed at build time\nis invisible to it: a Module Federation `exposes: makeExposes()` or a\n`remotes` map spread from an environment module declares entries this\nrun does not know about. The consequence is a finding, not a missing\nnumber: an unread `exposes` target is not registered as an entry point\nand its file can surface as `unused-file`, and an unread `remotes` alias\nis not treated as provided by a remote container and its import can\nsurface as an unlisted dependency.\n\nRecorded by the plugin stage, which runs before analysis and is not\ncached, so the entry is present on a warm cache too. It used to be a\nbare `tracing::warn!` from inside the plugin, so it reached no envelope\nand no CI consumer (issue #2736)."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "plugin": {
+              "type": "string",
+              "description": "The plugin that read the config, as it labels itself (`nuxt`)."
+            },
+            "key": {
+              "type": "string",
+              "description": "The config key whose effect is not modeled (`components`,\n`imports`). The set is open."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why the effect is not modeled, as a kebab-case token:\n`key-effect-not-modeled` when the key's own value is the reason,\n`config-property-unreadable` when a top-level property of the same\nconfig file could not be read statically, so no surface in it can\nbe classified at all. The set is open."
+            },
+            "kind": {
+              "type": "string",
+              "const": "plugin-effect-not-modeled"
+            }
+          },
+          "required": [
+            "kind",
+            "plugin",
+            "key",
+            "reason"
+          ],
+          "description": "A framework plugin read a config key it understands, does not model\nthat key's effect, and therefore stood a modeled default down. `path`\nnames the config file.\n\nThe Nuxt auto-import gate is the case this exists for. With\n`autoImports` enabled fallow drops the Nuxt convention entry patterns\nso a genuinely unreferenced convention file is reported, and a\n`components:` or `imports:` block whose effect it cannot model keeps\nthem, which silently costs the user the findings they opted in for.\n\nDeliberately NOT one of the [`Self::warns_on_stderr`] kinds. Nothing\nwas lost that the run could have measured: the patterns stayed, so\nfindings are suppressed rather than invented, and a project in this\nstate would otherwise warn on every run forever with \"write different\nconfig\" as the only remedy, which is the reason\n`boundaries-not-configured` is off stderr as well."
         },
         {
           "type": "object",

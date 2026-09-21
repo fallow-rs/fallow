@@ -107,10 +107,12 @@ pub struct CheckOutput {
     ///   `source-parse-degraded`;
     /// - dead-code analysis, from the dependency-catalog and override
     ///   detectors: `malformed-pnpm-workspace-yaml`,
-    ///   `bun-lockb-override-resolution-skipped`.
+    ///   `bun-lockb-override-resolution-skipped`;
+    /// - framework plugins, while they read their own build configs:
+    ///   `plugin-config-unreadable`, `plugin-effect-not-modeled`.
     ///
-    /// Analysis-stage kinds therefore reach only the envelopes whose run
-    /// includes a dead-code analyze pass, never a standalone
+    /// Analysis-stage and plugin-stage kinds therefore reach only the envelopes
+    /// whose run includes a dead-code analyze pass, never a standalone
     /// `fallow dupes --format json`. `path` is project-root-relative with
     /// forward slashes; the array is omitted when empty. The same list is
     /// repeated on each top-level command's envelope so single-command

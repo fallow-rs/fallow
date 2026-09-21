@@ -2446,6 +2446,19 @@ assert_contains "$OUT" "hotspots-skipped (1)" \
 assert_not_contains "$OUT" "coverage-auto-detected" \
   "gitlab degraded: auto-detected coverage is provenance and not a degraded run"
 
+# #2736: a build config a framework plugin could not read reaches the same line
+# through the same selector, and the quiet sibling kind stays out of it.
+PLUGIN_DEGRADED='"workspace_diagnostics":[{"path":"module-federation.config.ts","kind":"plugin-config-unreadable","plugin":"module-federation","key":"exposes","reason":"not-object-literal","message":"m","degrades_analysis":true},{"path":"module-federation.config.ts","kind":"plugin-config-unreadable","plugin":"module-federation","key":"remotes","reason":"spread","message":"m","degrades_analysis":true},{"path":"nuxt.config.ts","kind":"plugin-effect-not-modeled","plugin":"nuxt","key":"imports","reason":"key-effect-not-modeled","message":"m"}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$PLUGIN_DEGRADED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "plugin-config-unreadable (2)" \
+  "gitlab degraded: two unreadable keys in one config are counted separately"
+assert_not_contains "$OUT" "plugin-effect-not-modeled" \
+  "gitlab degraded: a config whose effect is not modeled lost nothing measurable"
+
 # #2687, #2688: this job runs fallow with --quiet and a machine format, so the
 # envelope is the only channel that reaches the pipeline.
 REQUESTS='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'

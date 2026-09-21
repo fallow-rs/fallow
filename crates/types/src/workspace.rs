@@ -1110,23 +1110,31 @@ fn unreadable_situation(reason: &str) -> &'static str {
     }
 }
 
-/// The configuration option that covers what a plugin could not read, for the
-/// config keys whose owning plugin documents one.
+/// What an unread config key costs, and the configuration option that covers
+/// the gap.
 ///
 /// Keyed on the config KEY rather than on the plugin name, because one key is
 /// read by several plugins: Module Federation `exposes` and `remotes` reach a
 /// build from a standalone config file and inline from the webpack, rspack,
-/// rsbuild and vite configs, and the remedy is the same in all five. A key with
-/// no documented option renders the message without a remedy clause rather than
-/// inventing one.
-fn config_option_advice(key: &str) -> Option<&'static str> {
+/// rsbuild and vite configs, and both the consequence and the remedy are the
+/// same in all five. A key this build does not know falls back to the general
+/// claim rather than borrowing another key's remedy, so a plugin added later
+/// still renders a sentence that is true.
+fn unreadable_key_consequence(key: &str) -> (&'static str, &'static str) {
     match key {
-        "exposes" => Some("Name the exposed files in `dynamicallyLoaded`."),
-        "remotes" => Some(
+        "exposes" => (
+            "the targets are not registered as entry points",
+            "Name the exposed files in `dynamicallyLoaded`.",
+        ),
+        "remotes" => (
+            "the aliases are not treated as provided by a remote container",
             "Name the aliases in `ignoreDependencies`, or declare them as the keys of an object \
              literal, whose values may be computed.",
         ),
-        _ => None,
+        _ => (
+            "what it declares is not fully registered",
+            "Declare the value as a static object literal.",
+        ),
     }
 }
 
@@ -1331,14 +1339,9 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             key,
             reason,
         } => {
-            let advice = match config_option_advice(key) {
-                Some(advice) => format!(" {advice}"),
-                None => String::new(),
-            };
+            let (consequence, advice) = unreadable_key_consequence(key);
             format!(
-                "Plugin '{plugin}': `{key}` in '{display}' {situation}, so what it declares beyond \
-                 what was read is missing from this run and the files and dependencies it covers \
-                 can be reported as unused. Declare the value as a static literal.{advice}",
+                "Plugin '{plugin}': `{key}` in '{display}' {situation}, so {consequence}. {advice}",
                 situation = unreadable_situation(reason)
             )
         }
@@ -2532,8 +2535,11 @@ mod tests {
         let unknown_key = plugin_unreadable("shared", "not-object-literal");
         assert!(
             !unknown_key.message.contains("dynamicallyLoaded")
-                && !unknown_key.message.contains("ignoreDependencies"),
-            "a key with no documented option must not borrow another's remedy: {}",
+                && !unknown_key.message.contains("ignoreDependencies")
+                && unknown_key
+                    .message
+                    .contains("Declare the value as a static object literal."),
+            "a key with no documented consequence falls back to the general claim: {}",
             unknown_key.message
         );
         assert!(
