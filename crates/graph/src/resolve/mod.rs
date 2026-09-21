@@ -555,6 +555,11 @@ fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule 
 /// [`ResolvedImport`] is added so the existing graph builder credits the edge.
 /// Name collisions across files over-credit every match, keeping each provider
 /// reachable. Resolution is recomputed from the live file index each run.
+///
+/// A name imported by hand from a framework's auto-import module
+/// ([`AUTO_IMPORT_VIRTUAL_MODULES`]) is credited through the same table: the
+/// module is generated at build time, so no resolver can follow the specifier,
+/// while the name means exactly what the bare reference means.
 fn synthesize_auto_import_edges(
     resolved: &mut [ResolvedModule],
     modules: &[ModuleInfo],
@@ -590,31 +595,86 @@ fn synthesize_auto_import_edges(
         .filter(|module| !module.auto_import_candidates.is_empty())
         .map(|module| (module.file_id, module.auto_import_candidates.as_slice()))
         .collect();
-    if candidates.is_empty() {
+    let virtual_module_names: FxHashMap<FileId, Vec<&str>> = modules
+        .iter()
+        .filter_map(|module| {
+            let names = virtual_auto_import_names(module);
+            (!names.is_empty()).then_some((module.file_id, names))
+        })
+        .collect();
+    if candidates.is_empty() && virtual_module_names.is_empty() {
         return;
     }
 
     for module in resolved.iter_mut() {
-        let Some(names) = candidates.get(&module.file_id) else {
-            continue;
-        };
-        for name in *names {
-            if is_auto_import_builtin(name) {
-                continue;
-            }
-            let Some(targets) = table.get(name.as_str()) else {
-                continue;
-            };
-            for (target_id, kind) in targets {
-                if *target_id == module.file_id {
-                    continue;
-                }
-                module.resolved_imports.push(ResolvedImport {
-                    info: synthetic_auto_import_info(name, *kind),
-                    target: ResolveResult::SyntheticAutoImport(*target_id),
-                });
+        if let Some(names) = candidates.get(&module.file_id) {
+            for name in *names {
+                credit_auto_import_name(module, name, &table);
             }
         }
+        if let Some(names) = virtual_module_names.get(&module.file_id) {
+            for name in names {
+                credit_auto_import_name(module, name, &table);
+            }
+        }
+    }
+}
+
+/// Framework modules that re-export a convention auto-import surface.
+///
+/// Nuxt generates `#components` and `#imports` at build time, and importing a
+/// name from one is the explicit spelling of the bare reference the scanners
+/// already credit (issue #2737).
+const AUTO_IMPORT_VIRTUAL_MODULES: &[&str] = &["#components", "#imports"];
+
+/// The names a module takes by name from an auto-import virtual module, whether
+/// it imports them or re-exports them.
+///
+/// A star re-export and a namespace import name nothing, so neither credits a
+/// convention file.
+fn virtual_auto_import_names(module: &ModuleInfo) -> Vec<&str> {
+    let imported = module
+        .imports
+        .iter()
+        .filter(|import| is_auto_import_virtual_module(&import.source))
+        .filter_map(|import| match &import.imported_name {
+            ImportedName::Named(name) => Some(name.as_str()),
+            _ => None,
+        });
+    let re_exported = module
+        .re_exports
+        .iter()
+        .filter(|re_export| is_auto_import_virtual_module(&re_export.source))
+        .map(|re_export| re_export.imported_name.as_str())
+        .filter(|name| *name != "*");
+    imported.chain(re_exported).collect()
+}
+
+/// Whether a specifier names one of the framework's auto-import modules.
+fn is_auto_import_virtual_module(source: &str) -> bool {
+    source.starts_with('#') && AUTO_IMPORT_VIRTUAL_MODULES.contains(&source)
+}
+
+/// Add the synthetic edges one referenced name earns from the auto-import table.
+fn credit_auto_import_name(
+    module: &mut ResolvedModule,
+    name: &str,
+    table: &FxHashMap<&str, Vec<(FileId, AutoImportKind)>>,
+) {
+    if is_auto_import_builtin(name) {
+        return;
+    }
+    let Some(targets) = table.get(name) else {
+        return;
+    };
+    for (target_id, kind) in targets {
+        if *target_id == module.file_id {
+            continue;
+        }
+        module.resolved_imports.push(ResolvedImport {
+            info: synthetic_auto_import_info(name, *kind),
+            target: ResolveResult::SyntheticAutoImport(*target_id),
+        });
     }
 }
 

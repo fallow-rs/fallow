@@ -32,6 +32,21 @@ globally with `--ignore-scripts`.
 
 ## Invariants
 
+- Run every credential-bearing job in the `release` environment: `build`
+  (binary signing key), `publish-crates`, `npm-publish`, and both VSIX
+  publisher jobs. Its deployment branch policy admits `main` only. The ref
+  check in `release-context` is part of the workflow file, so it stops a
+  mistaken dispatch but not an edited copy of the workflow on another ref; the
+  environment is enforced by GitHub outside the file.
+- Keep `VSCE_PAT`, `OVSX_PAT`, and `ED25519_BINARY_SIGNING_PRIVATE_KEY` as
+  `release` environment secrets only. A repository-level copy is readable by
+  any workflow on any ref. The maintainer preflight verifies the branch policy
+  and the absence of repository-level copies, because the workflow token cannot
+  read environment settings.
+- Pin the crates.io trusted publishing configs to the `release` environment.
+  crates.io accepts an environment claim when a config sets none, and rejects a
+  token without the matching claim once it does, so the pin is what stops an
+  edited workflow on another ref from publishing crates over OIDC.
 - Keep every checkout at `persist-credentials: false`.
 - Keep repository dependency installation out of `npm-publish`, both VSIX
   publisher jobs, and `publish-crates`.

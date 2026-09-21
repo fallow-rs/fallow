@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-auto-imports-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}

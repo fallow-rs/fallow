@@ -2477,13 +2477,7 @@ fn run_workspace_plugins(
             if ws_result.active_plugins.is_empty() {
                 return None;
             }
-            let ws_prefix = ws
-                .root
-                .strip_prefix(&config.root)
-                .unwrap_or(&ws.root)
-                .to_string_lossy()
-                .into_owned();
-            Some(Ok((ws_result, ws_prefix)))
+            Some(Ok((ws_result, workspace_prefix(&config.root, &ws.root))))
         })
         .collect::<Vec<_>>()
 }
@@ -2514,13 +2508,29 @@ fn merge_workspace_plugin_results(
     Ok(())
 }
 
+/// The project-relative prefix of a workspace root, empty for the project root
+/// itself. A root outside the project tree keeps its own path, which is also the
+/// prefix its patterns carry.
+fn workspace_prefix(root: &Path, workspace_root: &Path) -> String {
+    workspace_root
+        .strip_prefix(root)
+        .unwrap_or(workspace_root)
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// When `autoImports` is enabled, drop the modeled Nuxt convention entry
 /// patterns so genuinely-unreferenced convention files are reported as
 /// `unused-file`. Component and script fallbacks are classified separately
 /// because `components:` and `imports:` settings affect different convention
 /// surfaces. A surface whose settings are not modeled keeps its patterns; a
-/// config that statically proves the surface scans nothing is treated like the
-/// default and loses them.
+/// config that statically proves the surface scans no more than the modeled
+/// defaults is treated like the default and loses them.
+///
+/// Each root is classified on its own: the project root plus every workspace
+/// root, and a pattern is judged by the config of the root whose prefix it
+/// carries. One custom `nuxt.config` in a monorepo therefore no longer keeps
+/// every other app's patterns. See issue #2737.
 fn gate_auto_import_entry_patterns(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
@@ -2532,26 +2542,55 @@ fn gate_auto_import_entry_patterns(
     if !result.active_plugins.iter().any(|name| name == "nuxt") {
         return;
     }
-    let settings: Vec<_> = std::iter::once(config.root.as_path())
-        .chain(workspaces.iter().map(|ws| ws.root.as_path()))
-        .map(plugins::nuxt::auto_import_settings)
-        .collect();
-    let components_custom = settings
+    let root_settings = plugins::nuxt::auto_import_settings(&config.root);
+    let workspace_settings: Vec<_> = workspaces
         .iter()
-        .any(|setting| setting.components.is_custom());
-    let imports_custom = settings.iter().any(|setting| setting.scripts.is_custom());
+        .map(|ws| {
+            (
+                workspace_prefix(&config.root, &ws.root),
+                plugins::nuxt::auto_import_settings(&ws.root),
+            )
+        })
+        .collect();
     result.entry_patterns.retain(|(rule, plugin)| {
         if plugin != "nuxt" {
             return true;
         }
-        if !components_custom && plugins::nuxt::is_component_entry_pattern(&rule.pattern) {
+        let setting =
+            settings_for_entry_pattern(&root_settings, &workspace_settings, &rule.pattern);
+        if !setting.components.is_custom()
+            && plugins::nuxt::is_component_entry_pattern(&rule.pattern)
+        {
             return false;
         }
-        if !imports_custom && plugins::nuxt::is_script_auto_import_entry_pattern(&rule.pattern) {
+        if !setting.scripts.is_custom()
+            && plugins::nuxt::is_script_auto_import_entry_pattern(&rule.pattern)
+        {
             return false;
         }
         true
     });
+}
+
+/// Pick the settings of the root that owns an entry pattern: the workspace with
+/// the longest matching prefix, on a `{prefix}/` boundary so `packages/web` does
+/// not capture `packages/web-admin`. A pattern under no workspace prefix, such as
+/// the project root's own `app/components/**`, is the project root's own.
+fn settings_for_entry_pattern<'a>(
+    root: &'a plugins::nuxt::AutoImportSettings,
+    workspaces: &'a [(String, plugins::nuxt::AutoImportSettings)],
+    pattern: &str,
+) -> &'a plugins::nuxt::AutoImportSettings {
+    workspaces
+        .iter()
+        .filter(|(prefix, _)| {
+            !prefix.is_empty()
+                && pattern
+                    .strip_prefix(prefix.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map_or(root, |(_, setting)| setting)
 }
 
 fn bucket_files_by_workspace(
@@ -2785,7 +2824,8 @@ mod tests {
         AnalysisSession, bucket_files_by_workspace, bucket_files_by_workspace_roots,
         collect_config_search_roots, credit_workspace_package_usage, default_config,
         format_undeclared_workspace_warning, parse_analysis_modules, plugin_config_hash,
-        resolver_options_hash, warn_undeclared_workspaces,
+        resolver_options_hash, settings_for_entry_pattern, warn_undeclared_workspaces,
+        workspace_prefix,
     };
     use std::path::{Path, PathBuf};
     use std::time::Instant;
@@ -2803,6 +2843,94 @@ mod tests {
             .path_aliases
             .push(("@/".to_string(), "src/".to_string()));
         result
+    }
+
+    fn auto_import_settings(
+        components: crate::plugins::nuxt::AutoImportSetting,
+    ) -> crate::plugins::nuxt::AutoImportSettings {
+        crate::plugins::nuxt::AutoImportSettings {
+            components,
+            scripts: crate::plugins::nuxt::AutoImportSetting::Default,
+        }
+    }
+
+    #[test]
+    fn entry_pattern_settings_prefer_the_longest_workspace_prefix() {
+        let root = auto_import_settings(crate::plugins::nuxt::AutoImportSetting::Default);
+        let workspaces = vec![
+            (
+                "packages/web".to_string(),
+                auto_import_settings(crate::plugins::nuxt::AutoImportSetting::Custom),
+            ),
+            (
+                "packages/web-admin".to_string(),
+                auto_import_settings(crate::plugins::nuxt::AutoImportSetting::Disabled),
+            ),
+        ];
+
+        let admin = settings_for_entry_pattern(
+            &root,
+            &workspaces,
+            "packages/web-admin/components/**/*.{vue,ts,tsx,js,jsx}",
+        );
+        assert_eq!(
+            admin.components,
+            crate::plugins::nuxt::AutoImportSetting::Disabled,
+            "a sibling whose name starts with another workspace name is its own"
+        );
+
+        let web = settings_for_entry_pattern(
+            &root,
+            &workspaces,
+            "packages/web/components/**/*.{vue,ts,tsx,js,jsx}",
+        );
+        assert_eq!(
+            web.components,
+            crate::plugins::nuxt::AutoImportSetting::Custom
+        );
+    }
+
+    #[test]
+    fn entry_pattern_without_a_workspace_prefix_belongs_to_the_project_root() {
+        let root = auto_import_settings(crate::plugins::nuxt::AutoImportSetting::Custom);
+        let workspaces = vec![(
+            "packages/web".to_string(),
+            auto_import_settings(crate::plugins::nuxt::AutoImportSetting::Default),
+        )];
+
+        let setting = settings_for_entry_pattern(
+            &root,
+            &workspaces,
+            "app/components/**/*.{vue,ts,tsx,js,jsx}",
+        );
+        assert_eq!(
+            setting.components,
+            crate::plugins::nuxt::AutoImportSetting::Custom
+        );
+    }
+
+    #[test]
+    fn a_workspace_outside_the_project_keeps_its_own_prefix() {
+        let project_root = Path::new("/repo");
+        let outside = Path::new("/elsewhere/app");
+        let prefix = workspace_prefix(project_root, outside);
+        assert_eq!(prefix, "/elsewhere/app");
+
+        let root = auto_import_settings(crate::plugins::nuxt::AutoImportSetting::Default);
+        let workspaces = vec![(
+            prefix,
+            auto_import_settings(crate::plugins::nuxt::AutoImportSetting::Custom),
+        )];
+        let setting = settings_for_entry_pattern(
+            &root,
+            &workspaces,
+            "/elsewhere/app/components/**/*.{vue,ts,tsx,js,jsx}",
+        );
+        assert_eq!(
+            setting.components,
+            crate::plugins::nuxt::AutoImportSetting::Custom,
+            "an out-of-tree workspace is classified on its own config"
+        );
     }
 
     #[test]

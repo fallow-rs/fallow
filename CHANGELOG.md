@@ -97,6 +97,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Nuxt `autoImports` covers the `global/` and `islands/` component
+  directories, a config key it cannot read statically, and one config per
+  workspace root.** A component under `components/global/` or
+  `components/islands/` is named after its own directory, so
+  `components/global/Foo.vue` is `<Foo>` and keeps its credit. A `nuxt.config`
+  whose top level carries a spread, a computed key or an accessor keeps the
+  convention entry patterns for that root, and a name imported or re-exported
+  from `#components` or `#imports` credits its convention file the way a
+  template tag already does.
+
+  In a monorepo each workspace root is classified on its own, so one custom
+  config no longer switches the flag off for every app. `components: true`,
+  `imports: {}` and `imports: { dirs: [] }` count as the Nuxt defaults, and
+  `#layers/<name>/` resolves into the root `layers/` tree. Exit codes are
+  unchanged
+  (Closes [#2737](https://github.com/fallow-rs/fallow/issues/2737)).
+
+- **A package named in a bundler `entry` is credited as a dependency instead of
+  becoming an entry glob.** webpack, rspack and rsbuild read `entry` and
+  `source.entry` values that are bare module requests, such as
+  `react-hot-loader/patch`. Such a value named no file, so the pattern matched
+  nothing and the package could be reported as an unused dependency. A value
+  without a leading `./`, without glob syntax and without a source extension now
+  credits its package, the rule Module Federation `exposes` targets already
+  follow.
+
+  A resource query belongs to the loader rather than to the path, so
+  `webpack-hot-middleware/client?reload=true` credits `webpack-hot-middleware`.
+  Relative values, absolute values and glob patterns are unchanged. Exit codes
+  are unchanged
+  (Closes [#2739](https://github.com/fallow-rs/fallow/issues/2739)).
+
 - **The MCP `audit` and `decision_surface` tools auto-detect a base ref again.**
   Since 3.1.0, calling either tool without `base` on a repository with a remote
   failed with `FALLOW_CHANGED_FILES_FAILED`, because the auto-detected ref kept

@@ -48,7 +48,7 @@ define_plugin! {
 
         let entries =
             config_parser::extract_config_string_or_array(source, config_path, &["entry"]);
-        result.extend_entry_patterns(entries);
+        result.extend_entry_patterns_or_dependencies(entries);
 
         let require_deps =
             config_parser::extract_config_require_strings(source, config_path, "plugins");
@@ -115,6 +115,27 @@ mod tests {
                 .contains(&"@rspack/cli".to_string())
         );
         assert_eq!(result.entry_patterns, vec!["src/main.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_entry_module_request_is_credited_as_dependency() {
+        let source = r#"
+            module.exports = {
+                entry: ["react-hot-loader/patch", "./src/index.tsx"],
+            };
+        "#;
+        let plugin = RspackPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/rspack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/index.tsx"]);
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"react-hot-loader".to_string())
+        );
     }
 
     #[test]
