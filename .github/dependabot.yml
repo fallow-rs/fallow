@@ -12,6 +12,13 @@ updates:
       crypto-rng:
         patterns: ["ed25519-dalek", "rand", "rand_core"]
     open-pull-requests-limit: 10
+    ignore:
+      # lightningcss types its public `Parse` trait against cssparser without
+      # re-exporting it, so the direct pin has to equal the version lightningcss
+      # resolves. A newer cssparser only adds a second copy to the graph and
+      # `CssColor::parse` stops compiling. Move both pins together when
+      # lightningcss releases on a newer cssparser.
+      - dependency-name: cssparser
 
   - package-ecosystem: cargo
     directory: /fuzz
