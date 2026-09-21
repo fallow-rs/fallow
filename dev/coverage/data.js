@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790030945206,
+  "lastUpdate": 1790032835839,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea",
-          "message": "fix(cli): keep syntactic findings when type-aware analysis cannot run (#2514)\n\nCloses #2499.\n\nThe semantic pass has a fixed two-minute ceiling, and a project large enough to\nreach it lost the entire report: every CLI surface exited 2 regardless of\ntypeAware.require, whose default is best-effort. The LSP already handled the\nidentical failure correctly, so the same condition produced a warning through\none surface and a hard error through the other.\n\nSyntactic analysis reports a superset and the semantic pass only removes\ncandidates it confirms are used, so continuing is the conservative outcome. check,\nwatch, health and both combined sites now warn and finish with the syntactic\nfindings, recording the reason in _meta.type_aware.warnings for CI consumers.\n\nfallow fix is the deliberate exception and still stops. It removes code, and the\nextra entries in the unrefined set are precisely the ones a working semantic pass\nwould have proven live, so widening a deletion is the opposite of conservative.\nIts error now names the way out.\n\nSix call sites, not the five originally scoped: run_combined_health has a second\none reached by a bare fallow --only health.\n\nThe CLI's own diagnostic was already being discarded. Under --format json it goes\nto stdout while the extension read stderr only, which is why this report and #2284\nboth say just \"code 2\". The extension now recovers it, says when results came from\na semantic pass that did not run, and exposes the ceiling as a setting.",
-          "timestamp": "2026-09-01T13:33:19+02:00",
-          "tree_id": "c74fe3b9cb37ed66138b09b7da2141488e2177ef",
-          "url": "https://github.com/fallow-rs/fallow/commit/6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea"
-        },
-        "date": 1788262828022,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/7e2e7ad99634f2c7ccd359a6a3ea33b162e3d0e6"
         },
         "date": 1790030941704,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "234d24c8d1d8cb34bd22f166cddf48fd5dd59191",
+          "message": "feat(baseline): give saved baselines a kind and report an unrecognised one on every surface (#2749)\n\nEach saved baseline carries a top-level kind: dead-code, dupes or health. A baseline that another command saved loads as zero entries on all three commands, warns on stderr with both kinds and the path, and carries baseline_staleness.unrecognised_format. fallow dead-code no longer exits 2 on such a file. The stale-baseline gate trips on it, so --fail-on-stale-baseline fails the run, and gate_trips carries that rule. A save over a baseline of another kind is refused with exit 2. Audit reports every baseline it cannot read. The pull-request comment and the merge-request note carry the unrecognised-baseline sentence, the combined run gets the recheck-baseline next step, and the live github-summary render carries the gate outcomes.\n\nCloses #2738\nCloses #2735",
+          "timestamp": "2026-09-22T01:11:08+02:00",
+          "tree_id": "ce61633c08d0dda3ca253d3c7651587e7a4855e1",
+          "url": "https://github.com/fallow-rs/fallow/commit/234d24c8d1d8cb34bd22f166cddf48fd5dd59191"
+        },
+        "date": 1790032832256,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
