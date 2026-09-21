@@ -11934,15 +11934,20 @@
         {
           "type": "object",
           "properties": {
+            "cause": {
+              "type": "string",
+              "description": "Which input stopped it, as a kebab-case token: `not-a-repository`,\n`invalid-since` or `churn-file-unreadable`. The set is open.\n\nThe cause decides the remedy, which is why it is on the wire: a run\noutside a repository is fixed by running fallow inside one, a\nmalformed `--since` by respelling the flag, and a churn file that\nchanged under the run by rerunning it. A consumer reading only the\nkind would offer the first remedy for all three."
+            },
             "kind": {
               "type": "string",
               "const": "hotspots-skipped"
             }
           },
           "required": [
-            "kind"
+            "kind",
+            "cause"
           ],
-          "description": "Churn-based hotspot analysis was skipped because the project root is not\na git repository, so the hotspots, churn and ownership sections report\nnothing at all. The remaining health sections are unaffected.\n\nCarries no payload: the other two skip paths (a malformed `--since`, a\n`--churn-file` that became unreadable after validation) route through\n`tracing` rather than a user-facing note and are not part of this kind\nyet."
+          "description": "Churn-based hotspot analysis was skipped, so the hotspots, churn and\nownership sections report nothing at all. The remaining health sections\nare unaffected."
         },
         {
           "type": "object",

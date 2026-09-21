@@ -616,6 +616,17 @@ kind: "no-source-files-analyzed"
 error: string
 kind: "file-scores-unavailable"
 } | {
+/**
+ * Which input stopped it, as a kebab-case token: `not-a-repository`,
+ * `invalid-since` or `churn-file-unreadable`. The set is open.
+ *
+ * The cause decides the remedy, which is why it is on the wire: a run
+ * outside a repository is fixed by running fallow inside one, a
+ * malformed `--since` by respelling the flag, and a churn file that
+ * changed under the run by rerunning it. A consumer reading only the
+ * kind would offer the first remedy for all three.
+ */
+cause: string
 kind: "hotspots-skipped"
 } | {
 /**

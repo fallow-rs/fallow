@@ -982,6 +982,45 @@ mod tests {
         }
     }
 
+    /// The churn-file re-read is a time-of-check path: the up-front gate
+    /// accepted the file and it changed before the analysis read it again. The
+    /// CLI gate exits 2 on a file that is malformed at check time, so this is
+    /// the level that can drive the branch, and without the diagnostic such a
+    /// run reports the hotspot, churn and ownership sections as zero rather than
+    /// as unmeasured (issue #2734).
+    #[test]
+    fn a_churn_file_that_fails_the_re_read_records_the_skip() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        let churn_file = root.join("churn.json");
+        std::fs::write(&churn_file, "{ not json").expect("churn file");
+        let fixture = HealthExecutionOptionsFixture::new();
+        let mut options = fixture.options(root);
+        options.churn_file = Some(&churn_file);
+
+        assert!(
+            hotspots::fetch_churn_data(&options, &root.join(".fallow")).is_none(),
+            "an unreadable churn file yields no churn"
+        );
+
+        let recorded = fallow_config::health_stage_workspace_diagnostics(root);
+        let skip = recorded
+            .iter()
+            .find(|entry| entry.kind.id() == "hotspots-skipped")
+            .expect("the skip is recorded");
+        assert_eq!(
+            skip.kind,
+            fallow_types::workspace::WorkspaceDiagnosticKind::HotspotsSkipped {
+                cause: "churn-file-unreadable".to_owned(),
+            }
+        );
+        assert!(
+            skip.message.contains("churn.json"),
+            "the remedy names the file: {}",
+            skip.message
+        );
+    }
+
     #[test]
     fn standalone_health_precomputes_dead_code_when_default_crap_can_use_graph() {
         let project = tempfile::tempdir().expect("temp dir");

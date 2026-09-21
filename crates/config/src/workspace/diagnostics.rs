@@ -1152,7 +1152,9 @@ mod tests {
                 WorkspaceDiagnostic::new(
                     root,
                     root.to_path_buf(),
-                    WorkspaceDiagnosticKind::HotspotsSkipped,
+                    WorkspaceDiagnosticKind::HotspotsSkipped {
+                        cause: "not-a-repository".to_owned(),
+                    },
                 ),
                 WorkspaceDiagnostic::new(
                     root,

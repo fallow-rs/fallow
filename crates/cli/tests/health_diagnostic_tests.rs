@@ -156,11 +156,61 @@ fn a_project_without_a_repository_reports_hotspots_skipped() {
     let entry = diagnostic(&envelope, "hotspots-skipped");
     assert_eq!(entry["degrades_analysis"], true);
     assert_eq!(entry["path"], ".");
+    assert_eq!(
+        entry["cause"], "not-a-repository",
+        "the cause decides the remedy and must reach the wire: {entry}"
+    );
     let message = entry["message"].as_str().expect("a remedy sentence");
     assert!(
         message.contains("no git repository") && message.contains("--churn-file"),
         "the sentence must name the cause and a next step: {message}"
     );
+}
+
+/// A `--since` the run could not read as a window is a second way to lose the
+/// same three sections, and it needs the opposite remedy: respell the flag
+/// rather than move into a repository. Until now it warned through `tracing`
+/// only, which every shipped consumer discards.
+#[test]
+fn a_malformed_since_reports_its_own_skip_cause() {
+    let project = project();
+    init_repo(project.path());
+    let envelope = health_json(root_arg(&project), &["--hotspots", "--since", "nonsense"]);
+    let entry = diagnostic(&envelope, "hotspots-skipped");
+    assert_eq!(entry["cause"], "invalid-since", "{entry}");
+    assert_eq!(entry["degrades_analysis"], true);
+    let message = entry["message"].as_str().expect("a remedy sentence");
+    assert!(
+        message.contains("--since") && !message.contains("no git repository"),
+        "a run inside a repository must not be told to move into one: {message}"
+    );
+    assert!(
+        !message.contains('\n'),
+        "the sentence travels into a CI annotation and must stay on one line: {message}"
+    );
+}
+
+/// The three causes are one kind, so a consumer selecting on `degrades_analysis`
+/// needs no change, and a consumer that wants the remedy reads `cause`.
+#[test]
+fn every_skip_cause_shares_the_kind_and_the_degraded_flag() {
+    let repo = project();
+    init_repo(repo.path());
+    let no_repo = project();
+    for (envelope, cause) in [
+        (
+            health_json(root_arg(&repo), &["--hotspots", "--since", "nonsense"]),
+            "invalid-since",
+        ),
+        (
+            health_json(root_arg(&no_repo), &["--hotspots"]),
+            "not-a-repository",
+        ),
+    ] {
+        let entry = diagnostic(&envelope, "hotspots-skipped");
+        assert_eq!(entry["cause"], cause, "{entry}");
+        assert_eq!(entry["degrades_analysis"], true, "{entry}");
+    }
 }
 
 /// The parity case. `--quiet` removes the printed note and must not remove the

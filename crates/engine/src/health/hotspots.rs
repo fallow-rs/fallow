@@ -183,6 +183,16 @@ pub(super) fn fetch_churn_data(
                 // than emit a SECOND error document, which would break the
                 // single-document `--format json` contract (#294).
                 tracing::warn!("churn file became unreadable after validation: {e}");
+                // The diagnostic is the channel a `--quiet --format json`
+                // consumer has, and a silent skip there reports the hotspot
+                // sections as zero rather than as unmeasured (issue #2734).
+                super::diagnostics::record_health_diagnostic(
+                    opts.root,
+                    Some(&resolved),
+                    fallow_types::workspace::WorkspaceDiagnosticKind::HotspotsSkipped {
+                        cause: "churn-file-unreadable".to_owned(),
+                    },
+                );
                 return None;
             }
         };
@@ -203,7 +213,9 @@ pub(super) fn fetch_churn_data(
         super::diagnostics::record_health_diagnostic(
             opts.root,
             None,
-            fallow_types::workspace::WorkspaceDiagnosticKind::HotspotsSkipped,
+            fallow_types::workspace::WorkspaceDiagnosticKind::HotspotsSkipped {
+                cause: "not-a-repository".to_owned(),
+            },
         );
         return None;
     }
@@ -211,16 +223,20 @@ pub(super) fn fetch_churn_data(
     let since_input = opts.since.unwrap_or("6m");
     if let Err(e) = crate::validate::validate_no_control_chars(since_input, "--since") {
         // A malformed `--since` degrades to "no churn, continue" like the
-        // missing-git-repo branch above: route the diagnostic to `tracing` and
+        // missing-git-repo branch above: route the error text to `tracing` and
         // emit NO second JSON document, preserving the single-document
-        // `--format json` contract (#294).
+        // `--format json` contract (#294). The diagnostic carries the cause, so
+        // a consumer that never sees stderr still reads the hotspot sections as
+        // unmeasured rather than as zero (issue #2734).
         tracing::warn!("hotspot analysis skipped: {e}");
+        record_invalid_since(opts.root);
         return None;
     }
     let since = match crate::churn::parse_since(since_input) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("hotspot analysis skipped: invalid --since: {e}");
+            record_invalid_since(opts.root);
             return None;
         }
     };
@@ -236,6 +252,22 @@ pub(super) fn fetch_churn_data(
         cache_hit,
         git_log_ms,
     })
+}
+
+/// Record the two `--since` failures as one diagnostic.
+///
+/// Rejected-as-input and failed-to-parse are one fact to the reader of a report:
+/// the window they asked for was not read, so the hotspot sections measured
+/// nothing. The error text that distinguishes them stays on the `tracing` line
+/// where it was already written.
+fn record_invalid_since(root: &std::path::Path) {
+    super::diagnostics::record_health_diagnostic(
+        root,
+        None,
+        fallow_types::workspace::WorkspaceDiagnosticKind::HotspotsSkipped {
+            cause: "invalid-since".to_owned(),
+        },
+    );
 }
 
 /// Header label for imported churn (`--churn-file`). The imported window is

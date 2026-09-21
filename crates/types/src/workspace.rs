@@ -309,15 +309,20 @@ pub enum WorkspaceDiagnosticKind {
         /// Scoring error text.
         error: String,
     },
-    /// Churn-based hotspot analysis was skipped because the project root is not
-    /// a git repository, so the hotspots, churn and ownership sections report
-    /// nothing at all. The remaining health sections are unaffected.
-    ///
-    /// Carries no payload: the other two skip paths (a malformed `--since`, a
-    /// `--churn-file` that became unreadable after validation) route through
-    /// `tracing` rather than a user-facing note and are not part of this kind
-    /// yet.
-    HotspotsSkipped,
+    /// Churn-based hotspot analysis was skipped, so the hotspots, churn and
+    /// ownership sections report nothing at all. The remaining health sections
+    /// are unaffected.
+    HotspotsSkipped {
+        /// Which input stopped it, as a kebab-case token: `not-a-repository`,
+        /// `invalid-since` or `churn-file-unreadable`. The set is open.
+        ///
+        /// The cause decides the remedy, which is why it is on the wire: a run
+        /// outside a repository is fixed by running fallow inside one, a
+        /// malformed `--since` by respelling the flag, and a churn file that
+        /// changed under the run by rerunning it. A consumer reading only the
+        /// kind would offer the first remedy for all three.
+        cause: String,
+    },
     /// The repository is a shallow clone, so churn is measured over the fetched
     /// history only and every hotspot figure is incomplete.
     ShallowClone {
@@ -380,7 +385,7 @@ impl WorkspaceDiagnosticKind {
             Self::ExcludedByDefaultIgnore { .. } => "excluded-by-default-ignore",
             Self::NoSourceFilesAnalyzed { .. } => "no-source-files-analyzed",
             Self::FileScoresUnavailable { .. } => "file-scores-unavailable",
-            Self::HotspotsSkipped => "hotspots-skipped",
+            Self::HotspotsSkipped { .. } => "hotspots-skipped",
             Self::ShallowClone { .. } => "shallow-clone",
             Self::UnpinnedClock => "unpinned-clock",
             Self::OwnershipUnavailable { .. } => "ownership-unavailable",
@@ -431,7 +436,7 @@ impl WorkspaceDiagnosticKind {
             | Self::NodeModulesMissing
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
-            | Self::HotspotsSkipped
+            | Self::HotspotsSkipped { .. }
             | Self::ShallowClone { .. }
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
@@ -550,7 +555,7 @@ impl WorkspaceDiagnosticKind {
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
-            | Self::HotspotsSkipped
+            | Self::HotspotsSkipped { .. }
             | Self::ShallowClone { .. }
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
@@ -596,7 +601,7 @@ impl WorkspaceDiagnosticKind {
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
-            | Self::HotspotsSkipped
+            | Self::HotspotsSkipped { .. }
             | Self::ShallowClone { .. }
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
@@ -625,7 +630,7 @@ impl WorkspaceDiagnosticKind {
     pub const fn is_health_stage(&self) -> bool {
         match self {
             Self::FileScoresUnavailable { .. }
-            | Self::HotspotsSkipped
+            | Self::HotspotsSkipped { .. }
             | Self::ShallowClone { .. }
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
@@ -1085,13 +1090,27 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              project has nothing to score. Rerun with --no-cache, or scope the run to a \
              subdirectory to find the input that fails."
         ),
-        WorkspaceDiagnosticKind::HotspotsSkipped => {
-            "Hotspot analysis was skipped because no git repository was found at the project \
-             root, so the hotspots, churn and ownership sections report nothing rather than \
-             zero. Run fallow inside the repository, or pass --churn-file with exported change \
-             history."
-                .to_owned()
-        }
+        WorkspaceDiagnosticKind::HotspotsSkipped { cause } => match cause.as_str() {
+            "invalid-since" => "Hotspot analysis was skipped because --since could not be read \
+                 as a time window, so the hotspots, churn and ownership sections report nothing \
+                 rather than zero. Spell it as a duration such as 6m or 90d, or drop it to use \
+                 the default window."
+                .to_owned(),
+            "churn-file-unreadable" => format!(
+                "Hotspot analysis was skipped because the churn file '{display}' could no longer \
+                 be read after it was validated, so the hotspots, churn and ownership sections \
+                 report nothing rather than zero. Make sure nothing rewrites the file while \
+                 fallow runs, and rerun."
+            ),
+            // The original single cause, whose wording predates the token and
+            // is kept byte-identical: a consumer matching on this sentence is
+            // reading the same run it always was.
+            _ => "Hotspot analysis was skipped because no git repository was found at the \
+                  project root, so the hotspots, churn and ownership sections report nothing \
+                  rather than zero. Run fallow inside the repository, or pass --churn-file with \
+                  exported change history."
+                .to_owned(),
+        },
         WorkspaceDiagnosticKind::ShallowClone {
             ownership_requested,
         } => {
@@ -2000,7 +2019,9 @@ mod tests {
             WorkspaceDiagnosticKind::FileScoresUnavailable {
                 error: "boom".to_owned(),
             },
-            WorkspaceDiagnosticKind::HotspotsSkipped,
+            WorkspaceDiagnosticKind::HotspotsSkipped {
+                cause: "not-a-repository".to_owned(),
+            },
             WorkspaceDiagnosticKind::ShallowClone {
                 ownership_requested: true,
             },
@@ -2038,7 +2059,10 @@ mod tests {
     #[test]
     fn only_the_coverage_provenance_kind_does_not_degrade_the_analysis() {
         assert!(
-            WorkspaceDiagnosticKind::HotspotsSkipped.warns_on_stderr(),
+            WorkspaceDiagnosticKind::HotspotsSkipped {
+                cause: "invalid-since".to_owned(),
+            }
+            .warns_on_stderr(),
             "a skipped hotspot section is a degraded result"
         );
         assert!(
@@ -2049,6 +2073,56 @@ mod tests {
             !WorkspaceDiagnosticKind::CoverageAutoDetected.warns_on_stderr(),
             "auto-detected coverage loaded fine and degraded nothing"
         );
+    }
+
+    /// Each skip cause carries its own remedy, and the original cause's wording
+    /// is frozen: it shipped before the token existed, so a reader who matched
+    /// on that sentence must still match on it.
+    #[test]
+    fn every_hotspot_skip_cause_renders_its_own_remedy() {
+        let root = Path::new("/project");
+        let skipped = |cause: &str, path: PathBuf| {
+            WorkspaceDiagnostic::new(
+                root,
+                path,
+                WorkspaceDiagnosticKind::HotspotsSkipped {
+                    cause: cause.to_owned(),
+                },
+            )
+        };
+
+        let no_repo = skipped("not-a-repository", root.to_path_buf());
+        assert_eq!(
+            no_repo.message,
+            "Hotspot analysis was skipped because no git repository was found at the project \
+             root, so the hotspots, churn and ownership sections report nothing rather than \
+             zero. Run fallow inside the repository, or pass --churn-file with exported change \
+             history."
+        );
+
+        let bad_since = skipped("invalid-since", root.to_path_buf());
+        assert!(
+            bad_since.message.contains("--since")
+                && bad_since.message.contains("6m or 90d")
+                && !bad_since.message.contains("no git repository"),
+            "a malformed window is respelled, not moved into a repository: {}",
+            bad_since.message
+        );
+
+        let churn = skipped("churn-file-unreadable", root.join("build/churn.json"));
+        assert!(
+            churn.message.contains("'build/churn.json'") && churn.message.contains("rerun"),
+            "the remedy names the file that changed under the run: {}",
+            churn.message
+        );
+
+        for diagnostic in [&no_repo, &bad_since, &churn] {
+            assert!(
+                diagnostic.degrades_analysis,
+                "every skip leaves the hotspot sections unmeasured: {}",
+                diagnostic.message
+            );
+        }
     }
 
     /// The message is the only prose a consumer renders, so each one must name
