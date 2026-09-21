@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790032640535,
+  "lastUpdate": 1790034724743,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "d5a422c6206d00c813fe7c77d5038855d1051780",
-          "message": "fix(telemetry): stop asserting a lock release is instantly visible\n\n`spool_lock_excludes_concurrent_acquire` demanded that the post-drop reacquire\nsucceed on its first attempt. Dropping the holder closes the descriptor, but\nthe kernel does not promise the release is visible to the next `flock` right\naway, and under a loaded parallel workspace run it measurably is not. Refs\n#2460.\n\nThe diagnostic added in #2459 is what pinned this down. The failure arrives as\n`Contended`, not `Unusable`, so the lock file opened fine and the lock was\nsimply still held a moment after its holder was gone. That rules out the\nenvironment explanations (a missing directory, a permissions denial, a\ndescriptor limit) and leaves release visibility, which is a property of the\nplatform rather than of this code.\n\nRetrying is not a mask, because production never needed the guarantee the test\nwas asserting. Both callers of `try_acquire`, the over-cap trim and the drain,\ntreat contention as \"skip, the next run picks it up\". A release that becomes\nvisible a few milliseconds later costs nothing there. What still matters is\nthat the lock does come free once its holder is gone, and that is still\nasserted: the test fails if it never reacquires across the full window.\n\nThe sibling assertion, that a second acquire contends while the first is held,\nis unchanged and still immediate, since that direction has no visibility delay\nto absorb.",
-          "timestamp": "2026-08-31T14:28:52+02:00",
-          "tree_id": "8a6961c9cdf1897e714ac1f552d596f80568273e",
-          "url": "https://github.com/fallow-rs/fallow/commit/d5a422c6206d00c813fe7c77d5038855d1051780"
-        },
-        "date": 1788179480755,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/234d24c8d1d8cb34bd22f166cddf48fd5dd59191"
         },
         "date": 1790032636867,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 480,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c3197ecf8cd63e1a3ea094d88f36d5c0ca9b88ba",
+          "message": "feat(plugins): read Module Federation options wherever a config declares them (#2750)\n\nThe Module Federation reader finds a plugin call anywhere in a bundler config: in a nested plugin array, in a plugins variable, under tools.rspack.plugins, in an rsbuild appendPlugins hook, and in a Next.js webpack(config) hook. next.config.* is read with NextFederationPlugin as a recognised callee. The array form of exposes is read; the array form of remotes keeps its array-form diagnostic. Options that a same-file const holds are read when the program has one binding of that name and never writes to it. An array element with glob syntax, a nested array or a non-string element is reported under unreadable-entries.\n\nRefs #2698",
+          "timestamp": "2026-09-22T01:50:50+02:00",
+          "tree_id": "6ea057c1b237d7a18463f64bb290803a317825c1",
+          "url": "https://github.com/fallow-rs/fallow/commit/c3197ecf8cd63e1a3ea094d88f36d5c0ca9b88ba"
+        },
+        "date": 1790034721509,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
