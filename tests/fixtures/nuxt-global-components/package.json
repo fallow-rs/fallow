@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-global-components",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^3.0.0"
+  }
+}
