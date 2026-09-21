@@ -1148,9 +1148,13 @@ jobs:
     name: Publish to npm
     # Privileged job. Keep the surface tiny:
     # - downloads pre-packed tarballs (no fresh checkout, no installs)
-    # - the only network calls are `npm publish` and the `npm view` precheck
+    # - the only network calls are `npm publish`, the single stage call for
+    #   the `fallow` root, and the `npm view` precheck
     # - --ignore-scripts on every publish blocks lifecycle scripts inside the
     #   tarballs from executing here.
+    # - the `fallow` root is staged, not published. Its trusted publisher grants
+    #   stage publish only, and it becomes installable when the maintainer
+    #   approves the stage on npm with 2FA.
     # Anything that needs `npm ci` or runs dependency code belongs in npm-prep.
     needs: [npm-prep, release-assets]
     runs-on: ubuntu-latest
@@ -1182,11 +1186,11 @@ jobs:
       # repairs the tree so the second step (the actual pinned version that
       # holds OIDC trusted-publishing config) can land. Both invocations carry
       # --ignore-scripts so the supply-chain hardening surface stays narrow.
-      # See incident v2.71.0 -> v2.71.1.
+      # See incident v2.71.0 -> v2.71.1. Staged publishing needs npm >= 11.15.0.
       - name: Install pinned npm (required for trusted publishing)
         run: |
           npm install -g --ignore-scripts npm@10.9.8
-          npm install -g --ignore-scripts npm@11.14.1
+          npm install -g --ignore-scripts npm@11.19.0
 
       - name: Download npm tarballs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -1242,6 +1246,20 @@ jobs:
             "@fallow-cli/fallow-node-win32-arm64-msvc"
             "@fallow-cli/fallow-node"
           )
+          # `fallow` pins its platform packages and `fallow-type-aware` to the
+          # exact release version, so those reach users only through a new
+          # root. Adding a name here needs a stage-only trusted publisher for
+          # it and costs one more maintainer approval per release.
+          STAGED_NAMES=("fallow")
+          is_staged_name() {
+            local candidate
+            for candidate in "${STAGED_NAMES[@]}"; do
+              if [ "$candidate" = "$1" ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
           FAILED=0
           index=0
           # Manifest format (TSV): <tarball-path>\t<name>\t<version>. Rows are
@@ -1278,6 +1296,36 @@ jobs:
             echo "Publishing $name@$version from $file"
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "  Already published, skipping"
+              index=$((index + 1))
+              continue
+            fi
+            if is_staged_name "$name"; then
+              digest=$(sha256sum "$file" | cut -d' ' -f1)
+              # One stage call per run, never a probing publish: every attempt
+              # signs and logs a provenance statement before npm answers. The
+              # token is cleared so a bootstrap NPM_TOKEN never reaches a
+              # staged name, whose publisher is OIDC and stage-only.
+              set +e
+              stage_output=$(NODE_AUTH_TOKEN="" npm stage publish "$file" --access public --provenance --ignore-scripts 2>&1)
+              stage_status=$?
+              set -e
+              printf '%s\n' "$stage_output"
+              if [ "$stage_status" -eq 0 ]; then
+                stage_id=$(grep -oE 'staged with id [0-9a-f-]{36}' <<<"$stage_output" | head -n1 | cut -d' ' -f4 || true)
+                echo "Staged $name@$version as ${stage_id:-unknown}, sha256 $digest"
+                echo "- Staged \`$name@$version\`, stage id \`${stage_id:-unknown}\`, sha256 \`$digest\`. Approve it on npm before the signed tag." >> "$GITHUB_STEP_SUMMARY"
+              elif grep -q '^npm error code E409$' <<<"$stage_output"; then
+                # A rerun after a successful stage. This job cannot read
+                # stages (`npm stage list` is E401 without a login), so E409
+                # is the only already-staged signal. The maintainer compares
+                # the staged bytes with the npm-tarballs artifact before
+                # approving, which proves which run built them.
+                echo "::notice::$name@$version is already staged or published; keeping the existing stage"
+                echo "- \`$name@$version\` was already staged, expected sha256 \`$digest\`. Approve it on npm before the signed tag." >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "::error::Failed to stage $name@$version with npm provenance"
+                FAILED=1
+              fi
               index=$((index + 1))
               continue
             fi

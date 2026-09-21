@@ -570,6 +570,33 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(releaseReady, /Release tag .* appeared before the release workflow completed/u);
 });
 
+test("release stages the fallow npm root for maintainer approval", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const npmPublish = indentedBlock(workflow, "npm-publish", 2);
+  const security = readFileSync("docs/development/release-security.md", "utf8");
+  const stageCalls = npmPublish.match(/^\s+stage_output=\$\(.*npm stage publish /gmu) ?? [];
+  const stagedBranch = npmPublish.indexOf('if is_staged_name "$name"; then');
+  const directPublish = npmPublish.indexOf('if ! npm publish "$file"');
+
+  assert.match(npmPublish, /^\s+STAGED_NAMES=\("fallow"\)$/mu);
+  assert.equal(stageCalls.length, 1, "npm-publish must make exactly one stage call");
+  assert.match(
+    npmPublish,
+    /NODE_AUTH_TOKEN="" npm stage publish "\$file" --access public --provenance --ignore-scripts/u,
+  );
+  assert.notEqual(stagedBranch, -1, "staged names must branch before the direct publish");
+  assert.ok(stagedBranch < directPublish, "a staged name must never reach npm publish");
+  assert.match(
+    npmPublish.slice(stagedBranch, directPublish),
+    /index=\$\(\(index \+ 1\)\)\n\s+continue\n\s+fi\n\s*$/u,
+    "the staged branch must end by skipping the direct publish",
+  );
+  assert.match(npmPublish, /grep -q '\^npm error code E409\$'/u);
+  assert.match(npmPublish, /npm install -g --ignore-scripts npm@11\.19\.0/u);
+  assert.match(security, /Stage the `fallow` npm root, never publish it from the workflow/u);
+  assert.match(security, /exactly one `npm stage publish` call/u);
+});
+
 test("release keeps the version tag last and requires curated public notes", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const context = indentedBlock(workflow, "release-context", 2);
@@ -580,7 +607,9 @@ test("release keeps the version tag last and requires curated public notes", () 
   const assembleStep = releaseAssets.indexOf("- name: Assemble release asset bundle");
   const uploadStep = releaseAssets.indexOf("- name: Upload release asset bundle");
   const workflowDispatch = procedure.indexOf("gh workflow run release.yml");
-  const downloadBundle = procedure.indexOf('gh run download "$RUN_ID"');
+  const downloadBundle = procedure.indexOf("--name release-assets");
+  const stageDigestCheck = procedure.indexOf('test "$BUILT" = "$STAGED"');
+  const stageApprove = procedure.indexOf('npm stage approve "$STAGE_ID"');
   const signedTag = procedure.indexOf('git tag -s "$TAG"');
   const createRelease = procedure.indexOf('gh release create "$TAG"');
 
@@ -637,6 +666,15 @@ test("release keeps the version tag last and requires curated public notes", () 
   assert.notEqual(createRelease, -1, "procedure must create the immutable release");
   assert.ok(workflowDispatch < downloadBundle, "workflow must complete before asset download");
   assert.ok(downloadBundle < signedTag, "asset bundle must exist before tag creation");
+  assert.notEqual(
+    stageDigestCheck,
+    -1,
+    "procedure must compare the staged root with the run artifact",
+  );
+  assert.notEqual(stageApprove, -1, "procedure must approve the staged fallow root");
+  assert.ok(workflowDispatch < stageDigestCheck, "workflow must complete before the stage check");
+  assert.ok(stageDigestCheck < stageApprove, "staged bytes must be verified before approval");
+  assert.ok(stageApprove < signedTag, "the staged root must be approved before tag creation");
   assert.ok(signedTag < createRelease, "signed tag must exist before release creation");
 });
 

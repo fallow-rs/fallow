@@ -168,7 +168,8 @@ invariants in this file.
     The workflow deliberately has no tag trigger and never creates a tag or
     GitHub Release. It validates and builds the release, stores the complete
     flattened GitHub asset bundle as the `release-assets` Actions artifact, and
-    publishes registries while the tag remains absent. The VS Code release is
+    publishes registries while the tag remains absent. The `fallow` npm root is
+    the exception: the workflow stages it and step 11 approves it. The VS Code release is
     published by separate Marketplace and Open VSX jobs. A credential-free
     public verifier checks every exact target before the final release gate.
 11. Monitor the specific workflow run through `status=completed` and
@@ -180,6 +181,39 @@ invariants in this file.
     and `Release ready for signed tag` jobs to pass. The public verifier requires
     the exact universal plus six platform tuples and normalized payloads from
     both registries, without accepting a universal fallback.
+
+    The workflow stages the `fallow` npm root instead of publishing it. Its
+    trusted publisher grants stage publish only, so the version becomes
+    installable only when the maintainer approves the stage with npm 2FA.
+    Before approving, prove that the staged bytes are the tarball this exact
+    run built:
+
+    ```bash
+    STAGE_LIST="$(npm stage list fallow)"
+    test "$(grep -c '^id: ' <<<"$STAGE_LIST")" -eq 1
+    grep -qx "version: ${VERSION}" <<<"$STAGE_LIST"
+    STAGE_ID="$(sed -n 's/^id: //p' <<<"$STAGE_LIST")"
+
+    NPM_DIR="$(mktemp -d)"
+    STAGE_DIR="$(mktemp -d)"
+    gh run download "$RUN_ID" --name npm-tarballs --dir "$NPM_DIR"
+    (cd "$STAGE_DIR" && npm stage download "$STAGE_ID")
+    BUILT="$(shasum -a 256 < "$NPM_DIR/20-cli-root/fallow-${VERSION}.tgz")"
+    STAGED="$(shasum -a 256 < "$STAGE_DIR/fallow-${VERSION}-${STAGE_ID}.tgz")"
+    test "$BUILT" = "$STAGED"
+
+    npm stage approve "$STAGE_ID"   # interactive npm 2FA
+    test "$(npm view "fallow@${VERSION}" version)" = "$VERSION"
+    test "$(npm view "fallow@${VERSION}" dist.attestations.provenance.predicateType)" \
+      = "https://slsa.dev/provenance/v1"
+    ```
+
+    A digest mismatch, a second stage, or a stage at another version means the
+    stage did not come from this run: reject it with `npm stage reject` and
+    investigate before anything else. A rejected version can be staged again, so
+    recovery is a rerun of the `Publish to npm` job, which skips every package
+    that already landed. No tag exists yet, so nothing is burned.
+
     Download the `release-assets` artifact from that exact run and confirm it
     is non-empty. Confirm it contains the seven target VSIX files,
     `inventory.json`, and `SHA256SUMS`. Only then create and push the signed tag
