@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790030234295,
+  "lastUpdate": 1790032609176,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "173ee9b117aabba2a2d39795abacccc7f680bbaf",
-          "message": "feat(sveltekit): recognize the SvelteKit 3 file conventions (#2488)\n\nCloses #2400. Thanks @filiabel for the heads-up ahead of the release.\n\nSvelteKit 3 is still 3.0.0-next.25 on npm, and the issue asks to wait for the\nofficial release before implementing the migration. This does not implement it.\nIt closes the gap a version 3 project hits today, measured rather than read off\nthe migration guide.\n\nThe current binary reports src/params.ts, src/instrumentation.server.ts and\nsrc/service-worker/index.ts as unused files, all wrong: each is loaded by the\nframework rather than imported. Every matcher exported from src/params.ts is\nreported as an unused export on top of that, because version 2 matchers each\nexported a fixed match from their own file while version 3 collapses them into\none file whose export names are the matcher names.\n\nThree entry patterns and one used-exports entry, additive, with no version 2\nshape touched. Verified by a new integration test against a new fixture, proven\nto fail without the plugin change, the existing SvelteKit tests, and an end to\nend probe going from three unused-file findings to zero.\n\nConfiguration moving from svelte.config.js into sveltekit() plugin options is\ndeliberately not covered: that option shape is still moving in the release\ncandidate, so alias resolution waits for 3.0.0 final.",
-          "timestamp": "2026-08-31T15:31:39+02:00",
-          "tree_id": "d7d44be14a8c3be0a4b9f326be6158aff05b7749",
-          "url": "https://github.com/fallow-rs/fallow/commit/173ee9b117aabba2a2d39795abacccc7f680bbaf"
-        },
-        "date": 1788183725335,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9756669,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49412,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1209022,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8514,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8496,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "234d24c8d1d8cb34bd22f166cddf48fd5dd59191",
+          "message": "feat(baseline): give saved baselines a kind and report an unrecognised one on every surface (#2749)\n\nEach saved baseline carries a top-level kind: dead-code, dupes or health. A baseline that another command saved loads as zero entries on all three commands, warns on stderr with both kinds and the path, and carries baseline_staleness.unrecognised_format. fallow dead-code no longer exits 2 on such a file. The stale-baseline gate trips on it, so --fail-on-stale-baseline fails the run, and gate_trips carries that rule. A save over a baseline of another kind is refused with exit 2. Audit reports every baseline it cannot read. The pull-request comment and the merge-request note carry the unrecognised-baseline sentence, the combined run gets the recheck-baseline next step, and the live github-summary render carries the gate outcomes.\n\nCloses #2738\nCloses #2735",
+          "timestamp": "2026-09-22T01:11:08+02:00",
+          "tree_id": "ce61633c08d0dda3ca253d3c7651587e7a4855e1",
+          "url": "https://github.com/fallow-rs/fallow/commit/234d24c8d1d8cb34bd22f166cddf48fd5dd59191"
+        },
+        "date": 1790032604565,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10036422,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51481,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1185345,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8420,
             "unit": "allocations"
           }
         ]
