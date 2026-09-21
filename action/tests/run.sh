@@ -2434,6 +2434,18 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DETAILS_FILE" "com
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "--envelope" "comment.sh passes typed PR comment envelope when present"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh checks reconcile apply errors"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
+# The runner rejects a manifest that is not valid YAML before any step runs, and the
+# substring assertions below cannot see that: an apostrophe inside a single-quoted
+# description is enough. Ruby ships with macOS and with the hosted Linux runners.
+if command -v ruby > /dev/null 2>&1; then
+  if ruby -ryaml -e 'YAML.load_file(ARGV[0]).fetch("outputs")' "$DIR/../../action.yml" > /dev/null 2>&1; then
+    pass "action.yml parses as YAML"
+  else
+    fail "action.yml parses as YAML" "the manifest does not load; check the quoting of the last edited description"
+  fi
+else
+  echo "  - action.yml parse check skipped: ruby is not installed"
+fi
 assert_contains "$(cat "$DIR/../../action.yml")" "review-guidance:" "action.yml exposes review-guidance input"
 assert_contains "$(cat "$DIR/../../action.yml")" "FALLOW_REVIEW_GUIDANCE: \${{ inputs.review-guidance }}" "action.yml maps review-guidance to env"
 assert_contains "$(cat "$DIR/../../action.yml")" "review-id:" "action.yml exposes review-id input"
