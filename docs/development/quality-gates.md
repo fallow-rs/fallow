@@ -80,6 +80,15 @@ binary comes from that package's own devDependencies. Without the install the
 step ends in `napi: command not found` and exit 127, after every earlier gate
 has already passed.
 
+A `verify:full` result only describes the checkout it ran in once all four of
+those installs happened there. A checkout that reuses another checkout's
+`node_modules` reports on that other checkout's pinned versions, so a finding
+appears or disappears for a reason the branch does not contain.
+
+`target/debug/incremental` grows without bound when several checkouts build
+against the same profile. Deleting that one directory is safe and costs a single
+slower build; never delete `target/` itself.
+
 `scripts/assert-local-resolution.mjs` enforces the invariant for the
 entrypoints that load third-party modules. The JavaScript lint, format, and
 commitlint commands run it in their main script bodies, so npm's
@@ -124,6 +133,15 @@ Focused integration checks:
   guidance or a public companion contract changes.
 - `node scripts/check-audit-schema-doc-sync.mjs` when audit or dead-code JSON
   envelope versions or the public audit example change.
+
+Both companion parity checks resolve their companion checkout as a sibling of the
+main checkout, which inside a linked git worktree is the clone the worktree
+belongs to and not the worktree directory. `FALLOW_DOCS_DIR` and
+`FALLOW_SKILLS_DIR` override that guess and keep failing closed, which is how
+continuous integration runs them. A guessed companion checkout that is not
+present at all stands down with a `skipped:` line naming where it looked, so a
+checkout without the companion clones reports nothing to fix. A companion
+checkout that exists and has lost an expected document is still reported.
 - `npm run check:conformance-fixtures` for dead-code detection changes: it
   scores the committed fixtures under `tests/conformance/fixtures/` against
   their `expected.json`. Runs in `verify:fast`.
