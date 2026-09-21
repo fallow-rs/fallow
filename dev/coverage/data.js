@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789990874346,
+  "lastUpdate": 1789993534683,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "05374a4d878f73f0b42337fe417b985d7732ced3",
-          "message": "fix(cli): stop mutating the process environment from tests (#2510)\n\nCloses #2494.\n\ncrates/cli and crates/mcp tests called std::env::set_var / remove_var from inside\ntest functions. The harness runs tests as parallel threads in one process, so\nthose calls mutated state other threads were concurrently reading.\n\nThe issue filed this on soundness grounds with no claim it was breaking anything.\nIt was: crates/mcp links its unit tests and its end-to-end tests into one binary,\nso one test removed and repointed FALLOW_BIN while concurrent end-to-end tests\nread that same variable to locate the binary they spawn, and the coverage\nworkflow sets it for the whole workspace run.\n\nEvery environment read is now a thin one-line wrapper delegating to a pure inner\nfunction the test drives, following the pattern established for #2368.\nFALLOW_BOT_LOGIN needed a tri-state rather than an Option, because its three\nreaders distinguish set, set-but-not-unicode, and absent, and one reader is\nstricter than the other two. Semantics are byte-identical.\n\nA guard test walks the workspace and fails on a new mutation, matching both the\npath form and the call form so a glob import cannot slip past it.",
-          "timestamp": "2026-09-01T12:03:02+02:00",
-          "tree_id": "f570d80e28c88e31fd0399df4f2fad13325aa9bf",
-          "url": "https://github.com/fallow-rs/fallow/commit/05374a4d878f73f0b42337fe417b985d7732ced3"
-        },
-        "date": 1788257864253,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/731a504da976f1a8f4ce08bf08c2defd961e5f44"
         },
         "date": 1789990870830,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4264c27859c6b307fbebd269c969c0b107984ee",
+          "message": "fix(plugins): credit bundler entry packages and close the Nuxt autoImports precision gaps (#2745)\n\nA package named in a webpack, rspack or rsbuild entry, with or without a resource query, is credited as a dependency instead of becoming an entry pattern that matches nothing; glob-shaped entries stay entry patterns.\n\nNuxt autoImports: components under global/ and islands/ get the name Nuxt gives them, a config with a computed key, accessor or top-level spread keeps the convention entry patterns for that root, each workspace root is classified on its own, components: true, imports: {} and imports: { dirs: [] } count as the defaults they are, and a name imported or re-exported from #components or #imports is credited. #layers/<name>/ resolves as a path alias.\n\nCloses #2739\nCloses #2737",
+          "timestamp": "2026-09-21T14:15:43+02:00",
+          "tree_id": "38b1e5a0bba36bb6b69c4d828010e925328fe1ba",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4264c27859c6b307fbebd269c969c0b107984ee"
+        },
+        "date": 1789993530458,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
