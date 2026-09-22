@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790041672559,
+  "lastUpdate": 1790045731046,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "edb39549d14f356c5463763339ef09d47bf0ecca",
-          "message": "docs(changelog): credit React Native Storybook, the lefthook fix, and the version-surface gate\n\nThe React Native Storybook feature landed with no entry at all, the lefthook\nfix credited its issue but not the contributor who wrote it, and the\nversion-surface drift gate closed an issue without a line.",
-          "timestamp": "2026-09-01T17:39:45+02:00",
-          "tree_id": "cc8187f5e470f27b175796bf73e0f2ec30b350f1",
-          "url": "https://github.com/fallow-rs/fallow/commit/edb39549d14f356c5463763339ef09d47bf0ecca"
-        },
-        "date": 1788277803308,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/b04ec44d560eb2375ef9a675df05d1c05a75c210"
         },
         "date": 1790041668523,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "bd8fca5af5df4ccfd94c7a835d17bd93c31a7cef",
+          "message": "chore: release v3.28.0",
+          "timestamp": "2026-09-22T04:43:46+02:00",
+          "tree_id": "4213b6d9d0adfa274094c8bf54443252987a4ccc",
+          "url": "https://github.com/fallow-rs/fallow/commit/bd8fca5af5df4ccfd94c7a835d17bd93c31a7cef"
+        },
+        "date": 1790045726543,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
