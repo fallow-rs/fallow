@@ -2876,7 +2876,9 @@ pub enum SecuritySeverity {
     Low,
 }
 
-/// Defensive control found on an attack-surface path.
+/// Control pattern observed in a file on an attack-surface import trace.
+/// Its presence does not prove that it executes before the sink or protects
+/// the same input.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityDefensiveControl {
@@ -2897,7 +2899,8 @@ pub struct SecurityDefensiveControl {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityDefensiveBoundary {
-    /// Known controls detected along this path.
+    /// Control patterns observed in files on this import trace. These are
+    /// verification hints, not proof of sink protection or value-level data flow.
     pub controls: Vec<SecurityDefensiveControl>,
     /// Verification question for the consuming agent. It is a prompt, not a
     /// missing-guard verdict.

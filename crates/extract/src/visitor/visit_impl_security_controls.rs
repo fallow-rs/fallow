@@ -7,11 +7,11 @@
 use oxc_ast::ast::*;
 use oxc_span::Span;
 
-use fallow_types::extract::{SecurityControlKind, SecurityControlSite};
+use fallow_types::extract::{SecurityControlKind, SecurityControlSite, SinkLiteralValue};
 
 use super::{
     ModuleInfoExtractor, callee_leaf_name, expression_has_boundary_validation_keys,
-    expression_has_fastify_schema, flatten_callee_path,
+    expression_has_fastify_schema, flatten_callee_path, unwrap_static_expr,
 };
 
 pub(super) fn security_control_kind_for_callee(callee_path: &str) -> Option<SecurityControlKind> {
@@ -98,7 +98,55 @@ fn route_method_leaf(callee_path: &str) -> Option<&str> {
     .then_some(leaf)
 }
 
+fn branch_exits_immediately(statement: &Statement<'_>) -> bool {
+    match statement {
+        Statement::ReturnStatement(_) | Statement::ThrowStatement(_) => true,
+        Statement::BlockStatement(block) => {
+            block.body.first().is_some_and(branch_exits_immediately)
+        }
+        _ => false,
+    }
+}
+
+fn is_origin_property(expression: &Expression<'_>) -> bool {
+    matches!(unwrap_static_expr(expression), Expression::StaticMemberExpression(member)
+        if member.property.name == "origin")
+}
+
 impl ModuleInfoExtractor {
+    /// Record comparison syntax for verification, without claiming URL provenance
+    /// or that this branch protects a particular input or sink.
+    pub(super) fn capture_origin_guard_observation(&mut self, statement: &IfStatement<'_>) {
+        let Expression::BinaryExpression(comparison) = unwrap_static_expr(&statement.test) else {
+            return;
+        };
+        let mismatch_exits = match comparison.operator {
+            BinaryOperator::StrictInequality => branch_exits_immediately(&statement.consequent),
+            BinaryOperator::StrictEquality => statement
+                .alternate
+                .as_ref()
+                .is_some_and(branch_exits_immediately),
+            _ => false,
+        };
+        if !mismatch_exits {
+            return;
+        }
+        let expected = if is_origin_property(&comparison.left) {
+            &comparison.right
+        } else if is_origin_property(&comparison.right) {
+            &comparison.left
+        } else {
+            return;
+        };
+        if !matches!(
+            self.static_sink_literal_value(expected),
+            Some(SinkLiteralValue::String(_))
+        ) {
+            return;
+        }
+        self.record_validation_control_site("origin-equality-guard", statement.span);
+    }
+
     fn record_validation_control_site(&mut self, callee_path: &str, span: Span) {
         self.security_control_sites.push(SecurityControlSite {
             kind: SecurityControlKind::Validation,

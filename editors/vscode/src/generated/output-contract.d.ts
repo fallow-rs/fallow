@@ -1222,7 +1222,7 @@ export type SecurityUrlShape = ("fixed-origin-dynamic-path" | "dynamic-origin")
  */
 export type SecurityRuntimeState = ("runtime-hot" | "runtime-cold" | "never-executed" | "low-traffic" | "coverage-unavailable" | "runtime-unknown")
 /**
- * Defensive control family detected on a source to sink path.
+ * Family of a control pattern observed in a file on an import trace.
  */
 export type SecurityControlKind = ("sanitization" | "validation" | "authentication" | "authorization")
 /**
@@ -12909,7 +12909,8 @@ defensive_boundary: SecurityDefensiveBoundary
  */
 export interface SecurityDefensiveBoundary {
 /**
- * Known controls detected along this path.
+ * Control patterns observed in files on this import trace. These are
+ * verification hints, not proof of sink protection or value-level data flow.
  */
 controls: SecurityDefensiveControl[]
 /**
@@ -12919,7 +12920,9 @@ controls: SecurityDefensiveControl[]
 verification_prompt: string
 }
 /**
- * Defensive control found on an attack-surface path.
+ * Control pattern observed in a file on an attack-surface import trace.
+ * Its presence does not prove that it executes before the sink or protects
+ * the same input.
  */
 export interface SecurityDefensiveControl {
 kind: SecurityControlKind

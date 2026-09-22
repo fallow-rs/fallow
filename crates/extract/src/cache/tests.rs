@@ -25,6 +25,29 @@ fn cache_store_default_is_empty() {
 }
 
 #[test]
+fn cache_roundtrip_preserves_origin_guard_observations_without_sanitizers() {
+    let source = r#"export function handle(req) {
+        const destination = new URL(req.query.url);
+        if (destination.origin !== "https://api.example.com") return;
+        fetch(destination.href);
+    }"#;
+    let module = parse_from_content(FileId(0), Path::new("src/route.ts"), source);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let encoded = bitcode::encode(&cached);
+    let decoded: CachedModule = bitcode::decode(&encoded).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+    assert_eq!(
+        bitcode::encode(&restored.security_control_sites),
+        bitcode::encode(&module.security_control_sites),
+    );
+    assert!(restored.security_control_sites.iter().any(|control| {
+        control.callee_path == "origin-equality-guard"
+            && source[control.span_start as usize..control.span_end as usize].starts_with("if (")
+    }));
+    assert!(restored.sanitized_sink_args.is_empty());
+}
+
+#[test]
 fn cache_roundtrip_preserves_declaration_merge_facts() {
     let module = parse_from_content(
         FileId(0),

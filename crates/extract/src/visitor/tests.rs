@@ -1302,6 +1302,80 @@ fn has_validation_control(source: &str, callee: &str) -> bool {
 }
 
 #[test]
+fn security_origin_guard_observations_preserve_unsanitized_sinks() {
+    for guard in [
+        r#"if (destination.origin !== "https://api.example.com") throw new Error();"#,
+        r#"if ("https://api.example.com" !== destination.origin) { return; }"#,
+        r"if (destination.origin === ORIGIN) {} else { throw new Error(); }",
+        r"if (ORIGIN === destination.origin) {} else return;",
+        r"if ((destination.origin) !== (ALIAS)) { throw new Error(); }",
+    ] {
+        let source = format!(
+            r#"const ORIGIN = "https://api.example.com";
+            const ALIAS = ORIGIN;
+            export function handle(req) {{
+                const destination = new URL(req.query.url);
+                {guard}
+                fetch(destination.href);
+            }}"#
+        );
+        let info = parse(&source);
+        let control = info
+            .security_control_sites
+            .iter()
+            .find(|control| control.callee_path == "origin-equality-guard")
+            .unwrap_or_else(|| panic!("missing origin comparison observation: {guard}"));
+        assert_eq!(control.kind, SecurityControlKind::Validation);
+        assert_eq!(
+            &source[control.span_start as usize..control.span_end as usize],
+            guard
+        );
+        assert!(
+            info.sanitized_sink_args.is_empty(),
+            "observations must not sanitize: {guard}"
+        );
+        assert!(
+            info.security_sinks
+                .iter()
+                .any(|sink| sink.callee_path == "fetch")
+        );
+    }
+}
+
+#[test]
+fn security_origin_guard_observations_reject_unproven_comparisons() {
+    for guard in [
+        r"if (destination.origin != ORIGIN) throw new Error();",
+        r"if (destination.origin == ORIGIN) {} else return;",
+        r"if (destination.origin.startsWith(ORIGIN)) {} else return;",
+        r"if (destination.origin !== ORIGIN) log();",
+        r"if (destination.origin === ORIGIN) return;",
+        r"if (destination.origin !== unknownOrigin) return;",
+        r"if (destination.origin !== 42) return;",
+        r"if (destination.origin !== ORIGIN || other) return;",
+        r"if (destination.host !== ORIGIN) return;",
+        r"if (destination.origin !== ORIGIN) { if (other) return; }",
+        r"{ const ORIGIN = getOrigin(); if (destination.origin !== ORIGIN) return; }",
+    ] {
+        let source = format!(
+            r#"const ORIGIN = "https://api.example.com";
+            export function handle(req) {{ const destination = new URL(req.query.url); {guard} fetch(destination.href); }}"#
+        );
+        assert!(
+            !has_validation_control(&source, "origin-equality-guard"),
+            "{guard}"
+        );
+    }
+    assert!(!has_validation_control(
+        r#"const ORIGIN = "https://api.example.com";
+        export function handle(ORIGIN, destination) {
+            if (destination.origin !== ORIGIN) return;
+        }"#,
+        "origin-equality-guard"
+    ));
+}
+
+#[test]
 fn security_control_capture_records_elysia_route_validation() {
     assert!(has_validation_control(
         r#"

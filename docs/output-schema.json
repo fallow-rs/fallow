@@ -14053,7 +14053,7 @@
           "description": "Authorization or permission check."
         }
       ],
-      "description": "Defensive control family detected on a source to sink path."
+      "description": "Family of a control pattern observed in a file on an import trace."
     },
     "SecurityDefensiveControl": {
       "type": "object",
@@ -14086,7 +14086,7 @@
         "col",
         "callee"
       ],
-      "description": "Defensive control found on an attack-surface path."
+      "description": "Control pattern observed in a file on an attack-surface import trace.\nIts presence does not prove that it executes before the sink or protects\nthe same input."
     },
     "SecurityDefensiveBoundary": {
       "type": "object",
@@ -14096,7 +14096,7 @@
           "items": {
             "$ref": "#/definitions/SecurityDefensiveControl"
           },
-          "description": "Known controls detected along this path."
+          "description": "Control patterns observed in files on this import trace. These are\nverification hints, not proof of sink protection or value-level data flow."
         },
         "verification_prompt": {
           "type": "string",

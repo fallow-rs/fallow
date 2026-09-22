@@ -3943,6 +3943,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_if_statement(&mut self, stmt: &IfStatement<'a>) {
+        self.capture_origin_guard_observation(stmt);
         // Record `x instanceof ClassName` narrowings from the test condition so
         // that method calls on `x` inside the body (e.g. `x.getMessage()`) are
         // credited as uses of `ClassName.getMessage`, preventing false

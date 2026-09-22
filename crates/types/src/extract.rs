@@ -165,8 +165,8 @@ pub struct ModuleInfo {
     /// time. Used for direct sink calls such as
     /// `el.innerHTML = DOMPurify.sanitize(input)`.
     pub sanitized_sink_args: Vec<SanitizedSinkArg>,
-    /// Known defensive control call sites found in this module. Consumed only by
-    /// the `fallow security --surface` agent JSON path.
+    /// Control patterns observed in this module. Surface context only: their
+    /// presence does not establish input identity, execution order, or protection.
     pub security_control_sites: Vec<SecurityControlSite>,
     /// Statically flattenable callee paths invoked in this module, deduped per
     /// unique path (first occurrence wins). Consumed by the
@@ -520,7 +520,7 @@ impl ModuleInfo {
     }
 }
 
-/// Defensive control family detected on a source to sink path.
+/// Family of a control pattern observed in a file on an import trace.
 #[derive(
     Debug,
     Clone,
@@ -547,7 +547,7 @@ pub enum SecurityControlKind {
     Authorization,
 }
 
-/// A known defensive control call site.
+/// An observed control call or guard pattern, without proof that it protects a sink.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct SecurityControlSite {
     /// Control family.

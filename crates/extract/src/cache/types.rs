@@ -1057,7 +1057,10 @@ use crate::MemberKind;
 /// Bumped to 291 because URL shape now requires a completed static authority
 /// and uses shadow-aware const resolution. Warm caches can falsely claim an
 /// attacker-controlled URL has a fixed origin.
-pub(super) const CACHE_VERSION: u32 = 291;
+///
+/// Bumped to 292 to retain strict origin-comparison guard observations. Older
+/// caches omit this verification context; sanitizer and taint facts are unchanged.
+pub(super) const CACHE_VERSION: u32 = 292;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

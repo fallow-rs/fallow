@@ -129,6 +129,8 @@ Return only JSON matching fallow-security-verdict/v1.
 
 Pass the packet after the prompt. If `attack_surface.defensive_boundary.verification_prompt` is present, include it as an additional question, not as a verdict.
 
+Defensive controls are observations from files on the import trace. They do not establish that a control runs before this sink or protects the same input. The `origin-equality-guard` observation records a strict `.origin` comparison against a known string with a directly exiting mismatch branch. It does not prove that the object is a built-in `URL`, that the guarded value reaches the sink unchanged, or that redirects and network policy are safe. Verify those properties from source. These observations do not suppress candidates or reduce their taint or severity.
+
 ## Verdict Schema
 
 The verifier should return a compact verdict object:

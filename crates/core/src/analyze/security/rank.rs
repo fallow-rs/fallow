@@ -32,8 +32,8 @@ use fallow_security::{catalogue, derive_security_severity};
 
 const UNUSED_FILE_GUIDANCE: &str = "This sink sits in a file fallow also reports as unused. Verify the dead-code finding, then delete the file instead of hardening the sink.";
 const UNUSED_EXPORT_GUIDANCE: &str = "This sink sits on an export fallow also reports as unused. Verify the dead-code finding, then remove the export instead of hardening the sink.";
-const ZERO_CONTROL_PROMPT: &str = "No known control library was detected on this path. Should validation, sanitization, or auth be required before this sink?";
-const CONTROL_PRESENT_PROMPT: &str = "Known defensive controls were detected on this path. Are they sufficient for this sink and untrusted input?";
+const ZERO_CONTROL_PROMPT: &str = "No recognized control pattern was observed in files on this import trace. What controls does this sink require?";
+const CONTROL_PRESENT_PROMPT: &str = "Control patterns were observed in files on this import trace. Do they apply to the same input before this sink? Their presence alone does not establish protection.";
 
 /// Annotate tainted-sink candidates that overlap dead-code findings from the same
 /// analysis run. Client-server leak findings stay unchanged because #884 was
@@ -1023,7 +1023,7 @@ mod tests {
             surface
                 .defensive_boundary
                 .verification_prompt
-                .contains("Are they sufficient")
+                .contains("Their presence alone does not establish protection")
         );
     }
 
@@ -1042,7 +1042,7 @@ mod tests {
             .defensive_boundary
             .verification_prompt;
         assert!(prompt.ends_with('?'));
-        assert!(prompt.contains("No known control library"));
+        assert!(prompt.contains("No recognized control pattern"));
     }
 
     #[test]
