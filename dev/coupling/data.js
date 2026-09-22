@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790076367797,
+  "lastUpdate": 1790085155321,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "0fabc864081f9326259b2b31cf3c01e9f5357471",
-          "message": "fix(mcp): bound Code Mode output and single-source its allowlist\n\nCode Mode capped the fallow JSON its host calls read but not the value the\nsnippet returns, which is the one thing that reaches the calling agent. A 3 MB\nreturn value came back whole under a 1 KB cap, bounded only by the 32 MB\nsandbox heap. An oversized result is now refused with ok:false plus truncated,\nresult_bytes, and a short result_preview, and an oversized thrown message is\nclamped the same way.\n\nThe sandbox advertised that it had no Function, but undefining the global\nbinding left the intrinsic reachable: (function(){}).constructor compiled and\nran code. The function, async, generator, and async-generator prototypes now\ncarry a non-configurable undefined constructor, and a test pins the sandbox\nglobal set so a future runtime cannot widen it unnoticed.\n\nThe Code Mode allowlist lived in five hand-kept lists that had to agree by\nhand. McpToolInfo now carries code_mode_alias and CODE_MODE_ONLY_TOOLS covers\nthe one helper with no standalone tool, the sandbox bindings project that data,\nand drift tests bind the enum to the manifest in both directions. The allowlist\nreaches fallow schema, the fallow://tools resource, and capabilities.json, so\nagents read reachability from data instead of parsing the tool description.\nTests that asserted contract facts against hardcoded prose now derive them from\nthe manifest.\n\nBacking is one value per tool rather than two overlapping predicates with an\ninline exception list, which removes four dispatch arms nothing could reach.\nAbandoned in-process calls are bounded: once one has been left running, the\nnext call takes the killable subprocess.\n\nHost calls are memoized per snippet on the tool and canonicalized params, and\nfallow.all fans out independent calls under one shared output budget. Refusals\nno longer spend the analysis budget, and the recorded tool name is clamped so a\nbogus 5 KB name cannot inflate the trace.\n\nAlso fixes a macOS process-group race in crates/process: killpg returns EPERM\nwhen the leader has become an unreaped zombie, and terminate() accepted that\nonly from a cached observation, which made the user-visible max_output_bytes\nrefusal message nondeterministic. It now asks the kernel at the moment of\nfailure.\n\nBehavior changes are recorded in docs/backwards-compatibility.md.",
-          "timestamp": "2026-08-31T20:41:32+02:00",
-          "tree_id": "f1a439f34afcb6fae39008ece811265d941dc35c",
-          "url": "https://github.com/fallow-rs/fallow/commit/0fabc864081f9326259b2b31cf3c01e9f5357471"
-        },
-        "date": 1788202010280,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d4742dac6e20450de88df7b3d89895d97eaee84c"
         },
         "date": 1790076363964,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 480,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1314,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cd91addff1a7060d0e09cd101a25e78c2bd0fd2e",
+          "message": "fix(security): ignore constant writeHead header objects",
+          "timestamp": "2026-09-22T13:42:25Z",
+          "tree_id": "520484eb8abb37d6981edf8e3f8a9b3247d3762e",
+          "url": "https://github.com/fallow-rs/fallow/commit/cd91addff1a7060d0e09cd101a25e78c2bd0fd2e"
+        },
+        "date": 1790085150431,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
