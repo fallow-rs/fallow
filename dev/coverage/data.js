@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790073446978,
+  "lastUpdate": 1790076606034,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "49699333+dependabot[bot]@users.noreply.github.com",
-            "name": "dependabot[bot]",
-            "username": "dependabot[bot]"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f49761cb3db5391d17cec4f5fa3058a495787179",
-          "message": "chore(deps): bump taiki-e/install-action from 2.86.6 to 2.86.7\n\nBumps [taiki-e/install-action](https://github.com/taiki-e/install-action) from 2.86.6 to 2.86.7.\n- [Release notes](https://github.com/taiki-e/install-action/releases)\n- [Changelog](https://github.com/taiki-e/install-action/blob/main/CHANGELOG.md)\n- [Commits](https://github.com/taiki-e/install-action/compare/6cd13508893c0e7eab5f273c2575d3859bd7229a...b6ff580856c41316412a0b9b60540fbc6f8c82cc)\n\n---\nupdated-dependencies:\n- dependency-name: taiki-e/install-action\n  dependency-version: 2.86.7\n  dependency-type: direct:production\n  update-type: version-update:semver-patch\n...\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
-          "timestamp": "2026-09-02T11:20:55+02:00",
-          "tree_id": "dd289f9ec84d9848e042c8486ae9ee46419fdf5c",
-          "url": "https://github.com/fallow-rs/fallow/commit/f49761cb3db5391d17cec4f5fa3058a495787179"
-        },
-        "date": 1788341560314,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/7c173685891c5f244fd5b31575a4b704b67bd9f0"
         },
         "date": 1790073443605,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4742dac6e20450de88df7b3d89895d97eaee84c",
+          "message": "fix: distinguish security findings on the same line (#2766)",
+          "timestamp": "2026-09-22T13:20:07+02:00",
+          "tree_id": "11dedd2531ee6aa01f12bd8cdeb50e1afdbcd069",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4742dac6e20450de88df7b3d89895d97eaee84c"
+        },
+        "date": 1790076602097,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
