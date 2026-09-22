@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790069805656,
+  "lastUpdate": 1790073138095,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "702aaca8c7f81108ac85c702c31c5ca0d1b54325",
-          "message": "fix(mcp): keep Code Mode refusals free of process-cleanup noise\n\nThe output-cap refusal and the deadline message are contract strings: the\nsnippet acts on them and the code_execute response envelope documents them.\nBoth were built with with_cleanup_errors, which appends best-effort\nprocess-teardown diagnostics, so on macOS a refusal intermittently read \"code\nmode host output exceeded 500 bytes; cleanup errors: failed to terminate\nsubprocess tree: Operation not permitted (os error 1)\". Terminating the\nprocess group is a cleanup concern, not part of the host call's outcome, and\nit fails whenever the leader has already become an unreaped zombie.\n\nThose two messages now keep their exact wording and the cleanup errors go to\ntracing::warn instead. Operational failures still carry their cleanup context\ninline, and structured programmatic errors still gain their cleanup_errors\nfield, so nothing is lost from a channel where it belongs. Three unit tests\npin the split.\n\nFollow-up to #2498, whose description claimed its crates/process change took\nthis from 1 failure in 15 runs to 0 in 15. That measurement was invalid: the\nload generators from the first half were still running during the second. Both\nvariants prebuilt and alternated under one constant load give 3 in 20 before\nthat change and 2 in 20 after, so it does not close the window; it remains\ncorrect on its own merit. With this change the message cannot vary by\nconstruction.",
-          "timestamp": "2026-08-31T23:08:51+02:00",
-          "tree_id": "94e9adcaa7cc7e4e7577a5c2c429ca1bbadbbe21",
-          "url": "https://github.com/fallow-rs/fallow/commit/702aaca8c7f81108ac85c702c31c5ca0d1b54325"
-        },
-        "date": 1788210888364,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9711539,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49339,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1164498,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8361,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8485,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7c173685891c5f244fd5b31575a4b704b67bd9f0",
+          "message": "feat(security): record exact-origin guard observations (#2765)",
+          "timestamp": "2026-09-22T10:26:41Z",
+          "tree_id": "61650fc87910fbb7f77f5f181cdc3120d45540bc",
+          "url": "https://github.com/fallow-rs/fallow/commit/7c173685891c5f244fd5b31575a4b704b67bd9f0"
+        },
+        "date": 1790073134492,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10080328,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51551,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1195930,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8454,
             "unit": "allocations"
           }
         ]
