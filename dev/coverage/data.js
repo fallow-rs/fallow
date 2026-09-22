@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790063807058,
+  "lastUpdate": 1790065553085,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "118eb77fb9f7149250f94b54f3560079f59d681e",
-          "message": "chore(docker): pin FALLOW_VERSION 3.22.0 with refreshed checksums",
-          "timestamp": "2026-09-01T21:51:51+02:00",
-          "tree_id": "76e9fec50e9187be51e4a30ae571b81c34161161",
-          "url": "https://github.com/fallow-rs/fallow/commit/118eb77fb9f7149250f94b54f3560079f59d681e"
-        },
-        "date": 1788292886832,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/cef0e55a9442f7246543189b4903e8cea255346e"
         },
         "date": 1790063803057,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9667d803f993216650970d17684ef0da0836f987",
+          "message": "ci(release): publish the VSIX only after the approved fallow root is public (#2762)\n\nThe VS Code extension downloads its binary from the GitHub Release of its own version and purges an installed binary of another version, so a VSIX that is public before that release exists breaks auto-updating installs. Both VSIX publishers and release-ready now wait for npm-root-approved, a credential-free job that polls the public registry until the maintainer-approved fallow root is public and requires the public tarball's sha256 to equal the digest npm-publish recorded for the tarball it staged. Crates and the direct npm publishes stay ahead of the approval.",
+          "timestamp": "2026-09-22T10:18:36+02:00",
+          "tree_id": "46565911f98c7d629c651fb11314ad650b0dc5dc",
+          "url": "https://github.com/fallow-rs/fallow/commit/9667d803f993216650970d17684ef0da0836f987"
+        },
+        "date": 1790065549497,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
