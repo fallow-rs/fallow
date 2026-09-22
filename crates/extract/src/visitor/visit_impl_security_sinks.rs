@@ -11,9 +11,9 @@ use super::super::ModuleInfoExtractor;
 use super::visit_security_controls::security_control_kind_for_callee;
 use super::{
     classify_arg_kind, classify_url_shape, flatten_callee_path, flatten_member_path,
-    is_non_literal_arg, is_token_like_security_name, object_key_metadata,
-    object_literal_properties, should_capture_hardcoded_secret_literal, sink_literal_value,
-    static_string_literal_value, unwrap_parens, unwrap_static_expr,
+    is_non_literal_arg, is_static_write_head_headers, is_token_like_security_name,
+    object_key_metadata, object_literal_properties, should_capture_hardcoded_secret_literal,
+    sink_literal_value, static_string_literal_value, unwrap_parens, unwrap_static_expr,
 };
 
 struct ArgSinkSiteInput<'site, 'ast> {
@@ -765,6 +765,12 @@ impl ModuleInfoExtractor {
             let Ok(arg_index) = u32::try_from(index) else {
                 continue;
             };
+            if callee_path.ends_with(".writeHead")
+                && matches!(arg_index, 1 | 2)
+                && is_static_write_head_headers(arg_expr)
+            {
+                continue;
+            }
             self.push_security_sink_arg(PushSinkArgInput {
                 callee_path,
                 sink_shape,

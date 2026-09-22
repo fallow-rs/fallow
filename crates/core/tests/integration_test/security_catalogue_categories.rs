@@ -1017,6 +1017,32 @@ fn issue_882_catalogue_sinks_fire() {
     assert_candidate(&results, "src/dom-navigation.ts", "open-redirect", 601);
     assert_candidate(&results, "src/mass-assignment.ts", "mass-assignment", 915);
     assert_candidate(&results, "src/ssrf-clients.ts", "ssrf", 918);
+    let source = std::fs::read_to_string(
+        fixture_path("security-catalogue-sinks-882").join("src/header-injection.ts"),
+    )
+    .expect("header fixture should be readable");
+    for (index, line) in source.lines().enumerate() {
+        if !line.trim_start().starts_with("res.") {
+            continue;
+        }
+        let candidates = results
+            .security_findings
+            .iter()
+            .filter(|finding| {
+                finding
+                    .path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .ends_with("src/header-injection.ts")
+                    && finding.line == u32::try_from(index + 1).expect("fixture line fits u32")
+                    && finding.category.as_deref() == Some("header-injection")
+            })
+            .count();
+        assert_eq!(
+            candidates, 1,
+            "each dynamic header call must retain exactly one candidate: {line}"
+        );
+    }
 }
 
 #[test]

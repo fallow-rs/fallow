@@ -309,6 +309,47 @@ pub(super) fn is_non_literal_arg(expr: &Expression<'_>) -> bool {
     }
 }
 
+/// Whether a `writeHead` headers argument is a fully static header value.
+/// Header values may be flat arrays of primitive literals, but nested arrays
+/// or objects, spreads, computed keys, holes, and other non-literals remain
+/// dynamic.
+pub(super) fn is_static_write_head_headers(expr: &Expression<'_>) -> bool {
+    match unwrap_static_expr(expr) {
+        Expression::ObjectExpression(object) => object.properties.iter().all(|property| {
+            let ObjectPropertyKind::ObjectProperty(property) = property else {
+                return false;
+            };
+            !property.computed
+                && property.key.static_name().is_some()
+                && is_static_header_value(&property.value)
+        }),
+        _ => false,
+    }
+}
+
+fn is_static_header_value(expr: &Expression<'_>) -> bool {
+    match unwrap_static_expr(expr) {
+        Expression::ArrayExpression(array) => array.elements.iter().all(|element| {
+            element
+                .as_expression()
+                .is_some_and(is_static_header_primitive)
+        }),
+        expr => is_static_header_primitive(expr),
+    }
+}
+
+fn is_static_header_primitive(expr: &Expression<'_>) -> bool {
+    match unwrap_static_expr(expr) {
+        Expression::StringLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::BigIntLiteral(_) => true,
+        Expression::TemplateLiteral(template) => template.expressions.is_empty(),
+        _ => false,
+    }
+}
+
 /// Classify a captured non-literal argument into a finer-grained [`SinkArgKind`]
 /// so the catalogue can require unsafe shapes (concat, template-with-substitution)
 /// and exclude safe ones (object literal, the parameterized form). Static

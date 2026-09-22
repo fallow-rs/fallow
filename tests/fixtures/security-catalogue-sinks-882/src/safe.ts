@@ -13,6 +13,25 @@ export function literalHeader(res: { setHeader(name: string, value: string): voi
   res.setHeader("X-Static", "ok");
 }
 
+export const literalWriteHead = (res: {
+  writeHead(status: number, headers: Record<string, string | string[]>): void;
+}): void => {
+  res.writeHead(200, {
+    "Content-Type": "text/html",
+    "Set-Cookie": ["session=static"],
+  });
+};
+
+export const literalWriteHeadWithStatusMessage = (res: {
+  writeHead(
+    status: number,
+    statusMessage: string,
+    headers: Record<string, string>,
+  ): void;
+}): void => {
+  res.writeHead(200, "OK", { "Content-Type": "text/html" });
+};
+
 export function sourceFreeAssign(target: Record<string, unknown>, defaults: Record<string, unknown>): void {
   Object.assign(target, defaults);
 }

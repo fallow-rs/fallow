@@ -1685,6 +1685,42 @@ fn security_object_sink_capture_records_nested_literal_properties() {
 }
 
 #[test]
+fn security_write_head_static_headers_are_not_captured() {
+    let cases: &[(&str, &[u32])] = &[
+        ("res.writeHead(200, { 'Content-Type': 'text/html' });", &[]),
+        ("res.writeHead(200, { 'Set-Cookie': ['a=1', 'b=2'] });", &[]),
+        ("res.writeHead(200, { 'X-Empty': [] });", &[]),
+        ("res.writeHead(200, { 'X-Value': [input] });", &[1]),
+        ("res.writeHead(200, { 'X-Hole': ['a', , 'b'] });", &[1]),
+        ("res.writeHead(200, { 'X-Nested': { value: 'a' } });", &[1]),
+        ("res.writeHead(200, { 'X-Nested': [['a']] });", &[1]),
+        ("res.writeHead(200, { 'X-Pattern': /a/ });", &[1]),
+        ("res.writeHead(200, { [name]: 'a' });", &[1]),
+        ("res.writeHead(200, { ...headers });", &[1]),
+        (
+            "res.writeHead(200, { get value() { return input; } });",
+            &[1],
+        ),
+        (
+            "res.writeHead(200, status, { 'Content-Type': 'text/html' });",
+            &[1],
+        ),
+        ("res.writeHead(200, 'OK', headers);", &[2]),
+        ("res.writeHead(200, status, headers);", &[1, 2]),
+    ];
+    for &(source, expected) in cases {
+        let info = parse(source);
+        let arguments: Vec<_> = info
+            .security_sinks
+            .iter()
+            .filter(|sink| sink.callee_path == "res.writeHead")
+            .map(|sink| sink.arg_index)
+            .collect();
+        assert_eq!(arguments, expected, "header argument capture for {source}");
+    }
+}
+
+#[test]
 fn security_chmod_capture_records_integer_literal_argument() {
     let info = parse(r"fs.chmodSync(file, 0o777);");
     let sink = info
