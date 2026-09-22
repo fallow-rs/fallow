@@ -38,6 +38,12 @@ The Cargo dependency graph is gated by `cargo-deny` (`deny.toml`, run in CI):
 
 Dependency updates flow through Dependabot with a 7-day cooldown and non-major-only auto-merge, so a freshly-published (possibly compromised) version is not pulled into a build the day it lands.
 
+### Publication path
+
+Registries are published from `.github/workflows/release.yml` over OIDC trusted publishing; no long-lived npm or crates.io token exists in the repository. Every credential-bearing job runs in the `release` GitHub environment, whose deployment branch policy admits `main` only, so a copy of the workflow dispatched from another ref is refused before it starts.
+
+The `fallow` npm root is the one package the workflow cannot make installable. Its trusted publisher grants stage publish only: CI runs `npm stage publish`, npm holds the tarball privately, and the maintainer approves the stage with npm two-factor authentication from their own machine after comparing the staged bytes with the tarball the run built. A direct `npm publish` of `fallow` over OIDC is refused by npm. Because `fallow` pins its `@fallow-cli/*` platform packages and `fallow-type-aware` to the exact release version, a new version of those reaches users only through a root the maintainer approved. The maintainer-side rules live in `docs/development/release-security.md`.
+
 Every fallow release publishes signed standalone CLI, LSP, and MCP binaries through GitHub Releases. The `@fallow-cli/*` npm platform packages and the bundled `fallow-rs/fallow@v3` GitHub Action instead use one signed per-platform multicall `fallow` binary, which the npm package exposes through the `fallow`, `fallow-lsp`, and `fallow-mcp` launchers. At release time the `build` job in `.github/workflows/release.yml` signs all four build artifacts with the workflow's Ed25519 private key (`ED25519_BINARY_SIGNING_PRIVATE_KEY` repo secret), uploads the standalone signatures alongside their GitHub Release binaries, and publishes npm tarballs with `npm publish --provenance --ignore-scripts`. The same workflow embeds the multicall binary's SHA-256 digest in the platform package's `package.json` under `fallowDigests`, so npm and Action verification runs locally without a network round-trip.
 
 The matching public key is `34 bytes of SPKI DER header + 32 raw bytes of Ed25519 public key`. The 32-byte raw key is hardcoded into every consumer (the VS Code extension at `editors/vscode/src/download.ts`, the npm wrapper at `npm/fallow/scripts/verify-binary.js`) so the Ed25519 layer of verification works fully offline and cannot be silently downgraded by network-path tampering. The SHA-256 layer reads the embedded `fallowDigests` field from the platform package's `package.json`; platform packages predating v2.78.1 (which introduced the field, see issue #597) cannot be lazily verified and surface an actionable `npm install fallow@latest` error.
@@ -120,7 +126,7 @@ If `npm install fallow` or the `fallow-rs/fallow` action ever aborts with `binar
 
 The binary-signing keypair is asymmetric and split across two surfaces:
 
-- **Private key:** the `ED25519_BINARY_SIGNING_PRIVATE_KEY` repository secret. Only the `build` job in `.github/workflows/release.yml` reads it, to sign each platform binary at release time.
+- **Private key:** the `ED25519_BINARY_SIGNING_PRIVATE_KEY` Actions secret. Only the `build` job in `.github/workflows/release.yml` reads it, to sign each platform binary at release time; that job runs in the `release` environment.
 - **Public key:** the raw 32 bytes are hardcoded into every consumer that verifies a binary, `editors/vscode/src/download.ts` and `npm/fallow/scripts/verify-binary.js`, and the hex fingerprint is documented in the "Build-time trust boundary" section above. Repository policy tests assert that both consumer copies, the fingerprint, and the documented base64 form agree. Before signing, the release build also compares the public repository variable with that committed key. Treat all copies as one unit on any key change.
 
 **Why rotation is a clean per-version cutover (no grace window needed).** Each released consumer pins exactly one public key (the one it was built with) and only ever fetches the binary for its own version (the npm wrapper resolves the matching `@fallow-cli/*` platform package; the VS Code extension and the Action download the binary for the version they ship). So version N's consumer verifies version N's binary against version N's key, and an already-installed version N-1 keeps verifying its own N-1 binary against the old key. A key rotation therefore takes effect on upgrade, with nothing to dual-sign and no mixed-key window to manage.
@@ -128,7 +134,7 @@ The binary-signing keypair is asymmetric and split across two surfaces:
 **Scheduled / maintainer-change rotation.** Do it as one ordinary release:
 
 1. Generate a new Ed25519 keypair offline.
-2. Replace the `ED25519_BINARY_SIGNING_PRIVATE_KEY` repo secret (read from stdin, never `--body -`; see the release-workflow rules).
+2. Replace the `ED25519_BINARY_SIGNING_PRIVATE_KEY` secret in the `release` environment (read from stdin, never `--body -`; see the release-workflow rules), and delete any repository-level copy in the same pass.
 3. Update the hardcoded raw public key in BOTH `editors/vscode/src/download.ts` and `npm/fallow/scripts/verify-binary.js`, and update the hex fingerprint block in this file, in the same commit.
 4. Ship a normal release through `/fallow-release`. The new release's binaries are signed with the new key and its consumers verify against it.
 5. Confirm a fresh `npm install fallow@<new>` and a clean VS Code extension download both verify without error.
@@ -138,7 +144,7 @@ The binary-signing keypair is asymmetric and split across two surfaces:
 1. Rotate immediately via a patch release using the steps above. This is the load-bearing action: once the new release ships, upgrading consumers no longer trust the compromised key.
 2. File a GitHub Security Advisory ([new advisory](https://github.com/fallow-rs/fallow/security/advisories/new)) describing the exposure window and the fixed version.
 3. Consider deprecating (`npm deprecate`) the versions published during the exposure window so installs steer to the rotated release. Do NOT force-rewrite their git tags (tag tombstones are permanent); the rotation is forward-only.
-4. Rotate any other secret that shared the exposure path (a leaked Actions secret rarely leaks alone): `NPM_TOKEN`, `CARGO_REGISTRY_TOKEN`, `VSCE_PAT`, `OVSX_PAT`.
+4. Rotate any other secret that shared the exposure path (a leaked Actions secret rarely leaks alone): `VSCE_PAT`, `OVSX_PAT`, and any bootstrap `NPM_TOKEN` that happened to exist at the time. npm and crates.io publish over OIDC, so there is no registry token to rotate; review the trusted publisher configurations instead.
 
 ## Agent-instruction surface
 
