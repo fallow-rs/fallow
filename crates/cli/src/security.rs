@@ -3134,7 +3134,7 @@ fn sarif_result_for_finding(finding: &SecurityFinding) -> serde_json::Value {
         message.push('.');
     }
     let related = sarif_related_locations(finding);
-    // Stable dedup key for GHAS: rule + anchor path + line. Without
+    // Stable dedup key for GHAS: rule + anchor path + line + column. Without
     // partialFingerprints, every run re-opens previously triaged alerts.
     // Same helper as the JSON `finding_id` field so the two never drift
     // (issue #900).
@@ -3144,7 +3144,7 @@ fn sarif_result_for_finding(finding: &SecurityFinding) -> serde_json::Value {
         "message": { "text": message },
         "locations": [sarif_location(&finding.path, finding.line, finding.col)],
         "relatedLocations": related,
-        "partialFingerprints": { "fallowSecurity/v1": security_finding_id(finding) },
+        "partialFingerprints": { "fallowSecurity/v2": security_finding_id(finding) },
     });
     if let Some(code_flows) = sarif_code_flows(finding) {
         result["codeFlows"] = code_flows;
@@ -3232,7 +3232,7 @@ pub fn build_security_sarif(
     })
 }
 
-/// Stable per-finding correlation id: FNV-1a hex of `rule:path:line`. The single
+/// Stable per-finding correlation id: FNV-1a hex of `rule:path:line:col`. The single
 /// source of truth for BOTH the JSON `finding_id` field and the SARIF
 /// `partialFingerprints` value, so an agent can join the two and they never
 /// drift. Computed on the project-relative path, so it must run after the
@@ -4436,7 +4436,7 @@ mod tests {
             serde_json::from_str(&render_sarif(&output_with(vec![finding], 0)))
                 .expect("valid SARIF");
         assert_eq!(
-            sarif["runs"][0]["results"][0]["partialFingerprints"]["fallowSecurity/v1"],
+            sarif["runs"][0]["results"][0]["partialFingerprints"]["fallowSecurity/v2"],
             serde_json::Value::String(id)
         );
     }
@@ -4493,7 +4493,7 @@ mod tests {
             serde_json::json!("secret-source")
         );
         // Stable dedup fingerprint present for GHAS.
-        assert!(result["partialFingerprints"]["fallowSecurity/v1"].is_string());
+        assert!(result["partialFingerprints"]["fallowSecurity/v2"].is_string());
 
         let rules = run["tool"]["driver"]["rules"].as_array().unwrap();
         assert_eq!(rules[0]["name"], "Client-server secret leak");

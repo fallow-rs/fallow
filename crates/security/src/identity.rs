@@ -37,7 +37,7 @@ pub fn security_rule_id(finding: &SecurityFinding) -> String {
 }
 
 /// The stable per-finding correlation id: an FNV-1a hex digest of
-/// `rule:path:line`.
+/// `rule:path:line:col`.
 ///
 /// This is the single source of truth for both the JSON `finding_id` field and
 /// the SARIF `partialFingerprints` value, so an agent can join the two and they
@@ -46,10 +46,11 @@ pub fn security_rule_id(finding: &SecurityFinding) -> String {
 #[must_use]
 pub fn security_finding_id(finding: &SecurityFinding, relative_path: &Path) -> String {
     let fingerprint = format!(
-        "{}:{}:{}",
+        "{}:{}:{}:{}",
         security_rule_id(finding),
         relative_path.to_string_lossy().replace('\\', "/"),
         finding.line,
+        finding.col,
     );
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in fingerprint.bytes() {
@@ -151,6 +152,19 @@ mod tests {
         assert_eq!(id.len(), 16);
         assert!(id.chars().all(|character| character.is_ascii_hexdigit()));
         assert_ne!(id, security_finding_id(&finding, Path::new("src/b.tsx")));
+    }
+
+    #[test]
+    fn finding_id_distinguishes_same_rule_sinks_on_one_line() {
+        let mut first = finding(SecurityFindingKind::TaintedSink, Some("dynamic-regex"));
+        first.col = 12;
+        let mut second = first.clone();
+        second.col = 48;
+
+        assert_ne!(
+            security_finding_id(&first, Path::new("src/patterns.ts")),
+            security_finding_id(&second, Path::new("src/patterns.ts"))
+        );
     }
 
     #[test]

@@ -53,6 +53,94 @@ fn write_empty_survivor_inputs(dir: &tempfile::TempDir) -> (String, String) {
 }
 
 #[test]
+fn security_same_line_sinks_keep_distinct_ids_across_formats_and_verdicts() {
+    let output = run_fallow(
+        "security",
+        "security-same-line-sinks",
+        &["--format", "json"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let findings = json["security_findings"]
+        .as_array()
+        .expect("findings array");
+    assert_eq!(findings.len(), 2);
+    assert_eq!(findings[0]["line"], findings[1]["line"]);
+    assert_ne!(findings[0]["col"], findings[1]["col"]);
+    assert_ne!(findings[0]["finding_id"], findings[1]["finding_id"]);
+
+    let scoped = run_fallow(
+        "security",
+        "security-same-line-sinks",
+        &["--format", "json", "--file", "index.ts"],
+    );
+    assert_eq!(scoped.code, 0, "stderr: {}", scoped.stderr);
+    assert_eq!(
+        parse_json(&scoped)["security_findings"],
+        json["security_findings"]
+    );
+
+    let sarif_output = run_fallow(
+        "security",
+        "security-same-line-sinks",
+        &["--format", "sarif"],
+    );
+    assert_eq!(sarif_output.code, 0, "stderr: {}", sarif_output.stderr);
+    let sarif = parse_json(&sarif_output);
+    let results = sarif["runs"][0]["results"]
+        .as_array()
+        .expect("SARIF results");
+    assert_eq!(results.len(), findings.len());
+    for finding in findings {
+        let column = finding["col"].as_u64().expect("finding column") + 1;
+        let result = results
+            .iter()
+            .find(|result| {
+                result["locations"][0]["physicalLocation"]["region"]["startColumn"] == column
+            })
+            .expect("SARIF result for column");
+        assert_eq!(
+            result["partialFingerprints"]["fallowSecurity/v2"],
+            finding["finding_id"]
+        );
+        assert!(
+            result["partialFingerprints"]
+                .get("fallowSecurity/v1")
+                .is_none()
+        );
+    }
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let candidates = dir.path().join("candidates.json");
+    let verdicts = dir.path().join("verdicts.json");
+    std::fs::write(&candidates, &output.stdout).expect("write candidates");
+    std::fs::write(
+        &verdicts,
+        serde_json::json!([
+            {"schema_version": "fallow-security-verdict/v1", "finding_id": findings[0]["finding_id"], "verdict": "survivor"},
+            {"schema_version": "fallow-security-verdict/v1", "finding_id": findings[1]["finding_id"], "verdict": "dismissed"}
+        ]).to_string(),
+    ).expect("write independent verdicts");
+    let survivors = run_fallow_raw(&[
+        "security",
+        "survivors",
+        "--candidates",
+        &candidates.to_string_lossy(),
+        "--verdicts",
+        &verdicts.to_string_lossy(),
+        "--require-verdict-for-each-candidate",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(survivors.code, 0, "stderr: {}", survivors.stderr);
+    let survivors = parse_json(&survivors);
+    assert_eq!(survivors["summary"]["unverdicted"], 0);
+    let retained = survivors["survivors"].as_object().expect("survivor map");
+    assert_eq!(retained.len(), 1);
+    assert!(retained.contains_key(findings[0]["finding_id"].as_str().expect("finding id")));
+}
+
+#[test]
 fn security_survivors_renders_verifier_filtered_candidates() {
     let dir = tempfile::tempdir().expect("temp dir");
     let candidates = dir.path().join("candidates.json");

@@ -1,0 +1,5 @@
+{
+  "name": "security-same-line-sinks",
+  "private": true,
+  "main": "index.ts"
+}

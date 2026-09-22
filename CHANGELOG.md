@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Security findings for different sinks on the same line now have distinct
+  IDs. Security SARIF uses `fallowSecurity/v2` fingerprints with the same IDs
+  as JSON and the visualization. Upgrading changes every security finding ID:
+  regenerate candidate files and their verdicts together, including ID-based
+  evaluation labels. Previously saved candidate/verdict pairs remain usable
+  together, but SARIF alerts can reopen once and stored review history does
+  not transfer automatically. Other fingerprint families are unchanged.
+
 - **The VS Code extension keeps working through the minutes between an
   extension update and its release.** The extension downloads its binary from
   the GitHub Release of its own version. When the Marketplace had the new

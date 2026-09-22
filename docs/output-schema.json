@@ -13133,7 +13133,7 @@
       "properties": {
         "finding_id": {
           "type": "string",
-          "description": "Stable per-finding correlation id, identical across runs for the same\nrule + anchor path + line. An autonomous agent that triaged this\ncandidate on a prior run uses it to correlate the candidate after a\nrebase. Equal to the SARIF `partialFingerprints` value for the same\nfinding (one shared helper computes both)."
+          "description": "Stable per-finding correlation id, identical across runs for the same\nrule + anchor path + line + column. An autonomous agent that triaged this\ncandidate on a prior run uses it to correlate the candidate after a\nrebase. Equal to the SARIF `partialFingerprints[\"fallowSecurity/v2\"]`\nvalue for the same finding (one shared helper computes both)."
         },
         "kind": {
           "description": "The rule that produced this candidate.",

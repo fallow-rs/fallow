@@ -434,6 +434,19 @@ These are documented for the rare CI script that depended on the old behavior. N
   like a syntactic one. No field is renamed, retyped, or added, and no
   `schema_version` moves.
 
+- **Security finding IDs include the anchor column.** The shared JSON,
+  visualization and security SARIF identity hashes rule, normalized relative
+  path, line and column. The old rule/path/line tuple merged distinct sinks on
+  the same line, which also made their verifier verdicts ambiguous. Security
+  SARIF names the corrected algorithm `fallowSecurity/v2` and does not emit the
+  old `fallowSecurity/v1` key. Other fingerprint families are unchanged.
+  Every security ID changes on upgrade. Regenerate candidates and their
+  verdicts together, and refresh ID-based evaluation labels. Historical
+  candidate/verdict pairs remain usable together; do not remap their verdicts
+  to new candidates by path and line alone. Stored review history does not
+  transfer automatically, and security alerts may close and reopen once.
+  This identity correction changes no JSON field shape or envelope version.
+
 - **Every SARIF result in one run now carries its own
   `partialFingerprints` value.** GitHub code scanning treats that value as
   alert identity, so two results sharing one were shown as a single alert and

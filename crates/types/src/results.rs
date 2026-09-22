@@ -2931,10 +2931,10 @@ pub struct SecurityAttackSurfaceEntry {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityFinding {
     /// Stable per-finding correlation id, identical across runs for the same
-    /// rule + anchor path + line. An autonomous agent that triaged this
+    /// rule + anchor path + line + column. An autonomous agent that triaged this
     /// candidate on a prior run uses it to correlate the candidate after a
-    /// rebase. Equal to the SARIF `partialFingerprints` value for the same
-    /// finding (one shared helper computes both).
+    /// rebase. Equal to the SARIF `partialFingerprints["fallowSecurity/v2"]`
+    /// value for the same finding (one shared helper computes both).
     pub finding_id: String,
     /// The rule that produced this candidate.
     pub kind: SecurityFindingKind,

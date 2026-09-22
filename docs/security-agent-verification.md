@@ -45,6 +45,22 @@ For each `security_findings[]` item, build a verifier packet from these fields:
 
 Fallow does not read source windows into the security JSON. The verifier harness should collect them from disk after the scan, usually with a small fixed radius such as 20 lines around each location. Keep the window outside fallow output so the core stays deterministic, compact, and provider-neutral. Treat source windows and verifier artifacts as local review material; do not publish private project code or verifier transcripts in release notes, README examples, or public issue comments.
 
+## Finding identity migration
+
+Finding IDs include the rule, project-relative path, line and column so separate
+sinks on one line stay distinct. JSON and the visualization share this ID with
+security SARIF's `partialFingerprints["fallowSecurity/v2"]`. Selecting fewer
+files does not change the IDs of the findings that remain.
+
+When upgrading from line-only IDs, regenerate candidate files and verdicts
+together, and refresh evaluation labels keyed by `finding_id`. Every security
+finding gets a new ID, including findings that did not collide before. Keep
+historical candidate/verdict pairs together: they remain valid for replay, but
+their verdicts must not be matched to fresh candidates by path and line alone.
+Stored review history does not transfer automatically, and SARIF consumers may
+close and reopen security alerts once. The legacy `fallowSecurity/v1` key is not
+emitted because it could merge distinct sinks again.
+
 ## MCP Flow
 
 Ask the MCP server for the same scan:
