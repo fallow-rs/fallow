@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790034990556,
+  "lastUpdate": 1790040736715,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "a5b045900bc0ad7cd1f859b95d75cec27fa791a5",
-          "message": "feat(api): cooperative cancellation, and a staleness gate for curated agent-doc cells\n\nAn MCP Code Mode host call that ran in this process could be answered on its\ndeadline but not stopped: the thread was abandoned and kept running a full\nanalysis inside a long-lived server. AnalysisOptions now carries an optional\ncancellation token, matching the Option<Arc<AtomicBool>> idiom the type-aware\ntransport already uses. It reaches the dead-code pipeline's stage boundaries\nand the per-file parse loop, which is the one place work stops per item rather\nthan per stage, and cancellation is always an error so a truncated module set\ncannot reach the graph.\n\nThe stop is cooperative and has no upper bound: duplication detection and the\ndead-code detectors hold no check once entered, so analyze, find_dupes,\ncheck_health and audit keep the killable subprocess, and every description\nthat touches this says which stops are promised and which are not. Threading a\ntoken into those loops was deliberately not done, because the suffix-array\nstage after the tokenize loop holds no check either, so the stop would have\nstayed unbounded while the change touched eight public entry points.\n\nMeasured on a 520-file project: every in-process route returns FALLOW_CANCELLED\nin a fraction of its uncancelled time, where three of them previously returned\na completed analysis. The engine test asserts work performed, a strictly\nsmaller module count, rather than how long the caller took to return.\n\nSeparately, the agent-doc generator prefers hand-written prose over its\ngenerated seed and preserves it forever, which is right except when the\nmanifest text a cell was written from moves later: the published cell then\ndescribes a surface that has changed and nothing says so. A record beside the\ngenerator holds the seed each of the 400 curated cells was last accepted\nagainst, outside the vendored skill tree so it never touches the public skills\nsurface. generate:contracts:check fails naming the cell and both seeds;\ngenerate:contracts re-records.",
-          "timestamp": "2026-09-01T15:34:29+02:00",
-          "tree_id": "65e54c61456f9199c92fc54a58bf7f4cb43a6fe6",
-          "url": "https://github.com/fallow-rs/fallow/commit/a5b045900bc0ad7cd1f859b95d75cec27fa791a5"
-        },
-        "date": 1788272471212,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c3197ecf8cd63e1a3ea094d88f36d5c0ca9b88ba"
         },
         "date": 1790034985966,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f9fb3f9719b757df756d425302a5898e34fc1258",
+          "message": "refactor(cli): resolve the base analysis root and the short HEAD through the engine (#2751)\n\nOne engine helper resolves the base analysis root and canonicalizes both sides. The two CLI copies are removed, and the short HEAD probe has one implementation. The security copy did not canonicalize the root; every entry point resolves the root before the analysis starts, so the widening did not reach a run. fallow security --base warns on stderr when the base root is remapped. The CLI boundary test fails on a reintroduced git probe for ref or root detection. Discarded stderr in the Action and GitLab scripts is replayed as debug lines, and a green run gains no log line. The MCP tests no longer read FALLOW_CHANGED_SINCE from the environment.\n\nCloses #2740",
+          "timestamp": "2026-09-22T03:23:11+02:00",
+          "tree_id": "3d196158c9a4781ba7c9bec79d6923f5cd38e429",
+          "url": "https://github.com/fallow-rs/fallow/commit/f9fb3f9719b757df756d425302a5898e34fc1258"
+        },
+        "date": 1790040732870,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
