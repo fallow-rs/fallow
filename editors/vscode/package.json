@@ -942,7 +942,7 @@
     "rolldown": "1.2.8",
     "ovsx": "1.1.1",
     "typescript": "7.0.2",
-    "vitest": "5.0.0",
+    "vitest": "5.0.1",
     "yauzl": "3.4.0"
   }
 }
