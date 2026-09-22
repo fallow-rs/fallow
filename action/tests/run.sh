@@ -1262,7 +1262,7 @@ case "$*" in
     printf '%s\n' 'probe wrote line one' '::error::probe wrote line two' >&2
     printf '%s\n' 'Usage: fallow dead-code'
     ;;
-  *) printf '%s\n' '{"kind":"dead-code","total_issues":0,"gate_outcomes":"::error::not an object"}' ;;
+  *) printf '%s\n' '{"kind":"dead-code","total_issues":0,"gate_outcomes":"::error::x"}' ;;
 esac
 SH
 chmod +x "$ANALYZE_TMP/bin/fallow"
@@ -1273,12 +1273,14 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
 cd "$DIR"
 assert_contains "$OUT" '::debug::jq: jq: error' \
   "analyze: a replayed jq line keeps the debug prefix"
-assert_contains "$OUT" 'string ("::error::not an object") has no keys' \
+# jq 1.6 truncates a value in its error text after eleven characters, so the
+# forged value is short enough to survive on every runner image.
+assert_contains "$OUT" 'string ("::error::x") has no keys' \
   "analyze: the replayed line carries the text jq could not read"
 assert_contains "$OUT" '::debug::fallow dead-code --help: ::error::probe wrote line two' \
   "analyze: the second captured line keeps the debug prefix"
 LOOSE_SEQUENCE_LINES=$(printf '%s\n' "$OUT" |
-  grep -e 'not an object' | grep -cv '^::debug::jq: ' || true)
+  grep -e '::error::x' | grep -cv '^::debug::jq: ' || true)
 if [ "$LOOSE_SEQUENCE_LINES" -eq 0 ]; then
   pass "analyze: a workflow command in the jq text stays inside the debug line"
 else
