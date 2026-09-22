@@ -1172,6 +1172,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      fallow_sha256: ${{ steps.publish.outputs.fallow_sha256 }}
+      fallow_stage_id: ${{ steps.publish.outputs.fallow_stage_id }}
     env:
       # Bootstrap fallback. When NPM_TOKEN is present in repo secrets,
       # setup-node writes it to .npmrc and `npm publish` authenticates
@@ -1209,6 +1212,7 @@ jobs:
           path: tarballs
 
       - name: Publish all tarballs
+        id: publish
         shell: bash
         run: |
           if [ ! -s tarballs/manifest.tsv ]; then
@@ -1311,6 +1315,9 @@ jobs:
             fi
             if is_staged_name "$name"; then
               digest=$(sha256sum "$file" | cut -d' ' -f1)
+              # npm-root-approved compares the public tarball against this
+              # digest before any VSIX is published.
+              echo "fallow_sha256=$digest" >> "$GITHUB_OUTPUT"
               # One stage call per run, never a probing publish: every attempt
               # signs and logs a provenance statement before npm answers. The
               # token is cleared so a bootstrap NPM_TOKEN never reaches a
@@ -1322,6 +1329,7 @@ jobs:
               printf '%s\n' "$stage_output"
               if [ "$stage_status" -eq 0 ]; then
                 stage_id=$(grep -oE 'staged with id [0-9a-f-]{36}' <<<"$stage_output" | head -n1 | cut -d' ' -f4 || true)
+                echo "fallow_stage_id=${stage_id:-}" >> "$GITHUB_OUTPUT"
                 echo "Staged $name@$version as ${stage_id:-unknown}, sha256 $digest"
                 echo "- Staged \`$name@$version\`, stage id \`${stage_id:-unknown}\`, sha256 \`$digest\`. Approve it on npm before the signed tag." >> "$GITHUB_STEP_SUMMARY"
               elif grep -q '^npm error code E409$' <<<"$stage_output"; then
@@ -1330,6 +1338,8 @@ jobs:
                 # is the only already-staged signal. The maintainer compares
                 # the staged bytes with the npm-tarballs artifact before
                 # approving, which proves which run built them.
+                # The stage id is unknown on this path; npm-root-approved gates
+                # on the digest, which is recorded above regardless.
                 echo "::notice::$name@$version is already staged or published; keeping the existing stage"
                 echo "- \`$name@$version\` was already staged, expected sha256 \`$digest\`. Approve it on npm before the signed tag." >> "$GITHUB_STEP_SUMMARY"
               else
@@ -1352,6 +1362,81 @@ jobs:
           if [ "$FAILED" -eq 1 ]; then
             exit 1
           fi
+
+  # The VS Code extension downloads its binary from the GitHub Release of its
+  # own version and purges an installed binary of another version, so a VSIX
+  # that is public before that release exists breaks every auto-updating
+  # install. The release is created after the maintainer approves the staged
+  # `fallow` root, so both VSIX publishers wait here until that approval has
+  # made `fallow@<version>` public, and until the public bytes are the ones
+  # this run staged. No credentials: this job only reads the public registry.
+  npm-root-approved:
+    name: Wait for the approved fallow root
+    needs: npm-publish
+    runs-on: ubuntu-latest
+    # GitHub stops a job after 6 hours. The loop gives up before that with the
+    # recovery path in its message; the approval itself does not expire.
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    env:
+      EXPECTED_SHA256: ${{ needs.npm-publish.outputs.fallow_sha256 }}
+      STAGE_ID: ${{ needs.npm-publish.outputs.fallow_stage_id }}
+      WAIT_MINUTES: '350'
+      POLL_SECONDS: '30'
+    steps:
+      - name: Wait until fallow@version is public with the staged bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          REGISTRY="${NPM_REGISTRY_URL:-https://registry.npmjs.org}"
+          if [ -z "$EXPECTED_SHA256" ]; then
+            echo "::error::npm-publish did not record the sha256 of the staged fallow tarball"
+            exit 1
+          fi
+          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (stage ${STAGE_ID:-unknown}, sha256 ${EXPECTED_SHA256})"
+          {
+            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. The VSIX publishers start when the public tarball matches."
+          } >> "$GITHUB_STEP_SUMMARY"
+          deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+          body=""
+          while :; do
+            if body=$(curl -fsS -H 'Cache-Control: no-cache' "${REGISTRY}/fallow/${VERSION}" 2>/dev/null); then
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::fallow@${VERSION} did not become public within ${WAIT_MINUTES} minutes. Approve the stage on npm, then rerun the failed jobs of this run: the wait passes at once and the VSIX publishers follow."
+              exit 1
+            fi
+            sleep "$POLL_SECONDS"
+          done
+          public_version=$(jq -r '.version // empty' <<<"$body")
+          tarball_url=$(jq -r '.dist.tarball // empty' <<<"$body")
+          if [ "$public_version" != "$VERSION" ]; then
+            echo "::error::Registry answered with version '${public_version}' for fallow@${VERSION}"
+            exit 1
+          fi
+          case "$tarball_url" in
+            "${REGISTRY}/"*) ;;
+            *)
+              echo "::error::Refusing tarball URL outside the registry: ${tarball_url}"
+              exit 1
+              ;;
+          esac
+          # The registry redirects tarball downloads to its CDN; that is why -L
+          # is needed after the host check above. Nothing here carries a
+          # credential, and the digest comparison below fails closed on any
+          # substituted content.
+          curl -fsSL "$tarball_url" -o fallow-public.tgz
+          actual_sha256=$(sha256sum fallow-public.tgz | cut -d' ' -f1)
+          if [ "$actual_sha256" != "$EXPECTED_SHA256" ]; then
+            echo "::error::Public fallow@${VERSION} has sha256 ${actual_sha256}, but this run staged ${EXPECTED_SHA256}. Someone published other bytes under this version; do not tag this release."
+            exit 1
+          fi
+          publisher=$(jq -r '[._npmUser.name // "unknown", (._npmUser.approver.name // empty)] | join(", approved by ")' <<<"$body")
+          echo "fallow@${VERSION} is public with the staged bytes (published by ${publisher})"
+          echo "- \`fallow@${VERSION}\` is public with sha256 \`${actual_sha256}\`, published by ${publisher}." >> "$GITHUB_STEP_SUMMARY"
 
   # Build all marketplace variants in a job with no marketplace tokens.
   # Publisher jobs below receive only this closed artifact set. They never
@@ -1596,7 +1681,7 @@ jobs:
 
   vscode-publish-marketplace:
     name: Publish VS Code Marketplace targets
-    needs: [vscode-prep, vscode-host-smoke, release-assets]
+    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-root-approved]
     environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -1680,7 +1765,7 @@ jobs:
 
   vscode-publish-open-vsx:
     name: Publish Open VSX targets
-    needs: [vscode-prep, vscode-host-smoke, release-assets]
+    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-root-approved]
     environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -1789,7 +1874,7 @@ jobs:
 
   release-ready:
     name: Release ready for signed tag
-    needs: [publish-crates, npm-publish, vscode-public-verify, release-assets]
+    needs: [publish-crates, npm-publish, npm-root-approved, vscode-public-verify, release-assets]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

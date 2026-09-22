@@ -514,7 +514,11 @@ test("release publication waits for the aggregate verification gate", () => {
     ],
     [vscodeOpenVsx, "Open VSX", "ovsx", vscodePackage.devDependencies.ovsx, "OVSX_PAT", "VSCE_PAT"],
   ]) {
-    assert.match(job, /needs: \[vscode-prep, vscode-host-smoke, release-assets\]/, registry);
+    assert.match(
+      job,
+      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-root-approved\]/,
+      registry,
+    );
     assert.match(job, /permissions: \{\}/, registry);
     assert.match(
       job,
@@ -564,7 +568,7 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.doesNotMatch(vscodePublicVerify, /secrets\.|_PAT|npm install|pnpm install/u);
   assert.match(
     releaseReady,
-    /needs: \[publish-crates, npm-publish, vscode-public-verify, release-assets\]/,
+    /needs: \[publish-crates, npm-publish, npm-root-approved, vscode-public-verify, release-assets\]/,
   );
   assert.match(releaseReady, /permissions:\n\s+contents: read/);
   assert.match(releaseReady, /Release tag .* appeared before the release workflow completed/u);
@@ -595,6 +599,39 @@ test("release stages the fallow npm root for maintainer approval", () => {
   assert.match(npmPublish, /npm install -g --ignore-scripts npm@11\.19\.0/u);
   assert.match(security, /Stage the `fallow` npm root, never publish it from the workflow/u);
   assert.match(security, /exactly one `npm stage publish` call/u);
+});
+
+test("release publishes no VSIX before the approved fallow root is public", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const npmPublish = indentedBlock(workflow, "npm-publish", 2);
+  const gate = indentedBlock(workflow, "npm-root-approved", 2);
+  const marketplace = indentedBlock(workflow, "vscode-publish-marketplace", 2);
+  const openVsx = indentedBlock(workflow, "vscode-publish-open-vsx", 2);
+  const security = readFileSync("docs/development/release-security.md", "utf8");
+  const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
+
+  assert.match(npmPublish, /^\s+id: publish$/mu);
+  assert.match(npmPublish, /fallow_sha256: \$\{\{ steps\.publish\.outputs\.fallow_sha256 \}\}/u);
+  assert.match(npmPublish, /echo "fallow_sha256=\$digest" >> "\$GITHUB_OUTPUT"/u);
+  assert.match(gate, /^\s+needs: npm-publish$/mu);
+  assert.match(gate, /permissions:\n\s+contents: read/u);
+  assert.doesNotMatch(gate, /^\s+environment:|secrets\.|id-token: write|actions\/checkout/mu);
+  assert.match(gate, /EXPECTED_SHA256: \$\{\{ needs\.npm-publish\.outputs\.fallow_sha256 \}\}/u);
+  assert.match(gate, /curl -fsS[^\n]*"\$\{REGISTRY\}\/fallow\/\$\{VERSION\}"/u);
+  assert.match(gate, /sha256sum fallow-public\.tgz/u);
+  assert.match(gate, /"\$actual_sha256" != "\$EXPECTED_SHA256"/u);
+  assert.match(gate, /rerun the failed jobs of this run/u);
+  assert.match(gate, /^\s+timeout-minutes: 360$/mu);
+  assert.match(gate, /WAIT_MINUTES: '3[0-5][0-9]'/u);
+  for (const publisher of [marketplace, openVsx]) {
+    assert.match(
+      publisher,
+      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-root-approved\]/u,
+    );
+  }
+  assert.match(security, /Publish no VSIX before the approved `fallow` root is public/u);
+  assert.match(procedure, /Wait for the approved fallow root/u);
+  assert.match(procedure, /Do this right after\s+`release-ready` without other work in between/u);
 });
 
 test("release credential jobs run in the main-only release environment", () => {

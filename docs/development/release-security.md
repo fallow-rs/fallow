@@ -18,6 +18,7 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `publish-crates` | Publish prevalidated crates in dependency order | crates.io OIDC |
 | `npm-prep` | Install, assemble, and pack npm artifacts | Read only |
 | `npm-publish` | Publish downloaded tarballs and stage the `fallow` root | npm OIDC, stage-only for `fallow` |
+| `npm-root-approved` | Wait until the maintainer-approved `fallow` root is public with the staged bytes | Read only |
 | `vscode-prep` | Build seven VSIX targets plus their inventory and checksums | Read only |
 | `vscode-host-smoke` | Run the exact prepared x64 target VSIX on Linux, Windows, and macOS with matching release binaries | Read only |
 | `vscode-publish-marketplace` | Publish the closed VSIX set to Visual Studio Marketplace | VSCE token only |
@@ -73,6 +74,21 @@ globally with `--ignore-scripts`.
   not see a staged version. The maintainer digest comparison is what proves
   which run built the staged bytes.
 - Keep staged publishing on a reviewed npm pin of at least 11.15.0.
+- Publish no VSIX before the approved `fallow` root is public. The VS Code
+  extension downloads its binary from the GitHub Release of its own version and
+  purges an installed binary of another version, and that release is created
+  after the approval. Both VSIX publishers and `release-ready` need
+  `npm-root-approved`, which polls the public registry without credentials,
+  downloads the public tarball, and requires its sha256 to equal the digest
+  `npm-publish` recorded for the tarball it staged. Other bytes under the
+  released version fail the run. The wait is bounded below GitHub's job limit
+  and names its recovery: approve, then rerun the failed jobs of the same run.
+- Keep `publish-crates` and the direct npm publishes ahead of the approval.
+  They do not depend on the GitHub Release, and gating them would only extend
+  the time between the VSIX publication and the release.
+- The residual window is the VSIX publication plus the public verification
+  plus the maintainer's tag step. The maintainer flow creates the tag and the
+  release immediately after `release-ready`.
 - Keep the VSIX artifact closed to the seven universal and platform-specific
   packages, `inventory.json`, and `SHA256SUMS`. The inventory is universal
   first and publication follows that order.
