@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790040736715,
+  "lastUpdate": 1790041672559,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "0beb9fb4ae56c799fca0088b7e167430d815254d",
-          "message": "fix(cli): complete the knip and jscpd migration tables (#2523)\n\nCloses #2507.\n\nA systematic diff against knip 6.34.0 and @jscpd/core 4.2.5 found 128 knip gaps\nand 15 jscpd gaps. The serious category is not the missing entries: 16 keys were\nclaimed as auto-detected by fallow when no fallow plugin covers them, so\nmigration was telling users their tooling was handled when it was not. Those now\nreport honestly as unsupported.\n\nCoverage is exact. The covered and unsupported knip tables together are the 184\nreal keys, taken as the union of knip's Plugins map and its published schema.\njscpd is 6 mapped plus 31 reported across IOptions plus colors. Plausible but\nunreal mappings were rejected rather than padding the covered list: metro is\nonly reachable through the react-native plugin, i18next is the library rather\nthan the CLI, and parsing a file type is not plugin coverage.\n\nThe tables are now guarded rather than merely correct. A first pass claimed the\ntests pinned each table against the upstream key set; they asserted sorting and\neight hardcoded names and consulted nothing, so renaming a plugin would have\nleft every test green while migration promised auto-detection that would not\nhappen. Every covered key now resolves through a named alias table to the\nbuilt-in plugin roster, with the reverse check and a no-stale-alias check.\n\nUnknown keys no longer vanish either. Both migrators were allowlist-only with no\nelse branch, so a real knip root key produced zero warnings. They now report what\nneither table names, following the existing unmapped-rule-key wording.\n\nAlso maps knip's cycles rule to circular-dependencies, which fallow has and the\ntable missed.\n\nFallow still has no Marko plugin; only the table side is fixed here.\n\nThanks @VariableVince for the report, and for the hunch that more than Marko was\nmissing.",
-          "timestamp": "2026-09-01T16:43:48+02:00",
-          "tree_id": "4e92ea67e3ab4cccf52afdc3108411b5b2bcc67c",
-          "url": "https://github.com/fallow-rs/fallow/commit/0beb9fb4ae56c799fca0088b7e167430d815254d"
-        },
-        "date": 1788274826472,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/f9fb3f9719b757df756d425302a5898e34fc1258"
         },
         "date": 1790040732870,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b04ec44d560eb2375ef9a675df05d1c05a75c210",
+          "message": "docs(changelog): edit the unreleased entries for the 3.28.0 release (#2759)\n\nEach unreleased entry is a headline and two short paragraphs. Three sentences were corrected against the code: dead-code reports an unrecognised baseline instead of exiting 2, the baseline check reads kind before the keys, and the stderr prefix belongs to the plugin-config-unreadable kind. The issue links are unchanged.",
+          "timestamp": "2026-09-22T03:42:04+02:00",
+          "tree_id": "7e1f801d0547ae375502c1de2568b7c7629deed1",
+          "url": "https://github.com/fallow-rs/fallow/commit/b04ec44d560eb2375ef9a675df05d1c05a75c210"
+        },
+        "date": 1790041668523,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
