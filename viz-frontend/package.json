@@ -17,7 +17,7 @@
   },
   "devDependencies": {
     "@types/d3-force": "^3.0.10",
-    "@types/d3-selection": "^3.0.11",
+    "@types/d3-selection": "^3.0.12",
     "@types/d3-transition": "^3.0.9",
     "@types/d3-zoom": "^3.0.8",
     "rolldown": "1.2.8",
