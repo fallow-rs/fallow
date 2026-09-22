@@ -167,7 +167,7 @@ const resolveBinaryPath = async (
   }
 
   if (getAutoDownload()) {
-    const downloaded = await downloadBinary(context);
+    const downloaded = await downloadBinary(context, outputChannel);
     return downloaded ? bareLsp(downloaded) : null;
   }
 
@@ -179,7 +179,7 @@ const resolveBinaryPath = async (
   );
 
   if (choice === "Download") {
-    const downloaded = await downloadBinary(context);
+    const downloaded = await downloadBinary(context, outputChannel);
     return downloaded ? bareLsp(downloaded) : null;
   }
 

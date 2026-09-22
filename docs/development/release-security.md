@@ -88,7 +88,10 @@ globally with `--ignore-scripts`.
   the time between the VSIX publication and the release.
 - The residual window is the VSIX publication plus the public verification
   plus the maintainer's tag step. The maintainer flow creates the tag and the
-  release immediately after `release-ready`.
+  release immediately after `release-ready`. Inside that window the extension
+  keeps serving its previously installed, verified binary and retries the
+  download once the release exists, so the window delays the update instead
+  of stranding the install.
 - Keep the VSIX artifact closed to the seven universal and platform-specific
   packages, `inventory.json`, and `SHA256SUMS`. The inventory is universal
   first and publication follows that order.

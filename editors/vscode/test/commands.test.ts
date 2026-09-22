@@ -432,7 +432,7 @@ describe("resolveCliBinary", () => {
     mockDownloadedCli = "/storage/bin/fallow";
 
     await expect(resolveCliBinary(context)).resolves.toBe("/storage/bin/fallow");
-    expect(downloadCliBinary).toHaveBeenCalledWith(context);
+    expect(downloadCliBinary).toHaveBeenCalledWith(context, undefined);
   });
 
   it("does not download the CLI when auto-download is disabled", async () => {
@@ -510,7 +510,7 @@ describe("resolveCliForRun", () => {
       binary: "/storage/bin/fallow",
       version: "2.88.1",
     });
-    expect(downloadCliBinary).toHaveBeenCalledWith(context);
+    expect(downloadCliBinary).toHaveBeenCalledWith(context, undefined);
   });
 
   it("keeps a stale CLI (degraded) when auto-download is disabled", async () => {

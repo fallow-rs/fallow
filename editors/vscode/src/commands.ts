@@ -107,6 +107,7 @@ export const findCliBinary = async (context: vscode.ExtensionContext): Promise<s
 
 export const resolveCliBinary = async (
   context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
 ): Promise<string | null> => {
   const existing = await findCliBinary(context);
   if (existing) {
@@ -117,7 +118,7 @@ export const resolveCliBinary = async (
     return null;
   }
 
-  return downloadCliBinary(context);
+  return downloadCliBinary(context, outputChannel);
 };
 
 /**
@@ -301,7 +302,7 @@ export const resolveCliForRun = async (
 ): Promise<{ binary: string | null; version: string | null }> => {
   const found = await findCliBinary(context);
   if (!found) {
-    const downloaded = await resolveCliBinary(context);
+    const downloaded = await resolveCliBinary(context, outputChannel);
     return { binary: downloaded, version: downloaded ? await probeCliVersion(downloaded) : null };
   }
 
@@ -311,7 +312,8 @@ export const resolveCliForRun = async (
 
   if (tooOld && getAutoDownload()) {
     const managed =
-      (await getInstalledCliPath(context, outputChannel)) ?? (await downloadCliBinary(context));
+      (await getInstalledCliPath(context, outputChannel)) ??
+      (await downloadCliBinary(context, outputChannel));
     if (managed && managed !== found) {
       const managedVersion = await probeCliVersion(managed);
       outputChannel?.appendLine(
@@ -410,7 +412,8 @@ const execInspectWithManagedFallback = async (
 
     if (getAutoDownload()) {
       const managed =
-        (await getInstalledCliPath(context, outputChannel)) ?? (await downloadCliBinary(context));
+        (await getInstalledCliPath(context, outputChannel)) ??
+        (await downloadCliBinary(context, outputChannel));
       if (managed && managed !== initialBinary) {
         outputChannel?.appendLine(
           "Fallow: resolved CLI does not support inspect; switched to the managed CLI.",

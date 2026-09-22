@@ -9,6 +9,7 @@ import {
 import { runBaselineCommand } from "./baselineCommand.js";
 import { shouldAcceptLspAnalysisComplete } from "./analysisNotification.js";
 import { startClient, stopClient, restartClient } from "./client.js";
+import { cancelReleaseRetry } from "./download.js";
 import { createSingleFlight } from "./analysis-single-flight.js";
 import {
   getHealthEnabled,
@@ -1249,6 +1250,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 };
 
 export const deactivate = async (): Promise<void> => {
+  cancelReleaseRetry();
   disposeStatusBar();
   disposeLicenseStatusBar();
   disposeWorkspacePicker();

@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { getExecutableExtension } from "./binary-utils.js";
+import { getAutoDownload } from "./config.js";
 
 const GITHUB_REPO = "fallow-rs/fallow";
 const LSP_BINARY_NAME = "fallow-lsp";
@@ -602,20 +603,21 @@ export const matchesExtensionVersion = async (
   outputChannel?.appendLine(
     `Fallow: installed ${label} binary is v${binaryVersion ?? markerVersion ?? "unknown"}, extension is v${extensionVersion}. Re-downloading.`,
   );
-  // Purge ONLY the mismatched binary, not the whole managed set. `downloadBinary`
-  // verifies the LSP first, then checks the CLI; purging both here would delete
-  // the already-verified LSP and return its now-stale path. A fresh version
-  // marker is rewritten on the next successful download.
-  purgeManagedBinary(binaryPath);
+  // The stale binary stays on disk: it is still signature- or digest-verified,
+  // a successful download replaces it and its sidecars atomically, and it is
+  // the fallback while the GitHub Release for this extension version does not
+  // exist yet (the VSIX is published minutes before that release). Purging
+  // here left auto-updated installs with no binary at all in that window.
   return false;
 };
 
-const getManagedBinaryPath = async (
+/** An installed managed binary that passed signature or digest verification, whatever its version. */
+const getTrustedManagedBinaryPath = (
   context: vscode.ExtensionContext,
   binaryName: string,
   label: string,
   outputChannel?: vscode.OutputChannel,
-): Promise<string | null> => {
+): string | null => {
   const dir = getInstallDir(context);
   const binaryPath = path.join(dir, `${binaryName}${getExecutableExtension()}`);
   if (!fs.existsSync(binaryPath)) {
@@ -626,11 +628,168 @@ const getManagedBinaryPath = async (
     return null;
   }
 
-  if (!(await matchesExtensionVersion(dir, binaryPath, label, outputChannel))) {
+  return binaryPath;
+};
+
+const getManagedBinaryPath = async (
+  context: vscode.ExtensionContext,
+  binaryName: string,
+  label: string,
+  outputChannel?: vscode.OutputChannel,
+): Promise<string | null> => {
+  const binaryPath = getTrustedManagedBinaryPath(context, binaryName, label, outputChannel);
+  if (!binaryPath) {
+    return null;
+  }
+
+  if (!(await matchesExtensionVersion(getInstallDir(context), binaryPath, label, outputChannel))) {
     return null;
   }
 
   return binaryPath;
+};
+
+/** The release fetch answered HTTP 404: the GitHub Release for this extension version is not published yet. */
+export const isReleaseNotPublished = (err: unknown): boolean =>
+  err instanceof Error && err.message === "HTTP 404";
+
+const RELEASE_RETRY_DELAYS_MS = [5, 15, 30, 60].map((minutes) => minutes * 60 * 1000);
+
+let releaseRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let releaseRetryAttempt = 0;
+let releaseGapAnnounced = false;
+
+/** Stops a pending background retry and forgets the session state; called from `deactivate`. */
+export const cancelReleaseRetry = (): void => {
+  if (releaseRetryTimer) {
+    clearTimeout(releaseRetryTimer);
+    releaseRetryTimer = null;
+  }
+  releaseRetryAttempt = 0;
+  releaseGapAnnounced = false;
+};
+
+/**
+ * Downloads the LSP and CLI for the extension version once the release exists,
+ * without prompts or progress, then offers a restart. Runs at most once at a
+ * time, with a bounded backoff; the next activation retries on its own anyway,
+ * because the version check keeps failing until the new binary is in place.
+ */
+export const scheduleReleaseRetry = (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): boolean => {
+  if (releaseRetryTimer || releaseRetryAttempt >= RELEASE_RETRY_DELAYS_MS.length) {
+    return false;
+  }
+  // A one-time "Download" click is not consent to unattended downloads later.
+  if (!getAutoDownload()) {
+    return false;
+  }
+  const target = getPlatformTarget();
+  if (!target) {
+    return false;
+  }
+  const delay = RELEASE_RETRY_DELAYS_MS[releaseRetryAttempt];
+  releaseRetryAttempt += 1;
+  outputChannel?.appendLine(
+    `Fallow: retrying the release download in ${Math.round(delay / 60000)} minutes.`,
+  );
+  releaseRetryTimer = setTimeout(() => {
+    releaseRetryTimer = null;
+    void retryReleaseDownload(context, target, outputChannel);
+  }, delay);
+  return true;
+};
+
+const retryReleaseDownload = async (
+  context: vscode.ExtensionContext,
+  target: string,
+  outputChannel?: vscode.OutputChannel,
+): Promise<void> => {
+  if (!getAutoDownload()) {
+    outputChannel?.appendLine(
+      "Fallow: automatic download is disabled; the release retry stops here.",
+    );
+    return;
+  }
+  const dir = getInstallDir(context);
+  try {
+    const installed = await withInstallLock(dir, async (): Promise<string | null> => {
+      if (await getManagedBinaryPath(context, LSP_BINARY_NAME, "LSP", outputChannel)) {
+        return null;
+      }
+      const release = await fetchReleaseForExtension();
+      const lspPath = await downloadAsset(release, LSP_BINARY_NAME, target, dir);
+      if (!lspPath) {
+        return null;
+      }
+      writeVersionMarker(dir, normalizeReleaseVersion(release));
+      try {
+        await downloadAsset(release, CLI_BINARY_NAME, target, dir);
+      } catch (cliErr) {
+        outputChannel?.appendLine(
+          `Fallow: CLI download after the release retry failed: ${cliErr instanceof Error ? cliErr.message : String(cliErr)}`,
+        );
+      }
+      return release.tag_name;
+    });
+    if (!installed) {
+      return;
+    }
+    releaseRetryAttempt = 0;
+    outputChannel?.appendLine(`Fallow: ${installed} downloaded in the background.`);
+    const choice = await vscode.window.showInformationMessage(
+      `Fallow: ${installed} is now installed. Restart the language server to use it.`,
+      "Restart",
+    );
+    if (choice === "Restart") {
+      await vscode.commands.executeCommand("fallow.restart");
+    }
+  } catch (err) {
+    if (isReleaseNotPublished(err)) {
+      if (!scheduleReleaseRetry(context, outputChannel)) {
+        outputChannel?.appendLine(
+          "Fallow: the release is still not published; the next window reload retries the download.",
+        );
+      }
+      return;
+    }
+    outputChannel?.appendLine(
+      `Fallow: background release download failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+};
+
+/**
+ * While the GitHub Release for this extension version is not published yet,
+ * keep serving the installed, verified binary of the previous version.
+ * Returns its path, or null when there is nothing installed to fall back to.
+ */
+const fallBackToInstalledBinary = (
+  context: vscode.ExtensionContext,
+  binaryName: string,
+  label: string,
+  outputChannel?: vscode.OutputChannel,
+): string | null => {
+  const stalePath = getTrustedManagedBinaryPath(context, binaryName, label, outputChannel);
+  if (!stalePath) {
+    return null;
+  }
+  const extensionVersion = getExtensionVersion() ?? "this version";
+  outputChannel?.appendLine(
+    `Fallow: release v${extensionVersion} is not published yet; using the installed ${label} binary at ${stalePath} until it is.`,
+  );
+  const scheduled = scheduleReleaseRetry(context, outputChannel);
+  // Commands resolve the CLI on every invocation; the toast is shown once per
+  // session, the output channel keeps the per-call record.
+  if (!releaseGapAnnounced) {
+    releaseGapAnnounced = true;
+    void vscode.window.showInformationMessage(
+      `Fallow: release v${extensionVersion} is not published yet. Using the installed binaries until it is${scheduled ? "; the extension retries in the background" : ""}.`,
+    );
+  }
+  return stalePath;
 };
 
 export const getInstalledBinaryPath = (
@@ -779,6 +938,7 @@ const downloadManagedBinary = async (
   context: vscode.ExtensionContext,
   binaryName: string,
   label: string,
+  outputChannel?: vscode.OutputChannel,
 ): Promise<string | null> => {
   const target = ensurePlatformTarget();
   if (!target) {
@@ -852,6 +1012,17 @@ const downloadManagedBinary = async (
             if (token.isCancellationRequested) {
               return null;
             }
+            if (isReleaseNotPublished(err)) {
+              const stalePath = fallBackToInstalledBinary(
+                context,
+                binaryName,
+                label,
+                outputChannel,
+              );
+              if (stalePath) {
+                return stalePath;
+              }
+            }
             const message = err instanceof Error ? err.message : String(err);
             const shouldRetry = await promptAfterDownloadFailure(
               `Fallow: failed to download ${label} binary: ${message}`,
@@ -868,10 +1039,15 @@ const downloadManagedBinary = async (
   );
 };
 
-export const downloadCliBinary = async (context: vscode.ExtensionContext): Promise<string | null> =>
-  downloadManagedBinary(context, CLI_BINARY_NAME, "CLI");
+export const downloadCliBinary = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<string | null> => downloadManagedBinary(context, CLI_BINARY_NAME, "CLI", outputChannel);
 
-export const downloadBinary = async (context: vscode.ExtensionContext): Promise<string | null> => {
+export const downloadBinary = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<string | null> => {
   const target = ensurePlatformTarget();
   if (!target) {
     return null;
@@ -995,9 +1171,22 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
             if (token.isCancellationRequested) {
               return null;
             }
+            if (isReleaseNotPublished(err)) {
+              const stalePath = fallBackToInstalledBinary(
+                context,
+                LSP_BINARY_NAME,
+                "LSP",
+                outputChannel,
+              );
+              if (stalePath) {
+                return stalePath;
+              }
+            }
             const message = err instanceof Error ? err.message : String(err);
             const shouldRetry = await promptAfterDownloadFailure(
-              `Fallow: failed to download binaries: ${message}`,
+              isReleaseNotPublished(err)
+                ? `Fallow: release v${getExtensionVersion() ?? "?"} is not published yet and no earlier binary is installed. Retry in a few minutes.`
+                : `Fallow: failed to download binaries: ${message}`,
             );
             if (!shouldRetry) {
               return null;

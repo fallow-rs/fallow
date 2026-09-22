@@ -31,6 +31,20 @@ Do not duplicate the full setting list in durable prose.
   Stream completion is not enough: Unix refuses to execute a file that any
   process still holds open for writing, and the extension chmods, renames,
   and spawns what it just downloaded.
+- A version mismatch is not a trust failure. A managed binary that passed
+  signature or digest verification but reports another version stays on disk
+  until a download of the matching version replaces it atomically; only a
+  failed verification purges. The extension downloads from the GitHub Release
+  of its own version, and that release is created after the VSIX is public,
+  so while the release endpoint answers HTTP 404 the extension keeps serving
+  the installed binary, says so once per session without a modal, and, when
+  `fallow.autoDownload` is on, retries in the background with a bounded
+  backoff and offers `fallow.restart` when the new version has landed. With
+  `fallow.autoDownload` off no unattended download is scheduled, and a retry
+  already scheduled stops when the setting is turned off. The next activation
+  retries on its own because the version check keeps failing until then.
+  Without an installed binary the download prompt still appears and names the
+  missing release.
 - Keep LSP analysis, health, audit, security, and runtime coverage as separate
   lazy workflows unless a measured UX change justifies combining them.
 - Configuration changes restart only the surfaces whose initialization state

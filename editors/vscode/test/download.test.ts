@@ -58,10 +58,7 @@ vi.mock("node:crypto", () => ({
         throw new Error("unsupported encoding");
       }
 
-      return Buffer.from(mockHashInput, "utf8")
-        .toString("hex")
-        .padEnd(64, "0")
-        .slice(0, 64);
+      return Buffer.from(mockHashInput, "utf8").toString("hex").padEnd(64, "0").slice(0, 64);
     },
   }),
   verify: () => mockSignatureValid,
@@ -103,10 +100,7 @@ const cliDigestPath = `${cliPath}.sha256`;
 const versionPath = path.join(binDir, ".fallow-version");
 const binaryBytes = Buffer.from("signed-binary");
 const signatureBytes = Buffer.alloc(64, 1);
-const digestHex = Buffer.from("signed-binary", "utf8")
-  .toString("hex")
-  .padEnd(64, "0")
-  .slice(0, 64);
+const digestHex = Buffer.from("signed-binary", "utf8").toString("hex").padEnd(64, "0").slice(0, 64);
 
 describe("writeVersionMarker / readVersionMarker", () => {
   beforeEach(() => {
@@ -140,7 +134,7 @@ describe("matchesExtensionVersion", () => {
     mockExecError = false;
   });
 
-  it("purges ONLY the mismatched binary, sparing the verified sibling and the marker", async () => {
+  it("keeps the mismatched binary on disk, ready as the fallback while its release is missing", async () => {
     for (const f of [
       lspPath,
       lspSigPath,
@@ -158,13 +152,12 @@ describe("matchesExtensionVersion", () => {
     const ok = await matchesExtensionVersion(binDir, cliPath, "CLI");
 
     expect(ok).toBe(false);
-    // The mismatched CLI binary + its sidecars are removed.
-    expect(cliPath in mockFiles).toBe(false);
-    expect(cliSigPath in mockFiles).toBe(false);
-    expect(cliDigestPath in mockFiles).toBe(false);
-    // The already-verified LSP binary, its sidecars, and the version marker
-    // MUST survive: downloadBinary verifies the LSP first, so purging the whole
-    // set here would delete it and then return its now-deleted path.
+    // A version mismatch is not a trust failure: the verified binary and its
+    // sidecars stay until a download of the matching version replaces them,
+    // so an install keeps working while the new release is not published yet.
+    expect(cliPath in mockFiles).toBe(true);
+    expect(cliSigPath in mockFiles).toBe(true);
+    expect(cliDigestPath in mockFiles).toBe(true);
     expect(lspPath in mockFiles).toBe(true);
     expect(lspSigPath in mockFiles).toBe(true);
     expect(lspDigestPath in mockFiles).toBe(true);
@@ -321,7 +314,7 @@ describe("getInstalledBinaryPath", () => {
     expect(await getInstalledBinaryPath(fakeContext)).toBe(lspPath);
   });
 
-  it("returns null and deletes ONLY the stale LSP binary (sibling CLI + marker survive)", async () => {
+  it("returns null for a stale LSP binary but leaves it and its siblings on disk", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockFiles[cliPath] = binaryBytes;
@@ -329,11 +322,9 @@ describe("getInstalledBinaryPath", () => {
     mockFiles[versionPath] = "2.25.0";
 
     expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
-    // The mismatched LSP binary + its sidecar are purged.
-    expect(mockFiles[lspPath]).toBeUndefined();
-    expect(mockFiles[lspSigPath]).toBeUndefined();
-    // Per-binary purge (not whole-set): the CLI binary and the version marker
-    // survive so a CLI check cannot return an already-deleted path.
+    // Stale, not untrusted: the LSP binary and its sidecar stay as the fallback.
+    expect(mockFiles[lspPath]).toBe(binaryBytes);
+    expect(mockFiles[lspSigPath]).toBe(signatureBytes);
     expect(mockFiles[cliPath]).not.toBeUndefined();
     expect(mockFiles[cliSigPath]).not.toBeUndefined();
     expect(mockFiles[versionPath]).not.toBeUndefined();
@@ -353,7 +344,7 @@ describe("getInstalledBinaryPath", () => {
     mockExecError = true;
 
     expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
-    expect(mockFiles[lspPath]).toBeUndefined();
+    expect(mockFiles[lspPath]).toBe(binaryBytes);
   });
 
   it("treats mismatched --version as stale when no marker", async () => {
@@ -362,7 +353,7 @@ describe("getInstalledBinaryPath", () => {
     mockExecOutput = "fallow-lsp 2.24.0\n";
 
     expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
-    expect(mockFiles[lspPath]).toBeUndefined();
+    expect(mockFiles[lspPath]).toBe(binaryBytes);
   });
 
   it("treats missing signature as stale without executing the binary", async () => {
@@ -456,8 +447,8 @@ describe("getInstalledCliPath", () => {
     mockExecOutput = "fallow 2.25.0\n";
 
     expect(await getInstalledCliPath(fakeContext)).toBeNull();
-    expect(mockFiles[cliPath]).toBeUndefined();
-    expect(mockFiles[cliSigPath]).toBeUndefined();
+    expect(mockFiles[cliPath]).toBe(binaryBytes);
+    expect(mockFiles[cliSigPath]).toBe(signatureBytes);
   });
 
   it("retries a missing managed CLI without purging a trusted LSP binary", async () => {

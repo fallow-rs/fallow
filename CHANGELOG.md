@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The VS Code extension keeps working through the minutes between an
+  extension update and its release.** The extension downloads its binary from
+  the GitHub Release of its own version. When the Marketplace had the new
+  extension before that release existed, the update deleted the installed
+  binary, the download answered HTTP 404, and the extension stopped with a
+  retry dialog. A verified binary of the previous version now stays in place
+  until the new one has downloaded. In that window the extension says once
+  per session that the release is not published yet, keeps using the installed
+  binary, and, with `fallow.autoDownload` on, retries in the background and
+  offers a restart when the new version has landed. Without an installed
+  binary the download prompt still appears and names the missing release.
+
 ## [3.28.0] - 2026-09-22
 ### Added
 
