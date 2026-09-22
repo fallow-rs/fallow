@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790045731046,
+  "lastUpdate": 1790059791469,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "a212b0f01d061898405c11dc5b908f54b9055b6a",
-          "message": "fix(viz): gate every path-redaction site on rooted rather than absolute (#2538)\n\nFollow-up to #2537, which corrected one of four sites.\n\nThree siblings in the same file made the same is_absolute assumption. The JSON\nlayer left a rooted path without a drive letter untouched in the payload, and\ntwo join-onto-root decisions joined such a path onto the project root, so an\nexternal path rendered as project-relative rather than being redacted at all.\n\nAll four now gate on has_root. A value outside a path key, such as a route\nspecifier, is excluded by the key gate rather than by the absoluteness test, so\nbroadening the predicate does not widen what gets rewritten.\n\ncrates/engine/src/viz.rs now contains no is_absolute.",
-          "timestamp": "2026-09-01T19:02:43+02:00",
-          "tree_id": "f6d71789df67da0f04bd6bd7ab8cdca15f8123df",
-          "url": "https://github.com/fallow-rs/fallow/commit/a212b0f01d061898405c11dc5b908f54b9055b6a"
-        },
-        "date": 1788282682846,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/bd8fca5af5df4ccfd94c7a835d17bd93c31a7cef"
         },
         "date": 1790045726543,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6a60a9573d4fa716d1f2d8ec41d52c18b07d4c1c",
+          "message": "docs(security): describe the OIDC publication path and the staged fallow root (#2760)\n\nSECURITY.md gains a Publication path subsection: OIDC trusted publishing without long-lived registry tokens, credential-bearing jobs in the main-only release environment, and the fallow npm root that CI can only stage while the maintainer approves it with npm two-factor authentication after a byte comparison. The rotation and compromise sections are aligned with that.",
+          "timestamp": "2026-09-22T08:40:07+02:00",
+          "tree_id": "f5a8ae1d6f1726cdc7156ae3ef33f7232ecfc38a",
+          "url": "https://github.com/fallow-rs/fallow/commit/6a60a9573d4fa716d1f2d8ec41d52c18b07d4c1c"
+        },
+        "date": 1790059786979,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
