@@ -695,7 +695,7 @@ impl ModuleInfoExtractor {
             span_end: span.end,
             url_arg_literal,
             url_shape: if arg_is_non_literal {
-                classify_url_shape(arg_expr, &self.static_string_bindings)
+                classify_url_shape(arg_expr, self)
             } else {
                 None
             },
@@ -939,7 +939,7 @@ impl ModuleInfoExtractor {
             span_end: expr.span.end,
             url_arg_literal: None,
             url_shape: if arg_is_non_literal {
-                classify_url_shape(&expr.right, &self.static_string_bindings)
+                classify_url_shape(&expr.right, self)
             } else {
                 None
             },

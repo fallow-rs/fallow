@@ -539,6 +539,95 @@ fn ssrf_fixed_origin_dynamic_path_is_classified() {
 }
 
 #[test]
+fn ssrf_url_authority_boundaries_are_classified() {
+    let results = analyze_with_security_sink("security-ssrf");
+    let cases = [
+        ("hostSuffix", SecurityUrlShape::DynamicOrigin),
+        ("aliasHostSuffix", SecurityUrlShape::DynamicOrigin),
+        ("concatHostSuffix", SecurityUrlShape::DynamicOrigin),
+        ("unfinishedPort", SecurityUrlShape::DynamicOrigin),
+        ("unfinishedUserinfo", SecurityUrlShape::DynamicOrigin),
+        ("emptyAuthority", SecurityUrlShape::DynamicOrigin),
+        ("rootSlash", SecurityUrlShape::DynamicOrigin),
+        ("networkPath", SecurityUrlShape::DynamicOrigin),
+        ("backslashAuthority", SecurityUrlShape::DynamicOrigin),
+        ("tabAuthority", SecurityUrlShape::DynamicOrigin),
+        ("crAuthority", SecurityUrlShape::DynamicOrigin),
+        ("lfAuthority", SecurityUrlShape::DynamicOrigin),
+        ("changedOrigin", SecurityUrlShape::DynamicOrigin),
+        ("shadowedOrigin", SecurityUrlShape::DynamicOrigin),
+        ("opaqueOrigin", SecurityUrlShape::DynamicOrigin),
+        ("staticPath", SecurityUrlShape::FixedOriginDynamicPath),
+        ("aliasPath", SecurityUrlShape::FixedOriginDynamicPath),
+        ("concatPath", SecurityUrlShape::FixedOriginDynamicPath),
+        ("nestedConcatPath", SecurityUrlShape::FixedOriginDynamicPath),
+        (
+            "literalTemplatePath",
+            SecurityUrlShape::FixedOriginDynamicPath,
+        ),
+        (
+            "nestedTemplatePath",
+            SecurityUrlShape::FixedOriginDynamicPath,
+        ),
+        ("relativePath", SecurityUrlShape::FixedOriginDynamicPath),
+        ("fixedQuery", SecurityUrlShape::FixedOriginDynamicPath),
+        ("fixedFragment", SecurityUrlShape::FixedOriginDynamicPath),
+        ("cookedPath", SecurityUrlShape::FixedOriginDynamicPath),
+        ("completeOrigin", SecurityUrlShape::FixedOriginDynamicPath),
+        ("pathBackslash", SecurityUrlShape::FixedOriginDynamicPath),
+        ("completeRoot", SecurityUrlShape::FixedOriginDynamicPath),
+    ];
+    assert_authority_boundary_shapes(&results, "ssrf", &cases);
+    assert!(
+        !anchored_on(&results, "src/static-values.ts"),
+        "fully known const and template URLs must remain omitted"
+    );
+}
+
+#[test]
+fn open_redirect_url_authority_boundaries_are_classified() {
+    let results = analyze_with_security_sink("security-open-redirect");
+    let cases = [
+        ("hostSuffix", SecurityUrlShape::DynamicOrigin),
+        ("rootSlash", SecurityUrlShape::DynamicOrigin),
+        ("fixedPath", SecurityUrlShape::FixedOriginDynamicPath),
+        ("relativePath", SecurityUrlShape::FixedOriginDynamicPath),
+        ("assignedHost", SecurityUrlShape::DynamicOrigin),
+        ("assignedPath", SecurityUrlShape::FixedOriginDynamicPath),
+    ];
+    assert_authority_boundary_shapes(&results, "open-redirect", &cases);
+}
+
+fn assert_authority_boundary_shapes(
+    results: &AnalysisResults,
+    category: &str,
+    cases: &[(&str, SecurityUrlShape)],
+) {
+    let mut findings: Vec<_> = results
+        .security_findings
+        .iter()
+        .filter(|finding| {
+            finding.path.ends_with("src/authority-boundaries.ts")
+                && finding.category.as_deref() == Some(category)
+        })
+        .collect();
+    findings.sort_by_key(|finding| (finding.line, finding.col));
+    assert_eq!(
+        findings.len(),
+        cases.len(),
+        "every {category} case must remain a candidate"
+    );
+    for (finding, (name, expected)) in findings.iter().zip(cases) {
+        assert_eq!(finding.candidate.sink.url_shape, Some(*expected), "{name}");
+        assert_eq!(
+            finding.evidence.contains("Fixed-origin dynamic URL"),
+            *expected == SecurityUrlShape::FixedOriginDynamicPath,
+            "evidence for {name}"
+        );
+    }
+}
+
+#[test]
 fn ssrf_dynamic_origin_is_classified() {
     let results = analyze_with_security_sink("security-ssrf");
     assert_candidate(&results, "src/dynamic-origin.ts", "ssrf", 918);

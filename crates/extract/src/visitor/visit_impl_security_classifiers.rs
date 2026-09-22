@@ -1,12 +1,11 @@
 use oxc_ast::ast::{
-    Argument, AssignmentTarget, BinaryExpression, BinaryOperator, CallExpression, ChainElement,
-    ChainExpression, Expression, ObjectPropertyKind, TemplateLiteral,
+    Argument, AssignmentTarget, BinaryOperator, CallExpression, ChainElement, ChainExpression,
+    Expression, ObjectPropertyKind,
 };
-use rustc_hash::FxHashMap;
 
 use fallow_types::extract::{SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkObjectProperty};
 
-use super::{flatten_callee_path, unwrap_parens, unwrap_static_expr};
+use super::{ModuleInfoExtractor, flatten_callee_path, unwrap_parens, unwrap_static_expr};
 
 pub(super) fn risky_redos_fragment(pattern: &str) -> Option<String> {
     let mut cursor = 0;
@@ -329,25 +328,18 @@ pub(super) fn classify_arg_kind(expr: &Expression<'_>) -> SinkArgKind {
 
 pub(super) fn classify_url_shape(
     expr: &Expression<'_>,
-    static_string_bindings: &FxHashMap<String, String>,
+    extractor: &ModuleInfoExtractor,
 ) -> Option<SecurityUrlShape> {
-    match unwrap_static_expr(expr) {
-        Expression::TemplateLiteral(tpl) => {
-            classify_template_url_shape(tpl, static_string_bindings)
-        }
-        Expression::BinaryExpression(bin) if bin.operator == BinaryOperator::Addition => {
-            classify_concat_url_shape(bin, static_string_bindings)
-        }
-        Expression::Identifier(ident) => Some(
-            static_string_bindings
-                .get(ident.name.as_str())
-                .map_or(SecurityUrlShape::DynamicOrigin, |value| {
-                    classify_url_prefix(value)
-                }),
-        ),
-        Expression::StringLiteral(_) => None,
-        _ => Some(SecurityUrlShape::DynamicOrigin),
+    if matches!(unwrap_static_expr(expr), Expression::StringLiteral(_)) {
+        return None;
     }
+    let mut prefix = String::new();
+    let complete = append_static_url_prefix(expr, extractor, &mut prefix);
+    Some(if has_fixed_url_origin_or_root(&prefix, complete) {
+        SecurityUrlShape::FixedOriginDynamicPath
+    } else {
+        SecurityUrlShape::DynamicOrigin
+    })
 }
 
 pub(super) fn sink_literal_value(expr: &Expression<'_>) -> Option<SinkLiteralValue> {
@@ -430,70 +422,75 @@ pub(super) fn object_key_metadata(expr: &Expression<'_>) -> ObjectKeyMetadata {
     ObjectKeyMetadata { keys, complete }
 }
 
-fn classify_template_url_shape(
-    tpl: &TemplateLiteral<'_>,
-    static_string_bindings: &FxHashMap<String, String>,
-) -> Option<SecurityUrlShape> {
-    let first = tpl.quasis.first()?.value.raw.as_ref();
-    if !first.is_empty() {
-        return Some(classify_url_prefix(first));
-    }
-    let first_expr = tpl.expressions.first()?;
-    let Expression::Identifier(ident) = unwrap_static_expr(first_expr) else {
-        return Some(SecurityUrlShape::DynamicOrigin);
-    };
-    Some(
-        static_string_bindings
-            .get(ident.name.as_str())
-            .map_or(SecurityUrlShape::DynamicOrigin, |base| {
-                classify_url_prefix(base)
-            }),
-    )
-}
-
-fn classify_concat_url_shape(
-    bin: &BinaryExpression<'_>,
-    static_string_bindings: &FxHashMap<String, String>,
-) -> Option<SecurityUrlShape> {
-    match unwrap_static_expr(&bin.left) {
-        Expression::StringLiteral(lit) => Some(classify_url_prefix(lit.value.as_str())),
-        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => tpl
-            .quasis
-            .first()
-            .map(|quasi| classify_url_prefix(quasi.value.raw.as_ref())),
-        Expression::Identifier(ident) => Some(
-            static_string_bindings
-                .get(ident.name.as_str())
-                .map_or(SecurityUrlShape::DynamicOrigin, |value| {
-                    classify_url_prefix(value)
-                }),
-        ),
-        Expression::BinaryExpression(left) if left.operator == BinaryOperator::Addition => {
-            classify_concat_url_shape(left, static_string_bindings)
+/// Append only the string prefix before the first unknown value. Later static
+/// segments cannot close an authority that attacker-controlled input can extend.
+fn append_static_url_prefix(
+    expr: &Expression<'_>,
+    extractor: &ModuleInfoExtractor,
+    prefix: &mut String,
+) -> bool {
+    match unwrap_static_expr(expr) {
+        Expression::StringLiteral(lit) => {
+            prefix.push_str(lit.value.as_str());
+            true
         }
-        _ => Some(SecurityUrlShape::DynamicOrigin),
+        Expression::Identifier(_) => {
+            let Some(SinkLiteralValue::String(value)) = extractor.static_sink_literal_value(expr)
+            else {
+                return false;
+            };
+            prefix.push_str(&value);
+            true
+        }
+        Expression::TemplateLiteral(template) => {
+            for (index, quasi) in template.quasis.iter().enumerate() {
+                let Some(cooked) = quasi.value.cooked.as_ref() else {
+                    prefix.clear();
+                    return false;
+                };
+                prefix.push_str(cooked.as_str());
+                if let Some(expression) = template.expressions.get(index)
+                    && !append_static_url_prefix(expression, extractor, prefix)
+                {
+                    return false;
+                }
+            }
+            true
+        }
+        Expression::BinaryExpression(binary) if binary.operator == BinaryOperator::Addition => {
+            append_static_url_prefix(&binary.left, extractor, prefix)
+                && append_static_url_prefix(&binary.right, extractor, prefix)
+        }
+        _ => false,
     }
 }
 
-fn classify_url_prefix(prefix: &str) -> SecurityUrlShape {
-    if has_fixed_url_origin_or_root(prefix) {
-        SecurityUrlShape::FixedOriginDynamicPath
-    } else {
-        SecurityUrlShape::DynamicOrigin
+fn has_fixed_url_origin_or_root(prefix: &str, complete: bool) -> bool {
+    // URL parsers remove ASCII tabs and line breaks before recognizing authority.
+    // Keep ambiguous control-character prefixes for downstream verification.
+    if prefix.chars().any(char::is_control) {
+        return false;
     }
-}
-
-fn has_fixed_url_origin_or_root(prefix: &str) -> bool {
     let trimmed = prefix.trim_start();
-    trimmed.starts_with('/')
-        || trimmed.find("://").is_some_and(|scheme_end| {
-            scheme_end > 0
-                && !trimmed[scheme_end + 3..]
-                    .split(['/', '?', '#'])
-                    .next()
-                    .unwrap_or_default()
-                    .is_empty()
-        })
+    if let Some(relative) = trimmed.strip_prefix('/') {
+        return (complete && relative.is_empty())
+            || relative
+                .chars()
+                .next()
+                .is_some_and(|next| !matches!(next, '/' | '\\'));
+    }
+    let Some((scheme, rest)) = trimmed.split_once("://") else {
+        return false;
+    };
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return false;
+    }
+    let authority_end = match rest.find(['/', '?', '#']) {
+        Some(end) => end,
+        None if complete => rest.len(),
+        None => return false,
+    };
+    authority_end > 0 && !rest[..authority_end].contains('\\')
 }
 
 fn collect_object_literal_properties(

@@ -1053,7 +1053,11 @@ use crate::MemberKind;
 /// Bumped to 290 for issue #2560: destructuring a known class instance now
 /// records member reads and conservative whole-object uses. Warm 289 caches
 /// lack these facts and would retain false unused-class-member findings.
-pub(super) const CACHE_VERSION: u32 = 290;
+///
+/// Bumped to 291 because URL shape now requires a completed static authority
+/// and uses shadow-aware const resolution. Warm caches can falsely claim an
+/// attacker-controlled URL has a fixed origin.
+pub(super) const CACHE_VERSION: u32 = 291;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
