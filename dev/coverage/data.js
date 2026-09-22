@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790059791469,
+  "lastUpdate": 1790063807058,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "79a0e8d8dbcaa408dce348b3df14fc1e824f988b",
-          "message": "chore: release v3.22.0",
-          "timestamp": "2026-09-01T20:01:03+02:00",
-          "tree_id": "8df4a6416fa304cf0788325200b367301015aa11",
-          "url": "https://github.com/fallow-rs/fallow/commit/79a0e8d8dbcaa408dce348b3df14fc1e824f988b"
-        },
-        "date": 1788286172491,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/6a60a9573d4fa716d1f2d8ec41d52c18b07d4c1c"
         },
         "date": 1790059786979,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cef0e55a9442f7246543189b4903e8cea255346e",
+          "message": "docs(changelog): say the 3.28.0 entries in plain English (#2761)\n\nThe 19 entries under 3.28.0 use plain developer English. Every fact, link, code span and heading stays.",
+          "timestamp": "2026-09-22T09:51:49+02:00",
+          "tree_id": "0f3629ce027cb93b1260b1eaff2e949ca6dbfafc",
+          "url": "https://github.com/fallow-rs/fallow/commit/cef0e55a9442f7246543189b4903e8cea255346e"
+        },
+        "date": 1790063803057,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
