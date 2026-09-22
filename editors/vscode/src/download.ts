@@ -675,7 +675,7 @@ export const cancelReleaseRetry = (): void => {
  * time, with a bounded backoff; the next activation retries on its own anyway,
  * because the version check keeps failing until the new binary is in place.
  */
-export const scheduleReleaseRetry = (
+const scheduleReleaseRetry = (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
 ): boolean => {
