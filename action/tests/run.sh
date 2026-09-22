@@ -1244,11 +1244,55 @@ SH
 chmod +x "$ANALYZE_TMP/bin/fallow"
 cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
-  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" ACTIONS_STEP_DEBUG="true" \
+  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
 assert_not_contains "$OUT" "::debug::jq:" \
   "analyze: a run without a failed envelope read logs no debug line"
+
+# A replayed capture cannot start a workflow command of its own. The replay
+# prefixes each line, so a `::error::` sequence stays inside the `::debug::`
+# line, and a second captured line keeps the prefix. `jq -s 'last'` collapses
+# the raw output before the envelope reads, so each read reports one line; the
+# multi-line capture comes from the capability probe.
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"--help"*)
+    printf '%s\n' 'probe wrote line one' '::error::probe wrote line two' >&2
+    printf '%s\n' 'Usage: fallow dead-code'
+    ;;
+  *) printf '%s\n' '{"kind":"dead-code","total_issues":0,"gate_outcomes":"::error::not an object"}' ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_contains "$OUT" '::debug::jq: jq: error' \
+  "analyze: a replayed jq line keeps the debug prefix"
+assert_contains "$OUT" 'string ("::error::not an object") has no keys' \
+  "analyze: the replayed line carries the text jq could not read"
+assert_contains "$OUT" '::debug::fallow dead-code --help: ::error::probe wrote line two' \
+  "analyze: the second captured line keeps the debug prefix"
+LOOSE_SEQUENCE_LINES=$(printf '%s\n' "$OUT" |
+  grep -e 'not an object' | grep -cv '^::debug::jq: ' || true)
+if [ "$LOOSE_SEQUENCE_LINES" -eq 0 ]; then
+  pass "analyze: a workflow command in the jq text stays inside the debug line"
+else
+  fail "analyze: a workflow command in the jq text stays inside the debug line" \
+    "$LOOSE_SEQUENCE_LINES lines carry the sequence without the prefix"
+fi
+STRAY_REPLAY_LINES=$(printf '%s\n' "$OUT" |
+  grep -c -e '^::error::' -e '^jq: error' -e '^probe wrote' || true)
+if [ "$STRAY_REPLAY_LINES" -eq 0 ]; then
+  pass "analyze: no replayed line starts a line of its own"
+else
+  fail "analyze: no replayed line starts a line of its own" \
+    "found $STRAY_REPLAY_LINES unprefixed lines"
+fi
 
 # --- Summary jq tests ---
 
