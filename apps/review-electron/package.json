@@ -40,7 +40,7 @@
     "electron": "44.3.0",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
-    "oxfmt": "^0.67.0",
+    "oxfmt": "^0.68.0",
     "oxlint": "^1.82.0",
     "typescript": "^7.0.2",
     "vite": "7.3.6",
