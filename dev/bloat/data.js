@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790076964689,
+  "lastUpdate": 1790085771235,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "48417c46faa284f18304c4f49f50a6edecdcfdb7",
-          "message": "fix(cli): resolve project-local fallow in lefthook (#2465)\n\nA real installed Git hook preserves its caller's PATH and does not add\n`node_modules/.bin`, so a project with fallow pinned locally could have the\ngenerated Lefthook job exit successfully without auditing anything. The job now\nprefers a global `fallow`, then the project-local launcher, then the Yarn\nPlug'n'Play binary, and still skips when there is none.\n\nThe Yarn arm passes the audit arguments through the separator yarn requires.\nMeasured on yarn 1.22.22, `yarn exec fallow audit --base HEAD` reaches the\nbinary as `audit` alone, so without it the hook would audit the default base\nwith no gate marker and say nothing about it.\n\nCloses #2464\n\nThanks to @PrinceD96 for the report and the implementation.",
-          "timestamp": "2026-08-31T13:33:06+02:00",
-          "tree_id": "42edcfbe7c0f368abcdba2585faa7f1a02f617f8",
-          "url": "https://github.com/fallow-rs/fallow/commit/48417c46faa284f18304c4f49f50a6edecdcfdb7"
-        },
-        "date": 1788177267019,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 547901568,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21324712,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 27947768,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 41846776,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43754024,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cd91addff1a7060d0e09cd101a25e78c2bd0fd2e",
+          "message": "fix(security): ignore constant writeHead header objects",
+          "timestamp": "2026-09-22T13:42:25Z",
+          "tree_id": "520484eb8abb37d6981edf8e3f8a9b3247d3762e",
+          "url": "https://github.com/fallow-rs/fallow/commit/cd91addff1a7060d0e09cd101a25e78c2bd0fd2e"
+        },
+        "date": 1790085767658,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 576922608,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21694792,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28795896,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43754920,
             "unit": "bytes"
           }
         ]
