@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790065553085,
+  "lastUpdate": 1790068978128,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9c30f94b673ce87cb1fa8b6a406d1659f03775a9",
-          "message": "docs(agents): name dead-code where the reference still said check (#2540)\n\nThree references in the agent CLI reference used fallow check, the legacy alias\nfor fallow dead-code. One of them quotes an stderr string that the source had\nalready moved on from: crates/cli/src/fix/plan.rs emits \"file content changed\nsince `fallow dead-code` ran\", while the reference still said \"since fallow\ncheck ran\", so text matched against real output would not find it. The other two\nname which command reports an export and which commands carry\nworkspace_diagnostics[].\n\nThe alias still resolves, so nothing was broken. The reference described a\ncommand by a name the binary no longer uses in its own output.\n\n.agents/ is canonical and .claude/ is generated from it, regenerated here. The\npublished npm/fallow/skills copy was already correct and is untouched, as is the\nRust source.",
-          "timestamp": "2026-09-02T09:43:27+02:00",
-          "tree_id": "58f8aa80c4e32209a361c76a72dc0485269d0c6e",
-          "url": "https://github.com/fallow-rs/fallow/commit/9c30f94b673ce87cb1fa8b6a406d1659f03775a9"
-        },
-        "date": 1788335778510,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/9667d803f993216650970d17684ef0da0836f987"
         },
         "date": 1790065549497,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d541fa809c6fcf73ab3dda4011c8a2d6763fe11a",
+          "message": "fix(vscode): keep the installed binary while the extension's release is not published yet (#2764)\n\nA managed binary that passed signature or digest verification but reports another version stays on disk until a download of the matching version replaces it; only a failed verification purges. While the GitHub Release of the extension's own version answers HTTP 404, the extension keeps serving the installed binary, says so once per session without a modal, and with fallow.autoDownload on retries in the background with a bounded backoff and offers a restart when the new version has landed. Without an installed binary the download prompt still appears and names the missing release.",
+          "timestamp": "2026-09-22T11:13:28+02:00",
+          "tree_id": "3609d6f64d8a9a9d1413c2d107ca25e17b9998df",
+          "url": "https://github.com/fallow-rs/fallow/commit/d541fa809c6fcf73ab3dda4011c8a2d6763fe11a"
+        },
+        "date": 1790068974283,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
