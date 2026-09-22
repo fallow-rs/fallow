@@ -232,13 +232,55 @@ fn a_readable_federation_config_carries_no_advisory() {
     );
 }
 
+/// A shape the reader learns to read stops reporting: the array form of
+/// `exposes` carries no entry and no stderr line, while the array form of
+/// `remotes` in the same file still carries both (issue #2698).
+#[test]
+fn the_array_form_of_exposes_no_longer_reports() {
+    let project = federation_project(
+        "export default {\n\
+         \x20 name: 'host',\n\
+         \x20 exposes: ['./src/index.ts'],\n\
+         \x20 remotes: ['checkout@https://example.test/remoteEntry.js'],\n\
+         };\n",
+    );
+    let output = dead_code_json_with_warnings(&root_arg(&project), &[]);
+    let envelope = parse_json(&output);
+    let reported: Vec<(&str, &str)> = of_kind(&envelope, UNREADABLE)
+        .iter()
+        .map(|entry| {
+            (
+                entry["key"].as_str().expect("a key"),
+                entry["reason"].as_str().expect("a reason"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        reported,
+        vec![("remotes", "array-form")],
+        "only the unread key reports: {}",
+        envelope["workspace_diagnostics"]
+    );
+    assert_eq!(
+        output
+            .stderr
+            .lines()
+            .filter(|line| line.contains("Plugin 'module-federation'"))
+            .count(),
+        1,
+        "stderr was:\n{}",
+        output.stderr
+    );
+}
+
 /// The entry is produced in the plugin stage, which is not cached, so a warm
 /// run carries it exactly like the cold one that wrote the cache. A consumer
 /// reading only the second run of a CI job would otherwise see nothing.
 #[test]
 fn the_advisory_survives_a_warm_cache_and_the_quiet_flag() {
-    let project =
-        federation_project("export default { name: 'host', exposes: ['./src/index.ts'] };\n");
+    let project = federation_project(
+        "export default { name: 'host', remotes: ['checkout@https://example.test/re.js'] };\n",
+    );
     let root = root_arg(&project);
     let cold = parse_json(&dead_code_json(&root, &[]));
     let cold_entries = of_kind(&cold, UNREADABLE);

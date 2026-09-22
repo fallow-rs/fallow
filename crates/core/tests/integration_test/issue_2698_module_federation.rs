@@ -257,6 +257,396 @@ fn a_nested_config_file_is_not_reported_as_unused() {
     );
 }
 
+/// One config shape that holds Federation options, with both halves the issue
+/// asks about: a producer that exposes one file beside an unexposed sibling, and
+/// a consumer that imports the remote alias beside an undeclared package.
+struct Shape {
+    /// What the shape is, for the assertion message.
+    name: &'static str,
+    /// The config file, relative to the project root.
+    config_file: &'static str,
+    /// The config file contents.
+    config: String,
+    /// The dependencies the reading plugin needs to activate, as JSON members.
+    dev_dependencies: &'static str,
+}
+
+/// The `remotes` mapping every shape declares, so one alias covers the consumer
+/// half of each project.
+const REMOTES: &str = r#"remotes: { checkout: "checkout@https://example.test/remoteEntry.js" }"#;
+
+/// Build the project of one shape and analyze it.
+fn analyze_shape(shape: &Shape) -> fallow_types::results::AnalysisResults {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        &format!(
+            r#"{{ "name": "mf-shape", "private": true, "devDependencies": {{ {} }} }}"#,
+            shape.dev_dependencies
+        ),
+    );
+    write(&root.join(shape.config_file), &shape.config);
+    write(
+        &root.join("src/Panel.tsx"),
+        r#"import "checkout/Button";
+           import "genuinely-missing-pkg";
+           export default (): string => "panel";"#,
+    );
+    write(&root.join("src/orphan.ts"), "export const x = 1;");
+
+    let config = create_config(root.to_path_buf());
+    fallow_core::analyze(&config).expect("analysis should succeed")
+}
+
+/// Assert both halves for one shape: the exposed target is an entry point and
+/// its sibling is not, the remote alias is provided and an undeclared package is
+/// not.
+fn assert_shape_is_read(shape: &Shape) {
+    let results = analyze_shape(shape);
+    let unused = unused_file_paths(&results);
+    assert!(
+        !contains_suffix(&unused, "src/Panel.tsx"),
+        "{}: the exposed target is an entry point, got {unused:?}",
+        shape.name
+    );
+    assert!(
+        contains_suffix(&unused, "src/orphan.ts"),
+        "{}: an unexposed sibling still reports, got {unused:?}",
+        shape.name
+    );
+
+    let unlisted = unlisted_packages(&results);
+    assert!(
+        !unlisted.contains(&"checkout"),
+        "{}: the remote alias is provided by the container, got {unlisted:?}",
+        shape.name
+    );
+    assert!(
+        unlisted.contains(&"genuinely-missing-pkg"),
+        "{}: an undeclared package still reports, got {unlisted:?}",
+        shape.name
+    );
+
+    let unresolved = unresolved_specifiers(&results);
+    assert!(
+        !unresolved.contains(&"checkout/Button"),
+        "{}: a remote subpath import is not unresolved, got {unresolved:?}",
+        shape.name
+    );
+}
+
+/// A bundler uses a string element of the `exposes` array both as the public
+/// name and as the module request, so the element names a local file.
+#[test]
+fn exposes_array_form_targets_are_entry_points() {
+    assert_shape_is_read(&Shape {
+        name: "array exposes",
+        config_file: "module-federation.config.ts",
+        config: format!(
+            r#"export default {{
+                 name: "host",
+                 exposes: ["./src/Panel.tsx"],
+                 {REMOTES},
+               }};"#
+        ),
+        dev_dependencies: r#""@module-federation/enhanced": "^0.9.0""#,
+    });
+}
+
+/// Vite flattens a nested plugin array, so a Federation call one level down is
+/// part of the same build.
+#[test]
+fn nested_plugin_array_federation_is_read() {
+    assert_shape_is_read(&Shape {
+        name: "nested plugin array",
+        config_file: "vite.config.ts",
+        config: format!(
+            r#"import {{ federation }} from "@module-federation/vite";
+
+               export default defineConfig({{
+                 plugins: [
+                   [
+                     react(),
+                     federation({{
+                       name: "host",
+                       exposes: {{ "./Panel": "./src/Panel.tsx" }},
+                       {REMOTES},
+                     }}),
+                   ],
+                   other(),
+                 ],
+               }});"#
+        ),
+        dev_dependencies: r#""vite": "^6.0.0", "@module-federation/vite": "^1.0.0""#,
+    });
+}
+
+/// A plugin list held by a variable is the shape a config takes as soon as it
+/// builds the list conditionally.
+#[test]
+fn plugins_identifier_federation_is_read() {
+    assert_shape_is_read(&Shape {
+        name: "plugins identifier",
+        config_file: "webpack.config.js",
+        config: format!(
+            r#"const {{
+                 ModuleFederationPlugin,
+               }} = require("@module-federation/enhanced/webpack");
+
+               const plugins = [
+                 new ModuleFederationPlugin({{
+                   name: "host",
+                   exposes: {{ "./Panel": "./src/Panel.tsx" }},
+                   {REMOTES},
+                 }}),
+               ];
+
+               module.exports = {{ plugins }};"#
+        ),
+        dev_dependencies: r#""webpack": "^5.98.0", "@module-federation/enhanced": "^0.9.0""#,
+    });
+}
+
+/// An rsbuild config holds its rspack plugin list under `tools.rspack`.
+#[test]
+fn tool_key_plugin_array_federation_is_read() {
+    assert_shape_is_read(&Shape {
+        name: "tools.rspack.plugins",
+        config_file: "rsbuild.config.ts",
+        config: format!(
+            r#"import {{ ModuleFederationPlugin }} from "@module-federation/enhanced/rspack";
+
+               export default {{
+                 tools: {{
+                   rspack: {{
+                     plugins: [
+                       new ModuleFederationPlugin({{
+                         name: "host",
+                         exposes: {{ "./Panel": "./src/Panel.tsx" }},
+                         {REMOTES},
+                       }}),
+                     ],
+                   }},
+                 }},
+               }};"#
+        ),
+        dev_dependencies: r#""@rsbuild/core": "^1.0.0", "@module-federation/enhanced": "^0.9.0""#,
+    });
+}
+
+/// `@module-federation/nextjs-mf` registers the plugin inside the
+/// `webpack(config)` hook of `next.config.*`.
+#[test]
+fn next_config_webpack_hook_exposes_are_entry_points() {
+    assert_shape_is_read(&Shape {
+        name: "next.config webpack hook",
+        config_file: "next.config.js",
+        config: format!(
+            r#"const NextFederationPlugin = require("@module-federation/nextjs-mf");
+
+               module.exports = {{
+                 webpack(config, options) {{
+                   config.plugins.push(
+                     new NextFederationPlugin({{
+                       name: "shop",
+                       filename: "static/chunks/remoteEntry.js",
+                       exposes: {{ "./Panel": "./src/Panel.tsx" }},
+                       {REMOTES},
+                     }}),
+                   );
+                   return config;
+                 }},
+               }};"#
+        ),
+        dev_dependencies: r#""next": "^15.0.0", "@module-federation/nextjs-mf": "^8.0.0""#,
+    });
+}
+
+/// Options held by a `const` above the plugin list are the most common real
+/// shape.
+#[test]
+fn options_bound_to_a_local_const_are_read() {
+    assert_shape_is_read(&Shape {
+        name: "const options",
+        config_file: "webpack.config.js",
+        config: format!(
+            r#"const {{
+                 ModuleFederationPlugin,
+               }} = require("@module-federation/enhanced/webpack");
+
+               const mfConfig = {{
+                 name: "host",
+                 exposes: {{ "./Panel": "./src/Panel.tsx" }},
+                 {REMOTES},
+               }};
+
+               module.exports = {{ plugins: [new ModuleFederationPlugin(mfConfig)] }};"#
+        ),
+        dev_dependencies: r#""webpack": "^5.98.0", "@module-federation/enhanced": "^0.9.0""#,
+    });
+}
+
+/// A bundler derives the request scope of a `remotes` array element from the
+/// whole container location, which is never a bare specifier a provider rule can
+/// cover, so the array form of `remotes` stays unread and the import keeps
+/// reporting.
+#[test]
+fn remotes_array_form_still_reports_the_unlisted_alias() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "mf-consumer",
+            "private": true,
+            "devDependencies": { "@module-federation/enhanced": "^0.9.0" }
+        }"#,
+    );
+    write(
+        &root.join("module-federation.config.ts"),
+        r#"export default {
+             name: "host",
+             exposes: { "./Panel": "./src/Panel.tsx" },
+             remotes: ["checkout@https://example.test/remoteEntry.js"],
+           };"#,
+    );
+    write(
+        &root.join("src/Panel.tsx"),
+        r#"import "checkout/Button";
+           export default (): string => "panel";"#,
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        unlisted_packages(&results).contains(&"checkout"),
+        "an alias fallow did not read cannot be provided, got {:?}",
+        unlisted_packages(&results)
+    );
+    assert!(
+        !contains_suffix(&unused_file_paths(&results), "src/Panel.tsx"),
+        "the readable `exposes` beside it is still read, got {:?}",
+        unused_file_paths(&results)
+    );
+}
+
+/// A widened search must keep the shape gate. A project that does not use
+/// Module Federation registers nothing, whatever a call in its config is named.
+#[test]
+fn a_call_named_like_a_federation_plugin_registers_nothing() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "no-federation",
+            "private": true,
+            "devDependencies": { "vite": "^6.0.0" }
+        }"#,
+    );
+    write(
+        &root.join("vite.config.ts"),
+        r#"export default defineConfig({
+             plugins: [federation("graphql-schema", { batch: true })],
+           });"#,
+    );
+    write(&root.join("src/main.ts"), r#"import "checkout/Button";"#);
+    write(&root.join("src/orphan.ts"), "export const x = 1;");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        unlisted_packages(&results).contains(&"checkout"),
+        "no remote was declared, so the import reports, got {:?}",
+        unlisted_packages(&results)
+    );
+    assert!(
+        contains_suffix(&unused_file_paths(&results), "src/orphan.ts"),
+        "no entry point was registered, got {:?}",
+        unused_file_paths(&results)
+    );
+}
+
+/// Two packages each read their own `next.config.js`. The Next.js reader and the
+/// Federation reader run over one file, and neither package takes the other's
+/// declarations.
+#[test]
+fn a_workspace_reads_each_next_config_on_its_own() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "mf-workspace",
+            "private": true,
+            "workspaces": ["packages/*"],
+            "devDependencies": {
+                "next": "^15.0.0",
+                "@module-federation/nextjs-mf": "^8.0.0"
+            }
+        }"#,
+    );
+    for (package, exposed) in [("shop", "Panel"), ("admin", "Widget")] {
+        write(
+            &root.join(format!("packages/{package}/package.json")),
+            &format!(r#"{{ "name": "@mf/{package}", "private": true }}"#),
+        );
+        write(
+            &root.join(format!("packages/{package}/next.config.js")),
+            &format!(
+                r#"const NextFederationPlugin = require("@module-federation/nextjs-mf");
+
+                   module.exports = {{
+                     pageExtensions: ["tsx"],
+                     webpack(config) {{
+                       config.plugins.push(
+                         new NextFederationPlugin({{
+                           name: "{package}",
+                           exposes: {{ "./{exposed}": "./src/{exposed}.tsx" }},
+                         }}),
+                       );
+                       return config;
+                     }},
+                   }};"#
+            ),
+        );
+        write(
+            &root.join(format!("packages/{package}/src/{exposed}.tsx")),
+            &format!("export default (): string => \"{package}\";"),
+        );
+        write(
+            &root.join(format!("packages/{package}/src/orphan.ts")),
+            "export const x = 1;",
+        );
+    }
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results);
+
+    for exposed in [
+        "packages/shop/src/Panel.tsx",
+        "packages/admin/src/Widget.tsx",
+    ] {
+        assert!(
+            !contains_suffix(&unused, exposed),
+            "{exposed} is an entry point of its own package, got {unused:?}"
+        );
+    }
+    for orphan in [
+        "packages/shop/src/orphan.ts",
+        "packages/admin/src/orphan.ts",
+    ] {
+        assert!(
+            contains_suffix(&unused, orphan),
+            "{orphan} is exposed by neither config, got {unused:?}"
+        );
+    }
+}
+
 /// The provider rule covers only the directory tree that declared the alias, so
 /// a sibling package importing the same specifier without declaring the remote
 /// keeps reporting.

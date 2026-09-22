@@ -8,6 +8,7 @@ use fallow_extract::visitor::extract_import_from_callable;
 use oxc_allocator::Allocator;
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
+use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use rustc_hash::FxHashSet;
@@ -1332,7 +1333,7 @@ fn unwrap_to_identifier_name<'a>(expr: &'a Expression<'a>) -> Option<&'a str> {
 ///
 /// Handles `const config = { ... }`, `const config: Type = { ... }`,
 /// and `const config = defineConfig({ ... })`.
-fn find_variable_init_object<'a>(
+pub(crate) fn find_variable_init_object<'a>(
     program: &'a Program,
     name: &str,
 ) -> Option<&'a ObjectExpression<'a>> {
@@ -1349,6 +1350,114 @@ fn find_variable_init_object<'a>(
         }
     }
     None
+}
+
+/// Resolve an expression to an object literal, through a top-level `const` or
+/// `let` in the same file when the expression only names one.
+///
+/// `new ModuleFederationPlugin(mfConfig)` is the common shape for plugin options
+/// that a config declares above the plugin list. A reader that accepts the
+/// inline object only reads nothing there.
+///
+/// The name resolves only when the program holds one binding of that name. A
+/// second binding, a parameter of the same name, or a write to the binding means
+/// the expression can name another object than the top-level one, so the
+/// resolver declines instead of reading the wrong object.
+pub(crate) fn resolve_object_expression<'a>(
+    program: &'a Program<'a>,
+    expr: &'a Expression<'a>,
+) -> Option<&'a ObjectExpression<'a>> {
+    if let Some(obj) = object_expression(expr) {
+        return Some(obj);
+    }
+    let name = unwrap_to_identifier_name(expr)?;
+    if !holds_one_stable_object(program, name) {
+        return None;
+    }
+    find_variable_init_object(program, name)
+}
+
+/// Whether one top-level `const` or `let` is the only binding of `name` in the
+/// program, and no expression writes to it or to one of its members.
+fn holds_one_stable_object(program: &Program<'_>, name: &str) -> bool {
+    if !declares_top_level_const_or_let(program, name) {
+        return false;
+    }
+    let mut usage = NameUsage::new(name);
+    usage.visit_program(program);
+    usage.bindings == 1 && usage.writes == 0
+}
+
+/// Whether a top-level `const` or `let` statement declares `name`. A `var` is
+/// function scoped and hoisted, so a later statement can hold its value.
+fn declares_top_level_const_or_let(program: &Program<'_>, name: &str) -> bool {
+    program.body.iter().any(|stmt| {
+        let Statement::VariableDeclaration(decl) = stmt else {
+            return false;
+        };
+        matches!(
+            decl.kind,
+            VariableDeclarationKind::Const | VariableDeclarationKind::Let
+        ) && decl.declarations.iter().any(|declarator| {
+            matches!(&declarator.id, BindingPattern::BindingIdentifier(id) if id.name == name)
+        })
+    })
+}
+
+/// What one program does with one name: the number of bindings that declare it,
+/// and the number of expressions that write to it or to one of its members.
+struct NameUsage<'n> {
+    name: &'n str,
+    bindings: usize,
+    writes: usize,
+    write_depth: usize,
+}
+
+impl<'n> NameUsage<'n> {
+    const fn new(name: &'n str) -> Self {
+        Self {
+            name,
+            bindings: 0,
+            writes: 0,
+            write_depth: 0,
+        }
+    }
+}
+
+impl<'a> Visit<'a> for NameUsage<'_> {
+    fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
+        if identifier.name == self.name {
+            self.bindings += 1;
+        }
+    }
+
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if self.write_depth > 0 && identifier.name == self.name {
+            self.writes += 1;
+        }
+    }
+
+    fn visit_assignment_target(&mut self, target: &AssignmentTarget<'a>) {
+        self.write_depth += 1;
+        walk::walk_assignment_target(self, target);
+        self.write_depth -= 1;
+    }
+
+    fn visit_update_expression(&mut self, expression: &UpdateExpression<'a>) {
+        self.write_depth += 1;
+        walk::walk_update_expression(self, expression);
+        self.write_depth -= 1;
+    }
+
+    fn visit_unary_expression(&mut self, expression: &UnaryExpression<'a>) {
+        if expression.operator != UnaryOperator::Delete {
+            walk::walk_unary_expression(self, expression);
+            return;
+        }
+        self.write_depth += 1;
+        walk::walk_unary_expression(self, expression);
+        self.write_depth -= 1;
+    }
 }
 
 /// Resolve a config object that is passed as a NAMED CONST to a wrapper call:

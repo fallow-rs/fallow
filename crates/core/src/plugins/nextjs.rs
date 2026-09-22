@@ -238,7 +238,7 @@ define_plugin!(
         ("src/app/**/sitemap.{ts,tsx,js,jsx}", SITEMAP_EXPORTS),
         ("src/app/**/robots.{ts,tsx,js,jsx}", ROBOTS_EXPORTS),
     ],
-    resolve_config(config_path, source, _root) {
+    resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
 
         let imports = config_parser::extract_imports(source, config_path);
@@ -315,6 +315,18 @@ define_plugin!(
                 .referenced_dependencies
                 .push(REACT_COMPILER_BABEL_PLUGIN.to_string());
         }
+
+        // `@module-federation/nextjs-mf` registers the plugin inside the
+        // `webpack(config)` hook of this same file, so the Federation reader has
+        // to run over `next.config.*` as it runs over a bundler config.
+        super::module_federation::apply_bundler_plugin_options(
+            &mut result,
+            source,
+            config_path,
+            root,
+            None,
+            "nextjs",
+        );
 
         result
     },
@@ -630,6 +642,93 @@ mod tests {
                 .any(|p| p.starts_with("src/pages")),
             "should include src/pages variants"
         );
+    }
+
+    /// `@module-federation/nextjs-mf` registers the plugin inside the
+    /// `webpack(config)` hook, and the Next.js plugin owns `next.config.*`, so
+    /// the exposed target reaches the report through this reader only.
+    #[test]
+    fn next_config_webpack_hook_exposes_become_entry_patterns() {
+        let source = r#"
+            const NextFederationPlugin = require("@module-federation/nextjs-mf");
+            module.exports = {
+                pageExtensions: ["tsx"],
+                webpack(config, options) {
+                    config.plugins.push(
+                        new NextFederationPlugin({
+                            name: "shop",
+                            filename: "static/chunks/remoteEntry.js",
+                            exposes: { "./pages-map": "./pages-map.js" },
+                            remotes: remotes(options.isServer),
+                        }),
+                    );
+                    return config;
+                },
+            };
+        "#;
+        let plugin = NextJsPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/next.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        let patterns: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|rule| rule.pattern.as_str())
+            .collect();
+        assert!(
+            patterns.contains(&"pages-map.js"),
+            "the exposed target is an entry point, got {patterns:?}"
+        );
+        assert!(
+            patterns.iter().any(|pattern| pattern.contains("tsx")),
+            "the Next.js reader still contributes its own patterns, got {patterns:?}"
+        );
+        let recorded: Vec<(&str, &str, &str)> = result
+            .config_diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.plugin.as_str(),
+                    diagnostic.key.as_str(),
+                    diagnostic.reason.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            recorded,
+            vec![("nextjs", "remotes", "not-object-literal")],
+            "the unreadable key names the config the user must edit"
+        );
+    }
+
+    /// A `next.config.*` without Federation options gains nothing, so the reader
+    /// cannot make a Next.js project report differently.
+    #[test]
+    fn next_config_without_federation_options_gains_nothing() {
+        let source = r"
+            export default {
+                reactStrictMode: true,
+                webpack(config) {
+                    config.plugins.push(new MyPlugin({ exposes: 1 }));
+                    return config;
+                },
+            };
+        ";
+        let plugin = NextJsPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/next.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            result.entry_patterns.is_empty(),
+            "{:?}",
+            result.entry_patterns
+        );
+        assert!(result.config_diagnostics.is_empty());
+        assert!(result.provided_dependencies.is_empty());
     }
 
     #[test]
