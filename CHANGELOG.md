@@ -10,160 +10,160 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Saved baselines say which command wrote them.** Every baseline
-  `--save-baseline` writes now carries a top-level `kind` of `dead-code`,
-  `dupes` or `health`, so a file states which command can read it. A baseline
-  saved by an earlier release carries no `kind` and still loads on all three
-  commands, and a baseline saved now loads on an older binary.
+  `--save-baseline` writes carries a top-level `kind` of `dead-code`, `dupes`
+  or `health`. A baseline from an earlier release carries no `kind`, and it
+  loads on all three commands. A baseline this release saves loads on an older
+  binary.
 
-  A run pointed at a baseline another command saved warns on stderr, naming both
-  commands and the path, carries `unrecognised_format: true` and suppresses
-  nothing. `dead-code` used to exit 2 on such a file while `dupes` and `health`
-  went green on it; all three now warn. A file that suppresses nothing also
-  trips `--fail-on-stale-baseline`, which reaches the comment, the job summary,
-  both CI integrations and the MCP gate sentences. Exit codes are unchanged
-  without that flag. `fallow` refuses a `--save-baseline` that points at a file
-  another command wrote. It exits 2 before the analysis runs and keeps the file.
-  Save each command's baseline to its own path
+  A run pointed at a baseline another command saved warns on stderr and
+  suppresses nothing. The warning names both commands and the path, and
+  `baseline_staleness.unrecognised_format` is `true`. `dead-code` used to exit
+  2 on such a file, and `dupes` and `health` passed on it. The file trips
+  `--fail-on-stale-baseline`, which reaches the comment, the job summary, both
+  CI integrations and the MCP gate sentences. Exit codes are unchanged without
+  that flag. `fallow` refuses a `--save-baseline` aimed at a file another
+  command wrote: it exits 2 before the analysis and keeps the file. Save each
+  command's baseline to its own path
   (Closes [#2738](https://github.com/fallow-rs/fallow/issues/2738)).
 
-- **A baseline nothing recognises reaches the comment and the note.** The sticky
+- **An unrecognised baseline reaches the comment and the note.** The sticky
   pull-request comment, the merge-request note and the MCP gate sentences say
-  that the loaded baseline has no entries the command recognises, before the
-  staleness advisory, whose two counts are both zero on such a file. The GitHub
-  job summary names the file, through the new `baseline-path` action output.
+  that the loaded baseline has no entries the command recognises. They say it
+  before the staleness advisory, whose two counts are both zero on such a file.
+  The GitHub job summary names the file, through the new `baseline-path` action
+  output.
 
   A bare `fallow` run that loaded a baseline and was narrowed only by flags a
-  repeat can drop now carries the `recheck-baseline` next step the three
-  standalone commands already had. `fallow audit` prints the recognition note
-  for its health baseline too, so all three of its baselines say the same thing
+  repeat can drop carries the `recheck-baseline` next step. The three
+  standalone commands already had it. `fallow audit` prints the same sentence
+  for each of its three baselines
   (Closes [#2735](https://github.com/fallow-rs/fallow/issues/2735)).
 
-- **A config a plugin cannot use now reaches the report.** The Module Federation
-  reader cannot always read `exposes` or `remotes` in full. Such a run now
-  carries a `plugin-config-unreadable` entry in `workspace_diagnostics[]` that
-  names the plugin, the config file, the key and the reason. Two unreadable keys
-  in one file give two entries. Until now the reader used stderr only, and a
-  consumer of `--quiet --format json` saw nothing. The entry carries
-  `degrades_analysis: true`, so the run reports degraded inputs in CI: the GitHub
-  Action and the GitLab template name the kind in their existing degraded-inputs
-  warning, and you change nothing.
+- **A config a plugin cannot use reaches the report.** The Module Federation
+  reader cannot always read `exposes` or `remotes` in full. Such a run carries
+  a `plugin-config-unreadable` entry in `workspace_diagnostics[]` that names
+  the plugin, the config file, the key and the reason. Two unreadable keys in
+  one file give two entries. Until now the reader used stderr only, and
+  `--quiet --format json` showed nothing. The entry carries
+  `degrades_analysis: true`, so the GitHub Action and the GitLab template name
+  the kind in their degraded-inputs warning, and you change nothing. The stderr
+  line keeps its wording and gains the `fallow: ` prefix.
 
-  A `nuxt.config` with a `components:` or `imports:` block that fallow does not
-  model keeps the convention entry patterns for that surface, so the
-  `autoImports` option has no effect there. Such a run now carries a
-  `plugin-effect-not-modeled` entry per config file and surface. That kind does
-  not degrade the analysis and warns on no channel. The stderr wording stays the
-  same, but the line now carries the `fallow: ` prefix of every other diagnostic.
-  Exit codes are unchanged
+  A `nuxt.config` can carry a `components:` or `imports:` block that fallow
+  does not model. That block keeps the convention entry patterns for the
+  surface, and the `autoImports` option has no effect there. Such a run carries
+  a `plugin-effect-not-modeled` entry per config file and surface. That kind
+  does not degrade the analysis and warns on no channel. Exit codes are
+  unchanged
   (Closes [#2736](https://github.com/fallow-rs/fallow/issues/2736)).
 
-- **`baseline_staleness` reports what narrowed the run.** A run scoped to part
-  of the project cannot judge a whole-project baseline, so the staleness
-  advisory and `fail-on-stale-baseline` stand down on it. Until now the envelope
-  did not say which scoping was responsible. `scope_reasons` is present whenever
-  `change_scoped` is true and holds one or more of `diff`, `changed-since`,
-  `changed-files`, `workspace`, `changed-workspaces`, `scope`, `file`,
-  `issue-type-filter` and `production`. Not every command can emit every name,
-  and the name set is open. The GitHub Action and the GitLab template use it to
-  decide whether to re-read the baseline over the whole project: they do when
-  only their own diff or base-ref scoping narrowed the run. For production mode
-  and workspace scoping they stand down and name the channel, including when
-  the scoping came in through `args` or `FALLOW_ARGS`. The Action publishes the
+- **`baseline_staleness` reports what narrowed the run.** The staleness
+  advisory and `fail-on-stale-baseline` stand down on a run scoped to part of
+  the project. Until now the envelope did not say which scoping was
+  responsible. `scope_reasons` is present whenever `change_scoped` is true. It
+  holds one or more of `diff`, `changed-since`, `changed-files`, `workspace`,
+  `changed-workspaces`, `scope`, `file`, `issue-type-filter` and `production`.
+  Not every command emits every name, and the name set is open.
+
+  The GitHub Action and the GitLab template read it before they re-read the
+  baseline over the whole project. They re-read when only their own diff or
+  base-ref scoping narrowed the run. For production mode and workspace scoping
+  they stand down and name the channel. They do the same when the scoping
+  reaches the run through `args` or `FALLOW_ARGS`. The Action publishes the
   list as `baseline-scope-reasons`
   (Closes [#2678](https://github.com/fallow-rs/fallow/issues/2678)).
 
-- **A scoped run with a baseline suggests the run that can judge it.** When a
-  run loaded a non-empty baseline and was narrowed only by flags a repeat can
-  drop, `next_steps` gains a `recheck-baseline` entry with the unscoped command.
-  A run without findings gets it too. The command re-reads the baseline and
-  reports; it never re-saves. There is no entry for production mode or
-  workspace scoping, which also resolve from config and the environment, or for
-  a diff-scoped run while `FALLOW_DIFF_FILE` is exported: in both cases the
-  suggested command would come back just as narrow. The MCP tools put the same
-  fact in their `warnings` array
+- **A scoped run with a baseline suggests the run that can judge it.** A run can
+  load a non-empty baseline and be narrowed only by flags a repeat can drop.
+  Such a run gains a `recheck-baseline` entry in `next_steps`, with the unscoped
+  command. A run without findings gains it too. The command re-reads the
+  baseline and reports. It never re-saves.
+
+  There is no entry for production mode or workspace scoping, which also
+  resolve from config and the environment. A diff-scoped run gains none either
+  while `FALLOW_DIFF_FILE` is exported. In both cases the suggested command
+  would be just as narrow. The MCP tools put the same fact in their `warnings`
+  array
   ([#2678](https://github.com/fallow-rs/fallow/issues/2678)).
 
-- **Module Federation `exposes` and `remotes` are read from config.** A file
-  named in a static `exposes` mapping is a runtime entry point, so an exposed
-  component is no longer reported as unused and does not have to be listed in
-  `dynamicallyLoaded`. Imports from a remote are covered too: a `remotes` alias
-  and its subpaths count as provided by the remote container, which stops
-  `import('checkout/Button')` from being reported as an unlisted dependency.
-  That holds only under the directory of the config that declared the alias.
-  Exposed files follow `includeEntryExports` like any other entry point.
+- **fallow reads Module Federation `exposes` and `remotes` from config.** A file
+  named in a static `exposes` mapping is a runtime entry point. An exposed
+  component is no longer reported as unused, and `dynamicallyLoaded` does not
+  have to list it. A `remotes` alias and its subpaths count as provided by the
+  remote container, so `import('checkout/Button')` is not an unlisted
+  dependency. The alias holds only under the directory of the config that
+  declared it. Exposed files follow `includeEntryExports`.
 
-  Both keys are read from `module-federation.config.{ts,js,mjs,cjs,mts,cts}` and
-  from a Federation plugin call in a webpack, rspack, rsbuild, vite or
-  `next.config.*` file, wherever that call sits: a nested plugin array, a plugin
-  list a variable holds, a key such as `tools.rspack.plugins`, or a Next.js
-  `webpack(config)` hook. Options a `const` in the same file holds are read, and
-  so is the array form of `exposes`. A value fallow cannot read statically is
-  reported with the config key that covers the gap. Not read yet: `shared`,
-  runtime `registerRemotes` and `loadRemote` calls, and the array form of
-  `remotes`, whose alias a bundler derives from the whole container location
+  fallow reads both keys from
+  `module-federation.config.{ts,js,mjs,cjs,mts,cts}` and from a Federation
+  plugin call in a webpack, rspack, rsbuild, vite or `next.config.*` file. The
+  call can sit in a nested plugin array, in a plugin list a variable holds,
+  under a key such as `tools.rspack.plugins`, or in a Next.js `webpack(config)`
+  hook. fallow reads options a `const` in the same file holds, and the array
+  form of `exposes`. A value fallow cannot read statically is reported with the
+  config key that covers the gap. Not read yet: `shared`, runtime
+  `registerRemotes` and `loadRemote` calls, and the array form of `remotes`
   ([#2698](https://github.com/fallow-rs/fallow/issues/2698)).
 
-- **A run now says on the wire when it widened, measured an empty scope, or
-  skipped hotspots.** `fallow flags` and `fallow suppressions` carry
-  `request_outcomes` with their `changed-since` entry, so an unresolvable ref no
-  longer widens the report with only a stderr line to say so. An applied
-  `diff-filter` carries `scope_size`, and `0` means the diff parsed no added
-  lines, so a report with no findings says nothing was analyzable rather than
-  that the code is clean; the CI integrations, the MCP tools and the rendered
-  comment, review and summary bodies each say so once.
-  `hotspots-skipped` carries a `cause`, adding `invalid-since` and
+- **Four commands carry their request outcomes in the envelope.**
+  `fallow flags` and `fallow suppressions` carry `request_outcomes` with their
+  `changed-since` entry. An unresolvable ref no longer widens the report behind
+  a stderr line alone. An applied `diff-filter` carries `scope_size`, and `0`
+  means the diff parsed no added lines. A report with no findings then states
+  that nothing was analyzable instead of a clean project. The CI integrations,
+  the MCP tools and the rendered comment, review and summary bodies each state
+  it once.
+
+  `hotspots-skipped` carries a `cause`, which adds `invalid-since` and
   `churn-file-unreadable` to the existing `not-a-repository`.
-  `fallow security --sarif-file` carries the `sarif-file` entry on success. A live
-  `--format github-summary` or `--format github-annotations` run for dead-code now
-  carries the gate inventory and the baseline advisory. Until now those two
-  surfaces received them only through `fallow report --from`. Exit codes are
-  unchanged
+  `fallow security --sarif-file` carries the `sarif-file` entry on success. A
+  live `--format github-summary` or `--format github-annotations` run for
+  dead-code carries the gate inventory and the baseline advisory. Until now
+  those two surfaces received them only through `fallow report --from`. Exit
+  codes are unchanged
   (Closes [#2734](https://github.com/fallow-rs/fallow/issues/2734)).
 
 ### Fixed
 
 - **The GitHub Action and the GitLab template keep the cause of a failed
   envelope read in the job log.** Both integrations discarded the stderr of the
-  `jq` and `git` calls that read the saved envelope and derive the change scope.
-  An envelope member of the wrong type then produced an empty value, and the run
-  went green with no cause in the log. A failure now replays into the log, behind
-  `::debug::` on GitHub, so a truncated envelope explains an empty summary. A run
-  without failures logs what it logged before, and you change nothing.
+  `jq` and `git` calls that read the saved envelope and derive the change
+  scope. An envelope member of the wrong type produced an empty value, and the
+  run passed with no cause in the log. A failure replays into the log, behind
+  `::debug::` on GitHub, so a truncated envelope explains an empty summary. A
+  run without failures logs what it logged before, and you change nothing.
 
-  `fallow security --base` and `fallow audit` also resolve the base analysis root
-  through one implementation, which warns on stderr when it cannot remap the
-  analysis root into the base worktree. The `security` copy was silent there and
-  compared the root as the caller spelled it, so a root spelled through a
-  symbolic link could widen the base snapshot to the whole base worktree. Every
-  entry point resolves the root before the analysis starts, so the widening did
-  not reach a run. Exit codes are unchanged
+  `fallow security --base` and `fallow audit` resolve the base analysis root
+  through one implementation. It warns on stderr when it cannot remap the
+  analysis root into the base worktree. The `security` copy was silent there
+  and compared the root as the caller spelled it. A root spelled through a
+  symbolic link could then widen the base snapshot to the whole base worktree.
+  Every entry point resolves the root before the analysis starts, and the
+  widening did not reach a run. Exit codes are unchanged
   (Closes [#2740](https://github.com/fallow-rs/fallow/issues/2740)).
 
-- **Nuxt `autoImports` covers the `global/` and `islands/` component
-  directories, a config key it cannot read statically, and one config per
-  workspace root.** A component under `components/global/` or
-  `components/islands/` is named after its own directory, so
-  `components/global/Foo.vue` is `<Foo>` and keeps its credit. A `nuxt.config`
-  whose top level carries a spread, a computed key or an accessor keeps the
-  convention entry patterns for that root, and a name imported or re-exported
-  from `#components` or `#imports` credits its convention file the way a
-  template tag already does.
+- **Nuxt `autoImports` credits the `global/` and `islands/` component
+  directories.** Nuxt names a component under `components/global/` or
+  `components/islands/` after its own directory, so `components/global/Foo.vue`
+  is `<Foo>` and keeps its credit. A `nuxt.config` whose top level carries a
+  spread, a computed key or an accessor keeps the convention entry patterns for
+  that root. A name imported or re-exported from `#components` or `#imports`
+  credits its convention file, the way a template tag already does.
 
-  In a monorepo each workspace root is classified on its own, so one custom
-  config no longer switches the flag off for every app. `components: true`,
-  `imports: {}` and `imports: { dirs: [] }` count as the Nuxt defaults, and
+  In a monorepo fallow classifies each workspace root on its own, and one
+  custom config no longer disables the flag for every app. `components: true`,
+  `imports: {}` and `imports: { dirs: [] }` count as the Nuxt defaults.
   `#layers/<name>/` resolves into the root `layers/` tree. Exit codes are
   unchanged
   (Closes [#2737](https://github.com/fallow-rs/fallow/issues/2737)).
 
-- **A package named in a bundler `entry` is credited as a dependency instead of
-  becoming an entry glob.** webpack, rspack and rsbuild read `entry` and
-  `source.entry` values that are bare module requests, such as
-  `react-hot-loader/patch`. Such a value named no file, so the pattern matched
-  nothing and the package could be reported as an unused dependency. A value
-  without a leading `./`, without glob syntax and without a source extension now
-  credits its package, the rule Module Federation `exposes` targets already
-  follow.
+- **fallow credits a package named in a bundler `entry` as a dependency.**
+  webpack, rspack and rsbuild read `entry` and `source.entry` values that are
+  bare module requests, such as `react-hot-loader/patch`. Such a value named no
+  file, the pattern matched nothing, and the package could be reported as an
+  unused dependency. A value without a leading `./`, without glob syntax and
+  without a source extension credits its package. Module Federation `exposes`
+  targets already follow that rule.
 
   A resource query belongs to the loader rather than to the path, so
   `webpack-hot-middleware/client?reload=true` credits `webpack-hot-middleware`.
@@ -172,145 +172,153 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Closes [#2739](https://github.com/fallow-rs/fallow/issues/2739)).
 
 - **The MCP `audit` and `decision_surface` tools auto-detect a base ref again.**
-  Since 3.1.0, calling either tool without `base` on a repository with a remote
-  failed with `FALLOW_CHANGED_FILES_FAILED`, because the auto-detected ref kept
-  the newline git printed after `origin/main`. `fallow audit` trimmed its own
-  probes and was unaffected. The engine's git probe returns trimmed output
-  again, and the CLI uses the same detection. Both routes resolve the
-  same merge-base. Two `root` cases match `fallow audit` again as well. A `root`
-  inside the repository is compared with the same subdirectory of the base
-  snapshot. A `root` the base commit does not contain, such as a package added
-  on the branch, is compared with an empty base; everything under it counts
-  as introduced. Thanks [@codingthat](https://github.com/codingthat) for the
-  report and the bisect
+  Since 3.1.0, a call to either tool without `base` failed with
+  `FALLOW_CHANGED_FILES_FAILED` on a repository that has a remote. The
+  auto-detected ref kept the newline git printed after `origin/main`.
+  `fallow audit` trimmed its own probes and was unaffected. The engine git
+  probe returns trimmed output again, and the CLI uses the same detection. Both
+  routes resolve the same merge-base.
+
+  Two `root` cases match `fallow audit` again. fallow compares a `root` inside
+  the repository with the same subdirectory of the base snapshot. It compares a
+  `root` the base commit does not contain, such as a package added on the
+  branch, with an empty base. Everything under that root counts as introduced.
+  Thanks [@codingthat](https://github.com/codingthat) for the report and the
+  bisect
   (Closes [#2699](https://github.com/fallow-rs/fallow/issues/2699)).
 
-- **`autoImports` reports unused convention files when a Nuxt project turns the
-  scan off.** A config that switches auto-import scanning off
+- **`autoImports` reports unused convention files when a Nuxt project disables
+  the scan.** fallow treated a config that disables auto-import scanning
   (`components: false`, `components: []`, `components: { dirs: [] }`,
-  `imports: { scan: false }`) was treated as a custom layout, so every
-  component, composable and util stayed an entry point and nothing was
-  reported. Those shapes now count as Nuxt's default and the convention entry
-  patterns are dropped. A project that combines `autoImports: true` with one of
-  them will see new `unused-file` findings: add a file to `entry` when fallow
-  cannot see how it is reached, or to `ignoreFindings` to silence one finding.
-  Every other `components:` or `imports:` shape keeps its entry patterns,
-  including a lone `imports: { autoImport: false }`, a config that declares
-  `extends`, an object built with a spread, and a non-empty `imports.dirs` next
-  to `scan: false`. Template tags and composable calls still credit their
-  files. Thanks [@Tsuyoshi84](https://github.com/Tsuyoshi84) for the report
+  `imports: { scan: false }`) as a custom layout. Every component, composable
+  and util stayed an entry point, and fallow reported nothing. Those shapes
+  count as the Nuxt default, and fallow drops the convention entry patterns.
+
+  A project that combines `autoImports: true` with one of them will see new
+  `unused-file` findings. Add a file to `entry` when a run reaches it in a way
+  fallow cannot see, or to `ignoreFindings` to silence one finding. Every other
+  `components:` or `imports:` shape keeps its entry patterns. That covers a lone
+  `imports: { autoImport: false }`, a config that declares `extends`, an object
+  built with a spread, and a non-empty `imports.dirs` beside `scan: false`.
+  Template tags and composable calls credit their files as before. Thanks
+  [@Tsuyoshi84](https://github.com/Tsuyoshi84) for the report
   (Closes [#2695](https://github.com/fallow-rs/fallow/issues/2695)).
 
-- **A scoped run that fell back to the whole project reports it in the
-  envelope.** When git could not resolve a `--changed-since` ref, or fallow
-  could not place a diff, the run warned on stderr and then reported the whole
-  project. The GitHub Action and the GitLab template run with `--quiet` and
-  pass the diff through `FALLOW_DIFF_FILE`, so on a pull request every finding
-  in the repository could show up as introduced by the change, with nothing to
-  explain it. The JSON envelope carries `request_outcomes`, keyed by
-  request: `changed-since` (reasons `git-missing`, `not-a-repository`,
-  `git-failed`) and `diff-filter` (`oversize`, `unreadable`, `not-utf8`,
-  `foreign-namespace`, `ambiguous-base`). Each entry has `status`, `affects`
-  (`scope`, or `artifact` for a request that writes a file) and `requested`,
-  which echoes the input verbatim. An unapplied entry adds a `reason` and a
-  one-sentence `message`. Applied requests are listed as well: an absent
-  object means nothing was asked for. Select on `affects`; the key set and the
-  `status` values are open.
+- **The envelope reports a scoped run that widened to the whole project.** When
+  git could not resolve a `--changed-since` ref, or fallow could not place a
+  diff, the run warned on stderr and reported the whole project. The GitHub
+  Action and the GitLab template run with `--quiet` and pass the diff through
+  `FALLOW_DIFF_FILE`. Every finding in the repository could then appear as
+  introduced by the change.
 
-  An unapplied request also shows in the job summary, the pull-request comment,
-  the merge-request note, the review bodies and the annotations, both live and
-  through `fallow report --from`. The Action warns once and sets
-  `requests-unapplied`, the GitLab template writes `FALLOW_REQUESTS_UNAPPLIED`
-  to `fallow-gates.env`, and the MCP tools add the fact to `warnings`.
-  `fallow audit` carries no object because it exits 2 instead of widening; its
-  error now names the cause git gave for a `--base` it could not resolve. Exit
-  codes are unchanged and no `schema_version` moves
+  `request_outcomes` is keyed by request. `changed-since` carries the reasons
+  `git-missing`, `not-a-repository` and `git-failed`; `diff-filter` carries
+  `oversize`, `unreadable`, `not-utf8`, `foreign-namespace` and
+  `ambiguous-base`. Each entry has `status`, `affects` (`scope`, or `artifact`
+  for a request that writes a file) and `requested`, which echoes the input
+  verbatim. An unapplied entry adds a `reason` and a one-sentence `message`.
+  The envelope also lists applied requests, and an absent object means the run
+  requested nothing. Select on `affects`; the key set and the `status` values
+  are open. An unapplied request appears in the job summary, the pull-request
+  comment, the merge-request note, the review bodies and the annotations. It
+  appears live and through `fallow report --from`. The Action warns once and
+  sets `requests-unapplied`, the GitLab template writes
+  `FALLOW_REQUESTS_UNAPPLIED` to `fallow-gates.env`, and the MCP tools add the
+  fact to `warnings`. `fallow audit` carries no object: it exits 2 and never
+  widens the report. Its error names the cause git gave for a `--base` it could
+  not resolve. Exit codes are unchanged and no `schema_version` moves
   (Closes [#2687](https://github.com/fallow-rs/fallow/issues/2687), [#2688](https://github.com/fallow-rs/fallow/issues/2688)).
 
-- **Health inputs that failed to load are reported as diagnostics.** Six
+- **A health input that failed to load becomes a diagnostic.** Six
   failures used to warn on stderr and then contribute zeros, which a JSON
-  consumer could not tell from a clean measurement: a failed scoring pass, a
-  project without git, a shallow clone, an unpinned clock, an unparsable
-  CODEOWNERS or bot pattern, and an unreadable trend snapshot. Each adds a
-  `workspace_diagnostics[]` entry with `degrades_analysis: true`, with or
-  without `--quiet`. The kinds are `file-scores-unavailable`,
+  consumer could not tell from a clean measurement. The failures are a failed
+  scoring pass, a project without git, a shallow clone, an unpinned clock, an
+  unparsable CODEOWNERS or bot pattern, and an unreadable trend snapshot. Each
+  one adds a `workspace_diagnostics[]` entry with `degrades_analysis: true`,
+  with or without `--quiet`. The kinds are `file-scores-unavailable`,
   `hotspots-skipped`, `shallow-clone`, `unpinned-clock`,
-  `ownership-unavailable` (with `cause` `invalid-bot-pattern` or
+  `ownership-unavailable` (with the `cause` `invalid-bot-pattern` or
   `codeowners-parse-failed`) and `trend-snapshot-unreadable`.
-  `coverage-auto-detected` is new too and leaves `degrades_analysis` unset: it
-  names the coverage file that fed the CRAP scores, and its note prints on
-  any non-quiet run instead of only when `CI` is set. The Action, the GitLab
-  template and the MCP tools already select on `degrades_analysis`, so they pick
-  the new kinds up as they are, under a combined warning that reads
-  "degraded inputs". The kind set is open and no `schema_version` moves
+
+  `coverage-auto-detected` is new too and leaves `degrades_analysis` unset. It
+  names the coverage file that fed the CRAP scores, and its note prints on any
+  non-quiet run instead of only when `CI` is set. The GitHub Action, the GitLab
+  template and the MCP tools already select on `degrades_analysis`. They read
+  the new kinds as they are, under a combined warning that reads "degraded
+  inputs". The kind set is open and no `schema_version` moves
   (Closes [#2689](https://github.com/fallow-rs/fallow/issues/2689)).
 
-- **A `--sarif-file` that could not be written is reported.** When the
-  directory or the file could not be created, or serialization or the flush
-  failed, the run warned on stderr and kept its exit code, so code scanning
-  could stop receiving alerts behind a green job. `request_outcomes` carries
-  a `sarif-file` entry with `affects: "artifact"`, the reason
-  `directory-create-failed`, `write-failed` or `serialize-failed`, and the
-  sentence the CLI printed. A written file is listed as `applied` with its path.
-  A missing artifact does not make the report wider, which is why
-  `requests-unapplied` and the scope warnings leave it out. The Action's
-  warning for a missing SARIF
-  file says that nothing is uploaded, that code scanning keeps the previous
-  alerts, and why the write failed. That warning checks for the file itself and
-  also fires with an older binary. The two SARIF re-render fallbacks no longer
-  discard their stderr. Exit codes are unchanged
+- **fallow reports a `--sarif-file` it could not write.** The run used to
+  warn on stderr and keep its exit code. That happened when fallow could not
+  create the directory or the file, or when serialization or the flush failed.
+  Code scanning could then lose alerts while the job passed.
+  `request_outcomes` carries a `sarif-file` entry with `affects: "artifact"`,
+  the reason `directory-create-failed`, `write-failed` or `serialize-failed`,
+  and the sentence the CLI printed. A written file is listed as `applied` with
+  its path.
+
+  A missing artifact does not widen the report, and `requests-unapplied` and
+  the scope warnings omit it. The GitHub Action warning for a missing SARIF
+  file states that nothing is uploaded. It also states that code scanning keeps
+  the previous alerts, and why the write failed. It checks for the file itself
+  and fires with an older binary as well. The two SARIF re-render fallbacks no
+  longer discard their stderr. Exit codes are unchanged
   (Closes [#2690](https://github.com/fallow-rs/fallow/issues/2690)).
 
 - **Every format that cannot carry `--group-by` reports it.** `json`, `human`,
   `sarif` and `codeclimate` carry grouping. `compact`, `markdown` and `badge`
-  already warned on stderr when they fell back to a flat document, while the
-  four pull-request comment and review formats, `github-annotations` and
-  `github-summary` said nothing. They print the same note, which names the
-  format as `--format` spells it. The comment and review bodies also add a
-  clause with the requested mode that points at `--format json`, and
-  `fallow report --from` renders the same clause. The fallback exits `0` as
-  before, and the envelope is unchanged. The behaviour is documented in
-  `docs/backwards-compatibility.md`
+  already warned on stderr when they rendered one flat document. The four
+  comment and review formats, `github-annotations` and `github-summary` said
+  nothing. All of them print the same note, which names the format as
+  `--format` spells it.
+
+  The comment and review bodies add a clause with the requested mode and name
+  `--format json`, and `fallow report --from` renders the same clause. The
+  fallback exits `0` as before, and the envelope is unchanged.
+  `docs/backwards-compatibility.md` documents the behaviour
   (Closes [#2691](https://github.com/fallow-rs/fallow/issues/2691)).
 
 - **The pull-request comment, the merge-request note and the Check Run report a
-  stale baseline.** The advisory reached the Action's step log and job summary
+  stale baseline.** The advisory reached the Action step log and job summary
   only. The sticky pull-request comment, the GitLab merge-request note and both
-  review bodies add one sentence to their status line when the baseline
-  matched nothing, went partly stale or tripped `fail-on-stale-baseline`. The
-  sentence uses the job summary's wording, and an audit or combined envelope
-  gets one per baseline. The Check Run lists each armed gate as its own row,
-  with what it compared and its threshold. An unenforced verdict shows as
-  neutral, which keeps the overall conclusion as it was. With
-  `fallow ci post-check-run --split-gates` each armed gate gets a
-  `Fallow / <gate>` status context; neither integration passes that flag by
-  default
+  review bodies add one sentence to their status line. They add it when the
+  baseline matched nothing, went partly stale or tripped
+  `fail-on-stale-baseline`. The sentence uses the job summary wording, and an
+  audit or combined envelope gets one sentence per baseline.
+
+  The Check Run lists each armed gate as its own row, with what it compared and
+  its threshold. An unenforced verdict appears as neutral, which keeps the
+  overall conclusion as it was. With `fallow ci post-check-run --split-gates`
+  each armed gate gets a `Fallow / <gate>` status context. Neither integration
+  passes that flag by default
   (Closes [#2675](https://github.com/fallow-rs/fallow/issues/2675)).
 
 - **`fallow audit` reports the baselines it cannot judge.** An audit loads up
-  to three baselines (`dead-code-baseline`, `dupes-baseline`,
-  `health-baseline`, from flags or config) and analyzes changed files only, so
-  it can judge none of them. It warned on stderr once, which `--quiet` removes.
-  The audit envelope carries a staleness object per loaded baseline and a
-  `gate_outcomes["stale-baseline"]` entry whose gate stands down. All three
-  always report `change_scoped: true` and `gate_trips: false`; do not gate on
-  them. For each audit baseline the Action and the GitLab template print the
-  unscoped command that can judge it, and both reject
-  `--fail-on-stale-baseline` on an audit run passed through `args` or
-  `FALLOW_ARGS`
+  to three baselines from flags or config: `dead-code-baseline`,
+  `dupes-baseline` and `health-baseline`. It analyzes changed files only, so it
+  can judge none of them. It warned on stderr once, and `--quiet` removed that
+  line. The audit envelope carries a staleness object per loaded baseline
+  and a `gate_outcomes["stale-baseline"]` entry whose gate stands down.
+
+  All three staleness objects report `change_scoped: true` and
+  `gate_trips: false`. Do not gate on them. For each audit baseline the GitHub
+  Action and the GitLab template print the unscoped command that can judge it.
+  Both reject `--fail-on-stale-baseline` on an audit run passed through `args`
+  or `FALLOW_ARGS`
   (Closes [#2677](https://github.com/fallow-rs/fallow/issues/2677)).
 
-- **A baseline saved by another command is reported.** When
-  `fallow dupes --baseline` was given a health baseline, it loaded the file,
-  matched nothing and reported zero stale entries, so `fail-on-stale-baseline`
-  stayed green on the wrong file. Such a run warns on stderr and sets
-  `baseline_staleness.unrecognised_format: true`; the Action's step log and job
-  summary, the GitLab job log and the MCP `warnings` repeat it, also for a
-  baseline passed through `args` or `FALLOW_ARGS`. The check compares the keys
-  in the file with the keys the command writes. An empty baseline saved on a
-  clean project passes. `dead-code` never reports it, because a foreign file
-  already fails to load there with exit 2. The Action publishes
-  `baseline-unrecognised`. Exit codes are unchanged
+- **fallow reports a baseline another command saved.** Given a health baseline,
+  `fallow dupes --baseline` loaded the file, matched nothing and reported zero
+  stale entries, and `fail-on-stale-baseline` passed on the wrong file. Such a
+  run warns on stderr and sets
+  `baseline_staleness.unrecognised_format: true`. The Action step log and job
+  summary, the GitLab job log and the MCP `warnings` repeat it. A baseline
+  passed through `args` or `FALLOW_ARGS` is covered as well.
+
+  The check reads the `kind` in the file, and uses the keys the command writes
+  when the file carries no `kind`. An empty baseline saved on a clean project
+  passes. `dead-code` reports an unrecognised file as well. The Action
+  publishes `baseline-unrecognised`. Exit codes are unchanged
   (Closes [#2679](https://github.com/fallow-rs/fallow/issues/2679)).
 
 ## [3.27.0] - 2026-09-17
