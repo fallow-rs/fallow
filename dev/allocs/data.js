@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790073138095,
+  "lastUpdate": 1790076357186,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8a2b5194d09dbfd012cc8388925e9060fd5cfd54",
-          "message": "test: add component_cache bench shard for store load, save, and conversion (#2501)\n\nAdds CodSpeed coverage for the extraction cache store save, store load, and cached-module to module-info conversion. Benchmark only, no production code.",
-          "timestamp": "2026-08-31T23:47:08+02:00",
-          "tree_id": "5c9bbdf92a2d48121afb9fc543b50201d43ef463",
-          "url": "https://github.com/fallow-rs/fallow/commit/8a2b5194d09dbfd012cc8388925e9060fd5cfd54"
-        },
-        "date": 1788213066257,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9757381,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49421,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1188351,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8429,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8454,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4742dac6e20450de88df7b3d89895d97eaee84c",
+          "message": "fix: distinguish security findings on the same line (#2766)",
+          "timestamp": "2026-09-22T13:20:07+02:00",
+          "tree_id": "11dedd2531ee6aa01f12bd8cdeb50e1afdbcd069",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4742dac6e20450de88df7b3d89895d97eaee84c"
+        },
+        "date": 1790076352331,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10048085,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51430,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1142672,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 7024,
             "unit": "allocations"
           }
         ]
