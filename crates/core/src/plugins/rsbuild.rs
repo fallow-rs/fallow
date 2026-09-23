@@ -51,7 +51,10 @@ define_plugin! {
             source,
             config_path,
             root,
-            base.as_deref(),
+            super::module_federation::FederationBase {
+                context: base.as_deref(),
+                package_dir: None,
+            },
             "rsbuild",
         );
 

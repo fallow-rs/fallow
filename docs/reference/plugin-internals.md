@@ -99,16 +99,21 @@ reader resolves it.
 The reader resolves the first argument through a small set of shapes: an object
 literal, a name, an object spread of one of these, and `Object.assign(...)` over
 them. A name resolves to a top-level binding of the same file, including
-`export const`, and then to a relative ESM import of a sibling config. The
+`export const`, and then to a relative ESM import of a sibling config. A
+relative CommonJS `require('./x')` resolves to the value that module exports as
+a whole. The
 parser resolves a same-file name only when the program holds one binding of it,
 as a top-level `const` or `let`, and no expression writes to the binding or to
 one of its members. A name that a hook body or a parameter declares again, and a
 binding that a later statement reassigns or mutates, name another object at the
-call, so the resolver declines. A CommonJS `require` does not resolve. An
+call, so the resolver declines. A package `require` does not resolve. An
 argument that does not resolve is silent. A spread or an `Object.assign`
 argument that does not resolve records the `spread` advisory against each
 Federation key that the readable part does not declare, because the hidden part
-can declare that key. Resolution stops after a fixed number of steps, so a
+can declare that key. When the readable part declares no Federation key, only a
+callee that names Module Federation beyond doubt records it. The bare
+`federation` callee does not, because other libraries export a function of that
+name. Resolution stops after a fixed number of steps, so a
 spread cycle ends as an unreadable spread.
 
 The array form of `exposes` is read. A bundler uses a string element both as the
@@ -128,7 +133,16 @@ Also unread: `shared`, and the runtime `registerRemotes` and `loadRemote` calls.
 
 A path read out of a config file resolves against that file's directory unless
 the config declares its own base, as webpack and rspack `context` and rsbuild
-`root` do. A tool config
+`root` do. A webpack config in a config directory (`config/`, `build/` or
+`webpack/`) runs from the package root, so its Federation `exposes` targets and
+`remotes` scope resolve against the parent of that directory.
+
+A file with a `webpack.<target>` name in a config directory counts as a webpack
+config only when it exports a configuration: an object with at least one webpack
+config key, an array of configurations, or a `merge(...)` call. A helper module
+such as `config/webpack.paths.js` stays reportable. The `build/` directory is
+excluded from source discovery by a built-in ignore pattern, so config
+discovery probes the filesystem for a pattern under it. A tool config
 that is not at the project root is therefore only correct for the tree it sits
 in, which is what keeps a workspace package from seeding entries for a sibling.
 
@@ -151,7 +165,9 @@ Module Federation `exposes` targets share one predicate for this.
 A bundler resolves an entry path without a source extension the way it resolves
 an import: as a file with each extension, then as a directory through its index
 file. A webpack, rspack or rsbuild entry such as `./lib` therefore also yields
-`lib.{ext}` and `lib/index.{ext}` patterns.
+`lib.{ext}` and `lib/index.{ext}` patterns. The entry is classified as a path or
+a module request before it is joined to a `context` or `root` directory,
+because the joined value no longer carries its `./` prefix.
 
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that

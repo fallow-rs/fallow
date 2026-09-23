@@ -416,10 +416,11 @@ fn pattern_has_glob(pattern: &str) -> bool {
 }
 
 /// True when `pattern` has a directory component (any component before the
-/// basename) that is a hidden directory NOT on the walk's traversal allowlist.
-/// The discovery walk never descends such directories, so the in-memory
-/// candidate index cannot contain files under them and the filesystem probe is
-/// required to keep those configs (e.g. `.config/prisma.ts`) discoverable.
+/// basename) that the discovery walk does not index: a hidden directory NOT on
+/// the walk's traversal allowlist, or a directory that a built-in ignore
+/// pattern excludes, such as `build`. The in-memory candidate index cannot
+/// contain files under them, so the filesystem probe is required to keep those
+/// configs (e.g. `.config/prisma.ts`, `build/webpack.prod.js`) discoverable.
 fn pattern_needs_filesystem(pattern: &str) -> bool {
     let mut components = pattern.split('/').peekable();
     let mut needs_fs = false;
@@ -435,8 +436,25 @@ fn pattern_needs_filesystem(pattern: &str) -> bool {
             needs_fs = true;
             break;
         }
+        if is_default_ignored_directory(component) {
+            needs_fs = true;
+            break;
+        }
     }
     needs_fs
+}
+
+/// Whether a built-in ignore pattern of the form `**/<name>/**` excludes a
+/// directory of this name from source discovery.
+fn is_default_ignored_directory(name: &str) -> bool {
+    fallow_config::DEFAULT_IGNORE_PATTERNS
+        .iter()
+        .any(|pattern| {
+            pattern
+                .strip_prefix("**/")
+                .and_then(|rest| rest.strip_suffix("/**"))
+                .is_some_and(|directory| directory == name)
+        })
 }
 
 /// In-memory equivalent of [`discover_pattern_matches`], resolving `pattern`
@@ -759,6 +777,9 @@ mod tests {
         assert!(!pattern_needs_filesystem("**/project.json"));
         assert!(!pattern_needs_filesystem(".storybook/main.ts"));
         assert!(!pattern_needs_filesystem("a/b/c.json"));
+        // A directory that a built-in ignore pattern excludes is not indexed.
+        assert!(pattern_needs_filesystem("build/webpack.prod.js"));
+        assert!(!pattern_needs_filesystem("config/webpack.prod.js"));
     }
 
     #[test]

@@ -2034,6 +2034,23 @@ fn find_variable_init_expression<'a>(
     None
 }
 
+/// The expression a module exports as a whole: the right side of
+/// `module.exports = ...`, or the expression of `export default ...`.
+pub(crate) fn find_module_export_expression<'a>(
+    program: &'a Program<'a>,
+) -> Option<&'a Expression<'a>> {
+    program.body.iter().find_map(|stmt| match stmt {
+        Statement::ExportDefaultDeclaration(decl) => decl.declaration.as_expression(),
+        Statement::ExpressionStatement(expr_stmt) => match &expr_stmt.expression {
+            Expression::AssignmentExpression(assign) if is_module_exports_target(&assign.left) => {
+                Some(&assign.right)
+            }
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
 /// Find the init expression a sibling module exports under `name`
 /// (`None` = default export). For named exports this covers both
 /// `export const NAME = ...` and a local `const NAME = ...` later re-exported
@@ -2095,7 +2112,7 @@ pub(crate) fn find_relative_import_binding(
 
 /// True for a relative/absolute module specifier (`./x`, `../x`, `/x`), the
 /// shapes that point at a sibling file rather than an npm package.
-fn is_relative_specifier(specifier: &str) -> bool {
+pub(crate) fn is_relative_specifier(specifier: &str) -> bool {
     specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with('/')
 }
 
@@ -2492,12 +2509,12 @@ fn collect_require_sources(expr: &Expression) -> Vec<String> {
 }
 
 /// Check if a call expression is `require(...)`.
-fn is_require_call(call: &CallExpression) -> bool {
+pub(crate) fn is_require_call(call: &CallExpression) -> bool {
     matches!(&call.callee, Expression::Identifier(id) if id.name == "require")
 }
 
 /// Get the first string argument of a `require()` call.
-fn get_require_source(call: &CallExpression) -> Option<String> {
+pub(crate) fn get_require_source(call: &CallExpression) -> Option<String> {
     call.arguments.first().and_then(|arg| {
         if let Argument::StringLiteral(s) = arg {
             Some(s.value.to_string())
@@ -4026,6 +4043,23 @@ mod tests {
         "#;
         let val = extract_config_string(source, &js_path(), &["testDir"]);
         assert_eq!(val, Some("./tests".to_string()));
+    }
+
+    #[test]
+    fn variable_reference_to_an_exported_const() {
+        for source in [
+            r#"
+            export const config = { testDir: "./tests" };
+            export default config;
+            "#,
+            r#"
+            export const config = { testDir: "./tests" };
+            module.exports = config;
+            "#,
+        ] {
+            let val = extract_config_string(source, &js_path(), &["testDir"]);
+            assert_eq!(val, Some("./tests".to_string()), "source: {source}");
+        }
     }
 
     #[test]

@@ -46,6 +46,10 @@ const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 /// config: `ModuleFederationPlugin` for webpack and rspack,
 /// `pluginModuleFederation` for rsbuild, `federation` for vite,
 /// `NextFederationPlugin` for Next.js.
+/// The Federation callee that other libraries also name a function, so its
+/// options pass the shape gate only when they declare a Federation key.
+const AMBIGUOUS_CALLEE: &str = "federation";
+
 const FEDERATION_CALLEES: &[&str] = &[
     "ModuleFederationPlugin",
     "NextFederationPlugin",
@@ -89,13 +93,28 @@ struct ConfigLocation<'a> {
     /// Project-relative base directory that replaces the config directory when
     /// resolving a relative `exposes` target, as webpack's `context` does.
     pub context: Option<&'a Path>,
+    /// Project-relative package directory that replaces the config directory
+    /// when the config sits in a config directory such as `config/`.
+    pub package_dir: Option<&'a Path>,
+}
+
+/// The directories a bundler config anchors its Federation declarations to,
+/// when they differ from the config file's own directory.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct FederationBase<'a> {
+    /// The base directory option of the config, such as webpack's `context`,
+    /// as a project-relative path.
+    pub context: Option<&'a Path>,
+    /// The project-relative package directory of a config that sits in a
+    /// config directory. Webpack runs such a config from the package root.
+    pub package_dir: Option<&'a Path>,
 }
 
 impl ConfigLocation<'_> {
     /// The directory a relative `exposes` target resolves against, expressed as
     /// a stand-in config path so the shared path normalization applies.
     fn target_base(&self) -> std::borrow::Cow<'_, Path> {
-        match self.context {
+        match self.context.or(self.package_dir) {
             Some(context) => {
                 std::borrow::Cow::Owned(self.root.join(context).join("module-federation"))
             }
@@ -121,14 +140,15 @@ impl ConfigLocation<'_> {
     /// workspace package cannot silence a finding in a sibling package. A root
     /// config governs the whole project.
     fn scope_pattern(&self) -> String {
-        let directory = self
-            .relative_config_path()
-            .and_then(|relative| {
+        let directory = match self.package_dir {
+            Some(package_dir) => Some(config_parser::path_to_config_string(package_dir)),
+            None => self.relative_config_path().and_then(|relative| {
                 Path::new(&relative)
                     .parent()
                     .map(config_parser::path_to_config_string)
-            })
-            .filter(|directory| !directory.is_empty());
+            }),
+        }
+        .filter(|directory| !directory.is_empty());
         match directory {
             Some(directory) => format!("{directory}/{SCOPE_SUFFIX}"),
             None => SCOPE_SUFFIX.to_string(),
@@ -232,15 +252,14 @@ fn apply_from_source(
 /// Read the Federation options of every Federation plugin call in a bundler
 /// config and register what they declare.
 ///
-/// `context` is a project-relative base directory that replaces the config
-/// directory when resolving a relative `exposes` target, as webpack's `context`
-/// option does.
+/// `base` names the directories that replace the config directory when
+/// resolving a relative `exposes` target and scoping a remote alias.
 pub(super) fn apply_bundler_plugin_options(
     result: &mut PluginResult,
     source: &str,
     config_path: &Path,
     root: &Path,
-    context: Option<&Path>,
+    base: FederationBase<'_>,
     plugin_label: &str,
 ) {
     apply_from_source(
@@ -249,7 +268,8 @@ pub(super) fn apply_bundler_plugin_options(
         &ConfigLocation {
             config_path,
             root,
-            context,
+            context: base.context,
+            package_dir: base.package_dir,
         },
         plugin_label,
         &FederationSites {
@@ -319,7 +339,7 @@ fn read(
         {
             let mut options = ResolvedOptions::default();
             read_options_object(program, config_path, config_object, 0, &mut options);
-            collector.merge(options);
+            collector.merge(options, true);
         }
         if sites.read_plugin_calls {
             collector.visit_program(program);
@@ -354,9 +374,9 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
     }
 
     fn read_plugin_call(&mut self, callee: &Expression<'a>, arguments: &[Argument<'a>]) {
-        if !is_federation_callee(callee) {
+        let Some(callee_name) = federation_callee_name(callee) else {
             return;
-        }
+        };
         let Some(argument) = arguments.first().and_then(Argument::as_expression) else {
             return;
         };
@@ -364,18 +384,20 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
         if !resolve_options(self.program, self.config_path, argument, 0, &mut options) {
             return;
         }
-        self.merge(options);
+        self.merge(options, callee_name != AMBIGUOUS_CALLEE);
     }
 
     /// Take what one options value declares.
     ///
     /// The shape gate applies to the whole value: a call whose options declare
-    /// no Federation key and hide nothing behind a spread registers nothing, so
-    /// a same-named local symbol does not activate extraction. A spread that is
-    /// not readable can hold each key the readable part does not declare, so it
-    /// is recorded against each of those keys.
-    fn merge(&mut self, options: ResolvedOptions) {
-        if options.declared.is_empty() && !options.unreadable_spread {
+    /// no Federation key registers nothing, so a same-named local symbol does
+    /// not activate extraction. The one exception is an unreadable spread in
+    /// the options of a `federation_specific` source, which names Module
+    /// Federation beyond doubt. A spread that is not readable can hold each key
+    /// the readable part does not declare, so it is recorded against each of
+    /// those keys.
+    fn merge(&mut self, options: ResolvedOptions, federation_specific: bool) {
+        if options.declared.is_empty() && !(options.unreadable_spread && federation_specific) {
             return;
         }
         for target in options.config.exposed_targets {
@@ -445,6 +467,9 @@ fn resolve_options(
             read_options_object(program, path, object, depth, options);
             true
         }
+        Expression::CallExpression(call) if config_parser::is_require_call(call) => {
+            resolve_required_options(path, call, depth, options)
+        }
         Expression::CallExpression(call) if is_object_assign(&call.callee) => {
             for argument in &call.arguments {
                 let resolved = argument.as_expression().is_some_and(|argument| {
@@ -502,12 +527,42 @@ fn resolve_options_name(
     else {
         return false;
     };
-    let Some((module_path, source)) = config_parser::resolve_sibling_module(path, &specifier)
+    resolve_module_options(path, &specifier, imported_name.as_deref(), depth, options)
+}
+
+/// Resolve the options a relative `require('./x')` names: the value that module
+/// exports as a whole. A package `require` does not resolve.
+fn resolve_required_options(
+    path: &Path,
+    call: &CallExpression<'_>,
+    depth: usize,
+    options: &mut ResolvedOptions,
+) -> bool {
+    let Some(specifier) = config_parser::get_require_source(call)
+        .filter(|specifier| config_parser::is_relative_specifier(specifier))
     else {
         return false;
     };
+    resolve_module_options(path, &specifier, None, depth, options)
+}
+
+/// Read the options a relative sibling module exports: under `export_name`,
+/// or as the whole module when `export_name` is `None`.
+fn resolve_module_options(
+    path: &Path,
+    specifier: &str,
+    export_name: Option<&str>,
+    depth: usize,
+    options: &mut ResolvedOptions,
+) -> bool {
+    let Some((module_path, source)) = config_parser::resolve_sibling_module(path, specifier) else {
+        return false;
+    };
     config_parser::extract_from_source(&source, &module_path, |module| {
-        let init = config_parser::find_exported_init(module, imported_name.as_deref())?;
+        let init = match export_name {
+            Some(name) => config_parser::find_exported_init(module, Some(name))?,
+            None => config_parser::find_module_export_expression(module)?,
+        };
         resolve_options_init(module, &module_path, init, depth + 1, options).then_some(())
     })
     .is_some()
@@ -753,18 +808,19 @@ fn record_spread(
     }
 }
 
-fn is_federation_callee(callee: &Expression<'_>) -> bool {
+/// The Federation callee name of a call, or `None` for any other callee.
+fn federation_callee_name<'a>(callee: &'a Expression<'a>) -> Option<&'a str> {
     let name = match unwrap_expression(callee) {
         Expression::Identifier(identifier) => identifier.name.as_str(),
         Expression::StaticMemberExpression(member) => member.property.name.as_str(),
         Expression::ComputedMemberExpression(member) => match unwrap_expression(&member.expression)
         {
             Expression::StringLiteral(literal) => literal.value.as_str(),
-            _ => return false,
+            _ => return None,
         },
-        _ => return false,
+        _ => return None,
     };
-    FEDERATION_CALLEES.contains(&name)
+    FEDERATION_CALLEES.contains(&name).then_some(name)
 }
 
 fn unwrap_expression<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
@@ -808,7 +864,12 @@ define_plugin! {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
 
-        let location = ConfigLocation { config_path, root, context: None };
+        let location = ConfigLocation {
+            config_path,
+            root,
+            context: None,
+            package_dir: None,
+        };
         // The declared `always_used` pattern is matched against the
         // project-relative path without a `**/` rewrite, so it covers a root
         // config only. Credit the file that was actually read, at any depth.
@@ -1269,7 +1330,7 @@ mod tests {
             ",
             config_path,
             Path::new("/project"),
-            None,
+            FederationBase::default(),
             "webpack",
         );
         assert_eq!(result.config_diagnostics.len(), 1);
@@ -1580,6 +1641,7 @@ mod tests {
             r"module.exports = { plugins: [somethingElse({ exposes: { './a': './src/a.ts' } })] };",
             r"module.exports = { plugins: [federation(mfConfig)] };",
             r"module.exports = { plugins: [federation('graphql-schema', { batch: true })] };",
+            r"module.exports = { plugins: [federation({ ...opts })] };",
             r"
             const options = { registry: './src/registry.ts' };
             module.exports = { plugins: [federation(options)] };
@@ -1726,14 +1788,51 @@ mod tests {
     }
 
     #[test]
-    fn options_from_a_common_js_require_stay_unread_and_silent() {
-        let (config, computed) = bundler(
+    fn a_require_that_does_not_resolve_is_silent() {
+        for source in [
             r"
-            const mfConfig = require('./mf.config');
+            const mfConfig = require('./missing.config');
             module.exports = { plugins: [new ModuleFederationPlugin(mfConfig)] };
             ",
+            r"
+            const mfConfig = require('shared-federation-config');
+            module.exports = { plugins: [new ModuleFederationPlugin(mfConfig)] };
+            ",
+        ] {
+            let (config, computed) = bundler(source);
+            assert_eq!(config, FederationConfig::default(), "source: {source}");
+            assert!(computed.is_empty(), "source: {source}");
+        }
+    }
+
+    #[test]
+    fn options_from_a_relative_require_are_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            dir.path().join("mf.config.js"),
+            r"
+            const options = { exposes: { './Button': './src/Button.tsx' } };
+            module.exports = options;
+            ",
+        )
+        .expect("write sibling config");
+        let (config, computed) = read(
+            r"
+            const mfConfig = require('./mf.config');
+            module.exports = {
+                plugins: [
+                    new ModuleFederationPlugin(mfConfig),
+                    new ModuleFederationPlugin({ ...require('./mf.config.js') }),
+                ],
+            };
+            ",
+            &dir.path().join("webpack.config.js"),
+            &FederationSites {
+                read_plugin_calls: true,
+                read_config_object: false,
+            },
         );
-        assert_eq!(config, FederationConfig::default());
+        assert_eq!(config, exposed("./src/Button.tsx"));
         assert!(computed.is_empty(), "got {computed:?}");
     }
 

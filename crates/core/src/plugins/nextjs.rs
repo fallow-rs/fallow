@@ -324,7 +324,7 @@ define_plugin!(
             source,
             config_path,
             root,
-            None,
+            super::module_federation::FederationBase::default(),
             "nextjs",
         );
 

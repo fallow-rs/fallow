@@ -173,3 +173,69 @@ fn object_assign_options_are_read() {
         )],
     );
 }
+
+/// Item 1: a CommonJS `require` of a relative sibling config.
+#[test]
+fn options_from_a_relative_require_are_read() {
+    assert_button_is_exposed(
+        "relative require",
+        &[
+            (
+                "webpack.config.js",
+                r#"const { ModuleFederationPlugin } = require("@module-federation/enhanced");
+                   const mfConfig = require("./mf.config");
+                   module.exports = { plugins: [new ModuleFederationPlugin(mfConfig)] };"#,
+            ),
+            (
+                "mf.config.js",
+                r#"module.exports = { name: "app", exposes: { "./Button": "./src/Button.tsx" } };"#,
+            ),
+        ],
+    );
+}
+
+/// A webpack config under `config/` resolves `exposes` and scopes `remotes`
+/// against the package root, as webpack does without `context`.
+#[test]
+fn a_config_under_the_config_directory_anchors_to_the_package_root() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(&root.join("package.json"), PACKAGE_JSON);
+    write(
+        &root.join("config/webpack.client.js"),
+        r#"const { ModuleFederationPlugin } = require("@module-federation/enhanced");
+           module.exports = {
+             entry: "./src/index.ts",
+             plugins: [new ModuleFederationPlugin({
+               name: "app",
+               exposes: { "./Button": "./src/Button.tsx" },
+               remotes: { checkout: "checkout@https://example.test/remoteEntry.js" },
+             })],
+           };"#,
+    );
+    write(&root.join("src/index.ts"), r#"import "checkout/Cart";"#);
+    write(
+        &root.join("src/Button.tsx"),
+        r#"export default (): string => "button";"#,
+    );
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused.iter().any(|path| path.ends_with("src/Button.tsx")),
+        "the exposed file is an entry point, got {unused:?}"
+    );
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted.contains(&"checkout"),
+        "the remote alias covers the package, got {unlisted:?}"
+    );
+}

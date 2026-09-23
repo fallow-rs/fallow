@@ -9,13 +9,64 @@ use std::path::{Path, PathBuf};
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
-/// Webpack config files. A root name matches at any depth. A project that keeps
-/// one config per target commonly puts them under `config/` with the target in
-/// the name, such as `config/webpack.client.js`.
+/// Webpack config file names. A root name matches at any depth.
+const ROOT_CONFIG_PATTERNS: &[&str] = &[
+    "webpack.config.{ts,js,mjs,cjs}",
+    "webpack.*.config.{ts,js,mjs,cjs}",
+];
+
+/// Webpack config files. A project that keeps one config per target commonly
+/// puts them in a config directory with the target in the name, such as
+/// `config/webpack.client.js`. The same directory often holds helper modules,
+/// such as `config/webpack.paths.js`, so a file there counts as a config only
+/// when [`exports_webpack_config`] accepts it.
 const CONFIG_PATTERNS: &[&str] = &[
     "webpack.config.{ts,js,mjs,cjs}",
     "webpack.*.config.{ts,js,mjs,cjs}",
     "config/webpack.*.{ts,js,mjs,cjs}",
+    "build/webpack.*.{ts,js,mjs,cjs}",
+    "webpack/webpack.*.{ts,js,mjs,cjs}",
+];
+
+/// Directories that hold webpack configs one level below the package root.
+const CONFIG_DIRECTORIES: &[&str] = &["config", "build", "webpack"];
+
+/// Top-level keys of a webpack configuration object. A helper module exports
+/// none of them.
+const CONFIG_KEYS: &[&str] = &[
+    "amd",
+    "bail",
+    "cache",
+    "context",
+    "dependencies",
+    "devServer",
+    "devtool",
+    "entry",
+    "experiments",
+    "externals",
+    "externalsPresets",
+    "externalsType",
+    "ignoreWarnings",
+    "infrastructureLogging",
+    "loader",
+    "mode",
+    "module",
+    "name",
+    "node",
+    "optimization",
+    "output",
+    "parallelism",
+    "performance",
+    "plugins",
+    "profile",
+    "recordsPath",
+    "resolve",
+    "resolveLoader",
+    "snapshot",
+    "stats",
+    "target",
+    "watch",
+    "watchOptions",
 ];
 
 define_plugin!(
@@ -23,7 +74,7 @@ define_plugin!(
     enablers: &["webpack"],
     entry_patterns: &["src/index.{ts,tsx,js,jsx}"],
     config_patterns: CONFIG_PATTERNS,
-    always_used: CONFIG_PATTERNS,
+    always_used: ROOT_CONFIG_PATTERNS,
     tooling_dependencies: &[
         "webpack",
         "webpack-cli",
@@ -32,6 +83,11 @@ define_plugin!(
     ],
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
+
+        let package_dir = config_directory_package(config_path, root);
+        if package_dir.is_some() && !accept_directory_config(&mut result, config_path, source, root) {
+            return result;
+        }
 
         let imports = config_parser::extract_imports(source, config_path);
         for imp in &imports {
@@ -52,19 +108,14 @@ define_plugin!(
             source,
             config_path,
             root,
-            context.as_deref(),
+            super::module_federation::FederationBase {
+                context: context.as_deref(),
+                package_dir: package_dir.as_deref(),
+            },
             "webpack",
         );
 
-        for (find, replacement) in
-            config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
-        {
-            if let Some(normalized) =
-                config_parser::normalize_config_path(&replacement, config_path, root)
-            {
-                result.path_aliases.push((find, normalized));
-            }
-        }
+        push_path_aliases(&mut result, source, config_path, root);
 
         let require_deps =
             config_parser::extract_config_require_strings(source, config_path, "plugins");
@@ -237,12 +288,112 @@ pub(super) fn apply_entries(
     let entries = config_parser::extract_config_string_or_array(source, path, entry_key);
     let base = config_parser::extract_config_path(source, path, &[base_key])
         .and_then(|raw| config_parser::normalize_config_path_buf(&raw, path, root));
-    result.extend_entry_patterns_or_dependencies(entries.into_iter().map(|entry| {
+    result.extend_entry_patterns_or_dependencies(entries, |entry| {
         base.as_ref()
             .map(|base| normalize_context_entry(&entry, base, path, root))
             .unwrap_or(entry)
-    }));
+    });
     base
+}
+
+/// The project-relative package directory of a config that sits in a config
+/// directory, such as `apps/web` for `apps/web/config/webpack.client.js`.
+///
+/// Webpack resolves `exposes` targets against its working directory when a
+/// config sets no `context`, and a script runs a config in a config directory
+/// from the package root.
+fn config_directory_package(config_path: &Path, root: &Path) -> Option<PathBuf> {
+    let relative = config_path.strip_prefix(root).ok()?;
+    let directory = relative.parent()?;
+    let name = directory.file_name()?.to_str()?;
+    if !CONFIG_DIRECTORIES.contains(&name) {
+        return None;
+    }
+    directory.parent().map(Path::to_path_buf)
+}
+
+/// Register the `resolve.alias` entries of a config as path aliases.
+fn push_path_aliases(result: &mut PluginResult, source: &str, config_path: &Path, root: &Path) {
+    for (find, replacement) in
+        config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
+    {
+        if let Some(normalized) =
+            config_parser::normalize_config_path(&replacement, config_path, root)
+        {
+            result.path_aliases.push((find, normalized));
+        }
+    }
+}
+
+/// Decide whether a file in a config directory is a config, and credit it.
+///
+/// A root config name is always a config. A `webpack.<target>` name is a
+/// config only when [`exports_webpack_config`] accepts it. `always_used`
+/// covers root names only, so the accepted file is credited here, at any depth.
+fn accept_directory_config(
+    result: &mut PluginResult,
+    config_path: &Path,
+    source: &str,
+    root: &Path,
+) -> bool {
+    if !is_directory_config_name(config_path) {
+        return true;
+    }
+    if !exports_webpack_config(source, config_path) {
+        return false;
+    }
+    if let Ok(relative) = config_path.strip_prefix(root) {
+        result
+            .always_used_files
+            .push(globset::escape(&config_parser::path_to_config_string(
+                relative,
+            )));
+    }
+    true
+}
+
+/// Whether a file name has the config directory form `webpack.<target>.<ext>`
+/// rather than a root config name, which is always a config.
+fn is_directory_config_name(config_path: &Path) -> bool {
+    config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.starts_with("webpack.")
+                && !name.starts_with("webpack.config.")
+                && !name.contains(".config.")
+        })
+}
+
+/// Whether a module exports a webpack configuration: an object with at least
+/// one webpack config key (also from a function that returns one), an array of
+/// configurations, or a `webpack-merge` call such as `merge(common, { ... })`.
+fn exports_webpack_config(source: &str, path: &Path) -> bool {
+    config_parser::extract_from_source(source, path, |program| {
+        if let Some(object) = config_parser::find_config_object(program) {
+            return Some(
+                CONFIG_KEYS
+                    .iter()
+                    .any(|key| config_parser::property_expr(object, key).is_some()),
+            );
+        }
+        let exported = config_parser::find_module_export_expression(program)?;
+        Some(match exported {
+            oxc_ast::ast::Expression::ArrayExpression(_) => true,
+            oxc_ast::ast::Expression::CallExpression(call) => is_merge_callee(&call.callee),
+            _ => false,
+        })
+    })
+    .unwrap_or(false)
+}
+
+fn is_merge_callee(callee: &oxc_ast::ast::Expression<'_>) -> bool {
+    let name = match callee {
+        oxc_ast::ast::Expression::Identifier(identifier) => identifier.name.as_str(),
+        oxc_ast::ast::Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+        _ => return false,
+    };
+    name.starts_with("merge")
 }
 
 fn normalize_context_entry(entry: &str, context: &Path, config_path: &Path, root: &Path) -> String {
@@ -676,7 +827,12 @@ mod tests {
                     .compile_matcher()
             })
             .collect();
-        for path in ["config/webpack.client.js", "config/webpack.server.ts"] {
+        for path in [
+            "config/webpack.client.js",
+            "config/webpack.server.ts",
+            "build/webpack.prod.js",
+            "webpack/webpack.dev.js",
+        ] {
             assert!(
                 matchers.iter().any(|matcher| matcher.is_match(path)),
                 "{path} is a webpack config"
@@ -688,5 +844,45 @@ mod tests {
                 .any(|matcher| matcher.is_match("config/webpack-helpers.js")),
             "a file without the `webpack.` prefix is not a config"
         );
+    }
+
+    #[test]
+    fn a_config_directory_file_counts_only_when_it_exports_a_webpack_config() {
+        let path = std::path::Path::new("config/webpack.client.js");
+        for source in [
+            r#"module.exports = { mode: "production" };"#,
+            r#"module.exports = (env) => ({ entry: "./src/index.ts" });"#,
+            r"module.exports = [client, server];",
+            r#"module.exports = merge(common, require("./webpack.parts"));"#,
+            r"export default { plugins: [] };",
+        ] {
+            assert!(exports_webpack_config(source, path), "source: {source}");
+        }
+        for source in [
+            r#"module.exports = { src: path.resolve(__dirname, "../src") };"#,
+            r"exports.devServer = () => ({ devServer: { hot: true } });",
+            r"module.exports = { loadCss, loadImages };",
+        ] {
+            assert!(!exports_webpack_config(source, path), "source: {source}");
+        }
+    }
+
+    #[test]
+    fn a_helper_in_a_config_directory_contributes_nothing() {
+        let result = WebpackPlugin.resolve_config(
+            std::path::Path::new("/project/config/webpack.paths.js"),
+            r#"module.exports = { src: "./src/client.ts" };"#,
+            std::path::Path::new("/project"),
+        );
+        assert!(result.always_used_files.is_empty());
+        assert!(result.entry_patterns.is_empty());
+
+        let result = WebpackPlugin.resolve_config(
+            std::path::Path::new("/project/config/webpack.client.js"),
+            r#"module.exports = { entry: "./src/client.ts" };"#,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result.always_used_files, vec!["config/webpack.client.js"]);
+        assert_eq!(result.entry_patterns, vec!["src/client.ts"]);
     }
 }

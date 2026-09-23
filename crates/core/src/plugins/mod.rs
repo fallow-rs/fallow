@@ -274,8 +274,16 @@ impl PluginResult {
     /// so a glob built from it matches nothing while the package still needs
     /// dependency credit. Module Federation `exposes` targets already split the
     /// two this way (issue #2706); bundler entries now do too (issue #2739).
-    fn extend_entry_patterns_or_dependencies<I, S>(&mut self, values: I)
-    where
+    ///
+    /// `resolve_path` maps a path value to its project-relative form, for
+    /// example against a `context` directory. It runs after the value is
+    /// classified, because a joined path such as `app/main` no longer carries
+    /// the `./` that marks it as a path.
+    fn extend_entry_patterns_or_dependencies<I, S>(
+        &mut self,
+        values: I,
+        resolve_path: impl Fn(String) -> String,
+    ) where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
@@ -286,7 +294,7 @@ impl PluginResult {
                     .push(crate::resolve::extract_package_name(request));
                 continue;
             }
-            self.push_entry_path(value);
+            self.push_entry_path(resolve_path(value));
         }
     }
 

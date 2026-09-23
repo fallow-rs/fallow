@@ -143,3 +143,120 @@ fn webpack_extensionless_entry_resolves_to_the_file() {
     );
     assert_used("extensionless entry", &unused, &["src/app.ts"]);
 }
+
+/// An extensionless entry and a directory entry resolve against `context` too,
+/// for webpack and for rspack.
+#[test]
+fn extensionless_entries_resolve_against_context() {
+    for (dependency, config_file) in [
+        (r#""webpack": "^5.98.0""#, "webpack.config.js"),
+        (r#""@rspack/core": "^1.0.0""#, "rspack.config.js"),
+    ] {
+        let unused = unused_files(
+            dependency,
+            &[
+                (
+                    config_file,
+                    r#"const path = require("path");
+                       module.exports = {
+                         context: path.resolve(__dirname, "app"),
+                         entry: { a: "./main", b: "./widgets" },
+                       };"#,
+                ),
+                ("app/main.ts", "export const main = 1;"),
+                ("app/widgets/index.ts", "export const widgets = 1;"),
+            ],
+        );
+        assert_used(
+            config_file,
+            &unused,
+            &["app/main.ts", "app/widgets/index.ts"],
+        );
+    }
+}
+
+/// The rsbuild default entry shape, `./src/index`, resolves against `root`.
+#[test]
+fn rsbuild_default_entry_resolves_against_root() {
+    let unused = unused_files(
+        r#""@rsbuild/core": "^1.0.0""#,
+        &[
+            (
+                "rsbuild.config.ts",
+                r#"import path from "node:path";
+                   import { defineConfig } from "@rsbuild/core";
+                   export default defineConfig({
+                     root: path.resolve(__dirname, "app"),
+                     source: { entry: { index: "./src/index" } },
+                   });"#,
+            ),
+            ("app/src/index.ts", "export const index = 1;"),
+        ],
+    );
+    assert_used("rsbuild root default entry", &unused, &["app/src/index.ts"]);
+}
+
+/// `build/` and `webpack/` hold webpack configs too.
+#[test]
+fn webpack_configs_under_build_and_webpack_directories_are_read() {
+    for directory in ["build", "webpack"] {
+        let config_file = format!("{directory}/webpack.prod.js");
+        let unused = unused_files(
+            r#""webpack": "^5.98.0""#,
+            &[
+                (
+                    &config_file,
+                    r#"module.exports = { mode: "production", entry: "./src/client.ts" };"#,
+                ),
+                ("src/client.ts", "export const client = 1;"),
+            ],
+        );
+        assert_used(&config_file, &unused, &[&config_file, "src/client.ts"]);
+    }
+}
+
+/// A helper module beside the configs is not a config, so it stays reportable
+/// when nothing imports it.
+#[test]
+fn webpack_helper_modules_in_a_config_directory_stay_reportable() {
+    let unused = unused_files(
+        r#""webpack": "^5.98.0""#,
+        &[
+            (
+                "config/webpack.client.js",
+                r#"const { merge } = require("webpack-merge");
+                   const common = require("./webpack.common.js");
+                   module.exports = merge(common, { mode: "development" });"#,
+            ),
+            (
+                "config/webpack.common.js",
+                r#"module.exports = { entry: "./src/client.ts" };"#,
+            ),
+            (
+                "config/webpack.paths.js",
+                r#"const path = require("path");
+                   module.exports = { src: path.resolve(__dirname, "../src") };"#,
+            ),
+            (
+                "config/webpack.parts.js",
+                r"exports.devServer = () => ({ devServer: { hot: true } });",
+            ),
+            ("src/client.ts", "export const client = 1;"),
+        ],
+    );
+    assert_used(
+        "config helpers",
+        &unused,
+        &[
+            "config/webpack.client.js",
+            "config/webpack.common.js",
+            "src/client.ts",
+        ],
+    );
+    for helper in ["config/webpack.paths.js", "config/webpack.parts.js"] {
+        assert!(
+            unused.iter().any(|path| path.ends_with(helper)),
+            "{helper} is a helper that nothing imports, got {unused:?}"
+        );
+    }
+}
