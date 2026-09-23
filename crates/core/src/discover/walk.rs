@@ -803,9 +803,10 @@ fn build_skipped_dotdirs_note(root: &Path, reportable: &[&PathBuf], truncated: b
     };
     format!(
         "fallow: skipped {at_least}{count} hidden {noun} that {verb} source files ({examples}). \
-         Hidden directories are not traversed and no config field adds one: analyze {pronoun} \
-         with fallow --root {target} if it holds first-party source, or add '{target}/**' to \
-         ignorePatterns to silence this."
+         Hidden directories are not traversed and no config field adds one, so an export used \
+         only there can be reported as unused: add that export to ignoreExports, or add \
+         '{target}/**' to ignorePatterns to silence this. fallow --root {target} analyzes \
+         {pronoun} on its own and does not fix this run."
     )
 }
 
@@ -1680,7 +1681,9 @@ mod tests {
         let only = PathBuf::from("/repo/.tooling");
         let note = build_skipped_dotdirs_note(root, &[&only], false);
         assert!(note.contains("skipped 1 hidden directory that contains source files"));
-        assert!(note.contains("analyze it with fallow --root .tooling"));
+        assert!(note.contains("add that export to ignoreExports"));
+        assert!(note.contains("fallow --root .tooling analyzes it on its own"));
+        assert!(note.contains("does not fix this run"));
         assert!(note.contains("add '.tooling/**' to"));
         assert!(
             !note.contains("<dir>"),
@@ -1695,7 +1698,7 @@ mod tests {
         let b = PathBuf::from("/repo/.b");
         let note = build_skipped_dotdirs_note(root, &[&a, &b], false);
         assert!(note.contains("skipped 2 hidden directories that contain source files"));
-        assert!(note.contains("analyze one with fallow --root <dir>"));
+        assert!(note.contains("fallow --root <dir> analyzes one on its own"));
     }
 
     #[test]

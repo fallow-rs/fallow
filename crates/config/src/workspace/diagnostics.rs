@@ -907,8 +907,9 @@ mod tests {
             diag.message
         );
         assert!(
-            diag.message.contains("--root"),
-            "message names the real remedy: {}",
+            diag.message.contains("ignoreExports")
+                && diag.message.contains("does not fix this run"),
+            "message names the remedy for the false positive, not --root: {}",
             diag.message
         );
         assert!(

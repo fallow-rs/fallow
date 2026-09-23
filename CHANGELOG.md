@@ -104,6 +104,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Hotspots (1 files)`. These headers now print `1 file` for a count of one
   and `N files` for other counts. Closes #2808.
 
+- **The hidden-directory message gives a remedy that fixes the run.** The
+  `skipped-source-dotdir` message and the stderr note told you to run
+  `fallow --root <dir>`. That command analyzes only the hidden directory and
+  does not fix the current run. An export that only the hidden directory uses
+  can still report as unused. The message now tells you to add that export to
+  `ignoreExports`. To silence the message, add the directory to
+  `ignorePatterns`. The message also says that `--root` does not fix this run.
+  Closes #2797.
+
 - **Nuxt local layers are part of the project.** A local directory in
   `extends` of a `nuxt.config`, and each `layers/<name>` directory, is now a
   layer root when it holds a `nuxt.config`. Its pages, layouts, components,

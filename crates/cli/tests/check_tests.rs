@@ -1954,8 +1954,9 @@ fn combined_json_root_carries_the_skipped_source_dotdir_diagnostic() {
     assert!(
         reported[0]["message"]
             .as_str()
-            .is_some_and(|message| message.contains("--root")),
-        "the message names the only remedy that analyzes the directory: {}",
+            .is_some_and(|message| message.contains("ignoreExports")
+                && message.contains("does not fix this run")),
+        "the message names the remedy for the false positive in this run: {}",
         reported[0]["message"]
     );
 }

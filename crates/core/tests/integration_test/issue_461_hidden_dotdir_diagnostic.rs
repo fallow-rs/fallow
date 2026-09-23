@@ -61,10 +61,11 @@ fn skipped_source_dotdir_is_reported_once_with_both_real_remedies() {
             && diagnostic
                 .message
                 .contains("Its imports and exports are not analyzed.")
-            && diagnostic.message.contains("--root")
+            && diagnostic.message.contains("ignoreExports")
+            && diagnostic.message.contains("does not fix this run")
             && diagnostic.message.contains("ignorePatterns")
             && diagnostic.message.contains("no config field"),
-        "message names the directory, the consequence, both remedies, and the absence of a \
+        "message names the directory, the consequence, both remedies, the limit of --root, and the absence of a \
          config field: {}",
         diagnostic.message
     );
