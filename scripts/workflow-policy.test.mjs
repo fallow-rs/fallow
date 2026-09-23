@@ -294,7 +294,10 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   // must run there on the pull request too.
   assert.ok(windowsRustPaths.includes("crates/cli/tests/drift/**"));
   assert.match(windowsRustJob, /^[ \t]+run: cargo build -p fallow-mcp$/m);
-  assert.match(windowsRustJob, /^[ \t]+run: cargo test -p fallow-cli --test drift -- --include-ignored$/m);
+  assert.match(
+    windowsRustJob,
+    /^[ \t]+run: cargo test -p fallow-cli --test drift -- --include-ignored$/m,
+  );
   // Path rendering lives across both crates (`Display`, `join`, `components`),
   // and a separator regression there is invisible until the weekly Release
   // Validation runs the full suite on Windows.
