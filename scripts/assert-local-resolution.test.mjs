@@ -150,6 +150,72 @@ test("a dependency missing everywhere reports the install command", () => {
   }
 });
 
+const pinDependency = (root, spec, field = "devDependencies") =>
+  writeFileSync(
+    join(root, "package.json"),
+    `${JSON.stringify({ private: true, [field]: { [DEPENDENCY]: spec } })}\n`,
+  );
+
+test("a stale local install names the installed and the pinned version", () => {
+  const { outer, checkout, entrypoint } = nestedCheckout();
+  installPackage(checkout, { version: "1.0.0" });
+  pinDependency(checkout, "1.2.0");
+  try {
+    assert.throws(
+      () =>
+        assertLocalResolution({
+          dependency: DEPENDENCY,
+          resolveFrom: entrypoint,
+          repoRoot: checkout,
+          installCommand: "npm ci",
+        }),
+      (error) =>
+        error.message.includes(`${DEPENDENCY} 1.0.0 is installed`) &&
+        error.message.includes("pins 1.2.0") &&
+        error.message.includes(join(checkout, "package.json")) &&
+        error.message.includes("npm ci"),
+    );
+  } finally {
+    rmSync(outer, { recursive: true, force: true });
+  }
+});
+
+test("a local install at the pinned version passes", () => {
+  const { outer, checkout, entrypoint } = nestedCheckout();
+  installPackage(checkout, { version: "1.2.0" });
+  pinDependency(checkout, "1.2.0", "dependencies");
+  try {
+    assert.doesNotThrow(() =>
+      assertLocalResolution({
+        dependency: DEPENDENCY,
+        resolveFrom: entrypoint,
+        repoRoot: checkout,
+        installCommand: "npm ci",
+      }),
+    );
+  } finally {
+    rmSync(outer, { recursive: true, force: true });
+  }
+});
+
+test("a range spec leaves the version to the lockfile", () => {
+  const { outer, checkout, entrypoint } = nestedCheckout();
+  installPackage(checkout, { version: "1.0.0" });
+  pinDependency(checkout, "^1.2.0");
+  try {
+    assert.doesNotThrow(() =>
+      assertLocalResolution({
+        dependency: DEPENDENCY,
+        resolveFrom: entrypoint,
+        repoRoot: checkout,
+        installCommand: "npm ci",
+      }),
+    );
+  } finally {
+    rmSync(outer, { recursive: true, force: true });
+  }
+});
+
 test("the repository pins resolve inside this checkout", () => {
   assert.doesNotThrow(() => assertLocalResolution({ dependency: "oxlint" }));
   assert.doesNotThrow(() => assertLocalResolution({ dependency: "oxfmt" }));

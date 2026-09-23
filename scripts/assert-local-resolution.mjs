@@ -7,12 +7,13 @@
  * way. A checkout nested inside another checkout (for example a git worktree
  * created inside the clone) therefore borrows the outer install when it has
  * none of its own, silently running tool versions this checkout does not pin.
- * This guard turns that into a named failure.
+ * This guard turns that into a named failure. It also compares the installed
+ * version with an exact pin, so a stale local install fails too.
  *
  * Run: `node scripts/assert-local-resolution.mjs <dependency>...`
  */
 
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,8 @@ import { runCliMain } from "./cli-main.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_INSTALL_COMMAND = "npm ci";
+const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "optionalDependencies"];
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
 
 const realPath = (path) => {
   try {
@@ -71,6 +74,51 @@ export const resolveDependencyDirectory = (dependency, resolveFrom) => {
   return ancestorPackageDirectory(dependency, dirname(resolveFrom));
 };
 
+const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+
+/**
+ * Find the nearest `package.json` at or above `startDirectory`, and inside
+ * `repoRoot`, that declares `dependency`.
+ *
+ * @returns {{ manifest: string, spec: string } | null}
+ */
+const declaredSpec = (dependency, startDirectory, repoRoot) => {
+  let directory = startDirectory;
+  for (;;) {
+    const manifest = join(directory, "package.json");
+    if (existsSync(manifest)) {
+      const json = readJson(manifest);
+      for (const field of DEPENDENCY_FIELDS) {
+        const spec = json[field]?.[dependency];
+        if (typeof spec === "string") {
+          return { manifest, spec };
+        }
+      }
+    }
+    const parent = dirname(directory);
+    if (parent === directory || !isInside(repoRoot, parent)) {
+      return null;
+    }
+    directory = parent;
+  }
+};
+
+const assertPinnedVersion = ({ dependency, directory, resolveFrom, repoRoot, installCommand }) => {
+  const declared = declaredSpec(dependency, dirname(resolveFrom), repoRoot);
+  // A range leaves the exact version to the lockfile, which this guard does not read.
+  if (declared === null || !EXACT_VERSION.test(declared.spec)) {
+    return;
+  }
+  const installed = readJson(join(directory, "package.json")).version;
+  if (installed === declared.spec) {
+    return;
+  }
+  throw new Error(
+    `${dependency} ${installed} is installed at ${directory}, but ${declared.manifest} ` +
+      `pins ${declared.spec}. The local install is stale. Run \`${installCommand}\` in ${repoRoot}.`,
+  );
+};
+
 /**
  * Assert that `dependency` resolves to an install inside this checkout.
  *
@@ -81,8 +129,10 @@ export const resolveDependencyDirectory = (dependency, resolveFrom) => {
  *   binaries declared in the root `package.json`.
  * @param {string} [options.repoRoot] Checkout that must own the install.
  * @param {string} [options.installCommand] Command that creates that install.
- * @throws {Error} When the dependency is missing or resolves outside the
- *   checkout, naming the foreign path and the install command.
+ * @throws {Error} When the dependency is missing, resolves outside the
+ *   checkout, or has a version other than the exact pin in the nearest
+ *   `package.json` that declares it. The message names the path, both
+ *   versions where they apply, and the install command.
  */
 export const assertLocalResolution = ({
   dependency,
@@ -98,6 +148,7 @@ export const assertLocalResolution = ({
     );
   }
   if (isInside(repoRoot, directory) || isInside(realPath(repoRoot), realPath(directory))) {
+    assertPinnedVersion({ dependency, directory, resolveFrom, repoRoot, installCommand });
     return;
   }
   throw new Error(
