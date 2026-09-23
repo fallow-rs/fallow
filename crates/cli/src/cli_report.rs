@@ -241,21 +241,6 @@ fn render_saved_ci_target(
     }
 }
 
-/// The note a saved envelope's comment and review bodies carry: the existing
-/// type-aware message, the baseline advisory, the gate verdict, whether the run
-/// did what it was asked, a grouping this target cannot carry, or any
-/// combination of them.
-///
-/// Additive to whatever `saved_ci_conclusion` already produced, so the
-/// type-aware message keeps its place and the later clauses join it rather than
-/// replacing it. Joined by the same function the live path uses, because the
-/// two renders are one contract, and the clause order therefore matches
-/// `report::ci_status_note`, which is what `the_live_and_saved_notes_agree`
-/// pins.
-///
-/// The requests are read through `summary_line_for_saved_render`, because the
-/// diff filter governing THIS body was resolved by this process rather than by
-/// the run that saved the envelope.
 /// The status note a comment body rendered from `envelope` carries.
 ///
 /// The saved render reaches it through [`saved_ci_conclusion`] and
@@ -271,6 +256,21 @@ pub fn envelope_status_note(
     Ok(saved_status_message(envelope, existing, grouping_dropped))
 }
 
+/// The note a saved envelope's comment and review bodies carry: the existing
+/// type-aware message, the baseline advisory, the gate verdict, whether the run
+/// did what it was asked, a grouping this target cannot carry, or any
+/// combination of them.
+///
+/// Additive to whatever `saved_ci_conclusion` already produced, so the
+/// type-aware message keeps its place and the later clauses join it rather than
+/// replacing it. Joined by the same function the live path uses, because the
+/// two renders are one contract, and the clause order therefore matches
+/// `report::ci_status_note`, which is what `the_live_and_saved_notes_agree`
+/// pins.
+///
+/// The requests are read through `summary_line_for_saved_render`, because the
+/// diff filter governing THIS body was resolved by this process rather than by
+/// the run that saved the envelope.
 fn saved_status_message(
     envelope: &serde_json::Value,
     existing: Option<&'static str>,

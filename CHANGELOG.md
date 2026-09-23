@@ -106,7 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `readOnlyHint: false` and `destructiveHint: false`. A host that approves
     read-only tools with no prompt now asks before it runs these four tools.
     `code_execute` stays read-only and refuses `save_baseline`,
-    `save_regression_baseline` and `save_snapshot`.
+    `save_regression_baseline` and `save_snapshot`. A snippet that passed one
+    of them now gets an error. Call the standalone tool for the write.
 
 - **Nuxt local layers are part of the project.** A local directory in
   `extends` of a `nuxt.config`, and each `layers/<name>` directory, is now a
