@@ -246,6 +246,8 @@ pub struct RulesConfig {
     /// `warn` reports the finding without a failure, and `off` hides it. A
     /// finding above several ceilings takes the most severe of their rules.
     /// The rule applies before the `health --min-severity` band gate.
+    /// After you set a kind to `off`, save the health baseline again: its
+    /// entries for the hidden findings no longer match.
     #[serde(default)]
     pub complexity_cyclomatic: Severity,
     /// A function above the cognitive ceiling (`health.maxCognitive` or a

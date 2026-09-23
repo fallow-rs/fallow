@@ -1429,7 +1429,7 @@
           "default": "warn"
         },
         "complexity-cyclomatic": {
-          "description": "A function above the cyclomatic ceiling (`health.maxCyclomatic` or a\n`thresholdOverrides` entry). The threshold decides if the finding\nexists; this rule decides if it fails the run. Defaults to `error`.\n`warn` reports the finding without a failure, and `off` hides it. A\nfinding above several ceilings takes the most severe of their rules.\nThe rule applies before the `health --min-severity` band gate.",
+          "description": "A function above the cyclomatic ceiling (`health.maxCyclomatic` or a\n`thresholdOverrides` entry). The threshold decides if the finding\nexists; this rule decides if it fails the run. Defaults to `error`.\n`warn` reports the finding without a failure, and `off` hides it. A\nfinding above several ceilings takes the most severe of their rules.\nThe rule applies before the `health --min-severity` band gate.\nAfter you set a kind to `off`, save the health baseline again: its\nentries for the hidden findings no longer match.",
           "$ref": "#/$defs/Severity",
           "default": "error"
         },

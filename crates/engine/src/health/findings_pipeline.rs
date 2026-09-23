@@ -349,16 +349,17 @@ fn finalize_health_findings(
     scope_reasons: fallow_output::BaselineScopeReasons,
     threshold_state_tracker: &mut ThresholdOverrideStateTracker,
 ) -> Result<HealthFindingFinalizeResult, HealthError> {
-    // The rules drop the findings whose kinds are all `off`, so every later
-    // step (the override disclosure, the counts, the baseline and `--top`)
-    // sees the same list.
-    apply_complexity_rules(findings, config);
     // Runs before every downstream narrowing. The override rows were recorded
-    // over the whole collection pass, while `--diff-file`/`--diff-stdin`,
-    // `--baseline` and `--top` all narrow the findings list for DISPLAY, so
-    // annotating after any of them leaves an `insufficient` row with an empty
-    // `outstanding`: the one contradiction a CI gate cannot detect.
+    // over the whole collection pass, while the `complexity-*` rules,
+    // `--diff-file`/`--diff-stdin`, `--baseline` and `--top` all narrow the
+    // findings list, so annotating after any of them leaves an `insufficient`
+    // row with an empty `outstanding`: the one contradiction a CI gate cannot
+    // detect. A rule set to `off` hides a finding but does not make the
+    // override high enough, so the row keeps the dimension.
     annotate_outstanding_dimensions(threshold_state_tracker, findings);
+    // The rules drop the findings whose kinds are all `off` before the counts,
+    // the baseline and `--top`.
+    apply_complexity_rules(findings, config);
     if let Some(diff_index) = diff_index {
         filter_complexity_findings_by_diff(findings, diff_index, &config.root);
     }

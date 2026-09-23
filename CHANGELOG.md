@@ -22,7 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `overrides[].rules` can set the rules for some files. The rule applies
   before `health --min-severity`, so a `warn` finding never fails the run.
   `health.maxCrap: 0` stays the full off switch for CRAP: it also removes
-  the CRAP file-score signals, which `complexity-crap: off` keeps. Each
+  the CRAP file-score signals, which `complexity-crap: off` keeps. After
+  you turn a kind `off`, save the health baseline again: its entries for the
+  hidden findings no longer match and count as stale. A `thresholdOverrides`
+  row still lists the dimensions that its unit breaches, also when a rule
+  hides the finding. Each
   complexity finding in the JSON output now carries an optional
   `effective_severity` field (`error` or `warn`) next to the band in
   `severity`. A fallow version without these rules warns about an unknown

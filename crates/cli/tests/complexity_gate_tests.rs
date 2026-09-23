@@ -400,3 +400,42 @@ fn saved_json_without_the_field_keeps_the_band_levels() {
         "note"
     );
 }
+
+/// Rule `off` hides the finding but does not settle the threshold override.
+/// The override is still too low for the unit, so its row keeps the
+/// dimensions that the unit breaches.
+#[test]
+fn an_off_rule_keeps_the_outstanding_dimensions_of_a_threshold_override() {
+    let config = r#"{
+  "entry": ["src/**/*.ts"],
+  "rules": {
+    "complexity-cyclomatic": "off",
+    "complexity-cognitive": "off",
+    "complexity-crap": "off"
+  },
+  "health": {
+    "maxCyclomatic": 5,
+    "maxCognitive": 50,
+    "maxCrap": 1000,
+    "thresholdOverrides": [{ "files": ["src/core.ts"], "maxCyclomatic": 7 }]
+  }
+}
+"#;
+    let dir = project(config, &[(CORE, RISKY)]);
+    let envelope = parse_json(&run("health", dir.path(), "json", &[]));
+
+    assert_eq!(envelope["findings"].as_array().map_or(0, Vec::len), 0);
+    let row = envelope["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array")
+        .iter()
+        .find(|row| row["dimension"] == "complexity")
+        .unwrap_or_else(|| panic!("no complexity row in {envelope}"));
+    assert_eq!(row["status"], "insufficient");
+    assert!(
+        row["outstanding"]
+            .as_array()
+            .is_some_and(|dims| dims.iter().any(|dim| dim == "complexity")),
+        "an insufficient row names what the unit still breaches: {row}"
+    );
+}
