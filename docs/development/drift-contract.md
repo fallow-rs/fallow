@@ -22,14 +22,17 @@ to the harness, as the test that failed before the fix.
   root-relative path, symbol or package name, line). The harness compares key
   sets, not presentation fields such as `actions`, columns, or prose.
 - **Volatile field**: a field that changes between two runs of the same
-  analysis: `elapsed_ms` and `_meta.telemetry.analysis_run_id`.
+  analysis. `canonical_report` in `crates/cli/tests/common/mod.rs` removes
+  them before a comparison:
+  - `elapsed_ms` and `head_sha`, at any depth (`VOLATILE_REPORT_FIELDS`),
+  - `_meta.telemetry.analysis_run_id`.
 
 The harness builds keys with one normalizer per envelope shape
 (`crates/cli/tests/drift/keys.rs`):
 
 | Envelope | Issue kind | Path | Symbol | Line |
 |---|---|---|---|---|
-| Dead code | The array name, for example `unused_exports` | `path`, or the `files` joined with ` -> ` | `export_name`, `package_name`, `member_name` (with its parent), `name` or `specifier` | `line`, or 0 |
+| Dead code | The array name, for example `unused_exports` | `path`, or the `files` joined with ` -> ` | The first field that is present, in this order: `export_name`, `package_name`, `member_name`, `name`, `specifier`, `entry_name`, `catalog_name`. When the finding has a `parent_name`, the key is `parent_name.symbol` | `line`, or 0 |
 | Dupes | `code-duplication`, one key for each clone group | The instance files joined with ` -> ` | Each instance as `file:start-end` | The first start line |
 | Health | `complexity`, one key for each entry in `findings` | `path` | Function `name` | `line` |
 | Combined | The three sections above | | | |
@@ -201,6 +204,9 @@ shell cannot change one surface and not the others.
 
 The harness needs the `fallow-mcp` binary. When the binary is missing, the
 harness fails with the build command. It never skips the MCP surface.
+`cargo test -p fallow-cli` does not rebuild `fallow-mcp`. When a source file
+of `fallow-mcp` is newer than the binary, the harness fails with the same
+build command.
 
 ```bash
 cargo build -p fallow-mcp
@@ -212,7 +218,8 @@ cargo test -p fallow-cli --test drift
 A failure message gives the seed, the case count, the shrunk project with its
 files, and the difference between the two key sets.
 
-1. Build the binaries: `cargo build -p fallow-mcp`.
+1. Build the binaries: `cargo build -p fallow-mcp`. A local run needs this
+   step again after each change outside `crates/cli`.
 2. Run the failing test with the same seed and case count:
 
    ```bash

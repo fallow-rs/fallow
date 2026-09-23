@@ -57,9 +57,13 @@ const REGRESSIONS: &str = concat!(
 
 fn case_count() -> u32 {
     std::env::var("FALLOW_DRIFT_CASES").map_or(DEFAULT_CASES, |value| {
-        value
-            .parse()
-            .unwrap_or_else(|_| panic!("FALLOW_DRIFT_CASES must be a number, got {value:?}"))
+        // Zero cases would pass every invariant without a run.
+        match value.parse::<u32>() {
+            Ok(0) | Err(_) => {
+                panic!("FALLOW_DRIFT_CASES must be a positive number, got {value:?}")
+            }
+            Ok(cases) => cases,
+        }
     })
 }
 
@@ -274,10 +278,12 @@ fn subset_baseline(saved: &Value, mask: &[bool]) -> Value {
 }
 
 /// A fixed project that yields findings in every domain, so an empty key set
-/// from a broken normalizer cannot pass as agreement.
+/// from a broken normalizer cannot pass as agreement. The same project also
+/// proves that baselines and suppression comments remove findings: without
+/// that proof, a run that ignores both would pass every I6 subset check.
 #[test]
 fn harness_sees_findings_in_every_domain() {
-    let project = fixed_project();
+    let project = Project::new(&fixed_model(false), true);
     for analysis in Analysis::ALL {
         let keys = cli_keys(analysis, &project.root, &Scope::default(), None);
         assert!(
@@ -305,9 +311,60 @@ fn harness_sees_findings_in_every_domain() {
             envelope["kind"]
         );
     }
+    assert_full_baseline_removes_findings(&project);
+    assert_suppressions_remove_findings(&project);
 }
 
-fn fixed_project() -> Project {
+/// Baseline half of the I6 positive control.
+fn assert_full_baseline_removes_findings(project: &Project) {
+    let unscoped = Scope::default();
+    for analysis in Analysis::ALL {
+        let full = project
+            .scratch
+            .join(format!("{}-control.json", analysis.cli_command()));
+        cli_save_baseline(analysis, &project.root, &full);
+        let without = cli_keys(analysis, &project.root, &unscoped, None);
+        let with = cli_keys(analysis, &project.root, &unscoped, Some(&full));
+        assert!(
+            with.is_subset(&without) && with.len() < without.len(),
+            "baseline half of I6: a full {analysis:?} baseline removed no finding\n{}",
+            invariants::diff("no baseline", &without, "full baseline", &with)
+        );
+        if analysis != Analysis::DeadCode {
+            assert!(
+                with.is_empty(),
+                "baseline half of I6: a full {analysis:?} baseline kept findings\n{}",
+                keys::render(&with)
+            );
+        }
+    }
+}
+
+/// Suppression half of the I6 positive control: the fixed project with
+/// suppression comments on one unused export, one unused file and the complex
+/// function reports fewer findings than the same project without them.
+fn assert_suppressions_remove_findings(plain: &Project) {
+    let suppressed = Project::new(&fixed_model(true), true);
+    let unscoped = Scope::default();
+    for analysis in [Analysis::DeadCode, Analysis::Health] {
+        let without = cli_keys(analysis, &plain.root, &unscoped, None);
+        let with = invariants::without_suppression_reports(&cli_keys(
+            analysis,
+            &suppressed.root,
+            &unscoped,
+            None,
+        ));
+        assert!(
+            with.len() < without.len(),
+            "suppression half of I6: suppression comments removed no {analysis:?} finding\n{}",
+            invariants::diff("plain comments", &without, "suppression comments", &with)
+        );
+    }
+}
+
+/// The fixed project model. `suppressed` marks one unused export, one unused
+/// file and the complex function for a suppression comment.
+fn fixed_model(suppressed: bool) -> ProjectModel {
     use crate::model::{ChangeSpec, DepSpec, ExportSpec, FileSpec, MarkedBlock};
     let file = |exports: usize, imports: Vec<(usize, usize)>| FileSpec {
         second_package: false,
@@ -321,9 +378,18 @@ fn fixed_project() -> Project {
             .collect(),
         imports,
     };
-    let model = ProjectModel {
+    let mut first = file(2, vec![(1, 0)]);
+    // `e0x0`: an unused value export.
+    first.exports[0].suppressed = suppressed;
+    // Nothing imports this file, so it is an unused file.
+    let orphan = FileSpec {
+        entry_imported: false,
+        suppress_file: suppressed,
+        ..file(0, vec![])
+    };
+    ProjectModel {
         workspaces: false,
-        files: vec![file(2, vec![(1, 0)]), file(2, vec![]), file(1, vec![])],
+        files: vec![first, file(2, vec![]), file(1, vec![]), orphan],
         deps: vec![DepSpec {
             used_by: None,
             dev: false,
@@ -331,10 +397,9 @@ fn fixed_project() -> Project {
         duplicate: Some((1, 2, false)),
         complex: Some(MarkedBlock {
             file: 0,
-            suppressed: false,
+            suppressed,
         }),
         changes: vec![ChangeSpec::Add],
         baseline_mask: vec![true, false],
-    };
-    Project::new(&model, true)
+    }
 }

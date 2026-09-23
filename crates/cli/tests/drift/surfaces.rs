@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
 
@@ -169,7 +169,77 @@ pub fn mcp_bin() -> PathBuf {
          then run the harness again.",
         path.display()
     );
+    assert_mcp_bin_current(&path);
     path
+}
+
+/// Fail when a source file of `fallow-mcp` is newer than the binary.
+///
+/// `cargo test -p fallow-cli` does not rebuild `fallow-mcp`, so an old binary
+/// would run old `fallow_api` code on the MCP typed path. The list of sources
+/// comes from the dep-info file that cargo writes next to the binary. It is the
+/// list cargo itself compares against, so a rebuild always clears the failure.
+/// A crate outside the dependency graph of `fallow-mcp` never triggers it.
+fn assert_mcp_bin_current(binary: &Path) {
+    let dep_info = binary.with_extension("d");
+    let listing = std::fs::read_to_string(&dep_info).unwrap_or_else(|err| {
+        panic!(
+            "cannot read {} ({err}). Run `cargo build -p fallow-mcp`, then run the harness again.",
+            dep_info.display()
+        )
+    });
+    let built = modified(binary).expect("read the fallow-mcp modification time");
+    let newest = dep_info_sources(&listing)
+        .into_iter()
+        .filter_map(|source| modified(&source).map(|time| (time, source)))
+        .max();
+    if let Some((time, source)) = newest
+        && time > built
+    {
+        panic!(
+            "fallow-mcp at {} is older than {}. Run `cargo build -p fallow-mcp`, then run the \
+             harness again.",
+            binary.display(),
+            source.display()
+        );
+    }
+}
+
+fn modified(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+}
+
+/// The prerequisites of a make-style dep-info file. Each line has the form
+/// `target: source source`, and a backslash escapes a space inside a path.
+fn dep_info_sources(listing: &str) -> Vec<PathBuf> {
+    let mut sources = Vec::new();
+    for line in listing.lines() {
+        let Some((_, prerequisites)) = line.split_once(": ") else {
+            continue;
+        };
+        let mut current = String::new();
+        let mut chars = prerequisites.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\\' if chars.peek() == Some(&' ') => {
+                    current.push(' ');
+                    chars.next();
+                }
+                ' ' | '\t' => {
+                    if !current.is_empty() {
+                        sources.push(PathBuf::from(std::mem::take(&mut current)));
+                    }
+                }
+                _ => current.push(ch),
+            }
+        }
+        if !current.is_empty() {
+            sources.push(PathBuf::from(current));
+        }
+    }
+    sources
 }
 
 /// A `fallow-mcp` server driven over stdio JSON-RPC.

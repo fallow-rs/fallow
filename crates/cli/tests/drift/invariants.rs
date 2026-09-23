@@ -93,7 +93,7 @@ pub fn surfaces_agree(context: &str, results: &[(String, KeySet)]) -> Verdict {
     Err(format!("{context}:\n{}", failures.join("\n")))
 }
 
-fn without_suppression_reports(keys: &KeySet) -> KeySet {
+pub fn without_suppression_reports(keys: &KeySet) -> KeySet {
     keys.iter()
         .filter(|key| !SUPPRESSION_REPORT_KINDS.contains(&key.kind.as_str()))
         .cloned()
