@@ -289,6 +289,40 @@ fn hooks_namespace_installs_and_uninstalls_git_hook() {
     cleanup(&dir);
 }
 
+/// A clone without `origin/HEAD` still knows its default branch through the
+/// remote-tracking ref. The hook must fall back to that branch, not to `main`
+/// (issue #2758).
+#[test]
+fn hooks_install_uses_origin_master_when_origin_head_is_missing() {
+    let upstream = init_temp_dir("hooks-default-branch-upstream");
+    common::git(&upstream, &["init", "-q", "-b", "master"]);
+    common::commit_all(&upstream, "initial");
+
+    let parent = init_temp_dir("hooks-default-branch-clone");
+    let upstream_path = upstream.to_str().unwrap();
+    common::git(&parent, &["clone", "-q", upstream_path, "clone"]);
+    let clone = parent.join("clone");
+    common::git(&clone, &["remote", "set-head", "origin", "-d"]);
+
+    let install = run_fallow_raw(&[
+        "--root",
+        clone.to_str().unwrap(),
+        "hooks",
+        "install",
+        "--target",
+        "git",
+    ]);
+    assert_eq!(install.code, 0, "stderr: {}", install.stderr);
+
+    let hook = fs::read_to_string(clone.join(".git/hooks/pre-commit")).unwrap();
+    assert!(
+        hook.contains("BASE=\"master\""),
+        "the hook must fall back to origin/master: {hook}"
+    );
+    cleanup(&parent);
+    cleanup(&upstream);
+}
+
 #[test]
 fn hooks_namespace_agent_dry_run_uses_setup_hooks_engine() {
     let dir = init_temp_dir("hooks-namespace-agent");

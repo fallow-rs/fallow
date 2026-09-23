@@ -85,6 +85,7 @@ pub fn start_telemetry_run(cli: &Cli, fmt: &FormatConfig) -> TelemetryRun {
         start: std::time::Instant::now(),
         context: telemetry_context_for_command(cli, cli.command.as_ref(), fmt.output),
     };
+    output_runtime::reset_run_state();
     output_runtime::set_telemetry_analysis_run_id(
         matches!(fmt.output, OutputFormat::Json).then(telemetry::new_analysis_run_id),
     );

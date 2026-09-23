@@ -1207,6 +1207,40 @@ pub fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> Pat
     }
 }
 
+/// Move a cache directory inside the analysis root to the same place inside
+/// the base worktree.
+///
+/// A base snapshot that wrote into the head tree's cache would mix two
+/// commits in one cache. A relative cache directory resolves against the base
+/// worktree already, and an absolute one outside the root is shared on
+/// purpose, so both stay unchanged. The prefix check runs on the path as
+/// written first and then on the real paths, so a symlinked root cannot keep
+/// the base cache in the head tree.
+#[must_use]
+pub fn remap_cache_dir_for_base_worktree(
+    current_root: &Path,
+    base_worktree_root: &Path,
+    cache_dir: &Path,
+) -> PathBuf {
+    if !cache_dir.is_absolute() {
+        return cache_dir.to_path_buf();
+    }
+    if let Ok(relative) = cache_dir.strip_prefix(current_root) {
+        return base_worktree_root.join(relative);
+    }
+    let canonical_root =
+        dunce::canonicalize(current_root).unwrap_or_else(|_| current_root.to_path_buf());
+    let canonical_cache =
+        dunce::canonicalize(cache_dir).unwrap_or_else(|_| cache_dir.to_path_buf());
+    [cache_dir, canonical_cache.as_path()]
+        .into_iter()
+        .find_map(|candidate| candidate.strip_prefix(&canonical_root).ok())
+        .map_or_else(
+            || cache_dir.to_path_buf(),
+            |relative| base_worktree_root.join(relative),
+        )
+}
+
 /// Analysis root for a detached base worktree, and whether the base commit
 /// contains it at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1312,6 +1346,25 @@ pub fn short_head_sha(root: &Path) -> Option<String> {
     run_git(root, &["rev-parse", "--short", "HEAD"])
 }
 
+/// Full SHA for the current HEAD.
+///
+/// `Ok(None)` means git ran and HEAD does not resolve: the directory is not a
+/// repository, or the repository has no commit yet. `Err` means git could not
+/// be started, so a caller can name that cause in its own error text.
+///
+/// # Errors
+///
+/// Returns the spawn error when the `git` process cannot be started.
+pub fn head_sha(root: &Path) -> std::io::Result<Option<String>> {
+    let output = git_command(root).args(["rev-parse", "HEAD"]).output()?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let value = String::from_utf8_lossy(&output.stdout);
+    let trimmed = value.trim();
+    Ok((!trimmed.is_empty()).then(|| trimmed.to_owned()))
+}
+
 /// Resolve a concrete `--changed-workspaces` ref for project-level next steps.
 ///
 /// Returns `None` when the project has no workspaces, is not a git repository,
@@ -1331,21 +1384,7 @@ pub fn default_workspace_ref_for_workspaces(
     if workspaces.is_empty() || !crate::churn::is_git_repo(root) {
         return None;
     }
-    run_git(
-        root,
-        &[
-            "symbolic-ref",
-            "--quiet",
-            "--short",
-            "refs/remotes/origin/HEAD",
-        ],
-    )
-    .or_else(|| {
-        ["origin/main", "origin/master"]
-            .into_iter()
-            .find(|candidate| git_ref_exists(root, candidate))
-            .map(str::to_owned)
-    })
+    detect_remote_default_ref(root)
 }
 
 /// Git identities for the current user in forms useful for self-routing.
@@ -1402,7 +1441,14 @@ fn git_merge_base(root: &Path, a: &str, b: &str) -> Option<String> {
     run_git(root, &["merge-base", a, b])
 }
 
-fn detect_remote_default_ref(root: &Path) -> Option<String> {
+/// The remote default branch as a remote-tracking ref, such as
+/// `origin/main`.
+///
+/// Reads `origin/HEAD` first. A clone can lack it (a mirror, a CI checkout, or
+/// `git remote set-head origin -d`), so `origin/main` and then `origin/master`
+/// follow. Returns `None` when none of the three exists.
+#[must_use]
+pub fn detect_remote_default_ref(root: &Path) -> Option<String> {
     if let Some(full_ref) = run_git(root, &["symbolic-ref", "refs/remotes/origin/HEAD"])
         && let Some(branch) = full_ref.strip_prefix("refs/remotes/origin/")
     {
@@ -1987,6 +2033,85 @@ mod tests {
             base_analysis_root(&linked_app_root, &base_worktree),
             base_worktree.join("apps").join("mobile")
         );
+    }
+
+    #[test]
+    fn remap_cache_dir_moves_a_cache_under_the_root_into_the_base_worktree() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("repo");
+        let base = temp.path().join("fallow-base");
+        let cache_dir = root.join(".cache").join("fallow");
+
+        assert_eq!(
+            remap_cache_dir_for_base_worktree(&root, &base, &cache_dir),
+            base.join(".cache").join("fallow")
+        );
+    }
+
+    #[test]
+    fn remap_cache_dir_keeps_an_absolute_cache_outside_the_root() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("repo");
+        let base = temp.path().join("fallow-base");
+        let cache_dir = temp.path().join("shared").join("fallow-cache");
+
+        assert_eq!(
+            remap_cache_dir_for_base_worktree(&root, &base, &cache_dir),
+            cache_dir
+        );
+    }
+
+    #[test]
+    fn remap_cache_dir_keeps_a_relative_cache() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("repo");
+        let base = temp.path().join("fallow-base");
+        let cache_dir = Path::new(".fallow").join("cache");
+
+        assert_eq!(
+            remap_cache_dir_for_base_worktree(&root, &base, &cache_dir),
+            cache_dir
+        );
+    }
+
+    /// The root can be spelled through a symbolic link while the cache path
+    /// is the real path. The two spellings must meet, or the base snapshot
+    /// writes its cache into the head tree (issue #2758).
+    #[cfg(unix)]
+    #[test]
+    fn remap_cache_dir_maps_a_symlinked_root_spelling() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let real_root = temp.path().join("real");
+        fs::create_dir_all(&real_root).expect("create real root");
+        let linked_root = temp.path().join("linked");
+        std::os::unix::fs::symlink(&real_root, &linked_root).expect("link the root");
+        let base = temp.path().join("fallow-base");
+        let real_cache = dunce::canonicalize(&real_root)
+            .expect("canonical root")
+            .join(".fallow");
+
+        assert_eq!(
+            remap_cache_dir_for_base_worktree(&linked_root, &base, &real_cache),
+            base.join(".fallow")
+        );
+    }
+
+    #[test]
+    fn head_sha_is_none_before_the_first_commit() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+
+        assert_eq!(head_sha(&repo).expect("git starts"), None);
+    }
+
+    #[test]
+    fn head_sha_returns_the_full_sha() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = seeded_repo(temp.path());
+
+        let sha = head_sha(&repo).expect("git starts").expect("HEAD resolves");
+        assert_eq!(sha, git(&repo, &["rev-parse", "HEAD"]));
     }
 
     /// Auditing a package added on the branch is the ordinary case where the

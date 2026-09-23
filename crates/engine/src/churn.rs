@@ -603,13 +603,7 @@ struct ChurnEventState {
 
 /// Get the full HEAD SHA for cache keying.
 fn get_head_sha(root: &Path) -> Option<String> {
-    let mut command = git_command();
-    command.args(["rev-parse", "HEAD"]).current_dir(root);
-    command
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    crate::repo_refs::head_sha(root).ok().flatten()
 }
 
 /// Check whether `ancestor` is still reachable from `descendant`.

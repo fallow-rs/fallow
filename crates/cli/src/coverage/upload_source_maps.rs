@@ -225,20 +225,14 @@ fn resolve_git_sha(explicit: Option<&str>, root: &Path) -> Result<String, Upload
     {
         sha
     } else {
-        let mut command = Command::new("git");
-        command.args(["rev-parse", "HEAD"]).current_dir(root);
-        clear_ambient_git_env(&mut command);
-        let output = command.output().map_err(|_| {
-            UploadSourceMapsError::Validation(
-                "unable to determine git SHA; pass --git-sha or set $GITHUB_SHA".to_owned(),
-            )
-        })?;
-        if !output.status.success() {
-            return Err(UploadSourceMapsError::Validation(
-                "unable to determine git SHA; pass --git-sha or set $GITHUB_SHA".to_owned(),
-            ));
-        }
-        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        fallow_engine::repo_refs::head_sha(root)
+            .ok()
+            .flatten()
+            .ok_or_else(|| {
+                UploadSourceMapsError::Validation(
+                    "unable to determine git SHA; pass --git-sha or set $GITHUB_SHA".to_owned(),
+                )
+            })?
     };
     validate_git_sha(&sha)?;
     Ok(sha)

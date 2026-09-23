@@ -313,16 +313,13 @@ pub(super) fn resolve_git_sha(
     let sha = if let Some(explicit) = explicit_git_sha {
         explicit.trim().to_owned()
     } else {
-        let mut command = Command::new("git");
-        command.args(["rev-parse", "HEAD"]).current_dir(root);
-        clear_ambient_git_env(&mut command);
-        let output = command.output().map_err(|err| {
-            format!("could not resolve git SHA: {err}. Pass --git-sha <sha> explicitly.")
-        })?;
-        if !output.status.success() {
-            return Err("`git rev-parse HEAD` failed. Pass --git-sha <sha> explicitly.".to_owned());
-        }
-        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        fallow_engine::repo_refs::head_sha(root)
+            .map_err(|err| {
+                format!("could not resolve git SHA: {err}. Pass --git-sha <sha> explicitly.")
+            })?
+            .ok_or_else(|| {
+                "`git rev-parse HEAD` failed. Pass --git-sha <sha> explicitly.".to_owned()
+            })?
     };
 
     if sha.is_empty() {

@@ -117,6 +117,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as relative to the project root. They also keep that reading for the root
   itself, and for every leading-`/` value when `<root>/<root>` is a directory,
   the same as Vite. Closes #2806.
+- **The git hook uses the right default branch without `origin/HEAD`.**
+  `fallow init --hooks` and `fallow hooks install --target git` write a
+  fallback base branch into the hook. A clone without `origin/HEAD` got
+  `main`, also when the remote only has `master`. Now the hook uses
+  `origin/main`, and then `origin/master`, the same way `fallow audit` finds
+  its base. Refs #2758.
 
 - **Nuxt local layers are part of the project.** A local directory in
   `extends` of a `nuxt.config`, and each `layers/<name>` directory, is now a

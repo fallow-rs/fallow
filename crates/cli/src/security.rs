@@ -1208,8 +1208,11 @@ fn compute_base_security_snapshot(
         },
         ProductionAnalysis::DeadCode,
     )?;
-    base_config.cache_dir =
-        remap_cache_dir_for_base_worktree(opts.root, &base_root, &config.cache_dir);
+    base_config.cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
+        opts.root,
+        &base_root,
+        &config.cache_dir,
+    );
     enable_security_rules(&mut base_config);
     let mut base_analysis = analyze_security_candidates(
         &base_snapshot_security_options(opts, &base_root, &current_config_path),
@@ -1414,19 +1417,6 @@ fn save_cached_security_base_snapshot(
         return;
     }
     let _ = tmp.persist(security_base_snapshot_cache_file(config, key));
-}
-
-fn remap_cache_dir_for_base_worktree(
-    current_root: &Path,
-    base_worktree_root: &Path,
-    cache_dir: &Path,
-) -> PathBuf {
-    if cache_dir.is_absolute()
-        && let Ok(relative) = cache_dir.strip_prefix(current_root)
-    {
-        return base_worktree_root.join(relative);
-    }
-    cache_dir.to_path_buf()
 }
 
 struct SecurityAnalysisState {

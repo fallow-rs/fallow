@@ -1541,7 +1541,6 @@ fi
 # ten per level per step, and thirteen kinds would silently drop the tail while
 # competing with the baseline advisory for the same budget.
 ANALYSIS_DEGRADED=false
-EMPTY_ANALYSIS=false
 DEGRADED_SUMMARY=$(jq_debug -r '
   [ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.degrades_analysis == true) ]
   | group_by(.kind)
@@ -1595,7 +1594,6 @@ if [ -n "$REQUESTS_EMPTY_SCOPE" ]; then
 fi
 
 if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' "$RESULTS_FILE" > /dev/null 2>&1; then
-  EMPTY_ANALYSIS=true
   EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check the analysis root, ignorePatterns, and any path or workspace filter."
   if [ "${INPUT_FAIL_ON_EMPTY_ANALYSIS:-}" = "true" ]; then
     GATE_FAILURES+=("$EMPTY_ANALYSIS_MESSAGE")

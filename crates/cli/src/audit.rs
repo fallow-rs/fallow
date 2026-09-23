@@ -323,19 +323,6 @@ fn build_base_audit_options<'a>(
     }
 }
 
-fn remap_cache_dir_for_base_worktree(
-    current_root: &Path,
-    base_worktree_root: &Path,
-    cache_dir: &Path,
-) -> PathBuf {
-    if cache_dir.is_absolute()
-        && let Ok(relative) = cache_dir.strip_prefix(current_root)
-    {
-        return base_worktree_root.join(relative);
-    }
-    cache_dir.to_path_buf()
-}
-
 #[cfg(test)]
 use std::time::SystemTime;
 
@@ -548,7 +535,11 @@ fn run_audit_base_analyses(
     base_root: &Path,
     focus: Option<&FxHashSet<PathBuf>>,
 ) -> Result<HeadAnalyses, ExitCode> {
-    let base_cache_dir = remap_cache_dir_for_base_worktree(opts.root, base_root, opts.cache_dir);
+    let base_cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
+        opts.root,
+        base_root,
+        opts.cache_dir,
+    );
     let current_config_path = opts
         .config_path
         .clone()

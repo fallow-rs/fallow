@@ -34,6 +34,16 @@ pub fn set_loaded_baseline(loaded: LoadedBaselineRecheck) {
     }
 }
 
+/// Clear the state a previous command run left in this process.
+///
+/// A process that runs a second command, such as an embedder or a test
+/// harness, must not offer the baseline path that the first run loaded.
+pub fn reset_run_state() {
+    if let Ok(mut current) = LOADED_BASELINE.lock() {
+        *current = None;
+    }
+}
+
 /// The loaded baseline, when `command` is the command that loaded it.
 #[must_use]
 pub fn loaded_baseline_for(command: &str) -> Option<LoadedBaselineRecheck> {
@@ -60,4 +70,27 @@ pub fn telemetry_analysis_run_id() -> Option<String> {
         .lock()
         .ok()
         .and_then(|id| id.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A second command run in one process must not offer the baseline path
+    /// that the first run loaded. The command name is unique to this test, so
+    /// other tests that load a baseline in parallel cannot fill the slot.
+    #[test]
+    fn reset_clears_the_loaded_baseline() {
+        const COMMAND: &str = "output-runtime-reset-test";
+        set_loaded_baseline(LoadedBaselineRecheck {
+            command: COMMAND,
+            path: "fallow-baseline.json".to_owned(),
+            baseline_entries: 1,
+            scope_reasons: fallow_output::BaselineScopeReasons::default(),
+        });
+
+        reset_run_state();
+
+        assert!(loaded_baseline_for(COMMAND).is_none());
+    }
 }

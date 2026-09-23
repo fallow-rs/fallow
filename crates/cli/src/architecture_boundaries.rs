@@ -1181,7 +1181,7 @@ const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
     ),
     (
         "crates/cli/src/coverage/upload_common.rs",
-        "the full commit sha and working-tree state of a coverage upload",
+        "the origin remote and working-tree state of a coverage upload",
     ),
     (
         "crates/cli/src/coverage/upload_inventory.rs",
@@ -1189,15 +1189,11 @@ const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
     ),
     (
         "crates/cli/src/coverage/upload_source_maps.rs",
-        "the origin remote and full commit sha of a source-map upload",
-    ),
-    (
-        "crates/cli/src/init.rs",
-        "hook scaffolding and the default branch it writes into a hook",
+        "the origin remote of a source-map upload",
     ),
     (
         "crates/cli/src/regression/baseline.rs",
-        "whether a baseline path is ignored, and the full commit sha",
+        "whether a baseline path is ignored",
     ),
 ];
 
@@ -1220,6 +1216,18 @@ fn cli_does_not_own_git_ref_or_root_detection() {
         assert!(
             !source.contains("\"rev-parse\", \"--short\", \"HEAD\""),
             "{source_path} probes the short HEAD sha; use fallow_engine::repo_refs::short_head_sha"
+        );
+        assert!(
+            !source.contains("\"rev-parse\", \"HEAD\""),
+            "{source_path} probes the full HEAD sha; use fallow_engine::repo_refs::head_sha"
+        );
+        assert!(
+            !source.contains("\"refs/remotes/origin/HEAD\""),
+            "{source_path} probes the remote default branch; use fallow_engine::repo_refs::detect_remote_default_ref"
+        );
+        assert!(
+            !source.contains("fn remap_cache_dir_for_base_worktree"),
+            "{source_path} owns a base-worktree cache remap; use fallow_engine::repo_refs::remap_cache_dir_for_base_worktree"
         );
         assert!(
             source_path == base_worktree_path || !source.contains("--show-toplevel"),

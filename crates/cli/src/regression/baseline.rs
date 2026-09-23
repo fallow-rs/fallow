@@ -56,14 +56,7 @@ fn is_likely_gitignored(path: &Path, root: &Path) -> bool {
 
 /// Get the current git SHA, if available.
 fn current_git_sha(root: &Path) -> Option<String> {
-    let mut command = std::process::Command::new("git");
-    command.args(["rev-parse", "HEAD"]).current_dir(root);
-    clear_ambient_git_env(&mut command);
-    command
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    fallow_engine::repo_refs::head_sha(root).ok().flatten()
 }
 
 #[cfg(test)]

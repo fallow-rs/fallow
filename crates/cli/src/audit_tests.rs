@@ -3353,30 +3353,6 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
     assert!(result.dupes.is_some(), "dupes should still run");
 }
 
-#[test]
-fn remap_cache_dir_moves_project_local_cache_to_base_worktree() {
-    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-    let current_root = tmp.path().join("repo");
-    let base_root = tmp.path().join("fallow-base");
-    let cache_dir = current_root.join(".cache").join("fallow");
-
-    let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
-
-    assert_eq!(remapped, base_root.join(".cache").join("fallow"));
-}
-
-#[test]
-fn remap_cache_dir_keeps_external_absolute_cache_shared() {
-    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-    let current_root = tmp.path().join("repo");
-    let base_root = tmp.path().join("fallow-base");
-    let cache_dir = tmp.path().join("shared").join("fallow-cache");
-
-    let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
-
-    assert_eq!(remapped, cache_dir);
-}
-
 fn inherited_duplicate_audit_repo() -> tempfile::TempDir {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let root = tmp
