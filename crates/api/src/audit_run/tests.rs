@@ -720,3 +720,175 @@ fn a_rename_moves_dead_code_keys_onto_the_head_path() {
         snapshot.dead_code
     );
 }
+
+/// Analyses with one unused export in `src/util.ts`.
+struct StubAnalyses {
+    results: AnalysisResults,
+    config: ResolvedConfig,
+    root: PathBuf,
+}
+
+impl StubAnalyses {
+    fn new(root: &Path) -> Self {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/util.ts"),
+                export_name: "unusedValue".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let config = fallow_config::FallowConfig::default().resolve(
+            root.to_path_buf(),
+            fallow_types::output_format::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        Self {
+            results,
+            config,
+            root: root.to_path_buf(),
+        }
+    }
+}
+
+impl AuditAnalyses for StubAnalyses {
+    fn view(&self) -> AuditAnalysesView<'_> {
+        AuditAnalysesView {
+            dead_code: Some(DeadCodeView {
+                results: &self.results,
+                config: &self.config,
+                root: &self.root,
+                type_aware: None,
+                syntactic_keys: None,
+                public_api: None,
+            }),
+            ..AuditAnalysesView::default()
+        }
+    }
+
+    fn dead_code_results_mut(&mut self) -> Option<&mut AnalysisResults> {
+        Some(&mut self.results)
+    }
+
+    fn health_report_mut(&mut self) -> Option<&mut HealthReport> {
+        None
+    }
+
+    fn record_type_aware_warning(&mut self, _warning: &str) {}
+}
+
+struct StubCheckout(PathBuf);
+
+impl BaseCheckout for StubCheckout {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// A backend that counts every base checkout and base run.
+struct CountingBackend {
+    root: PathBuf,
+    base_calls: std::sync::atomic::AtomicUsize,
+}
+
+impl AuditBackend for CountingBackend {
+    type Analyses = StubAnalyses;
+    type Checkout = StubCheckout;
+    type CacheKey = ();
+    type Error = ();
+
+    fn run_head(&self, _changed_files: &FxHashSet<PathBuf>) -> Result<StubAnalyses, ()> {
+        Ok(StubAnalyses::new(&self.root))
+    }
+
+    fn create_base_checkout(
+        &self,
+        _base_ref: &str,
+        _base_sha: Option<&str>,
+    ) -> Result<StubCheckout, ()> {
+        self.base_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(StubCheckout(self.root.clone()))
+    }
+
+    fn run_base(
+        &self,
+        _base_root: &Path,
+        _focus: Option<&FxHashSet<PathBuf>>,
+    ) -> Result<StubAnalyses, ()> {
+        self.base_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut base = StubAnalyses::new(&self.root);
+        base.results.unused_exports.clear();
+        Ok(base)
+    }
+}
+
+/// A whitespace-only edit lets the head run stand in for the base: the run
+/// creates no base checkout, runs no base analyses, and keeps the head keys
+/// as the base snapshot, so the unused export is inherited.
+#[test]
+fn a_reused_head_run_keeps_the_head_keys_as_the_base_snapshot() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    // The git toplevel is canonical, so the changed paths must be canonical
+    // too (the macOS temporary directory is a symbolic link).
+    let repo = dunce::canonicalize(seeded_repo(tmp.path())).expect("canonical repo root");
+    let util = "export const unusedValue = 1;\n";
+    fs::create_dir_all(repo.join("src")).expect("src dir should be created");
+    fs::write(repo.join("src/util.ts"), util).expect("write util");
+    git(&repo, &["add", "."]);
+    git(
+        &repo,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "util"],
+    );
+    fs::write(repo.join("src/util.ts"), format!("{util}\n\n")).expect("edit util");
+    let changed: FxHashSet<PathBuf> = std::iter::once(repo.join("src/util.ts")).collect();
+    assert!(
+        can_reuse_current_as_base(&repo, None, "HEAD", &changed),
+        "the whitespace-only edit must reach the reuse path"
+    );
+    let backend = CountingBackend {
+        root: repo.clone(),
+        base_calls: std::sync::atomic::AtomicUsize::new(0),
+    };
+
+    let run = run(
+        &backend,
+        AuditRunInput {
+            root: &repo,
+            gate: AuditGate::NewOnly,
+            base_ref: "HEAD",
+            cache_dir: None,
+            changed_files: changed,
+        },
+    )
+    .expect("the stub backend does not fail")
+    .expect("the run has changed files");
+
+    assert_eq!(
+        backend.base_calls.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the reuse path must not check out or analyze the base"
+    );
+    assert!(run.outcome.base_snapshot_skipped);
+    let head_keys = AuditKeySnapshot::from_view(&run.analyses.view()).dead_code;
+    let base_keys = run
+        .outcome
+        .base_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.dead_code.clone());
+    assert_eq!(base_keys, Some(head_keys.clone()));
+    assert!(
+        head_keys.contains("unused-export:src/util.ts:unusedValue"),
+        "{head_keys:?}"
+    );
+    assert_eq!(run.outcome.attribution.dead_code_inherited, 1);
+    assert_eq!(run.outcome.attribution.dead_code_introduced, 0);
+}

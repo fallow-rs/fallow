@@ -220,8 +220,10 @@ fn a_dependency_that_a_source_edit_made_unused_is_out_of_scope() {
     let report = audit(&root);
 
     assert_eq!(
-        introduced_by_name(&report, "unused_dependencies", "package_name"),
-        Vec::<(String, bool)>::new(),
+        report["dead_code"]["unused_dependencies"]
+            .as_array()
+            .map(Vec::len),
+        Some(0),
         "{report:#}"
     );
     assert_ne!(report["verdict"], "fail", "{report:#}");
@@ -249,9 +251,11 @@ fn a_dependency_that_a_source_edit_made_unused_is_introduced_when_the_manifest_c
     assert_eq!(report["verdict"], "fail", "{report:#}");
 }
 
-/// A whitespace-only edit lets the head run stand in for the base. The typed
-/// output then keeps the head keys as `base_snapshot`, the same as the CLI,
-/// so a stale suppression is marked `introduced: false`.
+/// Checks the typed output shape after a whitespace-only edit: the typed
+/// output has a `base_snapshot`, and a stale suppression is marked
+/// `introduced: false`. The unit test
+/// `a_reused_head_run_keeps_the_head_keys_as_the_base_snapshot` in
+/// `src/audit_run/tests.rs` covers the reuse path itself.
 #[test]
 fn a_reused_head_run_keeps_the_base_snapshot() {
     let dir = repository();
