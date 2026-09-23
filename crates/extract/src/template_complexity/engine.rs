@@ -372,7 +372,7 @@ impl TemplateComplexity {
             match source.as_bytes()[offset] {
                 byte if byte.is_ascii_whitespace() => offset += 1,
                 b'\'' | b'"' | b'`' => {
-                    offset = skip_quoted(source, offset)?;
+                    offset = self.scan_quoted(scope, offset)?;
                     state.needs_rhs = false;
                     state.regex.after_value();
                 }
@@ -466,6 +466,26 @@ impl TemplateComplexity {
         } else {
             Ok(())
         }
+    }
+
+    /// Skip the string or template literal that opens at `offset` and return
+    /// the offset just past its closing quote. A template literal scores each
+    /// `${ ... }` interpolation. The literal text between interpolations is not
+    /// an expression, so it is not scanned. An interpolation keeps the nesting
+    /// of the literal, the same as a bracket group (issue #2798).
+    fn scan_quoted(&mut self, scope: ExprScope<'_>, offset: usize) -> Result<usize, ScanError> {
+        let ExprScope {
+            source,
+            base,
+            nesting,
+            depth,
+        } = scope;
+        if source.as_bytes()[offset] != b'`' {
+            return skip_quoted(source, offset);
+        }
+        walk_template_literal(source, offset, depth, |start, end| {
+            self.scan_expression(&source[start..end], base + start, nesting, depth + 1)
+        })
     }
 
     /// Recurse into a bracketed sub-expression `( [ {` at `offset`, recording its
@@ -645,6 +665,19 @@ pub(super) fn find_matching_delimiter(
     open: u8,
     close: u8,
 ) -> Result<usize, ScanError> {
+    find_matching_delimiter_at(source, open_offset, open, close, 0)
+}
+
+/// [`find_matching_delimiter`] with the template-literal nesting depth, so a
+/// pathological chain of nested template literals fails with [`ScanError`]
+/// instead of exhausting the stack.
+fn find_matching_delimiter_at(
+    source: &str,
+    open_offset: usize,
+    open: u8,
+    close: u8,
+    template_depth: u16,
+) -> Result<usize, ScanError> {
     let mut offset = open_offset + 1;
     let mut depth = 1_u16;
     let mut regex = RegexContext::expression_start();
@@ -652,7 +685,7 @@ pub(super) fn find_matching_delimiter(
         match source.as_bytes()[offset] {
             byte if byte.is_ascii_whitespace() => offset += 1,
             b'\'' | b'"' | b'`' => {
-                offset = skip_quoted(source, offset)?;
+                offset = skip_quoted_at(source, offset, template_depth)?;
                 regex.after_value();
             }
             b'/' if is_tag_close(source, offset) => offset = regex.skip_markup(offset),
@@ -769,8 +802,19 @@ fn matching_close_byte(open: u8) -> Option<u8> {
     }
 }
 
+/// Skip a quoted string or a template literal that opens at `quote_offset` and
+/// return the offset just past its closing quote. A template literal skips each
+/// `${ ... }` interpolation as code, so a quote, a backtick or a brace inside an
+/// interpolation does not end the literal.
 pub(super) fn skip_quoted(source: &str, quote_offset: usize) -> Result<usize, ScanError> {
+    skip_quoted_at(source, quote_offset, 0)
+}
+
+fn skip_quoted_at(source: &str, quote_offset: usize, depth: u16) -> Result<usize, ScanError> {
     let quote = source.as_bytes()[quote_offset];
+    if quote == b'`' {
+        return walk_template_literal(source, quote_offset, depth, |_, _| Ok(()));
+    }
     let mut offset = quote_offset + 1;
     while offset < source.len() {
         match source.as_bytes()[offset] {
@@ -783,6 +827,41 @@ pub(super) fn skip_quoted(source: &str, quote_offset: usize) -> Result<usize, Sc
                 }
             }
             byte if byte == quote => return Ok(offset + 1),
+            _ => offset += source[offset..].chars().next().map_or(1, char::len_utf8),
+        }
+    }
+    Err(ScanError)
+}
+
+/// Walk the template literal that opens at the backtick `open` and return the
+/// offset just past its closing backtick. `on_interpolation` receives the byte
+/// range between each `${` and its matching `}`.
+fn walk_template_literal(
+    source: &str,
+    open: usize,
+    depth: u16,
+    mut on_interpolation: impl FnMut(usize, usize) -> Result<(), ScanError>,
+) -> Result<usize, ScanError> {
+    if depth > MAX_TEMPLATE_EXPR_DEPTH {
+        return Err(ScanError);
+    }
+    let bytes = source.as_bytes();
+    let mut offset = open + 1;
+    while offset < source.len() {
+        match bytes[offset] {
+            b'\\' => {
+                offset += 1;
+                if offset < source.len() {
+                    offset += source[offset..].chars().next().map_or(0, char::len_utf8);
+                }
+            }
+            b'`' => return Ok(offset + 1),
+            b'$' if bytes.get(offset + 1) == Some(&b'{') => {
+                let brace = offset + 1;
+                let close = find_matching_delimiter_at(source, brace, b'{', b'}', depth + 1)?;
+                on_interpolation(brace + 1, close)?;
+                offset = close + 1;
+            }
             _ => offset += source[offset..].chars().next().map_or(1, char::len_utf8),
         }
     }
@@ -955,5 +1034,71 @@ mod tests {
 
         assert_eq!(close, source.len() - 1);
         assert_eq!(expression_metrics(&source[1..close]), Some((1, 1)));
+    }
+
+    #[test]
+    fn template_literal_interpolations_are_scored() {
+        assert_eq!(
+            expression_metrics("`a ${ isReady ? label : suffix } b`"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            expression_metrics("`a ${ isReady && label } b`"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            expression_metrics("`${a || b} and ${c ?? d}`"),
+            Some((2, 2))
+        );
+        assert_eq!(expression_metrics("tag`${a && b}`"), Some((1, 1)));
+        assert_eq!(expression_metrics("`${a ? b : c}` || d"), Some((2, 2)));
+    }
+
+    #[test]
+    fn nested_template_literals_and_braces_in_strings_keep_their_nesting() {
+        assert_eq!(
+            expression_metrics("`x ${ `y ${ a && b }` } z`"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            expression_metrics("`x ${ fn({ key: \"}\" }) && ok } z`"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            expression_metrics("`x ${ ready ? `}` : '${' } z` && done"),
+            Some((2, 2))
+        );
+    }
+
+    #[test]
+    fn template_literal_text_and_plain_strings_are_not_scored() {
+        assert_eq!(expression_metrics("`a && b ? c : d`"), Some((0, 0)));
+        assert_eq!(expression_metrics("`a \\${b && c}`"), Some((0, 0)));
+        assert_eq!(expression_metrics("'a ${b && c}'"), Some((0, 0)));
+        assert_eq!(expression_metrics("\"a ${b ? c : d}\""), Some((0, 0)));
+    }
+
+    #[test]
+    fn unterminated_template_interpolation_is_malformed() {
+        assert_eq!(expression_metrics("`a ${ b && c `"), None);
+        assert_eq!(expression_metrics("`a ${ b && c }"), None);
+    }
+
+    #[test]
+    fn pathologically_nested_template_literals_are_dropped_without_crashing() {
+        let depth = 5000;
+        let source = format!("{}a{}", "`${".repeat(depth), "}`".repeat(depth));
+        assert_eq!(expression_metrics(&source), None);
+
+        let braced = format!("{{ {source} }}");
+        assert!(find_matching_delimiter(&braced, 0, b'{', b'}').is_err());
+    }
+
+    #[test]
+    fn delimiter_matching_skips_nested_template_literals() {
+        let source = "{ `a ${ `}` } b` }";
+        let close = find_matching_delimiter(source, 0, b'{', b'}')
+            .expect("a brace inside a nested template literal is not the close");
+        assert_eq!(close, source.len() - 1);
     }
 }

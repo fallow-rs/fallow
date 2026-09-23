@@ -415,6 +415,24 @@ const b = 2;
         assert_eq!(complexity.name, "<template>");
     }
 
+    /// Issue #2798: the shared engine scans into `${}` interpolations.
+    #[test]
+    fn template_literal_interpolation_in_binding_counts() {
+        let complexity = compute_vue_template_complexity(
+            r#"<template><span :title="`a ${ isReady ? label : suffix } b`" :class="`${ on || off }`"></span></template>"#,
+        )
+        .expect("template should have complexity");
+        assert_eq!(complexity.cyclomatic, 3, "{complexity:?}");
+        assert_eq!(complexity.cognitive, 2, "{complexity:?}");
+
+        assert!(
+            compute_vue_template_complexity(
+                r#"<template><span :title="`a && b ? c : d`"></span></template>"#,
+            )
+            .is_none()
+        );
+    }
+
     #[test]
     fn template_v_for_counts_as_control_flow() {
         let complexity = compute_vue_template_complexity(

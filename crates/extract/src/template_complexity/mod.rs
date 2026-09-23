@@ -619,6 +619,36 @@ mod tests {
         assert!(complexity.cognitive >= 5, "{complexity:?}");
     }
 
+    /// Issue #2798: an operator inside a `${}` interpolation of a bound
+    /// template literal counts like the same operator outside the literal.
+    #[test]
+    fn angular_template_literal_interpolation_counts() {
+        let bare = compute_angular_template_complexity(
+            r#"<span [title]="isReady ? label : suffix"></span>"#,
+        )
+        .expect("bare ternary should have complexity");
+        let interpolated = compute_angular_template_complexity(
+            r#"<span [title]="`a ${ isReady ? label : suffix } b`"></span>"#,
+        )
+        .expect("interpolated ternary should have complexity");
+        assert_eq!(
+            (interpolated.cyclomatic, interpolated.cognitive),
+            (bare.cyclomatic, bare.cognitive)
+        );
+        assert_eq!((interpolated.cyclomatic, interpolated.cognitive), (2, 1));
+
+        let logical = compute_angular_template_complexity(
+            r#"<span [title]="`a ${ isReady && label } b`"></span>"#,
+        )
+        .expect("interpolated logical operator should have complexity");
+        assert_eq!(logical.cyclomatic, 2, "{logical:?}");
+
+        assert!(
+            compute_angular_template_complexity(r#"<span [title]="`a && b ? c : d`"></span>"#)
+                .is_none()
+        );
+    }
+
     #[test]
     fn resets_logical_sequences_across_ternary_branches() {
         let complexity = compute_angular_template_complexity(

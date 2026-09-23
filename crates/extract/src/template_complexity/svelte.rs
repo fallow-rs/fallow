@@ -780,6 +780,18 @@ mod tests {
         assert_eq!(complexity.name, "<template>");
     }
 
+    /// Issue #2798: the shared engine scans into `${}` interpolations, and a
+    /// brace inside a nested template literal does not close the tag.
+    #[test]
+    fn template_literal_interpolation_counts() {
+        let complexity = single_unit("<p>{`a ${ ready ? `}` : fallback ?? 'none' } b`}</p>")
+            .expect("template should have complexity");
+        assert_eq!(complexity.cyclomatic, 3, "{complexity:?}");
+        assert_eq!(complexity.cognitive, 2, "{complexity:?}");
+
+        assert!(single_unit("<p>{`a && b ? c : d`}</p>").is_none());
+    }
+
     #[test]
     fn else_if_cascade_increments_per_branch() {
         let complexity = single_unit(

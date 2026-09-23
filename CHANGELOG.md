@@ -38,6 +38,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Template complexity counts operators inside a template literal.** In an
+  Angular, Vue or Svelte template, a bound expression such as
+  `` `a ${ ready ? label : suffix } b` `` added no complexity: the scanner
+  skipped the whole template literal. Now a ternary inside a `${}`
+  interpolation adds to cyclomatic and cognitive complexity, and `&&`, `||`
+  and `??` add to cyclomatic complexity, the same as outside the literal. The
+  literal text outside `${}` and plain quoted strings are still not scanned.
+  A nested template literal or a brace inside a string in an interpolation no
+  longer ends the literal early. A `health` run can report higher template
+  complexity than before. The extraction cache version changes, so the first
+  run after the upgrade parses every file again. Closes #2798.
+
 - **Nuxt local layers are part of the project.** A local directory in
   `extends` of a `nuxt.config`, and each `layers/<name>` directory, is now a
   layer root when it holds a `nuxt.config`. Its pages, layouts, components,
