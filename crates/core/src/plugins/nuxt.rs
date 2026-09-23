@@ -1582,8 +1582,9 @@ fn nested_surface_overrides(obj: &ObjectExpression<'_>) -> Option<SurfaceKeys> {
     Some(touched)
 }
 
-/// Which surface keys one environment override object carries, or `None` when
-/// the object cannot be read statically.
+/// Which surfaces one environment override object can set, through a nested
+/// `components` or `imports` key or through its own `hooks`, or `None` when the
+/// object cannot be read statically.
 fn override_surfaces(expr: &Expression<'_>) -> Option<SurfaceKeys> {
     let obj = config_parser::object_expression(expr)?;
     let lookup = |key| match sole_static_property(obj, key) {
@@ -1591,14 +1592,24 @@ fn override_surfaces(expr: &Expression<'_>) -> Option<SurfaceKeys> {
         PropertyLookup::Absent => Some(false),
         PropertyLookup::Unknown => None,
     };
+    let hooks = match sole_static_property(obj, "hooks") {
+        PropertyLookup::Found(hooks) => hook_surfaces(hooks)?,
+        PropertyLookup::Absent => SurfaceKeys {
+            components: false,
+            imports: false,
+        },
+        PropertyLookup::Unknown => return None,
+    };
     Some(SurfaceKeys {
-        components: lookup("components")?,
-        imports: lookup("imports")?,
+        components: hooks.components || lookup("components")?,
+        imports: hooks.imports || lookup("imports")?,
     })
 }
 
 /// Which surfaces the hooks in a `hooks` object can change, or `None` when the
-/// object or one of its keys cannot be read statically.
+/// object or one of its keys cannot be read statically. Nuxt flattens nested
+/// hook objects with `:`, so `components: { dirs() {} }` registers
+/// `components:dirs`: the first segment of a top-level key decides.
 fn hook_surfaces(expr: &Expression<'_>) -> Option<SurfaceKeys> {
     let obj = config_parser::object_expression(expr)?;
     let mut found = SurfaceKeys {
@@ -1610,8 +1621,9 @@ fn hook_surfaces(expr: &Expression<'_>) -> Option<SurfaceKeys> {
             return None;
         };
         let name = static_key_name(&property.key)?;
-        found.components |= name.starts_with("components:");
-        found.imports |= name.starts_with("imports:");
+        let namespace = name.split(':').next().unwrap_or(name);
+        found.components |= namespace == "components";
+        found.imports |= namespace == "imports";
     }
     Some(found)
 }
@@ -3196,6 +3208,31 @@ mod tests {
                 "components: false, hooks: { 'imports:extend'() {} }",
                 AutoImportSetting::Disabled,
                 AutoImportSetting::Custom,
+            ),
+            (
+                "components: false, hooks: { components: { dirs(dirs) {} } }",
+                AutoImportSetting::Custom,
+                AutoImportSetting::Default,
+            ),
+            (
+                "components: false, hooks: { imports: { extend() {} } }",
+                AutoImportSetting::Disabled,
+                AutoImportSetting::Custom,
+            ),
+            (
+                "components: false, $production: { hooks: { 'components:dirs'(dirs) {} } }",
+                AutoImportSetting::Custom,
+                AutoImportSetting::Default,
+            ),
+            (
+                "components: false, $env: { staging: { hooks: { components: { dirs() {} } } } }",
+                AutoImportSetting::Custom,
+                AutoImportSetting::Default,
+            ),
+            (
+                "components: false, $development: { hooks: devHooks }",
+                AutoImportSetting::Custom,
+                AutoImportSetting::Default,
             ),
             (
                 "components: false, hooks: { ...sharedHooks }",

@@ -456,6 +456,50 @@ fn an_unrelated_hook_or_override_keeps_the_surface_modeled() {
     }
 }
 
+/// A hook that changes the component scan keeps the component patterns, in the
+/// nested hook form and inside an environment override. Here the hook drops the
+/// path prefix, so `<Btn/>` names `base/Btn.vue` and only the retained entry
+/// pattern keeps it alive; the advisory says why.
+#[test]
+fn a_component_hook_keeps_the_patterns_in_every_shape() {
+    let hook = "(dirs) { dirs.length = 0; dirs.push({ path: '~/components', pathPrefix: false }) }";
+    for config in [
+        format!("export default {{ hooks: {{ components: {{ dirs{hook} }} }} }};\n"),
+        format!("export default {{ $production: {{ hooks: {{ 'components:dirs'{hook} }} }} }};\n"),
+    ] {
+        let project = nuxt_project(&config);
+        let root = project.path();
+        std::fs::create_dir_all(root.join("app/components/base")).expect("base dir");
+        std::fs::create_dir_all(root.join("app/pages")).expect("pages dir");
+        std::fs::write(
+            root.join("app/components/base/Btn.vue"),
+            "<template><button>btn</button></template>\n",
+        )
+        .expect("component");
+        std::fs::write(
+            root.join("app/pages/index.vue"),
+            "<template><Btn /></template>\n",
+        )
+        .expect("page");
+        let envelope = parse_json(&dead_code_json(&root_arg(&project), &["--quiet"]));
+        let unused: Vec<&str> = envelope["unused_files"]
+            .as_array()
+            .map_or(&[] as &[Value], Vec::as_slice)
+            .iter()
+            .filter_map(|entry| entry["path"].as_str())
+            .collect();
+        assert!(
+            !unused.contains(&"app/components/base/Btn.vue"),
+            "{config}: the hook-registered component must not report, got {unused:?}"
+        );
+        let keys: Vec<&str> = of_kind(&envelope, NOT_MODELED)
+            .iter()
+            .filter_map(|entry| entry["key"].as_str())
+            .collect();
+        assert_eq!(keys, vec!["components"], "{config}");
+    }
+}
+
 /// `fallow check` is the other command a CI job runs, and it reaches the array
 /// through the same generic route, so no per-command wiring is needed.
 #[test]
