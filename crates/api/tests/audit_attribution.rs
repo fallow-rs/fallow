@@ -55,6 +55,10 @@ fn commit(root: &Path, message: &str) {
 }
 
 fn audit(root: &Path) -> Value {
+    audit_with_gate(root, AuditGate::NewOnly)
+}
+
+fn audit_with_gate(root: &Path, gate: AuditGate) -> Value {
     let options = AuditOptions {
         analysis: AnalysisOptions {
             root: Some(root.to_path_buf()),
@@ -62,7 +66,7 @@ fn audit(root: &Path) -> Value {
             ..AnalysisOptions::default()
         },
         base: Some("HEAD~1".to_string()),
-        gate: AuditGate::NewOnly,
+        gate,
         ..AuditOptions::default()
     };
     run_audit(&options)
@@ -332,4 +336,85 @@ fn removing_an_expected_unused_tag_introduces_the_unused_export() {
         "{report:#}"
     );
     assert_eq!(report["verdict"], "fail", "{report:#}");
+}
+
+/// A repository whose head commit adds one unused and one misconfigured
+/// dependency override to `package.json`. The config sets the two rules to
+/// `base` and a per-file override for `package.json` sets them to `manifest`.
+fn dependency_override_repository(base: &str, manifest: &str) -> tempfile::TempDir {
+    let dir = repository();
+    let root = dir.path().join("project");
+    write(
+        &root,
+        ".fallowrc.json",
+        &format!(
+            r#"{{
+  "rules": {{
+    "unused-dependency-overrides": "{base}",
+    "misconfigured-dependency-overrides": "{base}"
+  }},
+  "overrides": [{{
+    "files": ["package.json"],
+    "rules": {{
+      "unused-dependency-overrides": "{manifest}",
+      "misconfigured-dependency-overrides": "{manifest}"
+    }}
+  }}]
+}}
+"#
+        ),
+    );
+    write(
+        &root,
+        "package.json",
+        r#"{"name":"override-fixture","private":true,"main":"src/index.ts"}"#,
+    );
+    write(&root, "src/index.ts", "export {};\n");
+    commit(&root, "base");
+    write(
+        &root,
+        "package.json",
+        r#"{"name":"override-fixture","private":true,"main":"src/index.ts","overrides":{"never-installed":"^1.0.0","":"^1.0.0"}}"#,
+    );
+    commit(&root, "add dependency overrides");
+    dir
+}
+
+/// Both gates judge the introduced findings by the same per-file severity.
+fn assert_gates_agree(report_all: &Value, report_new_only: &Value, expected: &str) {
+    for (gate, report) in [("all", report_all), ("new-only", report_new_only)] {
+        for kind in [
+            "unused_dependency_overrides",
+            "misconfigured_dependency_overrides",
+        ] {
+            assert_eq!(
+                report["dead_code"][kind].as_array().map(Vec::len),
+                Some(1),
+                "gate {gate} must report one {kind} finding: {report:#}"
+            );
+        }
+        assert_eq!(report["verdict"], expected, "gate {gate}: {report:#}");
+    }
+}
+
+#[test]
+fn a_manifest_override_to_warn_passes_both_gates() {
+    let dir = dependency_override_repository("error", "warn");
+    let root = dir.path().join("project");
+
+    let report_all = audit_with_gate(&root, AuditGate::All);
+    let report_new_only = audit_with_gate(&root, AuditGate::NewOnly);
+
+    assert_gates_agree(&report_all, &report_new_only, "warn");
+}
+
+#[test]
+fn a_manifest_override_to_error_fails_both_gates() {
+    let dir = dependency_override_repository("warn", "error");
+    let root = dir.path().join("project");
+
+    let report_all = audit_with_gate(&root, AuditGate::All);
+    let report_new_only = audit_with_gate(&root, AuditGate::NewOnly);
+
+    assert_gates_agree(&report_all, &report_new_only, "fail");
 }

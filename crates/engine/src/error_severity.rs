@@ -439,3 +439,125 @@ pub fn promote_policy_finding_warns(results: &mut crate::dead_code::AnalysisResu
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use fallow_config::{ConfigOverride, FallowConfig, PartialRulesConfig, RulesConfig, Severity};
+    use fallow_types::output_dead_code::{
+        EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding,
+        UnusedDependencyOverrideFinding,
+    };
+    use fallow_types::results::{
+        DependencyOverrideMisconfigReason, DependencyOverrideSource, EmptyCatalogGroup,
+        MisconfiguredDependencyOverride, UnusedDependencyOverride,
+    };
+
+    use super::has_error_severity_issues;
+    use crate::dead_code::AnalysisResults;
+
+    /// One finding of each manifest-level kind that per-file `overrides` can
+    /// change: an unused and a misconfigured dependency override in
+    /// `package.json`, and an empty catalog group in `pnpm-workspace.yaml`.
+    fn manifest_findings() -> [(&'static str, AnalysisResults); 3] {
+        let mut unused = AnalysisResults::default();
+        unused
+            .unused_dependency_overrides
+            .push(UnusedDependencyOverrideFinding::with_actions(
+                UnusedDependencyOverride {
+                    raw_key: "old-dep".to_string(),
+                    target_package: "old-dep".to_string(),
+                    parent_package: None,
+                    version_constraint: None,
+                    version_range: "^1.0.0".to_string(),
+                    source: DependencyOverrideSource::PnpmPackageJson,
+                    path: PathBuf::from("/project/package.json"),
+                    line: 7,
+                    hint: None,
+                },
+            ));
+        let mut misconfigured = AnalysisResults::default();
+        misconfigured.misconfigured_dependency_overrides.push(
+            MisconfiguredDependencyOverrideFinding::with_actions(MisconfiguredDependencyOverride {
+                raw_key: "bad>".to_string(),
+                target_package: None,
+                raw_value: "1.0.0".to_string(),
+                reason: DependencyOverrideMisconfigReason::UnparsableKey,
+                source: DependencyOverrideSource::PnpmPackageJson,
+                path: PathBuf::from("/project/package.json"),
+                line: 4,
+            }),
+        );
+        let mut empty_group = AnalysisResults::default();
+        empty_group
+            .empty_catalog_groups
+            .push(EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+                catalog_name: "legacy".to_string(),
+                path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                line: 3,
+            }));
+        [
+            ("unused-dependency-overrides", unused),
+            ("misconfigured-dependency-overrides", misconfigured),
+            ("empty-catalog-groups", empty_group),
+        ]
+    }
+
+    fn config_with_manifest_override(
+        base: Severity,
+        manifest: Severity,
+    ) -> fallow_config::ResolvedConfig {
+        FallowConfig {
+            rules: RulesConfig {
+                unused_dependency_overrides: base,
+                misconfigured_dependency_overrides: base,
+                empty_catalog_groups: base,
+                ..RulesConfig::default()
+            },
+            overrides: vec![ConfigOverride {
+                files: vec![
+                    "package.json".to_string(),
+                    "pnpm-workspace.yaml".to_string(),
+                ],
+                rules: PartialRulesConfig {
+                    unused_dependency_overrides: Some(manifest),
+                    misconfigured_dependency_overrides: Some(manifest),
+                    empty_catalog_groups: Some(manifest),
+                    ..PartialRulesConfig::default()
+                },
+            }],
+            ..FallowConfig::default()
+        }
+        .resolve(
+            PathBuf::from("/project"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        )
+    }
+
+    #[test]
+    fn a_manifest_override_to_warn_clears_a_base_error() {
+        let config = config_with_manifest_override(Severity::Error, Severity::Warn);
+        for (kind, results) in manifest_findings() {
+            assert!(
+                !has_error_severity_issues(&results, &config.rules, Some(&config), false),
+                "the `warn` override for the manifest must win over the base `error` for {kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_manifest_override_to_error_raises_a_base_warn() {
+        let config = config_with_manifest_override(Severity::Warn, Severity::Error);
+        for (kind, results) in manifest_findings() {
+            assert!(
+                has_error_severity_issues(&results, &config.rules, Some(&config), false),
+                "the `error` override for the manifest must win over the base `warn` for {kind}"
+            );
+        }
+    }
+}
