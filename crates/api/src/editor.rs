@@ -485,12 +485,11 @@ impl EditorAnalysisSession {
     /// Run dead-code and duplication analysis, optionally focusing duplication
     /// to files the editor already resolved as changed.
     ///
-    /// Dead-code still runs with full graph context. When `changed_files` is
-    /// set, the dead-code findings of this project are narrowed with
-    /// [`fallow_engine::dead_code::apply_scope`] and the config of this
-    /// project, as the CLI, MCP and Node API narrow them. The `ignoreFindings`
-    /// patterns of this project then hide a finding that only ignored owners
-    /// hold after the scope.
+    /// Dead-code still runs with full graph context, and the dead-code
+    /// findings keep full scope until the type-aware pass has run. That pass
+    /// reads `unused_files` as its set of unreachable files. After the pass,
+    /// call [`Self::apply_changed_files_scope`] to narrow the dead-code
+    /// findings of this project.
     ///
     /// # Errors
     ///
@@ -513,32 +512,37 @@ impl EditorAnalysisSession {
             .map(fallow_engine::project_analysis::ProjectAnalysisArtifacts::into_output)
             .map(EditorProjectAnalysisOutput::from_engine)
             .map(|output| self.with_resolved_rule_severities(output))
-            .map(|output| self.with_changed_files_scope(output, changed_files))
     }
 
-    /// Narrow the dead-code findings of this project to the changed files.
+    /// Narrow the dead-code findings of this project to the changed files,
+    /// with [`fallow_engine::dead_code::apply_scope`] and the config of this
+    /// project, as the CLI, MCP and Node API narrow them.
     ///
-    /// A multi-root editor session merges several projects, and each project
-    /// has its own `ignoreFindings`. So the scope runs here, per project, where
-    /// the config is known, and not after the merge.
-    fn with_changed_files_scope(
+    /// Call it after the type-aware pass. That pass reads `unused_files` as
+    /// its set of unreachable files, so a scope before it drops evidence from
+    /// unused files outside the changed set. A multi-root editor session
+    /// merges several projects, and each project has its own
+    /// `ignoreFindings`. So the scope runs per project, where the config is
+    /// known, and not after the merge. It does nothing when `changed_files`
+    /// is `None`.
+    pub fn apply_changed_files_scope(
         &self,
-        mut output: EditorProjectAnalysisOutput,
+        dead_code: &mut EditorDeadCodeAnalysisOutput,
         changed_files: Option<&FxHashSet<PathBuf>>,
-    ) -> EditorProjectAnalysisOutput {
-        if changed_files.is_some() {
-            fallow_engine::dead_code::apply_scope(
-                &mut output.dead_code.results,
-                &fallow_engine::dead_code::DeadCodeScope {
-                    workspace_roots: None,
-                    changed_files,
-                    diff: None,
-                    files: None,
-                },
-                self.inner.config(),
-            );
+    ) {
+        if changed_files.is_none() {
+            return;
         }
-        output
+        fallow_engine::dead_code::apply_scope(
+            &mut dead_code.results,
+            &fallow_engine::dead_code::DeadCodeScope {
+                workspace_roots: None,
+                changed_files,
+                diff: None,
+                files: None,
+            },
+            self.inner.config(),
+        );
     }
 
     /// Resolve configured rule severities, including per-path
@@ -645,10 +649,12 @@ impl EditorAnalysisOutput {
 
     /// Drop findings and clone groups that do not touch any changed file.
     ///
-    /// Each project already narrowed its dead-code findings with its own
-    /// config in `analyze_project_with_changed_files`. The dead-code filter
-    /// here does not change those findings. It narrows findings that a later
-    /// step, such as the type-aware pass, added after that scope.
+    /// Each project narrows its dead-code findings with its own config in
+    /// [`EditorAnalysisSession::apply_changed_files_scope`], after the
+    /// type-aware pass. The scope must come after that pass, because the pass
+    /// reads `unused_files` as its set of unreachable files. This filter then
+    /// narrows the clone groups of the merged output. For the dead-code
+    /// findings, it changes nothing.
     pub fn filter_by_changed_files(&mut self, changed_files: &FxHashSet<PathBuf>, root: &Path) {
         fallow_engine::changed_files::filter_results_by_changed_files(
             &mut self.results,
@@ -810,6 +816,56 @@ mod tests {
                 .files
                 .as_ref()
                 .is_some_and(|files| !files.is_empty())
+        );
+    }
+
+    /// The type-aware pass reads `unused_files` as its set of unreachable
+    /// files. So the analysis keeps an unused file outside the changed set,
+    /// and the scope removes it only when the caller applies it.
+    #[test]
+    fn changed_files_scope_runs_after_the_analysis_keeps_all_unused_files() {
+        let temp = tempfile::tempdir().expect("temp project");
+        let root = temp.path().canonicalize().expect("canonical root");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"editor-scope-order","main":"src/a.ts"}"#,
+        )
+        .expect("package.json");
+        std::fs::write(src.join("a.ts"), "export const a = 1;\n").expect("source a");
+        std::fs::write(src.join("orphan.ts"), "export const orphan = 1;\n").expect("orphan");
+
+        let session = EditorAnalysisSession::load(&root, None).expect("session loads");
+        let mut changed_files = FxHashSet::default();
+        changed_files.insert(src.join("a.ts"));
+        let mut output = session
+            .analyze_project_with_changed_files(
+                &fallow_config::DuplicatesConfig::default(),
+                false,
+                Some(&changed_files),
+            )
+            .expect("analysis runs");
+        let unused_files = |output: &EditorProjectAnalysisOutput| {
+            output
+                .dead_code
+                .results
+                .unused_files
+                .iter()
+                .map(|finding| finding.file.path.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            unused_files(&output),
+            vec![src.join("orphan.ts")],
+            "the analysis keeps the unused file outside the changed set"
+        );
+
+        session.apply_changed_files_scope(&mut output.dead_code, Some(&changed_files));
+        assert!(
+            unused_files(&output).is_empty(),
+            "the scope removes the unused file outside the changed set: {:?}",
+            unused_files(&output)
         );
     }
 

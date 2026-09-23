@@ -1431,7 +1431,20 @@ fn lsp_changed_since_scopes_editor_project_analysis_before_duplication() {
     );
     assert!(
         source.contains("analysis.filter_by_changed_files"),
-        "LSP must keep the existing post-analysis changedSince filter for dead-code and inline complexity semantics"
+        "LSP must keep the post-merge changedSince filter for clone groups and inline complexity"
+    );
+    let refine = source
+        .find("refine_type_aware_project(")
+        .expect("LSP runs the type-aware pass per project");
+    let scope = source
+        .find("apply_changed_files_scope(")
+        .expect("LSP narrows dead-code findings per project");
+    let merge = source
+        .find("merge_project_output(")
+        .expect("LSP merges the project outputs");
+    assert!(
+        refine < scope && scope < merge,
+        "LSP must narrow dead-code findings after the type-aware pass, which reads `unused_files`, and before the merge"
     );
 }
 

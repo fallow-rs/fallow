@@ -223,6 +223,9 @@ fn run_typed_project_analysis(
             ));
         }
     }
+    // The type-aware pass reads `unused_files` as its set of unreachable
+    // files, so the changed-files scope runs after it.
+    session.apply_changed_files_scope(&mut output.dead_code, input.changed_files);
     if input.inline_complexity_enabled {
         input
             .merged_inline_complexity
