@@ -844,7 +844,8 @@ enum LeadingSlash {
 /// Handles values extracted from config files such as `"./src"`, `"src/lib"`,
 /// `"/src"`, or absolute filesystem paths under `root`. An absolute path under
 /// `root` is read as absolute. Any other leading `/` is read as relative to
-/// `root`. Use [`normalize_filesystem_config_path_buf`] for a reader whose tool
+/// `root`, the same as Vite: this includes the root itself and, when
+/// `<root>/<root>` is a directory, every leading-`/` value. Use [`normalize_filesystem_config_path_buf`] for a reader whose tool
 /// reads a leading `/` as a filesystem path.
 #[must_use]
 pub(crate) fn normalize_config_path_buf(
@@ -879,10 +880,13 @@ fn normalize_path_value(
 
     let raw_string = path_to_config_string(raw);
     let raw_path = Path::new(&raw_string);
+    let root_relative_slash =
+        leading_slash == LeadingSlash::RootRelative && raw_string.starts_with('/');
     let absolute = raw_path
         .is_absolute()
         .then(|| lexical_normalize(raw_path))
-        .filter(|absolute| absolute.starts_with(root));
+        .filter(|absolute| absolute.starts_with(root))
+        .filter(|absolute| !(root_relative_slash && (absolute == root || root_in_root(root))));
     let candidate = if let Some(absolute) = absolute {
         absolute
     } else if let Some(stripped) = raw_string.strip_prefix('/') {
@@ -899,6 +903,17 @@ fn normalize_path_value(
 
     let relative = candidate.strip_prefix(root).ok()?;
     (!relative.as_os_str().is_empty()).then(|| relative.to_path_buf())
+}
+
+/// Vite's `rootInRoot` rule: when `<root>/<root>` is a directory, Vite reads
+/// every leading-`/` value as relative to the root, also one that starts with
+/// the root path.
+fn root_in_root(root: &Path) -> bool {
+    let root_string = path_to_config_string(root);
+    let Some(stripped) = root_string.strip_prefix('/') else {
+        return false;
+    };
+    !stripped.is_empty() && root.join(stripped).is_dir()
 }
 
 /// [`normalize_filesystem_config_path_buf`] as a project-root-relative
@@ -3322,6 +3337,41 @@ mod tests {
         assert_eq!(
             normalize_filesystem_config_path(&absolute, &config_path, &root),
             Some("src/lib".to_string())
+        );
+    }
+
+    /// Vite reads a leading `/` as relative to the root when the value is the
+    /// root itself, or when `<root>/<root>` is a directory (its `rootInRoot`
+    /// rule). A project checked out at `/src` with a `src/` folder and the
+    /// alias `'@': '/src'` resolves to `/src/src`.
+    #[cfg(unix)]
+    #[test]
+    fn normalize_config_path_keeps_the_vite_root_in_root_reading() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("src");
+        std::fs::create_dir_all(&root).expect("root dir");
+        let config_path = root.join("vite.config.ts");
+        let root_string = path_to_config_string(&root);
+        let nested = root_string.trim_start_matches('/').to_string();
+        let under = format!("{root_string}/lib");
+
+        assert_eq!(
+            normalize_config_path(&root_string, &config_path, &root),
+            Some(nested.clone())
+        );
+        assert_eq!(
+            normalize_config_path(&under, &config_path, &root),
+            Some("lib".to_string())
+        );
+
+        std::fs::create_dir_all(root.join(&nested)).expect("root-in-root dir");
+        assert_eq!(
+            normalize_config_path(&under, &config_path, &root),
+            Some(format!("{nested}/lib"))
+        );
+        assert_eq!(
+            normalize_filesystem_config_path(&under, &config_path, &root),
+            Some("lib".to_string())
         );
     }
 

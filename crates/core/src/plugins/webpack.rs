@@ -630,24 +630,24 @@ mod tests {
     /// path.
     #[test]
     fn resolve_config_reads_a_leading_slash_as_a_filesystem_path() {
-        let source = r#"
-            module.exports = {
-                context: "/project/app",
-                entry: ["./main.ts", "/src/absolute.js", "/project/app/admin.ts"],
-                resolve: {
-                    alias: {
+        let root = std::env::temp_dir().join("fallow-2806-webpack");
+        let project = config_parser::path_to_config_string(&root);
+        let source = format!(
+            r#"
+            module.exports = {{
+                context: "{project}/app",
+                entry: ["./main.ts", "/src/absolute.js", "{project}/app/admin.ts"],
+                resolve: {{
+                    alias: {{
                         "@outside": "/src/absolute",
-                        "@inside": "/project/src/inside",
-                    },
-                },
-            };
-        "#;
-        let plugin = WebpackPlugin;
-        let result = plugin.resolve_config(
-            std::path::Path::new("/project/webpack.config.js"),
-            source,
-            std::path::Path::new("/project"),
+                        "@inside": "{project}/src/inside",
+                    }},
+                }},
+            }};
+        "#
         );
+        let plugin = WebpackPlugin;
+        let result = plugin.resolve_config(&root.join("webpack.config.js"), &source, &root);
 
         assert_eq!(
             result.path_aliases,
