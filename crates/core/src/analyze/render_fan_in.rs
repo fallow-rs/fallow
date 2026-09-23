@@ -41,8 +41,9 @@ use super::predicates::{declares_react_runtime, is_react_file};
 use super::react_resolve::{ChildResolver, CompKey};
 
 /// The same concentration floor `compute_coupling_concentration` uses
-/// (`vital_signs.rs`): the high-fan-in threshold is `max(p95, FLOOR)`, so there
-/// is NO new tunable constant beyond the one coupling already carries.
+/// (`crates/engine/src/vital_signs.rs`): the high-fan-in threshold is
+/// `max(p95, FLOOR)`, so there is NO new tunable constant beyond the one
+/// coupling already carries.
 const CONCENTRATION_FLOOR: u32 = 10;
 
 /// Compute the project-wide render fan-in metric. Returns `None` unless the
@@ -249,10 +250,11 @@ struct FanInAccum {
     parents: FxHashSet<(FileId, String)>,
 }
 
-/// Compute the distinct-parents concentration: `(p95, high_pct)`, mirroring
-/// `compute_coupling_concentration` in `crates/cli/src/vital_signs.rs` verbatim
-/// (p95 over the per-component distinct-parents distribution; `high_pct` = the
-/// percent of components above the `max(p95, FLOOR)` threshold). `(None, None)`
+/// Compute the distinct-parents concentration: `(p95, high_pct)` over the
+/// per-component distinct-parents distribution. This function uses the same p95
+/// index, `max(p95, CONCENTRATION_FLOOR)` threshold and one-decimal `high_pct`
+/// as `compute_coupling_concentration` in `crates/engine/src/vital_signs.rs`;
+/// change both together. `(None, None)`
 /// on an empty population (the percentile-on-tiny-population caveat coupling
 /// already carries). A singleton population is fine (its single value is the
 /// p95).
@@ -260,7 +262,7 @@ struct FanInAccum {
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
-    reason = "distinct-parents values are bounded by project size; mirrors compute_coupling_concentration"
+    reason = "distinct-parents values are bounded by project size; same math as compute_coupling_concentration"
 )]
 fn concentration(distinct_parents: &[u32]) -> (Option<u32>, Option<f64>) {
     if distinct_parents.is_empty() {

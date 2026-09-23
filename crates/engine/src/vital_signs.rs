@@ -410,11 +410,11 @@ fn compute_interfacing_risk_profile(param_counts: &[u8]) -> RiskProfile {
 ///
 /// The component-graph analogue (render fan-in concentration:
 /// `p95_render_fan_in` / `render_fan_in_high_pct` / `max_render_fan_in`) is
-/// computed in core (`crate::render_fan_in`), which has the
-/// resolved-module graph the CLI lacks. It mirrors this helper verbatim (p95 +
-/// `high_pct` over the per-component distinct-parents distribution, reusing the
-/// same `max(p95, 10)` floor) and is assigned onto `VitalSigns` in
-/// `health/mod.rs::prepare_health_vital_data`.
+/// computed in the `analyze::render_fan_in` module of `fallow_core`, which has
+/// the resolved-module graph. It uses the same p95 and floor math over the
+/// per-component distinct-parents distribution; change both together. The
+/// result is assigned onto `VitalSigns` in
+/// `health/vital_data.rs::prepare_health_vital_data`.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "fan-in values are bounded by project size"
