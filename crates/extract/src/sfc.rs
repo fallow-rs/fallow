@@ -890,7 +890,10 @@ fn apply_emits_harvest(
     }
 }
 
-fn translate_script_complexity(
+/// Score the functions of an SFC `<script>` or an Astro frontmatter
+/// (cyclomatic and cognitive complexity). Each function line and column moves
+/// from the script-body coordinates to the coordinates of the full source file.
+pub(crate) fn translate_script_complexity(
     script: &SfcScript,
     program: &oxc_ast::ast::Program<'_>,
     sfc_line_offsets: &[u32],
@@ -898,8 +901,10 @@ fn translate_script_complexity(
     let script_line_offsets = compute_line_offsets(&script.body);
     let mut complexity =
         crate::complexity::compute_complexity(program, &script.body, &script_line_offsets);
-    let (body_start_line, body_start_col) =
-        byte_offset_to_line_col(sfc_line_offsets, script.byte_offset as u32);
+    let (body_start_line, body_start_col) = byte_offset_to_line_col(
+        sfc_line_offsets,
+        u32::try_from(script.byte_offset).unwrap_or(u32::MAX),
+    );
 
     for function in &mut complexity {
         function.line = body_start_line + function.line.saturating_sub(1);

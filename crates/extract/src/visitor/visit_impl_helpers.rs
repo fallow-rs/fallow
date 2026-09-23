@@ -9,7 +9,7 @@ use std::path::{Component, PathBuf};
 use crate::MemberAccess;
 
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
-use super::{static_member_object_name, unwrap_static_expr};
+use super::{assignment_target_identifier_name, static_member_object_name, unwrap_static_expr};
 
 pub(super) const PINO_PACKAGE: &str = "pino";
 pub(super) const PINO_FACTORY_EXPORT: &str = "pino";
@@ -1087,39 +1087,6 @@ fn append_unique_paths(target: &mut Vec<String>, paths: Vec<String>) {
         if !target.iter().any(|existing| existing == &path) {
             target.push(path);
         }
-    }
-}
-
-fn assignment_target_identifier_name<'b>(target: &'b AssignmentTarget<'_>) -> Option<&'b str> {
-    match target {
-        AssignmentTarget::AssignmentTargetIdentifier(ident) => Some(ident.name.as_str()),
-        AssignmentTarget::TSAsExpression(ts_as) => expression_identifier_name(&ts_as.expression),
-        AssignmentTarget::TSSatisfiesExpression(ts_sat) => {
-            expression_identifier_name(&ts_sat.expression)
-        }
-        AssignmentTarget::TSNonNullExpression(ts_non_null) => {
-            expression_identifier_name(&ts_non_null.expression)
-        }
-        AssignmentTarget::TSTypeAssertion(ts_assertion) => {
-            expression_identifier_name(&ts_assertion.expression)
-        }
-        _ => None,
-    }
-}
-
-fn expression_identifier_name<'b>(expr: &'b Expression<'_>) -> Option<&'b str> {
-    match expr {
-        Expression::Identifier(ident) => Some(ident.name.as_str()),
-        Expression::ParenthesizedExpression(paren) => expression_identifier_name(&paren.expression),
-        Expression::TSAsExpression(ts_as) => expression_identifier_name(&ts_as.expression),
-        Expression::TSSatisfiesExpression(ts_sat) => expression_identifier_name(&ts_sat.expression),
-        Expression::TSNonNullExpression(ts_non_null) => {
-            expression_identifier_name(&ts_non_null.expression)
-        }
-        Expression::TSTypeAssertion(ts_assertion) => {
-            expression_identifier_name(&ts_assertion.expression)
-        }
-        _ => None,
     }
 }
 

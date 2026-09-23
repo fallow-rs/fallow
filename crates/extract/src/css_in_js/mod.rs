@@ -21,7 +21,5 @@ pub use object::{CssInJsObjectSheets, css_in_js_object_sheets};
 pub use template::css_in_js_virtual_stylesheet;
 pub use tokens::{
     ConsumerQuery, CssInJsToken, CssInJsTokenDef, CssInJsTokenOrigin, TokenConsumerHit,
-    css_in_js_consumer_scan, css_in_js_theme_consumers, css_in_js_theme_token_defs,
-    css_in_js_token_consumers, css_in_js_token_defs, panda_style_value_consumers,
-    panda_token_call_consumers,
+    css_in_js_consumer_scan, css_in_js_theme_token_defs, css_in_js_token_defs,
 };

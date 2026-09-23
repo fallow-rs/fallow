@@ -12,15 +12,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::suppress::ParsedSuppressions;
 use crate::{
-    AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
-    ClassThisMemberAccessFact, ClassThisWholeObjectUseFact, ComputedEnumKeyUseFact,
-    DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
-    ExportName, ExportedObjectInstancePropertyFact, FactoryCallMemberAccessFact,
-    FactoryFnMemberAccessFact, FactoryFnWholeObjectFact, FactoryReturnObjectPropertyAccessFact,
-    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
+    AngularTemplateMemberAccessFact, ClassThisMemberAccessFact, ClassThisWholeObjectUseFact,
+    ComputedEnumKeyUseFact, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
+    ExportedObjectInstancePropertyFact, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact,
+    FactoryFnWholeObjectFact, FactoryReturnObjectPropertyAccessFact, ImportInfo, ImportedName,
     InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
-    PlaywrightFixtureUseFact, QualifiedClassMemberAccessFact, ReExportInfo, RequireCallInfo,
+    PlaywrightFixtureDefinitionFact, QualifiedClassMemberAccessFact, ReExportInfo, RequireCallInfo,
     SemanticFact, TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag,
 };
 use fallow_types::extract::{
@@ -1374,85 +1371,11 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    fn record_angular_component_field_array_type_fact(
-        &mut self,
-        field: String,
-        element_class: String,
-    ) {
-        self.semantic_facts
-            .push(SemanticFact::AngularComponentFieldArrayType(
-                AngularComponentFieldArrayTypeFact {
-                    field,
-                    element_class,
-                },
-            ));
-    }
-
-    fn record_angular_this_spread_fact(&mut self) {
-        self.semantic_facts
-            .push(SemanticFact::AngularThisSpread(AngularThisSpreadFact));
-    }
-
-    fn record_dynamic_custom_element_render_fact(&mut self) {
-        self.semantic_facts
-            .push(SemanticFact::DynamicCustomElementRender(
-                DynamicCustomElementRenderFact,
-            ));
-    }
-
-    fn record_instance_export_binding_fact(&mut self, export_name: String, target_name: String) {
-        self.semantic_facts
-            .push(SemanticFact::InstanceExportBinding(
-                InstanceExportBindingFact {
-                    export_name,
-                    target_name,
-                },
-            ));
-    }
-
-    fn record_factory_call_member_fact(
-        &mut self,
-        callee_object: String,
-        callee_method: String,
-        member: String,
-    ) {
-        self.semantic_facts
-            .push(SemanticFact::FactoryCallMemberAccess(
-                FactoryCallMemberAccessFact {
-                    callee_object,
-                    callee_method,
-                    member,
-                },
-            ));
-    }
-
     fn record_factory_fn_member_fact(&mut self, callee_name: String, member: String) {
         self.semantic_facts
             .push(SemanticFact::FactoryFnMemberAccess(
                 FactoryFnMemberAccessFact {
                     callee_name,
-                    member,
-                },
-            ));
-    }
-
-    fn record_factory_fn_whole_object_fact(&mut self, callee_name: String) {
-        self.semantic_facts.push(SemanticFact::FactoryFnWholeObject(
-            FactoryFnWholeObjectFact { callee_name },
-        ));
-    }
-
-    fn record_factory_return_object_property_fact(
-        &mut self,
-        callee_name: String,
-        property_path: String,
-        member: String,
-    ) {
-        self.semantic_facts
-            .push(SemanticFact::FactoryReturnObjectPropertyAccess(
-                FactoryReturnObjectPropertyAccessFact {
-                    callee_name,
-                    property_path,
                     member,
                 },
             ));
@@ -1474,55 +1397,6 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    fn record_fluent_chain_member_fact(
-        &mut self,
-        root_object: String,
-        root_method: String,
-        chain: Vec<String>,
-        member: String,
-    ) {
-        self.semantic_facts
-            .push(SemanticFact::FluentChainMemberAccess(
-                FluentChainMemberAccessFact {
-                    root_object,
-                    root_method,
-                    chain,
-                    member,
-                },
-            ));
-    }
-
-    fn record_fluent_chain_new_member_fact(
-        &mut self,
-        class_name: String,
-        chain: Vec<String>,
-        member: String,
-    ) {
-        self.semantic_facts
-            .push(SemanticFact::FluentChainNewMemberAccess(
-                FluentChainNewMemberAccessFact {
-                    class_name,
-                    chain,
-                    member,
-                },
-            ));
-    }
-
-    fn record_playwright_fixture_use_fact(
-        &mut self,
-        test_name: String,
-        fixture_name: String,
-        member: String,
-    ) {
-        self.semantic_facts.push(SemanticFact::PlaywrightFixtureUse(
-            PlaywrightFixtureUseFact {
-                test_name,
-                fixture_name,
-                member,
-            },
-        ));
-    }
-
     fn record_playwright_fixture_definition_fact(
         &mut self,
         test_name: String,
@@ -1533,32 +1407,6 @@ impl ModuleInfoExtractor {
             .push(SemanticFact::PlaywrightFixtureDefinition(
                 PlaywrightFixtureDefinitionFact {
                     test_name,
-                    fixture_name,
-                    type_name,
-                },
-            ));
-    }
-
-    fn record_playwright_fixture_alias_fact(&mut self, test_name: String, base_name: String) {
-        self.semantic_facts
-            .push(SemanticFact::PlaywrightFixtureAlias(
-                PlaywrightFixtureAliasFact {
-                    test_name,
-                    base_name,
-                },
-            ));
-    }
-
-    fn record_playwright_fixture_type_fact(
-        &mut self,
-        alias_name: String,
-        fixture_name: String,
-        type_name: String,
-    ) {
-        self.semantic_facts
-            .push(SemanticFact::PlaywrightFixtureType(
-                PlaywrightFixtureTypeFact {
-                    alias_name,
                     fixture_name,
                     type_name,
                 },
@@ -1894,7 +1742,13 @@ impl ModuleInfoExtractor {
                 continue;
             };
             let export_name = export.name.to_string();
-            self.record_instance_export_binding_fact(export_name, target_name.to_string());
+            self.semantic_facts
+                .push(SemanticFact::InstanceExportBinding(
+                    InstanceExportBindingFact {
+                        export_name,
+                        target_name: target_name.to_string(),
+                    },
+                ));
         }
     }
 
@@ -2250,7 +2104,14 @@ impl ModuleInfoExtractor {
             self.record_factory_fn_member_fact(callee_name, member);
         }
         for (callee_name, property_path, member) in deferred_object_property_facts {
-            self.record_factory_return_object_property_fact(callee_name, property_path, member);
+            self.semantic_facts
+                .push(SemanticFact::FactoryReturnObjectPropertyAccess(
+                    FactoryReturnObjectPropertyAccessFact {
+                        callee_name,
+                        property_path,
+                        member,
+                    },
+                ));
         }
     }
 
@@ -2321,7 +2182,9 @@ impl ModuleInfoExtractor {
                 .iter()
                 .any(|import| import.local_name == callee_name)
             {
-                self.record_factory_fn_whole_object_fact(callee_name);
+                self.semantic_facts.push(SemanticFact::FactoryFnWholeObject(
+                    FactoryFnWholeObjectFact { callee_name },
+                ));
             }
         }
     }
@@ -2659,7 +2522,14 @@ impl ModuleInfoExtractor {
                 .collect();
         self.member_accesses.extend(additional_accesses);
         for (callee_object, callee_method, member) in additional_facts {
-            self.record_factory_call_member_fact(callee_object, callee_method, member);
+            self.semantic_facts
+                .push(SemanticFact::FactoryCallMemberAccess(
+                    FactoryCallMemberAccessFact {
+                        callee_object,
+                        callee_method,
+                        member,
+                    },
+                ));
         }
         for (type_name, property_path, member) in additional_typed_property_facts {
             self.record_typed_property_member_fact(type_name, property_path, member);

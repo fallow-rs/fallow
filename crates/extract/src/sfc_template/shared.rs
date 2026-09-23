@@ -29,57 +29,6 @@ pub(super) fn merge_expression_usage(
     );
 }
 
-#[cfg(test)]
-pub(super) fn merge_statement_usage(
-    usage: &mut TemplateUsage,
-    snippet: &str,
-    imported_bindings: &FxHashSet<String>,
-    locals: &[String],
-) {
-    merge_snippet_usage(
-        usage,
-        snippet,
-        TemplateSnippetKind::Statement,
-        imported_bindings,
-        locals,
-        false,
-    );
-}
-
-#[cfg(test)]
-pub(super) fn merge_expression_usage_allow_dollar_refs(
-    usage: &mut TemplateUsage,
-    snippet: &str,
-    imported_bindings: &FxHashSet<String>,
-    locals: &[String],
-) {
-    merge_snippet_usage(
-        usage,
-        snippet,
-        TemplateSnippetKind::Expression,
-        imported_bindings,
-        locals,
-        true,
-    );
-}
-
-#[cfg(test)]
-pub(super) fn merge_statement_usage_allow_dollar_refs(
-    usage: &mut TemplateUsage,
-    snippet: &str,
-    imported_bindings: &FxHashSet<String>,
-    locals: &[String],
-) {
-    merge_snippet_usage(
-        usage,
-        snippet,
-        TemplateSnippetKind::Statement,
-        imported_bindings,
-        locals,
-        true,
-    );
-}
-
 pub(super) fn merge_expression_usage_with_bound_targets(
     usage: &mut TemplateUsage,
     snippet: &str,
@@ -652,13 +601,13 @@ fn parse_unquoted_attr_value(inner: &str, index: usize) -> (Option<String>, usiz
 
 #[cfg(test)]
 mod tests {
-    use rustc_hash::FxHashSet;
+    use rustc_hash::{FxHashMap, FxHashSet};
 
     use super::{
         extract_pattern_binding_names, kebab_to_camel_case, merge_component_tag_usage,
-        merge_expression_usage, merge_expression_usage_allow_dollar_refs,
-        merge_pattern_binding_usage, merge_statement_usage,
-        merge_statement_usage_allow_dollar_refs, parse_tag_attrs, split_top_level,
+        merge_expression_usage, merge_expression_usage_allow_dollar_refs_with_bound_targets,
+        merge_pattern_binding_usage, merge_statement_usage_allow_dollar_refs_with_bound_targets,
+        merge_statement_usage_with_bound_targets, parse_tag_attrs, split_top_level,
         split_top_level_once, strip_trailing_type_annotation, strip_wrapping, trim_outer_parens,
         uppercase_first, valid_identifier,
     };
@@ -973,7 +922,13 @@ mod tests {
         let mut usage = TemplateUsage::default();
         let imported_bindings = FxHashSet::from_iter(["doSomething".to_string()]);
 
-        merge_statement_usage(&mut usage, "doSomething();", &imported_bindings, &[]);
+        merge_statement_usage_with_bound_targets(
+            &mut usage,
+            "doSomething();",
+            &imported_bindings,
+            &FxHashMap::default(),
+            &[],
+        );
 
         assert!(usage.used_bindings.contains("doSomething"));
     }
@@ -983,7 +938,13 @@ mod tests {
         let mut usage = TemplateUsage::default();
         let imported_bindings = FxHashSet::from_iter(["count".to_string()]);
 
-        merge_expression_usage_allow_dollar_refs(&mut usage, "$count + 1", &imported_bindings, &[]);
+        merge_expression_usage_allow_dollar_refs_with_bound_targets(
+            &mut usage,
+            "$count + 1",
+            &imported_bindings,
+            &FxHashMap::default(),
+            &[],
+        );
 
         assert!(usage.used_bindings.contains("count"));
     }
@@ -993,10 +954,11 @@ mod tests {
         let mut usage = TemplateUsage::default();
         let imported_bindings = FxHashSet::from_iter(["store".to_string()]);
 
-        merge_statement_usage_allow_dollar_refs(
+        merge_statement_usage_allow_dollar_refs_with_bound_targets(
             &mut usage,
             "$store.update();",
             &imported_bindings,
+            &FxHashMap::default(),
             &[],
         );
 

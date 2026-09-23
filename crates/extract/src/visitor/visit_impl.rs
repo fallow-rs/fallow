@@ -10,9 +10,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::{
-    ComputedEnumKeyUseFact, DefaultImportWholeObjectUseFact, DynamicImportInfo,
-    DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess,
-    ModuleLoadMechanism, ReExportInfo, RequireCallInfo, RequiredTypeMemberFact, SemanticFact,
+    AngularComponentFieldArrayTypeFact, AngularThisSpreadFact, ComputedEnumKeyUseFact,
+    DefaultImportWholeObjectUseFact, DynamicCustomElementRenderFact, DynamicImportInfo,
+    DynamicImportPattern, ExportInfo, ExportName, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, MemberAccess, ModuleLoadMechanism,
+    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, RequiredTypeMemberFact, SemanticFact,
     VisibilityTag,
 };
 use fallow_types::extract::{
@@ -439,12 +441,15 @@ impl ModuleInfoExtractor {
             };
             if let Expression::Identifier(root_id) = &inner_member.object {
                 chain_prefix_reversed.reverse();
-                self.record_fluent_chain_member_fact(
-                    root_id.name.to_string(),
-                    inner_member.property.name.to_string(),
-                    chain_prefix_reversed,
-                    this_method.to_string(),
-                );
+                self.semantic_facts
+                    .push(SemanticFact::FluentChainMemberAccess(
+                        FluentChainMemberAccessFact {
+                            root_object: root_id.name.to_string(),
+                            root_method: inner_member.property.name.to_string(),
+                            chain: chain_prefix_reversed,
+                            member: this_method.to_string(),
+                        },
+                    ));
                 return;
             }
             if let Expression::NewExpression(new_expr) = &inner_member.object
@@ -452,11 +457,14 @@ impl ModuleInfoExtractor {
             {
                 chain_prefix_reversed.push(inner_member.property.name.to_string());
                 chain_prefix_reversed.reverse();
-                self.record_fluent_chain_new_member_fact(
-                    class_id.name.to_string(),
-                    chain_prefix_reversed,
-                    this_method.to_string(),
-                );
+                self.semantic_facts
+                    .push(SemanticFact::FluentChainNewMemberAccess(
+                        FluentChainNewMemberAccessFact {
+                            class_name: class_id.name.to_string(),
+                            chain: chain_prefix_reversed,
+                            member: this_method.to_string(),
+                        },
+                    ));
                 return;
             }
             chain_prefix_reversed.push(inner_member.property.name.to_string());
@@ -2640,7 +2648,13 @@ impl<'a> ModuleInfoExtractor {
 
     fn record_angular_component_field_array_types(&mut self, class: &Class<'_>) {
         for (field, element_class) in super::helpers::collect_component_field_array_types(class) {
-            self.record_angular_component_field_array_type_fact(field, element_class);
+            self.semantic_facts
+                .push(SemanticFact::AngularComponentFieldArrayType(
+                    AngularComponentFieldArrayTypeFact {
+                        field,
+                        element_class,
+                    },
+                ));
         }
     }
 
@@ -3423,11 +3437,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Some(test_name) = playwright_test_callee_name(&expr.callee) {
             let fixture_uses = collect_playwright_fixture_member_uses(&expr.arguments);
             for access in &fixture_uses {
-                self.record_playwright_fixture_use_fact(
-                    test_name.clone(),
-                    access.fixture_name.clone(),
-                    access.member.clone(),
-                );
+                self.semantic_facts.push(SemanticFact::PlaywrightFixtureUse(
+                    PlaywrightFixtureUseFact {
+                        test_name: test_name.clone(),
+                        fixture_name: access.fixture_name.clone(),
+                        member: access.member.clone(),
+                    },
+                ));
             }
         }
 
@@ -3968,7 +3984,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             // pattern" convention spreads `this` into a behavior pattern). Record
             // a typed fact so the Angular input/output detectors abstain the
             // whole component instead of false-flagging spread inputs.
-            Expression::ThisExpression(_) => self.record_angular_this_spread_fact(),
+            Expression::ThisExpression(_) => {
+                self.semantic_facts
+                    .push(SemanticFact::AngularThisSpread(AngularThisSpreadFact));
+            }
             _ => {}
         }
         walk::walk_spread_element(self, elem);
@@ -4080,7 +4099,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     .as_ref()
                     .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str());
                 if text.ends_with('<') || text.ends_with("</") {
-                    self.record_dynamic_custom_element_render_fact();
+                    self.semantic_facts
+                        .push(SemanticFact::DynamicCustomElementRender(
+                            DynamicCustomElementRenderFact,
+                        ));
                 }
             }
         }
@@ -4391,6 +4413,8 @@ fn is_string_coercion_sibling(expr: &Expression<'_>) -> bool {
     )
 }
 
+/// The class name in a `new Class()` expression, or `None` for a non-`new`
+/// expression, a non-identifier callee, or a builtin constructor.
 fn new_expression_class_name(expr: &Expression<'_>) -> Option<String> {
     let Expression::NewExpression(new_expr) = expr else {
         return None;

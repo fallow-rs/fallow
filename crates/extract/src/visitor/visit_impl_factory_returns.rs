@@ -6,8 +6,8 @@
 )]
 use oxc_ast::ast::*;
 
-use super::super::{FactoryAssignedValue, ObjectPropValueRef, helpers::is_builtin_constructor};
-use super::unwrap_static_expr;
+use super::super::{FactoryAssignedValue, ObjectPropValueRef};
+use super::{new_expression_class_name, unwrap_static_expr};
 
 #[derive(Clone, Copy)]
 pub(super) struct FactoryReturnFunctionInput<'site, 'ast> {
@@ -81,21 +81,6 @@ pub(in super::super) fn count_returns_in_statements(statements: &[Statement<'_>]
     let mut count = 0;
     for_each_return_statement(statements, &mut |_| count += 1);
     count
-}
-
-/// The class name in a `new Class()` expression, or `None` for a non-`new`
-/// expression, a non-identifier callee, or a builtin constructor.
-fn new_expression_class_name(expr: &Expression<'_>) -> Option<String> {
-    let Expression::NewExpression(new_expr) = expr else {
-        return None;
-    };
-    let Expression::Identifier(callee) = &new_expr.callee else {
-        return None;
-    };
-    if is_builtin_constructor(callee.name.as_str()) {
-        return None;
-    }
-    Some(callee.name.to_string())
 }
 
 /// Classify the right-hand side of a module-local assignment for the alias

@@ -146,84 +146,6 @@ pub struct TokenConsumerHit {
     pub line: u32,
 }
 
-/// Walk a consuming JS/TS source for cross-module reads of a token binding,
-/// returning the located reads that resolve to a DEFINED leaf token path. The
-/// caller supplies the local `alias` the consuming file imported the token binding
-/// under (so aliased imports work) and the set of defined leaf paths. A member
-/// access `<alias>.a.b` is a hit when `a.b` is exactly a defined leaf path;
-/// intermediate groups (`<alias>.a` where only `a.b` is defined) and accesses on
-/// other bindings are not hits, so there is no double-count and no false match.
-#[must_use]
-#[expect(
-    clippy::implicit_hasher,
-    reason = "callers build an FxHashSet; std HashSet is a disallowed type here"
-)]
-pub fn css_in_js_token_consumers(
-    source: &str,
-    path: &Path,
-    alias: &str,
-    leaf_paths: &FxHashSet<String>,
-) -> Vec<TokenConsumerHit> {
-    css_in_js_consumer_scan(
-        source,
-        path,
-        &[ConsumerQuery::MemberBinding { alias, leaf_paths }],
-    )
-    .into_iter()
-    .map(|(_, hit)| hit)
-    .collect()
-}
-
-/// Walk a consuming JS/TS source for PandaCSS `token('path.to.token')` calls.
-/// The caller supplies the local alias imported from Panda's generated
-/// `styled-system` token module and the set of defined leaf paths.
-#[must_use]
-#[expect(
-    clippy::implicit_hasher,
-    reason = "callers build an FxHashSet; std HashSet is a disallowed type here"
-)]
-pub fn panda_token_call_consumers(
-    source: &str,
-    path: &Path,
-    alias: &str,
-    leaf_paths: &FxHashSet<String>,
-) -> Vec<TokenConsumerHit> {
-    css_in_js_consumer_scan(
-        source,
-        path,
-        &[ConsumerQuery::PandaTokenCall { alias, leaf_paths }],
-    )
-    .into_iter()
-    .map(|(_, hit)| hit)
-    .collect()
-}
-
-/// Walk a consuming JS/TS source for common PandaCSS style calls whose object
-/// literal values statically name token paths.
-#[must_use]
-#[expect(
-    clippy::implicit_hasher,
-    reason = "callers build FxHashSet values; std HashSet is a disallowed type here"
-)]
-pub fn panda_style_value_consumers(
-    source: &str,
-    path: &Path,
-    aliases: &FxHashSet<String>,
-    leaf_paths: &FxHashSet<String>,
-) -> Vec<TokenConsumerHit> {
-    css_in_js_consumer_scan(
-        source,
-        path,
-        &[ConsumerQuery::PandaStyleValues {
-            aliases,
-            leaf_paths,
-        }],
-    )
-    .into_iter()
-    .map(|(_, hit)| hit)
-    .collect()
-}
-
 /// Walk a JS/TS source for statically-authored theme object definitions used by
 /// styled-components and Emotion. A `theme` or `*Theme` variable with an object
 /// literal initializer becomes a token surface, with nested scalar leaves exposed
@@ -242,30 +164,11 @@ pub fn css_in_js_theme_token_defs(source: &str, path: &Path) -> Vec<CssInJsToken
     collector.defs
 }
 
-/// Walk a consuming JS/TS source for styled-components / Emotion theme reads such
-/// as `theme.colors.brand` and `props.theme.colors.brand`.
-#[must_use]
-#[expect(
-    clippy::implicit_hasher,
-    reason = "callers build an FxHashSet; std HashSet is a disallowed type here"
-)]
-pub fn css_in_js_theme_consumers(
-    source: &str,
-    path: &Path,
-    leaf_paths: &FxHashSet<String>,
-) -> Vec<TokenConsumerHit> {
-    css_in_js_consumer_scan(source, path, &[ConsumerQuery::ThemeReads { leaf_paths }])
-        .into_iter()
-        .map(|(_, hit)| hit)
-        .collect()
-}
-
-/// One attribution query to run against a single parsed consumer source. Each
-/// variant mirrors one of the single-query consumer functions above; a scan runs
-/// any mix of them against ONE parse of the source.
+/// One attribution query to run against a single parsed consumer source. A scan
+/// runs any mix of queries against ONE parse of the source.
 pub enum ConsumerQuery<'a> {
-    /// Member-access reads `<alias>.a.b` of an imported token binding. Mirrors
-    /// [`css_in_js_token_consumers`].
+    /// Member-access reads `<alias>.a.b` of an imported token binding. A read is
+    /// a hit only when `a.b` is a defined leaf path, not an intermediate group.
     MemberBinding {
         /// The local identifier the token binding was imported under.
         alias: &'a str,
@@ -280,36 +183,42 @@ pub enum ConsumerQuery<'a> {
         /// Every defined leaf in that contract group.
         leaf_paths: &'a FxHashSet<String>,
     },
-    /// PandaCSS `token('a.b')` calls through the given alias. Mirrors
-    /// [`panda_token_call_consumers`].
+    /// PandaCSS `token('a.b')` calls through the given alias.
     PandaTokenCall {
         /// The local alias imported from Panda's generated token module.
         alias: &'a str,
         /// The defined leaf token paths (`colors.brand`).
         leaf_paths: &'a FxHashSet<String>,
     },
-    /// PandaCSS style-call object values naming token paths. Mirrors
-    /// [`panda_style_value_consumers`].
+    /// PandaCSS style-call object values naming token paths.
     PandaStyleValues {
         /// The local aliases for Panda style calls (`css`, `cva`).
         aliases: &'a FxHashSet<String>,
         /// The defined leaf token paths (`colors.brand`).
         leaf_paths: &'a FxHashSet<String>,
     },
-    /// styled-components / Emotion theme reads (`theme.colors.x`). Mirrors
-    /// [`css_in_js_theme_consumers`].
+    /// styled-components / Emotion theme reads (`theme.colors.x`), including
+    /// `props.theme.colors.x`.
     ThemeReads {
         /// The defined leaf token paths (`colors.brand`).
         leaf_paths: &'a FxHashSet<String>,
     },
 }
 
+impl ConsumerQuery<'_> {
+    /// `true` for the queries that `BatchedBindingCollector` runs in one walk.
+    const fn is_batched(&self) -> bool {
+        matches!(
+            self,
+            Self::MemberBinding { .. } | Self::StyleXThemeGroup { .. }
+        )
+    }
+}
+
 /// Parse `source` once and run every query against the same AST, returning
 /// `(query_index, hit)` pairs so the caller can attribute each hit back to the
-/// definer that produced its query. Behavior per query is identical to the
-/// corresponding single-query function, including the empty-alias / empty-leaf
-/// short-circuits (a query that would have early-returned simply contributes no
-/// hits, without suppressing the other queries).
+/// definer that produced its query. A query with an empty alias or an empty
+/// leaf set contributes no hits and does not suppress the other queries.
 #[must_use]
 pub fn css_in_js_consumer_scan(
     source: &str,
@@ -323,16 +232,7 @@ pub fn css_in_js_consumer_scan(
     let allocator = Allocator::default();
     let ret = Parser::new(&allocator, source, source_type).parse();
     let mut out = Vec::new();
-    let batch_query_count = queries
-        .iter()
-        .filter(|query| {
-            matches!(
-                query,
-                ConsumerQuery::MemberBinding { .. } | ConsumerQuery::StyleXThemeGroup { .. }
-            )
-        })
-        .count();
-    if batch_query_count > 0 {
+    if queries.iter().any(ConsumerQuery::is_batched) {
         let mut collector = BatchedBindingCollector {
             lines: LineCounter::new(source),
             queries,
@@ -358,15 +258,9 @@ pub fn css_in_js_consumer_scan(
         out.extend(collector.hits);
     }
     for (idx, query) in queries.iter().enumerate() {
-        if batch_query_count > 0
-            && matches!(
-                query,
-                ConsumerQuery::MemberBinding { .. } | ConsumerQuery::StyleXThemeGroup { .. }
-            )
-        {
-            continue;
+        if !query.is_batched() {
+            run_consumer_query(query, source, &ret.program, idx, &mut out);
         }
-        run_consumer_query(query, source, &ret.program, idx, &mut out);
     }
     out
 }
@@ -867,9 +761,9 @@ impl<'a> Visit<'a> for BatchedBindingCollector<'a, '_, '_> {
     }
 }
 
-/// Run one [`ConsumerQuery`] against an already-parsed `program`, tagging each
-/// resulting hit with `idx`. The per-variant guards mirror each single-query
-/// function's empty-input short-circuit exactly.
+/// Run one non-batched [`ConsumerQuery`] against an already-parsed `program`,
+/// and tag each resulting hit with `idx`. A query with an empty alias or an
+/// empty leaf set gives no hits.
 fn run_consumer_query<'a>(
     query: &ConsumerQuery<'_>,
     source: &'a str,
@@ -878,19 +772,8 @@ fn run_consumer_query<'a>(
     out: &mut Vec<(usize, TokenConsumerHit)>,
 ) {
     match query {
-        ConsumerQuery::MemberBinding { alias, leaf_paths } => {
-            if alias.is_empty() || leaf_paths.is_empty() {
-                return;
-            }
-            let mut collector = ConsumerCollector {
-                lines: LineCounter::new(source),
-                alias,
-                leaf_paths,
-                hits: Vec::new(),
-            };
-            collector.visit_program(program);
-            out.extend(collector.hits.into_iter().map(|hit| (idx, hit)));
-        }
+        // `css_in_js_consumer_scan` runs these queries in `BatchedBindingCollector`.
+        ConsumerQuery::MemberBinding { .. } | ConsumerQuery::StyleXThemeGroup { .. } => {}
         ConsumerQuery::PandaTokenCall { alias, leaf_paths } => {
             if alias.is_empty() || leaf_paths.is_empty() {
                 return;
@@ -901,25 +784,6 @@ fn run_consumer_query<'a>(
                 leaf_paths,
                 hits: Vec::new(),
             };
-            collector.visit_program(program);
-            out.extend(collector.hits.into_iter().map(|hit| (idx, hit)));
-        }
-        ConsumerQuery::StyleXThemeGroup {
-            contract_alias,
-            leaf_paths,
-        } => {
-            if contract_alias.is_empty() || leaf_paths.is_empty() {
-                return;
-            }
-            let mut collector = StyleXThemeGroupCollector {
-                lines: LineCounter::new(source),
-                contract_alias,
-                leaf_paths,
-                namespaces: FxHashSet::default(),
-                theme_functions: FxHashSet::default(),
-                hits: Vec::new(),
-            };
-            collector.build_import_map(program);
             collector.visit_program(program);
             out.extend(collector.hits.into_iter().map(|hit| (idx, hit)));
         }
@@ -951,144 +815,6 @@ fn run_consumer_query<'a>(
             collector.visit_program(program);
             out.extend(collector.hits.into_iter().map(|hit| (idx, hit)));
         }
-    }
-}
-
-struct StyleXThemeGroupCollector<'a, 'b> {
-    lines: LineCounter<'a>,
-    contract_alias: &'b str,
-    leaf_paths: &'b FxHashSet<String>,
-    namespaces: FxHashSet<&'a str>,
-    theme_functions: FxHashSet<&'a str>,
-    hits: Vec<TokenConsumerHit>,
-}
-
-impl<'a> StyleXThemeGroupCollector<'a, '_> {
-    fn build_import_map(&mut self, program: &'a Program<'a>) {
-        for stmt in &program.body {
-            let Statement::ImportDeclaration(decl) = stmt else {
-                continue;
-            };
-            if decl.import_kind.is_type()
-                || module_library(decl.source.value.as_str()) != Some(Lib::StyleX)
-            {
-                continue;
-            }
-            let Some(specifiers) = &decl.specifiers else {
-                continue;
-            };
-            for specifier in specifiers {
-                match specifier {
-                    ImportDeclarationSpecifier::ImportSpecifier(specifier)
-                        if !specifier.import_kind.is_type()
-                            && matches!(
-                                specifier.imported.name().as_str(),
-                                "createTheme" | "unstable_createThemeNested"
-                            ) =>
-                    {
-                        self.theme_functions.insert(specifier.local.name.as_str());
-                    }
-                    ImportDeclarationSpecifier::ImportDefaultSpecifier(specifier) => {
-                        self.namespaces.insert(specifier.local.name.as_str());
-                    }
-                    ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => {
-                        self.namespaces.insert(specifier.local.name.as_str());
-                    }
-                    ImportDeclarationSpecifier::ImportSpecifier(_) => {}
-                }
-            }
-        }
-    }
-
-    fn is_theme_callee(&self, callee: &Expression<'a>) -> bool {
-        match callee {
-            Expression::Identifier(id) => self.theme_functions.contains(id.name.as_str()),
-            Expression::StaticMemberExpression(member) => {
-                let Expression::Identifier(object) = &member.object else {
-                    return false;
-                };
-                self.namespaces.contains(object.name.as_str())
-                    && matches!(
-                        member.property.name.as_str(),
-                        "createTheme" | "unstable_createThemeNested"
-                    )
-            }
-            _ => false,
-        }
-    }
-}
-
-impl<'a> Visit<'a> for StyleXThemeGroupCollector<'a, '_> {
-    fn visit_call_expression(&mut self, call: &oxc_ast::ast::CallExpression<'a>) {
-        if self.is_theme_callee(&call.callee)
-            && let Some(contract) = call.arguments.first().and_then(Argument::as_expression)
-            && matches!(contract, Expression::Identifier(id) if id.name.as_str() == self.contract_alias)
-        {
-            let line = self.lines.line_at(call.span().start);
-            self.hits.extend(
-                self.leaf_paths
-                    .iter()
-                    .cloned()
-                    .map(|token_path| TokenConsumerHit { token_path, line }),
-            );
-        }
-        walk::walk_call_expression(self, call);
-    }
-}
-
-/// Walks a consuming program for member accesses on a token binding alias.
-struct ConsumerCollector<'a, 'b> {
-    lines: LineCounter<'a>,
-    alias: &'b str,
-    leaf_paths: &'b FxHashSet<String>,
-    hits: Vec<TokenConsumerHit>,
-}
-
-impl<'a> ConsumerCollector<'a, '_> {
-    /// Record a hit if `(base, segments)` is exactly `<alias>.<leaf>` for a defined
-    /// leaf path. A node whose chain is `<alias>.<group>` (an intermediate group)
-    /// reconstructs a non-leaf path and is skipped, so each access site yields at
-    /// most one hit (no double count from the nested member expressions).
-    fn record(&mut self, chain: Option<(&'a str, Vec<String>)>, span_start: u32) {
-        if let Some((base, segments)) = chain
-            && base == self.alias
-            && !segments.is_empty()
-        {
-            let token_path = segments.join(".");
-            if self.leaf_paths.contains(&token_path) {
-                let line = self.lines.line_at(span_start);
-                self.hits.push(TokenConsumerHit { token_path, line });
-            }
-        }
-    }
-}
-
-impl<'a> Visit<'a> for ConsumerCollector<'a, '_> {
-    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
-        let mut chain = access_object_chain(&member.object);
-        if let Some((_, segments)) = chain.as_mut() {
-            segments.push(member.property.name.to_string());
-        }
-        self.record(chain, member.span().start);
-        walk::walk_static_member_expression(self, member);
-    }
-
-    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
-        // Bracket access with a STATIC string-literal key (`vars.color['gray-100']`):
-        // the only way to consume a token whose key is not a valid JS identifier
-        // (hyphenated `gray-100`, digit-leading `0x`), which design-token systems use
-        // heavily. Non-literal computed keys (`vars.color[k]`) cannot be resolved
-        // statically and are skipped (a documented lower-bound miss).
-        let mut chain = access_object_chain(&member.object);
-        if let (Some((_, segments)), Some(key)) =
-            (chain.as_mut(), static_computed_key(&member.expression))
-        {
-            segments.push(key);
-        } else {
-            chain = None;
-        }
-        self.record(chain, member.span().start);
-        walk::walk_computed_member_expression(self, member);
     }
 }
 
@@ -4319,7 +4045,7 @@ export const appTheme = {
             .into_iter()
             .map(str::to_owned)
             .collect();
-        let hits = css_in_js_theme_consumers(
+        let hits = scan_one(
             r"
 import styled from 'styled-components';
 export const Card = styled.div`
@@ -4328,7 +4054,9 @@ export const Card = styled.div`
 `;
 ",
             Path::new("card.tsx"),
-            &leaves,
+            ConsumerQuery::ThemeReads {
+                leaf_paths: &leaves,
+            },
         );
         let mut token_paths: Vec<String> = hits.into_iter().map(|hit| hit.token_path).collect();
         token_paths.sort();
@@ -4542,12 +4270,36 @@ export const vars = createGlobalTheme(':root', {
         paths.iter().map(|s| (*s).to_string()).collect()
     }
 
+    /// Run one query and drop the query index from each hit.
+    fn scan_one(source: &str, path: &Path, query: ConsumerQuery<'_>) -> Vec<TokenConsumerHit> {
+        css_in_js_consumer_scan(source, path, &[query])
+            .into_iter()
+            .map(|(_, hit)| hit)
+            .collect()
+    }
+
     fn consumers(source: &str, alias: &str, paths: &[&str]) -> Vec<TokenConsumerHit> {
-        css_in_js_token_consumers(source, Path::new("card.ts"), alias, &leaves(paths))
+        let leaf_paths = leaves(paths);
+        scan_one(
+            source,
+            Path::new("card.ts"),
+            ConsumerQuery::MemberBinding {
+                alias,
+                leaf_paths: &leaf_paths,
+            },
+        )
     }
 
     fn panda_consumers(source: &str, alias: &str, paths: &[&str]) -> Vec<TokenConsumerHit> {
-        panda_token_call_consumers(source, Path::new("card.ts"), alias, &leaves(paths))
+        let leaf_paths = leaves(paths);
+        scan_one(
+            source,
+            Path::new("card.ts"),
+            ConsumerQuery::PandaTokenCall {
+                alias,
+                leaf_paths: &leaf_paths,
+            },
+        )
     }
 
     fn panda_style_consumers(
@@ -4556,7 +4308,15 @@ export const vars = createGlobalTheme(':root', {
         paths: &[&str],
     ) -> Vec<TokenConsumerHit> {
         let aliases = aliases.iter().map(|s| (*s).to_string()).collect();
-        panda_style_value_consumers(source, Path::new("card.ts"), &aliases, &leaves(paths))
+        let leaf_paths = leaves(paths);
+        scan_one(
+            source,
+            Path::new("card.ts"),
+            ConsumerQuery::PandaStyleValues {
+                aliases: &aliases,
+                leaf_paths: &leaf_paths,
+            },
+        )
     }
 
     #[test]
@@ -5059,31 +4819,52 @@ const good = createTheme(tokens, {});
         ];
         let scanned = css_in_js_consumer_scan(source, path, &queries);
 
-        let individual: Vec<(usize, TokenConsumerHit)> =
-            css_in_js_token_consumers(source, path, "vars", &member_leaves)
-                .into_iter()
-                .map(|hit| (0, hit))
-                .chain(
-                    panda_token_call_consumers(source, path, "token", &panda_call_leaves)
-                        .into_iter()
-                        .map(|hit| (1, hit)),
-                )
-                .chain(
-                    panda_style_value_consumers(
-                        source,
-                        path,
-                        &panda_style_aliases,
-                        &panda_style_leaves,
-                    )
-                    .into_iter()
-                    .map(|hit| (2, hit)),
-                )
-                .chain(
-                    css_in_js_theme_consumers(source, path, &theme_leaves)
-                        .into_iter()
-                        .map(|hit| (3, hit)),
-                )
-                .collect();
+        let individual: Vec<(usize, TokenConsumerHit)> = scan_one(
+            source,
+            path,
+            ConsumerQuery::MemberBinding {
+                alias: "vars",
+                leaf_paths: &member_leaves,
+            },
+        )
+        .into_iter()
+        .map(|hit| (0, hit))
+        .chain(
+            scan_one(
+                source,
+                path,
+                ConsumerQuery::PandaTokenCall {
+                    alias: "token",
+                    leaf_paths: &panda_call_leaves,
+                },
+            )
+            .into_iter()
+            .map(|hit| (1, hit)),
+        )
+        .chain(
+            scan_one(
+                source,
+                path,
+                ConsumerQuery::PandaStyleValues {
+                    aliases: &panda_style_aliases,
+                    leaf_paths: &panda_style_leaves,
+                },
+            )
+            .into_iter()
+            .map(|hit| (2, hit)),
+        )
+        .chain(
+            scan_one(
+                source,
+                path,
+                ConsumerQuery::ThemeReads {
+                    leaf_paths: &theme_leaves,
+                },
+            )
+            .into_iter()
+            .map(|hit| (3, hit)),
+        )
+        .collect();
 
         assert_eq!(scanned, individual);
         assert_eq!(scanned.len(), 4);

@@ -3,7 +3,8 @@ use oxc_ast::ast::{
 };
 
 use crate::{
-    DynamicImportInfo, SemanticFact, VitestModuleMockAction, VitestModuleMockOperationFact,
+    DynamicImportInfo, PlaywrightFixtureAliasFact, PlaywrightFixtureTypeFact, SemanticFact,
+    VitestModuleMockAction, VitestModuleMockOperationFact,
 };
 
 use super::super::{
@@ -75,11 +76,14 @@ impl ModuleInfoExtractor {
         self.playwright_fixture_types
             .insert(type_name.to_string(), bindings.clone());
         for (fixture_name, fixture_type) in bindings {
-            self.record_playwright_fixture_type_fact(
-                type_name.to_string(),
-                fixture_name.clone(),
-                fixture_type,
-            );
+            self.semantic_facts
+                .push(SemanticFact::PlaywrightFixtureType(
+                    PlaywrightFixtureTypeFact {
+                        alias_name: type_name.to_string(),
+                        fixture_name,
+                        type_name: fixture_type,
+                    },
+                ));
         }
     }
 
@@ -120,7 +124,13 @@ impl ModuleInfoExtractor {
     }
 
     fn record_playwright_fixture_alias(&mut self, test_name: &str, base_name: &str) {
-        self.record_playwright_fixture_alias_fact(test_name.to_string(), base_name.to_string());
+        self.semantic_facts
+            .push(SemanticFact::PlaywrightFixtureAlias(
+                PlaywrightFixtureAliasFact {
+                    test_name: test_name.to_string(),
+                    base_name: base_name.to_string(),
+                },
+            ));
     }
 
     pub(super) fn record_playwright_wrapper_aliases(

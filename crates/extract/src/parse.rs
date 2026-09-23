@@ -654,15 +654,19 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
 fn classify_jsdoc_visibility_tag(text: &str) -> Option<(VisibilityTag, Option<String>)> {
     if has_public_tag(text) {
         Some((VisibilityTag::Public, None))
-    } else if has_internal_tag(text) {
+    } else if bare_jsdoc_tag_end(text, "@internal").is_some() {
         Some((VisibilityTag::Internal, None))
-    } else if has_alpha_tag(text) {
+    } else if bare_jsdoc_tag_end(text, "@alpha").is_some() {
         Some((VisibilityTag::Alpha, None))
-    } else if has_beta_tag(text) {
+    } else if bare_jsdoc_tag_end(text, "@beta").is_some() {
         Some((VisibilityTag::Beta, None))
     } else {
-        let (has_expected_unused, reason) = expected_unused_tag(text);
-        has_expected_unused.then_some((VisibilityTag::ExpectedUnused, reason))
+        bare_jsdoc_tag_end(text, "@expected-unused").map(|after| {
+            (
+                VisibilityTag::ExpectedUnused,
+                split_jsdoc_reason(&text[after..]),
+            )
+        })
     }
 }
 
@@ -725,39 +729,6 @@ fn apply_visibility_tag_to_export(
     }
 }
 
-/// Check if a JSDoc comment body contains an `@internal` tag.
-fn has_internal_tag(comment_text: &str) -> bool {
-    for (i, _) in comment_text.match_indices("@internal") {
-        let after = i + "@internal".len();
-        if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Check if a JSDoc comment body contains a `@beta` tag.
-fn has_beta_tag(comment_text: &str) -> bool {
-    for (i, _) in comment_text.match_indices("@beta") {
-        let after = i + "@beta".len();
-        if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Check if a JSDoc comment body contains an `@alpha` tag.
-fn has_alpha_tag(comment_text: &str) -> bool {
-    for (i, _) in comment_text.match_indices("@alpha") {
-        let after = i + "@alpha".len();
-        if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
-            return true;
-        }
-    }
-    false
-}
-
 fn split_jsdoc_reason(rest: &str) -> Option<String> {
     for (idx, _) in rest.match_indices("--") {
         let before_ok = idx == 0
@@ -782,17 +753,6 @@ fn split_jsdoc_reason(rest: &str) -> Option<String> {
     }
 
     None
-}
-
-/// Return whether an `@expected-unused` tag is present and its optional reason.
-fn expected_unused_tag(comment_text: &str) -> (bool, Option<String>) {
-    for (i, _) in comment_text.match_indices("@expected-unused") {
-        let after = i + "@expected-unused".len();
-        if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
-            return (true, split_jsdoc_reason(&comment_text[after..]));
-        }
-    }
-    (false, None)
 }
 
 /// Check if a byte is an identifier-continuation character (alphanumeric or `_`).
@@ -1074,17 +1034,15 @@ fn jsdoc_line_prefix_has_type_tag(prefix: &str) -> bool {
     let prefix = strip_jsdoc_line_prefix(prefix);
     TYPE_TAGS
         .iter()
-        .any(|tag| contains_bare_jsdoc_tag(prefix, tag))
+        .any(|tag| bare_jsdoc_tag_end(prefix, tag).is_some())
 }
 
-fn contains_bare_jsdoc_tag(text: &str, tag: &str) -> bool {
-    for (idx, _) in text.match_indices(tag) {
-        let after = idx + tag.len();
-        if after >= text.len() || !is_ident_char(text.as_bytes()[after]) {
-            return true;
-        }
-    }
-    false
+/// Return the byte offset just after the first `tag` in `text` that is not
+/// followed by an identifier character, so `@alpha` does not match `@alphabet`.
+fn bare_jsdoc_tag_end(text: &str, tag: &str) -> Option<usize> {
+    text.match_indices(tag)
+        .map(|(idx, _)| idx + tag.len())
+        .find(|&after| after >= text.len() || !is_ident_char(text.as_bytes()[after]))
 }
 
 fn preceding_jsdoc_line_has_type_tag(body: &[u8], pos: usize) -> bool {
@@ -1125,11 +1083,8 @@ fn has_only_jsdoc_spacing_between(body: &[u8], start: usize, end: usize) -> bool
 
 /// Check if a JSDoc comment body contains a `@public` or `@api public` tag.
 fn has_public_tag(comment_text: &str) -> bool {
-    for (i, _) in comment_text.match_indices("@public") {
-        let after = i + "@public".len();
-        if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
-            return true;
-        }
+    if bare_jsdoc_tag_end(comment_text, "@public").is_some() {
+        return true;
     }
     for (i, _) in comment_text.match_indices("@api") {
         let after = i + "@api".len();
@@ -1657,86 +1612,56 @@ pub fn compute_import_binding_usage(
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_jsdoc_brace_stack, has_alpha_tag, has_beta_tag, has_internal_tag, has_public_tag,
-        parse_source_to_module, scan_jsdoc_imports_in,
+        advance_jsdoc_brace_stack, classify_jsdoc_visibility_tag, parse_source_to_module,
+        scan_jsdoc_imports_in,
     };
     use fallow_types::discover::FileId;
-    use fallow_types::extract::{ImportInfo, ImportedName};
+    use fallow_types::extract::{ImportInfo, ImportedName, VisibilityTag};
     use std::path::Path;
 
     #[test]
-    fn has_public_tag_matches_bare_tag() {
-        assert!(has_public_tag(" * @public"));
+    fn classify_jsdoc_visibility_tag_requires_a_bare_tag() {
+        let cases = [
+            (" * @public", Some(VisibilityTag::Public)),
+            (" * @api public", Some(VisibilityTag::Public)),
+            (" * @publicly", None),
+            (" * @apipublic", None),
+            (" * public", None),
+            (" * @internal", Some(VisibilityTag::Internal)),
+            (" * @internal-only", Some(VisibilityTag::Internal)),
+            (" * @internalizer", None),
+            (" * @internalFoo", None),
+            (" * internal", None),
+            (" * @beta", Some(VisibilityTag::Beta)),
+            (" * @betaware", None),
+            (" * @beta_x", None),
+            (" * beta", None),
+            ("@alpha", Some(VisibilityTag::Alpha)),
+            ("@alpha Some description", Some(VisibilityTag::Alpha)),
+            ("@alphabet", None),
+            (" * alpha", None),
+            (" * @expected-unused", Some(VisibilityTag::ExpectedUnused)),
+            (" * @expected-unusedX", None),
+        ];
+        for (text, expected) in cases {
+            let actual = classify_jsdoc_visibility_tag(text).map(|(tag, _)| tag);
+            assert_eq!(actual, expected, "{text:?}");
+        }
     }
 
     #[test]
-    fn has_public_tag_matches_api_public_variant() {
-        assert!(has_public_tag(" * @api public"));
-    }
-
-    #[test]
-    fn has_public_tag_rejects_partial_word() {
-        assert!(!has_public_tag(" * @publicly"));
-    }
-
-    #[test]
-    fn has_public_tag_rejects_at_apipublic() {
-        assert!(!has_public_tag(" * @apipublic"));
-    }
-
-    #[test]
-    fn has_public_tag_rejects_missing_at() {
-        assert!(!has_public_tag(" * public"));
-    }
-
-    #[test]
-    fn has_internal_tag_matches_bare_tag() {
-        assert!(has_internal_tag(" * @internal"));
-    }
-
-    #[test]
-    fn has_internal_tag_rejects_partial_word() {
-        assert!(!has_internal_tag(" * @internalizer"));
-    }
-
-    #[test]
-    fn has_internal_tag_rejects_missing_at() {
-        assert!(!has_internal_tag(" * internal"));
-    }
-
-    #[test]
-    fn has_beta_tag_matches_bare_tag() {
-        assert!(has_beta_tag(" * @beta"));
-    }
-
-    #[test]
-    fn has_beta_tag_rejects_partial_word() {
-        assert!(!has_beta_tag(" * @betaware"));
-    }
-
-    #[test]
-    fn has_beta_tag_rejects_missing_at() {
-        assert!(!has_beta_tag(" * beta"));
-    }
-
-    #[test]
-    fn alpha_tag_standalone() {
-        assert!(has_alpha_tag("@alpha"));
-    }
-
-    #[test]
-    fn alpha_tag_with_text() {
-        assert!(has_alpha_tag("@alpha Some description"));
-    }
-
-    #[test]
-    fn alpha_tag_not_prefix() {
-        assert!(!has_alpha_tag("@alphabet"));
-    }
-
-    #[test]
-    fn has_alpha_tag_rejects_missing_at() {
-        assert!(!has_alpha_tag(" * alpha"));
+    fn classify_jsdoc_visibility_tag_keeps_the_expected_unused_reason() {
+        assert_eq!(
+            classify_jsdoc_visibility_tag(" * @expected-unused -- kept for the plugin API"),
+            Some((
+                VisibilityTag::ExpectedUnused,
+                Some("kept for the plugin API".to_string())
+            ))
+        );
+        assert_eq!(
+            classify_jsdoc_visibility_tag(" * @expected-unused"),
+            Some((VisibilityTag::ExpectedUnused, None))
+        );
     }
 
     fn scan(body: &str) -> Vec<ImportInfo> {

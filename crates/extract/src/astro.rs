@@ -681,12 +681,7 @@ fn analyze_astro_frontmatter(
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     let props_harvest = crate::sfc_props::harvest_astro_props(&parser_return.program);
     let complexity = if need_complexity {
-        compute_astro_frontmatter_complexity(
-            &parser_return.program,
-            &script.body,
-            script.byte_offset,
-            line_offsets,
-        )
+        crate::sfc::translate_script_complexity(script, &parser_return.program, line_offsets)
     } else {
         Vec::new()
     };
@@ -705,32 +700,6 @@ fn empty_astro_frontmatter_analysis() -> AstroFrontmatterAnalysis {
         props_harvest: crate::sfc_props::DefinePropsHarvest::default(),
         complexity: Vec::new(),
     }
-}
-
-/// Score the frontmatter's JS functions (cyclomatic/cognitive), remapping each
-/// function's line/col from the frontmatter-body coordinate space onto the
-/// `.astro` source. Mirrors the Vue/Svelte `sfc::translate_script_complexity`
-/// path so a complex `.astro` frontmatter contributes to the health complexity
-/// aggregate the same as an SFC `<script>`.
-fn compute_astro_frontmatter_complexity(
-    program: &oxc_ast::ast::Program<'_>,
-    body: &str,
-    body_byte_offset: usize,
-    source_line_offsets: &[u32],
-) -> Vec<fallow_types::extract::FunctionComplexity> {
-    let body_line_offsets = fallow_types::extract::compute_line_offsets(body);
-    let mut complexity = crate::complexity::compute_complexity(program, body, &body_line_offsets);
-    let (body_start_line, body_start_col) = fallow_types::extract::byte_offset_to_line_col(
-        source_line_offsets,
-        u32::try_from(body_byte_offset).unwrap_or(u32::MAX),
-    );
-    for function in &mut complexity {
-        function.line = body_start_line + function.line.saturating_sub(1);
-        if function.line == body_start_line {
-            function.col += body_start_col;
-        }
-    }
-    complexity
 }
 
 /// Thread the harvested Astro `Props` declaration + `Astro.props` usage onto the

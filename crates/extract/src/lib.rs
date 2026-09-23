@@ -85,9 +85,8 @@ pub use css_classes::{
 };
 pub use css_in_js::{
     ConsumerQuery, CssInJsObjectSheets, CssInJsToken, CssInJsTokenDef, CssInJsTokenOrigin,
-    TokenConsumerHit, css_in_js_consumer_scan, css_in_js_object_sheets, css_in_js_theme_consumers,
-    css_in_js_theme_token_defs, css_in_js_token_consumers, css_in_js_token_defs,
-    css_in_js_virtual_stylesheet, panda_style_value_consumers, panda_token_call_consumers,
+    TokenConsumerHit, css_in_js_consumer_scan, css_in_js_object_sheets, css_in_js_theme_token_defs,
+    css_in_js_token_defs, css_in_js_virtual_stylesheet,
 };
 pub use css_metrics::{compute_css_analytics, parse_css_color_rgb};
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
