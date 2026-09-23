@@ -88,14 +88,6 @@ impl DeadCodeAuditLedger {
             .any(|record| record.introduced && record.effective_severity == Severity::Warn)
     }
 
-    /// Whether any current finding has effective error severity.
-    #[must_use]
-    pub fn has_errors(&self) -> bool {
-        self.records
-            .iter()
-            .any(|record| record.effective_severity == Severity::Error)
-    }
-
     /// Demote introduced findings that have no syntactic counterpart in the
     /// current head run to inherited (advisory) status.
     ///
@@ -868,7 +860,8 @@ struct FrameworkFindingSlices<'a> {
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
 /// file) and the per-collection severity branches in
-/// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
+/// `crates/engine/src/dead_code.rs` (`apply_rule_severities`) and
+/// `crates/engine/src/error_severity.rs` (`has_error_severity_issues`).
 /// TypeScript mirror: `editors/vscode/scripts/codegen-contracts.mjs` derives
 /// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
 pub fn dead_code_keys(
@@ -2037,7 +2030,8 @@ const fn merge_severity(left: Severity, right: Severity) -> Severity {
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
 /// file) and the per-collection severity branches in
-/// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
+/// `crates/engine/src/dead_code.rs` (`apply_rule_severities`) and
+/// `crates/engine/src/error_severity.rs` (`has_error_severity_issues`).
 /// TypeScript mirror: `editors/vscode/scripts/codegen-contracts.mjs` derives
 /// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
 #[expect(

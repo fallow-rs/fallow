@@ -40,6 +40,7 @@ pub mod diff_scope;
 pub mod discover;
 pub mod duplicates;
 mod effective_severity;
+pub mod error_severity;
 mod feature_flags;
 pub mod flags;
 pub(crate) mod graph {

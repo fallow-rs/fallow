@@ -209,7 +209,7 @@ fn verdict(
     let dead_code_errors = if new_only {
         comparison.dead_code.has_introduced_errors()
     } else {
-        comparison.dead_code.has_errors()
+        dead_code_has_errors(view)
     };
     let dead_code_warnings = if new_only {
         comparison.dead_code.has_introduced_warnings()
@@ -268,6 +268,19 @@ fn verdict(
     }
 }
 
+/// Whether the head dead-code findings hold an error-severity finding, by the
+/// same rule that decides the exit code of `fallow dead-code`.
+fn dead_code_has_errors(view: &AuditAnalysesView<'_>) -> bool {
+    view.dead_code.as_ref().is_some_and(|dead_code| {
+        fallow_engine::error_severity::has_error_severity_issues(
+            dead_code.results,
+            &dead_code.config.rules,
+            Some(dead_code.config),
+            false,
+        )
+    })
+}
+
 fn attribution(gate: AuditGate, comparison: &AuditComparison, has_base: bool) -> AuditAttribution {
     if !has_base {
         return AuditAttribution {
@@ -289,7 +302,7 @@ fn attribution(gate: AuditGate, comparison: &AuditComparison, has_base: bool) ->
 fn summary(view: &AuditAnalysesView<'_>, comparison: &AuditComparison) -> AuditSummary {
     AuditSummary {
         dead_code_issues: comparison.dead_code.visible_count(),
-        dead_code_has_errors: comparison.dead_code.has_errors(),
+        dead_code_has_errors: dead_code_has_errors(view),
         complexity_findings: view
             .health
             .as_ref()

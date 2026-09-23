@@ -4,7 +4,7 @@
 //! (SARIF, CodeClimate, GitHub annotations) state a level for each finding.
 //! Both must agree, so this module writes the severity that the exit-code
 //! check uses onto each finding one time, after rule resolution. The rules
-//! here mirror `has_error_severity_issues` in `crates/cli/src/check/rules.rs`:
+//! here mirror `has_error_severity_issues` in `crates/engine/src/error_severity.rs`:
 //!
 //! - a file-scoped finding resolves `overrides[].rules` for its own path;
 //! - a circular dependency is `error` when any file in the cycle resolves to
