@@ -25,7 +25,9 @@ pub fn suggestions_enabled() -> bool {
 /// declined-onboarding flag; that store is CLI-owned, so the API surface omits
 /// it. Embedders can suppress all suggestions with `FALLOW_SUGGESTIONS`.
 pub fn setup_pointer_applicable(root: &Path) -> bool {
-    root.exists() && fallow_config::FallowConfig::find_config_path(root).is_none() && !is_ci()
+    root.exists()
+        && fallow_config::FallowConfig::find_config_path(root).is_none()
+        && !fallow_engine::ci_env::is_ci()
 }
 
 /// Resolve a concrete `--changed-workspaces` ref for the `scope-workspaces`
@@ -41,10 +43,4 @@ pub fn default_workspace_ref_for_workspaces(
     workspaces: &[WorkspaceInfo],
 ) -> Option<String> {
     fallow_engine::repo_refs::default_workspace_ref_for_workspaces(root, workspaces)
-}
-
-fn is_ci() -> bool {
-    std::env::var_os("CI").is_some()
-        || std::env::var_os("GITHUB_ACTIONS").is_some()
-        || std::env::var_os("GITLAB_CI").is_some()
 }

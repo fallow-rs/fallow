@@ -4,10 +4,6 @@ use std::sync::{LazyLock, Mutex};
 
 use fallow_config::OutputFormat;
 
-const DO_NOT_TRACK_ENV: &str = "DO_NOT_TRACK";
-const TELEMETRY_DISABLED_ENV: &str = "FALLOW_TELEMETRY_DISABLED";
-const UPDATE_CHECK_ENV: &str = "FALLOW_UPDATE_CHECK";
-
 static CACHE_NOTICE: LazyLock<Mutex<Option<CacheNoticeCandidate>>> =
     LazyLock::new(|| Mutex::new(None));
 
@@ -42,7 +38,7 @@ pub fn record_candidate(
         quiet,
         stdout_tty: std::io::stdout().is_terminal(),
         stderr_tty: std::io::stderr().is_terminal(),
-        env_disabled: env_disabled(),
+        env_disabled: crate::update_check::env_disabled(),
     };
     if !should_consider_notice(context) {
         return;
@@ -94,37 +90,6 @@ fn display_cache_dir(root: &Path, cache_dir: &Path) -> String {
         display.push('/');
     }
     display
-}
-
-fn env_disabled() -> bool {
-    env_truthy(DO_NOT_TRACK_ENV)
-        || env_truthy(TELEMETRY_DISABLED_ENV)
-        || update_check_off()
-        || is_ci()
-}
-
-fn update_check_off() -> bool {
-    std::env::var(UPDATE_CHECK_ENV).ok().is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "off" | "0" | "false" | "disabled" | "no"
-        )
-    })
-}
-
-fn is_ci() -> bool {
-    std::env::var_os("CI").is_some()
-        || std::env::var_os("GITHUB_ACTIONS").is_some()
-        || std::env::var_os("GITLAB_CI").is_some()
-}
-
-fn env_truthy(name: &str) -> bool {
-    std::env::var(name).ok().is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
 }
 
 #[cfg(test)]

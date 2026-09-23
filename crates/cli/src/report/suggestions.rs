@@ -49,7 +49,7 @@ fn suggestions_enabled_from(value: Option<&str>) -> bool {
 pub fn setup_pointer_applicable(root: &Path) -> bool {
     root.exists()
         && fallow_config::FallowConfig::find_config_path(root).is_none()
-        && !crate::telemetry::is_ci()
+        && !fallow_engine::ci_env::is_ci()
         && !crate::impact::load(root).onboarding_declined
 }
 
@@ -87,7 +87,7 @@ pub fn impact_digest_line(digest: crate::impact::ImpactDigest) -> String {
 /// show it.
 #[must_use]
 pub fn due_impact_digest(root: &Path) -> Option<crate::impact::ImpactDigest> {
-    if !suggestions_enabled() || crate::telemetry::is_ci() {
+    if !suggestions_enabled() || fallow_engine::ci_env::is_ci() {
         return None;
     }
     crate::impact::take_due_digest(root)

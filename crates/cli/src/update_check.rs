@@ -186,12 +186,13 @@ fn cache_is_expired(checked_at_secs: u64, now: u64, ttl_secs: u64) -> bool {
     now.saturating_sub(checked_at_secs) >= ttl_secs
 }
 
-/// Env / CI kill switches that suppress both the nudge and the fetch.
-fn env_disabled() -> bool {
-    env_truthy(DO_NOT_TRACK_ENV)
-        || env_truthy(TELEMETRY_DISABLED_ENV)
+/// Env / CI kill switches that suppress both the nudge and the fetch. The
+/// cache notice reads the same gate, so one opt-out silences both.
+pub fn env_disabled() -> bool {
+    crate::telemetry::env_truthy(DO_NOT_TRACK_ENV)
+        || crate::telemetry::env_truthy(TELEMETRY_DISABLED_ENV)
         || update_check_off()
-        || is_ci()
+        || fallow_engine::ci_env::is_ci()
 }
 
 /// `FALLOW_UPDATE_CHECK` set to an explicit off value.
@@ -204,41 +205,15 @@ fn update_check_off() -> bool {
     })
 }
 
-fn env_truthy(name: &str) -> bool {
-    std::env::var(name).ok().is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
-
-fn is_ci() -> bool {
-    std::env::var_os("CI").is_some()
-        || std::env::var_os("GITHUB_ACTIONS").is_some()
-        || std::env::var_os("GITLAB_CI").is_some()
-}
-
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
 }
 
-/// User-global cache path, mirroring `telemetry::config_path`.
+/// User-global cache path, in the same directory as `telemetry::config_dir`.
 fn cache_path() -> Option<PathBuf> {
-    let base = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join("Library").join("Application Support"))
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-    }?;
-    Some(base.join("fallow").join("update-check.json"))
+    crate::telemetry::config_dir().map(|dir| dir.join("update-check.json"))
 }
 
 fn read_cache_from(path: &std::path::Path) -> Result<UpdateCache, String> {

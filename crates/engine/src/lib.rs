@@ -28,6 +28,8 @@ pub mod baseline;
 pub mod cache_status;
 pub mod changed_files;
 pub mod churn;
+/// Continuous integration detection shared by the API runtime and the CLI.
+pub mod ci_env;
 pub mod clock;
 pub mod codeowners;
 mod core_backend;

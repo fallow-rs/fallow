@@ -383,7 +383,7 @@ thread_local! {
 
     /// Per-test CI signal for the record gate. Defaults to `false` so the unit
     /// tests record into their isolated store EVEN when the suite itself runs on
-    /// CI (GitHub Actions sets `CI` / `GITHUB_ACTIONS`, which `telemetry::is_ci`
+    /// CI (GitHub Actions sets `CI` / `GITHUB_ACTIONS`, which `ci_env::is_ci`
     /// reads); without this, every record-dependent test fails on CI because the
     /// real `is_ci()` short-circuits `record_*` before any store write. A test
     /// can flip it true to exercise the CI no-op gate. Thread-local, so it is
@@ -406,7 +406,7 @@ fn impact_config_dir() -> Option<PathBuf> {
 }
 
 /// Whether this run should be treated as CI for the Impact record gate. In
-/// production it is `telemetry::is_ci()`; under test it reads the per-test
+/// production it is `fallow_engine::ci_env::is_ci()`; under test it reads the per-test
 /// `TEST_FORCE_CI` override (default `false`) so the suite records into its
 /// isolated store regardless of the ambient CI env. The store path is ALWAYS
 /// the per-test temp dir under `#[cfg(test)]` (see [`impact_config_dir`]), so
@@ -418,7 +418,7 @@ fn record_gate_is_ci() -> bool {
     }
     #[cfg(not(test))]
     {
-        crate::telemetry::is_ci()
+        fallow_engine::ci_env::is_ci()
     }
 }
 
@@ -2386,7 +2386,6 @@ pub fn render_json_with_style(
 ) -> String {
     let value = fallow_output::serialize_impact_json_output(
         report.clone(),
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .unwrap_or_else(|_| serde_json::json!({"error":"failed to serialize impact report"}));
@@ -2533,7 +2532,6 @@ pub fn render_cross_repo_json_with_style(
 ) -> String {
     let value = fallow_output::serialize_cross_repo_impact_json_output(
         report.clone(),
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .unwrap_or_else(

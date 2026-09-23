@@ -1420,7 +1420,7 @@ fn build_workflow_event_with(
         agent_source,
         output_format: output_format_label(record.output),
         quiet: record.quiet,
-        ci: is_ci(),
+        ci: fallow_engine::ci_env::is_ci(),
         tty: std::io::stdout().is_terminal(),
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
@@ -1478,7 +1478,7 @@ fn status_changed_event(enabled: bool) -> TelemetryEvent {
         agent_source: None,
         output_format: "human",
         quiet: false,
-        ci: is_ci(),
+        ci: fallow_engine::ci_env::is_ci(),
         tty: std::io::stdout().is_terminal(),
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
@@ -1703,7 +1703,7 @@ fn effective_config() -> EffectiveConfig {
             config_path: config_path(),
         };
     }
-    if is_ci() {
+    if fallow_engine::ci_env::is_ci() {
         return EffectiveConfig {
             mode: EffectiveMode::Off,
             source: ModeSource::Default,
@@ -1793,7 +1793,9 @@ fn debug_enabled() -> bool {
     env_truthy(DEBUG_ENV)
 }
 
-fn env_truthy(name: &str) -> bool {
+/// True when env var `name` holds a truthy value (`1`, `true`, `yes`, `on`).
+/// Shared with the update check and the cache notice opt-out gate.
+pub fn env_truthy(name: &str) -> bool {
     std::env::var(name).ok().is_some_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),
@@ -2169,7 +2171,7 @@ fn classify_invocation_context() -> InvocationContext {
     if classify_agent_source() != AgentSource::None {
         return InvocationContext::Agent;
     }
-    if is_ci() {
+    if fallow_engine::ci_env::is_ci() {
         return InvocationContext::Ci;
     }
     if std::env::var_os("VSCODE_PID").is_some() || std::env::var_os("TERM_PROGRAM").is_some() {
@@ -2256,12 +2258,6 @@ where
 fn key_has_token(key: &str, token: &str) -> bool {
     key.match_indices(token)
         .any(|(idx, _)| idx == 0 || key.as_bytes()[idx - 1] == b'_')
-}
-
-pub fn is_ci() -> bool {
-    std::env::var_os("CI").is_some()
-        || std::env::var_os("GITHUB_ACTIONS").is_some()
-        || std::env::var_os("GITLAB_CI").is_some()
 }
 
 fn integration_surface(output: OutputFormat) -> IntegrationSurface {
@@ -4178,7 +4174,7 @@ mod tests {
     fn invocation_context_is_ci_when_agent_source_is_none_and_ci_is_set() {
         // We cannot safely mutate env vars in parallel tests. However, we can
         // exercise the pure helper classify_agent_source_from_env with no keys,
-        // which yields AgentSource::None, and then observe that is_ci() returns
+        // which yields AgentSource::None, and then observe that `ci_env::is_ci()` returns
         // a bool based on the actual env (which may or may not be CI).
         // The function classify_invocation_context() itself reads env directly, so
         // we verify the surrounding pure helpers cover the branches instead.
