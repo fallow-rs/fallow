@@ -235,6 +235,76 @@ fn warn_rule_with_unrelated_override_exits_0_without_fail_on_issues() {
     );
 }
 
+/// A pnpm project with one unused dependency override in `package.json`. The
+/// base rule has `base` severity, and an `overrides` entry for `package.json`
+/// sets `manifest` severity.
+fn dependency_override_severity_project(base: &str, manifest: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path().canonicalize().expect("canonical root");
+    std::fs::create_dir_all(root.join("src")).expect("create source directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"override-severity","private":true,"type":"module","main":"src/index.ts","pnpm":{"overrides":{"@scope/legacy-pkg":"^1.0.0"}}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        format!(
+            r#"{{
+  "rules": {{ "unused-dependency-overrides": "{base}" }},
+  "overrides": [{{ "files": ["package.json"], "rules": {{ "unused-dependency-overrides": "{manifest}" }} }}]
+}}"#
+        ),
+    )
+    .expect("write config");
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("write entry point");
+    dir
+}
+
+fn run_dependency_override_severity(base: &str, manifest: &str) -> (i32, serde_json::Value) {
+    let dir = dependency_override_severity_project(base, manifest);
+    let root = dir.path().canonicalize().expect("canonical root");
+    let output = run_fallow_in_root(
+        "dead-code",
+        &root,
+        &["--no-cache", "--format", "json", "--quiet"],
+    );
+    let json = parse_json(&output);
+    let overrides: Vec<&str> = json["unused_dependency_overrides"]
+        .as_array()
+        .expect("unused_dependency_overrides array")
+        .iter()
+        .filter_map(|finding| finding["target_package"].as_str())
+        .collect();
+    assert_eq!(
+        overrides,
+        vec!["@scope/legacy-pkg"],
+        "the unused override is reported; stdout: {}",
+        output.stdout
+    );
+    (output.code, json)
+}
+
+#[test]
+fn dependency_override_rule_override_to_warn_exits_0() {
+    let (code, json) = run_dependency_override_severity("error", "warn");
+    assert_eq!(
+        code, 0,
+        "the `overrides` entry sets `warn` for package.json, so the base `error` does not fail the run: {}",
+        json["gate_outcomes"]
+    );
+}
+
+#[test]
+fn dependency_override_rule_override_to_error_exits_1() {
+    let (code, json) = run_dependency_override_severity("warn", "error");
+    assert_eq!(
+        code, 1,
+        "the `overrides` entry sets `error` for package.json, so the run fails: {}",
+        json["gate_outcomes"]
+    );
+}
+
 #[test]
 fn check_json_format_produces_valid_json() {
     let output = run_fallow("check", "basic-project", &["--format", "json", "--quiet"]);
