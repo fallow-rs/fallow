@@ -698,7 +698,56 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
         .map(|issue| issue.code.as_str())
         .collect();
 
-    assert_eq!(codes.first(), Some(&"code-duplication"));
+    // Editors save code filters by these codes. A change to this list is a
+    // change to the editor contract, so update it on purpose only.
+    assert_eq!(
+        codes,
+        [
+            "code-duplication",
+            "unused-file",
+            "unused-export",
+            "unused-type",
+            "private-type-leak",
+            "unused-dependency",
+            "unused-dev-dependency",
+            "unused-optional-dependency",
+            "unused-enum-member",
+            "unused-class-member",
+            "unused-store-member",
+            "unresolved-import",
+            "unlisted-dependency",
+            "duplicate-export",
+            "type-only-dependency",
+            "test-only-dependency",
+            "dev-dependency-in-production",
+            "circular-dependency",
+            "re-export-cycle",
+            "boundary-violation",
+            "policy-violation",
+            "invalid-client-export",
+            "mixed-client-server-barrel",
+            "misplaced-directive",
+            "unprovided-inject",
+            "unrendered-component",
+            "unused-component-prop",
+            "unused-component-emit",
+            "unused-component-input",
+            "unused-component-output",
+            "unused-svelte-event",
+            "unused-server-action",
+            "unused-load-data-key",
+            "route-collision",
+            "dynamic-segment-name-conflict",
+            "stale-suppression",
+            "unused-catalog-entry",
+            "empty-catalog-group",
+            "unresolved-catalog-reference",
+            "unused-dependency-override",
+            "misconfigured-dependency-override",
+            "security-sink",
+            "security-client-server-leak",
+        ]
+    );
     assert_eq!(
         issue_types
             .iter()
