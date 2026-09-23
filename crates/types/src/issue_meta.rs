@@ -1948,26 +1948,18 @@ mod tests {
     }
 
     #[test]
-    fn ci_summary_check_tables_match_result_metadata() {
+    fn ci_summary_check_table_matches_result_metadata() {
         assert_summary_check_table_matches_result_metadata(
             include_str!("../../../action/jq/summary-check.jq"),
             "action/jq/summary-check.jq",
         );
-        assert_summary_check_table_matches_result_metadata(
-            include_str!("../../../ci/jq/summary-check.jq"),
-            "ci/jq/summary-check.jq",
-        );
     }
 
     #[test]
-    fn ci_summary_combined_tables_match_result_metadata() {
+    fn ci_summary_combined_table_matches_result_metadata() {
         assert_summary_combined_table_matches_result_metadata(
             include_str!("../../../action/jq/summary-combined.jq"),
             "action/jq/summary-combined.jq",
-        );
-        assert_summary_combined_table_matches_result_metadata(
-            include_str!("../../../ci/jq/summary-combined.jq"),
-            "ci/jq/summary-combined.jq",
         );
     }
 

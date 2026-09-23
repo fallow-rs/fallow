@@ -104,7 +104,7 @@ Find the first incorrect stage before editing:
 - `crates/cli/src/viz.rs`: visualization command and asset serving.
 - `viz-frontend/src/`: browser rendering and interaction.
 - `action.yml`, `action/scripts/`, `action/jq/`: GitHub Action.
-- `ci/gitlab-ci.yml`, `ci/scripts/`, `ci/jq/`: GitLab CI.
+- `ci/gitlab-ci.yml`, `ci/scripts/`: GitLab CI.
 
 ## System invariants
 

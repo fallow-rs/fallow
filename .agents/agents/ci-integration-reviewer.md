@@ -50,8 +50,7 @@ Review changes to fallow's CI integrations. Decide the provider from the touched
 - `ci/gitlab-ci.yml` (GitLab template definition)
 - `ci/scripts/comment.sh` (GitLab MR comment posting)
 - `ci/scripts/review.sh` (GitLab MR inline review discussions)
-- `ci/jq/` (GitLab summary jq helpers)
-- `ci/tests/` (shell integration tests for the jq helpers and the typed MR/review scripts)
+- `ci/tests/` (shell integration tests for the GitLab template and the typed MR/review scripts)
 
 ## Veto rights
 

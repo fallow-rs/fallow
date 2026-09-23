@@ -5,14 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const rowId = ({ anchor, key, label }) => `${label}\t${key}\t${anchor}`;
 
-// The four registry diffs are the whole verdict. If all four are empty then
-// the GitHub row set and the GitLab row set both equal the registry set, so
-// the two parity diffs are empty as well; and any row a parity diff could
-// contain is in the registry (making it a *Missing row) or is not (making it
-// a *Extra row). The parity fields therefore stay on the result object and in
-// the report, where they state the cross-provider direction, but they cannot
-// decide pass or fail.
-const SUMMARY_PROBLEM_KEYS = ["githubMissing", "gitlabMissing", "githubExtra", "gitlabExtra"];
+// Both directions decide the verdict: a registry row that the summary table
+// does not render, and a summary row that the registry does not know.
+const SUMMARY_PROBLEM_KEYS = ["githubMissing", "githubExtra"];
 
 const sortRows = (rows) => rows.toSorted((a, b) => rowId(a).localeCompare(rowId(b)));
 
@@ -50,21 +45,15 @@ export const parseSummaryRows = (source) => {
   return sortRows(rows);
 };
 
-export const checkSummaryRows = ({ github, gitlab, registry }) => {
+export const checkSummaryRows = ({ github, registry }) => {
   const expected = expectedSummaryRows(registry);
   const githubRows = parseSummaryRows(github);
-  const gitlabRows = parseSummaryRows(gitlab);
 
   return {
     expected,
     githubRows,
-    gitlabRows,
     githubMissing: diffRows(expected, githubRows),
-    gitlabMissing: diffRows(expected, gitlabRows),
     githubExtra: diffRows(githubRows, expected),
-    gitlabExtra: diffRows(gitlabRows, expected),
-    parityMissingFromGithub: diffRows(gitlabRows, githubRows),
-    parityMissingFromGitlab: diffRows(githubRows, gitlabRows),
   };
 };
 
@@ -76,11 +65,7 @@ const reportSection = (title, rows) => (rows.length > 0 ? `${title}:\n${formatRo
 export const formatSummaryRowProblems = (result) =>
   [
     reportSection("GitHub summary rows missing registry rows", result.githubMissing),
-    reportSection("GitLab summary rows missing registry rows", result.gitlabMissing),
     reportSection("GitHub summary rows not in registry", result.githubExtra),
-    reportSection("GitLab summary rows not in registry", result.gitlabExtra),
-    reportSection("Rows present in GitLab but not GitHub", result.parityMissingFromGithub),
-    reportSection("Rows present in GitHub but not GitLab", result.parityMissingFromGitlab),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -90,12 +75,10 @@ export const hasSummaryRowProblems = (result) =>
 
 export const checkSummaryRowFiles = ({
   githubPath = "action/jq/summary-check.jq",
-  gitlabPath = "ci/jq/summary-check.jq",
   registryPath = "npm/fallow/issue-registry.json",
 } = {}) =>
   checkSummaryRows({
     github: readFileSync(githubPath, "utf8"),
-    gitlab: readFileSync(gitlabPath, "utf8"),
     registry: JSON.parse(readFileSync(registryPath, "utf8")),
   });
 
@@ -107,7 +90,7 @@ const main = () => {
     return;
   }
 
-  console.log("ci summary rows: GitHub and GitLab match the issue registry");
+  console.log("ci summary rows: GitHub matches the issue registry");
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

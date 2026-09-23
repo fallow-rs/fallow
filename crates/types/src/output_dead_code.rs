@@ -3867,9 +3867,8 @@ mod position_0_invariants {
     /// of `unresolved_catalog_references[].actions` is `add-catalog-entry`,
     /// directing the agent to grow the targeted catalog.
     ///
-    /// Downstream consumers (MCP `actions[0].type` dispatch, jq scripts in
-    /// `action/jq/review-comments-check.jq` and `ci/jq/review-check.jq`)
-    /// pattern-match on this string. A future refactor that puts the
+    /// Downstream consumers (MCP `actions[0].type` dispatch and JSON
+    /// consumers that read the first action) pattern-match on this string. A future refactor that puts the
     /// generic `remove-catalog-reference` fallback at position 0 would
     /// flip every CI annotation from "add this entry" to "remove this
     /// reference", reversing the recommended action.

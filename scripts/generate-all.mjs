@@ -248,7 +248,6 @@ const checkContractSurfaceCoverage = () => {
 const checkCiSummaryRows = (stagingRoot) => {
   const result = checkSummaryRowFiles({
     githubPath: join(REPO_ROOT, "action/jq/summary-check.jq"),
-    gitlabPath: join(REPO_ROOT, "ci/jq/summary-check.jq"),
     registryPath: join(stagingRoot, ISSUE_REGISTRY_PATH),
   });
   if (hasSummaryRowProblems(result)) {

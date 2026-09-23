@@ -11,11 +11,10 @@
 #   action/jq/summary-audit.jq      (all)   GitHub audit dead_code_rows
 #   action/jq/annotations-check.jq  (all)   GitHub ::warning annotations
 #   action/jq/filter-changed.jq     (all)   per-changed-file filter + recount
-#   ci/jq/summary-check.jq          (all)   GitLab dead-code summary table
-#   ci/jq/summary-combined.jq       (all)   GitLab combined Code-issues breakdown
-#   ci/jq/summary-audit.jq          (all)   GitLab audit dead_code_rows
 #
-# Sourced by both action/tests/run.sh and ci/tests/run.sh. Relies on the
+# Sourced by both action/tests/run.sh and ci/tests/run.sh. The GitLab suite
+# checks only the helpers, because the GitLab scripts use the typed Rust
+# formats and have no jq surface. Relies on the
 # `pass` / `fail` helpers defined by the sourcing runner, plus `$GUARD_DIR`
 # (the directory containing this script) being set by the caller.
 #
