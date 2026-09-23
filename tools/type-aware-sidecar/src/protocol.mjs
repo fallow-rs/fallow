@@ -372,7 +372,7 @@ const parseBatchRequest = (value) => {
   validateGraphQueryCount(queries);
   requireUniqueCandidateIds(queries);
   const evidenceLimit = parseEvidenceLimit(value.evidence_limit);
-  return { protocolVersion: WIRE_PROTOCOL_VERSION, root, projects, queries, evidenceLimit };
+  return { root, projects, queries, evidenceLimit };
 };
 
 export const parseRequest = (value) => {

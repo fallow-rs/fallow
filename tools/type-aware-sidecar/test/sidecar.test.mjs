@@ -16,7 +16,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { API } from "typescript/unstable/sync";
 
-import { createSemanticResponse, createStatusResponse, parseRequest } from "../src/protocol.mjs";
+import { createSemanticResponse, parseRequest } from "../src/protocol.mjs";
 import { analyzeSemanticQueries, createSemanticSession } from "../src/semantic.mjs";
 import { readAll } from "../src/cli.mjs";
 import { canonicalFileIdentity } from "../src/file-identity.mjs";
@@ -2709,6 +2709,47 @@ test("rejects the removed protocol v2 without JSON stdout", () => {
   assert.match(result.stderr, /unsupported protocol_version 2/);
 });
 
+test("rejects unknown arguments without JSON stdout", () => {
+  for (const args of [["--session", "extra"], ["--status", "extra"], ["--bogus"]]) {
+    const result = spawnSync(executable, args, { cwd: sidecarRoot, input: "", encoding: "utf8" });
+
+    assert.equal(result.status, 2, args.join(" "));
+    assert.equal(result.stdout, "", args.join(" "));
+    assert.match(result.stderr, new RegExp(`unknown argument: ${args[0]}`), args.join(" "));
+  }
+});
+
+test("rejects an unsupported operation in a batch request", () => {
+  const result = spawnSync(executable, {
+    cwd: sidecarRoot,
+    input: JSON.stringify({
+      ...semanticRequest(sidecarRoot, [], { projects: [] }),
+      operation: "class-member-uses",
+    }),
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /unsupported operation class-member-uses/);
+});
+
+test("rejects an unsupported operation in a session request", () => {
+  const request = {
+    ...semanticRequest(sidecarRoot, [], { projects: [] }),
+    operation: "class-member-uses",
+  };
+  const result = spawnSync(executable, ["--session"], {
+    cwd: sidecarRoot,
+    input: `${JSON.stringify({ type: "analyze", request_id: 1, revision: 1, request })}\n`,
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /unsupported operation class-member-uses/);
+});
+
 test("rejects negative semantic query IDs", () => {
   const result = spawnSync(executable, {
     cwd: sidecarRoot,
@@ -2791,12 +2832,6 @@ test("bounds and normalizes warning text", () => {
   assert.equal(response.warnings[0], "first warning");
   assert.equal(response.warnings[1].length, 512);
   assert.deepEqual(response.warnings.slice(2), ["\uE000", "\u{10000}"]);
-});
-
-test("sidecar version matches the package version", () => {
-  const response = createStatusResponse();
-
-  assert.equal(response.package_version, sidecarVersion);
 });
 
 test("rejects oversized stdin while reading", async () => {

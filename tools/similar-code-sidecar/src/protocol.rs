@@ -188,10 +188,10 @@ pub fn serve(
                 }
                 match serde_json::from_slice::<EmbedRequest>(&bytes) {
                     Ok(request) => process_request(request, paths, &mut model),
-                    Err(_) => error_response(ErrorCode::InvalidRequest, None, false),
+                    Err(_) => error_response(ErrorCode::InvalidRequest),
                 }
             }
-            BoundedLine::Oversized => error_response(ErrorCode::RequestTooLarge, None, false),
+            BoundedLine::Oversized => error_response(ErrorCode::RequestTooLarge),
         };
         serde_json::to_writer(&mut *output, &response)
             .map_err(|error| format!("failed to write protocol response: {error}"))?;
@@ -279,9 +279,10 @@ fn process_request(
         };
     }
 
-    if model.is_none() {
-        match LocalModel::load(paths) {
-            Ok(loaded) => *model = Some(loaded),
+    let model = match model {
+        Some(loaded) => &*loaded,
+        None => match LocalModel::load(paths) {
+            Ok(loaded) => &*model.insert(loaded),
             Err(error) => {
                 return error_response_with_message(
                     ErrorCode::ModelNotReady,
@@ -290,10 +291,7 @@ fn process_request(
                     &error,
                 );
             }
-        }
-    }
-    let Some(model) = model.as_ref() else {
-        return error_response_with_limits(ErrorCode::ModelNotReady, limits, requested_functions);
+        },
     };
 
     let started = Instant::now();
@@ -386,7 +384,7 @@ fn process_request(
     }
 }
 
-fn error_response(code: ErrorCode, key: Option<u32>, retryable: bool) -> EmbedResponse {
+fn error_response(code: ErrorCode) -> EmbedResponse {
     let limits = RequestLimits::default().applied();
     EmbedResponse {
         protocol_version: PROTOCOL_VERSION,
@@ -404,9 +402,9 @@ fn error_response(code: ErrorCode, key: Option<u32>, retryable: bool) -> EmbedRe
             applied_limits: limits,
         },
         errors: vec![FunctionError {
-            key,
+            key: None,
             code,
-            retryable,
+            retryable: false,
             observed: None,
             limit: None,
             message: None,
@@ -419,7 +417,7 @@ fn error_response_with_limits(
     limits: AppliedLimits,
     requested_functions: usize,
 ) -> EmbedResponse {
-    let mut response = error_response(code, None, false);
+    let mut response = error_response(code);
     response.completion.applied_limits = limits;
     response.completion.requested_functions = requested_functions;
     response.completion.skipped_functions = requested_functions;

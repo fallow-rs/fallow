@@ -112,10 +112,7 @@ fn run_command(command: Command) -> Result<(), String> {
             let status = status_output(&paths, None);
             write_json_line(&mut io::stdout().lock(), &status)
         }
-        Command::Setup { local, json: _ } => {
-            if !local {
-                return Err("only the explicit local provider is supported".to_string());
-            }
+        Command::Setup { local: _, json: _ } => {
             disclose_setup(&paths)?;
             let result = setup::install(&paths)?;
             drop(model::LocalModel::load(&paths)?);
@@ -235,5 +232,16 @@ mod tests {
                 json: true
             }
         ));
+    }
+
+    #[test]
+    fn cli_rejects_setup_without_local_provider() {
+        let error = Cli::try_parse_from(["fallow-similar-code", "setup", "--json"])
+            .err()
+            .expect("setup without --local must fail to parse");
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
     }
 }

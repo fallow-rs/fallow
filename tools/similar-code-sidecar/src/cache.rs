@@ -227,11 +227,7 @@ fn read_manifest(path: &Path) -> Result<InstalledManifest, String> {
         .map_err(|error| format!("failed to parse model manifest: {error}"))
 }
 
-fn verify_artifact(
-    path: &Path,
-    expected_size: u64,
-    expected_sha256: &str,
-) -> Result<(), String> {
+fn verify_artifact(path: &Path, expected_size: u64, expected_sha256: &str) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|_| format!("model artifact `{}` is missing", file_label(path)))?;
     if !metadata.file_type().is_file() {
@@ -342,20 +338,43 @@ mod tests {
 
         let status = inspect_cache(&paths);
         assert!(!status.ready);
-        assert!(status.problem.expect("integrity error").contains("SHA-256 verification"));
+        assert!(
+            status
+                .problem
+                .expect("integrity error")
+                .contains("SHA-256 verification")
+        );
     }
 
     #[test]
-    fn expected_manifest_tracks_protocol_artifacts() {
-        let manifest = expected_manifest();
-        assert_eq!(manifest.schema_version, INSTALLED_MANIFEST_SCHEMA_VERSION);
-        assert_eq!(manifest.protocol_version, PROTOCOL_VERSION);
-        assert_eq!(
-            manifest.embedding_semantics_version,
-            EMBEDDING_SEMANTICS_VERSION
+    fn stale_installed_manifest_is_not_ready() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = ModelPaths::from_cache_root(directory.path());
+        fs::create_dir_all(&paths.directory).expect("cache directory");
+        let mut stale = expected_manifest();
+        stale.protocol_version += 1;
+        fs::write(
+            &paths.manifest,
+            serde_json::to_vec_pretty(&stale).expect("stale manifest"),
+        )
+        .expect("write stale manifest");
+        // The artifacts have the protocol sizes, so only the manifest
+        // comparison can reject this cache before content verification.
+        for artifact in ARTIFACTS {
+            File::create(paths.artifact(artifact.path).expect("artifact path"))
+                .expect("artifact file")
+                .set_len(artifact.size)
+                .expect("matching artifact size");
+        }
+
+        let status = inspect_cache(&paths);
+        assert!(!status.ready);
+        assert!(
+            status
+                .problem
+                .expect("manifest error")
+                .contains("does not match this sidecar")
         );
-        assert_eq!(manifest.model_revision, MODEL_REVISION);
-        assert_eq!(manifest.artifacts.len(), ARTIFACTS.len());
     }
 
     #[test]
