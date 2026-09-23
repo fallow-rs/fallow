@@ -292,6 +292,15 @@ impl ConfigCandidateIndex {
         Self { dirs }
     }
 
+    /// Whether the discovery walk collected the file at `path`.
+    #[must_use]
+    pub(crate) fn contains_file(&self, path: &Path) -> bool {
+        match (path.parent(), path.file_name()) {
+            (Some(dir), Some(name)) => self.dir_contains(dir, name),
+            _ => false,
+        }
+    }
+
     /// Whether the directory `dir` contains a file named `name`, per the files
     /// the discovery walk collected. Used by file-based plugin activation to
     /// avoid a per-directory filesystem `read` probe.
@@ -365,7 +374,7 @@ pub fn discover_config_files<'a>(
     candidate_index: Option<&ConfigCandidateIndex>,
 ) -> Vec<(PathBuf, &'a dyn Plugin)> {
     use rayon::prelude::*;
-    let mut pending: Vec<(&'a dyn Plugin, &Path, String)> = Vec::new();
+    let mut pending: Vec<(&'a dyn Plugin, &Path, String, bool)> = Vec::new();
     for (plugin, _) in config_matchers {
         // A resolved plugin still probes the patterns that source discovery
         // cannot index, such as `build/webpack.prod.js`: Phase 3a never saw
@@ -380,14 +389,14 @@ pub fn discover_config_files<'a>(
                 if resolved && !pattern_needs_filesystem(pat) {
                     continue;
                 }
-                pending.push((*plugin, *root, pat.to_string()));
+                pending.push((*plugin, *root, pat.to_string(), resolved));
             }
         }
     }
 
     let hits: Vec<(PathBuf, &'a dyn Plugin)> = pending
         .par_iter()
-        .flat_map_iter(|(plugin, root, pat)| {
+        .flat_map_iter(|(plugin, root, pat, resolved)| {
             expand_brace_pattern(pat)
                 .into_iter()
                 .flat_map(|expanded| match candidate_index {
@@ -400,6 +409,11 @@ pub fn discover_config_files<'a>(
                         match_pattern_in_index(root, &expanded, index)
                     }
                     _ => discover_pattern_matches(root, &expanded),
+                })
+                // Phase 3a already read an indexed file of a resolved plugin,
+                // such as a config in a plugin's discovery hidden directory.
+                .filter(|path| {
+                    !*resolved || !candidate_index.is_some_and(|index| index.contains_file(path))
                 })
                 .map(move |path| (path, *plugin))
                 .collect::<Vec<_>>()

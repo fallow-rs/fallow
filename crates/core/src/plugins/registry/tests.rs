@@ -2394,6 +2394,43 @@ fn in_memory_config_discovery_matches_filesystem() {
     );
 }
 
+/// A resolved plugin still probes a pattern that source discovery cannot index,
+/// but a file that the candidate index holds was already read in Phase 3a, so
+/// it resolves once.
+#[test]
+fn discover_config_files_reads_an_indexed_file_of_a_resolved_plugin_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let storybook_main = root.join(".rnstorybook/main.ts");
+    let build_config = root.join("build/webpack.prod.js");
+    for path in [&storybook_main, &build_config] {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "module.exports = {};").unwrap();
+    }
+
+    let registry = PluginRegistry::default();
+    let matchers = registry.precompile_config_matchers();
+    let resolved: FxHashSet<&str> = ["storybook", "webpack"].into_iter().collect();
+    // `.rnstorybook` is a discovery hidden directory, so Phase 3a indexed its
+    // file. Source discovery skips `build/`, so the index does not hold it.
+    let index = ConfigCandidateIndex::build([storybook_main.as_path()]);
+
+    let hits: Vec<(PathBuf, &str)> =
+        discover_config_files(&matchers, &resolved, &[root], false, Some(&index))
+            .into_iter()
+            .map(|(path, plugin)| (path, plugin.name()))
+            .collect();
+    assert!(
+        !hits.iter().any(|(path, _)| path == &storybook_main),
+        "an indexed file of a resolved plugin was already read, got {hits:?}"
+    );
+    assert!(
+        hits.iter()
+            .any(|(path, name)| path == &build_config && *name == "webpack"),
+        "a file that the index cannot hold is still read, got {hits:?}"
+    );
+}
+
 #[test]
 fn discover_config_files_skips_source_ext_root_patterns() {
     let tmp = tempfile::tempdir().unwrap();
