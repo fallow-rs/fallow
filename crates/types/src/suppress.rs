@@ -664,60 +664,12 @@ pub struct UnknownSuppressionKind {
     pub reason: Option<String>,
 }
 
-/// Levenshtein edit distance between two ASCII-leaning strings.
-///
-/// Local duplicate of the config-crate helper (see
-/// `crates/config/src/config/rules.rs::levenshtein`) so `fallow-types` can
-/// compute "did you mean?" suggestions for unknown suppression tokens without
-/// taking a dependency on `fallow-config`. Issue-kind names are short
-/// (max ~33 chars) so allocation cost is negligible.
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a_bytes = a.as_bytes();
-    let b_bytes = b.as_bytes();
-    let (a_len, b_len) = (a_bytes.len(), b_bytes.len());
-
-    if a_len == 0 {
-        return b_len;
-    }
-    if b_len == 0 {
-        return a_len;
-    }
-
-    let mut prev: Vec<usize> = (0..=b_len).collect();
-    let mut curr: Vec<usize> = vec![0; b_len + 1];
-
-    for i in 1..=a_len {
-        curr[0] = i;
-        for j in 1..=b_len {
-            let cost = usize::from(a_bytes[i - 1] != b_bytes[j - 1]);
-            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-
-    prev[b_len]
-}
-
 /// Find the closest known issue-kind name to `input` when it is plausibly a typo.
 ///
-/// Returns the best match when the Levenshtein distance is at most 2 AND
-/// the input is long enough that the match is not coincidental
-/// (`input.len() / 2 > distance`). Returns `None` for completely novel
-/// strings where a suggestion would be misleading.
+/// Applies the policy of [`crate::levenshtein::closest_match`].
 #[must_use]
 pub fn closest_known_kind_name(input: &str) -> Option<&'static str> {
-    let input_lower = input.to_ascii_lowercase();
-    let mut best: Option<(&'static str, usize)> = None;
-
-    for &candidate in KNOWN_ISSUE_KIND_NAMES.iter() {
-        let d = levenshtein(&input_lower, candidate);
-        if best.is_none_or(|(_, b_dist)| d < b_dist) {
-            best = Some((candidate, d));
-        }
-    }
-
-    best.filter(|&(_, d)| d > 0 && d <= 2 && input_lower.len() / 2 > d)
-        .map(|(name, _)| name)
+    crate::levenshtein::closest_match(input, KNOWN_ISSUE_KIND_NAMES.iter().copied())
 }
 
 const _: () = assert!(std::mem::size_of::<IssueKind>() == 1);

@@ -147,17 +147,6 @@ impl ModuleGraph {
 
     /// Direct declaration bindings exposed through public entries, including
     /// declarations nested under public namespace-object exports.
-    #[must_use]
-    pub fn public_export_declaration_bindings(
-        &self,
-        public_api_entry_points: &FxHashSet<FileId>,
-    ) -> FxHashSet<EffectiveExportBinding> {
-        self.public_export_declaration_bindings_in_namespace(
-            public_api_entry_points,
-            ExportNamespace::Value,
-        )
-    }
-
     fn public_export_declaration_bindings_in_namespace(
         &self,
         public_api_entry_points: &FxHashSet<FileId>,
@@ -511,7 +500,10 @@ mod tests {
             }],
         );
 
-        let declarations = graph.public_export_declaration_bindings(&public_entries);
+        let declarations = graph.public_export_declaration_bindings_in_namespace(
+            &public_entries,
+            ExportNamespace::Value,
+        );
 
         assert_eq!(declarations.len(), 1);
         let binding = *declarations.iter().next().expect("public Client binding");

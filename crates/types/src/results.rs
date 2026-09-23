@@ -29,7 +29,7 @@ use crate::output_dead_code::{
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
-use crate::suppress::{IssueKind, closest_known_kind_name};
+use crate::suppress::closest_known_kind_name;
 
 /// Summary of detected entry points, grouped by discovery source.
 ///
@@ -3695,22 +3695,6 @@ impl StaleSuppression {
         }
     }
 
-    /// The suppressed `IssueKind`, if this was a comment suppression with a specific known kind.
-    ///
-    /// Returns `None` for unknown-kind comments (`kind_known == false`) and
-    /// for JSDoc tags.
-    #[must_use]
-    pub fn suppressed_kind(&self) -> Option<IssueKind> {
-        match &self.origin {
-            SuppressionOrigin::Comment {
-                issue_kind,
-                kind_known: true,
-                ..
-            } => issue_kind.as_deref().and_then(IssueKind::parse),
-            SuppressionOrigin::Comment { .. } | SuppressionOrigin::JsdocTag { .. } => None,
-        }
-    }
-
     /// Per-format display message combining `description()` and `explanation()`
     /// for the unknown-kind case so SARIF, CodeClimate, and compact consumers
     /// surface the typo-fix copy and Levenshtein hint without needing to
@@ -5013,23 +4997,6 @@ mod tests {
     }
 
     // ── clone produces independent copies ───────────────────────
-
-    #[test]
-    fn clone_results_are_independent() {
-        let mut r = AnalysisResults::default();
-        r.unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("a.ts"),
-            }));
-        let mut cloned = r.clone();
-        cloned
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("b.ts"),
-            }));
-        assert_eq!(r.total_issues(), 1);
-        assert_eq!(cloned.total_issues(), 2);
-    }
 
     fn protected_architecture_findings(path: &Path) -> AnalysisResults {
         AnalysisResults {

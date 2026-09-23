@@ -3830,7 +3830,7 @@ fn named_re_export_mixed_use_credits_both_namespaces() {
         vec![ExportNamespace::Value]
     );
     assert_single_merged_barrel_stub(&graph, &[ExportNamespace::Type, ExportNamespace::Value]);
-    assert_eq!(graph.modules[1].exports[0].physical_reference_count(), 1);
+    assert_eq!(graph.modules[1].exports[0].physical_references().count(), 1);
 }
 
 #[test]

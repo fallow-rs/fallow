@@ -171,17 +171,16 @@ pub const MUTATING_COMMANDS: &[&str] = &[
     "watch",
 ];
 
-/// The first command token after the `fallow` prefix, or the empty string for
-/// a bare flag-fragment row.
-#[must_use]
-pub fn leading_command_token(row: &TaskRow) -> &'static str {
-    let after_fallow = row.command.strip_prefix("fallow ").unwrap_or(row.command);
-    after_fallow.split_whitespace().next().unwrap_or("")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The first command token after the `fallow` prefix, or the empty string
+    /// for a bare flag-fragment row.
+    fn leading_command_token(row: &TaskRow) -> &'static str {
+        let after_fallow = row.command.strip_prefix("fallow ").unwrap_or(row.command);
+        after_fallow.split_whitespace().next().unwrap_or("")
+    }
 
     #[test]
     fn matrix_is_non_empty() {

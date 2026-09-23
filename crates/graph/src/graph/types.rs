@@ -67,16 +67,6 @@ impl ModuleNode {
         self.flags & FLAG_CJS_EXPORTS != 0
     }
 
-    /// Set whether this module is an entry point.
-    #[inline]
-    pub fn set_entry_point(&mut self, v: bool) {
-        if v {
-            self.flags |= FLAG_ENTRY_POINT;
-        } else {
-            self.flags &= !FLAG_ENTRY_POINT;
-        }
-    }
-
     /// Set whether this module is reachable from any entry point.
     #[inline]
     pub fn set_reachable(&mut self, v: bool) {
@@ -287,12 +277,6 @@ impl ExportSymbol {
                 })
             })
             .map(|(_, reference)| reference)
-    }
-
-    /// Number of distinct physical reference sites.
-    #[must_use]
-    pub fn physical_reference_count(&self) -> usize {
-        self.physical_references().count()
     }
 
     /// Provenance path recorded for the reference at `index`, when tracked.
@@ -936,47 +920,6 @@ mod tests {
     use super::*;
     use crate::graph::ExportNamespace;
 
-    #[test]
-    fn reference_kind_equality() {
-        assert_eq!(ReferenceKind::NamedImport, ReferenceKind::NamedImport);
-        assert_ne!(ReferenceKind::NamedImport, ReferenceKind::DefaultImport);
-    }
-
-    #[test]
-    fn reference_kind_all_variants_are_distinct() {
-        let all = [
-            ReferenceKind::NamedImport,
-            ReferenceKind::DefaultImport,
-            ReferenceKind::NamespaceImport,
-            ReferenceKind::ReExport,
-            ReferenceKind::DynamicImport,
-            ReferenceKind::SideEffectImport,
-        ];
-        for (i, a) in all.iter().enumerate() {
-            for (j, b) in all.iter().enumerate() {
-                if i == j {
-                    assert_eq!(a, b);
-                } else {
-                    assert_ne!(a, b);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn reference_kind_copy() {
-        let original = ReferenceKind::NamespaceImport;
-        let copied = original;
-        assert_eq!(original, copied);
-    }
-
-    #[test]
-    fn reference_kind_debug_format() {
-        let kind = ReferenceKind::DynamicImport;
-        let debug_str = format!("{kind:?}");
-        assert_eq!(debug_str, "DynamicImport");
-    }
-
     fn module_with_reference_paths(paths: &[Option<ReferencePathId>]) -> ModuleNode {
         ModuleNode {
             file_id: FileId(0),
@@ -1033,8 +976,8 @@ mod tests {
         let small = export_with_reference_files(&[0, 1, 2, 3, 4, 5, 6, 0]);
         let large = export_with_reference_files(&[0, 1, 2, 3, 4, 5, 6, 7, 0]);
 
-        assert_eq!(small.physical_reference_count(), 7);
-        assert_eq!(large.physical_reference_count(), 8);
+        assert_eq!(small.physical_references().count(), 7);
+        assert_eq!(large.physical_references().count(), 8);
     }
 
     #[test]
@@ -1149,176 +1092,6 @@ mod tests {
             first_modules[0].exports[0].reference_paths,
             second_modules[0].exports[0].reference_paths
         );
-    }
-
-    #[test]
-    fn symbol_reference_construction() {
-        let reference = SymbolReference {
-            from_file: FileId(42),
-            kind: ReferenceKind::NamedImport,
-            namespace: ExportNamespace::Value,
-            import_span: oxc_span::Span::new(10, 30),
-        };
-        assert_eq!(reference.from_file, FileId(42));
-        assert_eq!(reference.kind, ReferenceKind::NamedImport);
-        assert_eq!(reference.import_span.start, 10);
-        assert_eq!(reference.import_span.end, 30);
-    }
-
-    #[test]
-    fn symbol_reference_copy_preserves_all_fields() {
-        let reference = SymbolReference {
-            from_file: FileId(7),
-            kind: ReferenceKind::ReExport,
-            namespace: ExportNamespace::Value,
-            import_span: oxc_span::Span::new(5, 25),
-        };
-        let copied = reference;
-        assert_eq!(copied.from_file, reference.from_file);
-        assert_eq!(copied.kind, reference.kind);
-        assert_eq!(copied.import_span.start, reference.import_span.start);
-        assert_eq!(copied.import_span.end, reference.import_span.end);
-    }
-
-    #[test]
-    fn re_export_edge_construction() {
-        let edge = ReExportEdge {
-            source_file: FileId(3),
-            imported_name: "*".to_string(),
-            exported_name: "*".to_string(),
-            is_type_only: false,
-            span: oxc_span::Span::default(),
-        };
-        assert_eq!(edge.source_file, FileId(3));
-        assert_eq!(edge.imported_name, "*");
-        assert_eq!(edge.exported_name, "*");
-        assert!(!edge.is_type_only);
-    }
-
-    #[test]
-    fn re_export_edge_type_only() {
-        let edge = ReExportEdge {
-            source_file: FileId(1),
-            imported_name: "MyType".to_string(),
-            exported_name: "MyType".to_string(),
-            is_type_only: true,
-            span: oxc_span::Span::default(),
-        };
-        assert!(edge.is_type_only);
-    }
-
-    #[test]
-    fn re_export_edge_renamed() {
-        let edge = ReExportEdge {
-            source_file: FileId(2),
-            imported_name: "internal".to_string(),
-            exported_name: "public".to_string(),
-            is_type_only: false,
-            span: oxc_span::Span::default(),
-        };
-        assert_ne!(edge.imported_name, edge.exported_name);
-        assert_eq!(edge.imported_name, "internal");
-        assert_eq!(edge.exported_name, "public");
-    }
-
-    #[test]
-    fn export_symbol_named() {
-        let sym = ExportSymbol {
-            name: ExportName::Named("myFunction".to_string()),
-            is_type_only: false,
-            is_side_effect_used: false,
-            visibility: VisibilityTag::None,
-            expected_unused_reason: None,
-            span: oxc_span::Span::new(0, 50),
-            references: vec![],
-            reference_paths: Vec::new(),
-            members: vec![],
-        };
-        assert!(matches!(sym.name, ExportName::Named(ref n) if n == "myFunction"));
-        assert!(!sym.is_type_only);
-        assert_eq!(sym.visibility, VisibilityTag::None);
-    }
-
-    #[test]
-    fn export_symbol_default() {
-        let sym = ExportSymbol {
-            name: ExportName::Default,
-            is_type_only: false,
-            is_side_effect_used: false,
-            visibility: VisibilityTag::None,
-            expected_unused_reason: None,
-            span: oxc_span::Span::new(0, 20),
-            references: vec![],
-            reference_paths: Vec::new(),
-            members: vec![],
-        };
-        assert!(matches!(sym.name, ExportName::Default));
-    }
-
-    #[test]
-    fn export_symbol_public_tag() {
-        let sym = ExportSymbol {
-            name: ExportName::Named("api".to_string()),
-            is_type_only: false,
-            is_side_effect_used: false,
-            visibility: VisibilityTag::Public,
-            expected_unused_reason: None,
-            span: oxc_span::Span::new(0, 10),
-            references: vec![],
-            reference_paths: Vec::new(),
-            members: vec![],
-        };
-        assert_eq!(sym.visibility, VisibilityTag::Public);
-    }
-
-    #[test]
-    fn export_symbol_type_only() {
-        let sym = ExportSymbol {
-            name: ExportName::Named("MyInterface".to_string()),
-            is_type_only: true,
-            is_side_effect_used: false,
-            visibility: VisibilityTag::None,
-            expected_unused_reason: None,
-            span: oxc_span::Span::new(0, 30),
-            references: vec![],
-            reference_paths: Vec::new(),
-            members: vec![],
-        };
-        assert!(sym.is_type_only);
-    }
-
-    #[test]
-    fn export_symbol_with_references() {
-        let sym = ExportSymbol {
-            name: ExportName::Named("helper".to_string()),
-            is_type_only: false,
-            is_side_effect_used: false,
-            visibility: VisibilityTag::None,
-            expected_unused_reason: None,
-            span: oxc_span::Span::new(0, 20),
-            references: vec![
-                SymbolReference {
-                    from_file: FileId(1),
-                    kind: ReferenceKind::NamedImport,
-                    namespace: ExportNamespace::Value,
-                    import_span: oxc_span::Span::new(0, 10),
-                },
-                SymbolReference {
-                    from_file: FileId(2),
-                    kind: ReferenceKind::ReExport,
-                    namespace: ExportNamespace::Value,
-                    import_span: oxc_span::Span::new(5, 15),
-                },
-            ],
-            reference_paths: vec![
-                Some(ReferencePathId::from_index(0)),
-                Some(ReferencePathId::from_index(1)),
-            ],
-            members: vec![],
-        };
-        assert_eq!(sym.references.len(), 2);
-        assert_eq!(sym.references[0].from_file, FileId(1));
-        assert_eq!(sym.references[1].kind, ReferenceKind::ReExport);
     }
 
     #[test]

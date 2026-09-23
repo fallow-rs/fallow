@@ -868,17 +868,6 @@ fn expand_rules_for_groups(
 }
 
 impl BoundaryConfig {
-    /// Return the preset name if one is configured but not yet expanded.
-    #[must_use]
-    pub fn preset_name(&self) -> Option<&str> {
-        self.preset.as_ref().map(|p| match p {
-            BoundaryPreset::Layered => "layered",
-            BoundaryPreset::Hexagonal => "hexagonal",
-            BoundaryPreset::FeatureSliced => "feature-sliced",
-            BoundaryPreset::Bulletproof => "bulletproof",
-        })
-    }
-
     /// Validate that patterns do not repeat the zone root.
     #[must_use]
     pub fn validate_root_prefixes(&self) -> Vec<RedundantRootPrefix> {
@@ -3350,45 +3339,6 @@ callee = ["console.*"]
         assert_eq!(resolved.classify_zone("src/domain/user.ts"), Some("domain"));
         assert!(!resolved.is_import_allowed("adapters", "domain"));
         assert!(resolved.is_import_allowed("adapters", "ports"));
-    }
-
-    #[test]
-    fn preset_name_returns_correct_string() {
-        let config = BoundaryConfig {
-            coverage: BoundaryCoverageConfig::default(),
-            calls: BoundaryCallsConfig::default(),
-            preset: Some(BoundaryPreset::FeatureSliced),
-            zones: vec![],
-            rules: vec![],
-        };
-        assert_eq!(config.preset_name(), Some("feature-sliced"));
-
-        let empty = BoundaryConfig::default();
-        assert_eq!(empty.preset_name(), None);
-    }
-
-    #[test]
-    fn preset_name_all_variants() {
-        let cases = [
-            (BoundaryPreset::Layered, "layered"),
-            (BoundaryPreset::Hexagonal, "hexagonal"),
-            (BoundaryPreset::FeatureSliced, "feature-sliced"),
-            (BoundaryPreset::Bulletproof, "bulletproof"),
-        ];
-        for (preset, expected_name) in cases {
-            let config = BoundaryConfig {
-                coverage: BoundaryCoverageConfig::default(),
-                calls: BoundaryCallsConfig::default(),
-                preset: Some(preset),
-                zones: vec![],
-                rules: vec![],
-            };
-            assert_eq!(
-                config.preset_name(),
-                Some(expected_name),
-                "preset_name() mismatch for variant"
-            );
-        }
     }
 
     #[test]

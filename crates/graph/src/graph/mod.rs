@@ -101,15 +101,6 @@ impl<'graph> EffectiveExportSurface<'graph> {
     pub const fn origin(self) -> Option<EffectiveExportOrigin<'graph>> {
         self.origin
     }
-
-    /// Whether the requested module owns a concrete export surface.
-    ///
-    /// Named re-exports have a local export-specifier identity. Star-only
-    /// surfaces do not, so semantic consumers must use the origin declaration.
-    #[must_use]
-    pub const fn has_local_export(self) -> bool {
-        self.local_export
-    }
 }
 
 impl<'graph> EffectiveExportOrigin<'graph> {

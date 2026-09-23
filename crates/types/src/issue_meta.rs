@@ -58,22 +58,10 @@ impl IssueKindMeta {
         issue_sarif_rule_ids(self.code)
     }
 
-    /// Whether this issue row is eligible for SARIF rule metadata.
-    #[must_use]
-    pub fn sarif_enabled(self) -> bool {
-        self.has_result_contract()
-    }
-
     /// CodeClimate check names used by CI formatters for this issue row.
     #[must_use]
     pub fn codeclimate_check_names(self) -> Vec<String> {
         issue_codeclimate_check_names(self.code)
-    }
-
-    /// Whether this issue row is eligible for CodeClimate output.
-    #[must_use]
-    pub fn codeclimate_enabled(self) -> bool {
-        !self.codeclimate_check_names().is_empty()
     }
 
     /// Documentation anchor under `/explanations/dead-code`.
@@ -1939,7 +1927,7 @@ mod tests {
         for meta in result_issue_metas() {
             let issue = issue_meta_by_code(meta.code)
                 .unwrap_or_else(|| panic!("result metadata code {} has no issue row", meta.code));
-            assert!(issue.sarif_enabled());
+            assert!(issue.has_result_contract());
             let sarif_ids = issue.sarif_rule_ids();
             assert!(sarif_ids.contains(&format!("fallow/{}", meta.code)));
             for rule_id in sarif_ids {
