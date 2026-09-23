@@ -163,11 +163,15 @@ pub(super) fn render_hotspots(
 
 fn push_hotspots_header(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
     let header = report.hotspot_summary.as_ref().map_or_else(
-        || format!("Hotspots ({} files)", report.hotspots.len()),
+        || {
+            let count = report.hotspots.len();
+            format!("Hotspots ({count} file{})", plural(count))
+        },
         |summary| {
+            let count = report.hotspots.len();
             format!(
-                "Hotspots ({} files, since {})",
-                report.hotspots.len(),
+                "Hotspots ({count} file{}, since {})",
+                plural(count),
                 summary.since,
             )
         },

@@ -2391,9 +2391,12 @@ fn push_file_scores_header(lines: &mut Vec<String>, score_count: usize) {
     lines.push(format!(
         "{} {} {}",
         "\u{25cf}".cyan(),
-        format!("File health scores ({score_count} files)")
-            .cyan()
-            .bold(),
+        format!(
+            "File health scores ({score_count} file{})",
+            plural(score_count)
+        )
+        .cyan()
+        .bold(),
         "\u{b7} sorted by triage concern".dimmed(),
     ));
     lines.push(String::new());
@@ -4769,7 +4772,8 @@ mod tests {
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("File health scores (1 files)"));
+        assert!(text.contains("File health scores (1 file)"));
+        assert!(!text.contains("(1 files)"));
         assert!(text.contains("85.3"));
         assert!(text.contains("src/utils.ts"));
         assert!(text.contains("200 LOC"));
@@ -5148,7 +5152,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("Hotspots (1 files)"));
+        assert!(text.contains("Hotspots (1 file)"));
         assert!(text.contains("75.0"));
         assert!(text.contains("src/core.ts"));
         assert!(text.contains("42 commits"));
@@ -5240,7 +5244,7 @@ mod tests {
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("Hotspots (1 files, since 6 months)"));
+        assert!(text.contains("Hotspots (1 file, since 6 months)"));
         assert!(text.contains("20 files excluded (< 3 commits)"));
     }
 
