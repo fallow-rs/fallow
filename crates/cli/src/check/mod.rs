@@ -745,28 +745,22 @@ fn apply_scope_filters(
     ws_roots: Option<&Vec<std::path::PathBuf>>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
 ) {
-    if let Some(ws_roots) = ws_roots {
-        filtering::filter_to_workspaces(results, ws_roots);
-    }
-    if let Some(changed) = changed_files {
-        filtering::filter_changed_files(results, changed);
-    }
     let diff_index = match opts.diff_index {
         Some(index) => Some(index),
         None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
         None => None,
     };
-    if let Some(diff_index) = diff_index {
-        filtering::filter_results_by_diff(results, diff_index, opts.root);
-    }
-
-    // Scope filters prune the owner list of a multi-owner finding in place
-    // (`duplicate_exports` narrows `locations`), so a group the engine kept
-    // because one owner was outside `ignoreFindings` can end up holding only
-    // ignored owners. Re-apply the ignore filter over the scoped result so the
-    // "hidden only when every owner matches" contract holds for what is actually
-    // reported. The helper returns immediately when no patterns are configured.
-    fallow_engine::dead_code::filter_configured_ignored_findings(results, config);
+    let files = file_scope(opts);
+    fallow_engine::dead_code::apply_scope(
+        results,
+        &fallow_engine::dead_code::DeadCodeScope {
+            workspace_roots: ws_roots.map(Vec::as_slice),
+            changed_files,
+            diff: diff_index.map(|index| (index, opts.root)),
+            files: files.as_ref(),
+        },
+        config,
+    );
 }
 
 fn apply_rules_and_filters(
@@ -781,9 +775,11 @@ fn apply_rules_and_filters(
     opts.filters.apply(results);
 }
 
-fn apply_file_filter(opts: &CheckOptions<'_>, results: &mut AnalysisResults) {
+/// The `--file` set of the run, resolved against the root, or `None` when the
+/// flag is absent. Warns for each path that does not exist.
+fn file_scope(opts: &CheckOptions<'_>) -> Option<rustc_hash::FxHashSet<std::path::PathBuf>> {
     if opts.file.is_empty() {
-        return;
+        return None;
     }
     let file_set: rustc_hash::FxHashSet<std::path::PathBuf> = opts
         .file
@@ -805,13 +801,7 @@ fn apply_file_filter(opts: &CheckOptions<'_>, results: &mut AnalysisResults) {
             );
         }
     }
-    filtering::filter_changed_files(results, &file_set);
-    results.unused_dependencies.clear();
-    results.unused_dev_dependencies.clear();
-    results.unused_optional_dependencies.clear();
-    results.type_only_dependencies.clear();
-    results.test_only_dependencies.clear();
-    results.dev_dependencies_in_production.clear();
+    Some(file_set)
 }
 
 fn warn_scoped_regression_save(opts: &CheckOptions<'_>) {
@@ -1088,7 +1078,6 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         ws_roots.as_ref(),
         changed_files.as_ref(),
     );
-    apply_file_filter(opts, &mut data.results);
 
     apply_rules_and_filters(opts, &config, &mut data.results);
 

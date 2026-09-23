@@ -20,9 +20,7 @@ pub fn filter_to_workspaces(
     fallow_engine::dead_code::filter_to_workspaces(results, ws_roots);
 }
 
-pub use fallow_engine::changed_files::{
-    changed_files as try_get_changed_files, filter_results_by_changed_files as filter_changed_files,
-};
+pub use fallow_engine::changed_files::changed_files as try_get_changed_files;
 
 /// Drop the findings whose source line is not on an added line of the diff.
 /// The one implementation lives in the engine, so the CLI and the programmatic
@@ -174,6 +172,7 @@ fn quote_owned_patterns(patterns: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_engine::changed_files::filter_results_by_changed_files as filter_changed_files;
     use fallow_types::extract::MemberKind;
     use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
     use fallow_types::output_dead_code::*;

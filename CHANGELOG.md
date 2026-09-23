@@ -180,6 +180,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   work only without a subcommand: `fallow --dupes-baseline <file> dead-code`
   stops with exit 2.
 
+- **The MCP tools and the Node API hide a duplicate export that only ignored
+  files hold after a scope.** `ignoreFindings` hides a `duplicate-exports`
+  finding only when every file that exports the name matches. A scope such as
+  `--changed-since` or `--workspace` can remove files from the finding. The
+  CLI then checked `ignoreFindings` again, and the MCP typed tools and the
+  Node API did not, so they showed a finding that the CLI hid. All three now
+  narrow a dead-code report through the same code.
+
 - **Traces pick the file you name in a monorepo.** A trace of `src/a.ts`
   (for example `dead-code --trace-file src/a.ts` or
   `dead-code --trace src/a.ts:foo`) now takes the file at that exact path from

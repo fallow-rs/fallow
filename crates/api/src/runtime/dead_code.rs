@@ -467,45 +467,43 @@ fn apply_dead_code_scope(
     results: &mut AnalysisResults,
 ) -> ProgrammaticResult<()> {
     let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
-    if let Some(workspace_roots) = workspace_roots.as_ref() {
-        fallow_engine::dead_code::filter_to_workspaces(results, workspace_roots);
-    }
     let resolved_changed_files = if changed_files.is_some() {
         None
     } else {
         changed_files_for_run(resolved)?
     };
-    if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref()) {
-        fallow_engine::dead_code::filter_by_changed_files(results, changed_files);
-    }
-    if let Some(diff) = resolved.diff.as_ref() {
-        fallow_engine::diff_scope::filter_dead_code_by_diff(results, diff, session.root());
-    }
-    apply_dead_code_file_filter(options, session.root(), results);
+    let files = file_scope(options, session.root());
+    fallow_engine::dead_code::apply_scope(
+        results,
+        &fallow_engine::dead_code::DeadCodeScope {
+            workspace_roots: workspace_roots.as_deref(),
+            changed_files: changed_files.or(resolved_changed_files.as_ref()),
+            diff: resolved.diff.as_ref().map(|diff| (diff, session.root())),
+            files: files.as_ref(),
+        },
+        session.config(),
+    );
     Ok(())
 }
 
-fn apply_dead_code_file_filter(
-    options: &DeadCodeOptions,
-    root: &Path,
-    results: &mut AnalysisResults,
-) {
+/// The `files` option resolved against the root, or `None` when it is empty.
+fn file_scope(options: &DeadCodeOptions, root: &Path) -> Option<FxHashSet<std::path::PathBuf>> {
     if options.files.is_empty() {
-        return;
+        return None;
     }
-    let file_set = options
-        .files
-        .iter()
-        .map(|path| {
-            if is_absolute_path_any_platform(path) {
-                path.clone()
-            } else {
-                root.join(path)
-            }
-        })
-        .collect::<FxHashSet<_>>();
-    fallow_engine::dead_code::filter_by_changed_files(results, &file_set);
-    clear_dead_code_dependency_findings(results);
+    Some(
+        options
+            .files
+            .iter()
+            .map(|path| {
+                if is_absolute_path_any_platform(path) {
+                    path.clone()
+                } else {
+                    root.join(path)
+                }
+            })
+            .collect(),
+    )
 }
 
 fn apply_dead_code_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {

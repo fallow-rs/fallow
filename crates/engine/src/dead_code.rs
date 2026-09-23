@@ -49,6 +49,62 @@ pub fn filter_to_workspaces(results: &mut AnalysisResults, ws_roots: &[PathBuf])
     filter_workspace_policy_findings(results, &any_under);
 }
 
+/// The scope of one dead-code run, as the surface resolved it.
+///
+/// Every field is optional. A field that is `None` does not narrow the run.
+#[derive(Debug, Clone, Copy)]
+pub struct DeadCodeScope<'a> {
+    /// `--workspace`, `--changed-workspaces` and a positional path: the union
+    /// of these roots.
+    pub workspace_roots: Option<&'a [PathBuf]>,
+    /// `--changed-since`: the files that changed since the ref.
+    pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    /// A unified diff, with the root that finding paths resolve against.
+    pub diff: Option<(&'a fallow_output::DiffIndex, &'a Path)>,
+    /// `--file`: the only files to report. Dependency findings are dropped,
+    /// because a file list does not own a manifest.
+    pub files: Option<&'a FxHashSet<PathBuf>>,
+}
+
+/// Narrow dead-code results to the scope of the run.
+///
+/// The CLI, the programmatic API and the MCP typed path call this one function,
+/// so a scope narrows the same way on every surface. The filters run in this
+/// order: workspace roots, changed files, the diff, the file list. Then the
+/// configured `ignoreFindings` patterns run again, because the scope filters
+/// remove owners from a finding with several owners (`duplicate_exports`). A
+/// finding that only ignored owners hold after the scope is hidden, as the
+/// "hidden only when every owner matches" rule says.
+pub fn apply_scope(
+    results: &mut AnalysisResults,
+    scope: &DeadCodeScope<'_>,
+    config: &ResolvedConfig,
+) {
+    if let Some(roots) = scope.workspace_roots {
+        filter_to_workspaces(results, roots);
+    }
+    if let Some(changed_files) = scope.changed_files {
+        filter_by_changed_files(results, changed_files);
+    }
+    if let Some((diff, root)) = scope.diff {
+        crate::diff_scope::filter_dead_code_by_diff(results, diff, root);
+    }
+    if let Some(files) = scope.files {
+        filter_by_changed_files(results, files);
+        clear_dependency_findings(results);
+    }
+    filter_configured_ignored_findings(results, config);
+}
+
+fn clear_dependency_findings(results: &mut AnalysisResults) {
+    results.unused_dependencies.clear();
+    results.unused_dev_dependencies.clear();
+    results.unused_optional_dependencies.clear();
+    results.type_only_dependencies.clear();
+    results.test_only_dependencies.clear();
+    results.dev_dependencies_in_production.clear();
+}
+
 /// Scope dead-code results to findings affected by changed files.
 #[expect(
     clippy::implicit_hasher,
