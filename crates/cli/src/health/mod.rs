@@ -687,10 +687,7 @@ fn health_gate_outcomes(
     }
 
     if let Some(min_sev) = options.gates.min_severity {
-        let reached = result
-            .report
-            .findings
-            .iter()
+        let reached = blocking_findings(result)
             .filter(|f| f.severity >= min_sev)
             .count();
         gates.insert(
@@ -752,7 +749,7 @@ fn health_gate_outcomes(
                 GateOutcome::new(GateStatus::Skipped, false)
             } else {
                 GateOutcome::new(
-                    crate::gates::status_of(!result.report.findings.is_empty()),
+                    crate::gates::status_of(blocking_findings(result).next().is_some()),
                     enforced,
                 )
             },
@@ -923,12 +920,24 @@ fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> 
 
 fn findings_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
     if let Some(min_sev) = options.gates.min_severity {
-        result.report.findings.iter().any(|f| f.severity >= min_sev)
+        blocking_findings(result).any(|f| f.severity >= min_sev)
     } else if options.gates.min_score.is_none() {
-        !result.report.findings.is_empty()
+        blocking_findings(result).next().is_some()
     } else {
         false
     }
+}
+
+/// The findings whose `complexity-*` rule is `error`.
+///
+/// The rule applies first. `--min-severity` then filters these findings by
+/// band, so a `warn` finding never fails the run, whatever its band.
+fn blocking_findings(result: &HealthResult) -> impl Iterator<Item = &fallow_output::HealthFinding> {
+    result
+        .report
+        .findings
+        .iter()
+        .filter(|finding| finding.blocks())
 }
 
 fn has_failing_runtime_coverage(result: &HealthResult) -> bool {
@@ -1002,6 +1011,7 @@ mod tests {
             react_prop_count: 0,
             react_hook_profile: None,
             exceeded,
+            effective_severity: None,
             severity: FindingSeverity::Moderate,
             crap: exceeded.includes_crap().then_some(30.0),
             coverage_pct: None,

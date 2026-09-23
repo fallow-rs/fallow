@@ -57,6 +57,13 @@ struct SavedHealthFinding {
     effective_thresholds: Option<crate::HealthEffectiveThresholds>,
     #[serde(default)]
     threshold_source: Option<crate::ThresholdSource>,
+    /// Absent in envelopes from an older fallow. An unknown value reads as
+    /// absent, so the renderers keep the band-based level.
+    #[serde(
+        default,
+        deserialize_with = "fallow_types::output_dead_code::deserialize_effective_severity"
+    )]
+    effective_severity: Option<fallow_types::output_dead_code::EffectiveSeverity>,
 }
 
 #[derive(Default, Deserialize)]
@@ -244,6 +251,7 @@ impl From<SavedHealthFinding> for HealthFinding {
                 react_hook_profile: None,
                 exceeded: saved.exceeded,
                 severity: saved.severity,
+                effective_severity: saved.effective_severity,
                 crap: saved.crap,
                 coverage_pct: saved.coverage_pct,
                 coverage_tier: None,

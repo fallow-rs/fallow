@@ -3265,6 +3265,17 @@
           "description": "Finding severity derived from how far thresholds were crossed.",
           "$ref": "#/definitions/FindingSeverity"
         },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Absent in reports from older versions."
+        },
         "crap": {
           "type": [
             "number",
@@ -11312,6 +11323,17 @@
         "severity": {
           "description": "Finding severity derived from how far thresholds were crossed.",
           "$ref": "#/definitions/FindingSeverity"
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity after the `complexity-*` rules and their\n`overrides[].rules` entries: `error` fails the run, `warn` does not.\nThe most severe rule of the kinds in `exceeded` wins. It is separate\nfrom the band in `severity`, which ranks the finding and does not gate\nit. Absent in reports from older versions."
         },
         "crap": {
           "type": [
@@ -27170,7 +27192,7 @@
           "description": "The finding is reported and does not fail the run."
         }
       ],
-      "description": "Gate severity of one finding after rule resolution.\n\nIt is the severity that `rules` and the matching `overrides[].rules` give\nthe finding for its path. `--fail-on-issues` raises `warn` to `error`. A\nfinding whose rule is `off` is not reported, so there is no `off` value.\nThe type is separate from the health `severity` band, which ranks a\nfinding and does not gate it.\n\nThe `fallow dead-code` findings gate fails when a finding is `error`.\nOther gates (regression, stale baseline) decide on their own inputs. Two\ncommands differ: the `fallow audit` `new-only` gate fails only on introduced\nfindings, so an inherited `error` finding does not fail the audit, and the\ncombined command (`fallow` without a subcommand) exits 0 for machine\nformats."
+      "description": "Gate severity of one finding after rule resolution.\n\nIt is the severity that `rules` and the matching `overrides[].rules` give\nthe finding for its path. `--fail-on-issues` raises `warn` to `error`. A\nfinding whose rule is `off` is not reported, so there is no `off` value.\nThe type is separate from the health `severity` band, which ranks a\nfinding and does not gate it.\n\nThe `fallow dead-code` findings gate fails when a finding is `error`.\nOther gates (regression, stale baseline) decide on their own inputs. Two\ncommands differ: the `fallow audit` `new-only` gate fails only on introduced\nfindings, so an inherited `error` finding does not fail the audit, and the\ncombined command (`fallow` without a subcommand) exits 0 for machine\nformats.\n\nComplexity findings carry the same type. The `complexity-cyclomatic`,\n`complexity-cognitive` and `complexity-crap` rules set it, and the\n`fallow health` findings gate and the audit verdict read it."
     }
   }
 }

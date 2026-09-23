@@ -143,7 +143,9 @@ pub struct HealthConfig {
     /// `crap_max` and the overall health score never move with it. Set to
     /// `0` to disable CRAP enforcement entirely: no findings, nothing counts
     /// above threshold, and file-score rows disclose baseline breaches as
-    /// exempt instead.
+    /// exempt instead. The `complexity-crap` rule is different: it decides if
+    /// a finding fails the run, and `off` hides the findings but keeps the
+    /// file-score signals.
     #[serde(default = "default_max_crap")]
     pub max_crap: f64,
 

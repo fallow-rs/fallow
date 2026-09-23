@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Complexity findings can warn without failing the run.** Three new rules,
+  `complexity-cyclomatic`, `complexity-cognitive` and `complexity-crap`, set
+  whether a complexity finding fails `fallow health` and `fallow audit`. The
+  default is `error`, so the exit code and the verdict do not change. With
+  `warn`, the finding stays in every output format, `fallow health` exits 0
+  and the audit verdict is `warn`. With `off`, the finding is not reported.
+  The thresholds (`health.maxCyclomatic`, `maxCognitive`, `maxCrap` and
+  `thresholdOverrides`) still decide which functions have a finding. A
+  finding above several thresholds takes the most severe rule of those
+  kinds, and it is dropped only when all of them are `off`.
+  `overrides[].rules` can set the rules for some files. The rule applies
+  before `health --min-severity`, so a `warn` finding never fails the run.
+  `health.maxCrap: 0` stays the full off switch for CRAP: it also removes
+  the CRAP file-score signals, which `complexity-crap: off` keeps. Each
+  complexity finding in the JSON output now carries an optional
+  `effective_severity` field (`error` or `warn`) next to the band in
+  `severity`. A fallow version without these rules warns about an unknown
+  rule name and ignores it, so a shared config works with an older binary,
+  but its complexity findings still fail the run. Thanks
+  [@jwenger-notion](https://github.com/jwenger-notion) for the report.
+  (#2783)
+
 ### Changed
+
+- **The rule, not the band, sets the CI level of a complexity finding.**
+  `github-annotations`, SARIF and CodeClimate now take the level of a
+  complexity finding from its `complexity-*` rule. `error` gives
+  `::error`, SARIF `error` and CodeClimate `major`. `warn` gives
+  `::warning`, SARIF `warning` and CodeClimate `minor`. The band
+  (`moderate`, `high`, `critical`) stays in the title and the message.
+  With the default rules, a `moderate` finding changes from `::warning` to
+  `::error`, and SARIF `note` or `warning` changes to `error`, because the
+  finding fails the run. CodeClimate `critical` and `minor` change to
+  `major`. `fallow report --from` gives the same levels. A saved report
+  without `effective_severity` keeps the earlier band-based levels. (#2783)
 
 - **The GitHub Action tells you when it uses the legacy summary renderer.**
   For fallow before 3.4.2, the action renders the job summary and the inline

@@ -220,11 +220,25 @@ fn verdict(
             .iter()
             .any(|record| record.effective_severity == Severity::Warn)
     };
-    let complexity_findings = if new_only {
-        comparison.health.introduced_count()
-    } else {
-        summary.complexity_findings
-    };
+    // The `complexity-*` rules decide if a finding blocks: `error` fails the
+    // verdict and `warn` gives `warn`. The `new-only` gate reads only the
+    // introduced findings.
+    let (complexity_errors, complexity_warnings) =
+        view.health.as_ref().map_or((false, false), |health| {
+            health
+                .report
+                .findings
+                .iter()
+                .zip(comparison.health.introduced())
+                .filter(|(_, introduced)| !new_only || *introduced)
+                .fold((false, false), |(errors, warnings), (finding, _)| {
+                    if finding.blocks() {
+                        (true, warnings)
+                    } else {
+                        (errors, true)
+                    }
+                })
+        });
     let styling_errors = view.health.as_ref().is_some_and(|health| {
         health
             .report
@@ -245,9 +259,9 @@ fn verdict(
             && duplication.threshold > 0.0
             && duplication.duplication_percentage > duplication.threshold
     });
-    if dead_code_errors || complexity_findings > 0 || styling_errors || duplication_errors {
+    if dead_code_errors || complexity_errors || styling_errors || duplication_errors {
         AuditVerdict::Fail
-    } else if dead_code_warnings || duplication_findings > 0 {
+    } else if dead_code_warnings || complexity_warnings || duplication_findings > 0 {
         AuditVerdict::Warn
     } else {
         AuditVerdict::Pass

@@ -2,8 +2,9 @@
 
 use std::time::Instant;
 
-use fallow_config::ResolvedConfig;
+use fallow_config::{ResolvedConfig, Severity};
 use fallow_output::{ComplexityViolation, FindingSeverity, RefactoringTarget};
+use fallow_types::output_dead_code::EffectiveSeverity;
 
 use crate::baseline::HealthBaselineData;
 
@@ -348,6 +349,10 @@ fn finalize_health_findings(
     scope_reasons: fallow_output::BaselineScopeReasons,
     threshold_state_tracker: &mut ThresholdOverrideStateTracker,
 ) -> Result<HealthFindingFinalizeResult, HealthError> {
+    // The rules drop the findings whose kinds are all `off`, so every later
+    // step (the override disclosure, the counts, the baseline and `--top`)
+    // sees the same list.
+    apply_complexity_rules(findings, config);
     // Runs before every downstream narrowing. The override rows were recorded
     // over the whole collection pass, while `--diff-file`/`--diff-stdin`,
     // `--baseline` and `--top` all narrow the findings list for DISPLAY, so
@@ -370,6 +375,36 @@ fn finalize_health_findings(
         loaded_baseline,
         baseline_staleness,
     })
+}
+
+/// Apply the `complexity-*` rules to the findings.
+///
+/// The thresholds decide if a finding exists. The rules decide if it blocks.
+/// The most severe rule of the kinds in `exceeded` gives the gate severity,
+/// with `overrides[].rules` resolved for the path of the finding. A finding
+/// whose contributing kinds are all `off` is dropped.
+fn apply_complexity_rules(findings: &mut Vec<ComplexityViolation>, config: &ResolvedConfig) {
+    findings.retain_mut(|finding| {
+        let exceeded = finding.exceeded;
+        let severity_of = |rules: &fallow_config::RulesConfig| {
+            rules.complexity_severity(
+                exceeded.includes_cyclomatic(),
+                exceeded.includes_cognitive(),
+                exceeded.includes_crap(),
+            )
+        };
+        let severity = if config.overrides.is_empty() {
+            severity_of(&config.rules)
+        } else {
+            severity_of(&config.resolve_rules_for_path(&finding.path))
+        };
+        finding.effective_severity = match severity {
+            Severity::Error => Some(EffectiveSeverity::Error),
+            Severity::Warn => Some(EffectiveSeverity::Warn),
+            Severity::Off => None,
+        };
+        severity != Severity::Off
+    });
 }
 
 fn count_finding_severities(findings: &[ComplexityViolation]) -> (usize, usize, usize) {

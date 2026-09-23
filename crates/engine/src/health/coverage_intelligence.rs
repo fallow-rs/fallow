@@ -875,6 +875,7 @@ mod tests {
             react_hook_profile: None,
             exceeded: ExceededThreshold::Crap,
             severity: FindingSeverity::High,
+            effective_severity: None,
             crap,
             coverage_pct,
             coverage_tier: coverage_pct.map(|pct| {

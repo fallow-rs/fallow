@@ -10,6 +10,7 @@ use crate::{
     build_sarif_result_with_snippet as sarif_result_with_snippet, normalize_uri,
 };
 use fallow_types::duplicates::{CloneGroup, DuplicationReport};
+use fallow_types::output_dead_code::EffectiveSeverity;
 
 type SarifRuleBuilder<'a> = dyn Fn(&str, &str, &str) -> serde_json::Value + 'a;
 
@@ -349,11 +350,7 @@ fn append_complexity_sarif_results(
     for finding in &report.findings {
         let uri = relative_uri(&finding.path, root);
         let (rule_id, message) = health_complexity_sarif_message(finding, report);
-        let level = match finding.severity {
-            FindingSeverity::Critical => "error",
-            FindingSeverity::High => "warning",
-            FindingSeverity::Moderate => "note",
-        };
+        let level = complexity_sarif_level(finding);
         let source_snippet = snippets.line(&finding.path, finding.line);
         sarif_results.push(sarif_result_with_snippet(
             rule_id,
@@ -363,6 +360,23 @@ fn append_complexity_sarif_results(
             Some((finding.line, finding.col + 1)),
             source_snippet.as_deref(),
         ));
+    }
+}
+
+/// The SARIF level of a complexity finding.
+///
+/// The gate severity from the `complexity-*` rules sets the level. The band
+/// stays in the message. A finding without a gate severity (a saved report
+/// from an older version) keeps the band mapping.
+const fn complexity_sarif_level(finding: &crate::ComplexityViolation) -> &'static str {
+    match finding.effective_severity {
+        Some(EffectiveSeverity::Error) => "error",
+        Some(EffectiveSeverity::Warn) => "warning",
+        None => match finding.severity {
+            FindingSeverity::Critical => "error",
+            FindingSeverity::High => "warning",
+            FindingSeverity::Moderate => "note",
+        },
     }
 }
 
@@ -705,6 +719,7 @@ mod tests {
             react_hook_profile: None,
             exceeded,
             severity: crate::FindingSeverity::High,
+            effective_severity: None,
             crap: Some(90.0),
             coverage_pct: None,
             coverage_tier: None,

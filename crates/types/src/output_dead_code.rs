@@ -3507,6 +3507,10 @@ impl_caveated_finding!(
 /// findings, so an inherited `error` finding does not fail the audit, and the
 /// combined command (`fallow` without a subcommand) exits 0 for machine
 /// formats.
+///
+/// Complexity findings carry the same type. The `complexity-cyclomatic`,
+/// `complexity-cognitive` and `complexity-crap` rules set it, and the
+/// `fallow health` findings gate and the audit verdict read it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]

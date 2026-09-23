@@ -2792,6 +2792,7 @@ mod tests {
                 }
             }),
             exceeded,
+            effective_severity: None,
             severity,
             crap: value.get("crap").and_then(|v| v.as_f64()),
             coverage_pct: value.get("coverage_pct").and_then(|v| v.as_f64()),
@@ -3041,6 +3042,7 @@ mod tests {
             react_prop_count: 0,
             react_hook_profile: None,
             exceeded: fallow_output::ExceededThreshold::Crap,
+            effective_severity: None,
             severity: fallow_output::FindingSeverity::Moderate,
             crap: Some(35.5),
             coverage_pct: None,
@@ -3217,6 +3219,7 @@ mod tests {
             react_prop_count: 0,
             react_hook_profile: None,
             exceeded: fallow_output::ExceededThreshold::Crap,
+            effective_severity: None,
             severity: fallow_output::FindingSeverity::Moderate,
             crap: Some(35.5),
             coverage_pct: None,

@@ -220,6 +220,9 @@
         "css-selector-complexity": "warn",
         "css-dead-surface": "warn",
         "css-broken-reference": "warn",
+        "complexity-cyclomatic": "error",
+        "complexity-cognitive": "error",
+        "complexity-crap": "error",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1055,7 +1058,7 @@
           "default": 15
         },
         "maxCrap": {
-          "description": "Maximum allowed CRAP (Change Risk Anti-Patterns) score per function\n(default: 30.0). CRAP combines cyclomatic complexity with test\ncoverage: high complexity plus low coverage produces a high CRAP\nscore. Functions meeting or exceeding this threshold are reported.\nUse `--coverage` with Istanbul data for accurate per-function CRAP;\notherwise fallow estimates coverage from the module graph. Governs\nfindings and the threshold-relative file-score signals\n(`crap_above_threshold`, the `risk` triage tag, and the\n`add_test_coverage` refactoring target); measured values such as\n`crap_max` and the overall health score never move with it. Set to\n`0` to disable CRAP enforcement entirely: no findings, nothing counts\nabove threshold, and file-score rows disclose baseline breaches as\nexempt instead.",
+          "description": "Maximum allowed CRAP (Change Risk Anti-Patterns) score per function\n(default: 30.0). CRAP combines cyclomatic complexity with test\ncoverage: high complexity plus low coverage produces a high CRAP\nscore. Functions meeting or exceeding this threshold are reported.\nUse `--coverage` with Istanbul data for accurate per-function CRAP;\notherwise fallow estimates coverage from the module graph. Governs\nfindings and the threshold-relative file-score signals\n(`crap_above_threshold`, the `risk` triage tag, and the\n`add_test_coverage` refactoring target); measured values such as\n`crap_max` and the overall health score never move with it. Set to\n`0` to disable CRAP enforcement entirely: no findings, nothing counts\nabove threshold, and file-score rows disclose baseline breaches as\nexempt instead. The `complexity-crap` rule is different: it decides if\na finding fails the run, and `off` hides the findings but keeps the\nfile-score signals.",
           "type": "number",
           "format": "double",
           "default": 30.0
@@ -1424,6 +1427,21 @@
           "description": "CSS broken references, such as missing classes or keyframes. A\nstyling-domain advisory surfaced by deep CSS audit mode; defaults\nto `warn` (verdict-neutral). Set to `error` to gate, or `off` to silence.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
+        },
+        "complexity-cyclomatic": {
+          "description": "A function above the cyclomatic ceiling (`health.maxCyclomatic` or a\n`thresholdOverrides` entry). The threshold decides if the finding\nexists; this rule decides if it fails the run. Defaults to `error`.\n`warn` reports the finding without a failure, and `off` hides it. A\nfinding above several ceilings takes the most severe of their rules.\nThe rule applies before the `health --min-severity` band gate.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "complexity-cognitive": {
+          "description": "A function above the cognitive ceiling (`health.maxCognitive` or a\n`thresholdOverrides` entry). The threshold decides if the finding\nexists; this rule decides if it fails the run. Defaults to `error`.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "complexity-crap": {
+          "description": "A function above the CRAP ceiling (`health.maxCrap` or a\n`thresholdOverrides` entry). The threshold decides if the finding\nexists; this rule decides if it fails the run. Defaults to `error`.\n`off` hides the findings only. `health.maxCrap: 0` also turns off the\nthreshold-relative file-score signals.",
+          "$ref": "#/$defs/Severity",
+          "default": "error"
         },
         "unresolved-imports": {
           "description": "An import specifier that resolves to no file or package. Defaults to\n`error`.",
@@ -2293,6 +2311,39 @@
         },
         "css-broken-reference": {
           "description": "Optional override for [`RulesConfig::css_broken_reference`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "complexity-cyclomatic": {
+          "description": "Optional override for [`RulesConfig::complexity_cyclomatic`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "complexity-cognitive": {
+          "description": "Optional override for [`RulesConfig::complexity_cognitive`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "complexity-crap": {
+          "description": "Optional override for [`RulesConfig::complexity_crap`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

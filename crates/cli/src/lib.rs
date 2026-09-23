@@ -1398,6 +1398,8 @@ enum Command {
         /// Only exit with error for findings at or above this severity.
         /// Use --min-severity critical to ignore moderate/high findings in CI.
         /// Composes with --min-score (the run fails if either gate trips).
+        /// The complexity-* rules apply first: a finding whose rule is warn
+        /// never fails the run, whatever its severity.
         #[arg(long, value_name = "LEVEL", value_enum)]
         min_severity: Option<HealthSeverityCli>,
 

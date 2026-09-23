@@ -490,8 +490,10 @@ fn health_pr_summary_area(result: &HealthResult) -> PrSummaryArea {
         name: "Health".to_owned(),
         status: if count == 0 {
             PrSummaryStatus::Pass
-        } else {
+        } else if result.report.findings.iter().any(|f| f.blocks()) {
             PrSummaryStatus::Fail
+        } else {
+            PrSummaryStatus::Warn
         },
         result: count_label(count, "finding", "findings"),
         threshold: Some("configured complexity gates".to_owned()),
@@ -1137,7 +1139,7 @@ fn combined_gate_outcomes(
         gates.insert(
             fallow_output::GateName::HealthFindings,
             fallow_output::GateOutcome::new(
-                crate::gates::status_of(!result.report.findings.is_empty()),
+                crate::gates::status_of(result.report.findings.iter().any(|f| f.blocks())),
                 false,
             ),
         );

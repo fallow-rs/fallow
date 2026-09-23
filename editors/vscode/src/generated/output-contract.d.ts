@@ -316,6 +316,10 @@ export type AuditIntroduced = boolean
  * findings, so an inherited `error` finding does not fail the audit, and the
  * combined command (`fallow` without a subcommand) exits 0 for machine
  * formats.
+ *
+ * Complexity findings carry the same type. The `complexity-cyclomatic`,
+ * `complexity-cognitive` and `complexity-crap` rules set it, and the
+ * `fallow health` findings gate and the audit verdict read it.
  */
 export type EffectiveSeverity = ("error" | "warn")
 /**
@@ -6507,6 +6511,14 @@ react_prop_count?: number
 react_hook_profile?: (ReactHookProfile | null)
 exceeded: ExceededThreshold
 severity: FindingSeverity
+/**
+ * Gate severity after the `complexity-*` rules and their
+ * `overrides[].rules` entries: `error` fails the run, `warn` does not.
+ * The most severe rule of the kinds in `exceeded` wins. It is separate
+ * from the band in `severity`, which ranks the finding and does not gate
+ * it. Absent in reports from older versions.
+ */
+effective_severity?: (EffectiveSeverity | null)
 /**
  * CRAP score (change risk anti-pattern), when coverage data exists.
  */

@@ -206,6 +206,7 @@ fn collect_complexity_finding(
         react_prop_count: fc.react_prop_count,
         react_hook_profile,
         exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, false),
+        effective_severity: None,
         severity: compute_finding_severity(
             fc.cognitive,
             fc.cyclomatic,
@@ -614,6 +615,7 @@ fn new_crap_finding(args: NewCrapFindingInput<'_, '_>) -> ComplexityViolation {
         react_prop_count: args.fc.react_prop_count,
         react_hook_profile: args.hook_profile,
         exceeded: ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true),
+        effective_severity: None,
         severity: compute_finding_severity(
             args.fc.cognitive,
             args.fc.cyclomatic,

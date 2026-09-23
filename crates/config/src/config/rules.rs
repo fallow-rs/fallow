@@ -240,6 +240,26 @@ pub struct RulesConfig {
     /// to `warn` (verdict-neutral). Set to `error` to gate, or `off` to silence.
     #[serde(default = "Severity::default_warn", alias = "css-broken-reference")]
     pub css_broken_reference: Severity,
+    /// A function above the cyclomatic ceiling (`health.maxCyclomatic` or a
+    /// `thresholdOverrides` entry). The threshold decides if the finding
+    /// exists; this rule decides if it fails the run. Defaults to `error`.
+    /// `warn` reports the finding without a failure, and `off` hides it. A
+    /// finding above several ceilings takes the most severe of their rules.
+    /// The rule applies before the `health --min-severity` band gate.
+    #[serde(default)]
+    pub complexity_cyclomatic: Severity,
+    /// A function above the cognitive ceiling (`health.maxCognitive` or a
+    /// `thresholdOverrides` entry). The threshold decides if the finding
+    /// exists; this rule decides if it fails the run. Defaults to `error`.
+    #[serde(default)]
+    pub complexity_cognitive: Severity,
+    /// A function above the CRAP ceiling (`health.maxCrap` or a
+    /// `thresholdOverrides` entry). The threshold decides if the finding
+    /// exists; this rule decides if it fails the run. Defaults to `error`.
+    /// `off` hides the findings only. `health.maxCrap: 0` also turns off the
+    /// threshold-relative file-score signals.
+    #[serde(default)]
+    pub complexity_crap: Severity,
     /// An import specifier that resolves to no file or package. Defaults to
     /// `error`.
     #[serde(default, alias = "unresolved-import")]
@@ -417,6 +437,9 @@ impl Default for RulesConfig {
             css_selector_complexity: Severity::Warn,
             css_dead_surface: Severity::Warn,
             css_broken_reference: Severity::Warn,
+            complexity_cyclomatic: Severity::Error,
+            complexity_cognitive: Severity::Error,
+            complexity_crap: Severity::Error,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -527,6 +550,29 @@ impl RulesConfig {
         }
     }
 
+    /// The gate severity of a complexity finding from the kinds that exceeded
+    /// their threshold.
+    ///
+    /// The most severe rule of the contributing kinds wins. The result is
+    /// `Off` only when every contributing kind is `off`, and the finding is
+    /// then dropped. A kind that did not contribute has no effect.
+    #[must_use]
+    pub fn complexity_severity(&self, cyclomatic: bool, cognitive: bool, crap: bool) -> Severity {
+        [
+            (cyclomatic, self.complexity_cyclomatic),
+            (cognitive, self.complexity_cognitive),
+            (crap, self.complexity_crap),
+        ]
+        .into_iter()
+        .filter_map(|(contributed, severity)| contributed.then_some(severity))
+        .max_by_key(|severity| match severity {
+            Severity::Error => 2,
+            Severity::Warn => 1,
+            Severity::Off => 0,
+        })
+        .unwrap_or(Severity::Off)
+    }
+
     /// Apply a partial rules config on top. Only `Some` fields override.
     pub const fn apply_partial(&mut self, partial: &PartialRulesConfig) {
         apply_partial_rules!(
@@ -566,6 +612,9 @@ impl RulesConfig {
                 css_selector_complexity,
                 css_dead_surface,
                 css_broken_reference,
+                complexity_cyclomatic,
+                complexity_cognitive,
+                complexity_crap,
             ]
         );
         apply_partial_rules!(
@@ -831,6 +880,15 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub css_broken_reference: Option<Severity>,
+    /// Optional override for [`RulesConfig::complexity_cyclomatic`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity_cyclomatic: Option<Severity>,
+    /// Optional override for [`RulesConfig::complexity_cognitive`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity_cognitive: Option<Severity>,
+    /// Optional override for [`RulesConfig::complexity_crap`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity_crap: Option<Severity>,
     /// Optional override for [`RulesConfig::unresolved_imports`].
     #[serde(
         default,
@@ -1051,6 +1109,9 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "css-selector-complexity",
     "css-dead-surface",
     "css-broken-reference",
+    "complexity-cyclomatic",
+    "complexity-cognitive",
+    "complexity-crap",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -1428,6 +1489,45 @@ mod tests {
     }
 
     #[test]
+    fn complexity_rules_default_to_error_and_deserialize() {
+        let rules = RulesConfig::default();
+        assert_eq!(rules.complexity_cyclomatic, Severity::Error);
+        assert_eq!(rules.complexity_cognitive, Severity::Error);
+        assert_eq!(rules.complexity_crap, Severity::Error);
+
+        let partial: PartialRulesConfig =
+            serde_json::from_str(r#"{ "complexity-crap": "warn", "complexity-cognitive": "off" }"#)
+                .unwrap();
+        assert_eq!(partial.complexity_crap, Some(Severity::Warn));
+        assert_eq!(partial.complexity_cognitive, Some(Severity::Off));
+        assert_eq!(partial.complexity_cyclomatic, None);
+    }
+
+    #[test]
+    fn complexity_severity_takes_the_most_severe_contributing_rule() {
+        let rules = RulesConfig {
+            complexity_cyclomatic: Severity::Warn,
+            complexity_cognitive: Severity::Off,
+            complexity_crap: Severity::Error,
+            ..RulesConfig::default()
+        };
+        assert_eq!(
+            rules.complexity_severity(true, false, true),
+            Severity::Error
+        );
+        assert_eq!(rules.complexity_severity(true, true, false), Severity::Warn);
+        assert_eq!(rules.complexity_severity(false, true, false), Severity::Off);
+        assert_eq!(
+            rules.complexity_severity(true, false, false),
+            Severity::Warn
+        );
+        assert_eq!(
+            rules.complexity_severity(false, false, false),
+            Severity::Off
+        );
+    }
+
+    #[test]
     fn severity_display() {
         assert_eq!(Severity::Error.to_string(), "error");
         assert_eq!(Severity::Warn.to_string(), "warn");
@@ -1479,6 +1579,9 @@ mod tests {
             css_selector_complexity: Some(Severity::Off),
             css_dead_surface: Some(Severity::Off),
             css_broken_reference: Some(Severity::Off),
+            complexity_cyclomatic: Some(Severity::Off),
+            complexity_cognitive: Some(Severity::Off),
+            complexity_crap: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -1577,7 +1680,7 @@ mod tests {
     /// more. See the note on [`KNOWN_RULE_NAMES`].
     #[test]
     fn known_rule_names_list_length_is_pinned() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 98);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 101);
     }
 
     /// The reverse of `known_rule_names_covers_every_struct_field`. That one

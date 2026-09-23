@@ -1068,15 +1068,20 @@ fn threshold(env: &Value, key: &str, default: &str) -> String {
         .map_or_else(|| default.to_owned(), fmt_num)
 }
 
-/// Health complexity severity to workflow-command level: `critical` and
-/// `high` map to `::error` (consistent with SARIF's `error` for critical;
-/// panel decision), everything else to `::warning`.
-fn complexity_level(severity: &str) -> AnnotationLevel {
-    if matches!(severity, "critical" | "high") {
+/// Workflow-command level of a complexity finding.
+///
+/// The gate severity from the `complexity-*` rules sets the level: `error`
+/// gives `::error` and `warn` gives `::warning`, whatever the band. The band
+/// stays in the title and the message. A saved report without
+/// `effective_severity` (from an older version) keeps the old band mapping:
+/// `critical` and `high` give `::error`, `moderate` gives `::warning`.
+fn complexity_level(finding: &Value, band: &str) -> AnnotationLevel {
+    let band_level = if matches!(band, "critical" | "high") {
         AnnotationLevel::Error
     } else {
         AnnotationLevel::Warning
-    }
+    };
+    gate_level(finding, band_level)
 }
 
 struct ComplexityThresholds {
@@ -1172,7 +1177,7 @@ fn collect_health(env: &Value, out: &mut Vec<Annotation>) {
         let (title, message) = complexity_annotation(finding, &finding_thresholds(finding, &ctx));
         push(
             out,
-            complexity_level(severity),
+            complexity_level(finding, severity),
             s(finding, "path"),
             Anchor::line_col(finding),
             title,

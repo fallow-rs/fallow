@@ -431,6 +431,13 @@ pub struct ComplexityViolation {
     pub exceeded: ExceededThreshold,
     /// Finding severity derived from how far thresholds were crossed.
     pub severity: FindingSeverity,
+    /// Gate severity after the `complexity-*` rules and their
+    /// `overrides[].rules` entries: `error` fails the run, `warn` does not.
+    /// The most severe rule of the kinds in `exceeded` wins. It is separate
+    /// from the band in `severity`, which ranks the finding and does not gate
+    /// it. Absent in reports from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<fallow_types::output_dead_code::EffectiveSeverity>,
     /// CRAP score (change risk anti-pattern), when coverage data exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crap: Option<f64>,
@@ -475,6 +482,15 @@ pub struct ComplexityViolation {
 }
 
 impl ComplexityViolation {
+    /// Whether the finding fails the run.
+    ///
+    /// A `warn` gate severity does not block. A finding without the field, for
+    /// example from an older saved report, blocks as before.
+    #[must_use]
+    pub fn blocks(&self) -> bool {
+        self.effective_severity != Some(fallow_types::output_dead_code::EffectiveSeverity::Warn)
+    }
+
     /// Ceilings this finding was actually evaluated against: the per-file
     /// `thresholdOverrides` result when an override matched, otherwise the
     /// run's global summary ceilings.

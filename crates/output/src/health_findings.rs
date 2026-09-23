@@ -1148,6 +1148,7 @@ mod crap_action_tests {
             react_hook_profile: None,
             exceeded: ExceededThreshold::Cognitive,
             severity: crate::FindingSeverity::Moderate,
+            effective_severity: None,
             crap: None,
             coverage_pct: None,
             coverage_tier: None,

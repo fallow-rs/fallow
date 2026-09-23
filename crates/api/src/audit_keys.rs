@@ -4239,6 +4239,7 @@ mod tests {
             react_prop_count: 0,
             react_hook_profile: None,
             exceeded: ExceededThreshold::Cyclomatic,
+            effective_severity: None,
             severity: FindingSeverity::High,
             crap: None,
             coverage_pct: None,

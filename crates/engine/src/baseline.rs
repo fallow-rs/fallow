@@ -3895,6 +3895,7 @@ mod tests {
             react_hook_profile: None,
             exceeded,
             severity,
+            effective_severity: None,
             crap: None,
             coverage_pct: None,
             coverage_tier: None,

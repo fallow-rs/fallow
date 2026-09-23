@@ -9,6 +9,7 @@ use fallow_output::{
     RuntimeCoverageVerdict, StylingFinding, StylingFindingSeverity, UntestedExportFinding,
     UntestedFileFinding, build_codeclimate_issue, codeclimate_fingerprint_hash, normalize_uri,
 };
+use fallow_types::output_dead_code::EffectiveSeverity;
 
 struct HealthCodeClimateContext<'a> {
     root: &'a Path,
@@ -27,7 +28,7 @@ impl HealthCodeClimateContext<'_> {
         build_codeclimate_issue(CodeClimateIssueInput {
             check_name,
             description: &self.complexity_description(finding),
-            severity: health_finding_severity(finding.severity),
+            severity: complexity_codeclimate_severity(finding),
             category: "Complexity",
             path: &path,
             begin_line: Some(finding.line),
@@ -286,6 +287,20 @@ const fn complexity_check_name(finding: &ComplexityViolation) -> &'static str {
     }
 }
 
+/// The CodeClimate severity of a complexity finding.
+///
+/// The gate severity from the `complexity-*` rules sets it: `error` gives
+/// `major` and `warn` gives `minor`, as for dead-code and styling findings.
+/// A finding without a gate severity (a saved report from an older version)
+/// keeps the band mapping.
+const fn complexity_codeclimate_severity(finding: &ComplexityViolation) -> CodeClimateSeverity {
+    match finding.effective_severity {
+        Some(EffectiveSeverity::Error) => CodeClimateSeverity::Major,
+        Some(EffectiveSeverity::Warn) => CodeClimateSeverity::Minor,
+        None => health_finding_severity(finding.severity),
+    }
+}
+
 const fn health_finding_severity(severity: FindingSeverity) -> CodeClimateSeverity {
     match severity {
         FindingSeverity::Critical => CodeClimateSeverity::Critical,
@@ -368,6 +383,7 @@ mod tests {
                     react_prop_count: 0,
                     react_hook_profile: None,
                     exceeded: ExceededThreshold::Both,
+                    effective_severity: None,
                     severity: FindingSeverity::High,
                     coverage_pct: None,
                     crap: None,
@@ -441,6 +457,7 @@ mod tests {
             react_prop_count: 0,
             react_hook_profile: None,
             exceeded: ExceededThreshold::Crap,
+            effective_severity: None,
             severity: FindingSeverity::Critical,
             coverage_pct: None,
             crap: Some(132.0),

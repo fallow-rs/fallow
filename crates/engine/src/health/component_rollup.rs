@@ -260,6 +260,7 @@ fn make_component_rollup_violation(
             totals.exceeds_cognitive,
             false,
         ),
+        effective_severity: None,
         severity: compute_finding_severity(
             totals.rollup_cog,
             totals.rollup_cyc,
