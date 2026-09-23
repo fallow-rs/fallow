@@ -1,0 +1,1 @@
+export const useMark = () => 'mark';

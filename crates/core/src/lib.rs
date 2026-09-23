@@ -2584,14 +2584,18 @@ fn gate_auto_import_entry_patterns(
             if !setting.components.is_custom() {
                 return false;
             }
-            record_retained_auto_import_surface(&mut retained, setting, "components");
+            record_retained_auto_import_surface(
+                &mut retained,
+                &setting.components_origin,
+                "components",
+            );
             return true;
         }
         if plugins::nuxt::is_script_auto_import_entry_pattern(&rule.pattern) {
             if !setting.scripts.is_custom() {
                 return false;
             }
-            record_retained_auto_import_surface(&mut retained, setting, "imports");
+            record_retained_auto_import_surface(&mut retained, &setting.scripts_origin, "imports");
             return true;
         }
         true
@@ -2610,13 +2614,13 @@ const AUTO_IMPORT_KEY_NOT_MODELED: &str = "key-effect-not-modeled";
 /// surface kept.
 fn record_retained_auto_import_surface(
     retained: &mut Vec<plugins::PluginConfigDiagnostic>,
-    setting: &plugins::nuxt::AutoImportSettings,
+    origin: &plugins::nuxt::SurfaceOrigin,
     key: &str,
 ) {
-    let Some(config_path) = setting.config_path.as_deref() else {
+    let Some(config_path) = origin.config_path.as_deref() else {
         return;
     };
-    let reason = if setting.unreadable_property {
+    let reason = if origin.unreadable_property {
         AUTO_IMPORT_PROPERTY_UNREADABLE
     } else {
         AUTO_IMPORT_KEY_NOT_MODELED
@@ -2904,8 +2908,11 @@ mod tests {
         crate::plugins::nuxt::AutoImportSettings {
             components,
             scripts: crate::plugins::nuxt::AutoImportSetting::Default,
-            config_path: Some(std::path::PathBuf::from("nuxt.config.ts")),
-            unreadable_property: false,
+            components_origin: crate::plugins::nuxt::SurfaceOrigin {
+                config_path: Some(std::path::PathBuf::from("nuxt.config.ts")),
+                unreadable_property: false,
+            },
+            scripts_origin: crate::plugins::nuxt::SurfaceOrigin::default(),
         }
     }
 

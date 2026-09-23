@@ -479,6 +479,8 @@ mod astro_template_map_class_member;
 #[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
 mod issue_843_nestjs_lifecycle;
 
+#[path = "integration_test/issue_2752_nuxt_local_layers.rs"]
+mod issue_2752_nuxt_local_layers;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

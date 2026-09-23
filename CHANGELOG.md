@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Nuxt local layers are part of the project.** A local directory in
+  `extends` of a `nuxt.config`, and each `layers/<name>` directory, is now a
+  layer root. Its pages, layouts, components, composables and other convention
+  files are entry points, so they no longer report as unused files. With
+  `autoImports` on, its components and composables are auto-import sources,
+  and an unreferenced layer component reports as unused. An import from
+  `#layers/<name>/` now resolves to the local layer with that `$meta.name`,
+  or else with that directory name. A remote or package layer in `extends`
+  stays a dependency reference only. A nested key such as a `routeRules`
+  path that ends in `components` or `imports` no longer keeps the Nuxt
+  convention entry points with `autoImports` on. Refs #2752.
+
 - **Runtime coverage help says what is free.** The `--runtime-coverage`
   help of `audit`, `security`, `health` and `coverage analyze`, and the MCP
   `audit` parameter, now say that a single local capture is free and that

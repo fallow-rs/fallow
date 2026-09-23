@@ -105,6 +105,13 @@ const SRC_DIR_ENTRY_PATTERNS: &[&str] = &[
 
 const CONFIG_PATTERNS: &[&str] = &["nuxt.config.{ts,js}", "src/module.{ts,js}"];
 
+/// File names Nuxt reads as the config of a project or a layer.
+const NUXT_CONFIG_FILES: &[&str] = &["nuxt.config.ts", "nuxt.config.js"];
+
+/// Directory under the project root whose children Nuxt 3.12+ registers as
+/// layers without an `extends` entry.
+const AUTO_LAYERS_DIR: &str = "layers";
+
 const ALWAYS_USED: &[&str] = &[
     "nuxt.config.{ts,js}",
     "app.vue",
@@ -258,23 +265,9 @@ impl Plugin for NuxtPlugin {
 
     fn auto_imports(&self, root: &Path) -> Vec<AutoImportRule> {
         let mut rules = Vec::new();
-        for dir in COMPONENT_DIRS {
-            let base = root.join(dir);
-            if base.is_dir() {
-                collect_component_auto_imports(&base, &base, &mut rules);
-            }
-        }
-        for dir in SCRIPT_AUTO_IMPORT_DIRS {
-            let base = root.join(dir);
-            if base.is_dir() {
-                collect_script_auto_imports(&base, false, &mut rules);
-            }
-        }
-        for dir in SCRIPT_AUTO_IMPORT_RECURSIVE_DIRS {
-            let base = root.join(dir);
-            if base.is_dir() {
-                collect_script_auto_imports(&base, true, &mut rules);
-            }
+        collect_convention_auto_imports(root, &mut rules);
+        for layer in local_layer_roots(root) {
+            collect_convention_auto_imports(&layer, &mut rules);
         }
         rules
     }
@@ -379,7 +372,140 @@ fn resolve_nuxt_main_config(
     add_nuxt_component_dirs(result, component_dirs, config_path, root, &src_dir);
 
     let extends = config_parser::extract_config_string_array(source, config_path, &["extends"]);
-    add_referenced_packages(result, &extends);
+    let (local_extends, package_extends): (Vec<String>, Vec<String>) =
+        extends.into_iter().partition(|entry| is_local_path(entry));
+    add_referenced_packages(result, &package_extends);
+
+    let mut layers = local_layer_dirs(&local_extends, config_path, root, &src_dir);
+    if config_path.parent() == Some(root) {
+        for layer in auto_registered_layer_dirs(root) {
+            if !layers.contains(&layer) {
+                layers.push(layer);
+            }
+        }
+    }
+    for layer in &layers {
+        add_local_layer_support(result, root, layer);
+    }
+}
+
+/// Resolve the local directories named in `extends` to root-relative paths.
+/// A directory outside the root is skipped, like every other config path.
+fn local_layer_dirs(
+    entries: &[String],
+    config_path: &Path,
+    root: &Path,
+    src_dir: &Path,
+) -> Vec<String> {
+    let mut dirs: Vec<String> = Vec::new();
+    for entry in entries {
+        let Some(dir) = normalize_nuxt_path(entry, config_path, root, src_dir) else {
+            continue;
+        };
+        let dir = dir.trim_end_matches('/').to_string();
+        if !dir.is_empty() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs
+}
+
+/// The root-relative `layers/<name>` directories that Nuxt 3.12+ registers as
+/// layers without an `extends` entry, in a stable order.
+fn auto_registered_layer_dirs(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root.join(AUTO_LAYERS_DIR)) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .map(|name| format!("{AUTO_LAYERS_DIR}/{name}"))
+        .collect();
+    dirs.sort_unstable();
+    dirs
+}
+
+/// Treat a local layer like the project root: its convention directories are
+/// entry points, its root files are always used, and `#layers/<name>/`
+/// resolves to it. The name is the layer's `$meta.name`, else its directory
+/// name. See issue #2752.
+fn add_local_layer_support(result: &mut PluginResult, root: &Path, layer: &str) {
+    let prefix = Path::new(layer);
+    result.extend_entry_patterns(
+        ENTRY_PATTERNS
+            .iter()
+            .map(|pattern| prefix_with_src_dir(prefix, pattern)),
+    );
+    extend_prefixed_patterns(&mut result.always_used_files, prefix, ALWAYS_USED);
+    result.push_used_export_rule(
+        prefix_with_src_dir(prefix, "server/api/**/*.{ts,js}"),
+        USED_EXPORTS_SERVER_API.iter().copied(),
+    );
+    for middleware in ["middleware/**/*.{ts,js}", "app/middleware/**/*.{ts,js}"] {
+        add_default_used_export(result, prefix_with_src_dir(prefix, middleware));
+    }
+    add_prefixed_default_used_exports(result, prefix, DEFAULT_EXPORT_ENTRY_PATTERNS);
+
+    if let Some(name) = layer_name(root, layer) {
+        result
+            .path_aliases
+            .push((format!("#layers/{name}/"), layer.to_string()));
+    }
+}
+
+/// The name a local layer is addressed by in `#layers/<name>/`.
+fn layer_name(root: &Path, layer: &str) -> Option<String> {
+    let dir = root.join(layer);
+    let meta_name = NUXT_CONFIG_FILES.iter().find_map(|file| {
+        let path = dir.join(file);
+        let source = std::fs::read_to_string(&path).ok()?;
+        config_parser::extract_config_string(&source, &path, &["$meta", "name"])
+    });
+    meta_name
+        .or_else(|| {
+            Path::new(layer)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .filter(|name| !name.is_empty() && !name.contains(['/', '\\']))
+}
+
+/// The absolute roots of every local layer that `root` uses: each local
+/// `extends` entry of its `nuxt.config`, followed through the layers' own
+/// `extends`, plus each `layers/<name>` directory. Mirrors the layers that
+/// `resolve_config` models, so the auto-import sources and the entry patterns
+/// cover the same directories.
+fn local_layer_roots(root: &Path) -> Vec<PathBuf> {
+    let mut layers: Vec<String> = auto_registered_layer_dirs(root);
+    let mut pending: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for file in NUXT_CONFIG_FILES {
+            let config_path = dir.join(file);
+            let Ok(source) = std::fs::read_to_string(&config_path) else {
+                continue;
+            };
+            let src_dir = extract_nuxt_src_dir(&source, &config_path, root)
+                .unwrap_or_else(|| default_nuxt_src_dir(root));
+            let entries: Vec<String> =
+                config_parser::extract_config_string_array(&source, &config_path, &["extends"])
+                    .into_iter()
+                    .filter(|entry| is_local_path(entry))
+                    .collect();
+            for layer in local_layer_dirs(&entries, &config_path, root, &src_dir) {
+                if !layers.contains(&layer) {
+                    pending.push(root.join(&layer));
+                    layers.push(layer);
+                }
+            }
+        }
+    }
+    layers
+        .into_iter()
+        .map(|layer| root.join(layer))
+        .filter(|path| path.is_dir())
+        .collect()
 }
 
 /// Collect Nuxt component directory entries from `components`, its object `path`
@@ -435,7 +561,7 @@ fn add_nuxt_css_entries(
     src_dir: &Path,
 ) {
     for entry in css {
-        if is_local_css_path(entry) {
+        if is_local_path(entry) {
             if let Some(normalized) = normalize_nuxt_path(entry, config_path, root, src_dir) {
                 result.always_used_files.push(normalized);
             }
@@ -569,7 +695,8 @@ fn default_nuxt_src_dir(root: &Path) -> PathBuf {
     }
 }
 
-fn is_local_css_path(entry: &str) -> bool {
+/// Whether a config string names a local path rather than a package.
+fn is_local_path(entry: &str) -> bool {
     entry.starts_with("~/")
         || entry.starts_with("~~/")
         || entry.starts_with("@/")
@@ -727,6 +854,29 @@ fn prefix_with_src_dir(src_dir: &Path, path: &str) -> String {
     } else {
         let normalized = config_parser::lexical_normalize(&src_dir.join(path));
         config_parser::path_to_config_string(&normalized)
+    }
+}
+
+/// Collect the component and script auto-import rules of the Nuxt convention
+/// directories under one project or layer root.
+fn collect_convention_auto_imports(base: &Path, rules: &mut Vec<AutoImportRule>) {
+    for dir in COMPONENT_DIRS {
+        let components = base.join(dir);
+        if components.is_dir() {
+            collect_component_auto_imports(&components, &components, rules);
+        }
+    }
+    for dir in SCRIPT_AUTO_IMPORT_DIRS {
+        let scripts = base.join(dir);
+        if scripts.is_dir() {
+            collect_script_auto_imports(&scripts, false, rules);
+        }
+    }
+    for dir in SCRIPT_AUTO_IMPORT_RECURSIVE_DIRS {
+        let scripts = base.join(dir);
+        if scripts.is_dir() {
+            collect_script_auto_imports(&scripts, true, rules);
+        }
     }
 }
 
@@ -1124,13 +1274,22 @@ pub struct AutoImportSettings {
     pub components: AutoImportSetting,
     /// Classification of the `imports:` (composable and util) surface.
     pub scripts: AutoImportSetting,
-    /// The `nuxt.config` these verdicts were read from, absent for a root that
-    /// has none. Carried so the advisory a retained surface records names the
-    /// file the user has to edit: a monorepo classifies each root on its own,
-    /// and the gate that consumes the verdict holds patterns, not paths.
+    /// The config that decided the `components:` verdict.
+    pub components_origin: SurfaceOrigin,
+    /// The config that decided the `imports:` verdict.
+    pub scripts_origin: SurfaceOrigin,
+}
+
+/// The `nuxt.config` that decided one surface verdict. Carried so the advisory
+/// a retained surface records names the file the user has to edit: a monorepo
+/// classifies each root on its own, a root folds the configs of its local
+/// layers, and the gate that consumes the verdict holds patterns, not paths.
+#[derive(Clone, Debug, Default)]
+pub struct SurfaceOrigin {
+    /// The config file, absent for a root that has none.
     pub config_path: Option<PathBuf>,
     /// `true` when a top-level property this reader cannot resolve statically
-    /// is what put a surface on [`AutoImportSetting::Custom`], rather than the
+    /// is what put the surface on [`AutoImportSetting::Custom`], rather than the
     /// surface's own key. The two need different remedies: a spread or computed
     /// key has to become static properties before any surface in that file can
     /// be classified at all.
@@ -1143,15 +1302,25 @@ impl AutoImportSettings {
         Self {
             components: AutoImportSetting::Default,
             scripts: AutoImportSetting::Default,
-            config_path: None,
-            unreadable_property: false,
+            components_origin: SurfaceOrigin::default(),
+            scripts_origin: SurfaceOrigin::default(),
         }
     }
+}
 
-    /// Whether either surface is more conservative than `other`'s.
-    fn is_stricter_than(&self, other: &Self) -> bool {
-        rank(self.components) > rank(other.components) || rank(self.scripts) > rank(other.scripts)
+/// Fold one file verdict for a surface into the running verdict. The origin
+/// follows the strictest file; the first config read supplies it when no file is
+/// stricter than another.
+fn fold_surface(
+    setting: &mut AutoImportSetting,
+    origin: &mut SurfaceOrigin,
+    file_setting: AutoImportSetting,
+    file_origin: &SurfaceOrigin,
+) {
+    if origin.config_path.is_none() || rank(file_setting) > rank(*setting) {
+        origin.clone_from(file_origin);
     }
+    *setting = setting.most_conservative(file_setting);
 }
 
 /// Conservatism rank, so a fold can say which of two verdicts is stricter.
@@ -1163,45 +1332,69 @@ const fn rank(setting: AutoImportSetting) -> u8 {
     }
 }
 
-/// Classify both auto-import surfaces of the `nuxt.config` under `root`.
+/// Classify both auto-import surfaces of the `nuxt.config` under `root` and of
+/// each local layer it uses.
 ///
 /// Reads and parses each candidate config once and folds the per-file verdicts
-/// by conservatism. See [`AutoImportSetting`] for the classification rules.
+/// by conservatism, one surface at a time. A layer config counts because the
+/// convention patterns of the layer carry the prefix of `root`, and a layer can
+/// configure its own surfaces. See [`AutoImportSetting`] for the classification
+/// rules.
 ///
-/// `config_path` and `unreadable_property` describe the file that produced the
-/// strictest verdict, which is the file a reader has to edit; the first config
-/// read supplies them when no file is stricter than another.
+/// Each surface origin names the file that produced the strictest verdict for
+/// that surface, which is the file a reader has to edit.
 pub fn auto_import_settings(root: &Path) -> AutoImportSettings {
     let mut settings = AutoImportSettings::defaults();
-    for name in ["nuxt.config.ts", "nuxt.config.js"] {
-        let path = root.join(name);
+    let config_dirs = std::iter::once(root.to_path_buf()).chain(local_layer_roots(root));
+    for path in config_dirs.flat_map(|dir| NUXT_CONFIG_FILES.iter().map(move |name| dir.join(name)))
+    {
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
         };
         let file = classify_config_source(&source, &path);
-        if settings.config_path.is_none() || file.is_stricter_than(&settings) {
-            settings.config_path.clone_from(&file.config_path);
-            settings.unreadable_property = file.unreadable_property;
-        }
-        settings.components = settings.components.most_conservative(file.components);
-        settings.scripts = settings.scripts.most_conservative(file.scripts);
+        fold_surface(
+            &mut settings.components,
+            &mut settings.components_origin,
+            file.components,
+            &file.components_origin,
+        );
+        fold_surface(
+            &mut settings.scripts,
+            &mut settings.scripts_origin,
+            file.scripts,
+            &file.scripts_origin,
+        );
     }
     settings
 }
 
 /// Classify both auto-import surfaces of one `nuxt.config` source.
 ///
-/// The key regexes are one net: a surface whose key they match starts at
-/// `Custom`, and the AST can narrow it to `Disabled`. The AST is the second net:
-/// a top-level property it cannot resolve statically hides a key the regexes
-/// cannot see, so it puts both surfaces on `Custom`.
+/// A readable top-level object decides whether a surface key is present: a
+/// nested key such as a `routeRules` path that ends in `components` does not
+/// configure a surface. The key regexes are the fallback for a source whose
+/// config object the parser cannot resolve, and for an object whose nested
+/// properties can configure a surface. A surface whose key is present starts at
+/// `Custom`, and the AST can narrow it to `Disabled`. A top-level property the
+/// AST cannot resolve statically hides a key, so it puts both surfaces on
+/// `Custom`. See issue #2752.
 fn classify_config_source(source: &str, path: &Path) -> AutoImportSettings {
     let proof = read_config_proof(source, path);
-    let components_key = proof.unresolvable || source_has_components_key(source);
-    let imports_key = proof.unresolvable || source_has_imports_key(source);
-    let read = AutoImportSettings {
+    let (components_key, imports_key) = match proof.keys {
+        _ if proof.unresolvable => (true, true),
+        Some(keys) => (keys.components, keys.imports),
+        None => (
+            source_has_components_key(source),
+            source_has_imports_key(source),
+        ),
+    };
+    let origin = SurfaceOrigin {
         config_path: Some(path.to_path_buf()),
         unreadable_property: proof.unresolvable,
+    };
+    let read = AutoImportSettings {
+        components_origin: origin.clone(),
+        scripts_origin: origin,
         ..AutoImportSettings::defaults()
     };
     if !components_key && !imports_key {
@@ -1225,6 +1418,16 @@ struct ConfigProof {
     components_disabled: bool,
     /// The `imports` surface scans no more than the modeled defaults.
     scripts_disabled: bool,
+    /// The surface keys of the top-level object, absent when the object cannot
+    /// be read or a nested property can configure a surface.
+    keys: Option<SurfaceKeys>,
+}
+
+/// Which surface keys a readable top-level config object carries.
+#[derive(Clone, Copy)]
+struct SurfaceKeys {
+    components: bool,
+    imports: bool,
 }
 
 /// Parse one config source and read what its top-level object proves. A source
@@ -1239,20 +1442,31 @@ fn read_config_proof(source: &str, path: &Path) -> ConfigProof {
                 ..ConfigProof::default()
             });
         }
-        if !matches!(sole_static_property(obj, "extends"), PropertyLookup::Absent) {
-            return Some(ConfigProof::default());
+        let components = sole_static_property(obj, "components");
+        let imports = sole_static_property(obj, "imports");
+        let keys = (!has_nested_surface_override(obj)).then_some(SurfaceKeys {
+            components: !matches!(components, PropertyLookup::Absent),
+            imports: !matches!(imports, PropertyLookup::Absent),
+        });
+        if keys.is_none() || !matches!(sole_static_property(obj, "extends"), PropertyLookup::Absent)
+        {
+            return Some(ConfigProof {
+                keys,
+                ..ConfigProof::default()
+            });
         }
         Some(ConfigProof {
             unresolvable: false,
-            components_disabled: match sole_static_property(obj, "components") {
+            components_disabled: match components {
                 PropertyLookup::Found(expr) => components_value_proves_disabled(expr),
                 PropertyLookup::Absent | PropertyLookup::Unknown => false,
             },
-            scripts_disabled: match sole_static_property(obj, "imports") {
+            scripts_disabled: match imports {
                 PropertyLookup::Found(expr) => config_parser::object_expression(expr)
                     .is_some_and(imports_object_proves_disabled),
                 PropertyLookup::Absent | PropertyLookup::Unknown => false,
             },
+            keys,
         })
     })
     .unwrap_or_default()
@@ -1274,6 +1488,24 @@ fn has_unresolvable_top_level_property(obj: &ObjectExpression<'_>) -> bool {
                 property.key,
                 PropertyKey::StaticIdentifier(_) | PropertyKey::StringLiteral(_)
             )
+    })
+}
+
+/// Whether a top-level property holds nested config that can set a surface: an
+/// environment override such as `$production` merges a nested `components` or
+/// `imports` key into the config, and a `components:dirs` or `imports:dirs`
+/// hook can add scan directories. `$meta` is layer metadata, not config.
+fn has_nested_surface_override(obj: &ObjectExpression<'_>) -> bool {
+    obj.properties.iter().any(|property| {
+        let ObjectPropertyKind::ObjectProperty(property) = property else {
+            return false;
+        };
+        let name = match &property.key {
+            PropertyKey::StaticIdentifier(id) => id.name.as_str(),
+            PropertyKey::StringLiteral(literal) => literal.value.as_str(),
+            _ => return false,
+        };
+        name == "hooks" || (name.starts_with('$') && name != "$meta")
     })
 }
 
@@ -1767,6 +1999,72 @@ mod tests {
             result
                 .referenced_dependencies
                 .contains(&"@nuxt/ui-pro".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_keeps_remote_layers_as_references_only() {
+        let source = r#"
+            export default defineNuxtConfig({
+                extends: ["github:acme/layer", "@acme/layer", "./base"]
+            });
+        "#;
+        let result = NuxtPlugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(has_entry_pattern(
+            &result,
+            "base/components/**/*.{vue,ts,tsx,js,jsx}"
+        ));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@acme/layer".to_string())
+        );
+        assert!(
+            !result
+                .referenced_dependencies
+                .iter()
+                .any(|dep| dep.contains("base")),
+            "a local layer is not a package: {:?}",
+            result.referenced_dependencies
+        );
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .all(|rule| !rule.pattern.contains("acme")),
+            "a remote layer adds no entry pattern"
+        );
+    }
+
+    #[test]
+    fn auto_import_settings_fold_a_local_layer_config() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("base")).unwrap();
+        std::fs::write(
+            root.join("nuxt.config.ts"),
+            "export default defineNuxtConfig({ extends: ['./base'] })\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("base/nuxt.config.ts"),
+            "export default defineNuxtConfig({ components: [{ path: './ui', prefix: 'Base' }] })\n",
+        )
+        .unwrap();
+        let settings = auto_import_settings(root);
+        assert_eq!(settings.components, AutoImportSetting::Custom);
+        assert_eq!(settings.scripts, AutoImportSetting::Default);
+        assert_eq!(
+            settings.components_origin.config_path.as_deref(),
+            Some(root.join("base/nuxt.config.ts").as_path())
+        );
+        assert_eq!(
+            settings.scripts_origin.config_path.as_deref(),
+            Some(root.join("nuxt.config.ts").as_path())
         );
     }
 
@@ -2653,7 +2951,7 @@ mod tests {
             ("components: componentsFromEnv", AutoImportSetting::Custom),
             (
                 "myModule: { components: { dirs: [] } }",
-                AutoImportSetting::Custom,
+                AutoImportSetting::Default,
             ),
             (
                 "...base, components: { dirs: [] }",
@@ -2724,6 +3022,37 @@ mod tests {
             classify("components: { dirs: [] }, imports: { scan: false }, extends: ['../base']");
         assert_eq!(settings.components, AutoImportSetting::Custom);
         assert_eq!(settings.scripts, AutoImportSetting::Custom);
+    }
+
+    #[test]
+    fn classify_config_source_ignores_nested_surface_keys_in_a_readable_config() {
+        let settings = classify(
+            "routeRules: { '/api/imports': { prerender: true }, '/docs/components': { prerender: true } }",
+        );
+        assert_eq!(settings.components, AutoImportSetting::Default);
+        assert_eq!(settings.scripts, AutoImportSetting::Default);
+    }
+
+    #[test]
+    fn classify_config_source_keeps_nested_keys_that_can_configure_a_surface() {
+        for body in [
+            "$development: { components: { dirs: ['~/dev-ui'] }, imports: { dirs: ['dev'] } }",
+            "hooks: { 'components:dirs': (dirs) => dirs.push('~/ui'), 'imports:dirs': (dirs) => dirs.push('x') }",
+        ] {
+            let settings = classify(body);
+            assert_eq!(settings.components, AutoImportSetting::Custom, "{body}");
+            assert_eq!(settings.scripts, AutoImportSetting::Custom, "{body}");
+        }
+    }
+
+    #[test]
+    fn classify_config_source_falls_back_to_key_regex_for_an_unreadable_source() {
+        let settings = classify_config_source(
+            "// routeRules: { '/api/imports': {} }\nexport default defineNuxtConfig(loadConfig())\n",
+            Path::new("nuxt.config.ts"),
+        );
+        assert_eq!(settings.scripts, AutoImportSetting::Custom);
+        assert_eq!(settings.components, AutoImportSetting::Default);
     }
 
     #[test]
