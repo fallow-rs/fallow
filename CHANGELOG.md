@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Traces pick the file you name in a monorepo.** A trace of `src/a.ts`
+  (for example `dead-code --trace-file src/a.ts` or
+  `dead-code --trace src/a.ts:foo`) now takes the file at that exact path from
+  the project root. Before, it could take `packages/x/src/a.ts` when that file came first
+  in the module graph. A short path that matches more than one file still
+  takes the first match.
+
 - Security findings for different sinks on the same line now have distinct
   IDs. Security SARIF uses `fallowSecurity/v2` fingerprints with the same IDs
   as JSON and the visualization. Upgrading changes every security finding ID:
