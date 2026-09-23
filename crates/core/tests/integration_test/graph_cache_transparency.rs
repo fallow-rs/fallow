@@ -559,8 +559,8 @@ fn warm_graph_cache_hit_skips_import_resolution() {
     );
 }
 
-/// Force the resolver-payload reuse path: the manifest keeps matching
-/// `matches_resolution_inputs` while the persisted graph is unusable, so the
+/// Force the resolver-payload reuse path: the manifest still passes
+/// `classify_resolution_mismatch` while the persisted graph is unusable, so the
 /// graph is rebuilt from the cached `ResolvedProject` alone. Every import field
 /// the graph reads must survive that mirror, so the rebuilt output has to match
 /// the cold output exactly.
@@ -597,7 +597,10 @@ fn assert_resolver_cache_hit_matches_cold(fixture: &str) {
         "shifted FileIds must not trust the persisted graph"
     );
     assert!(
-        store.manifest.matches_resolution_inputs(&current),
+        store
+            .manifest
+            .classify_resolution_mismatch(&current)
+            .is_none(),
         "stable file keys and content hashes should still allow resolver reuse"
     );
     store.save(&cache_dir);

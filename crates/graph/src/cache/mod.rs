@@ -37,202 +37,9 @@ pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 /// unmodified tree and silently hides the new behaviour. The same applies to
 /// plugin config extraction, which seeds entry points and path aliases.
 ///
-/// Bumped to 17 for issue #2031: cached resolver output retains canonical
-/// test-root replacements and ESM/CommonJS mechanisms, while profiled graphs
-/// retain target-sparse reachability masks plus exact compact reference routes.
-/// Ordinary graphs omit unused provenance. Versions 7 through 16 were used by
-/// published development commits for this change, so the final version remains
-/// 17 rather than reusing a potentially stale intermediate cache version.
-///
-/// Bumped to 18 for issue #2083: reference provenance moved out of
-/// `SymbolReference` into the per-export `reference_paths` side table, changing
-/// the persisted layout of every export's reference list.
-///
-/// Bumped to 19 for issue #2084 (PR #2096): profiled test-reachability masking
-/// now falls back to the legacy fail-open classification when a graph would
-/// need more than the mask-profile cap, so caches written by the unbounded
-/// profiling code must not replay their old profiled results on large
-/// monorepos where the cap now engages.
-///
-/// Bumped to 20: cached re-export edges now carry the enclosing statement
-/// span and the source string-literal span used to anchor unresolved-import
-/// findings on the specifier. Warm 19 caches lack both spans.
-///
-/// Bumped to 21: persisted module graphs now carry the canonical effective
-/// export index used for named and star re-export resolution. Warm 20 caches
-/// lack that index and would replay the previous propagation semantics.
-///
-/// Bumped to 22: effective export names are interned once per graph and type
-/// and value resolutions share one compact key. Warm 21 caches contain the
-/// allocation-heavy intermediate index layout.
-///
-/// Bumped to 23: effective bindings distinguish direct declarations,
-/// namespace objects, and implicit SFC default exports.
-///
-/// Bumped to 24: namespace-object bindings retain their source module so
-/// consumers can enumerate the namespace through the canonical index.
-///
-/// Bumped to 25: export references retain their semantic Type or Value
-/// namespace so one named re-export surface can route both without duplicate
-/// graph symbols.
-///
-/// Bumped to 26: the effective export index retains typed declaration merge
-/// groups for namespace-aware reference selection.
-///
-/// Bumped to 27: declaration merge groups are stored once and referenced by a
-/// compact per-slot group identifier instead of cloning every group per slot.
-///
-/// Bumped to 28: reference-site deduplication now includes the exact import
-/// span, so one consumer can retain multiple distinct imports of one binding.
-///
-/// Bumped to 29: resolved semantic facts retain directly required structural
-/// type members used to protect explicit interface implementations.
-///
-/// Bumped to 30: declaration-merge references now propagate through named and
-/// star barrel surfaces using the canonical effective binding group.
-///
-/// Bumped to 31 for issue #2213: speculative `__mocks__` sibling candidates
-/// that resolve to package space are no longer emitted, so warm 30 caches
-/// would keep replaying the phantom `@scope/__mocks__` package edges the
-/// resolver no longer produces.
-///
-/// Bumped to 32: the effective export index resolves the type namespace in two
-/// lanes (real declarations and value-derived fallbacks), stores a per-file
-/// name index, and retains opaque bindings for known external named and
-/// namespace re-export surfaces. Warm 31 payloads neither describe the same
-/// structure nor carry those external bindings, so a consumed barrel export
-/// could be falsely reported as unused.
-///
-/// Bumped to 33 for issue #2225: speculative root-level `__mocks__/<specifier>`
-/// candidates from factory-less bare-specifier mocks now resolve to project
-/// files. Warm 32 caches lack those edges, so root manual mocks would stay
-/// reported as unused files.
-/// Bumped to 34: the effective export index only seeds the value-derived type
-/// fallback lane along re-export paths that reach a type-only re-export, and a
-/// type query reads the value lane where that lane is absent. A warm 33 payload
-/// is still read correctly, but a 33 reader would take an absent fallback lane
-/// for an absent type meaning and report consumed exports as unused.
-///
-/// Bumped to 35 for issue #2348: JSX member-expression tags (`<SC.UsedStyle />`)
-/// now record member accesses, and namespace narrowing bakes the credited
-/// references into the persisted graph. Warm 34 caches carry the old empty
-/// accessed-members verdict, so exports rendered only through JSX would stay
-/// reported as unused on upgrade.
-///
-/// Bumped to 36 for issue #2356: `export` declarations inside a namespace
-/// declared without the `export` keyword no longer contribute file-level
-/// exports, and unused-export verdicts are read off the persisted export set.
-/// Warm 35 caches still carry those local namespace members as file exports
-/// and would keep reporting them as unused on upgrade.
-///
-/// Bumped to 37 for issue #2357 (36 was taken by issue #2356 while this
-/// change was in review): a star re-export inside a
-/// `declare module '<specifier>'` body no longer becomes a `ReExportEdge` on
-/// the declaring module; the target's full ES star surface is credited
-/// through a whole-module namespace edge instead, in both the type and the
-/// value namespace and following the target's own `export *` and
-/// `export * as ns` chains. Warm 36 caches persist the old edge, the
-/// laundered re-export references, the runtime package usage for a
-/// bare-specifier ambient star, and type-lane-only credits that leave the
-/// value half of a same-name type and value pair unreferenced, and a
-/// graph-cache hit would replay all of them.
-///
-/// Bumped to 38 for issue #2355 (37 was taken by issue #2357 while this
-/// change was in review): Astro markup and MDX bodies now record member
-/// accesses for member-expression component tags (`<SC.Card />`), and namespace
-/// narrowing bakes the credited references into the persisted graph. Warm 37
-/// caches carry the old empty accessed-members verdict for those consumers, so
-/// exports rendered only in Astro or MDX markup would stay reported as unused
-/// on upgrade.
-///
-/// Bumped to 39 for issues #2372 and #2373: a consumer that observes a whole
-/// namespace object (a whole-object namespace use of an `import * as` or of an
-/// `export * as` binding imported by name, a dynamic-import pattern match) and
-/// an `export * as ns` chain an entry point exposes now credit the names the
-/// target only exposes through its own `export *` and `export * as` chains,
-/// and those references are baked into the persisted graph. Warm 38 caches
-/// carry only the direct-export credit, so the star-forwarded and
-/// nested-namespace exports would stay reported as unused on upgrade. The same
-/// version covers the one direction that moves the other way: a plain
-/// `export *` hop no longer carries a downstream `export * as default` onward,
-/// so a chain behind such a namespace object can report one finding more than
-/// a warm 38 cache holds.
-///
-/// Bumped to 40 for issue #2374: the per-module export-name index now treats
-/// `default` as one importable name however each side spells it, so
-/// `import { default as x } from './impl'`, an ambient
-/// `declare module '<specifier>' { export { default } from './impl' }`, and a
-/// plain `import x from './impl'` against an `export { x as default }` credit
-/// the target's default export, and those references are baked into the
-/// persisted graph. Warm 39 caches carry the uncredited verdict, so the
-/// default export would stay reported as unused on upgrade.
-///
-/// Bumped to 41 for issue #2376 (40 was taken by issue #2374 while this
-/// change was in review): an MDX prose line opening with the word
-/// "import" (and any other line the statement parser rejects) no longer drops
-/// every `import` of the file, so those files now resolve their imports and
-/// credit their bodies. Warm 40 caches persist the import-less module and its
-/// missing edges, so the imported modules would stay reported as unused files
-/// on upgrade.
-///
-/// Bumped to 42 for issue #2377: a namespace import handed over whole (a call
-/// argument, a JSX attribute value, an alias, an array or object literal
-/// element, an initializer, an assignment right-hand side, a return value) no
-/// longer narrows to its dotted accesses, and those mark-all verdicts are
-/// baked into the persisted graph. Warm 41 caches carry the narrowed verdict,
-/// so the siblings the consumer can still reach would stay reported as unused
-/// on upgrade.
-///
-/// Bumped to 43 for issue #2365: `import X = require('./x')` now resolves to a
-/// CommonJS namespace import edge, and the references it credits are baked into
-/// the persisted graph. Warm 42 caches hold the module without that edge, so
-/// the target would stay reported as an unused file on upgrade.
-///
-/// Bumped to 44 for issue #2375: `export type *` inside a `declare module`
-/// body now carries a type-only-star symbol edge instead of a file-level star
-/// re-export, and the type-lane-only credit it hands the target is baked into
-/// the persisted graph. Warm 43 caches hold the re-export edge, the laundered
-/// entry surface, and the value-lane credits, and a graph-cache hit skips the
-/// build entirely.
-///
-/// Bumped to 45 for issues #2391, #2395, and #2397: namespace handover now
-/// covers require, dynamic-import, Vue, and CSS Module bindings; ambient plain
-/// stars retain star-surface exposure; equivalent default spellings share the
-/// same duplicate-export rules; and proven CommonJS object maps use member
-/// narrowing while resolved CommonJS and CSS Module default imports preserve
-/// whole-object handoffs. Those reference outcomes are baked into the persisted
-/// graph, so a warm 44 cache would skip the corrected build logic.
-///
-/// Bumped to 46 for PR #2436: a tsconfig reached through `references` without
-/// `include` or `files` now applies only to files under its own directory
-/// instead of every file, so `paths` from a referenced package no longer
-/// resolve imports in sibling packages. Resolver output is persisted with the
-/// graph and the cache key does not cover tsconfig scope, so a warm 45 cache
-/// would keep replaying the leaked cross-package resolutions.
-///
-/// Bumped to 47 for issue #2444 (PR #2435): Yarn Plug'n'Play projects now
-/// resolve bare specifiers through the inlined `.pnp.cjs` manifest, anchored
-/// to the manifest directory, instead of missing on the empty `node_modules`
-/// and falling back. The resolver output persisted in a warm 46 cache holds
-/// those misses and would replay them as unresolved imports.
-///
-/// Bumped to 48: a directory a framework serves at a URL mount now resolves
-/// root-absolute references from any HTML document, not only from Storybook's
-/// preview fragments, and SvelteKit declares its `static/` directory as such a
-/// mount. A warm 47 cache holds the resolver's earlier miss and would replay it
-/// as an unresolved import plus an unused asset file.
-///
-/// Bumped to 49: manifest rows carry the parsed content hash instead of the
-/// `(mtime, size)` metadata fingerprint. Metadata alone cannot see a same-size
-/// rewrite whose mtime was restored, so a warm 48 manifest could match a tree
-/// whose contents had changed and replay the previous run's graph. Content
-/// hashing is also portable in a way ctime is not: `cp -Rp` and every CI cache
-/// restore preserve mtime but reset ctime, so keying on ctime here would break
-/// content reuse after metadata changes. The graph itself remains root-bound.
-///
-/// Bumped to 50: the manifest records the project root. The persisted graph
-/// contains absolute module paths, so moving a cache to another root must
-/// rebuild it instead of reporting findings and actions in the old checkout.
+/// Never reuse a version number that a published build wrote, even from a
+/// development commit. Git history and the CHANGELOG record the reason for
+/// each bump.
 pub const GRAPH_CACHE_VERSION: u32 = 50;
 
 /// Cached form of a resolved target.
@@ -1005,7 +812,7 @@ impl GraphCacheManifest {
     }
 
     /// Name the first input dimension that differs from the current run, for
-    /// a manifest that failed [`Self::matches_resolution_inputs`].
+    /// a manifest whose resolution inputs may differ from the current run.
     ///
     /// The caller decides graph reuse after a successful, fully paid load, so
     /// this is the most expensive refusal in the pipeline and used to be the
@@ -1036,28 +843,6 @@ impl GraphCacheManifest {
             .zip(current.files.iter())
             .any(|(cached, current)| cached.content_hash != current.content_hash)
             .then_some(CacheRejection::FingerprintChanged)
-    }
-
-    /// True when a persisted resolver payload can be remapped to current FileIds.
-    ///
-    /// Unlike [`Self::matches_inputs`], this intentionally ignores each row's
-    /// `file_id`. It is not sufficient to trust the persisted `ModuleGraph`, but
-    /// it is sufficient to reuse stable-keyed resolver output and rebuild the
-    /// graph with current FileIds.
-    #[must_use]
-    pub fn matches_resolution_inputs(&self, current: &Self) -> bool {
-        self.version == GRAPH_CACHE_VERSION
-            && current.version == GRAPH_CACHE_VERSION
-            && self.root == current.root
-            && self.mode == current.mode
-            && self.files.len() == current.files.len()
-            && self
-                .files
-                .iter()
-                .zip(current.files.iter())
-                .all(|(cached, current)| {
-                    cached.key == current.key && cached.content_hash == current.content_hash
-                })
     }
 }
 
@@ -1167,8 +952,9 @@ mod tests {
             !cached.matches_inputs(&current),
             "the persisted graph is still FileId-keyed, so FileId shifts cannot trust it"
         );
-        assert!(
-            cached.matches_resolution_inputs(&current),
+        assert_eq!(
+            cached.classify_resolution_mismatch(&current),
+            None,
             "stable-keyed resolver payloads may be remapped across FileId shifts"
         );
     }
@@ -1439,7 +1225,10 @@ mod tests {
         let current = manifest(&workspace_scoped, mode(), &map);
 
         assert!(!cached.matches_inputs(&current));
-        assert!(!cached.matches_resolution_inputs(&current));
+        assert_eq!(
+            cached.classify_resolution_mismatch(&current),
+            Some(CacheRejection::FileSetChanged)
+        );
     }
 
     #[test]
