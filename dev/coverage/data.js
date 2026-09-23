@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790085263534,
+  "lastUpdate": 1790155042601,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "541e048480866080382f3401a899f3338b947f92",
-          "message": "feat: add project readiness doctor and Oxlint JS plugin compatibility\n\n* chore: start Ultracite doctor work\n\n* feat: add doctor and Ultracite Oxlint compatibility\n\n* fix: harden doctor readiness checks",
-          "timestamp": "2026-09-03T13:33:53+02:00",
-          "tree_id": "6e17fc4af40d2427dd581c18248718aefb76e33f",
-          "url": "https://github.com/fallow-rs/fallow/commit/541e048480866080382f3401a899f3338b947f92"
-        },
-        "date": 1788435868749,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/cd91addff1a7060d0e09cd101a25e78c2bd0fd2e"
         },
         "date": 1790085259788,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ecb35b4f0e2e29cf0f69078ae8af37227eaf6915",
+          "message": "docs: add proof levels and test evidence rules to the maintainer lifecycle (#2784)\n\nimplement resolves open decisions before editing: facts are looked up, observable behavior is probed on a public fixture, and only real decisions go to the maintainer in one round. review compares runtime behavior on public projects against the latest release, filters reviewer findings before acting on them, and records dismissed findings. ship treats a second identical CI failure as a defect and checks the base before a retry. quality-gates.md now holds the proof levels, the test evidence rules and the behavior comparison.",
+          "timestamp": "2026-09-23T11:07:08+02:00",
+          "tree_id": "92ae1a0877a2d0e22a2a744e90b93078cc4cde5a",
+          "url": "https://github.com/fallow-rs/fallow/commit/ecb35b4f0e2e29cf0f69078ae8af37227eaf6915"
+        },
+        "date": 1790155039414,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
