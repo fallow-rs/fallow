@@ -1914,7 +1914,7 @@
         },
         "actionable": {
           "type": "boolean",
-          "description": "Whether an autonomous agent may act on this report (fallow-rs/fallow-cloud#316,\nmirrors the cloud runtime-context contract). `false` when the capture\ncarries no usable runtime evidence (no tracked functions); then\n`actionability_verdict` is `insufficient_evidence` and\n`actionability_reason` explains. F4: a non-action floor, never a gate on a\npositive verdict."
+          "description": "Whether an autonomous agent may act on this report (mirrors\nthe cloud runtime-context contract). `false` when the capture\ncarries no usable runtime evidence (no tracked functions); then\n`actionability_verdict` is `insufficient_evidence` and\n`actionability_reason` explains. F4: a non-action floor, never a gate on a\npositive verdict."
         },
         "actionability_reason": {
           "type": [
@@ -1931,7 +1931,7 @@
           "description": "First-class non-action verdict (`insufficient_evidence`) when not\nactionable; `null` otherwise. Mirrors the cloud runtime-context `verdict`;\nnamed distinctly from the report-context `verdict` above to avoid a\ncollision."
         },
         "provenance": {
-          "description": "Provenance an agent reads to self-attenuate confidence (fallow-rs/fallow-cloud#319,\nmirrors the cloud runtime-context `provenance`). F4: context only.",
+          "description": "Provenance an agent reads to self-attenuate confidence (mirrors\nthe cloud runtime-context `provenance`). F4: context only.",
           "$ref": "#/definitions/RuntimeCoverageProvenance"
         }
       },
@@ -19746,7 +19746,7 @@
         "min_observation_volume",
         "meets_observation_volume"
       ],
-      "description": "Discriminator inputs that PRODUCED a finding's verdict (fallow-rs/fallow-cloud#321),\nemitted alongside the verdict so an agent can reproduce it and see the\nminimum-observation confidence cap instead of re-deriving them from scratch.\nF4: these make the EXISTING Fallow-owned discriminators legible; they are not\na new or external signal and gate nothing. Pairs with `evidence.static_status`\n(the static half of the discriminator set)."
+      "description": "Discriminator inputs that PRODUCED a finding's verdict,\nemitted alongside the verdict so an agent can reproduce it and see the\nminimum-observation confidence cap instead of re-deriving them from scratch.\nF4: these make the EXISTING Fallow-owned discriminators legible; they are not\na new or external signal and gate nothing. Pairs with `evidence.static_status`\n(the static half of the discriminator set)."
     },
     "RuntimeCoverageProvenance": {
       "type": "object",
@@ -19791,7 +19791,7 @@
         "stale",
         "stale_after_days"
       ],
-      "description": "Provenance of a runtime-coverage report (fallow-rs/fallow-cloud#319), mirroring\nthe cloud runtime-context `provenance` block so the local-capture and cloud\nsurfaces present one portable shape. F4: provenance is context only; it never\ngates a verdict or confidence."
+      "description": "Provenance of a runtime-coverage report, mirroring\nthe cloud runtime-context `provenance` block so the local-capture and cloud\nsurfaces present one portable shape. F4: provenance is context only; it never\ngates a verdict or confidence."
     },
     "FeatureFlagFinding": {
       "type": "object",

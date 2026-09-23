@@ -372,7 +372,7 @@ pub struct RuntimeCoverageMessage {
     pub message: String,
 }
 
-/// Discriminator inputs that PRODUCED a finding's verdict (fallow-rs/fallow-cloud#321),
+/// Discriminator inputs that PRODUCED a finding's verdict,
 /// emitted alongside the verdict so an agent can reproduce it and see the
 /// minimum-observation confidence cap instead of re-deriving them from scratch.
 /// F4: these make the EXISTING Fallow-owned discriminators legible; they are not
@@ -654,8 +654,8 @@ pub struct RuntimeCoverageReport {
     #[cfg_attr(feature = "schema", schemars(default))]
     /// Non-fatal merge or coverage diagnostics. Omitted when empty.
     pub warnings: Vec<RuntimeCoverageMessage>,
-    /// Whether an autonomous agent may act on this report (fallow-rs/fallow-cloud#316,
-    /// mirrors the cloud runtime-context contract). `false` when the capture
+    /// Whether an autonomous agent may act on this report (mirrors
+    /// the cloud runtime-context contract). `false` when the capture
     /// carries no usable runtime evidence (no tracked functions); then
     /// `actionability_verdict` is `insufficient_evidence` and
     /// `actionability_reason` explains. F4: a non-action floor, never a gate on a
@@ -672,12 +672,12 @@ pub struct RuntimeCoverageReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub actionability_verdict: Option<String>,
-    /// Provenance an agent reads to self-attenuate confidence (fallow-rs/fallow-cloud#319,
-    /// mirrors the cloud runtime-context `provenance`). F4: context only.
+    /// Provenance an agent reads to self-attenuate confidence (mirrors
+    /// the cloud runtime-context `provenance`). F4: context only.
     pub provenance: RuntimeCoverageProvenance,
 }
 
-/// Provenance of a runtime-coverage report (fallow-rs/fallow-cloud#319), mirroring
+/// Provenance of a runtime-coverage report, mirroring
 /// the cloud runtime-context `provenance` block so the local-capture and cloud
 /// surfaces present one portable shape. F4: provenance is context only; it never
 /// gates a verdict or confidence.

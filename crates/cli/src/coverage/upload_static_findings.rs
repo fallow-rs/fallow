@@ -1,7 +1,7 @@
 //! `fallow coverage upload-static-findings` - push static dead-code verdicts
 //! to fallow cloud.
 //!
-//! These are the **static side** of the source-evidence viewer (ADR 024). The
+//! These are the **static side** of the cloud source-evidence viewer. The
 //! runtime coverage pipeline ships function hit-counts; this command ships
 //! fallow's own static analysis verdicts (`unused_export`, `dead_file`) so the
 //! cloud can overlay them onto the source view alongside the runtime overlay.
@@ -45,9 +45,8 @@ use crate::coverage::upload_common::{
 /// anchor on it.
 const LOG_PREFIX: &str = "fallow coverage upload-static-findings";
 
-/// Server-enforced cap on the finding count. Mirrors `STATIC_FINDINGS_MAX` in
-/// `fallow-cloud/src/routes/coverage.ts`. Validated client-side so users see a
-/// specific error before a 413 round-trip.
+/// Matches the finding-count limit that the server enforces. The client checks
+/// it first so users see a specific error before a 413 response.
 const STATIC_FINDINGS_MAX: usize = 200_000;
 
 /// HTTP timeouts for the upload. The body is small (<=200k findings) but can

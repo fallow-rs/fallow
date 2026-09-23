@@ -43,20 +43,19 @@ use fallow_output::{
     RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 
-/// Ed25519 public key used to verify the fallow-cov sidecar binary at every
-/// spawn. Intentionally SEPARATE from the license-signing pubkey at
-/// `crate::license::PUBLIC_KEY_BYTES` so binary and license keys can rotate
-/// independently; see `fallow-cloud/decisions/008-sidecar-key-rotation.md`.
+/// Ed25519 public key that verifies the `fallow-cov` sidecar binary at every
+/// spawn.
 ///
-/// The constant name deliberately avoids the substring `PUBLIC_KEY_BYTES` so
-/// the `fallow-cloud/.github/workflows/public-key-parity.yml` Python regex
-/// (which matches the first `PUBLIC_KEY_BYTES: [u8; 32]` in the file) never
-/// misidentifies it as the license pubkey.
+/// This key is separate from the license key at `crate::license::PUBLIC_KEY_BYTES`,
+/// so each key can rotate on its own schedule. It is also separate from the
+/// release binary key in `editors/vscode/src/download.ts`.
 ///
-/// Must match the `ED25519_BINARY_SIGNING_PUBLIC_KEY` repository variable on
-/// `fallow-rs/fallow-cloud` byte-for-byte; the `binary-signing-parity.yml`
-/// workflow on fallow-cloud asserts this daily. If you rotate the key, update
-/// both sides in the same release cycle per the procedure in ADR 008.
+/// The constant name must not contain `PUBLIC_KEY_BYTES`. A key-parity check
+/// matches the first `PUBLIC_KEY_BYTES: [u8; 32]` in a file, and this key must
+/// not match as the license key.
+///
+/// The bytes must match the sidecar signing key byte for byte. When you rotate
+/// the key, change both sides in the same release.
 #[cfg(not(feature = "test-sidecar-key"))]
 const BINARY_SIGNING_VERIFY_KEY: [u8; 32] = [
     19, 101, 100, 202, 175, 194, 21, 42, 215, 158, 125, 99, 218, 176, 85, 44, 62, 175, 122, 137,
@@ -64,7 +63,7 @@ const BINARY_SIGNING_VERIFY_KEY: [u8; 32] = [
 ];
 
 /// Test-only sidecar binary-signing pubkey, derived from the deterministic
-/// seed `[0xAA; 32]` at `crates/cli/tests/common/test_signing_keys.rs`. Enabled
+/// seed `TEST_SIDECAR_SEED` in `crates/cli/tests/common/sign.rs`. Enabled
 /// only by the `test-sidecar-key` cargo feature. A `compile_error!` below
 /// refuses to let this feature coexist with a release build so it cannot ship
 /// to users by accident.
@@ -2373,7 +2372,7 @@ mod tests {
     fn binary_signing_verify_key_must_not_be_placeholder() {
         assert_ne!(
             BINARY_SIGNING_VERIFY_KEY, [0u8; 32],
-            "BINARY_SIGNING_VERIFY_KEY is the all-zeros placeholder. Generate a real keypair per fallow-cloud/decisions/008-sidecar-key-rotation.md and paste the public bytes here before cutting a release."
+            "BINARY_SIGNING_VERIFY_KEY is the all-zeros placeholder. Paste the real sidecar signing public key here before a release."
         );
     }
 

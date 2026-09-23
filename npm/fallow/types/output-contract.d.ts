@@ -7510,8 +7510,8 @@ watermark?: (RuntimeCoverageWatermark | null)
  */
 warnings?: RuntimeCoverageMessage[]
 /**
- * Whether an autonomous agent may act on this report (fallow-rs/fallow-cloud#316,
- * mirrors the cloud runtime-context contract). `false` when the capture
+ * Whether an autonomous agent may act on this report (mirrors
+ * the cloud runtime-context contract). `false` when the capture
  * carries no usable runtime evidence (no tracked functions); then
  * `actionability_verdict` is `insufficient_evidence` and
  * `actionability_reason` explains. F4: a non-action floor, never a gate on a
@@ -7741,7 +7741,7 @@ description: string
 auto_fixable: boolean
 }
 /**
- * Discriminator inputs that PRODUCED a finding's verdict (fallow-rs/fallow-cloud#321),
+ * Discriminator inputs that PRODUCED a finding's verdict,
  * emitted alongside the verdict so an agent can reproduce it and see the
  * minimum-observation confidence cap instead of re-deriving them from scratch.
  * F4: these make the EXISTING Fallow-owned discriminators legible; they are not
@@ -7937,7 +7937,7 @@ code: string
 message: string
 }
 /**
- * Provenance of a runtime-coverage report (fallow-rs/fallow-cloud#319), mirroring
+ * Provenance of a runtime-coverage report, mirroring
  * the cloud runtime-context `provenance` block so the local-capture and cloud
  * surfaces present one portable shape. F4: provenance is context only; it never
  * gates a verdict or confidence.
