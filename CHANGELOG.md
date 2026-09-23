@@ -78,6 +78,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The GitHub Action checks the `baseline` input like the other paths.** A
+  `baseline` value with a control character, for example a newline, now
+  stops the run with exit 2 before the action writes a step output. The
+  `baseline_path` output uses the delimiter form of `$GITHUB_OUTPUT`. The
+  job summary line for a baseline that recognises nothing now shows a path
+  with a backtick correctly. The summary, annotation and install steps now
+  stop on an unset variable name. The branded token step records its
+  outcome for later steps of the job. Closes #2756.
+
 - **Template complexity counts operators inside a template literal.** In an
   Angular, Vue or Svelte template, a bound expression such as
   `` `a ${ ready ? label : suffix } b` `` added no complexity: the scanner
