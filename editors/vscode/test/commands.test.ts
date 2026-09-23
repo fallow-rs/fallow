@@ -44,6 +44,9 @@ let mockActiveTextEditor:
 
 vi.mock("node:fs", () => ({
   existsSync: (p: string) => mockFiles.has(p),
+  statSync: () => {
+    throw new Error("ENOENT");
+  },
 }));
 
 vi.mock("vscode", () => ({
@@ -121,21 +124,12 @@ vi.mock("../src/config.js", () => ({
   getWorkspaceScope: () => "",
 }));
 
-vi.mock("../src/binary-utils.js", () => ({
+// The real `resolveConfiguredBinaryPath` runs against the mocked node:fs.
+vi.mock("../src/binary-utils.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/binary-utils.js")>()),
   getExecutableExtension: () => "",
   findLocalBinary: (name: string) => (name === "fallow" ? mockLocalBinary : null),
   findBinaryInPath: (name: string) => (name === "fallow" ? mockPathBinary : null),
-  // Mirror the real sibling resolution against the mocked fs (mockFiles): the
-  // `fallow` CLI sibling of a configured `fallow.lspPath` is `<dir>/fallow`.
-  resolveConfiguredBinaryPath: (configured: string, name: string) => {
-    const slash = configured.lastIndexOf("/");
-    const dir = slash >= 0 ? configured.slice(0, slash) : ".";
-    const sibling = `${dir}/${name}`;
-    if (mockFiles.has(configured) && configured.endsWith(`/${name}`)) {
-      return configured;
-    }
-    return mockFiles.has(sibling) ? sibling : null;
-  },
 }));
 
 vi.mock("../src/download.js", () => ({

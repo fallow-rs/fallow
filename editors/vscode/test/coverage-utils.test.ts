@@ -241,6 +241,12 @@ describe("buildCoverageGateMessage", () => {
       "fallow license activate",
     );
   });
+
+  it("uses the rejection message when the envelope message is empty", () => {
+    const out = buildCoverageGateMessage(3, envelope("", 3), "fallow exited with code 3");
+    expect(out.startsWith("fallow exited with code 3 ")).toBe(true);
+    expect(out).toContain("fallow license activate --trial");
+  });
 });
 
 describe("coverageWatermarkMessage", () => {

@@ -5,11 +5,8 @@ import * as path from "node:path";
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { countDiagnosticErrorIssues } from "./analysis-utils.js";
-import {
-  middleElidePath,
-  resolveFilePath as resolveFilePathPure,
-  sortCloneGroupsBySize,
-} from "./treeView-utils.js";
+import { middleElidePath, sortCloneGroupsBySize } from "./treeView-utils.js";
+import { resolveWorkspaceFilePath } from "./workspaceRoot.js";
 import { openFileCommand } from "./openFileCommand.js";
 import type {
   CloneGroupFinding,
@@ -18,9 +15,6 @@ import type {
   IssueCategory,
 } from "./types.js";
 import { ISSUE_CATEGORY_LABELS } from "./types.js";
-
-const resolveFilePath = (filePath: string | undefined) =>
-  resolveFilePathPure(filePath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 
 /** Icons per issue category. */
 const CATEGORY_ICONS: Record<IssueCategory, string> = {
@@ -66,48 +60,12 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "misconfigured-dependency-overrides": "error",
 };
 
-/** Icons for individual issue items. */
+/** Icons for individual issue items. Only these categories use a different icon. */
 const ISSUE_ICONS: Record<IssueCategory, string> = {
+  ...CATEGORY_ICONS,
   "unused-files": "file",
-  "unused-exports": "symbol-method",
-  "unused-types": "symbol-interface",
-  "private-type-leaks": "symbol-interface",
-  "unused-dependencies": "package",
-  "unused-dev-dependencies": "package",
-  "unused-optional-dependencies": "package",
-  "unused-enum-members": "symbol-enum-member",
-  "unused-class-members": "symbol-field",
-  "unused-store-member": "symbol-field",
-  "unused-server-action": "symbol-method",
-  "unused-load-data-keys": "symbol-property",
-  "unused-component-prop": "symbol-property",
-  "unused-component-emit": "symbol-event",
-  "unused-component-input": "symbol-property",
-  "unused-component-output": "symbol-event",
-  "unused-svelte-event": "symbol-event",
-  "unrendered-component": "symbol-misc",
-  "unprovided-inject": "plug",
-  "invalid-client-export": "error",
-  "mixed-client-server-barrel": "files",
-  "misplaced-directive": "warning",
-  "route-collision": "git-merge",
-  "dynamic-segment-name-conflict": "git-merge",
-  "unresolved-imports": "error",
-  "unlisted-dependencies": "package",
   "duplicate-exports": "copy",
   "type-only-dependencies": "package",
-  "test-only-dependencies": "beaker",
-  "dev-dependencies-in-production": "package",
-  "circular-dependencies": "sync",
-  "re-export-cycles": "sync-ignored",
-  "boundary-violation": "symbol-namespace",
-  "policy-violations": "symbol-namespace",
-  "stale-suppressions": "trash",
-  "unused-catalog-entries": "package",
-  "empty-catalog-groups": "package",
-  "unresolved-catalog-references": "error",
-  "unused-dependency-overrides": "package",
-  "misconfigured-dependency-overrides": "error",
 };
 
 const staleSuppressionLabel = (
@@ -151,7 +109,7 @@ class IssueItem extends vscode.TreeItem {
   ) {
     super(label, vscode.TreeItemCollapsibleState.None);
 
-    const { absolute, relative } = resolveFilePath(filePath);
+    const { absolute, relative } = resolveWorkspaceFilePath(filePath);
 
     this.description = `${middleElidePath(relative)}:${line}`;
     this.tooltip = `${label}\n${absolute}:${line}:${col}`;
@@ -180,9 +138,9 @@ class CycleItem extends vscode.TreeItem {
         : vscode.TreeItemCollapsibleState.None,
     );
     this.fileItems = files.map((f) => new IssueItem(path.basename(f), f, 1, 0, category));
-    const { relative } = resolveFilePath(files[0] ?? "");
+    const { relative } = resolveWorkspaceFilePath(files[0] ?? "");
     this.description = relative ? middleElidePath(relative) : undefined;
-    this.tooltip = files.map((f) => resolveFilePath(f).absolute).join("\n");
+    this.tooltip = files.map((f) => resolveWorkspaceFilePath(f).absolute).join("\n");
     this.contextValue = "cycle";
     this.iconPath = new vscode.ThemeIcon(ISSUE_ICONS[category] ?? "warning");
   }
@@ -772,7 +730,7 @@ class CloneInstanceItem extends vscode.TreeItem {
     const basename = path.basename(filePath);
     super(`${basename}:${startLine}-${endLine}`, vscode.TreeItemCollapsibleState.None);
 
-    const { absolute, relative } = resolveFilePath(filePath);
+    const { absolute, relative } = resolveWorkspaceFilePath(filePath);
 
     this.description = middleElidePath(relative);
     this.tooltip = `${absolute}:${startLine}-${endLine}`;

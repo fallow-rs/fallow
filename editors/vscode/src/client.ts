@@ -40,7 +40,6 @@ import {
 } from "./binary-utils.js";
 import { compareVersions } from "./cli-args-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
-// fallow-ignore-next-line unresolved-import
 import type { LspInitializationOptions } from "./generated/lsp-initialization-options.js";
 import type { AnalysisCompleteParams } from "./statusBar-utils.js";
 import {

@@ -567,15 +567,12 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const healthView = vscode.window.createTreeView("fallow.health", {
     treeDataProvider: healthProvider,
   });
-  healthProvider.setView(healthView);
   const securityView = vscode.window.createTreeView("fallow.security", {
     treeDataProvider: securityProvider,
   });
-  securityProvider.setView(securityView);
   const coverageView = vscode.window.createTreeView("fallow.runtimeCoverage", {
     treeDataProvider: coverageProvider,
   });
-  coverageProvider.setView(coverageView);
   context.subscriptions.push(deadCodeView, duplicatesView, healthView, securityView, coverageView);
 
   const onHealthViewVisible = (): void => {

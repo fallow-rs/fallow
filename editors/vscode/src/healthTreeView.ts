@@ -18,11 +18,9 @@ import { getHealthTopFindings } from "./config.js";
 import { HEALTH_SECTION_ICONS, HEALTH_SECTION_LABELS } from "./health-labels.js";
 import type { HealthSection } from "./health-labels.js";
 import { openFileCommand } from "./openFileCommand.js";
-import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
+import { middleElidePath } from "./treeView-utils.js";
+import { resolveWorkspaceFilePath } from "./workspaceRoot.js";
 import type { HealthOutput, HealthReport } from "./types.js";
-
-const resolveFilePath = (filePath: string | undefined) =>
-  resolveFilePathPure(filePath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 
 type HealthItem = HealthSectionItem | HealthLeafItem;
 
@@ -86,7 +84,7 @@ class HealthLeafItem extends vscode.TreeItem {
     }
 
     if (options.open) {
-      const { absolute } = resolveFilePath(options.open.path);
+      const { absolute } = resolveWorkspaceFilePath(options.open.path);
       this.command = openFileCommand(absolute, options.open.line, options.open.col);
     }
   }
@@ -153,7 +151,7 @@ const visibleComplexityFindings = (report: HealthReport): HealthReport["findings
 
 const buildComplexityLeaves = (report: HealthReport): HealthLeafItem[] =>
   visibleComplexityFindings(report).map((finding) => {
-    const { relative } = resolveFilePath(finding.path);
+    const { relative } = resolveWorkspaceFilePath(finding.path);
     const crapNote = typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
     const tooltip = `${finding.name} (${finding.severity})\ncyclomatic ${finding.cyclomatic}, cognitive ${finding.cognitive}${crapNote}\n${relative}:${finding.line}`;
     const complexityTarget = { path: finding.path, line: finding.line };
@@ -176,7 +174,7 @@ const buildComplexityLeaves = (report: HealthReport): HealthLeafItem[] =>
 
 const buildHotspotLeaves = (report: HealthReport): HealthLeafItem[] =>
   (report.hotspots ?? []).map((hotspot) => {
-    const { relative } = resolveFilePath(hotspot.path);
+    const { relative } = resolveWorkspaceFilePath(hotspot.path);
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(
       `**${escapeHealthMarkdown(relative)}**\n\nChurn x complexity hotspot (score ${hotspot.score.toFixed(1)}, ${hotspot.commits} commit${hotspot.commits === 1 ? "" : "s"}).\n\n_Heuristic candidate, verify before acting._`,
@@ -194,7 +192,7 @@ const buildHotspotLeaves = (report: HealthReport): HealthLeafItem[] =>
 
 const buildTargetLeaves = (report: HealthReport): HealthLeafItem[] =>
   (report.targets ?? []).map((target) => {
-    const { relative } = resolveFilePath(target.path);
+    const { relative } = resolveWorkspaceFilePath(target.path);
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(
       `**${escapeHealthMarkdown(target.recommendation)}**\n\nEffort: ${escapeHealthMarkdown(target.effort)}, Confidence: ${escapeHealthMarkdown(target.confidence)}, Priority: ${target.priority.toFixed(0)}\n\n${escapeHealthMarkdown(relative)}\n\n_Heuristic suggestion, verify before acting._`,
@@ -238,7 +236,7 @@ const typeCouplingScore = (file: TypeCouplingFile): number =>
   file.public_api_depends_on + file.public_types_used_by;
 
 const buildTypeCouplingEvidenceLeaf = (edge: TypeCouplingEdge): HealthLeafItem => {
-  const { relative } = resolveFilePath(edge.evidence.path);
+  const { relative } = resolveWorkspaceFilePath(edge.evidence.path);
   const label = `${edge.source.exported_name} -> ${edge.target.exported_name} (${edge.relation})`;
   const tooltip = `${label}\n${relative}:${edge.evidence.line}:${edge.evidence.col}`;
   return new HealthLeafItem(label, undefined, {
@@ -248,7 +246,7 @@ const buildTypeCouplingEvidenceLeaf = (edge: TypeCouplingEdge): HealthLeafItem =
 };
 
 const buildTypeCouplingContributorLeaf = (file: TypeCouplingFile): HealthLeafItem => {
-  const { relative } = resolveFilePath(file.path);
+  const { relative } = resolveWorkspaceFilePath(file.path);
   const detailText = `public API depends on ${file.public_api_depends_on}, public types used by ${file.public_types_used_by}`;
   const tooltip = new vscode.MarkdownString();
   tooltip.appendMarkdown(
@@ -324,28 +322,15 @@ const buildTypeCouplingLeaves = (report: HealthOutput): HealthLeafItem[] => {
 
 export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
   private report: HealthOutput | null = null;
-  private view: vscode.TreeView<HealthItem> | null = null;
 
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     HealthItem | undefined | null | void
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  setView(view: vscode.TreeView<HealthItem>): void {
-    this.view = view;
-  }
-
   update(report: HealthOutput | null): void {
     this.report = report;
     this._onDidChangeTreeData.fire();
-    this.updateBadge();
-  }
-
-  private updateBadge(): void {
-    if (!this.view) {
-      return;
-    }
-    this.view.badge = undefined;
   }
 
   getTreeItem(element: HealthItem): vscode.TreeItem {
@@ -393,9 +378,5 @@ export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
 
   dispose(): void {
     this._onDidChangeTreeData.dispose();
-    // Null the view so a late `triggerHealthAnalysis` continuation that resolves
-    // after disposal hits the `if (!this.view)` guard in updateBadge() and
-    // no-ops, rather than touching a disposed TreeView (`object is disposed`).
-    this.view = null;
   }
 }

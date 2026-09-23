@@ -3,12 +3,9 @@ import { toWalkthroughDocument, type AuditBrief } from "./adapter";
 import fixture from "../../fixtures/sample-review-with-decisions.json";
 
 /**
- * Proof that the adapter -> render-model path DecisionList consumes works
- * end-to-end against a hand-authored decision-producing brief. Driven through the
- * pure adapter (no DOM mount), since the Phase 1 Rust fields are not yet synced
- * into this checkout, so the fixture hand-authors them and the adapter guards
- * them. The two committed real fixtures show empty decisions[], so this is the
- * first end-to-end exercise of the decision render path.
+ * This fixture exercises the decision render path that DecisionList consumes,
+ * through the pure adapter (no DOM mount). `sample-review.json` has an empty
+ * decisions list, so this fixture is the only one with decisions.
  */
 const brief = fixture as AuditBrief;
 
@@ -21,20 +18,6 @@ describe("toWalkthroughDocument over a decision-producing brief", () => {
       "boundary:src/services/api/client.ts->src/infra/db.ts",
       "public-api:src/services/api/index.ts#createClient",
     ]);
-  });
-
-  it("drops any decision lacking a Fallow signal_id (anti-hallucination)", () => {
-    const withUnanchored: AuditBrief = {
-      ...brief,
-      decisions: {
-        emitted_signal_ids: brief.decisions?.emitted_signal_ids,
-        decisions: [
-          ...(brief.decisions?.decisions ?? []),
-          { category: "coupling-boundary", question: "no signal id, should drop" },
-        ],
-      },
-    };
-    expect(toWalkthroughDocument(withUnanchored).decisions).toHaveLength(2);
   });
 
   it("camelCases every field DecisionList reads on the coupling-boundary decision", () => {

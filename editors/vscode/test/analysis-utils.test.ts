@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildAnalysisArgs,
   buildCleanAnalysisSummary,
-  compareVersions,
   countDuplicationGroups,
   describeAnalysisFailure,
   parseUnexpectedArgument,
   planDegradation,
   stripArgument,
 } from "../src/analysis-utils.js";
+import { compareVersions } from "../src/cli-args-utils.js";
 import type { FallowCheckResult, FallowDupesResult } from "../src/types.js";
 
 const baseOptions = {

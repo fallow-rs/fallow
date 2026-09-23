@@ -5,11 +5,9 @@
 import * as vscode from "vscode";
 import { openFileCommand } from "./openFileCommand.js";
 import { hopRoleLabel, securityFindingLabel } from "./security-utils.js";
-import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
+import { middleElidePath } from "./treeView-utils.js";
+import { resolveWorkspaceFilePath } from "./workspaceRoot.js";
 import type { SecurityFinding, SecurityOutput, TraceHop } from "./types.js";
-
-const resolveFilePath = (filePath: string | undefined): { absolute: string; relative: string } =>
-  resolveFilePathPure(filePath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 
 /**
  * The candidate-framing prefix shown at the head of every finding tooltip. The
@@ -44,7 +42,7 @@ const untrustedSourceTraceLines = (finding: SecurityFinding): string[] => {
   return [
     "untrusted-source trace:",
     ...trace.map((hop) => {
-      const { relative } = resolveFilePath(hop.path);
+      const { relative } = resolveWorkspaceFilePath(hop.path);
       return `${hopRoleLabel(hop.role)} ${middleElidePath(relative)}:${hop.line}`;
     }),
   ];
@@ -74,7 +72,7 @@ class SecurityGroupItem extends vscode.TreeItem {
 
 class SecurityHopItem extends vscode.TreeItem {
   constructor(hop: TraceHop) {
-    const { absolute, relative } = resolveFilePath(hop.path);
+    const { absolute, relative } = resolveWorkspaceFilePath(hop.path);
     super(`${middleElidePath(relative)}:${hop.line}`, vscode.TreeItemCollapsibleState.None);
 
     this.description = hopRoleLabel(hop.role);
@@ -123,7 +121,7 @@ class SecurityFindingItem extends vscode.TreeItem {
         : vscode.TreeItemCollapsibleState.None,
     );
 
-    const { absolute, relative } = resolveFilePath(finding.path);
+    const { absolute, relative } = resolveWorkspaceFilePath(finding.path);
 
     this.description = `${middleElidePath(relative)}:${finding.line}`;
     this.contextValue = "securityCandidate";
@@ -157,28 +155,15 @@ class SecurityFindingItem extends vscode.TreeItem {
  */
 export class SecurityTreeProvider implements vscode.TreeDataProvider<SecurityItem> {
   private result: SecurityOutput | null = null;
-  private view: vscode.TreeView<SecurityItem> | null = null;
 
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     SecurityItem | undefined | null | void
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  setView(view: vscode.TreeView<SecurityItem>): void {
-    this.view = view;
-  }
-
   update(result: SecurityOutput | null): void {
     this.result = result;
     this._onDidChangeTreeData.fire();
-    this.updateBadge();
-  }
-
-  private updateBadge(): void {
-    if (!this.view) {
-      return;
-    }
-    this.view.badge = undefined;
   }
 
   getTreeItem(element: SecurityItem): vscode.TreeItem {
@@ -226,10 +211,5 @@ export class SecurityTreeProvider implements vscode.TreeDataProvider<SecurityIte
 
   dispose(): void {
     this._onDidChangeTreeData.dispose();
-    // Null the view so a late fire-and-forget triggerSecurityAnalysis
-    // continuation that resolves after the TreeView is disposed (subscriptions
-    // dispose LIFO; the view goes before this provider) hits the `if
-    // (!this.view)` guard in updateBadge() instead of touching a disposed view.
-    this.view = null;
   }
 }

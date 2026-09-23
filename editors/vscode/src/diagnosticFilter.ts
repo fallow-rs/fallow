@@ -267,37 +267,9 @@ export class DiagnosticFilter {
     this.emitChange();
   }
 
-  public setMutedCategories(codes: ReadonlySet<string>): void {
-    const nextLocalMuted = new Set<string>();
-    const nextLocalVisible = new Set<string>();
-    for (const code of codes) {
-      if (!this.baselineMutedCategories.has(code)) {
-        nextLocalMuted.add(code);
-      }
-    }
-    for (const code of this.baselineMutedCategories) {
-      if (!codes.has(code)) {
-        nextLocalVisible.add(code);
-      }
-    }
-    const changed =
-      !setsEqual(this.localMutedCategories, nextLocalMuted) ||
-      !setsEqual(this.localVisibleCategories, nextLocalVisible);
-    if (!changed) {
-      return;
-    }
-
-    this.localMutedCategories = nextLocalMuted;
-    this.localVisibleCategories = nextLocalVisible;
-    this.persist();
-    this.refresh();
-    this.emitChange();
-  }
-
   /** Apply the global mute-all flag AND an explicit category set in ONE
-   *  persist/refresh/emit cycle. The Manage quick pick otherwise called
-   *  setMutedAll then setMutedCategories for a single accept, firing two
-   *  persisted writes and two refreshes (two LSP re-pulls) per user action. */
+   *  persist/refresh/emit cycle, so one quick-pick accept causes one persisted
+   *  write and one refresh (one LSP re-pull). */
   public applyMuteSelection(mutedAll: boolean, codes: ReadonlySet<string>): void {
     const nextLocalMuted = new Set<string>();
     const nextLocalVisible = new Set<string>();

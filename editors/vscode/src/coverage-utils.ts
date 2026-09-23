@@ -1,3 +1,4 @@
+import { describeAnalysisFailure } from "./analysis-utils.js";
 import type {
   RuntimeCoverageConfidence,
   RuntimeCoverageFinding,
@@ -113,13 +114,6 @@ const COVERAGE_EXIT_SIDECAR_MISSING = 4;
 /** Exit code the CLI emits when the sidecar binary fails signature verification. */
 const COVERAGE_EXIT_SIDECAR_INVALID = 5;
 
-/** Narrow a parsed CLI JSON envelope to the structured-error shape. */
-const isStructuredError = (value: unknown): value is { error: true; message?: string } =>
-  typeof value === "object" &&
-  value !== null &&
-  "error" in value &&
-  (value as { error: unknown }).error === true;
-
 /**
  * Build an actionable error message for a failed `coverage analyze` run from the
  * CLI's exit code and captured stdout. Kept pure (no VS Code access) so the
@@ -137,20 +131,7 @@ export const buildCoverageGateMessage = (
   stdout: string,
   fallbackMessage: string,
 ): string => {
-  let structured: string | undefined;
-  const trimmed = stdout.trim();
-  if (trimmed.length > 0) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (isStructuredError(parsed)) {
-        structured = parsed.message;
-      }
-    } catch {
-      // Non-JSON stdout (older CLI, partial output): fall through to fallback.
-    }
-  }
-
-  const detail = structured ?? fallbackMessage;
+  const detail = describeAnalysisFailure(stdout, fallbackMessage);
 
   if (exitCode === COVERAGE_EXIT_LICENSE) {
     return `${detail} Activate a runtime-coverage license or trial: run \`fallow license activate --trial --email you@company.com\`.`;

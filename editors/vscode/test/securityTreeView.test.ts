@@ -10,15 +10,8 @@ import { SecurityTreeProvider } from "../src/securityTreeView.js";
 import { OPEN_FILE_COMMAND, type OpenFileCommandArgs } from "../src/openFileCommand.js";
 import type { SecurityFinding, SecurityOutput } from "../src/types.js";
 
-interface FakeBadge {
-  readonly value: number;
-  readonly tooltip: string;
-}
-
 type SecurityFindingInput = Omit<SecurityFinding, "candidate" | "finding_id" | "severity"> &
   Partial<Pick<SecurityFinding, "candidate" | "finding_id" | "severity">>;
-
-const makeView = (): { badge: FakeBadge | undefined } => ({ badge: undefined });
 
 const finding = (input: SecurityFindingInput): SecurityFinding => ({
   ...input,
@@ -76,20 +69,15 @@ const selectionOf = (item: TestTreeItem): TestRange => {
 };
 
 describe("SecurityTreeProvider", () => {
-  it("renders no children and clears the badge for a null result", () => {
+  it("renders no children for a null result", () => {
     const provider = new SecurityTreeProvider();
-    const view = makeView();
-    provider.setView(view as never);
     provider.update(null);
 
     expect(provider.getChildren()).toEqual([]);
-    expect(view.badge).toBeUndefined();
   });
 
   it("renders one finding with label, description, navigation, icon, and tooltip framing", () => {
     const provider = new SecurityTreeProvider();
-    const view = makeView();
-    provider.setView(view as never);
     provider.update(
       result([
         {
@@ -127,7 +115,6 @@ describe("SecurityTreeProvider", () => {
     expect(selectionOf(item)).toMatchObject({ startLine: 11, startCharacter: 4 });
     // No trace -> not collapsible.
     expect(item.collapsibleState).toBe(0);
-    expect(view.badge).toBeUndefined();
   });
 
   it("renders trace hops as navigable children with role descriptions", () => {
@@ -236,40 +223,8 @@ describe("SecurityTreeProvider", () => {
     expect(htmlFindings.map((finding) => finding.description)).toEqual(["a.ts:1", "b.ts:2"]);
   });
 
-  it("sets the badge to the finding count", () => {
-    const provider = new SecurityTreeProvider();
-    const view = makeView();
-    provider.setView(view as never);
-    provider.update(
-      result([
-        {
-          kind: "tainted-sink",
-          path: "a.ts",
-          line: 1,
-          col: 0,
-          evidence: "x",
-          trace: [],
-          actions: [],
-        },
-        {
-          kind: "tainted-sink",
-          path: "b.ts",
-          line: 2,
-          col: 0,
-          evidence: "y",
-          trace: [],
-          actions: [],
-        },
-      ]),
-    );
-
-    expect(view.badge).toBeUndefined();
-  });
-
   it("renders non-zero blind-spot counts as a non-actionable info node", () => {
     const provider = new SecurityTreeProvider();
-    const view = makeView();
-    provider.setView(view as never);
     provider.update(
       result(
         [
@@ -300,7 +255,6 @@ describe("SecurityTreeProvider", () => {
     expect(blindSpot.iconPath?.id).toBe("info");
     expect(blindSpot.command).toBeUndefined();
     expect(provider.getChildren(blindSpot as never)).toEqual([]);
-    expect(view.badge).toBeUndefined();
   });
 
   it("omits the blind-spot node when both counters are zero", () => {

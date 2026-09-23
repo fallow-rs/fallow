@@ -8,6 +8,7 @@ import {
 import {
   appendCommonScopeArgs,
   compareVersions,
+  isStructuredError,
   type BuiltCliArgs,
   type SkippedCliCapability,
 } from "./cli-args-utils.js";
@@ -79,8 +80,6 @@ interface AnalysisArgsOptions {
   readonly cliVersion: string | null;
 }
 
-export type BuiltAnalysisArgs = BuiltCliArgs;
-
 const pushVersionGatedFlag = (
   args: string[],
   skipped: SkippedCliCapability[],
@@ -100,8 +99,6 @@ const pushVersionGatedFlag = (
   }
 };
 
-export { compareVersions };
-
 /**
  * Build the argument vector for the combined `fallow` analysis run that backs
  * the sidebar. Kept pure (no config/VS Code access) so flag-forwarding rules
@@ -109,7 +106,7 @@ export { compareVersions };
  * omitted because the resolved CLI is too old, so the caller can tell the user
  * their setting was not applied.
  */
-export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisArgs => {
+export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltCliArgs => {
   const args = ["--format", "json", "--quiet", "--skip", "health"];
   const skipped: SkippedCliCapability[] = [];
 
@@ -407,13 +404,6 @@ export const buildCleanAnalysisSummary = (
   };
 };
 
-/** Narrow a parsed CLI JSON envelope to the structured-error shape. */
-const isStructuredError = (value: unknown): value is { error: true; message?: string } =>
-  typeof value === "object" &&
-  value !== null &&
-  "error" in value &&
-  (value as { error: unknown }).error === true;
-
 /**
  * Recover the CLI's own diagnostic from a failed analysis spawn.
  *
@@ -422,8 +412,8 @@ const isStructuredError = (value: unknown): value is { error: true; message?: st
  * "fallow exited with code N" and the actionable message is discarded. Prefer
  * the envelope message when stdout holds one, and fall back to the
  * stderr-derived message otherwise (plain formats, an older CLI, or partial
- * output). Kept pure so the recovery can be unit-tested; mirrors
- * `buildCoverageGateMessage` in `coverage-utils.ts`.
+ * output). Kept pure so the recovery can be unit-tested.
+ * `buildCoverageGateMessage` in `coverage-utils.ts` uses it for the same recovery.
  */
 export const describeAnalysisFailure = (stdout: string, fallbackMessage: string): string => {
   const trimmed = stdout.trim();

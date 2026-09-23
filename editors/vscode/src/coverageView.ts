@@ -5,15 +5,13 @@
 import * as vscode from "vscode";
 import { formatConfidence, sortHotPaths, splitCleanupCandidates } from "./coverage-utils.js";
 import { openFileCommand } from "./openFileCommand.js";
-import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
+import { middleElidePath } from "./treeView-utils.js";
+import { resolveWorkspaceFilePath } from "./workspaceRoot.js";
 import type {
   RuntimeCoverageFinding,
   RuntimeCoverageHotPath,
   RuntimeCoverageReport,
 } from "./types.js";
-
-const resolveFilePath = (filePath: string | undefined) =>
-  resolveFilePathPure(filePath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 
 class CoverageGroupItem extends vscode.TreeItem {
   constructor(
@@ -31,7 +29,7 @@ class CoverageLeafItem extends vscode.TreeItem {
   constructor(label: string, filePath: string, line: number, icon: string, tooltip: string) {
     super(label, vscode.TreeItemCollapsibleState.None);
 
-    const { absolute, relative } = resolveFilePath(filePath);
+    const { absolute, relative } = resolveWorkspaceFilePath(filePath);
 
     this.description = `${middleElidePath(relative)}:${line}`;
     this.tooltip = tooltip;
@@ -42,13 +40,13 @@ class CoverageLeafItem extends vscode.TreeItem {
 }
 
 const hotPathLeaf = (hot: RuntimeCoverageHotPath): CoverageLeafItem => {
-  const { absolute } = resolveFilePath(hot.path);
+  const { absolute } = resolveWorkspaceFilePath(hot.path);
   const tooltip = `${hot.function}\n${absolute}:${hot.line}\nInvocations: ${hot.invocations} (percentile ${hot.percentile})`;
   return new CoverageLeafItem(hot.function, hot.path, hot.line, "flame", tooltip);
 };
 
 const findingLeaf = (finding: RuntimeCoverageFinding, candidateNote: string): CoverageLeafItem => {
-  const { absolute } = resolveFilePath(finding.path);
+  const { absolute } = resolveWorkspaceFilePath(finding.path);
   const invocations = finding.invocations ?? 0;
   const tooltip = `${finding.function}\n${absolute}:${finding.line}\n${candidateNote}\nInvocations: ${invocations} · confidence: ${formatConfidence(finding.confidence)}`;
   const icon = finding.verdict === "safe_to_delete" ? "trash" : "eye";
@@ -67,28 +65,15 @@ type CoverageItem = CoverageGroupItem | CoverageLeafItem;
  */
 export class RuntimeCoverageTreeProvider implements vscode.TreeDataProvider<CoverageItem> {
   private report: RuntimeCoverageReport | null = null;
-  private view: vscode.TreeView<CoverageItem> | null = null;
 
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     CoverageItem | undefined | null | void
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  setView(view: vscode.TreeView<CoverageItem>): void {
-    this.view = view;
-  }
-
   update(report: RuntimeCoverageReport | null): void {
     this.report = report;
     this._onDidChangeTreeData.fire();
-    this.updateBadge();
-  }
-
-  private updateBadge(): void {
-    if (!this.view) {
-      return;
-    }
-    this.view.badge = undefined;
   }
 
   getTreeItem(element: CoverageItem): vscode.TreeItem {
@@ -129,10 +114,5 @@ export class RuntimeCoverageTreeProvider implements vscode.TreeDataProvider<Cove
 
   dispose(): void {
     this._onDidChangeTreeData.dispose();
-    // Null the view so a late fire-and-forget loadCoverage continuation that
-    // resolves after the TreeView is disposed (subscriptions dispose LIFO; the
-    // view goes before this provider) hits the `if (!this.view)` guard in
-    // updateBadge() instead of touching a disposed view.
-    this.view = null;
   }
 }

@@ -11,10 +11,4 @@ describe("treemapLayoutKey", () => {
     expect(treemapLayoutKey("", 1600, 900, 1600, 2)).not.toBe(base);
     expect(treemapLayoutKey("", 1600, 1000, 1600, 1)).not.toBe(base);
   });
-
-  it("is stable when only paint state (hover, selection) changes", () => {
-    expect(treemapLayoutKey("src", 1600, 1000, 1220, 2)).toBe(
-      treemapLayoutKey("src", 1600, 1000, 1220, 2),
-    );
-  });
 });

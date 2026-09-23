@@ -1,7 +1,7 @@
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import { compareVersions } from "./analysis-utils.js";
+import { compareVersions, isStructuredError } from "./cli-args-utils.js";
 import { execFallow, FallowExecError, resolveCliForRun } from "./commands.js";
 import {
   getCoveragePath,
@@ -15,17 +15,10 @@ import {
   COVERAGE_ANALYZE_MIN_VERSION,
 } from "./coverage-utils.js";
 import type { CoverageAnalyzeOutput, RuntimeCoverageReport } from "./types.js";
+import { getWorkspaceRoot } from "./workspaceRoot.js";
 
 /** Workspace-scoped key persisting the user's chosen capture path. */
 const CAPTURE_PATH_SETTING = "coverage.capturePath";
-
-const getWorkspaceRoot = (): string | null => {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders || folders.length === 0) {
-    return null;
-  }
-  return folders[0].uri.fsPath;
-};
 
 /**
  * Prompt for a runtime-coverage capture (file or folder) and persist the choice
@@ -52,13 +45,6 @@ const promptForCapturePath = async (): Promise<string | null> => {
 
   return chosen.fsPath;
 };
-
-/** Narrow a parsed CLI JSON envelope to the structured-error shape. */
-const isStructuredError = (value: unknown): value is { error: true; message?: string } =>
-  typeof value === "object" &&
-  value !== null &&
-  "error" in value &&
-  (value as { error: unknown }).error === true;
 
 /**
  * Run `fallow coverage analyze --runtime-coverage <path> --format json` against

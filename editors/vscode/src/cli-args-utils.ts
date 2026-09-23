@@ -35,6 +35,13 @@ export const compareVersions = (a: string, b: string): number => {
   return 0;
 };
 
+/** Narrow a parsed CLI JSON envelope to the structured-error shape. */
+export const isStructuredError = (value: unknown): value is { error: true; message?: string } =>
+  typeof value === "object" &&
+  value !== null &&
+  "error" in value &&
+  (value as { error: unknown }).error === true;
+
 /** Append the project-scope flags shared by every analysis command. */
 export const appendCommonScopeArgs = (args: string[], options: CommonScopeArgs): void => {
   if (options.changedSince) {

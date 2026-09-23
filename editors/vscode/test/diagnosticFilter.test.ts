@@ -344,20 +344,6 @@ describe("DiagnosticFilter persistence", () => {
       })
     );
   });
-
-  it("updates a category set with one persisted write", async () => {
-    const m = memento();
-    const f = new DiagnosticFilter(m as never);
-    f.setMutedCategories(new Set(["code-duplication", "unused-export"]));
-    await flushPersistence();
-    expect(m.update).toHaveBeenCalledTimes(1);
-    expect(m.update).toHaveBeenLastCalledWith(
-      "fallow.diagnosticFilter.v1",
-      expect.objectContaining({
-        mutedCategories: ["code-duplication", "unused-export"],
-      })
-    );
-  });
 });
 
 describe("DiagnosticFilter corrupt-state recovery", () => {
@@ -412,8 +398,7 @@ describe("DiagnosticFilter.applyMuteSelection", () => {
     expect(f.isMutedAll()).toBe(false);
     expect(f.isCategoryMuted("unused-export")).toBe(true);
     expect(f.isCategoryMuted("code-duplication")).toBe(false);
-    // One accept => exactly one persisted write (the old setMutedAll +
-    // setMutedCategories pair fired two).
+    // One accept => exactly one persisted write.
     expect(m.update).toHaveBeenCalledTimes(1);
     expect(m.update).toHaveBeenLastCalledWith(
       "fallow.diagnosticFilter.v1",

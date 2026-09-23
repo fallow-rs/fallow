@@ -30,7 +30,6 @@ import {
 } from "./config.js";
 import {
   buildAnalysisArgs,
-  compareVersions,
   countCheckIssues,
   describeAnalysisFailure,
   planDegradation,
@@ -50,12 +49,14 @@ import {
   getExtensionVersion,
   getInstalledCliPath,
 } from "./download.js";
+import { compareVersions } from "./cli-args-utils.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import { buildHealthArgs, parseUnknownHealthSubcommand } from "./health-utils.js";
 import { registerChild, unregisterChild } from "./process-registry.js";
 import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
 import { appendTypeAwareArgs, TYPE_AWARE_MIN_CLI_VERSION } from "./type-aware-utils.js";
 import { noteTypeAwareDegradation, typeAwareDegradationWarnings } from "./typeAwareDegradation.js";
+import { getWorkspaceRoot } from "./workspaceRoot.js";
 import {
   cacheWorkspacesOutput,
   getCachedWorkspacesOutput,
@@ -591,14 +592,6 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     total_issues: totalIssues,
     summary,
   };
-};
-
-const getWorkspaceRoot = (): string | null => {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders || folders.length === 0) {
-    return null;
-  }
-  return folders[0].uri.fsPath;
 };
 
 interface FixQuickPickItem extends vscode.QuickPickItem {
