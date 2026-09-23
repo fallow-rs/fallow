@@ -14,8 +14,9 @@
  *   node scripts/vendor-skills.mjs --check
  *
  * `FALLOW_SKILLS_DIR` may point to the companion repository. Otherwise the
- * script uses `../fallow-skills`. A missing consumer is always an error so
- * cross-repository checks cannot pass by silently skipping.
+ * script uses `fallow-skills` next to the main working tree of this
+ * repository, also from a linked worktree. A missing consumer is always an
+ * error so cross-repository checks cannot pass by silently skipping.
  */
 
 import { execFileSync } from "node:child_process";
@@ -28,7 +29,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -161,8 +162,41 @@ export const runVendor = (canonical, published) => {
   return 0;
 };
 
+// These variables point git at one checkout. The lookup passes its own
+// directory, so an inherited value from a hook must not win.
+const GIT_LOCATION_VARIABLES = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"];
+
+const mainWorkingTree = (repoRoot, env) => {
+  const gitEnv = { ...process.env, ...env };
+  for (const name of GIT_LOCATION_VARIABLES) {
+    delete gitEnv[name];
+  }
+  try {
+    const commonDir = execFileSync(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd: repoRoot, env: gitEnv, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    // A linked worktree shares the `.git` directory of the main working tree.
+    return basename(commonDir) === ".git" ? dirname(commonDir) : repoRoot;
+  } catch {
+    return repoRoot;
+  }
+};
+
+/**
+ * Return the companion `fallow-skills` checkout. `FALLOW_SKILLS_DIR` wins.
+ * Otherwise the companion sits next to the main working tree, so a linked
+ * worktree finds the same checkout as the main one.
+ *
+ * @param {{ env?: Record<string, string | undefined>, repoRoot?: string }} [options]
+ * @returns {string}
+ */
+export const companionSkillsRoot = ({ env = process.env, repoRoot = REPO_ROOT } = {}) =>
+  env.FALLOW_SKILLS_DIR || join(dirname(mainWorkingTree(repoRoot, env)), "fallow-skills");
+
 const resolvePublished = () => {
-  const root = process.env.FALLOW_SKILLS_DIR || join(REPO_ROOT, "..", "fallow-skills");
+  const root = companionSkillsRoot();
   const tree = join(root, TARGET_SUBPATH);
   return { tree, present: existsSync(join(tree, "SKILL.md")) };
 };

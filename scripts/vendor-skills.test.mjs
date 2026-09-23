@@ -8,11 +8,14 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 import {
+  companionSkillsRoot,
   decide,
   diffTrees,
   listFiles,
@@ -140,5 +143,58 @@ test("main throws when the explicit public consumer is missing", () => {
     } else {
       process.env.FALLOW_SKILLS_DIR = previous;
     }
+  }
+});
+
+const git = (cwd, ...args) => execFileSync("git", args, { cwd, stdio: "pipe" });
+
+test("a linked worktree resolves the companion next to the main working tree", () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "vendor-skills-worktree-")));
+  const mainTree = join(base, "fallow");
+  const linked = join(base, "fallow", ".worktrees", "linked");
+  try {
+    mkdirSync(mainTree);
+    git(mainTree, "init", "-q");
+    git(
+      mainTree,
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.com",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "init",
+    );
+    git(mainTree, "worktree", "add", "-q", linked);
+
+    assert.equal(companionSkillsRoot({ env: {}, repoRoot: linked }), join(base, "fallow-skills"));
+    assert.equal(companionSkillsRoot({ env: {}, repoRoot: mainTree }), join(base, "fallow-skills"));
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("FALLOW_SKILLS_DIR overrides the companion location", () => {
+  assert.equal(
+    companionSkillsRoot({ env: { FALLOW_SKILLS_DIR: "/elsewhere/skills" }, repoRoot: "/unused" }),
+    "/elsewhere/skills",
+  );
+});
+
+test("a checkout outside git falls back to the sibling directory", () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "vendor-skills-nogit-")));
+  const checkout = join(base, "fallow");
+  try {
+    mkdirSync(checkout);
+    assert.equal(
+      companionSkillsRoot({ env: { GIT_CEILING_DIRECTORIES: base }, repoRoot: checkout }),
+      join(base, "fallow-skills"),
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
   }
 });
