@@ -3132,15 +3132,15 @@ assert_contains "$(cat "$DEGRADED_SUMMARY_FILE")" "or from an input that did not
 assert_not_contains "$(cat "$DEGRADED_SUMMARY_FILE")" "Some files never reached the analysis" \
   "summary.sh: the note does not claim files were skipped"
 
-# The `Gates:` line lists a default rule with `status: fail` also when the job
-# stays green because `fail-on-issues` is false.
+# summary.sh writes a `Gates:` line from `FALLOW_GATES_FAILED` alone. The
+# analyze.sh cases cover how a failing default rule reaches that list when
+# `fail-on-issues` is false.
 GATES_SUMMARY_FILE="$WORK_DIR/gates-summary.md"
 : > "$GATES_SUMMARY_FILE"
 OUT=$(cd "$WORK_DIR" && \
   GITHUB_STEP_SUMMARY="$GATES_SUMMARY_FILE" \
   FALLOW_COMMAND="dead-code" \
   ACTION_JQ_DIR="$JQ_DIR" \
-  INPUT_FAIL_ON_ISSUES="false" \
   FALLOW_GATES_FAILED="error-severity-findings" \
   FALLOW_RESULTS_FILE="missing-results.json" \
   bash "$SCRIPTS_DIR/summary.sh" 2>&1)
