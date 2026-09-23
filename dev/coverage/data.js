@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790164878156,
+  "lastUpdate": 1790165425637,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "802c7fe381daadb6190f46c9c856e96ba8dbdb27",
-          "message": "fix: preserve scoped package names in review brief\n\nFixes #2553.",
-          "timestamp": "2026-09-05T21:26:10+02:00",
-          "tree_id": "c114fbeaa525687e473f2746c407184d2bf9db73",
-          "url": "https://github.com/fallow-rs/fallow/commit/802c7fe381daadb6190f46c9c856e96ba8dbdb27"
-        },
-        "date": 1788636868750,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/2f7c2fbbd2ab52f3c57df2518e28a87cd0119b1e"
         },
         "date": 1790164874653,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a760767376cedb7b6ef3aa15e24177c2e3251b0b",
+          "message": "chore: re-include .claude/ so tracked adapters stay visible to git add (#2789)\n\nA global .claude/ ignore hides the whole directory, so git add skips new\ngenerated skills and agents under .claude/ even though .gitignore\nre-includes them. Re-including .claude/ first restores the intended\nrules; local settings and worktrees stay ignored.",
+          "timestamp": "2026-09-23T14:03:24+02:00",
+          "tree_id": "4361bca0e83178a3728e9423a3ccd43c655ccff3",
+          "url": "https://github.com/fallow-rs/fallow/commit/a760767376cedb7b6ef3aa15e24177c2e3251b0b"
+        },
+        "date": 1790165421724,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
