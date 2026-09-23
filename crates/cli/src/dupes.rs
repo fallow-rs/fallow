@@ -203,32 +203,6 @@ pub fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
     threshold > 0.0 && duplication_percentage > threshold
 }
 
-/// The gates a duplication run evaluated, for the envelope's `gate_outcomes`.
-///
-/// The threshold verdict is the same [`exceeds_threshold`] call the exit path
-/// makes, so the published boolean and the process status cannot disagree.
-fn dupes_gate_outcomes(
-    result: &DupesResult,
-    baseline_staleness: Option<&fallow_output::BaselineStaleness>,
-) -> Option<fallow_output::GateOutcomes> {
-    let mut gates = fallow_output::GateOutcomes::new();
-    gates.insert_if(
-        fallow_output::GateName::DuplicationThreshold,
-        crate::gates::duplication_threshold_outcome(
-            result.threshold,
-            result.report.stats.duplication_percentage,
-            // Armed, not the verdict: the standalone command exits on this
-            // gate, so a passing threshold still reports `enforced: true`.
-            true,
-        ),
-    );
-    gates.insert_if(
-        fallow_output::GateName::StaleBaseline,
-        crate::gates::stale_baseline_outcome(baseline_staleness, result.fail_on_stale_baseline),
-    );
-    gates.into_option()
-}
-
 /// Result of executing duplication analysis without printing.
 pub struct DupesResult {
     pub report: DuplicationReport,
@@ -874,7 +848,12 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         .baseline_staleness
         .as_ref()
         .map(|loaded| loaded.to_envelope(0));
-    let gate_outcomes = dupes_gate_outcomes(result, baseline_staleness.as_ref());
+    let gate_outcomes = crate::gates::dupes_gate_outcomes(
+        result.threshold,
+        result.report.stats.duplication_percentage,
+        baseline_staleness.as_ref(),
+        result.fail_on_stale_baseline,
+    );
     let ctx = report::ReportContext {
         root: &result.config.root,
         rules: &result.config.rules,

@@ -918,47 +918,20 @@ fn render_security_github(opts: &SecurityOptions<'_>, output: &SecurityOutput) -
 
 /// The gates a security run evaluated, for the envelope's `gate_outcomes`.
 ///
-/// Projects [`security_exit_code`]'s two branches. A configured `--gate`
-/// returns before the advisory, so the advisory is recorded as `skipped` there
-/// rather than left to be inferred from silence: a passing gate suppressing an
-/// advisory-tier backlog is exactly the shadowing a consumer cannot see today.
-///
-/// Without `--gate`, the advisory is the command's default exit rule and is
-/// always in the object. It is `enforced` only when `--fail-on-issues` or an
-/// `error` rule severity lets it fail the run.
+/// Projects [`security_exit_code`]'s two branches through the same predicates.
 fn security_gate_outcomes(
     opts: &SecurityOptions<'_>,
     output: &SecurityOutput,
     effective_severities: SecurityRuleSeverities,
 ) -> Option<fallow_output::GateOutcomes> {
-    use fallow_output::{GateName, GateOutcome, GateStatus};
-
-    let mut gates = fallow_output::GateOutcomes::new();
-    if let Some(gate) = &output.gate {
-        gates.insert(
-            GateName::Security,
-            GateOutcome::new(
-                crate::gates::status_of(gate.verdict == SecurityGateVerdict::Fail),
-                true,
-            ),
-        );
-        gates.insert(
-            GateName::SecurityAdvisory,
-            GateOutcome::new(GateStatus::Skipped, false),
-        );
-        return gates.into_option();
-    }
-    let enforced = opts.fail_on_issues
-        || effective_severities.leak == Severity::Error
-        || effective_severities.sink == Severity::Error;
-    gates.insert(
-        GateName::SecurityAdvisory,
-        GateOutcome::new(
-            crate::gates::status_of(security_advisory_failed(opts, output, effective_severities)),
-            enforced,
-        ),
-    );
-    gates.into_option()
+    crate::gates::security_gate_outcomes(
+        output
+            .gate
+            .as_ref()
+            .map(|gate| gate.verdict == SecurityGateVerdict::Fail),
+        security_advisory_failed(opts, output, effective_severities),
+        security_advisory_enforced(opts, effective_severities),
+    )
 }
 
 fn security_exit_code(
@@ -984,10 +957,18 @@ fn security_advisory_failed(
     output: &SecurityOutput,
     effective_severities: SecurityRuleSeverities,
 ) -> bool {
-    (opts.fail_on_issues
+    security_advisory_enforced(opts, effective_severities) && !output.security_findings.is_empty()
+}
+
+/// Whether the advisory can fail the run: `--fail-on-issues`, or an `error`
+/// severity on a security rule.
+fn security_advisory_enforced(
+    opts: &SecurityOptions<'_>,
+    effective_severities: SecurityRuleSeverities,
+) -> bool {
+    opts.fail_on_issues
         || effective_severities.leak == Severity::Error
-        || effective_severities.sink == Severity::Error)
-        && !output.security_findings.is_empty()
+        || effective_severities.sink == Severity::Error
 }
 
 struct PreparedSecurityFindings {

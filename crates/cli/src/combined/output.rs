@@ -1082,109 +1082,33 @@ fn combined_gate_outcomes(
     health_result: Option<&HealthResult>,
     fail_on_stale_baseline: bool,
 ) -> Option<fallow_output::GateOutcomes> {
-    let mut gates = fallow_output::GateOutcomes::new();
-    if let Some(result) = check_result {
-        gates.insert_if(
-            fallow_output::GateName::Regression,
-            crate::gates::regression_outcome(result.regression.as_ref(), true),
-        );
-    }
-    gates.insert_if(
-        fallow_output::GateName::StaleBaseline,
-        combined_stale_baseline_outcome(
-            check_result,
-            dupes_result,
-            health_result,
-            fail_on_stale_baseline,
-        ),
-    );
-    if combined_type_aware_requested(check_result, health_result) {
-        gates.insert(
-            fallow_output::GateName::TypeAwareRequire,
-            fallow_output::GateOutcome::new(
-                crate::gates::status_of(combined_type_aware_gate_failed(
-                    check_result,
-                    health_result,
-                )),
-                true,
-            ),
-        );
-    }
-    if let Some(result) = dupes_result {
-        gates.insert_if(
-            fallow_output::GateName::DuplicationThreshold,
-            crate::gates::duplication_threshold_outcome(
-                result.threshold,
-                result.report.stats.duplication_percentage,
-                false,
-            ),
-        );
-    }
-    // The default rules below are `enforced: false` like the rest: the
-    // combined machine renderers collapse them to exit 0. See the doc comment
-    // above.
-    if let Some(result) = check_result {
-        let has_error_severity = crate::check::rules::has_error_severity_issues(
-            &result.results,
-            &crate::check::effective_check_rules(result),
-            Some(&result.config),
-            result.fail_on_issues,
-        );
-        gates.insert(
-            fallow_output::GateName::ErrorSeverityFindings,
-            fallow_output::GateOutcome::new(crate::gates::status_of(has_error_severity), false),
-        );
-    }
-    if let Some(result) = health_result {
-        gates.insert(
-            fallow_output::GateName::HealthFindings,
-            fallow_output::GateOutcome::new(
-                crate::gates::status_of(result.report.findings.iter().any(|f| f.blocks())),
-                false,
-            ),
-        );
-    }
-
-    gates.into_option()
-}
-
-/// One stale-baseline verdict for every baseline the combined run loaded.
-///
-/// A tripped baseline fails the entry, a judged baseline passes it, and the
-/// entry stands down only when every loaded baseline stood down. `None` when
-/// the run loaded no baseline.
-fn combined_stale_baseline_outcome(
-    check_result: Option<&CheckResult>,
-    dupes_result: Option<&DupesResult>,
-    health_result: Option<&HealthResult>,
-    fail_on_stale_baseline: bool,
-) -> Option<fallow_output::GateOutcome> {
-    use fallow_output::GateStatus;
-
-    let loaded = [
-        check_result
-            .and_then(|result| result.baseline_staleness.as_ref())
-            .map(|loaded| loaded.to_envelope(0)),
-        dupes_result
-            .and_then(|result| result.baseline_staleness.as_ref())
-            .map(|loaded| loaded.to_envelope(0)),
-        health_result.and_then(|result| result.report.summary.baseline_staleness),
-    ];
-    let outcomes: Vec<fallow_output::GateOutcome> = loaded
-        .iter()
-        .filter_map(|staleness| {
-            crate::gates::stale_baseline_outcome(staleness.as_ref(), fail_on_stale_baseline)
-        })
-        .collect();
-    let judged = |status: GateStatus| {
-        outcomes
-            .iter()
-            .find(|outcome| outcome.status == status)
-            .cloned()
-    };
-    judged(GateStatus::Fail)
-        .or_else(|| judged(GateStatus::Pass))
-        .or_else(|| outcomes.first().cloned())
+    crate::gates::combined_gate_outcomes(&crate::gates::CombinedGateInputs {
+        regression: check_result.and_then(|result| result.regression.as_ref()),
+        baselines: [
+            check_result
+                .and_then(|result| result.baseline_staleness.as_ref())
+                .map(|loaded| loaded.to_envelope(0)),
+            dupes_result
+                .and_then(|result| result.baseline_staleness.as_ref())
+                .map(|loaded| loaded.to_envelope(0)),
+            health_result.and_then(|result| result.report.summary.baseline_staleness),
+        ],
+        fail_on_stale_baseline,
+        type_aware_failed: combined_type_aware_requested(check_result, health_result)
+            .then(|| combined_type_aware_gate_failed(check_result, health_result)),
+        duplication: dupes_result
+            .map(|result| (result.threshold, result.report.stats.duplication_percentage)),
+        has_error_severity: check_result.map(|result| {
+            crate::check::rules::has_error_severity_issues(
+                &result.results,
+                &crate::check::effective_check_rules(result),
+                Some(&result.config),
+                result.fail_on_issues,
+            )
+        }),
+        health_has_findings: health_result
+            .map(|result| result.report.findings.iter().any(|f| f.blocks())),
+    })
 }
 
 /// Whether the combined run asked for the type-aware completeness gate at all,

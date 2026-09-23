@@ -642,130 +642,40 @@ fn health_report_context<'a>(
     }
 }
 
-/// The gates a health run armed, for the envelope's `gate_outcomes`.
-///
-/// Every entry reads the same predicate the exit path reads, so the published
-/// verdict and the process status cannot disagree. `--report-only` returns
-/// `ExitCode::SUCCESS` before any gate is consulted, so it clamps `enforced` to
-/// false on every entry while leaving each verdict in place; that is the case a
-/// boolean-only shape could not express, and the stale-baseline entry is
-/// clamped with the rest rather than reporting the flag it was armed with.
-///
-/// A gate armed by an explicit flag or by config always produces an entry.
-/// `health-findings` fails a plain `fallow health` run on any finding. It is
-/// the command's default exit rule, so it is always in the object, also when
-/// no flag armed a gate. A JSON reader then sees a failing run without the
-/// exit code.
+/// The gates a health run armed, for the envelope's `gate_outcomes`. The
+/// verdicts read the same values as the exit path.
 fn health_gate_outcomes(
     result: &HealthResult,
     options: HealthPrintOptions<'_>,
 ) -> Option<fallow_output::GateOutcomes> {
-    use fallow_output::{GateName, GateOutcome, GateStatus};
-
-    let enforced = !options.gates.report_only;
-    let mut gates = fallow_output::GateOutcomes::new();
-
-    if let Some(threshold) = options.gates.min_score {
-        // `--min-score` implies `--score`, so a missing score means the caller
-        // is a programmatic one that requested the gate without computing what
-        // it compares. Report the stand-down rather than nothing, or "armed"
-        // and "not armed" read identically.
-        gates.insert(
-            GateName::HealthMinScore,
-            result.report.health_score.as_ref().map_or_else(
-                || GateOutcome::new(GateStatus::Skipped, false),
-                |score| {
-                    GateOutcome::measured(
-                        crate::gates::status_of(score.score < threshold),
-                        enforced,
-                        score.score,
-                        threshold,
-                    )
-                },
-            ),
-        );
-    }
-
-    if let Some(min_sev) = options.gates.min_severity {
-        let reached = blocking_findings(result)
-            .filter(|f| f.severity >= min_sev)
-            .count();
-        gates.insert(
-            GateName::HealthMinSeverity,
-            GateOutcome::counted(
-                crate::gates::status_of(reached > 0),
-                enforced,
-                #[expect(
-                    clippy::cast_precision_loss,
-                    reason = "a finding count never approaches the f64 integer limit"
-                )]
-                {
-                    reached as f64
-                },
-                severity_floor_label(min_sev),
-            ),
-        );
-    }
-
-    if result.should_fail_on_coverage_gaps {
-        gates.insert(
-            GateName::HealthCoverageGaps,
-            GateOutcome::new(
-                crate::gates::status_of(result.coverage_gaps_has_findings),
-                enforced,
-            ),
-        );
-    }
-
-    // Armed by `--runtime-coverage`, so it belongs with the flag-armed gates
-    // rather than behind the default-rule guard below: without this a run whose
-    // only gate is runtime coverage exits 1 and publishes nothing.
-    if result.report.runtime_coverage.is_some() {
-        gates.insert(
-            GateName::HealthRuntimeCoverage,
-            GateOutcome::new(
-                crate::gates::status_of(has_failing_runtime_coverage(result)),
-                enforced,
-            ),
-        );
-    }
-
-    gates.insert_if(
-        GateName::StaleBaseline,
-        crate::gates::stale_baseline_outcome(
-            result.report.summary.baseline_staleness.as_ref(),
-            options.gates.fail_on_stale_baseline && enforced,
-        ),
-    );
-
-    // The default findings rule. With `--min-severity` the findings gate IS
-    // the severity gate, already recorded above under its own name.
-    if options.gates.min_severity.is_none() {
-        gates.insert(
-            GateName::HealthFindings,
-            if options.gates.min_score.is_some() {
-                // `--min-score` alone turns the findings branch off, which is
-                // what "complexity findings become informational" means.
-                GateOutcome::new(GateStatus::Skipped, false)
-            } else {
-                GateOutcome::new(
-                    crate::gates::status_of(blocking_findings(result).next().is_some()),
-                    enforced,
-                )
-            },
-        );
-    }
-
-    gates.into_option()
-}
-
-/// The wire spelling of a severity floor, for `threshold_label`.
-const fn severity_floor_label(severity: fallow_output::FindingSeverity) -> &'static str {
-    match severity {
-        fallow_output::FindingSeverity::Moderate => "moderate",
-        fallow_output::FindingSeverity::High => "high",
-        fallow_output::FindingSeverity::Critical => "critical",
-    }
+    crate::gates::health_gate_outcomes(&crate::gates::HealthGateInputs {
+        report_only: options.gates.report_only,
+        min_score: options.gates.min_score.map(|threshold| {
+            (
+                threshold,
+                result.report.health_score.as_ref().map(|score| score.score),
+            )
+        }),
+        min_severity: options.gates.min_severity.map(|floor| {
+            (
+                floor,
+                blocking_findings(result)
+                    .filter(|finding| finding.severity >= floor)
+                    .count(),
+            )
+        }),
+        coverage_gaps: result
+            .should_fail_on_coverage_gaps
+            .then_some(result.coverage_gaps_has_findings),
+        runtime_coverage: result
+            .report
+            .runtime_coverage
+            .is_some()
+            .then(|| has_failing_runtime_coverage(result)),
+        baseline_staleness: result.report.summary.baseline_staleness.as_ref(),
+        fail_on_stale_baseline: options.gates.fail_on_stale_baseline,
+        has_findings: blocking_findings(result).next().is_some(),
+    })
 }
 
 /// The OR of every health exit gate, with each one evaluated before the verdict
