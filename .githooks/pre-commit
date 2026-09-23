@@ -28,13 +28,15 @@ fi
 # Run oxlint + oxfmt --check only when this commit touches a JS/TS file
 # inside one of the lintable scopes. Keeps pure-Rust commits fast.
 #
-# The lintable scopes mirror the root `npm run lint:js` / `fmt:js:check`
-# script targets in package.json. Update both when adding a new tree.
-js_ts_changed=$(
-  git diff --cached --name-only --diff-filter=ACMR | \
-    grep -E '^(npm/|benchmarks/|crates/napi/|\.github/scripts/|editors/vscode/src/|viz-frontend/src/|scripts/|tools/type-aware-sidecar/|tests/coverage-producer-corpus/producers/drivers/|tests/coverage-producer-corpus/producers/lib/|commitlint\.config\.mjs$)' | \
-    grep -E '\.(js|ts|mjs|cjs|jsx|tsx)$' || true
-)
+# The `lint:js` script in package.json holds the scope list. The helper reads
+# it from there, and fails when the format scripts hold a different list.
+js_ts_changed=""
+if command -v node &> /dev/null; then
+  js_ts_changed=$(
+    git diff --cached --name-only --diff-filter=ACMR | \
+      node scripts/js-lint-scopes.mjs --filter-staged
+  )
+fi
 
 if [ -n "$js_ts_changed" ]; then
   if [ ! -d node_modules ]; then
