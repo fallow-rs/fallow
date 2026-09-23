@@ -230,6 +230,7 @@ fn dupes_gate_outcomes(
 }
 
 use fallow_engine::changed_files::filter_duplication_by_changed_files as filter_by_changed_files;
+use fallow_engine::diff_scope::filter_duplication_by_diff as filter_by_diff;
 
 /// Filter a duplication report to only retain clone groups where at least one
 /// instance belongs to a file under one of the given workspace roots. Mirrors
@@ -250,37 +251,6 @@ fn filter_by_workspaces(
             .iter()
             .any(|i| ws_roots.iter().any(|r| i.file.starts_with(r)))
     });
-    fallow_engine::duplicates::refresh_clone_families(report, root);
-    report.stats = recompute_stats(report);
-}
-
-/// Filter a duplication report to only retain clone groups whose at least
-/// one instance has its `[start_line..=end_line]` range overlap an added
-/// line for that instance's file in the supplied diff. Group-level
-/// retention (panel guidance for issue #424): a group is kept if ANY of
-/// its instances overlaps, even when the other instances do not, so the
-/// reviewer sees the full clone family in PR context. Single-instance
-/// drop is fine because a clone-of-one is no longer a clone.
-///
-/// Families and stats are rebuilt from the surviving groups so that the
-/// reported duplication percentage reflects the scoped slice.
-fn filter_by_diff(
-    report: &mut fallow_types::duplicates::DuplicationReport,
-    diff_index: &crate::report::ci::diff_filter::DiffIndex,
-    root: &std::path::Path,
-) {
-    let instance_overlaps = |instance: &fallow_types::duplicates::CloneInstance| -> bool {
-        let Some(rel) = diff_index.key_for(&instance.file, root) else {
-            return true;
-        };
-        let start = u64::try_from(instance.start_line).unwrap_or(u64::MAX);
-        let end = u64::try_from(instance.end_line).unwrap_or(u64::MAX);
-        diff_index.range_overlaps_added(&rel, start, end)
-    };
-
-    report
-        .clone_groups
-        .retain(|g| g.instances.iter().any(instance_overlaps));
     fallow_engine::duplicates::refresh_clone_families(report, root);
     report.stats = recompute_stats(report);
 }

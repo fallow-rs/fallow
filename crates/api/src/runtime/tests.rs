@@ -14,9 +14,8 @@ use crate::runtime_json::{
 use crate::runtime_output::HEALTH_SCHEMA_VERSION;
 use crate::{
     AnalysisOptions, CombinedOptions, DeadCodeFilters, DeadCodeOptions, DuplicationOptions,
-    FeatureFlagsOptions,
-    analysis_context::resolve_workspace_filters,
-    duplication_filters::{filter_by_diff, filter_by_workspaces},
+    FeatureFlagsOptions, analysis_context::resolve_workspace_filters,
+    duplication_filters::filter_by_workspaces,
 };
 
 struct FakeHealthRunner {
@@ -1241,7 +1240,7 @@ fn diff_file_filters_clone_groups() {
         "diff --git a/src/a.ts b/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n+added\n context\n",
     );
 
-    filter_by_diff(&mut report, &diff, &root);
+    fallow_engine::diff_scope::filter_duplication_by_diff(&mut report, &diff, &root);
 
     assert_eq!(report.clone_groups.len(), 1);
     assert_eq!(

@@ -2,23 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_output::DiffIndex;
-use fallow_types::duplicates::{CloneInstance, DuplicationReport};
-
-pub fn filter_by_diff(report: &mut DuplicationReport, diff_index: &DiffIndex, root: &Path) {
-    let instance_overlaps = |instance: &CloneInstance| -> bool {
-        let Some(rel) = diff_index.key_for(&instance.file, root) else {
-            return true;
-        };
-        let start = u64::try_from(instance.start_line).unwrap_or(u64::MAX);
-        let end = u64::try_from(instance.end_line).unwrap_or(u64::MAX);
-        diff_index.range_overlaps_added(&rel, start, end)
-    };
-    report
-        .clone_groups
-        .retain(|group| group.instances.iter().any(instance_overlaps));
-    rebuild_duplication_derived_fields(report, root);
-}
+use fallow_types::duplicates::DuplicationReport;
 
 pub fn filter_by_workspaces(
     report: &mut DuplicationReport,
@@ -64,7 +48,7 @@ fn rebuild_duplication_derived_fields(report: &mut DuplicationReport, root: &Pat
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::duplicates::{CloneGroup, DuplicationStats};
+    use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
 
     use super::*;
 

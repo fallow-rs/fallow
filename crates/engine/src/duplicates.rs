@@ -49,6 +49,18 @@ pub fn refresh_clone_families(report: &mut DuplicationReport, root: &Path) {
         detector::families::detect_mirrored_directories(&report.clone_families, root);
 }
 
+/// Rebuild the fields that a scope filter invalidates: clone families,
+/// mirrored directories, statistics and the report order.
+///
+/// A scope filter (`--changed-since`, `--workspace`, a diff) narrows the corpus,
+/// so `stats` describes the narrowed corpus after this call. A presentation cap
+/// such as `--top` must not call this.
+pub fn refresh_scoped_report(report: &mut DuplicationReport, root: &Path) {
+    refresh_clone_families(report, root);
+    report.stats = recompute_stats(report);
+    report.sort();
+}
+
 /// Refresh near-clone metrics after a caller filters group instances.
 #[doc(hidden)]
 pub fn refresh_clone_group_metrics(group: &mut CloneGroup) {
