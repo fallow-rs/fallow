@@ -25,21 +25,8 @@ use std::sync::{Mutex, OnceLock};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use fallow_types::path_util::display_relative;
 pub use fallow_types::workspace::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
-
-/// Render `path` relative to `root` with forward slashes. Mirrors the private
-/// helper of the same name in `fallow_types::workspace`, kept here for the
-/// aggregated stderr-message builders ([`build_glob_group_message`] and
-/// [`build_tsconfig_refs_message`]) so the per-instance and aggregated message
-/// surfaces format paths identically (the forward-slash normalisation is
-/// load-bearing for cross-platform output stability).
-fn display_relative(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .display()
-        .to_string()
-        .replace('\\', "/")
-}
 
 /// Workspace-discovery failures that prevent analysis from proceeding.
 ///

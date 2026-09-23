@@ -18,6 +18,7 @@ use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::path_util::display_relative;
 use crate::serde_path;
 
 /// Why a workspace-discovery candidate was rejected, or why a sibling
@@ -1061,16 +1062,6 @@ pub fn dedupe_workspace_diagnostics(
     diagnostics: Vec<WorkspaceDiagnostic>,
 ) -> Vec<WorkspaceDiagnostic> {
     merge_workspace_diagnostics(diagnostics, Vec::new())
-}
-
-/// Render `path` relative to `root` with forward slashes. The forward-slash
-/// normalisation is load-bearing for cross-platform output stability.
-fn display_relative(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .display()
-        .to_string()
-        .replace('\\', "/")
 }
 
 /// The first segment of a glob that contains no glob metacharacter, so it

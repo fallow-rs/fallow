@@ -35,6 +35,21 @@ pub fn looks_like_windows_absolute_path(value: &str) -> bool {
     looks_like_windows_drive_absolute(value.as_bytes())
 }
 
+/// Renders `path` relative to `root` with forward slashes.
+///
+/// A path outside `root` keeps its full form. A path equal to `root` gives an
+/// empty string. The slash normalisation keeps the output the same on all
+/// platforms, so every message and report that shows a root-relative path must
+/// use this helper.
+#[must_use]
+pub fn display_relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+        .replace('\\', "/")
+}
+
 fn looks_like_windows_drive_absolute(bytes: &[u8]) -> bool {
     bytes.len() >= 3
         && bytes[0].is_ascii_alphabetic()
@@ -46,6 +61,38 @@ fn looks_like_windows_drive_absolute(bytes: &[u8]) -> bool {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn display_relative_strips_root_prefix() {
+        assert_eq!(
+            display_relative(Path::new("/project"), Path::new("/project/src/a.ts")),
+            "src/a.ts"
+        );
+    }
+
+    #[test]
+    fn display_relative_keeps_path_outside_root() {
+        assert_eq!(
+            display_relative(Path::new("/project"), Path::new("/other/a.ts")),
+            "/other/a.ts"
+        );
+    }
+
+    #[test]
+    fn display_relative_normalises_backslashes() {
+        assert_eq!(
+            display_relative(Path::new("/project"), Path::new(r"packages\ui\a.ts")),
+            "packages/ui/a.ts"
+        );
+    }
+
+    #[test]
+    fn display_relative_of_root_is_empty() {
+        assert_eq!(
+            display_relative(Path::new("/project"), Path::new("/project")),
+            ""
+        );
+    }
 
     #[test]
     fn posix_style_root_is_absolute_on_any_platform() {

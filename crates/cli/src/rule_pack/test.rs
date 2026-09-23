@@ -229,7 +229,7 @@ fn emit_human(
         }) {
             println!(
                 "  {}:{}:{}  matched \"{}\"",
-                display_path(root, &finding.violation.path),
+                fallow_types::path_util::display_relative(root, &finding.violation.path),
                 finding.violation.line,
                 finding.violation.col,
                 finding.violation.matched
@@ -274,13 +274,6 @@ fn pack_arg_to_config_path(root: &std::path::Path, pack: &std::path::Path) -> St
         pack
     };
     path.to_string_lossy().replace('\\', "/")
-}
-
-fn display_path(root: &std::path::Path, path: &std::path::Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 fn default_threads() -> usize {

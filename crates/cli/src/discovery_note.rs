@@ -105,10 +105,10 @@ pub fn build_default_ignore_exclusion_note(
 }
 
 /// Render a diagnostic path relative to the project root with forward slashes,
-/// matching how every JSON envelope emits it.
+/// matching how every JSON envelope emits it. The project root itself renders
+/// as `.` so the note never shows an empty directory name.
 fn display_relative(root: &Path, path: &Path) -> String {
-    let relative = path.strip_prefix(root).unwrap_or(path);
-    let rendered = relative.display().to_string().replace('\\', "/");
+    let rendered = fallow_types::path_util::display_relative(root, path);
     if rendered.is_empty() {
         ".".to_owned()
     } else {

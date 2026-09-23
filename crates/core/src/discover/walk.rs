@@ -6,6 +6,7 @@ use fallow_config::{
     DEFAULT_IGNORE_PATTERNS, ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
 };
 use fallow_types::discover::{DiscoveredFile, FileId};
+use fallow_types::path_util::display_relative;
 use fallow_types::workspace::glob_first_literal_segment;
 use ignore::WalkBuilder;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -292,7 +293,7 @@ fn summarize_examples(root: &Path, examples: &[SizedFile]) -> String {
         .iter()
         .take(NOTE_EXAMPLE_CAP)
         .map(|(path, size)| {
-            let display = display_relative_path(root, path);
+            let display = display_relative(root, path);
             format!("{display} ({})", format_size_mb(*size))
         })
         .collect();
@@ -442,7 +443,7 @@ fn summarize_paths(root: &Path, examples: &[&PathBuf]) -> String {
     let shown: Vec<String> = examples
         .iter()
         .take(NOTE_EXAMPLE_CAP)
-        .map(|path| display_relative_path(root, path))
+        .map(|path| display_relative(root, path))
         .collect();
     let remaining = examples.len().saturating_sub(NOTE_EXAMPLE_CAP);
     if remaining > 0 {
@@ -458,23 +459,13 @@ fn summarize_paths_open_ended(root: &Path, examples: &[&PathBuf]) -> String {
     let shown: Vec<String> = examples
         .iter()
         .take(NOTE_EXAMPLE_CAP)
-        .map(|path| display_relative_path(root, path))
+        .map(|path| display_relative(root, path))
         .collect();
     if examples.len() > NOTE_EXAMPLE_CAP {
         format!("{}, and more", shown.join(", "))
     } else {
         shown.join(", ")
     }
-}
-
-/// Render `path` relative to `root` with forward slashes. Cross-platform
-/// output stability depends on the slash normalisation.
-fn display_relative_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .display()
-        .to_string()
-        .replace('\\', "/")
 }
 
 /// Whether a candidate file inside a skipped dotdir is one this run had
@@ -769,7 +760,7 @@ fn report_skipped_source_dotdirs(
             config.root.display(),
             reportable
                 .first()
-                .map_or_else(String::new, |dir| display_relative_path(&config.root, dir))
+                .map_or_else(String::new, |dir| display_relative(&config.root, dir))
         ))
     {
         tracing::warn!(
@@ -807,7 +798,7 @@ fn build_skipped_dotdirs_note(root: &Path, reportable: &[&PathBuf], truncated: b
     let verb = if count == 1 { "contains" } else { "contain" };
     let at_least = if truncated { "at least " } else { "" };
     let (target, pronoun) = match reportable {
-        [only] => (display_relative_path(root, only), "it"),
+        [only] => (display_relative(root, only), "it"),
         _ => ("<dir>".to_owned(), "one"),
     };
     format!(

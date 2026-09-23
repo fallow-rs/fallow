@@ -39,6 +39,7 @@ use fallow_config::{
     add_ignore_exports_rule_to_string, classify_config_fix_plan as classify_plan,
 };
 use fallow_types::output_dead_code::DuplicateExportFinding;
+use fallow_types::path_util::display_relative;
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
@@ -116,7 +117,7 @@ fn apply_edit(
     if entries.is_empty() {
         return false;
     }
-    let config_file = display_path(root, config_path);
+    let config_file = display_relative(root, config_path);
 
     if write.dry_run {
         return apply_edit_dry_run(
@@ -219,7 +220,7 @@ fn apply_create(
     if entries.is_empty() {
         return false;
     }
-    let target_display = display_path(root, target);
+    let target_display = display_relative(root, target);
 
     let info = init::detect_project(root);
     let seed = init::build_json_config(&info);
@@ -290,7 +291,7 @@ fn emit_blocked_monorepo(
     output: OutputFormat,
     fixes: &mut Vec<serde_json::Value>,
 ) {
-    let target_display = display_path(root, &root.join(".fallowrc.json"));
+    let target_display = display_relative(root, &root.join(".fallowrc.json"));
     let workspace_relative = display_workspace_path(root, workspace_root);
     if !matches!(output, OutputFormat::Json) {
         let root_display = root.to_string_lossy().replace('\\', "/");
@@ -357,7 +358,7 @@ fn emit_blocked_no_create(
     output: OutputFormat,
     fixes: &mut Vec<serde_json::Value>,
 ) {
-    let target_display = display_path(root, target);
+    let target_display = display_relative(root, target);
     if !matches!(output, OutputFormat::Json) {
         eprintln!(
             "Skipped duplicate-export config fix: no fallow config file at {} \
@@ -464,13 +465,6 @@ fn normal_components(path: &Path) -> Option<Vec<OsString>> {
         }
     }
     Some(components)
-}
-
-fn display_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 #[cfg(test)]

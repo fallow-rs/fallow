@@ -3,10 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus, ResolvedBoundaryConfig};
-use fallow_output::{
-    ListEntryPointOutput, RootEnvelopeMode, WorkspaceInfo as WorkspaceOutputInfo, WorkspacesOutput,
-};
+use fallow_output::{ListEntryPointOutput, WorkspaceInfo as WorkspaceOutputInfo, WorkspacesOutput};
 use fallow_types::discover::{DiscoveredFile, EntryPoint};
+use fallow_types::path_util::display_relative;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -55,8 +54,6 @@ pub struct ProjectInfoProgrammaticOutput {
     pub workspaces: Option<WorkspacesOutput<fallow_config::WorkspaceDiagnostic>>,
     /// Which list envelope shape wraps the serialized body.
     pub envelope: ListJsonEnvelope,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
 }
 
 /// Serialize typed project-info output to the stable JSON contract.
@@ -75,7 +72,6 @@ pub fn serialize_project_info_programmatic_json(
             boundaries: output.boundaries,
             workspaces: output.workspaces,
         },
-        output.envelope_mode,
         output.envelope,
     )
     .map_err(|err| {
@@ -90,8 +86,6 @@ pub fn serialize_project_info_programmatic_json(
 pub struct ListBoundariesProgrammaticOutput {
     /// Typed boundaries listing produced by the run.
     pub boundaries: BoundariesListing,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
 }
 
 /// Serialize typed boundary-list output to the stable JSON contract.
@@ -110,7 +104,6 @@ pub fn serialize_list_boundaries_programmatic_json(
             boundaries: Some(output.boundaries),
             workspaces: None,
         },
-        output.envelope_mode,
         ListJsonEnvelope::Boundaries,
     )
     .map_err(|err| {
@@ -211,7 +204,6 @@ pub fn run_list_boundaries(
 
         Ok(ListBoundariesProgrammaticOutput {
             boundaries: boundary_data_to_output(&data),
-            envelope_mode: RootEnvelopeMode::Tagged,
         })
     })
 }
@@ -284,7 +276,6 @@ pub fn run_project_info(
             boundaries,
             workspaces,
             envelope,
-            envelope_mode: RootEnvelopeMode::Tagged,
         })
     })
 }
@@ -363,7 +354,7 @@ fn collect_files(
         discovered.map(|files| {
             files
                 .iter()
-                .map(|file| format_display_path(&file.path, root))
+                .map(|file| display_relative(root, &file.path))
                 .collect()
         })
     } else {
@@ -423,7 +414,7 @@ fn entry_points_to_output(entries: &[EntryPoint], root: &Path) -> Vec<ListEntryP
     entries
         .iter()
         .map(|entry| ListEntryPointOutput {
-            path: format_display_path(&entry.path, root),
+            path: display_relative(root, &entry.path),
             source: entry.source.to_string(),
         })
         .collect()
@@ -456,14 +447,6 @@ fn collect_workspace_output(
             .map(|diagnostic| diagnostic.clone().into_root_relative(root))
             .collect(),
     }
-}
-
-fn format_display_path(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .display()
-        .to_string()
-        .replace('\\', "/")
 }
 
 /// Compute boundary listing data from resolved config and optional discovery.
@@ -695,7 +678,7 @@ mod tests {
     }
 
     fn git(project: &Path, args: &[&str]) {
-        let status = Command::new("git")
+        let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
             .args(args)
             .current_dir(project)
             .status()
