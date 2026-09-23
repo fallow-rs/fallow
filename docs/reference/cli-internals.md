@@ -24,8 +24,11 @@ an exit code.
 
 ## High-value paths
 
-- `crates/cli/src/audit.rs`: changed-code audit across dead code, complexity,
-  duplication, and styling.
+- `crates/cli/src/audit.rs`: the CLI runners and the review brief of the
+  changed-code audit. The audit itself (base snapshot, rename remap,
+  attribution, dependency scope, verdict) is `crates/api/src/audit_run/`,
+  which `fallow audit`, the MCP `audit` tool and `fallow_api::run_audit`
+  share.
 - `crates/cli/src/base_worktree.rs`: temporary base snapshots and cleanup.
 - `crates/cli/src/check/`: dead-code filters, severities, workspaces, and
   baselines.
@@ -137,10 +140,10 @@ an exit code.
   LSP, VS Code, GitHub Action, and GitLab consumers together.
 - New-only duplication demotion (issues #2164, #2220): under `--gate new-only`
   an introduced clone group none of whose instances overlap an added line is
-  demoted to inherited. Without an opt-in shared diff, the CLI uses the
-  merge-base worktree diff for that decision (`crates/cli/src/audit.rs`,
-  `demote_preexisting_dupe_introductions`); the programmatic runtime path
-  (`crates/api/src/runtime/audit.rs`) also uses its merge-base worktree diff.
+  demoted to inherited. Without an opt-in shared diff, the merge-base worktree
+  diff decides (`crates/api/src/audit_run/outcome.rs`,
+  `demote_preexisting_dupe_introductions`). The CLI and the programmatic
+  runtime run the same function.
   When an opt-in shared diff (`--diff-file`, `--diff-stdin`, or
   `$FALLOW_DIFF_FILE`) is active, it has already filtered the head duplication
   report with the same added-line overlap predicate. Every retained clone group
@@ -149,6 +152,12 @@ an exit code.
   as inherited and additionally surface via
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
+- Audit dependency scope: a dependency-level finding (unused, type-only,
+  test-only or misplaced dependency, unused catalog entry) is in audit scope
+  only when the changeset touches the manifest or catalog file that declares
+  it. The rule applies to the head run and to the base snapshot
+  (`scope_dependency_findings` in `crates/api/src/audit_run/scope.rs`).
+  `--changed-since` on the other commands keeps every dependency finding.
 - Narrowing requests report their own fate (issues #2687, #2688). Two channels
   can be asked for and refused: `--changed-since` and the opt-in shared diff.
   Both widen the report rather than failing the run, so the fact travels on the

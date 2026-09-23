@@ -625,7 +625,7 @@ fn build_audit_styling_groups<'a>(
     sort_audit_styling_findings(rules, &mut sorted);
     let gated_count = sorted
         .iter()
-        .filter(|finding| styling_finding_is_error_gated(rules, &finding.code))
+        .filter(|finding| fallow_api::audit_run::styling_finding_gates(rules, &finding.code))
         .count();
     let fix_confidently = sorted
         .iter()
@@ -650,8 +650,10 @@ fn sort_audit_styling_findings(
     findings: &mut [&fallow_output::StylingFinding],
 ) {
     findings.sort_by(|a, b| {
-        styling_finding_is_error_gated(rules, &b.code)
-            .cmp(&styling_finding_is_error_gated(rules, &a.code))
+        fallow_api::audit_run::styling_finding_gates(rules, &b.code)
+            .cmp(&fallow_api::audit_run::styling_finding_gates(
+                rules, &a.code,
+            ))
             .then_with(|| a.path.cmp(&b.path))
             .then_with(|| a.line.cmp(&b.line))
             .then_with(|| a.code.cmp(&b.code))
@@ -675,7 +677,7 @@ fn print_audit_styling_group(
     }
     let gated_count = findings
         .iter()
-        .filter(|finding| styling_finding_is_error_gated(rules, &finding.code))
+        .filter(|finding| fallow_api::audit_run::styling_finding_gates(rules, &finding.code))
         .count();
     let visible_count = top_n.max(gated_count);
     let indent = if show_label { "    " } else { "  " };
@@ -710,21 +712,11 @@ fn styling_finding_is_fix_confidently(finding: &fallow_output::StylingFinding) -
     )
 }
 
-fn styling_finding_is_error_gated(rules: &RulesConfig, code: &str) -> bool {
-    let (_, severity) = styling_finding_rule_context(rules, code);
-    severity == Severity::Error
-}
-
 fn styling_finding_rule_context(rules: &RulesConfig, code: &str) -> (String, Severity) {
-    let severity = match code {
-        "css-token-drift" => rules.css_token_drift,
-        "css-duplicate-block" => rules.css_duplicate_block,
-        "css-selector-complexity" => rules.css_selector_complexity,
-        "css-dead-surface" => rules.css_dead_surface,
-        "css-broken-reference" => rules.css_broken_reference,
-        _ => Severity::Warn,
-    };
-    (format!("rules.{code}"), severity)
+    (
+        format!("rules.{code}"),
+        fallow_api::audit_run::styling_rule_severity(rules, code),
+    )
 }
 
 fn styling_finding_audit_context(

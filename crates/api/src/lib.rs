@@ -29,6 +29,7 @@ mod analysis_context;
 /// introduced-vs-pre-existing attribution.
 pub mod audit_keys;
 pub mod audit_output;
+pub mod audit_run;
 pub mod combined_output;
 /// One-line-per-finding compact text builders for dead-code, grouped, health,
 /// and duplication output.

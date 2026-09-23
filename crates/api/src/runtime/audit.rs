@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use fallow_config::{AuditGate, ProductionAnalysis};
+use fallow_config::{ProductionAnalysis, ResolvedConfig};
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts,
     project_analysis::ProjectAnalysisArtifactOptions,
@@ -10,16 +10,23 @@ use fallow_engine::{
     session::AnalysisSession,
 };
 use fallow_output::build_audit_next_steps;
-use fallow_types::{envelope::AuditIntroduced, output::NextStep, output_format::OutputFormat};
+use fallow_types::{
+    envelope::AuditIntroduced, output::NextStep, output_format::OutputFormat,
+    results::AnalysisResults,
+};
 use rustc_hash::FxHashSet;
 
 use crate::{
-    AnalysisOptions, AuditAttribution, AuditOptions, AuditProgrammaticKeySnapshot,
-    AuditProgrammaticOutput, AuditSummary, AuditVerdict, ComplexityOptions, DeadCodeFilters,
-    DeadCodeOptions, DuplicationOptions, ProgrammaticError,
+    AnalysisOptions, AuditAttribution, AuditOptions, AuditProgrammaticOutput, AuditSummary,
+    AuditVerdict, ComplexityOptions, DeadCodeFilters, DeadCodeOptions, DuplicationOptions,
+    ProgrammaticError,
     analysis_context::{
         ProgrammaticAnalysisContext, changed_files_for_run,
         resolve_programmatic_analysis_context_deferred_workspace,
+    },
+    audit_run::{
+        AuditAnalyses, AuditAnalysesView, AuditBackend, AuditRun, AuditRunInput, DeadCodeView,
+        DuplicationView, HealthView,
     },
 };
 
@@ -30,6 +37,10 @@ use super::{
 };
 
 /// Run changed-code audit through typed programmatic runners.
+///
+/// The audit itself is [`crate::audit_run::run`], the same implementation as
+/// `fallow audit`. This function supplies the typed runners and builds the
+/// programmatic output.
 ///
 /// # Errors
 ///
@@ -54,53 +65,63 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         ));
     }
 
-    let mut head =
-        run_audit_subanalyses_with_context(options, &analysis, &resolved, Some(&changed_files))?;
-    let runtime_base_snapshot = if matches!(options.gate, AuditGate::NewOnly) {
-        Some(compute_base_snapshot(options, &resolved_base.git_ref)?)
-    } else {
-        None
-    };
     let config = load_programmatic_audit_config(&resolved)?;
-    let mut comparison =
-        build_programmatic_audit_comparison(&head, &config, runtime_base_snapshot.as_ref());
-    demote_preexisting_dupe_introductions(&mut comparison, &head, &resolved_base.git_ref);
-    let summary = build_programmatic_audit_summary(&head, &comparison);
-    let attribution =
-        comparison_attribution(options.gate, &comparison, runtime_base_snapshot.is_some());
-    let verdict = comparison_verdict(
-        options.gate,
-        &summary,
-        &head.duplication,
-        &head.complexity,
-        &config,
-        &comparison,
-    );
-    if runtime_base_snapshot.is_some() {
-        comparison.annotate_typed_findings(
-            &mut head.dead_code.output.results,
-            &mut head.complexity.report,
-        );
+    let backend = ProgrammaticAuditBackend {
+        options,
+        analysis: &analysis,
+        resolved: &resolved,
+        config: &config,
+    };
+    let Some(AuditRun {
+        analyses,
+        outcome,
+        changed_files: _,
+    }) = crate::audit_run::run(
+        &backend,
+        AuditRunInput {
+            root: resolved.root(),
+            gate: options.gate,
+            base_ref: &resolved_base.git_ref,
+            cache_dir: Some(&config.cache_dir),
+            changed_files,
+        },
+    )?
+    else {
+        return Ok(empty_audit_output(
+            options,
+            resolved_base,
+            resolved.root(),
+            changed_files_count,
+            start.elapsed(),
+        ));
+    };
+
+    let mut head = analyses.subanalyses;
+    if outcome.base_snapshot.is_some() {
         for ((group, introduced), demoted) in head
             .duplication
             .output
             .report
             .clone_groups
             .iter_mut()
-            .zip(comparison.dupes.introduced())
-            .zip(comparison.dupes.demoted())
+            .zip(outcome.comparison.dupes.introduced())
+            .zip(outcome.comparison.dupes.demoted())
         {
             group.introduced = Some(AuditIntroduced(introduced));
             group.demotion_reason = demoted.then_some(crate::CloneDemotionReason::NoAddedLines);
         }
     }
     let next_steps = audit_next_steps(&head.dead_code, &head.complexity);
-    let base_snapshot = runtime_base_snapshot.map(|snapshot| snapshot.public);
+    let base_snapshot = outcome
+        .base_snapshot
+        .as_ref()
+        .filter(|_| !outcome.base_snapshot_skipped)
+        .map(crate::audit_run::AuditKeySnapshot::to_programmatic);
 
     Ok(AuditProgrammaticOutput {
-        verdict,
-        summary,
-        attribution,
+        verdict: outcome.verdict,
+        summary: outcome.summary,
+        attribution: outcome.attribution,
         changed_files_count,
         base_ref: resolved_base.git_ref,
         base_description: resolved_base.description,
@@ -114,6 +135,156 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         next_steps,
         telemetry_analysis_run_id: None,
     })
+}
+
+/// The typed runners of the programmatic audit.
+struct ProgrammaticAuditBackend<'a> {
+    options: &'a AuditOptions,
+    analysis: &'a AnalysisOptions,
+    resolved: &'a ProgrammaticAnalysisContext,
+    config: &'a ResolvedConfig,
+}
+
+impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
+    type Analyses = ProgrammaticAuditAnalyses<'a>;
+    type Checkout = TemporaryBaseWorktree;
+    type CacheKey = ();
+    type Error = ProgrammaticError;
+
+    fn run_head(
+        &self,
+        changed_files: &FxHashSet<PathBuf>,
+    ) -> ProgrammaticResult<ProgrammaticAuditAnalyses<'a>> {
+        let subanalyses = run_audit_subanalyses_with_context(
+            self.options,
+            self.analysis,
+            self.resolved,
+            Some(changed_files),
+        )?;
+        Ok(ProgrammaticAuditAnalyses {
+            subanalyses,
+            config: self.config,
+        })
+    }
+
+    fn create_base_checkout(
+        &self,
+        base_ref: &str,
+        _base_sha: Option<&str>,
+    ) -> ProgrammaticResult<TemporaryBaseWorktree> {
+        TemporaryBaseWorktree::create(self.resolved.root(), base_ref).map_err(|err| {
+            ProgrammaticError::new(err.to_string(), 2)
+                .with_code("FALLOW_AUDIT_BASE_WORKTREE_FAILED")
+                .with_context("audit.base")
+        })
+    }
+
+    fn run_base(
+        &self,
+        base_root: &Path,
+        focus: Option<&FxHashSet<PathBuf>>,
+    ) -> ProgrammaticResult<ProgrammaticAuditAnalyses<'a>> {
+        let head_root = self.resolved.root();
+        let config_path = self
+            .options
+            .analysis
+            .config_path
+            .clone()
+            .or_else(|| fallow_config::FallowConfig::find_config_path(head_root));
+        let base_analysis = AnalysisOptions {
+            root: Some(base_root.to_path_buf()),
+            config_path,
+            changed_since: None,
+            explain: false,
+            ..self.options.analysis.clone()
+        };
+        let coverage = crate::audit_run::base_coverage_inputs(
+            head_root,
+            self.options.coverage.as_deref(),
+            self.options.coverage_root.as_deref(),
+        );
+        let base_options = AuditOptions {
+            coverage: coverage.coverage,
+            coverage_root: coverage.coverage_root,
+            ..self.options.clone()
+        };
+        let subanalyses = run_audit_subanalyses(&base_options, &base_analysis, focus, true)?;
+        Ok(ProgrammaticAuditAnalyses {
+            subanalyses,
+            config: self.config,
+        })
+    }
+}
+
+/// The typed analyses of one audit side. `config` is the head config, which
+/// decides severities and styling gates.
+struct ProgrammaticAuditAnalyses<'a> {
+    subanalyses: AuditSubanalyses,
+    config: &'a ResolvedConfig,
+}
+
+impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
+    fn view(&self) -> AuditAnalysesView<'_> {
+        let AuditSubanalyses {
+            dead_code,
+            duplication,
+            complexity,
+        } = &self.subanalyses;
+        AuditAnalysesView {
+            dead_code: Some(DeadCodeView {
+                results: &dead_code.output.results,
+                config: self.config,
+                root: &dead_code.root,
+                type_aware: dead_code
+                    .output
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.type_aware.as_ref()),
+                syntactic_keys: None,
+                public_api: None,
+            }),
+            duplication: Some(DuplicationView {
+                clone_groups: duplication
+                    .output
+                    .report
+                    .clone_groups
+                    .iter()
+                    .map(|group| &group.group)
+                    .collect(),
+                root: &duplication.root,
+                duplication_percentage: duplication.output.report.stats.duplication_percentage,
+                threshold: duplication.threshold,
+            }),
+            health: Some(HealthView {
+                report: &complexity.report,
+                root: &complexity.root,
+                rules: &self.config.rules,
+                branching: None,
+            }),
+        }
+    }
+
+    fn dead_code_results_mut(&mut self) -> Option<&mut AnalysisResults> {
+        Some(&mut self.subanalyses.dead_code.output.results)
+    }
+
+    fn health_report_mut(&mut self) -> Option<&mut fallow_output::HealthReport> {
+        Some(&mut self.subanalyses.complexity.report)
+    }
+
+    fn record_type_aware_warning(&mut self, warning: &str) {
+        if let Some(meta) = self
+            .subanalyses
+            .dead_code
+            .output
+            .meta
+            .as_mut()
+            .and_then(|meta| meta.type_aware.as_mut())
+        {
+            meta.warnings.push(warning.to_owned());
+            meta.warning_count = meta.warnings.len();
+        }
+    }
 }
 
 fn validate_audit_api_options(options: &AuditOptions) -> ProgrammaticResult<()> {
@@ -138,39 +309,34 @@ fn validate_audit_api_options(options: &AuditOptions) -> ProgrammaticResult<()> 
 pub(super) fn resolve_audit_base_ref(
     options: &AuditOptions,
 ) -> ProgrammaticResult<ResolvedAuditBase> {
-    if let Some(ref_str) = options
+    let explicit = options
         .base
         .as_deref()
-        .or(options.analysis.changed_since.as_deref())
-    {
-        validate_git_ref(ref_str, "audit.base")?;
-        return Ok(ResolvedAuditBase {
-            git_ref: (*ref_str).to_string(),
-            description: None,
-        });
-    }
-    if let Some(env_ref) = audit_base_env_override() {
-        validate_git_ref(&env_ref, "FALLOW_AUDIT_BASE")?;
-        return Ok(ResolvedAuditBase {
-            description: Some(format!("FALLOW_AUDIT_BASE={env_ref}")),
-            git_ref: env_ref,
-        });
-    }
+        .or(options.analysis.changed_since.as_deref());
     let root = options
         .analysis
         .root
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let detected = repo_refs::auto_detect_audit_base_ref(&root).ok_or_else(|| {
-        ProgrammaticError::new(
+    crate::audit_run::resolve_audit_base(&root, explicit).map_err(|error| match error {
+        crate::audit_run::AuditBaseError::InvalidRef {
+            origin,
+            value,
+            reason,
+        } => ProgrammaticError::new(format!("invalid git ref `{value}`: {reason}"), 2)
+            .with_code("FALLOW_INVALID_GIT_REF")
+            .with_context(match origin {
+                crate::audit_run::AuditBaseOrigin::Environment => "FALLOW_AUDIT_BASE",
+                crate::audit_run::AuditBaseOrigin::Explicit
+                | crate::audit_run::AuditBaseOrigin::Detected => "audit.base",
+            }),
+        crate::audit_run::AuditBaseError::NotDetected => ProgrammaticError::new(
             "could not detect base branch. Set audit.base to specify the comparison target",
             2,
         )
         .with_code("FALLOW_AUDIT_BASE_NOT_FOUND")
-        .with_context("audit.base")
-    })?;
-    validate_git_ref(&detected.git_ref, "audit.base")?;
-    Ok(detected)
+        .with_context("audit.base"),
+    })
 }
 
 fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> AnalysisOptions {
@@ -236,12 +402,6 @@ struct AuditSubanalyses {
     dead_code: crate::DeadCodeProgrammaticOutput,
     duplication: crate::DuplicationProgrammaticOutput,
     complexity: crate::HealthProgrammaticOutput,
-}
-
-#[derive(Default)]
-struct AuditRuntimeKeySnapshot {
-    public: AuditProgrammaticKeySnapshot,
-    styling: FxHashSet<String>,
 }
 
 struct AuditSubanalysisOptions {
@@ -589,304 +749,6 @@ fn load_programmatic_audit_config(
     })
 }
 
-fn build_programmatic_audit_comparison(
-    analyses: &AuditSubanalyses,
-    config: &fallow_config::ResolvedConfig,
-    base: Option<&AuditRuntimeKeySnapshot>,
-) -> crate::audit_keys::AuditComparison {
-    let dupe_keys = analyses
-        .duplication
-        .output
-        .report
-        .clone_groups
-        .iter()
-        .map(|group| crate::audit_keys::dupe_group_key(&group.group, &analyses.duplication.root))
-        .collect();
-    let styling_keys = analyses
-        .complexity
-        .report
-        .styling_findings
-        .iter()
-        .map(|finding| crate::audit_keys::styling_finding_key(finding, &analyses.complexity.root))
-        .collect();
-    crate::audit_keys::AuditComparison::build(crate::audit_keys::AuditComparisonInput {
-        results: &analyses.dead_code.output.results,
-        config,
-        root: &analyses.dead_code.root,
-        health: &analyses.complexity.report,
-        health_root: &analyses.complexity.root,
-        dupe_keys,
-        styling_keys,
-        base_dead_code: base.map(|snapshot| &snapshot.public.dead_code),
-        base_health: base.map(|snapshot| &snapshot.public.health),
-        base_dupes: base.map(|snapshot| &snapshot.public.dupes),
-        base_styling: base.map(|snapshot| &snapshot.styling),
-    })
-}
-
-/// Demote introduced clone groups whose instances contain no added lines from
-/// the merge-base worktree diff: no instance range contains an added line, so
-/// the changeset did not write the duplicated text and only the group's
-/// attribution key changed because the changeset
-/// removed code elsewhere. Keeps the new-only gate from failing a
-/// clone-removal refactor on duplication it did not write (issue #2164).
-fn demote_preexisting_dupe_introductions(
-    comparison: &mut crate::audit_keys::AuditComparison,
-    analyses: &AuditSubanalyses,
-    base_ref: &str,
-) {
-    if comparison.dupes.introduced_count() == 0 {
-        return;
-    }
-    let root = &analyses.duplication.root;
-    let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) else {
-        return;
-    };
-    let index = fallow_output::DiffIndex::from_unified_diff(&diff);
-    let demote = crate::audit_keys::preexisting_dupe_group_keys(
-        analyses
-            .duplication
-            .output
-            .report
-            .clone_groups
-            .iter()
-            .map(|group| &group.group),
-        root,
-        &index,
-    );
-    comparison.dupes.demote_introductions(&demote);
-}
-
-fn build_programmatic_audit_summary(
-    analyses: &AuditSubanalyses,
-    comparison: &crate::audit_keys::AuditComparison,
-) -> AuditSummary {
-    let dead_code_issues = comparison.dead_code.visible_count();
-    AuditSummary {
-        dead_code_issues,
-        dead_code_has_errors: comparison.dead_code.has_errors(),
-        complexity_findings: analyses.complexity.report.findings.len(),
-        max_cyclomatic: analyses
-            .complexity
-            .report
-            .findings
-            .iter()
-            .map(|finding| finding.cyclomatic)
-            .max(),
-        duplication_clone_groups: analyses.duplication.output.report.clone_groups.len(),
-    }
-}
-
-fn styling_finding_gates(rules: &fallow_config::RulesConfig, code: &str) -> bool {
-    let severity = match code {
-        "css-token-drift" => rules.css_token_drift,
-        "css-duplicate-block" => rules.css_duplicate_block,
-        "css-selector-complexity" => rules.css_selector_complexity,
-        "css-dead-surface" => rules.css_dead_surface,
-        "css-broken-reference" => rules.css_broken_reference,
-        _ => fallow_config::Severity::Warn,
-    };
-    severity == fallow_config::Severity::Error
-}
-
-fn comparison_verdict(
-    gate: AuditGate,
-    summary: &AuditSummary,
-    duplication: &crate::DuplicationProgrammaticOutput,
-    complexity: &crate::HealthProgrammaticOutput,
-    config: &fallow_config::ResolvedConfig,
-    comparison: &crate::audit_keys::AuditComparison,
-) -> AuditVerdict {
-    let new_only = matches!(gate, AuditGate::NewOnly);
-    let dead_code_errors = if new_only {
-        comparison.dead_code.has_introduced_errors()
-    } else {
-        comparison.dead_code.has_errors()
-    };
-    let dead_code_warnings = if new_only {
-        comparison.dead_code.has_introduced_warnings()
-    } else {
-        comparison
-            .dead_code
-            .records()
-            .iter()
-            .any(|record| record.effective_severity == fallow_config::Severity::Warn)
-    };
-    let complexity_findings = if new_only {
-        comparison.health.introduced_count()
-    } else {
-        summary.complexity_findings
-    };
-    let styling_errors = complexity
-        .report
-        .styling_findings
-        .iter()
-        .zip(comparison.styling.introduced())
-        .any(|(finding, introduced)| {
-            (!new_only || introduced) && styling_finding_gates(&config.rules, &finding.code)
-        });
-    if dead_code_errors || complexity_findings > 0 || styling_errors {
-        return AuditVerdict::Fail;
-    }
-    let duplication_findings = if new_only {
-        comparison.dupes.introduced_count()
-    } else {
-        summary.duplication_clone_groups
-    };
-    if duplication_findings > 0 {
-        let pct = duplication.output.report.stats.duplication_percentage;
-        if duplication.threshold > 0.0 && pct > duplication.threshold {
-            return AuditVerdict::Fail;
-        }
-        return AuditVerdict::Warn;
-    }
-    if dead_code_warnings {
-        return AuditVerdict::Warn;
-    }
-    AuditVerdict::Pass
-}
-
-fn comparison_attribution(
-    gate: AuditGate,
-    comparison: &crate::audit_keys::AuditComparison,
-    has_base: bool,
-) -> AuditAttribution {
-    if !has_base {
-        return AuditAttribution {
-            gate,
-            ..AuditAttribution::default()
-        };
-    }
-    AuditAttribution {
-        gate,
-        dead_code_introduced: comparison.dead_code.introduced_count(),
-        dead_code_inherited: comparison.dead_code.inherited_count(),
-        complexity_introduced: comparison.health.introduced_count(),
-        complexity_inherited: comparison.health.inherited_count(),
-        duplication_introduced: comparison.dupes.introduced_count(),
-        duplication_inherited: comparison.dupes.inherited_count(),
-    }
-}
-
-fn snapshot_from_analyses(analyses: &AuditSubanalyses) -> AuditRuntimeKeySnapshot {
-    let styling =
-        crate::audit_keys::styling_keys(&analyses.complexity.report, &analyses.complexity.root);
-    let mut health =
-        crate::audit_keys::health_keys(&analyses.complexity.report, &analyses.complexity.root);
-    health.extend(styling.iter().cloned());
-    AuditRuntimeKeySnapshot {
-        public: AuditProgrammaticKeySnapshot {
-            dead_code: crate::audit_keys::dead_code_keys(
-                &analyses.dead_code.output.results,
-                &analyses.dead_code.root,
-            ),
-            health,
-            dupes: analyses
-                .duplication
-                .output
-                .report
-                .clone_groups
-                .iter()
-                .map(|group| {
-                    crate::audit_keys::dupe_group_key(&group.group, &analyses.duplication.root)
-                })
-                .collect(),
-        },
-        styling,
-    }
-}
-
-fn compute_base_snapshot(
-    options: &AuditOptions,
-    base_ref: &str,
-) -> ProgrammaticResult<AuditRuntimeKeySnapshot> {
-    let current_root = analysis_root_from_options(options)?;
-    let worktree = TemporaryBaseWorktree::create(&current_root, base_ref).map_err(|err| {
-        ProgrammaticError::new(err.to_string(), 2)
-            .with_code("FALLOW_AUDIT_BASE_WORKTREE_FAILED")
-            .with_context("audit.base")
-    })?;
-    let base_root = match repo_refs::resolve_base_analysis_root(&current_root, worktree.path()) {
-        repo_refs::BaseAnalysisRoot::Present(root) => root,
-        // A root the base commit does not contain (a package added on the
-        // branch) has an empty base snapshot, so every finding under it is
-        // introduced. That matches the CLI, which analyzes the same absent
-        // directory and finds nothing there.
-        repo_refs::BaseAnalysisRoot::NewInHead(_) => {
-            return Ok(AuditRuntimeKeySnapshot::default());
-        }
-    };
-    let current_config_path = options
-        .analysis
-        .config_path
-        .clone()
-        .or_else(|| fallow_config::FallowConfig::find_config_path(&current_root));
-    let base_analysis = AnalysisOptions {
-        root: Some(base_root),
-        config_path: current_config_path,
-        changed_since: None,
-        explain: false,
-        ..options.analysis.clone()
-    };
-    let base_options = base_snapshot_options(options, &current_root);
-    let base = run_audit_subanalyses(&base_options, &base_analysis, None, true)?;
-    Ok(snapshot_from_analyses(&base))
-}
-
-/// Audit options for the base-worktree pass, with Istanbul coverage inputs
-/// remapped onto that worktree.
-///
-/// The coverage file lives in (and its recorded paths point at) the HEAD
-/// checkout, while the base pass analyzes a temporary worktree. The coverage
-/// path is resolved against the canonical HEAD root so the base pass reads
-/// the same file, and when no explicit `coverage_root` exists that root
-/// becomes the strip prefix so every entry rebases onto the base worktree;
-/// otherwise base CRAP silently degrades to the reachability estimate and
-/// unchanged functions flip to `introduced` (#2347). Without explicit
-/// coverage, the head pass auto-detects `coverage/coverage-final.json`
-/// against the HEAD root, which the base worktree never materializes; the
-/// same auto-detection runs here so both passes score from the same map. An
-/// explicit `coverage_root` is forwarded unchanged: the base pass rebases it
-/// onto its own root. The canonical root serves both the path resolution and
-/// the default prefix, so a relative `analysis.root` cannot make the two
-/// mechanisms disagree.
-fn base_snapshot_options(options: &AuditOptions, current_root: &Path) -> AuditOptions {
-    let canonical_root =
-        dunce::canonicalize(current_root).unwrap_or_else(|_| current_root.to_path_buf());
-    let coverage = options.coverage.as_deref().map_or_else(
-        || fallow_engine::health::scoring::auto_detect_coverage(&canonical_root),
-        |coverage| {
-            Some(fallow_engine::health::scoring::resolve_relative_to_root(
-                coverage,
-                Some(&canonical_root),
-            ))
-        },
-    );
-    let Some(coverage) = coverage else {
-        return options.clone();
-    };
-    let mut base_options = options.clone();
-    base_options.coverage = Some(coverage);
-    if base_options.coverage_root.is_none() {
-        base_options.coverage_root = Some(canonical_root);
-    }
-    base_options
-}
-
-fn analysis_root_from_options(options: &AuditOptions) -> ProgrammaticResult<PathBuf> {
-    match options.analysis.root.clone() {
-        Some(root) => Ok(root),
-        None => std::env::current_dir().map_err(|err| {
-            ProgrammaticError::new(
-                format!("failed to resolve current working directory: {err}"),
-                2,
-            )
-            .with_code("FALLOW_CWD_UNAVAILABLE")
-            .with_context("analysis.root")
-        }),
-    }
-}
-
 fn audit_next_steps(
     dead_code: &crate::DeadCodeProgrammaticOutput,
     complexity: &crate::HealthProgrammaticOutput,
@@ -897,23 +759,6 @@ fn audit_next_steps(
         crate::next_steps::suggestions_enabled(),
     );
     build_audit_next_steps(&input)
-}
-
-fn validate_git_ref(value: &str, context: &'static str) -> ProgrammaticResult<()> {
-    fallow_engine::validate::validate_git_ref(value)
-        .map(|_| ())
-        .map_err(|err| {
-            ProgrammaticError::new(format!("invalid git ref `{value}`: {err}"), 2)
-                .with_code("FALLOW_INVALID_GIT_REF")
-                .with_context(context)
-        })
-}
-
-fn audit_base_env_override() -> Option<String> {
-    std::env::var("FALLOW_AUDIT_BASE")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }
 
 #[cfg(test)]

@@ -2830,6 +2830,80 @@ fn audit_dependency_location_change_is_introduced() {
     );
 }
 
+/// A repository whose base commit has an unused `left-pad` dependency.
+fn unused_dependency_audit_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-dep-scope","main":"src/index.ts","dependencies":{"left-pad":"1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/index.ts"), "export {};\n").unwrap();
+    fs::write(dir.join("src/util.ts"), "export const value = 1;\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+    tmp
+}
+
+fn audit_unused_dependency_names(dir: &Path) -> Vec<String> {
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    let json = parse_json(&output);
+    json["dead_code"]["unused_dependencies"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| {
+            item["package_name"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn audit_leaves_out_dependency_findings_of_an_unchanged_manifest() {
+    let tmp = unused_dependency_audit_fixture();
+    let dir = tmp.path();
+    fs::write(
+        dir.join("src/util.ts"),
+        "export const value = 1;\nexport const other = 2;\n",
+    )
+    .unwrap();
+    commit_all(dir, "edit a source file");
+
+    assert_eq!(audit_unused_dependency_names(dir), Vec::<String>::new());
+}
+
+#[test]
+fn audit_reports_dependency_findings_of_a_changed_manifest() {
+    let tmp = unused_dependency_audit_fixture();
+    let dir = tmp.path();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-dep-scope","description":"changed","main":"src/index.ts","dependencies":{"left-pad":"1.0.0"}}"#,
+    )
+    .unwrap();
+    commit_all(dir, "edit the manifest");
+
+    assert_eq!(
+        audit_unused_dependency_names(dir),
+        vec!["left-pad".to_string()]
+    );
+}
+
 /// An audit fixture whose dead-code baseline is saved on `main` and then
 /// rotted on `feature`, so a whole-project comparison calls the baseline stale
 /// while every audit run sees only the changed slice.

@@ -16,6 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the module graph. A short path that matches more than one file still
   takes the first match.
 
+- **The MCP `audit` tool marks findings in renamed files the same way as
+  `fallow audit`.** After a `git mv`, a finding that moved with the file is
+  inherited. The MCP tool and `fallow_api::run_audit` reported it as
+  introduced, which could fail the `new-only` gate. They now run the same
+  audit as the CLI, so they give the same introduced and inherited findings
+  and the same verdict.
+
+- **`fallow audit` reports dependency findings only when the manifest
+  changed.** An unused, misplaced, type-only or test-only dependency, or an
+  unused catalog entry, now shows in the audit only when the changeset touches
+  the `package.json` or the catalog file that declares it. Before, audit showed
+  every dependency finding of the project as inherited. `fallow dead-code`
+  still reports all of them.
+
 - Security findings for different sinks on the same line now have distinct
   IDs. Security SARIF uses `fallowSecurity/v2` fingerprints with the same IDs
   as JSON and the visualization. Upgrading changes every security finding ID:

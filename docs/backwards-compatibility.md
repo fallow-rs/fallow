@@ -414,6 +414,22 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **`fallow audit` reports dependency findings only when their manifest
+  changed.** A dependency-level finding (an unused, type-only, test-only or
+  misplaced dependency, or an unused catalog entry) belongs to the
+  `package.json` or the catalog file that declares it. Audit now keeps such a
+  finding only when the changeset touches that file, for the root manifest
+  and for each workspace package manifest. Before, audit reported every
+  dependency finding of the project as inherited, because `--changed-since`
+  keeps dependency findings whatever changed. The rule applies to the base
+  snapshot too. `fallow dead-code --changed-since` does not change: it still
+  reports dependency findings for the whole project. The MCP `audit` tool and
+  `fallow_api::run_audit` now run the same audit as the CLI, so they give the
+  same result, and they follow renamed files the same way. No field is
+  renamed, retyped, or added, and no `schema_version` moves. A CI script that
+  counted dependency findings in the audit output sees fewer of them. Run
+  `fallow dead-code` to see every dependency finding.
+
 - **Agent-facing JSON now applies `rules` and per-path `overrides[].rules`.**
   The programmatic runtime behind the MCP `analyze` and `check_changed` tools,
   the audit sub-analyses, Code Mode's combined run, and the Node bindings

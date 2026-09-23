@@ -162,17 +162,6 @@ fn commit_file(repo: &std::path::Path, name: &str, body: &str) -> String {
     git_rev_parse(repo, "HEAD").expect("HEAD should resolve")
 }
 
-#[test]
-fn parse_audit_base_override_trims_and_rejects_empty() {
-    assert_eq!(parse_audit_base_override(None), None);
-    assert_eq!(parse_audit_base_override(Some(String::new())), None);
-    assert_eq!(parse_audit_base_override(Some("   ".to_string())), None);
-    assert_eq!(
-        parse_audit_base_override(Some("  origin/main  ".to_string())),
-        Some("origin/main".to_string())
-    );
-}
-
 fn worktree_is_registered_with_git(repo_root: &std::path::Path, worktree_path: &Path) -> bool {
     list_audit_worktrees(repo_root)
         .is_some_and(|paths| paths.iter().any(|p| paths_equal(p, worktree_path)))
@@ -2284,25 +2273,6 @@ fn remove_node_modules_context(worktree_path: &Path) {
     }
 }
 
-fn empty_snapshot_with_type_aware(
-    identity: Option<fallow_types::semantic::SemanticAnalysisIdentity>,
-    gap_signature: Vec<String>,
-) -> AuditKeySnapshot {
-    AuditKeySnapshot {
-        branching: rustc_hash::FxHashMap::default(),
-        type_aware_identity: identity,
-        type_aware_gap_signature: gap_signature,
-        syntactic_dead_code: None,
-        dead_code: FxHashSet::default(),
-        health: FxHashSet::default(),
-        styling: FxHashSet::default(),
-        dupes: FxHashSet::default(),
-        boundary_edges: FxHashSet::default(),
-        cycles: FxHashSet::default(),
-        public_api: FxHashSet::default(),
-    }
-}
-
 fn identity_with_hash(
     project_config_hash: &str,
 ) -> fallow_types::semantic::SemanticAnalysisIdentity {
@@ -2312,107 +2282,20 @@ fn identity_with_hash(
     }
 }
 
-fn meta_with_identity(
-    identity: fallow_types::semantic::SemanticAnalysisIdentity,
-) -> fallow_types::envelope::TypeAwareMeta {
-    fallow_types::envelope::TypeAwareMeta {
-        identity: Some(identity),
-        ..Default::default()
+fn branching_totals(
+    branch_points: u32,
+    functions: u32,
+    peak: u16,
+) -> fallow_types::extract::FileBranching {
+    fallow_types::extract::FileBranching {
+        branch_points,
+        functions,
+        peak_cyclomatic: peak,
+        cognitive: branch_points,
+        cognitive_nesting_weight: 0,
+        has_module_unit: false,
+        has_synthetic_units: false,
     }
-}
-
-#[test]
-fn degrade_reason_absent_for_fully_syntactic_comparison() {
-    let base = empty_snapshot_with_type_aware(None, Vec::new());
-    assert_eq!(
-        type_aware_attribution_degrade_reason(Some(&base), None),
-        None
-    );
-    assert_eq!(type_aware_attribution_degrade_reason(None, None), None);
-}
-
-/// Regression test for #2102: a side without a semantic identity made no
-/// semantic claims (it legitimately ran no semantic queries), so the other
-/// side's identity cannot conflict with it and the comparison must not
-/// degrade.
-#[test]
-fn degrade_reason_absent_when_only_one_side_has_type_aware_identity() {
-    let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
-    assert_eq!(
-        type_aware_attribution_degrade_reason(Some(&base), None),
-        None
-    );
-
-    let base = empty_snapshot_with_type_aware(None, Vec::new());
-    let head = meta_with_identity(identity_with_hash("hash-a"));
-    assert_eq!(
-        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
-        None
-    );
-}
-
-/// Regression test for #2102: the deferred project-config hash (a side that
-/// needed no semantic queries) is compatible with any concrete hash, so a
-/// diff that adds a file (deferred base, concrete head) must not degrade.
-#[test]
-fn degrade_reason_absent_for_deferred_vs_concrete_project_config_hash() {
-    let deferred = identity_with_hash(fallow_types::semantic::DEFERRED_PROJECT_CONFIG_HASH);
-    let concrete = identity_with_hash("sha256:concrete");
-
-    let base = empty_snapshot_with_type_aware(Some(deferred.clone()), Vec::new());
-    let head = meta_with_identity(concrete.clone());
-    assert_eq!(
-        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
-        None
-    );
-
-    let base = empty_snapshot_with_type_aware(Some(concrete), Vec::new());
-    let head = meta_with_identity(deferred);
-    assert_eq!(
-        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
-        None
-    );
-}
-
-#[test]
-fn degrade_reason_when_semantic_identities_are_incompatible() {
-    let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
-    let head = meta_with_identity(identity_with_hash("hash-b"));
-    assert_eq!(
-        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
-        Some("their semantic analysis identities are incompatible")
-    );
-}
-
-#[test]
-fn degrade_reason_absent_when_identities_and_gap_signatures_match() {
-    let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
-    let head = meta_with_identity(identity_with_hash("hash-a"));
-    assert_eq!(
-        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
-        None
-    );
-}
-
-#[test]
-fn degrade_reason_when_gap_signatures_differ() {
-    let base = empty_snapshot_with_type_aware(Some(identity_with_hash("hash-a")), Vec::new());
-    let mut head = meta_with_identity(identity_with_hash("hash-a"));
-    head.queries = vec![fallow_types::semantic::SemanticQuerySummary {
-        query_id: 0,
-        capability: fallow_types::semantic::SemanticCapability::SymbolUse,
-        assertion: "candidate usage refinement".to_string(),
-        status: fallow_types::semantic::SemanticCompleteness::Partial,
-        reason_code: None,
-        total_evidence_count: 0,
-        truncated: false,
-        omissions: Vec::new(),
-        actions: Vec::new(),
-    }];
-    assert_eq!(
-        type_aware_attribution_degrade_reason(Some(&base), Some(&head)),
-        Some("their incomplete semantic query reasons or omissions differ")
-    );
 }
 
 #[test]
@@ -3188,26 +3071,6 @@ fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
     assert_reshaped_demotion_observability(&result);
 }
 
-/// Issue #2220: each demotion diff-source state renders its user-facing
-/// label. `Shared` carries the source label recorded by the shared diff
-/// cache (`shared_diff_source_label()`) verbatim; the base ref only feeds
-/// the worktree fallback.
-#[test]
-fn dupe_demotion_diff_source_labels_cover_every_state() {
-    assert_eq!(
-        DupeDemotionDiffSource::Shared("--diff-file pr.diff".to_string()).label("main"),
-        "--diff-file pr.diff",
-    );
-    assert_eq!(
-        DupeDemotionDiffSource::Worktree.label("origin/main"),
-        "merge-base worktree diff vs origin/main",
-    );
-    assert_eq!(
-        DupeDemotionDiffSource::Skipped.label("main"),
-        "skipped: no diff available",
-    );
-}
-
 /// Issue #2220 assertions for the re-shaped-clone fixture: the demotion is
 /// recorded and surfaced on the wire, but stays observability-only.
 fn assert_reshaped_demotion_observability(result: &AuditResult) {
@@ -3488,89 +3351,6 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
 
     let result = execute_audit(&opts).expect("audit should execute");
     assert!(result.dupes.is_some(), "dupes should still run");
-}
-
-#[cfg(unix)]
-#[test]
-fn remap_focus_files_does_not_canonicalize_through_symlinks() {
-    let tmp = tempfile::TempDir::new().expect("temp dir");
-    let real = tmp.path().join("real");
-    let link = tmp.path().join("link");
-    fs::create_dir_all(&real).expect("real dir");
-    std::os::unix::fs::symlink(&real, &link).expect("symlink");
-    let canonical = link.canonicalize().expect("canonicalize symlink");
-    assert_ne!(link, canonical, "symlink should not equal its target");
-
-    let from_root = PathBuf::from("/repo");
-    let mut focus = FxHashSet::default();
-    focus.insert(from_root.join("src/foo.ts"));
-
-    let remapped = remap_focus_files(&focus, &from_root, &link)
-        .expect("remap should succeed for in-prefix files");
-
-    let expected = link.join("src/foo.ts");
-    assert!(
-        remapped.contains(&expected),
-        "remapped paths must keep the un-canonical to_root prefix; got {remapped:?}, expected entry {expected:?}"
-    );
-}
-
-#[test]
-fn remap_focus_files_skips_paths_outside_from_root() {
-    let from_root = PathBuf::from("/repo/apps/web");
-    let to_root = PathBuf::from("/wt/apps/web");
-    let mut focus = FxHashSet::default();
-    focus.insert(PathBuf::from("/repo/apps/web/src/in.ts"));
-    focus.insert(PathBuf::from("/repo/services/api/src/out.ts"));
-
-    let remapped =
-        remap_focus_files(&focus, &from_root, &to_root).expect("partial map should succeed");
-
-    assert_eq!(remapped.len(), 1);
-    assert!(remapped.contains(&PathBuf::from("/wt/apps/web/src/in.ts")));
-}
-
-#[test]
-fn remap_focus_files_returns_none_when_no_paths_map() {
-    let from_root = PathBuf::from("/repo/apps/web");
-    let to_root = PathBuf::from("/wt/apps/web");
-    let mut focus = FxHashSet::default();
-    focus.insert(PathBuf::from("/elsewhere/foo.ts"));
-
-    let remapped = remap_focus_files(&focus, &from_root, &to_root);
-    assert!(
-        remapped.is_none(),
-        "remap should return None when no paths can be mapped, falling caller back to full corpus"
-    );
-}
-
-/// The changed-file set is built from `git rev-parse --show-toplevel`, whose
-/// spelling can differ from the caller's canonicalized root (Windows 8.3
-/// components and drive-letter case; a symlinked root on unix). Those paths must
-/// still map: an unmappable set leaves the base snapshot unfiltered, and
-/// filtering it against the resulting empty set erased every base finding, so
-/// each inherited head finding looked introduced under the new-only gate.
-#[cfg(unix)]
-#[test]
-fn remap_focus_files_maps_paths_spelled_against_an_uncanonical_root() {
-    let tmp = tempfile::TempDir::new().expect("temp dir");
-    let real = tmp.path().join("real");
-    let link = tmp.path().join("link");
-    fs::create_dir_all(real.join("src")).expect("real src dir");
-    fs::write(real.join("src/foo.ts"), "export const foo = 1;\n").expect("source file");
-    std::os::unix::fs::symlink(&real, &link).expect("symlink");
-
-    let mut focus = FxHashSet::default();
-    focus.insert(real.join("src/foo.ts"));
-
-    let to_root = PathBuf::from("/wt");
-    let remapped = remap_focus_files(&focus, &link, &to_root)
-        .expect("paths spelled against an uncanonical root must still map");
-
-    assert!(
-        remapped.contains(&to_root.join("src/foo.ts")),
-        "expected the focus path to map through the canonicalized root; got {remapped:?}"
-    );
 }
 
 #[test]
@@ -4424,138 +4204,6 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
     }));
 }
 
-// Unit tests for js_ts_tokens_equivalent, is_analysis_input, is_non_behavioral_doc.
-
-#[test]
-fn tokens_equivalent_whitespace_only() {
-    // Reformatting (indentation, blank lines) must not change token identity.
-    let a = "export const x = 1;\nexport const y = 2;\n";
-    let b = "export const x = 1;\n\n\nexport const y = 2;\n";
-    assert!(
-        js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
-        "whitespace-only change must be treated as equivalent"
-    );
-}
-
-#[test]
-fn tokens_equivalent_comment_only_change() {
-    // Comments do not produce tokens; adding or removing a comment should be
-    // treated as equivalent by the tokenizer.
-    let a = "export const x = 1;\n";
-    let b = "// note\nexport const x = 1;\n";
-    assert!(
-        js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
-        "comment-only change must be treated as equivalent (comments emit no tokens)"
-    );
-}
-
-#[test]
-fn tokens_equivalent_identifier_rename_is_not_equivalent() {
-    // Identifier carries its text payload; a rename must not be reusable.
-    let a = "export const a = 1;\n";
-    let b = "export const b = 1;\n";
-    assert!(
-        !js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
-        "identifier rename must be treated as non-equivalent"
-    );
-}
-
-#[test]
-fn tokens_equivalent_string_literal_change_is_not_equivalent() {
-    // StringLiteral carries its text payload; a changed import path must not be reusable.
-    let a = r#"import x from "./a";"#;
-    let b = r#"import x from "./b";"#;
-    assert!(
-        !js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
-        "string-literal change must be treated as non-equivalent"
-    );
-}
-
-#[test]
-fn tokens_equivalent_fallow_ignore_marker_forces_false() {
-    // The guard fires before tokenization; even identical content containing the
-    // marker must return false so suppression changes are never skipped.
-    let code = "// fallow-ignore-next-line unused-exports\nexport const x = 1;\n";
-    assert!(
-        !js_ts_tokens_equivalent(Path::new("a.ts"), code, code),
-        "fallow-ignore marker in either side must force false"
-    );
-}
-
-#[test]
-fn tokens_equivalent_non_js_extension_is_false() {
-    // The extension check fires before tokenization; CSS content cannot be reused.
-    let a = ".foo { color: red; }\n";
-    let b = ".foo {\n  color: red;\n}\n";
-    assert!(
-        !js_ts_tokens_equivalent(Path::new("styles.css"), a, b),
-        "non-JS/TS extension must always return false"
-    );
-}
-
-/// KNOWN SOUNDNESS GAP: `TokenKind::TemplateLiteral` carries no payload
-/// (see `crates/engine/src/duplication_detector/token_types.rs`), so a change to the
-/// content of a template literal is invisible to the tokenizer and is
-/// treated as equivalent. This is safe for most template strings but
-/// unsound for dynamic `import(\`...\`)` patterns where the quasi prefix
-/// feeds module-resolution pattern edges. This test pins the current
-/// behavior. A follow-up fix should give `TemplateLiteral` a payload to
-/// close the gap.
-#[test]
-fn tokens_equivalent_template_literal_content_change_is_equivalent_known_gap() {
-    let a = "const p = import(`./pages/${x}`);\n";
-    let b = "const p = import(`./views/${x}`);\n";
-    // KNOWN GAP: changing the quasi string of a template literal is NOT
-    // detected as a behavioral change because TokenKind::TemplateLiteral
-    // has no payload. Expected: true (equivalent), which is incorrect for
-    // dynamic-import prefixes but documents the current reality.
-    assert!(
-        js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
-        "template-literal content change is CURRENTLY treated as equivalent (known gap)"
-    );
-}
-
-/// Companion to the template-literal gap test: a regex-literal content
-/// change is also invisible to the tokenizer.
-#[test]
-fn tokens_equivalent_regex_literal_content_change_is_equivalent_known_gap() {
-    let a = "const re = /^foo/;\n";
-    let b = "const re = /^bar/;\n";
-    // KNOWN GAP: TokenKind::RegExpLiteral has no payload.
-    assert!(
-        js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
-        "regex-literal content change is CURRENTLY treated as equivalent (known gap)"
-    );
-}
-
-#[test]
-fn analysis_input_and_doc_classification() {
-    // Analysis inputs: JS/TS variants and component formats are behavioral.
-    assert!(is_analysis_input(Path::new("src/app.ts")));
-    assert!(is_analysis_input(Path::new("src/app.tsx")));
-    assert!(is_analysis_input(Path::new("src/app.js")));
-    assert!(is_analysis_input(Path::new("src/app.jsx")));
-    assert!(is_analysis_input(Path::new("src/app.mts")));
-    assert!(is_analysis_input(Path::new("src/app.vue")));
-    assert!(is_analysis_input(Path::new("src/styles.css")));
-
-    // Non-analysis inputs.
-    assert!(!is_analysis_input(Path::new("README.md")));
-    assert!(!is_analysis_input(Path::new("package.json")));
-    assert!(!is_analysis_input(Path::new("image.png")));
-
-    // Non-behavioral docs.
-    assert!(is_non_behavioral_doc(Path::new("README.md")));
-    assert!(is_non_behavioral_doc(Path::new("CHANGELOG.txt")));
-    assert!(is_non_behavioral_doc(Path::new("docs/guide.rst")));
-    assert!(is_non_behavioral_doc(Path::new("docs/guide.adoc")));
-
-    // .json is neither an analysis input nor a non-behavioral doc, so the
-    // predicate treats it as behavioral (can_reuse returns false for it).
-    assert!(!is_analysis_input(Path::new("package.json")));
-    assert!(!is_non_behavioral_doc(Path::new("package.json")));
-}
-
 /// The weakening scan must never conflate a head-read FAILURE with removed
 /// content: a file deleted at head genuinely scans against empty head content,
 /// a net-new file (missing at base) scans against an empty base, and head
@@ -4642,118 +4290,4 @@ fn weakening_scan_skips_permission_denied_head_file() {
         signals.is_empty(),
         "an unreadable head file is skipped, not scanned as removed content: {signals:?}"
     );
-}
-
-/// [`BaseFileReader`] distinguishes a missing object (the file is new since
-/// base) from a broken request pipe: a pipe failure must surface as
-/// [`BaseRead::Error`], never as [`BaseRead::Missing`], so callers stop the
-/// scan instead of treating every remaining file as empty at base.
-#[test]
-fn base_file_reader_distinguishes_missing_from_pipe_error() {
-    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-    let repo = init_throwaway_repo(tmp.path(), "base-read-modes");
-    let mut reader = BaseFileReader::spawn(&repo).expect("reader should spawn");
-
-    assert!(
-        matches!(
-            reader.read("HEAD", Path::new("README.md")),
-            BaseRead::Content(content) if content == "seed\n"
-        ),
-        "a committed file reads back as content"
-    );
-    assert!(
-        matches!(
-            reader.read("HEAD", Path::new("absent.ts")),
-            BaseRead::Missing
-        ),
-        "an object absent at base is Missing, not an error"
-    );
-    assert!(
-        matches!(reader.read("HEAD", Path::new("a\nb.ts")), BaseRead::Error),
-        "a newline path cannot be requested over the batch protocol"
-    );
-
-    reader.stdin.take();
-    assert!(
-        matches!(reader.read("HEAD", Path::new("README.md")), BaseRead::Error),
-        "a severed request pipe is an Error, never Missing or empty content"
-    );
-}
-
-fn branching_totals(
-    branch_points: u32,
-    functions: u32,
-    peak: u16,
-) -> fallow_types::extract::FileBranching {
-    fallow_types::extract::FileBranching {
-        branch_points,
-        functions,
-        peak_cyclomatic: peak,
-        cognitive: branch_points,
-        cognitive_nesting_weight: 0,
-        has_module_unit: false,
-        has_synthetic_units: false,
-    }
-}
-
-fn snapshot_with_branching(
-    entries: &[(&str, fallow_types::extract::FileBranching)],
-) -> AuditKeySnapshot {
-    AuditKeySnapshot {
-        branching: entries
-            .iter()
-            .map(|(path, totals)| ((*path).to_string(), *totals))
-            .collect(),
-        type_aware_identity: None,
-        type_aware_gap_signature: Vec::new(),
-        syntactic_dead_code: None,
-        dead_code: FxHashSet::default(),
-        health: FxHashSet::default(),
-        styling: FxHashSet::default(),
-        dupes: FxHashSet::default(),
-        boundary_edges: FxHashSet::default(),
-        cycles: FxHashSet::default(),
-        public_api: FxHashSet::default(),
-    }
-}
-
-#[test]
-fn renaming_a_file_moves_its_branching_totals_onto_the_head_path() {
-    // Without this the base entry keeps the old path, the head entry looks
-    // like a new file, and a pure rename reads as branching arriving.
-    let root = std::path::Path::new("/repo");
-    let mut snapshot = snapshot_with_branching(&[("src/old.ts", branching_totals(11, 4, 6))]);
-    let renames = vec![fallow_engine::changed_files::RenamedFile {
-        from: root.join("src/old.ts"),
-        to: root.join("src/new.ts"),
-    }];
-
-    remap_base_snapshot_for_renames(&mut snapshot, &renames, root);
-
-    assert!(!snapshot.branching.contains_key("src/old.ts"));
-    assert_eq!(
-        snapshot.branching.get("src/new.ts").copied(),
-        Some(branching_totals(11, 4, 6))
-    );
-}
-
-#[test]
-fn a_file_untouched_by_a_rename_keeps_its_branching_key() {
-    let root = std::path::Path::new("/repo");
-    let mut snapshot = snapshot_with_branching(&[
-        ("src/old.ts", branching_totals(11, 4, 6)),
-        ("src/other.ts", branching_totals(3, 2, 4)),
-    ]);
-    let renames = vec![fallow_engine::changed_files::RenamedFile {
-        from: root.join("src/old.ts"),
-        to: root.join("src/new.ts"),
-    }];
-
-    remap_base_snapshot_for_renames(&mut snapshot, &renames, root);
-
-    assert_eq!(
-        snapshot.branching.get("src/other.ts").copied(),
-        Some(branching_totals(3, 2, 4))
-    );
-    assert_eq!(snapshot.branching.len(), 2);
 }
