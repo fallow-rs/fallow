@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790169734810,
+  "lastUpdate": 1790174477154,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "e368c0d05060409b9bcea702972415a85193c914",
-          "message": "fix(process): wait out an executable that is busy at spawn (#2496)\n\nUnix refuses to exec a file while any process holds it open for writing, and the\nholder is not always the process that opened it. `fs::write` closes its\ndescriptor, but a fork from any other thread during that open window carries a\nreference to the same open file description into the new child, and the inode\nkeeps counting a writer until that child reaches its own exec. A multi-threaded\nprocess that writes an executable and then runs it therefore races every other\nthread that spawns. That is how `cargo test -p fallow-api --lib` failed once in\nCI with `failed to spawn /tmp/.../fallow-similar-code: Text file busy`. The same\nshape reaches real users from the other side: an MCP tool call that re-runs the\nFallow binary while a package manager is still writing it.\n\nA new `crates/process/src/spawn_retry.rs` holds one retry schedule (200\nmicroseconds, doubling, capped at 20 milliseconds, one second total) behind two\nhelpers: a blocking one for `std::process::Command` and a Tokio one that awaits\n`tokio::time::sleep` so the pause yields instead of holding a worker. Both drive\nthe same struct, so the two paths cannot drift.\n\nWired into every managed spawn: `ScopedChild::spawn` and\n`ScopedChild::spawn_process_tree` (companion sidecars, audit helpers),\n`spawn_fallow` in the MCP tool path, and `spawn_managed_child` behind the MCP\ncode_mode tool. The last two re-run the Fallow binary itself. Each call site\nkeeps its exact error text, ProcessTree construction and cleanup behavior.\n`crates/engine/src/repo_refs.rs` deliberately keeps a plain spawn: it runs git\nfrom PATH, a binary Fallow never writes, so it cannot meet the condition.\n\nMeasured with a stress binary linked against the real crate, eight workers each\nwriting a stub and running it, 40000 spawns per row, on Linux:\n\n    Command::spawn (blocking, before)              1382 (3.455%)\n    ScopedChild::spawn_process_tree (after)           0\n    tokio::process::Command::spawn (before)         930 (2.325%)\n    spawn_tokio_retrying_busy_executable (after)      0\n\nSame wall time in both modes, so the retry costs nothing on the success path.\nTwo controls place the fault on the just-written target rather than on spawning:\nthe same loop single threaded fails 0 of 16000, and a thread that spawns a\npre-existing file under the same fork load fails 0 of 2000. On macOS an open\nwrite handle does not block exec at all, which is why this only ever failed on\nLinux CI.\n\nThe suite-level flake is not reproduced: the fallow-api lib suite is green over\n220 contended Linux runs before the change and 220 after. What is established is\nthe mechanism and the per-spawn rate, not a suite-level delta.",
-          "timestamp": "2026-08-31T18:45:13+02:00",
-          "tree_id": "df2f37a9849c34438fac9e1c90a43fdbf2c4d6e2",
-          "url": "https://github.com/fallow-rs/fallow/commit/e368c0d05060409b9bcea702972415a85193c914"
-        },
-        "date": 1788195732602,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 548000552,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21337352,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 27962616,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 41861752,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4384,6 +4340,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow)",
             "value": 576085376,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21675688,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28791960,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43715400,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c69751ce13d0e2c9fc2e76872217bc7cf44b81df",
+          "message": "fix(cli): say in runtime coverage help that a single capture is free (#2809)\n\nThe --runtime-coverage help of audit and security called the input paid,\nbut a single local capture runs without a license. Use one note on every\nruntime coverage input: a single local capture is free, and continuous or\nmulti-capture monitoring needs a license. Say that upload-inventory needs\na fallow cloud API key, and remove the path of a file that is not public\nfrom the coverage help.",
+          "timestamp": "2026-09-23T16:20:22+02:00",
+          "tree_id": "243e3c75ce820a98a99bb82a14cfeb9e05a1ad88",
+          "url": "https://github.com/fallow-rs/fallow/commit/c69751ce13d0e2c9fc2e76872217bc7cf44b81df"
+        },
+        "date": 1790174472798,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 576086072,
             "unit": "bytes"
           },
           {
