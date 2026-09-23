@@ -79,6 +79,9 @@ editors/vscode/LICENSE
 .playwright-mcp/
 
 # Claude
+# Re-include .claude/ first: a global .claude/ ignore would otherwise hide
+# the tracked adapters below from git add.
+!.claude/
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
