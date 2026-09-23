@@ -38,7 +38,9 @@ pub use crate::runtime_output::{
 };
 pub use audit::run_audit;
 pub use combined::run_combined;
-pub use dead_code::{run_boundary_violations, run_circular_dependencies, run_dead_code};
+pub use dead_code::{
+    run_boundary_violations, run_circular_dependencies, run_dead_code, run_dead_code_with_baseline,
+};
 pub use decision_surface::run_decision_surface;
 pub use duplication::run_duplication;
 pub use feature_flags::run_feature_flags;

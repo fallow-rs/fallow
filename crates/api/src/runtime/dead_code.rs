@@ -43,8 +43,49 @@ pub(super) struct DeadCodeProgrammaticRunWithArtifacts {
 /// options, config load failures, analysis failures, or git changed-file
 /// failures.
 pub fn run_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
+    run_dead_code_with_baseline(options, None)
+}
+
+/// Run dead-code analysis and hide the findings of a saved dead-code baseline.
+///
+/// The baseline is the file that `fallow dead-code --save-baseline` writes. It
+/// is applied by the same engine function as `fallow dead-code --baseline`, so
+/// both hide the same findings. A file that another command saved suppresses
+/// nothing, as on the CLI.
+///
+/// # Errors
+///
+/// Returns the errors of [`run_dead_code`], and a structured error when the
+/// baseline cannot be read, is not valid, or was saved with an incompatible
+/// analysis identity.
+pub fn run_dead_code_with_baseline(
+    options: &DeadCodeOptions,
+    baseline: Option<&Path>,
+) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
-    resolved.install(|| run_dead_code_inner(options, &resolved, |_| {}))
+    resolved.install(|| {
+        let start = Instant::now();
+        resolved.ensure_not_cancelled("config load and file discovery")?;
+        let session = load_dead_code_session(options, &resolved)?;
+        let (mut results, type_aware_meta) =
+            analyze_dead_code_results(options, &resolved, &session, None, |_| {})?;
+        if let Some(baseline) = baseline {
+            apply_baseline(
+                &mut results,
+                baseline,
+                session.root(),
+                type_aware_meta.as_ref(),
+            )?;
+        }
+        Ok(build_dead_code_programmatic_output(
+            options,
+            &resolved,
+            &session,
+            results,
+            type_aware_meta,
+            start,
+        ))
+    })
 }
 
 /// Turn an engine failure into a programmatic error, keeping a cancelled run
@@ -114,6 +155,30 @@ pub(super) fn run_dead_code_with_session(
     post_filter: impl FnOnce(&mut AnalysisResults),
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
+    let (results, type_aware_meta) =
+        analyze_dead_code_results(options, resolved, session, changed_files, post_filter)?;
+    Ok(build_dead_code_programmatic_output(
+        options,
+        resolved,
+        session,
+        results,
+        type_aware_meta,
+        start,
+    ))
+}
+
+/// The reported dead-code findings of one session run, with the type-aware
+/// metadata of the run.
+fn analyze_dead_code_results(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    changed_files: Option<&FxHashSet<std::path::PathBuf>>,
+    post_filter: impl FnOnce(&mut AnalysisResults),
+) -> ProgrammaticResult<(
+    AnalysisResults,
+    Option<fallow_types::envelope::TypeAwareMeta>,
+)> {
     resolved.ensure_not_cancelled("dead-code analysis")?;
     let analysis = session.analyze_dead_code().map_err(|err| {
         map_engine_error(
@@ -137,15 +202,53 @@ pub(super) fn run_dead_code_with_session(
         &mut results,
         post_filter,
     )?;
+    Ok((results, type_aware_meta))
+}
 
-    Ok(build_dead_code_programmatic_output(
-        options,
-        resolved,
-        session,
-        results,
-        type_aware_meta,
-        start,
-    ))
+/// Hide the findings of a saved dead-code baseline, as `--baseline` does.
+fn apply_baseline(
+    results: &mut AnalysisResults,
+    baseline: &Path,
+    root: &Path,
+    type_aware_meta: Option<&fallow_types::envelope::TypeAwareMeta>,
+) -> ProgrammaticResult<()> {
+    use fallow_engine::baseline::{DeadCodeBaselineError, apply_dead_code_baseline};
+
+    let path = if is_absolute_path_any_platform(baseline) {
+        baseline.to_path_buf()
+    } else {
+        root.join(baseline)
+    };
+    let content = std::fs::read_to_string(&path).map_err(|err| {
+        ProgrammaticError::new(
+            format!("failed to read baseline {}: {err}", path.display()),
+            2,
+        )
+        .with_code("FALLOW_BASELINE_READ_FAILED")
+        .with_context("baseline")
+    })?;
+    let identity = type_aware_meta
+        .and_then(|meta| meta.identity.clone())
+        .unwrap_or_default();
+    apply_dead_code_baseline(results, &content, root, &identity, false)
+        .map(|_| ())
+        .map_err(|err| match err {
+            DeadCodeBaselineError::Parse(message) => ProgrammaticError::new(
+                format!("failed to parse baseline {}: {message}", path.display()),
+                2,
+            )
+            .with_code("FALLOW_BASELINE_INVALID")
+            .with_context("baseline"),
+            DeadCodeBaselineError::IncompatibleIdentity(fields) => ProgrammaticError::new(
+                format!(
+                    "baseline analysis identity is incompatible in: {}. Save it again with the same analysis options",
+                    fields.join(", ")
+                ),
+                2,
+            )
+            .with_code("FALLOW_BASELINE_IDENTITY_INCOMPATIBLE")
+            .with_context("baseline"),
+        })
 }
 
 pub(super) fn run_dead_code_with_session_artifacts(

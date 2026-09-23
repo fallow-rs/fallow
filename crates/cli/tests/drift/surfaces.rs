@@ -503,6 +503,27 @@ pub fn api_keys(analysis: Analysis, root: &Path, scope: &Scope) -> KeySet {
     analysis.keys(&envelope)
 }
 
+/// Run `fallow_api` dead-code analysis with a saved dead-code baseline.
+///
+/// # Panics
+///
+/// Panics when the programmatic run fails.
+pub fn api_dead_code_keys_with_baseline(root: &Path, baseline: &Path) -> KeySet {
+    let options = fallow_api::DeadCodeOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            no_cache: true,
+            explain: true,
+            ..fallow_api::AnalysisOptions::default()
+        },
+        ..fallow_api::DeadCodeOptions::default()
+    };
+    let envelope = fallow_api::run_dead_code_with_baseline(&options, Some(baseline))
+        .and_then(fallow_api::serialize_dead_code_programmatic_json)
+        .unwrap_or_else(|err| panic!("fallow_api dead-code with a baseline failed: {err:?}"));
+    Analysis::DeadCode.keys(&envelope)
+}
+
 /// The base ref of every audit run: the base commit of a generated project.
 pub const AUDIT_BASE_REF: &str = "HEAD~1";
 

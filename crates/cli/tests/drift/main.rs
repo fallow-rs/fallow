@@ -37,9 +37,9 @@ use crate::invariants::{ExitRule, Verdict, VerdictRuns};
 use crate::keys::{AuditKeys, FindingKey, KeySet, audit_keys, combined_keys, envelope_keys};
 use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
-    Analysis, McpPath, McpServer, Scope, api_audit, api_keys, cli_audit, cli_combined,
-    cli_envelope, cli_keys, cli_save_baseline, mcp_audit, mcp_bin, mcp_envelope, mcp_keys,
-    mcp_supports, run_cli, run_cli_format,
+    Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_keys_with_baseline, api_keys,
+    cli_audit, cli_combined, cli_envelope, cli_keys, cli_save_baseline, mcp_audit, mcp_bin,
+    mcp_envelope, mcp_keys, mcp_supports, run_cli, run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -622,12 +622,24 @@ fn i6_suppressions_and_baselines_never_add_findings() {
 fn check_baseline_monotonic(analysis: Analysis, project: &Project, mask: &[bool]) -> Verdict {
     let (full, partial) = save_baselines(analysis, project, mask);
     let unscoped = Scope::default();
+    let with_partial = cli_keys(analysis, &project.root, &unscoped, Some(&partial));
     project.explain(invariants::i6_baseline_never_adds(
         &format!("{analysis:?} baseline"),
         &cli_keys(analysis, &project.root, &unscoped, None),
-        &cli_keys(analysis, &project.root, &unscoped, Some(&partial)),
+        &with_partial,
         &cli_keys(analysis, &project.root, &unscoped, Some(&full)),
-    ))
+    ))?;
+    if analysis == Analysis::DeadCode {
+        // `fallow_api` reads a dead-code baseline with the same engine
+        // function, so the partial baseline hides the same findings there.
+        project.explain(invariants::keys_equal(
+            "CLI with the partial baseline",
+            &with_partial,
+            "fallow_api with the partial baseline",
+            &api_dead_code_keys_with_baseline(&project.root, &partial),
+        ))?;
+    }
+    Ok(())
 }
 
 /// Save a full baseline of `analysis` and a partial copy that keeps the

@@ -143,6 +143,9 @@ An MCP result goes through the normalizer of the envelope in its text content.
   finding, on any command.
 - **Surfaces**: CLI `dead-code`, `dupes`, `health` and bare `fallow` for
   suppression comments; CLI `dead-code`, `dupes` and `health` for baselines.
+  For a dead-code baseline, `fallow_api::run_dead_code_with_baseline` must
+  also give the same keys as the CLI with the partial baseline. Both read the
+  file with `fallow_engine::baseline::apply_dead_code_baseline`.
 - **Comparison**: finding keys. The harness renders each project twice. One
   copy has the suppression comments, the other has plain comments on the same
   lines, so no finding moves to another line. For baselines, the harness saves

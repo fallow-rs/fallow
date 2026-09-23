@@ -164,10 +164,11 @@ pub use runtime::{
     benchmark_trace_clone_compact_json, benchmark_trace_graph_family_compact_json,
     inspect_similar_code, load_health_config, parse_similar_code_candidate_snapshot,
     review_similar_code, run_audit, run_boundary_violations, run_circular_dependencies,
-    run_combined, run_complexity_with_runner, run_dead_code, run_decision_surface, run_duplication,
-    run_feature_flags, run_health, run_health_with_runner, run_similar_code, run_trace_clone,
-    run_trace_dependency, run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
-    select_similar_code_candidate_snapshot, serialize_health_report_json,
+    run_combined, run_complexity_with_runner, run_dead_code, run_dead_code_with_baseline,
+    run_decision_surface, run_duplication, run_feature_flags, run_health, run_health_with_runner,
+    run_similar_code, run_trace_clone, run_trace_dependency, run_trace_error, run_trace_export,
+    run_trace_file, run_trace_import_path, select_similar_code_candidate_snapshot,
+    serialize_health_report_json,
 };
 pub use runtime_json::{
     serialize_audit_programmatic_json, serialize_boundary_violations_programmatic_json,

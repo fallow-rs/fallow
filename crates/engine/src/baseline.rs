@@ -1860,6 +1860,90 @@ pub fn filter_new_issues(
     results
 }
 
+/// What a loaded dead-code baseline did to a result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeadCodeBaselineOutcome {
+    /// The file is a dead-code baseline. The findings it holds are removed.
+    Applied(BaselineStaleness),
+    /// The file is not a dead-code baseline: another command saved it
+    /// (`saved_by` names that command), or nothing in it names a writer. It
+    /// suppresses nothing, so every finding stays.
+    NotDeadCode {
+        /// This run's view of the file: zero entries, zero matches.
+        staleness: BaselineStaleness,
+        /// The command that saved the file, when the file names one.
+        saved_by: Option<String>,
+    },
+}
+
+/// Why a dead-code baseline could not be applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeadCodeBaselineError {
+    /// The file is not valid JSON, or a dead-code baseline with a missing or
+    /// wrong field.
+    Parse(String),
+    /// The baseline was saved with another analysis identity, for example a
+    /// type-aware run. The fields that differ are listed.
+    IncompatibleIdentity(Vec<&'static str>),
+}
+
+/// Apply a dead-code baseline to a result.
+///
+/// The CLI (`--baseline`) and the programmatic API read a baseline through this
+/// one function, so a baseline hides the same findings on every surface.
+/// `content` is the text of the baseline file. `change_scoped` is true when the
+/// run analyzed only part of the project; see [`BaselineStaleness`].
+///
+/// The file kind is read before the strict parse. Several fields of the
+/// dead-code format have no default, so another command's baseline would fail
+/// the parse before anything could name its writer.
+///
+/// # Errors
+///
+/// Returns [`DeadCodeBaselineError`] when the file is not valid JSON, is a
+/// broken dead-code baseline, or was saved with an incompatible analysis
+/// identity.
+pub fn apply_dead_code_baseline(
+    results: &mut crate::results::AnalysisResults,
+    content: &str,
+    root: &Path,
+    identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+    change_scoped: bool,
+) -> Result<DeadCodeBaselineOutcome, DeadCodeBaselineError> {
+    let parsed = serde_json::from_str::<serde_json::Value>(content)
+        .map_err(|err| DeadCodeBaselineError::Parse(err.to_string()))?;
+    let saved_by = match classify_baseline_value(&parsed, BaselineKind::DeadCode) {
+        BaselineFileKind::Own | BaselineFileKind::NotAnObject => None,
+        BaselineFileKind::Foreign(found) => Some(Some(found)),
+        BaselineFileKind::Unrecognised => Some(None),
+    };
+    if let Some(saved_by) = saved_by {
+        return Ok(DeadCodeBaselineOutcome::NotDeadCode {
+            staleness: BaselineStaleness {
+                entries: 0,
+                matched: 0,
+                current_findings: results.total_issues(),
+                change_scoped,
+            },
+            saved_by,
+        });
+    }
+    let baseline = serde_json::from_value::<BaselineData>(parsed)
+        .map_err(|err| DeadCodeBaselineError::Parse(err.to_string()))?;
+    let incompatible = baseline.analysis_identity().incompatible_fields(identity);
+    if !incompatible.is_empty() {
+        return Err(DeadCodeBaselineError::IncompatibleIdentity(incompatible));
+    }
+    let before = results.total_issues();
+    *results = filter_new_issues(std::mem::take(results), &baseline, root);
+    Ok(DeadCodeBaselineOutcome::Applied(BaselineStaleness {
+        entries: baseline.total_entries(),
+        matched: before.saturating_sub(results.total_issues()),
+        current_findings: before,
+        change_scoped,
+    }))
+}
+
 /// Baseline data for duplication comparison.
 ///
 /// New baselines key every clone group by `<fingerprint>:<instance count>` in
