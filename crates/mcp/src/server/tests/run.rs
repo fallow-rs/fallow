@@ -16,11 +16,11 @@ const WINDOWS_FIXTURE_COMPLETION_TIMEOUT: Duration = Duration::from_mins(2);
 #[cfg(windows)]
 const WINDOWS_FIXTURE_FIRED_TIMEOUT: Duration = Duration::from_mins(1);
 
-use crate::tools::run_fallow;
+use crate::tools::run_tool;
 #[cfg(any(unix, windows))]
-use crate::tools::run_fallow_with_timeout;
+use crate::tools::run_tool_with_timeout;
 #[cfg(unix)]
-use crate::tools::{run_fallow_with_output_limit, run_fallow_with_top_level_warnings, run_tool};
+use crate::tools::{run_tool_with_limit, run_tool_with_top_level_warnings};
 
 use super::super::resolve_binary_from;
 
@@ -187,7 +187,12 @@ fn process_cleanup_disarm_does_not_signal_reused_pid() {
 
 #[tokio::test]
 async fn run_fallow_missing_binary() {
-    let result = run_fallow("nonexistent-binary-12345", &["dead-code".to_string()]).await;
+    let result = run_tool(
+        "nonexistent-binary-12345",
+        "analyze",
+        &["dead-code".to_string()],
+    )
+    .await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.message.contains("nonexistent-binary-12345"));
@@ -197,8 +202,9 @@ async fn run_fallow_missing_binary() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_0_with_stdout() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &["-c".to_string(), "echo '{\"ok\":true}'".to_string()],
     )
     .await
@@ -211,23 +217,29 @@ async fn run_fallow_exit_code_0_with_stdout() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_0_empty_stdout_returns_empty_json() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "true".to_string()])
-        .await
-        .unwrap();
+    let result = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "true".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(result.is_error, Some(false));
     assert_eq!(extract_text(&result), "{}");
 }
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_with_top_level_warnings_inserts_empty_array() {
-    let result = run_fallow_with_top_level_warnings(
+async fn run_tool_with_top_level_warnings_inserts_empty_array() {
+    let result = run_tool_with_top_level_warnings(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo '{\"schema_version\":4,\"runtime_coverage\":{\"schema_version\":\"1\"}}'"
                 .to_string(),
         ],
+        None,
     )
     .await
     .unwrap();
@@ -245,8 +257,9 @@ async fn run_fallow_with_top_level_warnings_inserts_empty_array() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_1_treated_as_success_with_issues() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo '{\"issues\":[]}'; exit 1".to_string(),
@@ -352,9 +365,13 @@ async fn complete_requirement_rejects_mixed_semantic_sections_and_query_statuses
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_1_empty_stdout_returns_empty_json() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "exit 1".to_string()])
-        .await
-        .unwrap();
+    let result = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "exit 1".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(result.is_error, Some(false));
     assert_eq!(extract_text(&result), "{}");
 }
@@ -362,8 +379,9 @@ async fn run_fallow_exit_code_1_empty_stdout_returns_empty_json() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_2_with_stderr_returns_structured_json_error() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo 'invalid config' >&2; exit 2".to_string(),
@@ -388,9 +406,13 @@ async fn run_fallow_exit_code_2_with_stderr_returns_structured_json_error() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_2_empty_stderr_returns_structured_json_error() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "exit 2".to_string()])
-        .await
-        .unwrap();
+    let result = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "exit 2".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
     let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
@@ -407,9 +429,13 @@ async fn run_fallow_exit_code_2_empty_stderr_returns_structured_json_error() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_high_exit_code_returns_error() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "exit 127".to_string()])
-        .await
-        .unwrap();
+    let result = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "exit 127".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
     let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
@@ -419,8 +445,9 @@ async fn run_fallow_high_exit_code_returns_error() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_stderr_is_trimmed_in_error_message() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo '  whitespace around  ' >&2; exit 3".to_string(),
@@ -446,9 +473,13 @@ fn resolve_binary_behavior() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_killed_by_signal_returns_error_with_negative_code() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "kill -9 $$".to_string()])
-        .await
-        .unwrap();
+    let result = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "kill -9 $$".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
     let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
@@ -458,8 +489,9 @@ async fn run_fallow_killed_by_signal_returns_error_with_negative_code() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_1_with_stderr_returns_stdout_not_stderr() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo '{\"issues\":1}'; echo 'debug warning' >&2; exit 1".to_string(),
@@ -476,8 +508,9 @@ async fn run_fallow_exit_code_1_with_stderr_returns_stdout_not_stderr() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_multiline_stdout() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo 'line1'; echo 'line2'; echo 'line3'".to_string(),
@@ -495,9 +528,13 @@ async fn run_fallow_multiline_stdout() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_empty_args() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "echo ok".to_string()])
-        .await
-        .unwrap();
+    let result = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "echo ok".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(result.is_error, Some(false));
     let text = extract_text(&result);
     assert!(text.contains("ok"));
@@ -506,8 +543,9 @@ async fn run_fallow_empty_args() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_multiline_stderr_in_error() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo 'error line 1' >&2; echo 'error line 2' >&2; exit 2".to_string(),
@@ -526,25 +564,37 @@ async fn run_fallow_multiline_stderr_in_error() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_result_has_single_content_item() {
-    let success = run_fallow("/bin/sh", &["-c".to_string(), "echo test".to_string()])
-        .await
-        .unwrap();
+    let success = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "echo test".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(success.content.len(), 1);
 
-    let error = run_fallow("/bin/sh", &["-c".to_string(), "exit 2".to_string()])
-        .await
-        .unwrap();
+    let error = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "exit 2".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(error.content.len(), 1);
 
-    let issues = run_fallow("/bin/sh", &["-c".to_string(), "exit 1".to_string()])
-        .await
-        .unwrap();
+    let issues = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "exit 1".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(issues.content.len(), 1);
 }
 
 #[tokio::test]
 async fn run_fallow_missing_binary_error_includes_install_hint() {
-    let result = run_fallow("nonexistent-binary-xyz", &[]).await;
+    let result = run_tool("nonexistent-binary-xyz", "analyze", &[]).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -556,8 +606,9 @@ async fn run_fallow_missing_binary_error_includes_install_hint() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_unicode_in_stdout() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo '{\"file\":\"ソース/コード.ts\"}'".to_string(),
@@ -573,8 +624,9 @@ async fn run_fallow_unicode_in_stdout() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_unicode_in_stderr_error() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo 'Fehler: ungültige Konfiguration' >&2; exit 2".to_string(),
@@ -595,9 +647,13 @@ async fn run_fallow_unicode_in_stderr_error() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_255() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "exit 255".to_string()])
-        .await
-        .unwrap();
+    let result = run_tool(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), "exit 255".to_string()],
+    )
+    .await
+    .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
     let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
@@ -607,8 +663,9 @@ async fn run_fallow_exit_code_255() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_large_stderr_in_error() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "for i in $(seq 1 100); do echo \"error line $i\" >&2; done; exit 2".to_string(),
@@ -627,8 +684,9 @@ async fn run_fallow_large_stderr_in_error() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_stdout_preserves_content() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             r#"printf '{"key": "value"}\n'"#.to_string(),
@@ -649,8 +707,9 @@ async fn run_fallow_stdout_preserves_content() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_1_only_stderr_returns_empty_json() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             "echo 'some warning' >&2; exit 1".to_string(),
@@ -665,8 +724,9 @@ async fn run_fallow_exit_code_1_only_stderr_returns_empty_json() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_stdin_is_not_inherited() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &["-c".to_string(), "cat < /dev/null".to_string()],
     )
     .await
@@ -682,8 +742,9 @@ async fn run_fallow_completed_child_cleans_descendant_process_tree() {
     let descendant_pid_path = temp.path().join("descendant.pid");
     let script = r#"sleep 30 >/dev/null 2>&1 & echo $! > "$1"; printf '{}'"#;
 
-    let result = run_fallow_with_timeout(
+    let result = run_tool_with_timeout(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             script.to_string(),
@@ -691,6 +752,7 @@ async fn run_fallow_completed_child_cleans_descendant_process_tree() {
             descendant_pid_path.to_string_lossy().into_owned(),
         ],
         Duration::from_secs(5),
+        None,
     )
     .await
     .expect("completed subprocess should stay a tool result");
@@ -716,8 +778,9 @@ async fn run_fallow_completed_child_cleanup_closes_inherited_pipes_without_timeo
     let script = r#"sleep 30 & echo $! > "$1"; printf '{}'"#;
     let started = std::time::Instant::now();
 
-    let result = run_fallow_with_timeout(
+    let result = run_tool_with_timeout(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             script.to_string(),
@@ -725,6 +788,7 @@ async fn run_fallow_completed_child_cleanup_closes_inherited_pipes_without_timeo
             descendant_pid_path.to_string_lossy().into_owned(),
         ],
         Duration::from_secs(2),
+        None,
     )
     .await
     .expect("completed subprocess should stay a tool result");
@@ -759,8 +823,9 @@ Write-Output '{}'
 ";
     std::fs::write(&script_path, script).expect("PowerShell fixture script");
 
-    let result = run_fallow_with_timeout(
+    let result = run_tool_with_timeout(
         "powershell.exe",
+        "analyze",
         &[
             "-NoProfile".to_string(),
             "-NonInteractive".to_string(),
@@ -772,6 +837,7 @@ Write-Output '{}'
             descendant_pid_path.to_string_lossy().into_owned(),
         ],
         WINDOWS_FIXTURE_COMPLETION_TIMEOUT,
+        None,
     )
     .await
     .expect("completed subprocess should stay a tool result");
@@ -792,10 +858,12 @@ Write-Output '{}'
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_timeout_returns_mcp_error() {
-    let result = run_fallow_with_timeout(
+    let result = run_tool_with_timeout(
         "/bin/sh",
+        "analyze",
         &["-c".to_string(), "sleep 10".to_string()],
         Duration::from_millis(20),
+        None,
     )
     .await
     .expect("timeout should stay a tool result");
@@ -821,8 +889,9 @@ async fn run_fallow_timeout_terminates_and_reaps_process_tree() {
     let descendant_pid_path = temp.path().join("descendant.pid");
     let script = r#"echo $$ > "$1"; sleep 30 & echo $! > "$2"; exec sleep 30"#;
 
-    let result = run_fallow_with_timeout(
+    let result = run_tool_with_timeout(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             script.to_string(),
@@ -831,6 +900,7 @@ async fn run_fallow_timeout_terminates_and_reaps_process_tree() {
             descendant_pid_path.to_string_lossy().into_owned(),
         ],
         Duration::from_millis(500),
+        None,
     )
     .await
     .expect("timeout should stay a tool result");
@@ -864,8 +934,9 @@ async fn run_fallow_timeout_is_not_held_open_by_escaped_pipe_writer() {
     let script = r#"python3 -c 'import os,sys,time; os.setsid(); p=open(sys.argv[1], "w"); p.write(str(os.getpid())); p.close(); time.sleep(30)' "$1" & exec sleep 30"#;
     let started = std::time::Instant::now();
 
-    let result = run_fallow_with_timeout(
+    let result = run_tool_with_timeout(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             script.to_string(),
@@ -873,6 +944,7 @@ async fn run_fallow_timeout_is_not_held_open_by_escaped_pipe_writer() {
             escaped_pid_path.to_string_lossy().into_owned(),
         ],
         Duration::from_secs(1),
+        None,
     )
     .await
     .expect("timeout should stay a tool result");
@@ -911,8 +983,9 @@ Start-Sleep -Seconds 600
 ";
     std::fs::write(&script_path, script).expect("PowerShell fixture script");
 
-    let result = run_fallow_with_timeout(
+    let result = run_tool_with_timeout(
         "powershell.exe",
+        "analyze",
         &[
             "-NoProfile".to_string(),
             "-NonInteractive".to_string(),
@@ -926,6 +999,7 @@ Start-Sleep -Seconds 600
             descendant_pid_path.to_string_lossy().into_owned(),
         ],
         WINDOWS_FIXTURE_FIRED_TIMEOUT,
+        None,
     )
     .await
     .expect("timeout should stay a tool result");
@@ -960,10 +1034,14 @@ Start-Sleep -Seconds 600
 #[tokio::test]
 async fn run_fallow_output_limit_refuses_and_reports_truncation_with_a_preview() {
     let script = r#"i=0; while [ "$i" -lt 2048 ]; do printf x; i=$((i + 1)); done"#;
-    let result =
-        run_fallow_with_output_limit("/bin/sh", &["-c".to_string(), script.to_string()], 1024)
-            .await
-            .expect("output limit should stay a tool result");
+    let result = run_tool_with_limit(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), script.to_string()],
+        Some(1024),
+    )
+    .await
+    .expect("output limit should stay a tool result");
 
     assert_eq!(
         result.is_error,
@@ -991,10 +1069,14 @@ async fn run_fallow_output_limit_refuses_and_reports_truncation_with_a_preview()
 #[tokio::test]
 async fn run_fallow_output_limit_help_never_advises_raising_the_cap() {
     let script = r#"i=0; while [ "$i" -lt 2048 ]; do printf x; i=$((i + 1)); done"#;
-    let result =
-        run_fallow_with_output_limit("/bin/sh", &["-c".to_string(), script.to_string()], 1024)
-            .await
-            .expect("output limit should stay a tool result");
+    let result = run_tool_with_limit(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), script.to_string()],
+        Some(1024),
+    )
+    .await
+    .expect("output limit should stay a tool result");
 
     let body: serde_json::Value =
         serde_json::from_str(extract_text(&result)).expect("output-limit body is JSON");
@@ -1012,8 +1094,9 @@ async fn run_fallow_output_limit_help_never_advises_raising_the_cap() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_2_with_json_stdout_passes_through() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             r#"echo '{"error":true,"message":"config not found","exit_code":2}'; exit 2"#
@@ -1033,8 +1116,9 @@ async fn run_fallow_exit_code_2_with_json_stdout_passes_through() {
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_exit_code_2_prefers_json_stdout_over_stderr() {
-    let result = run_fallow(
+    let result = run_tool(
         "/bin/sh",
+        "analyze",
         &[
             "-c".to_string(),
             r#"echo '{"error":true,"message":"structured error","exit_code":2}'; echo 'raw stderr msg' >&2; exit 2"#.to_string(),

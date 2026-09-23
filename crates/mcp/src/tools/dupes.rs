@@ -1,8 +1,7 @@
 use crate::params::FindDupesParams;
 
 use fallow_api::{
-    AnalysisOptions, DuplicationMode, DuplicationOptions, run_duplication,
-    serialize_duplication_programmatic_json,
+    AnalysisOptions, DuplicationOptions, run_duplication, serialize_duplication_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -13,9 +12,10 @@ use super::{
         changed_since_from_param, env_diff_file, json_success, non_empty_path,
         programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
     },
-    fallback_policy::{CliFallbackReason, baseline_fallback_reason, duplication_fallback_reason},
-    push_baseline, push_global, push_remote_extends, push_str_flag, run_tool,
-    validation_error_body,
+    duplication_mode_from_param,
+    fallback_policy::{baseline_requested, duplication_needs_cli},
+    min_occurrences_from_param, push_baseline, push_global, push_remote_extends, push_str_flag,
+    run_tool, validation_error_body,
 };
 
 /// Run `find_dupes` through the typed API when parameters map cleanly to the
@@ -85,19 +85,12 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
 }
 
 fn requires_cli_fallback(params: &FindDupesParams) -> bool {
-    cli_fallback_reason(params).is_some()
-}
-
-fn cli_fallback_reason(params: &FindDupesParams) -> Option<CliFallbackReason> {
-    baseline_fallback_reason(params.baseline.as_deref(), params.save_baseline.as_deref()).or_else(
-        || {
-            duplication_fallback_reason(
-                params.group_by.as_deref(),
-                params.explain_skipped,
-                params.threshold,
-            )
-        },
-    )
+    baseline_requested(params.baseline.as_deref(), params.save_baseline.as_deref())
+        || duplication_needs_cli(
+            params.group_by.as_deref(),
+            params.explain_skipped,
+            params.threshold,
+        )
 }
 
 fn duplication_options_from_params(params: &FindDupesParams) -> Result<DuplicationOptions, String> {
@@ -126,29 +119,6 @@ fn duplication_options_from_params(params: &FindDupesParams) -> Result<Duplicati
         top: params.top,
         include_fragments: Some(params.include_fragments.unwrap_or(false)),
     })
-}
-
-fn duplication_mode_from_param(mode: Option<&str>) -> Result<Option<DuplicationMode>, String> {
-    match mode {
-        None | Some("") => Ok(None),
-        Some("strict") => Ok(Some(DuplicationMode::Strict)),
-        Some("mild") => Ok(Some(DuplicationMode::Mild)),
-        Some("weak") => Ok(Some(DuplicationMode::Weak)),
-        Some("semantic") => Ok(Some(DuplicationMode::Semantic)),
-        Some(mode) => Err(validation_error_body(format!(
-            "Invalid mode '{mode}'. Valid values: strict, mild, weak, semantic"
-        ))),
-    }
-}
-
-fn min_occurrences_from_param(value: Option<u32>) -> Result<Option<usize>, String> {
-    match value {
-        Some(value) if value < 2 => Err(validation_error_body(format!(
-            "min_occurrences must be at least 2 (got {value})"
-        ))),
-        Some(value) => Ok(Some(value as usize)),
-        None => Ok(None),
-    }
 }
 
 /// Push the validated detection-tuning flags (`--mode`, `--min-tokens`,
@@ -221,6 +191,7 @@ fn push_dupes_toggle_flags(args: &mut Vec<String>, params: &FindDupesParams) {
 
 #[cfg(test)]
 mod tests {
+    use fallow_api::DuplicationMode;
     use rmcp::model::ContentBlock;
 
     use super::*;

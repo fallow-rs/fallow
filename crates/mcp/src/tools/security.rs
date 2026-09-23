@@ -4,14 +4,11 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
-    push_global, push_remote_extends, push_str_flag, run_tool_with_limit, validation_error_body,
+    fallback_policy::filled, push_global, push_remote_extends, push_str_flag, run_tool_with_limit,
+    validation_error_body,
 };
 
 const VALID_SECURITY_GATES: &[&str] = &["new", "newly-reachable"];
-
-fn has_value(value: Option<&str>) -> bool {
-    value.is_some_and(|s| !s.is_empty())
-}
 
 /// Run `security_candidates`. This remains CLI-backed until the security
 /// candidate surface has a command-neutral programmatic API.
@@ -37,7 +34,7 @@ pub async fn run_security_candidates(
 pub fn build_security_candidates_args(
     params: &SecurityCandidatesParams,
 ) -> Result<Vec<String>, String> {
-    if has_value(params.workspace.as_deref()) && has_value(params.changed_workspaces.as_deref()) {
+    if filled(params.workspace.as_deref()) && filled(params.changed_workspaces.as_deref()) {
         return Err(validation_error_body(
             "workspace and changed_workspaces are mutually exclusive for security_candidates",
         ));
@@ -49,8 +46,7 @@ pub fn build_security_candidates_args(
             "Invalid gate '{gate}'. Valid values: new, newly-reachable"
         )));
     }
-    if params.gate.as_deref() == Some("newly-reachable")
-        && !has_value(params.changed_since.as_deref())
+    if params.gate.as_deref() == Some("newly-reachable") && !filled(params.changed_since.as_deref())
     {
         return Err(validation_error_body(
             "gate=newly-reachable requires changed_since for security_candidates",

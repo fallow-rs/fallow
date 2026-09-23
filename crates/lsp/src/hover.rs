@@ -11,7 +11,7 @@ use fallow_api::{
 use crate::code_lens::{pluralize, react_hook_segment};
 use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
-use crate::position::{PositionMapper, line_range_from_byte_col};
+use crate::position::{NamedAnchor, PositionMapper, line_range_from_byte_col};
 
 /// Typed input for building hover information from editor analysis state.
 #[derive(Clone, Copy)]
@@ -504,6 +504,31 @@ fn unused_member_hover(
     })
 }
 
+/// Build the hover for a named anchor when the cursor is on its identifier.
+fn anchor_hover(
+    anchor: &NamedAnchor<'_>,
+    file_path: &Path,
+    position: Position,
+    mapper: &mut PositionMapper,
+    message: impl FnOnce() -> String,
+) -> Option<Hover> {
+    let line = anchor.line.saturating_sub(1);
+    if anchor.path != file_path || line != position.line {
+        return None;
+    }
+    let (start_col, end_col) = mapper.utf16_col_span(anchor.path, line, anchor.col, anchor.name);
+    if !position_in_span(position, start_col, end_col) {
+        return None;
+    }
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: message(),
+        }),
+        range: Some(span_range(line, start_col, end_col)),
+    })
+}
+
 /// Check if the position is on an unrendered Vue/Svelte component anchor.
 fn check_unrendered_component(
     results: &AnalysisResults,
@@ -511,45 +536,30 @@ fn check_unrendered_component(
     position: Position,
     mapper: &mut PositionMapper,
 ) -> Option<Hover> {
-    for finding in &results.unrendered_components {
+    results.unrendered_components.iter().find_map(|finding| {
         let c = &finding.component;
-        if c.path != file_path {
-            continue;
-        }
-        let component_line = c.line.saturating_sub(1);
-        if component_line != position.line {
-            continue;
-        }
-        let (start_col, end_col) =
-            mapper.utf16_col_span(&c.path, component_line, c.col, &c.component_name);
-        if !position_in_span(position, start_col, end_col) {
-            continue;
-        }
-
-        // Lit: `component_name` is the registered TAG; render it as a custom
-        // element to match the CLI human / markdown formatters.
-        let value = if c.framework == "lit" {
-            format!(
-                "**fallow**: Custom element {} is registered but rendered in no template.",
-                format_inline_code(&format!("<{}>", c.component_name)),
-            )
-        } else {
-            format!(
-                "**fallow**: Component {} is reachable but rendered nowhere in this project.",
-                format_inline_code(&c.component_name),
-            )
+        let anchor = NamedAnchor {
+            path: &c.path,
+            line: c.line,
+            col: c.col,
+            name: &c.component_name,
         };
-
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: Some(span_range(component_line, start_col, end_col)),
-        });
-    }
-
-    None
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            // Lit: `component_name` is the registered TAG; render it as a custom
+            // element to match the CLI human / markdown formatters.
+            if c.framework == "lit" {
+                format!(
+                    "**fallow**: Custom element {} is registered but rendered in no template.",
+                    format_inline_code(&format!("<{}>", c.component_name)),
+                )
+            } else {
+                format!(
+                    "**fallow**: Component {} is reachable but rendered nowhere in this project.",
+                    format_inline_code(&c.component_name),
+                )
+            }
+        })
+    })
 }
 
 /// Check if the position is on an unused component prop anchor.
@@ -559,35 +569,21 @@ fn check_unused_component_prop(
     position: Position,
     mapper: &mut PositionMapper,
 ) -> Option<Hover> {
-    for finding in &results.unused_component_props {
+    results.unused_component_props.iter().find_map(|finding| {
         let p = &finding.prop;
-        if p.path != file_path {
-            continue;
-        }
-        let prop_line = p.line.saturating_sub(1);
-        if prop_line != position.line {
-            continue;
-        }
-        let (start_col, end_col) = mapper.utf16_col_span(&p.path, prop_line, p.col, &p.prop_name);
-        if !position_in_span(position, start_col, end_col) {
-            continue;
-        }
-
-        let value = format!(
-            "**fallow**: Prop {} is declared but referenced nowhere in this component.",
-            format_inline_code(&p.prop_name),
-        );
-
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: Some(span_range(prop_line, start_col, end_col)),
-        });
-    }
-
-    None
+        let anchor = NamedAnchor {
+            path: &p.path,
+            line: p.line,
+            col: p.col,
+            name: &p.prop_name,
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: Prop {} is declared but referenced nowhere in this component.",
+                format_inline_code(&p.prop_name),
+            )
+        })
+    })
 }
 
 /// Check if the position is on an unused Vue component emit anchor.
@@ -597,35 +593,21 @@ fn check_unused_component_emit(
     position: Position,
     mapper: &mut PositionMapper,
 ) -> Option<Hover> {
-    for finding in &results.unused_component_emits {
+    results.unused_component_emits.iter().find_map(|finding| {
         let e = &finding.emit;
-        if e.path != file_path {
-            continue;
-        }
-        let emit_line = e.line.saturating_sub(1);
-        if emit_line != position.line {
-            continue;
-        }
-        let (start_col, end_col) = mapper.utf16_col_span(&e.path, emit_line, e.col, &e.emit_name);
-        if !position_in_span(position, start_col, end_col) {
-            continue;
-        }
-
-        let value = format!(
-            "**fallow**: Emit {} is declared but emitted nowhere in this component.",
-            format_inline_code(&e.emit_name),
-        );
-
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: Some(span_range(emit_line, start_col, end_col)),
-        });
-    }
-
-    None
+        let anchor = NamedAnchor {
+            path: &e.path,
+            line: e.line,
+            col: e.col,
+            name: &e.emit_name,
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: Emit {} is declared but emitted nowhere in this component.",
+                format_inline_code(&e.emit_name),
+            )
+        })
+    })
 }
 
 /// Check if the position is on an unused Angular component input anchor.
@@ -635,35 +617,21 @@ fn check_unused_component_input(
     position: Position,
     mapper: &mut PositionMapper,
 ) -> Option<Hover> {
-    for finding in &results.unused_component_inputs {
+    results.unused_component_inputs.iter().find_map(|finding| {
         let i = &finding.input;
-        if i.path != file_path {
-            continue;
-        }
-        let input_line = i.line.saturating_sub(1);
-        if input_line != position.line {
-            continue;
-        }
-        let (start_col, end_col) = mapper.utf16_col_span(&i.path, input_line, i.col, &i.input_name);
-        if !position_in_span(position, start_col, end_col) {
-            continue;
-        }
-
-        let value = format!(
-            "**fallow**: Input {} is declared but read nowhere in this component.",
-            format_inline_code(&i.input_name),
-        );
-
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: Some(span_range(input_line, start_col, end_col)),
-        });
-    }
-
-    None
+        let anchor = NamedAnchor {
+            path: &i.path,
+            line: i.line,
+            col: i.col,
+            name: &i.input_name,
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: Input {} is declared but read nowhere in this component.",
+                format_inline_code(&i.input_name),
+            )
+        })
+    })
 }
 
 /// Check if the position is on an unused Angular component output anchor.
@@ -673,36 +641,21 @@ fn check_unused_component_output(
     position: Position,
     mapper: &mut PositionMapper,
 ) -> Option<Hover> {
-    for finding in &results.unused_component_outputs {
+    results.unused_component_outputs.iter().find_map(|finding| {
         let o = &finding.output;
-        if o.path != file_path {
-            continue;
-        }
-        let output_line = o.line.saturating_sub(1);
-        if output_line != position.line {
-            continue;
-        }
-        let (start_col, end_col) =
-            mapper.utf16_col_span(&o.path, output_line, o.col, &o.output_name);
-        if !position_in_span(position, start_col, end_col) {
-            continue;
-        }
-
-        let value = format!(
-            "**fallow**: Output {} is declared but emitted nowhere in this component.",
-            format_inline_code(&o.output_name),
-        );
-
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: Some(span_range(output_line, start_col, end_col)),
-        });
-    }
-
-    None
+        let anchor = NamedAnchor {
+            path: &o.path,
+            line: o.line,
+            col: o.col,
+            name: &o.output_name,
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: Output {} is declared but emitted nowhere in this component.",
+                format_inline_code(&o.output_name),
+            )
+        })
+    })
 }
 
 /// Check if the position is on an unused Svelte dispatched event anchor.
@@ -712,35 +665,21 @@ fn check_unused_svelte_event(
     position: Position,
     mapper: &mut PositionMapper,
 ) -> Option<Hover> {
-    for finding in &results.unused_svelte_events {
+    results.unused_svelte_events.iter().find_map(|finding| {
         let e = &finding.event;
-        if e.path != file_path {
-            continue;
-        }
-        let event_line = e.line.saturating_sub(1);
-        if event_line != position.line {
-            continue;
-        }
-        let (start_col, end_col) = mapper.utf16_col_span(&e.path, event_line, e.col, &e.event_name);
-        if !position_in_span(position, start_col, end_col) {
-            continue;
-        }
-
-        let value = format!(
-            "**fallow**: Event {} is dispatched but listened to nowhere in this project.",
-            format_inline_code(&e.event_name),
-        );
-
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: Some(span_range(event_line, start_col, end_col)),
-        });
-    }
-
-    None
+        let anchor = NamedAnchor {
+            path: &e.path,
+            line: e.line,
+            col: e.col,
+            name: &e.event_name,
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: Event {} is dispatched but listened to nowhere in this project.",
+                format_inline_code(&e.event_name),
+            )
+        })
+    })
 }
 
 /// Check if the position is on an unused Next.js server action.
@@ -750,36 +689,21 @@ fn check_unused_server_action(
     position: Position,
     mapper: &mut PositionMapper,
 ) -> Option<Hover> {
-    for finding in &results.unused_server_actions {
+    results.unused_server_actions.iter().find_map(|finding| {
         let a = &finding.action;
-        if a.path != file_path {
-            continue;
-        }
-        let action_line = a.line.saturating_sub(1);
-        if action_line != position.line {
-            continue;
-        }
-        let (start_col, end_col) =
-            mapper.utf16_col_span(&a.path, action_line, a.col, &a.action_name);
-        if !position_in_span(position, start_col, end_col) {
-            continue;
-        }
-
-        let value = format!(
-            "**fallow**: Server action {} is exported from a \"use server\" file but no code in this project references it.",
-            format_inline_code(&a.action_name),
-        );
-
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: Some(span_range(action_line, start_col, end_col)),
-        });
-    }
-
-    None
+        let anchor = NamedAnchor {
+            path: &a.path,
+            line: a.line,
+            col: a.col,
+            name: &a.action_name,
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: Server action {} is exported from a \"use server\" file but no code in this project references it.",
+                format_inline_code(&a.action_name),
+            )
+        })
+    })
 }
 
 /// Check if the position is on an unused SvelteKit `load()` return-object key.
@@ -789,35 +713,21 @@ fn check_unused_load_data_key(
     position: Position,
     mapper: &mut PositionMapper,
 ) -> Option<Hover> {
-    for finding in &results.unused_load_data_keys {
+    results.unused_load_data_keys.iter().find_map(|finding| {
         let k = &finding.key;
-        if k.path != file_path {
-            continue;
-        }
-        let key_line = k.line.saturating_sub(1);
-        if key_line != position.line {
-            continue;
-        }
-        let (start_col, end_col) = mapper.utf16_col_span(&k.path, key_line, k.col, &k.key_name);
-        if !position_in_span(position, start_col, end_col) {
-            continue;
-        }
-
-        let value = format!(
-            "**fallow**: load() return key {} is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>).",
-            format_inline_code(&k.key_name),
-        );
-
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: Some(span_range(key_line, start_col, end_col)),
-        });
-    }
-
-    None
+        let anchor = NamedAnchor {
+            path: &k.path,
+            line: k.line,
+            col: k.col,
+            name: &k.key_name,
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: load() return key {} is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>).",
+                format_inline_code(&k.key_name),
+            )
+        })
+    })
 }
 
 /// Check if the position is on a React component prop anchor and surface the
@@ -1138,6 +1048,193 @@ mod tests {
             PathBuf::from("C:\\project")
         } else {
             PathBuf::from("/project")
+        }
+    }
+
+    /// One finding per named-anchor kind, each in its own file, at 1-based
+    /// line 3 and column 4. The Lit component checks the custom-element text.
+    fn named_anchor_results(root: &Path) -> AnalysisResults {
+        use fallow_api::editor_results as r;
+        let mut results = AnalysisResults::default();
+        for (file, name, framework) in [
+            ("Card.vue", "Card", "vue"),
+            ("card-element.ts", "my-card", "lit"),
+        ] {
+            results
+                .unrendered_components
+                .push(r::UnrenderedComponentFinding::with_actions(
+                    r::UnrenderedComponent {
+                        path: root.join(file),
+                        component_name: name.to_string(),
+                        framework: framework.to_string(),
+                        reachable_via: None,
+                        line: 3,
+                        col: 4,
+                    },
+                ));
+        }
+        results
+            .unused_component_props
+            .push(r::UnusedComponentPropFinding::with_actions(
+                r::UnusedComponentProp {
+                    path: root.join("Prop.vue"),
+                    component_name: "Prop".to_string(),
+                    prop_name: "size".to_string(),
+                    line: 3,
+                    col: 4,
+                },
+            ));
+        results
+            .unused_component_emits
+            .push(r::UnusedComponentEmitFinding::with_actions(
+                r::UnusedComponentEmit {
+                    path: root.join("Emit.vue"),
+                    component_name: "Emit".to_string(),
+                    emit_name: "change".to_string(),
+                    line: 3,
+                    col: 4,
+                },
+            ));
+        results
+            .unused_component_inputs
+            .push(r::UnusedComponentInputFinding::with_actions(
+                r::UnusedComponentInput {
+                    path: root.join("input.component.ts"),
+                    component_name: "InputComponent".to_string(),
+                    input_name: "label".to_string(),
+                    line: 3,
+                    col: 4,
+                },
+            ));
+        results
+            .unused_component_outputs
+            .push(r::UnusedComponentOutputFinding::with_actions(
+                r::UnusedComponentOutput {
+                    path: root.join("output.component.ts"),
+                    component_name: "OutputComponent".to_string(),
+                    output_name: "closed".to_string(),
+                    line: 3,
+                    col: 4,
+                },
+            ));
+        results
+            .unused_svelte_events
+            .push(r::UnusedSvelteEventFinding::with_actions(
+                r::UnusedSvelteEvent {
+                    path: root.join("Child.svelte"),
+                    component_name: "Child".to_string(),
+                    event_name: "dead".to_string(),
+                    line: 3,
+                    col: 4,
+                },
+            ));
+        results
+            .unused_server_actions
+            .push(r::UnusedServerActionFinding::with_actions(
+                r::UnusedServerAction {
+                    path: root.join("app/actions.ts"),
+                    action_name: "createUser".to_string(),
+                    line: 3,
+                    col: 4,
+                },
+            ));
+        results
+            .unused_load_data_keys
+            .push(r::UnusedLoadDataKeyFinding::with_actions(
+                r::UnusedLoadDataKey {
+                    path: root.join("src/routes/+page.server.ts"),
+                    key_name: "posts".to_string(),
+                    line: 3,
+                    col: 4,
+                    route_dir: None,
+                },
+            ));
+        results
+    }
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test string lengths are trivially small"
+    )]
+    fn named_anchor_hovers_keep_exact_markdown_and_range() {
+        let root = test_root();
+        let results = named_anchor_results(&root);
+        let duplication = DuplicationReport::default();
+        let cases = [
+            (
+                "Card.vue",
+                "Card",
+                "**fallow**: Component `Card` is reachable but rendered nowhere in this project.",
+            ),
+            (
+                "card-element.ts",
+                "my-card",
+                "**fallow**: Custom element `<my-card>` is registered but rendered in no template.",
+            ),
+            (
+                "Prop.vue",
+                "size",
+                "**fallow**: Prop `size` is declared but referenced nowhere in this component.",
+            ),
+            (
+                "Emit.vue",
+                "change",
+                "**fallow**: Emit `change` is declared but emitted nowhere in this component.",
+            ),
+            (
+                "input.component.ts",
+                "label",
+                "**fallow**: Input `label` is declared but read nowhere in this component.",
+            ),
+            (
+                "output.component.ts",
+                "closed",
+                "**fallow**: Output `closed` is declared but emitted nowhere in this component.",
+            ),
+            (
+                "Child.svelte",
+                "dead",
+                "**fallow**: Event `dead` is dispatched but listened to nowhere in this project.",
+            ),
+            (
+                "app/actions.ts",
+                "createUser",
+                "**fallow**: Server action `createUser` is exported from a \"use server\" file but no code in this project references it.",
+            ),
+            (
+                "src/routes/+page.server.ts",
+                "posts",
+                "**fallow**: load() return key `posts` is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>).",
+            ),
+        ];
+        for (file, name, expected) in cases {
+            let path = root.join(file);
+            let end = 4 + name.len() as u32;
+            let hover = build_hover_for_test(
+                &results,
+                &duplication,
+                &path,
+                Position {
+                    line: 2,
+                    character: end - 1,
+                },
+            )
+            .unwrap_or_else(|| panic!("hover for {file}"));
+            assert_eq!(markup_value(&hover), expected, "{file}");
+            assert_eq!(hover.range, Some(span_range(2, 4, end)), "{file}");
+            for character in [3, end] {
+                assert!(
+                    build_hover_for_test(
+                        &results,
+                        &duplication,
+                        &path,
+                        Position { line: 2, character }
+                    )
+                    .is_none(),
+                    "{file} column {character} is outside the anchor"
+                );
+            }
         }
     }
 

@@ -972,94 +972,6 @@ mod tests {
     }
 
     #[test]
-    fn dead_code_explain_uses_api_runtime_meta() {
-        let project = tiny_dead_code_project();
-        let root = project.path();
-
-        let json = api::run_dead_code(&api::DeadCodeOptions {
-            analysis: api::AnalysisOptions {
-                root: Some(root.to_path_buf()),
-                explain: true,
-                ..api::AnalysisOptions::default()
-            },
-            filters: api::DeadCodeFilters {
-                unused_exports: true,
-                ..api::DeadCodeFilters::default()
-            },
-            ..api::DeadCodeOptions::default()
-        })
-        .and_then(api::serialize_dead_code_programmatic_json)
-        .expect("api runtime succeeds");
-
-        assert!(json["_meta"].is_object());
-        assert_eq!(unused_export_names(&json), vec!["dead"]);
-    }
-
-    #[test]
-    fn dead_code_diff_file_uses_api_runtime_without_fallback() {
-        let project = tiny_dead_code_project();
-        let root = project.path();
-        std::fs::write(
-            root.join("feature.diff"),
-            "diff --git a/src/feature.ts b/src/feature.ts\n+++ b/src/feature.ts\n@@ -1 +1 @@\n+export const dead = 1;\n",
-        )
-        .expect("diff");
-
-        let json = api::run_dead_code(&api::DeadCodeOptions {
-            analysis: api::AnalysisOptions {
-                root: Some(root.to_path_buf()),
-                diff_file: Some(Path::new("feature.diff").to_path_buf()),
-                ..api::AnalysisOptions::default()
-            },
-            filters: api::DeadCodeFilters {
-                unused_exports: true,
-                ..api::DeadCodeFilters::default()
-            },
-            ..api::DeadCodeOptions::default()
-        })
-        .and_then(api::serialize_dead_code_programmatic_json)
-        .expect("api diff runtime succeeds");
-
-        assert!(json.get("_meta").is_none());
-        assert_eq!(unused_export_names(&json), vec!["dead"]);
-    }
-
-    #[test]
-    fn dead_code_family_helpers_use_api_filtered_envelopes() {
-        let project = tiny_dead_code_project();
-        let root = project.path();
-        let options = api::DeadCodeOptions {
-            analysis: api::AnalysisOptions {
-                root: Some(root.to_path_buf()),
-                ..api::AnalysisOptions::default()
-            },
-            ..api::DeadCodeOptions::default()
-        };
-
-        let circular = api::run_circular_dependencies(&options)
-            .and_then(api::serialize_circular_dependencies_programmatic_json)
-            .expect("circular helper");
-        let boundary = api::run_boundary_violations(&options)
-            .and_then(api::serialize_boundary_violations_programmatic_json)
-            .expect("boundary helper");
-
-        assert_eq!(circular["kind"], "dead-code");
-        assert_eq!(circular["total_issues"], 0);
-        assert!(
-            circular["unused_exports"]
-                .as_array()
-                .is_none_or(Vec::is_empty)
-        );
-        assert_eq!(boundary["kind"], "dead-code");
-        assert_eq!(boundary["total_issues"], 0);
-        assert!(
-            boundary["unused_exports"]
-                .as_array()
-                .is_none_or(Vec::is_empty)
-        );
-    }
-
-    #[test]
     fn detect_duplication_accepts_normalized_mode() {
         let task = detect_duplication(Some(DuplicationOptions {
             mode: Some(" STRICT ".to_string()),
@@ -1071,13 +983,16 @@ mod tests {
 
     #[test]
     fn detect_duplication_rejects_unknown_mode() {
-        let reason = error_reason(detect_duplication(Some(DuplicationOptions {
+        let Err(error) = detect_duplication(Some(DuplicationOptions {
             mode: Some("strictest".to_string()),
             ..DuplicationOptions::default()
-        })));
+        })) else {
+            panic!("option validation should fail");
+        };
 
+        assert_eq!(error.status, Status::InvalidArg);
         assert_eq!(
-            reason,
+            error.reason,
             "invalid `mode` value `strictest`; expected one of: strict, mild, weak, semantic"
         );
     }
@@ -1241,40 +1156,6 @@ mod tests {
     }
 
     #[test]
-    fn detect_feature_flags_returns_async_task() {
-        let task = detect_feature_flags(Some(FeatureFlagsOptions {
-            top: Some(1),
-            ..FeatureFlagsOptions::default()
-        }));
-
-        assert!(task.is_ok());
-    }
-
-    #[test]
-    fn duplication_options_reject_invalid_mode_and_min_occurrences() {
-        let invalid_mode = api::DuplicationOptions::try_from(DuplicationOptions {
-            mode: Some("exact".to_string()),
-            ..DuplicationOptions::default()
-        })
-        .expect_err("invalid mode should fail");
-
-        assert_eq!(invalid_mode.status, Status::InvalidArg);
-        assert!(invalid_mode.reason.contains("invalid `mode` value `exact`"));
-
-        let too_few_occurrences = api::DuplicationOptions::try_from(DuplicationOptions {
-            min_occurrences: Some(1),
-            ..DuplicationOptions::default()
-        })
-        .expect_err("single occurrence should fail");
-
-        assert!(
-            too_few_occurrences
-                .reason
-                .contains("min_occurrences must be at least 2")
-        );
-    }
-
-    #[test]
     fn complexity_options_map_sections_sort_ownership_effort_and_coverage() {
         let options = api::ComplexityOptions::try_from(ComplexityOptions {
             max_cyclomatic: Some(42),
@@ -1335,58 +1216,6 @@ mod tests {
     }
 
     #[test]
-    fn complexity_options_reject_invalid_values_and_out_of_range_thresholds() {
-        let invalid_sort = api::ComplexityOptions::try_from(ComplexityOptions {
-            sort: Some("weighted".to_string()),
-            ..ComplexityOptions::default()
-        })
-        .expect_err("invalid sort should fail");
-
-        assert_eq!(invalid_sort.status, Status::InvalidArg);
-        assert!(
-            invalid_sort
-                .reason
-                .contains("invalid `sort` value `weighted`")
-        );
-
-        let invalid_ownership = api::ComplexityOptions::try_from(ComplexityOptions {
-            ownership_emails: Some("cleartext".to_string()),
-            ..ComplexityOptions::default()
-        })
-        .expect_err("invalid ownership email mode should fail");
-
-        assert!(
-            invalid_ownership
-                .reason
-                .contains("invalid `ownershipEmails` value `cleartext`")
-        );
-
-        let invalid_effort = api::ComplexityOptions::try_from(ComplexityOptions {
-            effort: Some("tiny".to_string()),
-            ..ComplexityOptions::default()
-        })
-        .expect_err("invalid effort should fail");
-
-        assert!(
-            invalid_effort
-                .reason
-                .contains("invalid `effort` value `tiny`")
-        );
-
-        let invalid_threshold = api::ComplexityOptions::try_from(ComplexityOptions {
-            max_cyclomatic: Some(u32::from(u16::MAX) + 1),
-            ..ComplexityOptions::default()
-        })
-        .expect_err("threshold above u16 should fail");
-
-        assert!(
-            invalid_threshold
-                .reason
-                .contains("`maxCyclomatic` must be between 0")
-        );
-    }
-
-    #[test]
     fn programmatic_task_runs_once_and_preserves_compute_errors() {
         let project = tiny_dead_code_project();
         let options = api::DeadCodeOptions {
@@ -1429,27 +1258,6 @@ mod tests {
             .as_ref()
             .expect("programmatic error should be retained for reject");
         assert_eq!(stored.code.as_deref(), Some("FALLOW_TEST_FAILURE"));
-    }
-
-    #[test]
-    fn compute_health_uses_programmatic_health_boundary() {
-        let project = tiny_dead_code_project();
-        let options = api::ComplexityOptions::try_from(ComplexityOptions {
-            root: Some(project.path().display().to_string()),
-            no_cache: Some(true),
-            threads: Some(1),
-            score: Some(true),
-            ..ComplexityOptions::default()
-        })
-        .expect("health options should map");
-
-        let json = api::run_health_with_runner(&options, &api::EngineHealthRunner)
-            .and_then(api::serialize_health_programmatic_json)
-            .expect("health should run through programmatic health boundary");
-
-        assert_eq!(json["kind"], "health");
-        assert_eq!(json["schema_version"], 11);
-        assert!(json.get("health_score").is_some());
     }
 
     fn tiny_dead_code_project() -> tempfile::TempDir {

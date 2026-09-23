@@ -113,10 +113,11 @@ Contract rules:
   `serialize_health_programmatic_json` (`crates/api/src/runtime_json.rs`), so a
   typed `audit` restates its diagnostics and its baseline and has no gate object
   to read. A tool whose gate the programmatic route cannot evaluate takes the
-  CLI instead, which is what `CliFallbackReason::HealthMinScoreGate` and
-  `DuplicationThresholdGate` are for: without the second one, `find_dupes` with
-  a failing `threshold` returned a clean-looking result while the same call with
-  a `group_by` beside it reported the gate. Audit's verdict is not routed that
+  CLI instead: `min_score` in the `health.rs` `requires_cli_fallback`, and
+  `threshold` in `fallback_policy::duplication_needs_cli`. Without the
+  `threshold` check, `find_dupes` with a failing `threshold` returned a
+  clean-looking result, while the same call with a `group_by` beside it
+  reported the gate. Audit's verdict is not routed that
   way, because every audit computes one and forcing the CLI would retire the
   typed route; its absence is stated in the server instructions instead.
   The lookup tables name each envelope

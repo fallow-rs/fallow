@@ -338,20 +338,460 @@ fn all_tools_have_input_schema() {
     }
 }
 
+/// One row per tool: the top-level `properties` keys the tool must expose and
+/// the fields its schema must mark as required.
+const TOOL_SCHEMA_EXPECTATIONS: &[(&str, &[&str], &[&str])] = &[
+    (
+        "code_execute",
+        &["code", "root", "timeout_ms", "max_output_bytes"],
+        &["code"],
+    ),
+    (
+        "analyze",
+        &[
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "issue_types",
+            "boundary_violations",
+            "baseline",
+            "save_baseline",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "check_changed",
+        &[
+            "root",
+            "since",
+            "config",
+            "production",
+            "workspace",
+            "baseline",
+            "save_baseline",
+            "no_cache",
+            "threads",
+        ],
+        &["since"],
+    ),
+    (
+        "security_candidates",
+        &[
+            "root",
+            "config",
+            "workspace",
+            "changed_since",
+            "paths",
+            "changed_workspaces",
+            "surface",
+            "gate",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "inspect_target",
+        &[
+            "target",
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "include_churn",
+            "no_cache",
+            "threads",
+        ],
+        &["target"],
+    ),
+    ("guard", &["files", "root"], &["files"]),
+    (
+        "find_dupes",
+        &[
+            "root",
+            "config",
+            "workspace",
+            "mode",
+            "min_tokens",
+            "min_lines",
+            "threshold",
+            "skip_local",
+            "cross_language",
+            "ignore_imports",
+            "explain_skipped",
+            "top",
+            "baseline",
+            "save_baseline",
+            "no_cache",
+            "threads",
+            "changed_since",
+        ],
+        &[],
+    ),
+    (
+        "fix_preview",
+        &[
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "fix_apply",
+        &[
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "project_info",
+        &[
+            "root",
+            "config",
+            "entry_points",
+            "files",
+            "plugins",
+            "boundaries",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "trace_export",
+        &[
+            "file",
+            "export_name",
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "no_cache",
+            "threads",
+        ],
+        &["file", "export_name"],
+    ),
+    (
+        "trace_file",
+        &[
+            "file",
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "no_cache",
+            "threads",
+        ],
+        &["file"],
+    ),
+    (
+        "impact_closure",
+        &[
+            "path",
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "no_cache",
+            "threads",
+        ],
+        &["path"],
+    ),
+    (
+        "trace_dependency",
+        &[
+            "package_name",
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "no_cache",
+            "threads",
+        ],
+        &["package_name"],
+    ),
+    (
+        "trace_clone",
+        &[
+            "file",
+            "line",
+            "fingerprint",
+            "root",
+            "config",
+            "workspace",
+            "mode",
+            "min_tokens",
+            "min_lines",
+            "threshold",
+            "skip_local",
+            "cross_language",
+            "ignore_imports",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "check_health",
+        &[
+            "root",
+            "config",
+            "max_cyclomatic",
+            "max_cognitive",
+            "max_crap",
+            "top",
+            "sort",
+            "changed_since",
+            "complexity",
+            "file_scores",
+            "hotspots",
+            "targets",
+            "since",
+            "min_commits",
+            "churn_file",
+            "workspace",
+            "production",
+            "save_snapshot",
+            "baseline",
+            "save_baseline",
+            "baseline_mode",
+            "no_cache",
+            "threads",
+            "runtime_coverage",
+            "min_invocations_hot",
+            "min_observation_volume",
+            "low_traffic_threshold",
+        ],
+        &[],
+    ),
+    (
+        "audit",
+        &[
+            "root",
+            "config",
+            "base",
+            "production",
+            "workspace",
+            "no_cache",
+            "threads",
+            "gate",
+            "health_baseline",
+            "health_baseline_mode",
+            "max_crap",
+            "coverage",
+            "coverage_root",
+        ],
+        &[],
+    ),
+    (
+        "decision_surface",
+        &[
+            "root",
+            "config",
+            "base",
+            "max_decisions",
+            "workspace",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "list_boundaries",
+        &["root", "config", "no_cache", "threads"],
+        &[],
+    ),
+    (
+        "check_runtime_coverage",
+        &[
+            "coverage",
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "min_invocations_hot",
+            "min_observation_volume",
+            "low_traffic_threshold",
+            "no_cache",
+            "threads",
+            "max_crap",
+            "top",
+            "group_by",
+        ],
+        &["coverage"],
+    ),
+    ("get_hot_paths", &["coverage", "top"], &["coverage"]),
+    ("get_blast_radius", &["coverage", "top"], &["coverage"]),
+    ("get_importance", &["coverage", "top"], &["coverage"]),
+    (
+        "get_cleanup_candidates",
+        &["coverage", "top"],
+        &["coverage"],
+    ),
+    (
+        "feature_flags",
+        &[
+            "root",
+            "config",
+            "production",
+            "workspace",
+            "top",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "list_suppressions",
+        &[
+            "root",
+            "config",
+            "allow_remote_extends",
+            "production",
+            "workspace",
+            "changed_since",
+            "file",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+];
+
+fn tool_schema(tools: &[rmcp::model::Tool], name: &str) -> serde_json::Value {
+    let tool = tools
+        .iter()
+        .find(|tool| tool.name == name)
+        .unwrap_or_else(|| panic!("tool '{name}' is registered"));
+    serde_json::to_value(&tool.input_schema).unwrap()
+}
+
+fn schema_properties<'a>(
+    schema: &'a serde_json::Value,
+    name: &str,
+) -> &'a serde_json::Map<String, serde_json::Value> {
+    schema
+        .get("properties")
+        .and_then(|properties| properties.as_object())
+        .unwrap_or_else(|| panic!("tool '{name}' schema has a properties object"))
+}
+
 #[test]
-fn code_execute_schema_contains_expected_properties() {
+fn tool_schemas_expose_expected_properties_and_required_fields() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "code_execute").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in ["code", "root", "timeout_ms", "max_output_bytes"] {
+    for (name, props, required) in TOOL_SCHEMA_EXPECTATIONS {
+        let schema = tool_schema(&tools, name);
+        let properties = schema_properties(&schema, name);
+        for prop in *props {
+            assert!(
+                properties.contains_key(*prop),
+                "{name} schema should expose property '{prop}'"
+            );
+        }
+        if !required.is_empty() {
+            assert_required_fields(&schema, required);
+        }
+    }
+}
+
+#[test]
+fn security_candidates_schema_omits_inert_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let schema = tool_schema(&tools, "security_candidates");
+    let properties = schema_properties(&schema, "security_candidates");
+    for inert in [
+        "ci",
+        "fail_on_issues",
+        "sarif_file",
+        "summary",
+        "baseline",
+        "save_baseline",
+    ] {
         assert!(
-            schema.contains(prop),
-            "code_execute schema should contain property '{prop}'"
+            !properties.contains_key(inert),
+            "security_candidates must not expose inert or mutating property '{inert}'"
         );
     }
-    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    assert_required_fields(&schema, &["code"]);
+}
+
+#[test]
+fn required_path_params_reject_empty_strings() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    for (name, field) in [
+        ("trace_export", "file"),
+        ("trace_export", "export_name"),
+        ("trace_file", "file"),
+        ("impact_closure", "path"),
+        ("trace_dependency", "package_name"),
+    ] {
+        let schema = tool_schema(&tools, name);
+        assert_eq!(
+            schema
+                .pointer(&format!("/properties/{field}/minLength"))
+                .and_then(serde_json::Value::as_u64),
+            Some(1),
+            "{name}.{field} should reject an empty string"
+        );
+    }
+}
+
+#[test]
+fn inspect_target_schema_describes_both_target_shapes() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let schema = tool_schema(&tools, "inspect_target");
+    let variants = schema
+        .pointer("/$defs/InspectTarget/oneOf")
+        .and_then(serde_json::Value::as_array)
+        .expect("inspect_target defines the InspectTarget variants");
+    let variant_props: Vec<Vec<&str>> = variants
+        .iter()
+        .map(|variant| {
+            let mut keys: Vec<&str> = variant["properties"]
+                .as_object()
+                .expect("variant properties")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            keys.sort_unstable();
+            keys
+        })
+        .collect();
+    assert_eq!(
+        variant_props,
+        vec![vec!["file", "type"], vec!["export_name", "file", "type"]]
+    );
+}
+
+#[test]
+fn trace_clone_file_and_line_are_optional() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let schema = tool_schema(&tools, "trace_clone");
+    let required: Vec<&str> = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    assert!(
+        !required.contains(&"file") && !required.contains(&"line"),
+        "file/line must be optional now, got required: {required:?}"
+    );
 }
 
 /// The snapshot shape is published once as a resource instead of inlined into
@@ -492,115 +932,6 @@ fn code_execute_description_matches_the_manifest_code_mode_allowlist() {
 }
 
 #[test]
-fn analyze_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "analyze").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "issue_types",
-        "boundary_violations",
-        "baseline",
-        "save_baseline",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "analyze schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
-fn check_changed_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "check_changed").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "since",
-        "config",
-        "production",
-        "workspace",
-        "baseline",
-        "save_baseline",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "check_changed schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
-fn check_changed_schema_requires_since() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "check_changed").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    assert!(
-        schema.contains("\"required\""),
-        "check_changed schema should have a required array"
-    );
-    let schema_value: serde_json::Value = serde_json::from_str(&schema).unwrap();
-    if let Some(required) = schema_value.get("required").and_then(|r| r.as_array()) {
-        assert!(
-            required.iter().any(|v| v.as_str() == Some("since")),
-            "check_changed schema should require 'since'"
-        );
-    }
-}
-
-#[test]
-fn security_candidates_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools
-        .iter()
-        .find(|t| t.name == "security_candidates")
-        .unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "workspace",
-        "changed_since",
-        "paths",
-        "changed_workspaces",
-        "surface",
-        "gate",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "security_candidates schema should contain property '{prop}'"
-        );
-    }
-    for inert in [
-        "ci",
-        "fail_on_issues",
-        "sarif_file",
-        "summary",
-        "baseline",
-        "save_baseline",
-    ] {
-        assert!(
-            !schema.contains(inert),
-            "security_candidates must not expose inert or mutating property '{inert}'"
-        );
-    }
-}
-
-#[test]
 fn security_candidates_description_frames_candidates_and_scope() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
@@ -641,49 +972,6 @@ fn security_candidates_description_frames_candidates_and_scope() {
 }
 
 #[test]
-fn inspect_target_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "inspect_target").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "target",
-        "type",
-        "file",
-        "export_name",
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "include_churn",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "inspect_target schema should contain property '{prop}'"
-        );
-    }
-    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    assert_required_fields(&schema, &["target"]);
-}
-
-#[test]
-fn guard_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "guard").unwrap();
-    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    let props = schema
-        .get("properties")
-        .and_then(|p| p.as_object())
-        .expect("guard schema has a properties object");
-    assert!(props.contains_key("files"), "guard exposes 'files'");
-    assert!(props.contains_key("root"), "guard exposes 'root'");
-    assert_required_fields(&schema, &["files"]);
-}
-
-#[test]
 fn inspect_target_description_frames_scope_and_timeout() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
@@ -707,140 +995,6 @@ fn inspect_target_description_frames_scope_and_timeout() {
 }
 
 #[test]
-fn find_dupes_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "find_dupes").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "workspace",
-        "mode",
-        "min_tokens",
-        "min_lines",
-        "threshold",
-        "skip_local",
-        "cross_language",
-        "ignore_imports",
-        "explain_skipped",
-        "top",
-        "baseline",
-        "save_baseline",
-        "no_cache",
-        "threads",
-        "changed_since",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "find_dupes schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
-fn fix_preview_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "fix_preview").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "fix_preview schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
-fn fix_apply_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "fix_apply").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "fix_apply schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
-fn project_info_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "project_info").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "entry_points",
-        "files",
-        "plugins",
-        "boundaries",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "project_info schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
-fn trace_export_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "trace_export").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "file",
-        "export_name",
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "trace_export schema should contain property '{prop}'"
-        );
-    }
-    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    assert_required_fields(&schema, &["file", "export_name"]);
-    assert_eq!(
-        schema
-            .pointer("/properties/file/minLength")
-            .and_then(|v| v.as_u64()),
-        Some(1)
-    );
-    assert_eq!(
-        schema
-            .pointer("/properties/export_name/minLength")
-            .and_then(|v| v.as_u64()),
-        Some(1)
-    );
-}
-
-#[test]
 fn symbol_impact_schema_exposes_exclusive_export_or_class_method_selectors() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
@@ -861,136 +1015,6 @@ fn symbol_impact_schema_exposes_exclusive_export_or_class_method_selectors() {
     assert_required_fields(&schema, &["file"]);
 }
 
-#[test]
-fn trace_file_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "trace_file").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "file",
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "trace_file schema should contain property '{prop}'"
-        );
-    }
-    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    assert_required_fields(&schema, &["file"]);
-    assert_eq!(
-        schema
-            .pointer("/properties/file/minLength")
-            .and_then(|v| v.as_u64()),
-        Some(1)
-    );
-}
-
-#[test]
-fn impact_closure_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "impact_closure").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "path",
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "impact_closure schema should contain property '{prop}'"
-        );
-    }
-    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    assert_required_fields(&schema, &["path"]);
-    assert_eq!(
-        schema
-            .pointer("/properties/path/minLength")
-            .and_then(|v| v.as_u64()),
-        Some(1)
-    );
-}
-
-#[test]
-fn trace_dependency_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "trace_dependency").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "package_name",
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "trace_dependency schema should contain property '{prop}'"
-        );
-    }
-    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    assert_required_fields(&schema, &["package_name"]);
-    assert_eq!(
-        schema
-            .pointer("/properties/package_name/minLength")
-            .and_then(|v| v.as_u64()),
-        Some(1)
-    );
-}
-
-#[test]
-fn trace_clone_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "trace_clone").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "file",
-        "line",
-        "fingerprint",
-        "root",
-        "config",
-        "workspace",
-        "mode",
-        "min_tokens",
-        "min_lines",
-        "threshold",
-        "skip_local",
-        "cross_language",
-        "ignore_imports",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "trace_clone schema should contain property '{prop}'"
-        );
-    }
-    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    let required: Vec<&str> = schema
-        .get("required")
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-        .unwrap_or_default();
-    assert!(
-        !required.contains(&"file") && !required.contains(&"line"),
-        "file/line must be optional now, got required: {required:?}"
-    );
-}
-
 fn assert_required_fields(schema: &serde_json::Value, expected: &[&str]) {
     let required = schema
         .get("required")
@@ -1000,48 +1024,6 @@ fn assert_required_fields(schema: &serde_json::Value, expected: &[&str]) {
         assert!(
             required.iter().any(|v| v.as_str() == Some(field)),
             "schema should require {field}, got {required:?}"
-        );
-    }
-}
-
-#[test]
-fn check_health_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "check_health").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "max_cyclomatic",
-        "max_cognitive",
-        "max_crap",
-        "top",
-        "sort",
-        "changed_since",
-        "complexity",
-        "file_scores",
-        "hotspots",
-        "targets",
-        "since",
-        "min_commits",
-        "churn_file",
-        "workspace",
-        "production",
-        "save_snapshot",
-        "baseline",
-        "save_baseline",
-        "baseline_mode",
-        "no_cache",
-        "threads",
-        "runtime_coverage",
-        "min_invocations_hot",
-        "min_observation_volume",
-        "low_traffic_threshold",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "check_health schema should contain property '{prop}'"
         );
     }
 }
@@ -1064,56 +1046,6 @@ fn check_health_description_mentions_runtime_coverage() {
         desc.contains("fallow license"),
         "check_health description should reference `fallow license activate` as the activation path"
     );
-}
-
-#[test]
-fn audit_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "audit").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "base",
-        "production",
-        "workspace",
-        "no_cache",
-        "threads",
-        "gate",
-        "health_baseline",
-        "health_baseline_mode",
-        "max_crap",
-        "coverage",
-        "coverage_root",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "audit schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
-fn decision_surface_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "decision_surface").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "base",
-        "max_decisions",
-        "workspace",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "decision_surface schema should contain property '{prop}'"
-        );
-    }
 }
 
 #[test]
@@ -1165,20 +1097,6 @@ fn impact_schema_contains_root_and_omits_inert_flags() {
         assert!(
             !props.contains_key(inert),
             "impact must NOT expose inert property '{inert}'"
-        );
-    }
-}
-
-#[test]
-fn list_boundaries_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "list_boundaries").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in ["root", "config", "no_cache", "threads"] {
-        assert!(
-            schema.contains(prop),
-            "list_boundaries schema should contain property '{prop}'"
         );
     }
 }
@@ -1417,135 +1335,6 @@ fn default_drift_gate_trips_on_changed_or_missing_tool_description_default() {
 }
 
 #[test]
-fn check_runtime_coverage_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools
-        .iter()
-        .find(|t| t.name == "check_runtime_coverage")
-        .unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "coverage",
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "min_invocations_hot",
-        "min_observation_volume",
-        "low_traffic_threshold",
-        "no_cache",
-        "threads",
-        "max_crap",
-        "top",
-        "group_by",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "check_runtime_coverage schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
-fn runtime_context_split_tool_schemas_require_coverage() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    for name in [
-        "get_hot_paths",
-        "get_blast_radius",
-        "get_importance",
-        "get_cleanup_candidates",
-    ] {
-        let tool = tools.iter().find(|t| t.name == name).unwrap();
-        let schema = serde_json::to_string(&tool.input_schema).unwrap();
-        assert!(
-            schema.contains("coverage"),
-            "{name} schema should contain coverage"
-        );
-        assert!(schema.contains("top"), "{name} schema should contain top");
-        let schema_value: serde_json::Value = serde_json::from_str(&schema).unwrap();
-        let required = schema_value
-            .get("required")
-            .and_then(|r| r.as_array())
-            .expect("runtime context schema should have a required array");
-        assert!(
-            required.iter().any(|v| v.as_str() == Some("coverage")),
-            "{name} schema should require coverage"
-        );
-    }
-}
-
-#[test]
-fn check_runtime_coverage_schema_requires_coverage() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools
-        .iter()
-        .find(|t| t.name == "check_runtime_coverage")
-        .unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    let schema_value: serde_json::Value = serde_json::from_str(&schema).unwrap();
-    let required = schema_value
-        .get("required")
-        .and_then(|r| r.as_array())
-        .expect("check_runtime_coverage schema should have a required array");
-    assert!(
-        required.iter().any(|v| v.as_str() == Some("coverage")),
-        "check_runtime_coverage schema should require 'coverage'"
-    );
-}
-
-#[test]
-fn feature_flags_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "feature_flags").unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "production",
-        "workspace",
-        "top",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "feature_flags schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
-fn list_suppressions_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools
-        .iter()
-        .find(|t| t.name == "list_suppressions")
-        .unwrap();
-    let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in [
-        "root",
-        "config",
-        "allow_remote_extends",
-        "production",
-        "workspace",
-        "changed_since",
-        "file",
-        "no_cache",
-        "threads",
-    ] {
-        assert!(
-            schema.contains(prop),
-            "list_suppressions schema should contain property '{prop}'"
-        );
-    }
-}
-
-#[test]
 fn fix_apply_does_not_have_open_world_hint() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
@@ -1555,42 +1344,6 @@ fn fix_apply_does_not_have_open_world_hint() {
         ann.open_world_hint,
         Some(true),
         "fix_apply should not have open_world_hint=true"
-    );
-}
-
-#[test]
-fn analyze_description_mentions_unused_code() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "analyze").unwrap();
-    let desc = tool.description.as_deref().unwrap();
-    assert!(
-        desc.contains("unused"),
-        "analyze description should mention 'unused'"
-    );
-}
-
-#[test]
-fn find_dupes_description_mentions_duplication() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "find_dupes").unwrap();
-    let desc = tool.description.as_deref().unwrap();
-    assert!(
-        desc.contains("duplic"),
-        "find_dupes description should mention duplication"
-    );
-}
-
-#[test]
-fn check_health_description_mentions_complexity() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "check_health").unwrap();
-    let desc = tool.description.as_deref().unwrap();
-    assert!(
-        desc.contains("complexity"),
-        "check_health description should mention 'complexity'"
     );
 }
 
@@ -1615,18 +1368,6 @@ fn fix_apply_description_warns_about_modification() {
     assert!(
         desc.contains("modif") || desc.contains("disk") || desc.contains("destructi"),
         "fix_apply description should warn about file modification"
-    );
-}
-
-#[test]
-fn fix_preview_description_mentions_dry_run_or_preview() {
-    let server = FallowMcp::new();
-    let tools = server.tool_router.list_all();
-    let tool = tools.iter().find(|t| t.name == "fix_preview").unwrap();
-    let desc = tool.description.as_deref().unwrap();
-    assert!(
-        desc.contains("preview") || desc.contains("dry") || desc.contains("without modif"),
-        "fix_preview description should mention preview/dry-run behavior"
     );
 }
 

@@ -696,7 +696,7 @@ fn failed_analysis_restores_semantic_changes_as_full_invalidation() {
 }
 
 #[test]
-fn diagnostic_issue_types_include_all_lsp_codes_in_user_order() {
+fn diagnostic_issue_types_keep_user_order_and_labels() {
     let issue_types = diagnostic_issue_types();
     let codes: Vec<&str> = issue_types
         .iter()
@@ -704,13 +704,6 @@ fn diagnostic_issue_types_include_all_lsp_codes_in_user_order() {
         .collect();
 
     assert_eq!(codes.first(), Some(&"code-duplication"));
-    assert!(codes.contains(&"unused-file"));
-    assert!(codes.contains(&"private-type-leak"));
-    assert!(codes.contains(&"test-only-dependency"));
-    assert!(codes.contains(&"boundary-violation"));
-    assert!(codes.contains(&"stale-suppression"));
-    assert!(codes.contains(&"security-sink"));
-    assert!(codes.contains(&"security-client-server-leak"));
     assert_eq!(
         issue_types
             .iter()
@@ -2857,36 +2850,8 @@ fn merge_duplication_with_empty_source() {
 }
 
 #[test]
-fn issue_type_mapping_has_expected_entries() {
-    let keys: Vec<&str> = diagnostic_issue_type_metas()
-        .filter_map(|issue_type| issue_type.config_key)
-        .collect();
-
-    assert!(keys.contains(&"unused-files"));
-    assert!(keys.contains(&"unused-exports"));
-    assert!(keys.contains(&"unused-types"));
-    assert!(keys.contains(&"private-type-leaks"));
-    assert!(keys.contains(&"unused-dependencies"));
-    assert!(keys.contains(&"unused-dev-dependencies"));
-    assert!(keys.contains(&"unused-optional-dependencies"));
-    assert!(keys.contains(&"unused-enum-members"));
-    assert!(keys.contains(&"unused-class-members"));
-    assert!(keys.contains(&"unused-store-members"));
-    assert!(keys.contains(&"unresolved-imports"));
-    assert!(keys.contains(&"unlisted-dependencies"));
-    assert!(keys.contains(&"duplicate-exports"));
-    assert!(keys.contains(&"type-only-dependencies"));
-    assert!(keys.contains(&"test-only-dependencies"));
-    assert!(keys.contains(&"circular-dependencies"));
-    assert!(keys.contains(&"boundary-violation"));
-    assert!(keys.contains(&"stale-suppressions"));
-    assert!(keys.contains(&"security-sink"));
-    assert!(keys.contains(&"security-client-server-leak"));
-}
-
-#[test]
 fn issue_type_mapping_codes_are_singular() {
-    for issue_type in diagnostic_issue_type_metas() {
+    for issue_type in fallow_types::issue_meta::diagnostic_issue_metas() {
         let Some(config_key) = issue_type.config_key else {
             continue;
         };

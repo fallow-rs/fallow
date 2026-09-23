@@ -18,8 +18,7 @@ use super::{
         json_success, non_empty_path, programmatic_error_body, workspace_patterns_from_param,
     },
     fallback_policy::{
-        CliFallbackReason, baseline_fallback_reason, grouped_fallback_reason,
-        regression_fallback_reason,
+        baseline_requested, grouped_requested, regression_requested, type_aware_requested,
     },
     push_baseline, push_global, push_regression, push_remote_extends, push_scope, run_tool,
     typed_validation_error_body,
@@ -114,26 +113,18 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
 }
 
 fn requires_cli_fallback(params: &AnalyzeParams) -> bool {
-    params.type_aware == Some(true)
-        || params
-            .type_aware_projects
-            .as_ref()
-            .is_some_and(|projects| !projects.is_empty())
-        || params.type_aware_require.is_some()
-        || cli_fallback_reason(params).is_some()
-}
-
-fn cli_fallback_reason(params: &AnalyzeParams) -> Option<CliFallbackReason> {
-    baseline_fallback_reason(params.baseline.as_deref(), params.save_baseline.as_deref())
-        .or_else(|| {
-            regression_fallback_reason(
-                params.fail_on_regression,
-                params.tolerance.as_deref(),
-                params.regression_baseline.as_deref(),
-                params.save_regression_baseline.as_deref(),
-            )
-        })
-        .or_else(|| grouped_fallback_reason(params.group_by.as_deref()))
+    type_aware_requested(
+        params.type_aware,
+        params.type_aware_projects.as_deref(),
+        params.type_aware_require.as_ref(),
+    ) || baseline_requested(params.baseline.as_deref(), params.save_baseline.as_deref())
+        || regression_requested(
+            params.fail_on_regression,
+            params.tolerance.as_deref(),
+            params.regression_baseline.as_deref(),
+            params.save_regression_baseline.as_deref(),
+        )
+        || grouped_requested(params.group_by.as_deref())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

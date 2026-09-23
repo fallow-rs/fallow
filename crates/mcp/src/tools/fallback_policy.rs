@@ -1,60 +1,46 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CliFallbackReason {
-    Baseline,
-    Regression,
-    GroupedOutput,
-    DuplicationExplainSkipped,
-    DuplicationThresholdGate,
-    HealthMinScoreGate,
-    HealthMinSeverity,
-    HealthChurnFile,
-    HealthSnapshot,
-    HealthTrend,
-    HealthSummary,
-    HealthRuntimeCoverage,
+use crate::params::TypeAwareRequireParam;
+
+pub(super) fn baseline_requested(baseline: Option<&str>, save_baseline: Option<&str>) -> bool {
+    filled(baseline) || filled(save_baseline)
 }
 
-pub(super) fn baseline_fallback_reason(
-    baseline: Option<&str>,
-    save_baseline: Option<&str>,
-) -> Option<CliFallbackReason> {
-    (filled(baseline) || filled(save_baseline)).then_some(CliFallbackReason::Baseline)
-}
-
-pub(super) fn regression_fallback_reason(
+pub(super) fn regression_requested(
     fail_on_regression: Option<bool>,
     tolerance: Option<&str>,
     regression_baseline: Option<&str>,
     save_regression_baseline: Option<&str>,
-) -> Option<CliFallbackReason> {
-    (fail_on_regression == Some(true)
+) -> bool {
+    fail_on_regression == Some(true)
         || filled(tolerance)
         || filled(regression_baseline)
-        || filled(save_regression_baseline))
-    .then_some(CliFallbackReason::Regression)
+        || filled(save_regression_baseline)
 }
 
-pub(super) fn grouped_fallback_reason(group_by: Option<&str>) -> Option<CliFallbackReason> {
-    filled(group_by).then_some(CliFallbackReason::GroupedOutput)
+pub(super) fn grouped_requested(group_by: Option<&str>) -> bool {
+    filled(group_by)
 }
 
-/// `threshold` is checked first for the reason
-/// [`CliFallbackReason::HealthMinScoreGate`] exists: the programmatic
-/// duplication route has no threshold gate, so a typed call would compare
-/// nothing, publish no `gate_outcomes`, and hand back a result an agent reads
-/// as a pass. The CLI owns that comparison, so a call that arms it takes the
-/// CLI.
-pub(super) fn duplication_fallback_reason(
+/// The programmatic duplication route has no threshold gate. A typed call with
+/// a `threshold` compares nothing, publishes no `gate_outcomes`, and returns a
+/// result that reads as a pass. The CLI owns that comparison, so a call that
+/// sets a threshold takes the CLI.
+pub(super) fn duplication_needs_cli(
     group_by: Option<&str>,
     explain_skipped: Option<bool>,
     threshold: Option<f64>,
-) -> Option<CliFallbackReason> {
-    if threshold.is_some() {
-        return Some(CliFallbackReason::DuplicationThresholdGate);
-    }
-    grouped_fallback_reason(group_by).or_else(|| {
-        (explain_skipped == Some(true)).then_some(CliFallbackReason::DuplicationExplainSkipped)
-    })
+) -> bool {
+    threshold.is_some() || grouped_requested(group_by) || explain_skipped == Some(true)
+}
+
+/// Whether the call asks for type-aware analysis, which only the CLI runs.
+pub(super) fn type_aware_requested(
+    type_aware: Option<bool>,
+    projects: Option<&[String]>,
+    require: Option<&TypeAwareRequireParam>,
+) -> bool {
+    type_aware == Some(true)
+        || projects.is_some_and(|projects| !projects.is_empty())
+        || require.is_some()
 }
 
 pub(super) fn filled(value: Option<&str>) -> bool {
@@ -63,48 +49,7 @@ pub(super) fn filled(value: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::{Path, PathBuf};
-
-    #[test]
-    fn baseline_reason_tracks_either_baseline_surface() {
-        assert_eq!(
-            baseline_fallback_reason(Some("base.json"), None),
-            Some(CliFallbackReason::Baseline)
-        );
-        assert_eq!(
-            baseline_fallback_reason(None, Some("next.json")),
-            Some(CliFallbackReason::Baseline)
-        );
-        assert_eq!(baseline_fallback_reason(None, None), None);
-    }
-
-    #[test]
-    fn duplication_reason_preserves_grouping_precedence() {
-        assert_eq!(
-            duplication_fallback_reason(Some("owner"), Some(true), None),
-            Some(CliFallbackReason::GroupedOutput)
-        );
-        assert_eq!(
-            duplication_fallback_reason(None, Some(true), None),
-            Some(CliFallbackReason::DuplicationExplainSkipped)
-        );
-    }
-
-    /// The programmatic duplication route has no threshold gate, so a typed
-    /// call would compare nothing and hand back a result that reads as a pass.
-    #[test]
-    fn a_duplication_threshold_outranks_the_other_duplication_reasons() {
-        assert_eq!(
-            duplication_fallback_reason(None, None, Some(0.1)),
-            Some(CliFallbackReason::DuplicationThresholdGate)
-        );
-        assert_eq!(
-            duplication_fallback_reason(Some("owner"), Some(true), Some(0.1)),
-            Some(CliFallbackReason::DuplicationThresholdGate)
-        );
-        assert_eq!(duplication_fallback_reason(None, None, None), None);
-    }
 
     #[test]
     fn cli_fallback_surfaces_are_explicitly_owned() {
@@ -198,7 +143,6 @@ mod tests {
             "run_tool_with_timeout(",
             "run_tool_with_stdin_timeout(",
             "run_tool_with_top_level_warnings(",
-            "run_fallow(",
             "run_fallow_sync(",
             "Command::new(binary)",
         ]

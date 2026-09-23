@@ -4,7 +4,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use crate::params::{InspectTarget, InspectTargetParams};
 
 use super::{
-    push_global, push_remote_extends, push_scope, run_tool_with_limit, validation_error_body,
+    push_global, push_remote_extends, push_scope, require_non_empty, run_tool_with_limit,
+    validation_error_body,
 };
 
 const TOOL: &str = "inspect_target";
@@ -72,13 +73,6 @@ fn build_inspect_args(params: &InspectTargetParams) -> Result<Vec<String>, Strin
     }
 
     Ok(args)
-}
-
-fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
-    if value.trim().is_empty() {
-        return Err(format!("{field} must not be empty"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

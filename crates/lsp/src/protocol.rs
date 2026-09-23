@@ -3,7 +3,7 @@ use std::path::Path;
 use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
-use fallow_types::issue_meta::{IssueKindMeta, diagnostic_issue_metas};
+use fallow_types::issue_meta::diagnostic_issue_metas;
 use ls_types::notification;
 use serde::{Deserialize, Serialize};
 
@@ -194,10 +194,6 @@ pub fn diagnostic_issue_types() -> Vec<IssueTypeInfo> {
             label: meta.label.to_string(),
         })
         .collect()
-}
-
-pub fn diagnostic_issue_type_metas() -> impl Iterator<Item = &'static IssueKindMeta> {
-    diagnostic_issue_metas()
 }
 
 pub fn config_load_error_detail(

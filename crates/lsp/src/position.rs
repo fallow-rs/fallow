@@ -28,6 +28,15 @@ pub fn line_range_from_byte_col(
     }
 }
 
+/// A finding that points at one identifier: a 1-based line and a 0-based byte
+/// column, as the analysis results report them.
+pub struct NamedAnchor<'a> {
+    pub path: &'a Path,
+    pub line: u32,
+    pub col: u32,
+    pub name: &'a str,
+}
+
 /// Lazily maps byte columns from analysis results into LSP UTF-16 columns.
 #[derive(Default)]
 pub struct PositionMapper {

@@ -14,9 +14,7 @@ use super::{
         programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
         workspace_patterns_from_param,
     },
-    fallback_policy::{
-        CliFallbackReason, baseline_fallback_reason, filled, grouped_fallback_reason,
-    },
+    fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
     push_baseline, push_global, push_remote_extends, push_scope, push_str_flag, run_tool,
     validation_error_body,
 };
@@ -322,48 +320,24 @@ impl HealthArgsBuilder<'_> {
 }
 
 fn requires_cli_fallback(params: &HealthParams) -> bool {
-    params.type_aware == Some(true)
-        || params.type_coupling == Some(true)
-        || params
-            .type_aware_projects
-            .as_ref()
-            .is_some_and(|projects| !projects.is_empty())
-        || params.type_aware_require.is_some()
-        || cli_fallback_reason(params).is_some()
-}
-
-fn cli_fallback_reason(params: &HealthParams) -> Option<CliFallbackReason> {
-    if params.min_score.is_some() {
-        return Some(CliFallbackReason::HealthMinScoreGate);
-    }
-    if filled(params.min_severity.as_deref()) {
-        return Some(CliFallbackReason::HealthMinSeverity);
-    }
-    if filled(params.churn_file.as_deref()) {
-        return Some(CliFallbackReason::HealthChurnFile);
-    }
-    if params.save_snapshot.is_some() {
-        return Some(CliFallbackReason::HealthSnapshot);
-    }
-    if let Some(reason) =
-        baseline_fallback_reason(params.baseline.as_deref(), params.save_baseline.as_deref())
-    {
-        return Some(reason);
-    }
-    if params.trend == Some(true) {
-        return Some(CliFallbackReason::HealthTrend);
-    }
-    if params.summary == Some(true) {
-        return Some(CliFallbackReason::HealthSummary);
-    }
-    if filled(params.runtime_coverage.as_deref())
+    params.type_coupling == Some(true)
+        || type_aware_requested(
+            params.type_aware,
+            params.type_aware_projects.as_deref(),
+            params.type_aware_require.as_ref(),
+        )
+        || params.min_score.is_some()
+        || filled(params.min_severity.as_deref())
+        || filled(params.churn_file.as_deref())
+        || params.save_snapshot.is_some()
+        || baseline_requested(params.baseline.as_deref(), params.save_baseline.as_deref())
+        || params.trend == Some(true)
+        || params.summary == Some(true)
+        || filled(params.runtime_coverage.as_deref())
         || params.min_invocations_hot.is_some()
         || params.min_observation_volume.is_some()
         || params.low_traffic_threshold.is_some()
-    {
-        return Some(CliFallbackReason::HealthRuntimeCoverage);
-    }
-    grouped_fallback_reason(params.group_by.as_deref())
+        || grouped_requested(params.group_by.as_deref())
 }
 
 fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions, String> {

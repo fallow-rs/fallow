@@ -14,7 +14,7 @@ use super::{
         programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
         workspace_patterns_from_param,
     },
-    fallback_policy::{baseline_fallback_reason, filled, grouped_fallback_reason},
+    fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
     push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
 };
 
@@ -203,28 +203,21 @@ fn push_audit_coverage_flags(args: &mut Vec<String>, params: &AuditParams) {
     }
 }
 
+/// An invalid `gate` also takes the CLI, so the CLI reports the error.
 fn requires_cli_fallback(params: &AuditParams) -> bool {
-    params.type_aware == Some(true)
-        || params
-            .type_aware_projects
-            .as_ref()
-            .is_some_and(|projects| !projects.is_empty())
-        || params.type_aware_require.is_some()
-        || cli_fallback_reason(params).is_some()
-}
-
-fn cli_fallback_reason(params: &AuditParams) -> Option<&'static str> {
     let gate = params.gate.as_deref().unwrap_or("new-only");
-    if !VALID_AUDIT_GATES.contains(&gate) {
-        return Some("invalid gate");
-    }
-    baseline_fallback_reason(params.dead_code_baseline.as_deref(), None)
-        .or_else(|| baseline_fallback_reason(params.health_baseline.as_deref(), None))
-        .or_else(|| baseline_fallback_reason(params.dupes_baseline.as_deref(), None))
-        .or_else(|| grouped_fallback_reason(params.group_by.as_deref()))
-        .map(|_| "baseline or grouped output")
-        .or_else(|| (params.explain_skipped == Some(true)).then_some("duplication skipped notes"))
-        .or_else(|| filled(params.runtime_coverage.as_deref()).then_some("runtime coverage"))
+    !VALID_AUDIT_GATES.contains(&gate)
+        || type_aware_requested(
+            params.type_aware,
+            params.type_aware_projects.as_deref(),
+            params.type_aware_require.as_ref(),
+        )
+        || baseline_requested(params.dead_code_baseline.as_deref(), None)
+        || baseline_requested(params.health_baseline.as_deref(), None)
+        || baseline_requested(params.dupes_baseline.as_deref(), None)
+        || grouped_requested(params.group_by.as_deref())
+        || params.explain_skipped == Some(true)
+        || filled(params.runtime_coverage.as_deref())
 }
 
 fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, String> {
@@ -572,9 +565,21 @@ mod tests {
             ..AuditParams::default()
         };
 
+        let explain_skipped = AuditParams {
+            gate: Some("all".to_string()),
+            explain_skipped: Some(true),
+            ..AuditParams::default()
+        };
+        let invalid_gate = AuditParams {
+            gate: Some("sometimes".to_string()),
+            ..AuditParams::default()
+        };
+
         assert!(requires_cli_fallback(&baseline));
         assert!(requires_cli_fallback(&grouped));
         assert!(requires_cli_fallback(&runtime));
+        assert!(requires_cli_fallback(&explain_skipped));
+        assert!(requires_cli_fallback(&invalid_gate));
     }
 
     #[test]

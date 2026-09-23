@@ -192,10 +192,48 @@ fn push_regression(
 /// Valid detection modes for the `find_dupes` tool.
 pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];
 
+/// Map the `mode` parameter to a duplication mode. An absent or empty value
+/// keeps the configured default.
+fn duplication_mode_from_param(
+    mode: Option<&str>,
+) -> Result<Option<fallow_api::DuplicationMode>, String> {
+    use fallow_api::DuplicationMode;
+    match mode {
+        None | Some("") => Ok(None),
+        Some("strict") => Ok(Some(DuplicationMode::Strict)),
+        Some("mild") => Ok(Some(DuplicationMode::Mild)),
+        Some("weak") => Ok(Some(DuplicationMode::Weak)),
+        Some("semantic") => Ok(Some(DuplicationMode::Semantic)),
+        Some(mode) => Err(validation_error_body(format!(
+            "Invalid mode '{mode}'. Valid values: {}",
+            VALID_DUPES_MODES.join(", ")
+        ))),
+    }
+}
+
+fn min_occurrences_from_param(value: Option<u32>) -> Result<Option<usize>, String> {
+    match value {
+        Some(value) if value < 2 => Err(validation_error_body(format!(
+            "min_occurrences must be at least 2 (got {value})"
+        ))),
+        Some(value) => Ok(Some(value as usize)),
+        None => Ok(None),
+    }
+}
+
+/// Reject an empty or whitespace-only required string. The error is the plain
+/// message; the caller picks the response body.
+fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err(format!("{field} must not be empty"));
+    }
+    Ok(())
+}
+
 /// Valid gate values for the `audit` tool.
 pub const VALID_AUDIT_GATES: &[&str] = &["new-only", "all"];
 
-/// Build a structured validation error body matching the shape `run_fallow` emits
+/// Build a structured validation error body matching the shape `run_tool` emits
 /// for CLI-level errors.
 pub fn validation_error_body(message: impl Into<String>) -> String {
     serde_json::json!({
@@ -242,24 +280,6 @@ fn timeout_duration() -> Duration {
     timeout_duration_with_default(DEFAULT_TIMEOUT_SECS)
 }
 
-/// Execute the fallow CLI binary with the given arguments and return the result.
-///
-/// Untagged variant retained for the subprocess-behavior tests (timeouts, exit
-/// codes, signal handling); production tool dispatch goes through `run_tool` so
-/// the spawned CLI's telemetry is attributed to the `mcp` surface.
-#[cfg(test)]
-pub async fn run_fallow(binary: &str, args: &[String]) -> Result<CallToolResult, McpError> {
-    spawn_fallow(
-        binary,
-        args,
-        None,
-        timeout_duration(),
-        DEFAULT_MAX_OUTPUT_BYTES,
-        None,
-    )
-    .await
-}
-
 /// Execute the fallow CLI for a named MCP tool. Tags the spawned process so its
 /// telemetry event is attributed to the `mcp` integration surface and the
 /// specific tool, instead of looking like any other `cli_json` run. The CLI
@@ -297,7 +317,7 @@ pub async fn run_tool_with_limit(
         None,
         timeout_duration(),
         output_limit(max_output_bytes),
-        Some(tool),
+        tool,
     )
     .await
 }
@@ -316,7 +336,7 @@ pub async fn run_tool_with_timeout(
         None,
         timeout,
         output_limit(max_output_bytes),
-        Some(tool),
+        tool,
     )
     .await
 }
@@ -336,33 +356,7 @@ pub async fn run_tool_with_stdin_timeout(
         Some(stdin),
         timeout,
         output_limit(max_output_bytes),
-        Some(tool),
-    )
-    .await
-}
-
-#[cfg(test)]
-pub async fn run_fallow_with_timeout(
-    binary: &str,
-    args: &[String],
-    timeout: Duration,
-) -> Result<CallToolResult, McpError> {
-    spawn_fallow(binary, args, None, timeout, DEFAULT_MAX_OUTPUT_BYTES, None).await
-}
-
-#[cfg(all(test, unix))]
-pub async fn run_fallow_with_output_limit(
-    binary: &str,
-    args: &[String],
-    max_output_bytes: usize,
-) -> Result<CallToolResult, McpError> {
-    spawn_fallow(
-        binary,
-        args,
-        None,
-        timeout_duration(),
-        max_output_bytes,
-        None,
+        tool,
     )
     .await
 }
@@ -373,7 +367,7 @@ async fn spawn_fallow(
     stdin_input: Option<Vec<u8>>,
     timeout: Duration,
     max_output_bytes: usize,
-    tool: Option<&'static str>,
+    tool: &'static str,
 ) -> Result<CallToolResult, McpError> {
     let type_aware_complete_required = type_aware_complete_required(args);
     let mut command = Command::new(binary);
@@ -386,14 +380,12 @@ async fn spawn_fallow(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(tool) = tool {
-        // Re-tag the spawned CLI's telemetry event as the MCP surface + tool.
-        // The CLI inherits this process's env, so the existing telemetry path
-        // emits a single, correctly-attributed event (no second emit here).
-        command
-            .env("FALLOW_INTEGRATION_SURFACE", "mcp")
-            .env("FALLOW_MCP_TOOL", tool);
-    }
+    // Re-tag the spawned CLI's telemetry event as the MCP surface + tool.
+    // The CLI inherits this process's env, so the existing telemetry path
+    // emits a single, correctly-attributed event (no second emit here).
+    command
+        .env("FALLOW_INTEGRATION_SURFACE", "mcp")
+        .env("FALLOW_MCP_TOOL", tool);
     configure_tokio_command(&mut command);
 
     let mut child = spawn_tokio_retrying_busy_executable(&mut command)
@@ -914,19 +906,8 @@ fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> Call
     CallToolResult::error(vec![ContentBlock::text(body.to_string())])
 }
 
-/// Execute fallow and ensure successful JSON responses have a top-level
-/// `warnings` array for agent-facing runtime context tools. Untagged variant
-/// retained for tests; production goes through `run_tool_with_top_level_warnings`.
-#[cfg(all(test, unix))]
-pub async fn run_fallow_with_top_level_warnings(
-    binary: &str,
-    args: &[String],
-) -> Result<CallToolResult, McpError> {
-    Ok(ensure_top_level_warnings(run_fallow(binary, args).await?))
-}
-
-/// Tool-attributed variant of `run_fallow_with_top_level_warnings` (see
-/// `run_tool`), with a caller-supplied response cap.
+/// Execute one named MCP tool and make sure a successful JSON response has a
+/// top-level `warnings` array, for the runtime context tools.
 pub async fn run_tool_with_top_level_warnings(
     binary: &str,
     tool: &'static str,

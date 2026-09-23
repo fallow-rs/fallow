@@ -12,7 +12,7 @@ use crate::tools::{
     build_analyze_args, build_health_args, build_impact_closure_args, build_project_info_args,
     build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
     build_trace_export_args, build_trace_file_args, execute_code_mode, inspect_target, run_analyze,
-    run_fallow, run_find_dupes, run_fix_apply, run_fix_preview, run_trace_clone_tool,
+    run_find_dupes, run_fix_apply, run_fix_preview, run_tool, run_trace_clone_tool,
     run_trace_error_tool, run_trace_export_tool,
 };
 
@@ -62,7 +62,7 @@ async fn e2e_analyze_returns_json_on_basic_project() {
         ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -88,7 +88,7 @@ async fn e2e_project_info_returns_files() {
         ..Default::default()
     };
     let args = build_project_info_args(&params);
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -248,7 +248,7 @@ async fn e2e_analyze_with_issue_type_filter() {
         ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -276,7 +276,7 @@ async fn e2e_security_candidates_returns_security_json() {
         ..Default::default()
     };
     let args = build_security_candidates_args(&params).unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -300,7 +300,7 @@ async fn e2e_security_candidates_paths_scope_real_cli_output() {
         ..Default::default()
     };
     let args = build_security_candidates_args(&params).unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -331,7 +331,7 @@ async fn e2e_trace_export_returns_json() {
         threads: None,
     })
     .unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -450,7 +450,7 @@ async fn e2e_trace_file_returns_json() {
         threads: None,
     })
     .unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -481,7 +481,7 @@ async fn e2e_impact_closure_returns_json() {
         max_output_bytes: None,
     })
     .unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -613,7 +613,7 @@ async fn e2e_trace_dependency_returns_json() {
         threads: None,
     })
     .unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -649,7 +649,7 @@ async fn e2e_trace_clone_returns_json() {
         min_occurrences: None,
     })
     .unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -728,7 +728,7 @@ async fn e2e_health_returns_json() {
         ..Default::default()
     };
     let args = build_health_args(&params);
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_tool(&bin, "analyze", &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 

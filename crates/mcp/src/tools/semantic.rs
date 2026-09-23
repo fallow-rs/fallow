@@ -4,15 +4,9 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
 use super::{
-    push_global, push_remote_extends, push_type_aware, run_tool_with_limit, validation_error_body,
+    push_global, push_remote_extends, push_type_aware, require_non_empty, run_tool_with_limit,
+    validation_error_body,
 };
-
-fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
-    if value.trim().is_empty() {
-        return Err(format!("{field} must not be empty"));
-    }
-    Ok(())
-}
 
 fn build_semantic_symbol_args(
     params: &SemanticSymbolParams,

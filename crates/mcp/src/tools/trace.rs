@@ -7,7 +7,7 @@ use crate::params::{
 };
 
 use fallow_api::{
-    AnalysisOptions, DuplicationMode, DuplicationOptions, TraceCloneOptions, TraceCloneTarget,
+    AnalysisOptions, DuplicationOptions, TraceCloneOptions, TraceCloneTarget,
     TraceDependencyOptions, TraceErrorOptions, TraceExportOptions, TraceFileOptions,
     TraceImportPathOptions, run_trace_clone, run_trace_dependency, run_trace_error,
     run_trace_export, run_trace_file, run_trace_import_path,
@@ -24,7 +24,8 @@ use super::{
         changed_since_from_param, env_diff_file, json_success, non_empty_path,
         programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
     },
-    push_global, push_remote_extends, push_scope, validation_error_body,
+    duplication_mode_from_param, min_occurrences_from_param, push_global, push_remote_extends,
+    push_scope, require_non_empty, validation_error_body,
 };
 
 /// Run `trace_export` through the typed API.
@@ -176,8 +177,8 @@ pub fn run_trace_clone_api_value(
 
 /// Build CLI arguments for the `trace_export` tool.
 pub fn build_trace_export_args(params: &TraceExportParams) -> Result<Vec<String>, String> {
-    require_non_empty("file", &params.file)?;
-    require_non_empty("export_name", &params.export_name)?;
+    require_non_empty("file", &params.file).map_err(validation_error_body)?;
+    require_non_empty("export_name", &params.export_name).map_err(validation_error_body)?;
 
     let mut args = vec![
         "dead-code".to_string(),
@@ -204,7 +205,7 @@ pub fn build_trace_export_args(params: &TraceExportParams) -> Result<Vec<String>
 
 /// Build CLI arguments for the `trace_file` tool.
 pub fn build_trace_file_args(params: &TraceFileParams) -> Result<Vec<String>, String> {
-    require_non_empty("file", &params.file)?;
+    require_non_empty("file", &params.file).map_err(validation_error_body)?;
 
     let mut args = vec![
         "dead-code".to_string(),
@@ -228,7 +229,7 @@ pub fn build_trace_file_args(params: &TraceFileParams) -> Result<Vec<String>, St
 
 /// Build CLI arguments for the `trace_dependency` tool.
 pub fn build_trace_dependency_args(params: &TraceDependencyParams) -> Result<Vec<String>, String> {
-    require_non_empty("package_name", &params.package_name)?;
+    require_non_empty("package_name", &params.package_name).map_err(validation_error_body)?;
 
     let mut args = vec![
         "dead-code".to_string(),
@@ -378,18 +379,11 @@ fn push_trace_clone_numeric_options(
     Ok(())
 }
 
-fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
-    if value.trim().is_empty() {
-        return Err(validation_error_body(format!("{field} must not be empty")));
-    }
-    Ok(())
-}
-
 fn trace_export_options_from_params(
     params: &TraceExportParams,
 ) -> Result<TraceExportOptions, String> {
-    require_non_empty("file", &params.file)?;
-    require_non_empty("export_name", &params.export_name)?;
+    require_non_empty("file", &params.file).map_err(validation_error_body)?;
+    require_non_empty("export_name", &params.export_name).map_err(validation_error_body)?;
     Ok(TraceExportOptions {
         analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
             root: params.root.as_deref(),
@@ -406,7 +400,7 @@ fn trace_export_options_from_params(
 }
 
 fn trace_file_options_from_params(params: &TraceFileParams) -> Result<TraceFileOptions, String> {
-    require_non_empty("file", &params.file)?;
+    require_non_empty("file", &params.file).map_err(validation_error_body)?;
     Ok(TraceFileOptions {
         analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
             root: params.root.as_deref(),
@@ -424,8 +418,8 @@ fn trace_file_options_from_params(params: &TraceFileParams) -> Result<TraceFileO
 fn trace_import_path_options_from_params(
     params: &TraceImportPathParams,
 ) -> Result<TraceImportPathOptions, String> {
-    require_non_empty("from", &params.from)?;
-    require_non_empty("to", &params.to)?;
+    require_non_empty("from", &params.from).map_err(validation_error_body)?;
+    require_non_empty("to", &params.to).map_err(validation_error_body)?;
     Ok(TraceImportPathOptions {
         analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
             root: params.root.as_deref(),
@@ -477,7 +471,7 @@ fn trace_error_options_from_params(params: &TraceErrorParams) -> TraceErrorOptio
 fn trace_dependency_options_from_params(
     params: &TraceDependencyParams,
 ) -> Result<TraceDependencyOptions, String> {
-    require_non_empty("package_name", &params.package_name)?;
+    require_non_empty("package_name", &params.package_name).map_err(validation_error_body)?;
     Ok(TraceDependencyOptions {
         analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
             root: params.root.as_deref(),
@@ -587,29 +581,6 @@ fn trace_clone_location_target(params: &TraceCloneParams) -> Result<TraceCloneTa
             file: file.to_string(),
             line,
         }),
-    }
-}
-
-fn duplication_mode_from_param(mode: Option<&str>) -> Result<Option<DuplicationMode>, String> {
-    match mode {
-        None | Some("") => Ok(None),
-        Some("strict") => Ok(Some(DuplicationMode::Strict)),
-        Some("mild") => Ok(Some(DuplicationMode::Mild)),
-        Some("weak") => Ok(Some(DuplicationMode::Weak)),
-        Some("semantic") => Ok(Some(DuplicationMode::Semantic)),
-        Some(mode) => Err(validation_error_body(format!(
-            "Invalid mode '{mode}'. Valid values: strict, mild, weak, semantic"
-        ))),
-    }
-}
-
-fn min_occurrences_from_param(value: Option<u32>) -> Result<Option<usize>, String> {
-    match value {
-        Some(value) if value < 2 => Err(validation_error_body(format!(
-            "min_occurrences must be at least 2 (got {value})"
-        ))),
-        Some(value) => Ok(Some(value as usize)),
-        None => Ok(None),
     }
 }
 

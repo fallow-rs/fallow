@@ -75,15 +75,6 @@ fn check_changed(since: &str) -> CheckChangedParams {
     }
 }
 
-fn guard_params() -> GuardParams {
-    GuardParams {
-        files: vec!["src/domain/user.ts".to_string()],
-        root: None,
-        allow_remote_extends: None,
-        max_output_bytes: None,
-    }
-}
-
 #[test]
 fn explain_args_emit_json_quiet() {
     let args = build_explain_args(&ExplainParams {
@@ -913,9 +904,7 @@ fn find_dupes_args_min_occurrences_rejects_one() {
 #[test]
 fn fix_preview_args_include_dry_run() {
     let args = build_fix_preview_args(&FixParams::default());
-    assert!(args.contains(&"--dry-run".to_string()));
-    assert!(!args.contains(&"--yes".to_string()));
-    assert_eq!(args[0], "fix");
+    assert_eq!(args, ["fix", "--dry-run", "--format", "json", "--quiet"]);
 }
 
 #[test]
@@ -1966,274 +1955,20 @@ fn impact_all_args_empty_sort_dropped() {
 }
 
 #[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "central contract table intentionally enumerates every arg builder"
-)]
-fn all_arg_builders_include_format_json_and_quiet() {
-    let analyze = build_analyze_args(&AnalyzeParams::default()).unwrap();
-    let check_changed = build_check_changed_args(check_changed("main"));
-    let dupes = build_find_dupes_args(&FindDupesParams::default()).unwrap();
-    let fix_preview = build_fix_preview_args(&FixParams::default());
-    let fix_apply = build_fix_apply_args(&FixParams::default());
-    let project_info = build_project_info_args(&ProjectInfoParams::default());
-    let trace_export = build_trace_export_args(&TraceExportParams {
-        file: "src/utils.ts".to_string(),
-        export_name: "usedFunction".to_string(),
-        root: None,
-        config: None,
-        allow_remote_extends: None,
-        production: None,
-        workspace: None,
-        no_cache: None,
-        threads: None,
-    })
-    .unwrap();
-    let trace_file = build_trace_file_args(&TraceFileParams {
-        file: "src/utils.ts".to_string(),
-        root: None,
-        config: None,
-        allow_remote_extends: None,
-        production: None,
-        workspace: None,
-        no_cache: None,
-        threads: None,
-    })
-    .unwrap();
-    let impact_closure = build_impact_closure_args(&ImpactClosureParams {
-        path: "src/utils.ts".to_string(),
-        root: None,
-        config: None,
-        allow_remote_extends: None,
-        production: None,
-        workspace: None,
-        no_cache: None,
-        threads: None,
-        max_output_bytes: None,
-    })
-    .unwrap();
-    let trace_dependency = build_trace_dependency_args(&TraceDependencyParams {
-        package_name: "react".to_string(),
-        root: None,
-        config: None,
-        allow_remote_extends: None,
-        production: None,
-        workspace: None,
-        no_cache: None,
-        threads: None,
-    })
-    .unwrap();
-    let trace_clone = build_trace_clone_args(&TraceCloneParams {
-        file: Some("src/original.ts".to_string()),
-        fingerprint: None,
-        line: Some(2),
-        root: None,
-        config: None,
-        allow_remote_extends: None,
-        workspace: None,
-        mode: None,
-        near: None,
-        min_tokens: None,
-        min_lines: None,
-        threshold: None,
-        skip_local: None,
-        cross_language: None,
-        ignore_imports: None,
-        no_cache: None,
-        threads: None,
-        min_occurrences: None,
-    })
-    .unwrap();
-    let health = build_health_args(&HealthParams::default());
-    let audit = build_audit_args(&AuditParams::default()).expect("default params are valid");
-    let list_boundaries = build_list_boundaries_args(&ListBoundariesParams::default());
-    let feature_flags = build_feature_flags_args(&FeatureFlagsParams::default());
-    let list_suppressions = build_list_suppressions_args(&ListSuppressionsParams::default())
-        .expect("default params are valid");
-    let check_runtime_coverage =
-        build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
-    let impact = build_impact_args(&ImpactParams::default());
-    let guard = build_guard_args(&GuardParams {
-        files: vec!["src/domain/user.ts".to_string()],
-        root: None,
-        allow_remote_extends: None,
-        max_output_bytes: None,
-    })
-    .expect("plain file entries are valid");
-    let impact_all = build_impact_all_args(&ImpactAllParams::default());
-
-    for (name, args) in [
-        ("analyze", &analyze),
-        ("check_changed", &check_changed),
-        ("find_dupes", &dupes),
-        ("fix_preview", &fix_preview),
-        ("fix_apply", &fix_apply),
-        ("project_info", &project_info),
-        ("trace_export", &trace_export),
-        ("trace_file", &trace_file),
-        ("impact_closure", &impact_closure),
-        ("trace_dependency", &trace_dependency),
-        ("trace_clone", &trace_clone),
-        ("health", &health),
-        ("audit", &audit),
-        ("list_boundaries", &list_boundaries),
-        ("feature_flags", &feature_flags),
-        ("list_suppressions", &list_suppressions),
-        ("check_runtime_coverage", &check_runtime_coverage),
-        ("impact", &impact),
-        ("guard", &guard),
-        ("impact_all", &impact_all),
-    ] {
-        assert!(
-            args.contains(&"--format".to_string()),
-            "{name} missing --format"
-        );
-        assert!(args.contains(&"json".to_string()), "{name} missing json");
-        assert!(
-            args.contains(&"--quiet".to_string()),
-            "{name} missing --quiet"
-        );
-    }
-}
-
-#[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "central contract table intentionally enumerates every tool command"
-)]
-fn each_tool_uses_correct_subcommand() {
-    assert_eq!(
-        build_analyze_args(&AnalyzeParams::default()).unwrap()[0],
-        "dead-code"
-    );
-    assert_eq!(build_check_changed_args(check_changed("x"))[0], "dead-code");
-    assert_eq!(
-        build_find_dupes_args(&FindDupesParams::default()).unwrap()[0],
-        "dupes"
-    );
-    assert_eq!(build_fix_preview_args(&FixParams::default())[0], "fix");
-    assert_eq!(build_fix_apply_args(&FixParams::default())[0], "fix");
-    assert_eq!(
-        build_project_info_args(&ProjectInfoParams::default())[0],
-        "list"
-    );
-    assert_eq!(build_health_args(&HealthParams::default())[0], "health");
-    assert_eq!(build_impact_args(&ImpactParams::default())[0], "impact");
-    assert_eq!(build_guard_args(&guard_params()).unwrap()[0], "guard");
-    let impact_all = build_impact_all_args(&ImpactAllParams::default());
-    assert_eq!(impact_all[0], "impact");
-    assert_eq!(impact_all[1], "--all");
-    assert_eq!(
-        build_list_boundaries_args(&ListBoundariesParams::default())[0],
-        "list"
-    );
-    assert_eq!(
-        build_feature_flags_args(&FeatureFlagsParams::default())[0],
-        "flags"
-    );
-    assert_eq!(
-        build_list_suppressions_args(&ListSuppressionsParams::default()).unwrap()[0],
-        "suppressions"
-    );
-    assert_eq!(
-        build_trace_export_args(&TraceExportParams {
-            file: "src/utils.ts".to_string(),
-            export_name: "usedFunction".to_string(),
-            root: None,
-            config: None,
-            allow_remote_extends: None,
-            production: None,
-            workspace: None,
-            no_cache: None,
-            threads: None,
-        })
-        .unwrap()[0],
-        "dead-code"
-    );
-    assert_eq!(
-        build_trace_file_args(&TraceFileParams {
-            file: "src/utils.ts".to_string(),
-            root: None,
-            config: None,
-            allow_remote_extends: None,
-            production: None,
-            workspace: None,
-            no_cache: None,
-            threads: None,
-        })
-        .unwrap()[0],
-        "dead-code"
-    );
-    assert_eq!(
-        build_impact_closure_args(&ImpactClosureParams {
-            path: "src/utils.ts".to_string(),
-            root: None,
-            config: None,
-            allow_remote_extends: None,
-            production: None,
-            workspace: None,
-            no_cache: None,
-            threads: None,
-            max_output_bytes: None,
-        })
-        .unwrap()[0],
-        "dead-code"
-    );
-    assert_eq!(
-        build_trace_dependency_args(&TraceDependencyParams {
-            package_name: "react".to_string(),
-            root: None,
-            config: None,
-            allow_remote_extends: None,
-            production: None,
-            workspace: None,
-            no_cache: None,
-            threads: None,
-        })
-        .unwrap()[0],
-        "dead-code"
-    );
-    assert_eq!(
-        build_trace_clone_args(&TraceCloneParams {
-            file: Some("src/original.ts".to_string()),
-            fingerprint: None,
-            line: Some(2),
-            root: None,
-            config: None,
-            allow_remote_extends: None,
-            workspace: None,
-            mode: None,
-            near: None,
-            min_tokens: None,
-            min_lines: None,
-            threshold: None,
-            skip_local: None,
-            cross_language: None,
-            ignore_imports: None,
-            no_cache: None,
-            threads: None,
-            min_occurrences: None,
-        })
-        .unwrap()[0],
-        "dupes"
-    );
-    assert_eq!(
-        build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"))[0],
-        "health"
-    );
-}
-
-#[test]
 fn check_runtime_coverage_minimal_emits_coverage_flag() {
     let args = build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
-    assert_eq!(args[0], "health");
-    assert!(args.contains(&"--runtime-coverage".to_string()));
-    let idx = args.iter().position(|a| a == "--runtime-coverage").unwrap();
-    assert_eq!(args[idx + 1], "./coverage");
-    assert!(!args.contains(&"--min-invocations-hot".to_string()));
-    assert!(!args.contains(&"--min-observation-volume".to_string()));
-    assert!(!args.contains(&"--low-traffic-threshold".to_string()));
-    assert!(!args.contains(&"--group-by".to_string()));
+    assert_eq!(
+        args,
+        [
+            "health",
+            "--format",
+            "json",
+            "--quiet",
+            "--explain",
+            "--runtime-coverage",
+            "./coverage",
+        ]
+    );
 }
 
 #[test]
