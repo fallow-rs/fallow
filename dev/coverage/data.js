@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790165425637,
+  "lastUpdate": 1790166107780,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "02381b837dfa93df5c845b293359cb99d2a19c72",
-          "message": "fix: honor pnpm catalog next-line suppressions\n\nFixes #2548.",
-          "timestamp": "2026-09-05T21:45:59+02:00",
-          "tree_id": "b5836aff546faa0300fe76ee240f77a1face7047",
-          "url": "https://github.com/fallow-rs/fallow/commit/02381b837dfa93df5c845b293359cb99d2a19c72"
-        },
-        "date": 1788637902318,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/a760767376cedb7b6ef3aa15e24177c2e3251b0b"
         },
         "date": 1790165421724,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bartwaardenburg@gmail.com",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6cd8d83e04143c28885c81805ec73320872814c9",
+          "message": "fix: harden failure handling and remove redundant state (#2726)",
+          "timestamp": "2026-09-23T14:11:09+02:00",
+          "tree_id": "2bf6d8b65caec54284e07087786a9ae4df326b16",
+          "url": "https://github.com/fallow-rs/fallow/commit/6cd8d83e04143c28885c81805ec73320872814c9"
+        },
+        "date": 1790166103955,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
