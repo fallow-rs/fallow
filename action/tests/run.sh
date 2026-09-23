@@ -4263,14 +4263,22 @@ fi
 # A failing default rule belongs to the count gate: with fail-on-issues false
 # it prints nothing and leaves the job green, whether the CLI enforced it or
 # (combined mode) did not.
+# The outputs still name the failing default rule, so a step that reads
+# `gates-failed != ''` sees it on every run with findings.
 for default_case in \
-  'dead-code|{"error-severity-findings":{"status":"fail","enforced":true}}|' \
-  'health|{"health-findings":{"status":"fail","enforced":true}}|"summary":{"functions_above_threshold":2}' \
-  'dead-code|{"error-severity-findings":{"status":"fail","enforced":false},"health-findings":{"status":"fail","enforced":false}}|' \
+  'dead-code|{"error-severity-findings":{"status":"fail","enforced":true}}||error-severity-findings' \
+  'health|{"health-findings":{"status":"fail","enforced":true}}|"summary":{"functions_above_threshold":2}|health-findings' \
+  'dead-code|{"error-severity-findings":{"status":"fail","enforced":false},"health-findings":{"status":"fail","enforced":false}}||error-severity-findings,health-findings' \
   ; do
-  IFS='|' read -r default_command default_gates default_extra <<< "$default_case"
+  IFS='|' read -r default_command default_gates default_extra default_failed <<< "$default_case"
   run_gate_analyze "$(gate_envelope "$default_gates" "$default_extra")" \
     INPUT_COMMAND="$default_command" INPUT_FAIL_ON_ISSUES="false"
+  if grep -qx "gates_failed=${default_failed}" <<< "$GATE_OUTPUTS"; then
+    pass "gate: a default rule on $default_command is named in gates_failed"
+  else
+    fail "gate: a default rule on $default_command is named in gates_failed" \
+      "expected gates_failed=${default_failed}, got: $GATE_OUTPUTS"
+  fi
   assert_not_contains "$GATE_STDOUT" "gate reports a failure" \
     "gate: a default rule on $default_command $default_gates prints no gate line"
   assert_not_contains "$GATE_STDOUT" "::error::" \

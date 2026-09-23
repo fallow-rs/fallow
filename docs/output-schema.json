@@ -38,7 +38,7 @@
               "type": "null"
             }
           ],
-          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the default exit rule of each section that ran\n(`error-severity-findings`, `health-findings`). The machine formats of\nthe combined run exit 0 for findings, so most entries have `enforced:\nfalse`, and `status` gives the verdict of the human run. A gate fails\nthe build when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API leaves it absent. See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the default exit rule of each section that ran\n(`error-severity-findings`, `health-findings`). The machine formats of\nthe combined run exit 0 for findings, so most entries have `enforced:\nfalse`. For the default exit rules (`error-severity-findings`,\n`health-findings`), `status` gives the verdict of the human run. An\nadvisory entry can report `fail` without a failure of the human run: an\nexample is a `stale-baseline` entry that `--fail-on-stale-baseline` did\nnot arm. A gate fails the build when `status` is `fail` AND `enforced`\nis true. The typed\nprogrammatic API leaves it absent. See [`crate::GateOutcomes`]."
         },
         "request_outcomes": {
           "anyOf": [
@@ -76,7 +76,7 @@
         "dupes": {
           "anyOf": [
             {
-              "$ref": "#/definitions/DupesReportPayload"
+              "$ref": "#/definitions/CombinedDupesSection"
             },
             {
               "type": "null"
@@ -26658,6 +26658,53 @@
         }
       ],
       "description": "One channel that narrowed a run to part of the project.\n\nSerialized as kebab-case inside `scope_reasons` and published as an OPEN\nset, the same tolerate-unknown contract `gate_outcomes` keys carry: a name\nthis build does not emit means \"some narrowing\", not an error.\n\nWhich names a command can emit differs per command, because the three\nnarrowing predicates see different state. `dead-code` reads the flags\nthemselves and can name every channel. `dupes` and `health` see an already\nresolved changed-file set and report `changed-files`, because at that point\nthe flag that produced it is gone. `health` reports `workspace` for both\n`--workspace` and `--changed-workspaces` for the same reason. A consumer\nmust therefore not assume a given command emits a given name."
+    },
+    "CombinedDupesSection": {
+      "type": "object",
+      "properties": {
+        "clone_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneGroupFinding"
+          },
+          "description": "All detected clone groups, each wrapped with typed actions."
+        },
+        "clone_families": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneFamilyFinding"
+          },
+          "description": "Clone families, each wrapped with typed actions. Inner `groups`\ninside each `CloneFamilyFinding` are themselves wrapped as\n`CloneGroupFinding` entries carrying their own `actions[]` (and\noptional audit-mode `introduced` flag), so JSON-Schema strict\nconsumers and TS consumers reading `clone_families[].groups[]` see\nthe same shape as the top-level `clone_groups[]` array (preserves\nthe issue #393 regression contract)."
+        },
+        "mirrored_directories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MirroredDirectory"
+          },
+          "description": "Mirrored directory pairs."
+        },
+        "stats": {
+          "description": "Aggregate duplication statistics.",
+          "$ref": "#/definitions/DuplicationStats"
+        },
+        "baseline_staleness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BaselineStaleness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "This run's view of the loaded duplication baseline, present only when\n`--dupes-baseline` loaded one. Read `change_scoped` before dividing\n`matched_entries` by `baseline_entries`: a narrowed run can report\n`matched_entries: 0` on a healthy baseline."
+        }
+      },
+      "required": [
+        "clone_groups",
+        "clone_families",
+        "stats"
+      ],
+      "description": "Wire shape of the `dupes` section inside the bare combined envelope.\n\nThe section is the standalone payload plus the view of the loaded\nduplication baseline. The standalone `dupes` envelope carries the same\n`baseline_staleness` key at its root."
     }
   }
 }

@@ -247,8 +247,12 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     /// always emits it, with the default exit rule of each section that ran
     /// (`error-severity-findings`, `health-findings`). The machine formats of
     /// the combined run exit 0 for findings, so most entries have `enforced:
-    /// false`, and `status` gives the verdict of the human run. A gate fails
-    /// the build when `status` is `fail` AND `enforced` is true. The typed
+    /// false`. For the default exit rules (`error-severity-findings`,
+    /// `health-findings`), `status` gives the verdict of the human run. An
+    /// advisory entry can report `fail` without a failure of the human run: an
+    /// example is a `stale-baseline` entry that `--fail-on-stale-baseline` did
+    /// not arm. A gate fails the build when `status` is `fail` AND `enforced`
+    /// is true. The typed
     /// programmatic API leaves it absent. See [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,

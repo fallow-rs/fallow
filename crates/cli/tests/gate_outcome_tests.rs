@@ -570,6 +570,27 @@ fn bare_fallow_applies_dupes_and_health_baselines() {
     );
 }
 
+/// The combined baseline flags apply only to bare `fallow`. Before a
+/// subcommand they would have no effect, so the run stops with exit 2.
+#[test]
+fn combined_baseline_flags_before_a_subcommand_are_rejected() {
+    for flag in ["--dupes-baseline", "--health-baseline"] {
+        let output = run(&[flag, "x.json", "dead-code", "--format", "json", "--quiet"]);
+        assert_eq!(
+            output.code, 2,
+            "`{flag}` before a subcommand is rejected. stdout: {} stderr: {}",
+            output.stdout, output.stderr
+        );
+        let json = parse_json(&output);
+        assert_eq!(json["error"], Value::Bool(true));
+        let message = json["message"].as_str().expect("message");
+        assert!(
+            message.contains(flag),
+            "the message names the flag: {message}"
+        );
+    }
+}
+
 /// `gate_outcomes["regression"].status` is `regression.exceeded`, not a second
 /// reading of the same counts.
 #[test]

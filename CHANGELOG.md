@@ -31,7 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow --format json` still exits 0 when it has findings: its entries show
   `enforced: false`, and `status` tells you whether `fallow` in the terminal
   fails. `dupes` has no default rule, so its JSON has `gate_outcomes` only
-  when you give a gate flag.
+  when you give a gate flag. The GitHub Action output `gates-failed`, the
+  GitLab `FALLOW_GATES_FAILED` variable and the job summary now name this
+  rule on every run with findings, also when the job stays green. A step that
+  checks for a non-empty `gates-failed` must check the gate names instead.
 
 ### Fixed
 
@@ -74,7 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow dupes --baseline` and `fallow health --baseline` do. Before, bare
   `fallow` read only the dead-code `--baseline`, so its dupes and health
   sections showed findings that the standalone commands hid.
-  `--fail-on-stale-baseline` now checks all three baselines.
+  `--fail-on-stale-baseline` now checks all three baselines. The two flags
+  work only without a subcommand: `fallow --dupes-baseline <file> dead-code`
+  stops with exit 2.
 
 - **Traces pick the file you name in a monorepo.** A trace of `src/a.ts`
   (for example `dead-code --trace-file src/a.ts` or

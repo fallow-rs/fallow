@@ -351,6 +351,25 @@ pub struct DupesReportPayload {
     pub stats: DuplicationStats,
 }
 
+/// Wire shape of the `dupes` section inside the bare combined envelope.
+///
+/// The section is the standalone payload plus the view of the loaded
+/// duplication baseline. The standalone `dupes` envelope carries the same
+/// `baseline_staleness` key at its root.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CombinedDupesSection {
+    /// The duplication payload, flattened into the section.
+    #[serde(flatten)]
+    pub payload: DupesReportPayload,
+    /// This run's view of the loaded duplication baseline, present only when
+    /// `--dupes-baseline` loaded one. Read `change_scoped` before dividing
+    /// `matched_entries` by `baseline_entries`: a narrowed run can report
+    /// `matched_entries: 0` on a healthy baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
+}
+
 impl DupesReportPayload {
     /// Build the payload from a bare [`DuplicationReport`].
     #[must_use]

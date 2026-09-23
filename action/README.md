@@ -68,6 +68,12 @@ The outputs `gates-failed`, `gates-warned`, `gates-skipped` and `gates-passed`
 carry the comma-separated names, so a downstream step can report on a gate
 without failing on it.
 
+The CLI reports the default rule of the command (`error-severity-findings`,
+`health-findings`, `audit-verdict`) on every run. A run with findings therefore
+names that rule in `gates-failed`, also when `fail-on-issues: false` keeps the
+job green. To act on one gate, read its name in these outputs. Do not treat a
+non-empty `gates-failed` as a failed job.
+
 `min-score` and `min-severity` apply to `command: health` only and are rejected
 with exit 2 elsewhere. `--min-score` implies `--score`, which is a section
 selector, so the action adds `--complexity` unless you selected a health section

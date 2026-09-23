@@ -116,7 +116,8 @@ use cli_production::{ProductionModes, resolve_production_modes};
 #[cfg(test)]
 use cli_startup::build_tracing_filter;
 use cli_startup::{
-    bare_coverage_subcommand_error_message, cli_has_bare_coverage_input, parse_cli_args,
+    bare_combined_baseline_subcommand_error_message, bare_coverage_subcommand_error_message,
+    cli_bare_combined_baseline_flag, cli_has_bare_coverage_input, parse_cli_args,
     run_pre_dispatch_checks, setup_tracing, validate_inputs,
 };
 #[cfg(test)]
@@ -3445,6 +3446,14 @@ fn dispatch_and_finalize(
 
     let exit_code = if command.is_some() && cli_has_bare_coverage_input(cli) {
         emit_error(bare_coverage_subcommand_error_message(), 2, output)
+    } else if command.is_some()
+        && let Some(flag) = cli_bare_combined_baseline_flag(cli)
+    {
+        emit_error(
+            &bare_combined_baseline_subcommand_error_message(flag),
+            2,
+            output,
+        )
     } else {
         match command {
             None => dispatch_bare_command(dispatch),
@@ -7087,6 +7096,22 @@ mod tests {
         let message = bare_coverage_subcommand_error_message();
         assert!(message.contains("bare combined-mode flags"));
         assert!(message.contains("fallow health --coverage <coverage-final.json>"));
+    }
+
+    #[test]
+    fn bare_combined_baseline_before_subcommand_is_detectable() {
+        for flag in ["--dupes-baseline", "--health-baseline"] {
+            let cli = Cli::try_parse_from(["fallow", flag, "x.json", "dead-code"])
+                .expect("clap should parse a pre-subcommand combined baseline");
+            assert!(cli.command.is_some());
+            assert_eq!(cli_bare_combined_baseline_flag(&cli), Some(flag));
+            let message = bare_combined_baseline_subcommand_error_message(flag);
+            assert!(message.contains(flag));
+            assert!(message.contains("omit the subcommand"));
+        }
+        let bare = Cli::try_parse_from(["fallow", "--dupes-baseline", "x.json"])
+            .expect("bare combined baseline should parse");
+        assert!(bare.command.is_none());
     }
 
     #[test]

@@ -963,7 +963,7 @@ fn build_combined_json_output(
 
 /// Publish the duplication sub-pass's view of its loaded baseline at the
 /// `dupes` section root, where the standalone `dupes` envelope carries the same
-/// key.
+/// key. The schema declares the key on `fallow_api::CombinedDupesSection`.
 ///
 /// Inserted into the serialized value for the reason audit gives in
 /// `insert_duplication_baseline_staleness`: the section payload is flattened

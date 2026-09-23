@@ -508,6 +508,26 @@ pub fn bare_coverage_subcommand_error_message() -> &'static str {
     "`--coverage` and `--coverage-root` are bare combined-mode flags. Use `fallow health --coverage <coverage-final.json>` for standalone health analysis, or omit the subcommand to run combined mode."
 }
 
+/// Return the first combined-mode baseline flag on the command line.
+///
+/// These flags configure bare `fallow` only. Before a subcommand they would
+/// have no effect, so the caller rejects them.
+pub fn cli_bare_combined_baseline_flag(cli: &Cli) -> Option<&'static str> {
+    if cli.dupes_baseline.is_some() {
+        return Some("--dupes-baseline");
+    }
+    if cli.health_baseline.is_some() {
+        return Some("--health-baseline");
+    }
+    None
+}
+
+pub fn bare_combined_baseline_subcommand_error_message(flag: &str) -> String {
+    format!(
+        "`{flag}` is a bare combined-mode flag and has no effect before a subcommand. Use `fallow audit {flag} <file>`, `fallow dupes --baseline <file>` or `fallow health --baseline <file>`, or omit the subcommand to run combined mode."
+    )
+}
+
 fn command_rejects_output_gate(command: Option<&Command>) -> bool {
     matches!(
         command,

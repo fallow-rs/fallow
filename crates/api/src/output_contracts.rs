@@ -14,7 +14,7 @@ pub type AuditOutput = fallow_output::AuditOutput<
 /// Concrete combined check + dupes + health envelope for full analyses.
 pub type CombinedOutput = fallow_output::CombinedOutput<
     fallow_output::CheckOutput,
-    crate::DupesReportPayload,
+    crate::CombinedDupesSection,
     fallow_output::HealthReport,
 >;
 

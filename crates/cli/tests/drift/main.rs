@@ -600,7 +600,7 @@ fn combined_controls_see_baselines_and_verdicts() {
     );
 }
 
-/// One command of the I7 comparison./// One command of the I7 comparison.
+/// One command of the I7 comparison.
 struct VerdictCommand {
     args: &'static [&'static str],
     rule: ExitRule,

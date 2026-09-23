@@ -13328,8 +13328,12 @@ elapsed_ms: ElapsedMs
  * always emits it, with the default exit rule of each section that ran
  * (`error-severity-findings`, `health-findings`). The machine formats of
  * the combined run exit 0 for findings, so most entries have `enforced:
- * false`, and `status` gives the verdict of the human run. A gate fails
- * the build when `status` is `fail` AND `enforced` is true. The typed
+ * false`. For the default exit rules (`error-severity-findings`,
+ * `health-findings`), `status` gives the verdict of the human run. An
+ * advisory entry can report `fail` without a failure of the human run: an
+ * example is a `stale-baseline` entry that `--fail-on-stale-baseline` did
+ * not arm. A gate fails the build when `status` is `fail` AND `enforced`
+ * is true. The typed
  * programmatic API leaves it absent. See [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
@@ -13354,7 +13358,7 @@ check?: (CheckOutput | null)
 /**
  * Duplication section of the combined run.
  */
-dupes?: (DupesReportPayload | null)
+dupes?: (CombinedDupesSection | null)
 /**
  * Health section of the combined run.
  */
@@ -13394,6 +13398,41 @@ health?: (Meta | null)
  * Telemetry identifiers for the run.
  */
 telemetry?: (TelemetryMeta | null)
+}
+/**
+ * Wire shape of the `dupes` section inside the bare combined envelope.
+ *
+ * The section is the standalone payload plus the view of the loaded
+ * duplication baseline. The standalone `dupes` envelope carries the same
+ * `baseline_staleness` key at its root.
+ */
+export interface CombinedDupesSection {
+/**
+ * All detected clone groups, each wrapped with typed actions.
+ */
+clone_groups: CloneGroupFinding[]
+/**
+ * Clone families, each wrapped with typed actions. Inner `groups`
+ * inside each `CloneFamilyFinding` are themselves wrapped as
+ * `CloneGroupFinding` entries carrying their own `actions[]` (and
+ * optional audit-mode `introduced` flag), so JSON-Schema strict
+ * consumers and TS consumers reading `clone_families[].groups[]` see
+ * the same shape as the top-level `clone_groups[]` array (preserves
+ * the issue #393 regression contract).
+ */
+clone_families: CloneFamilyFinding[]
+/**
+ * Mirrored directory pairs.
+ */
+mirrored_directories?: MirroredDirectory[]
+stats: DuplicationStats
+/**
+ * This run's view of the loaded duplication baseline, present only when
+ * `--dupes-baseline` loaded one. Read `change_scoped` before dividing
+ * `matched_entries` by `baseline_entries`: a narrowed run can report
+ * `matched_entries: 0` on a healthy baseline.
+ */
+baseline_staleness?: (BaselineStaleness | null)
 }
 /**
  * Envelope emitted by `fallow flags --format json`.
