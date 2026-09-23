@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790165738925,
+  "lastUpdate": 1790168697330,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea",
-          "message": "fix(cli): keep syntactic findings when type-aware analysis cannot run (#2514)\n\nCloses #2499.\n\nThe semantic pass has a fixed two-minute ceiling, and a project large enough to\nreach it lost the entire report: every CLI surface exited 2 regardless of\ntypeAware.require, whose default is best-effort. The LSP already handled the\nidentical failure correctly, so the same condition produced a warning through\none surface and a hard error through the other.\n\nSyntactic analysis reports a superset and the semantic pass only removes\ncandidates it confirms are used, so continuing is the conservative outcome. check,\nwatch, health and both combined sites now warn and finish with the syntactic\nfindings, recording the reason in _meta.type_aware.warnings for CI consumers.\n\nfallow fix is the deliberate exception and still stops. It removes code, and the\nextra entries in the unrefined set are precisely the ones a working semantic pass\nwould have proven live, so widening a deletion is the opposite of conservative.\nIts error now names the way out.\n\nSix call sites, not the five originally scoped: run_combined_health has a second\none reached by a bare fallow --only health.\n\nThe CLI's own diagnostic was already being discarded. Under --format json it goes\nto stdout while the extension read stderr only, which is why this report and #2284\nboth say just \"code 2\". The extension now recovers it, says when results came from\na semantic pass that did not run, and exposes the ceiling as a setting.",
-          "timestamp": "2026-09-01T13:33:19+02:00",
-          "tree_id": "c74fe3b9cb37ed66138b09b7da2141488e2177ef",
-          "url": "https://github.com/fallow-rs/fallow/commit/6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea"
-        },
-        "date": 1788262643508,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9762877,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49421,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1185156,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8372,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8372,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4fc827f3e54f6e5703685dff91d396eb83095dd9",
+          "message": "fix: run one audit implementation for the CLI, MCP and API (#2792)\n\nThe CLI audit, the MCP audit tool and fallow_api::run_audit now share one implementation in fallow-api. Audit reports dependency findings only when the manifest changed, and it runs a real base analysis when a changed file holds a suppression or visibility marker. The drift harness checks I4 and I5.",
+          "timestamp": "2026-09-23T14:59:16+02:00",
+          "tree_id": "9252f37c097cdb8f14077ee0bcb60e7dc98f9eaa",
+          "url": "https://github.com/fallow-rs/fallow/commit/4fc827f3e54f6e5703685dff91d396eb83095dd9"
+        },
+        "date": 1790168693330,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10065890,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51352,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1197158,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8334,
             "unit": "allocations"
           }
         ]
