@@ -50,10 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   complexity than before. The extraction cache version changes, so the first
   run after the upgrade parses every file again. Closes #2798.
 
-- **The health headers use the singular for one file.** The human `health`
-  output printed `File health scores (1 files)` and `Hotspots (1 files)`. Both
-  headers now print `1 file` for a count of one and `N files` for other
-  counts. Closes #2808.
+- **The health headers use the singular for one file.** The human and
+  markdown `health` output printed `File health scores (1 files)` and
+  `Hotspots (1 files)`. These headers now print `1 file` for a count of one
+  and `N files` for other counts. Closes #2808.
 
 - **Nuxt local layers are part of the project.** A local directory in
   `extends` of a `nuxt.config`, and each `layers/<name>` directory, is now a

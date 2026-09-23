@@ -1930,10 +1930,11 @@ fn write_file_scores_section(out: &mut String, report: &fallow_output::HealthRep
     let rel = |p: &Path| normalize_uri(&relative_path(p, root).display().to_string());
 
     out.push('\n');
+    let count = report.file_scores.len();
     let _ = writeln!(
         out,
-        "### File Health Scores ({} files)\n",
-        report.file_scores.len(),
+        "### File Health Scores ({count} file{})\n",
+        plural(count),
     );
     out.push_str("| File | Maintainability | Fan-in | Fan-out | Dead Code | Density | Risk |\n");
     out.push_str("|:-----|:---------------|:-------|:--------|:----------|:--------|:-----|\n");
@@ -2061,12 +2062,13 @@ fn write_hotspots_section(out: &mut String, report: &fallow_output::HealthReport
     }
 
     out.push('\n');
+    let count = report.hotspots.len();
     let header = report.hotspot_summary.as_ref().map_or_else(
-        || format!("### Hotspots ({} files)\n", report.hotspots.len()),
+        || format!("### Hotspots ({count} file{})\n", plural(count)),
         |summary| {
             format!(
-                "### Hotspots ({} files, since {})\n",
-                report.hotspots.len(),
+                "### Hotspots ({count} file{}, since {})\n",
+                plural(count),
                 summary.since,
             )
         },
@@ -2655,6 +2657,70 @@ mod health_markdown_tests {
     use fallow_output::{HealthReport, StylingFinding, StylingFindingSeverity};
 
     use super::build_health_markdown;
+
+    fn one_file_report(root: &Path, since: Option<&str>) -> HealthReport {
+        HealthReport {
+            file_scores: vec![fallow_output::FileHealthScore {
+                path: root.join("src/core.ts"),
+                fan_in: 1,
+                fan_out: 0,
+                dead_code_ratio: 0.0,
+                complexity_density: 0.5,
+                maintainability_index: 80.0,
+                total_cyclomatic: 4,
+                total_cognitive: 2,
+                function_count: 1,
+                lines: 10,
+                crap_max: 4.0,
+                crap_above_threshold: 0,
+                crap_exempted: 0,
+                crap_effective_threshold: None,
+            }],
+            hotspots: vec![
+                fallow_output::HotspotEntry {
+                    path: root.join("src/core.ts"),
+                    score: 75.0,
+                    commits: 4,
+                    weighted_commits: 3.0,
+                    lines_added: 10,
+                    lines_deleted: 2,
+                    complexity_density: 0.5,
+                    fan_in: 1,
+                    trend: fallow_types::churn::ChurnTrend::Stable,
+                    ownership: None,
+                    is_test_path: false,
+                }
+                .into(),
+            ],
+            hotspot_summary: since.map(|since| fallow_output::HotspotSummary {
+                since: since.to_string(),
+                min_commits: 3,
+                files_analyzed: 1,
+                files_excluded: 0,
+                shallow_clone: false,
+                clock: None,
+            }),
+            ..HealthReport::default()
+        }
+    }
+
+    #[test]
+    fn health_markdown_headers_use_the_singular_for_one_file() {
+        let root = Path::new("/project");
+
+        let output = build_health_markdown(&one_file_report(root, None), root);
+        assert!(
+            output.contains("### File Health Scores (1 file)"),
+            "{output}"
+        );
+        assert!(output.contains("### Hotspots (1 file)"), "{output}");
+
+        let output = build_health_markdown(&one_file_report(root, Some("6 months")), root);
+        assert!(
+            output.contains("### Hotspots (1 file, since 6 months)"),
+            "{output}"
+        );
+    }
 
     #[test]
     fn health_markdown_includes_styling_findings() {
