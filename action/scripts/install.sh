@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 
 # Install fallow binary via npm, plus the exact-version fallow-type-aware
 # sidecar when the project or the action opts into type-aware analysis.
 # Optional env: FALLOW_VERSION, INPUT_ROOT, INPUT_CONFIG, INPUT_TYPE_AWARE,
-# FALLOW_INSTALL_DRY_RUN.
+# FALLOW_INSTALL_DRY_RUN, GITHUB_ENV, GITHUB_ACTION_PATH, GITHUB_ACTION_REF,
+# RUNNER_TEMP.
+
+# Each optional variable gets its default here, so `set -u` fails on a typo in
+# a name instead of on an input that the workflow did not set.
+: "${FALLOW_VERSION:=}" "${INPUT_ROOT:=.}" "${INPUT_CONFIG:=}"
+: "${INPUT_TYPE_AWARE:=}" "${FALLOW_INSTALL_DRY_RUN:=}" "${GITHUB_ENV:=}"
+: "${GITHUB_ACTION_PATH:=}" "${GITHUB_ACTION_REF:=}" "${RUNNER_TEMP:=}"
 
 trim() {
   local value="$1"

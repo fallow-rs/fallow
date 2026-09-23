@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 
 # Emit inline PR annotations via workflow commands.
 #
@@ -23,7 +23,15 @@ set -eo pipefail
 # Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
 #   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE,
 #   FALLOW_PR_DECISION_FILE, HAS_NATIVE_REPORT, FALLOW_BIN,
-#   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX
+#   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX, FALLOW_ROOT
+
+# Each optional variable gets its default here, so `set -u` fails on a typo in
+# a name instead of on an input that the workflow did not set.
+: "${CHANGED_SINCE:=}" "${INPUT_ROOT:=.}" "${FALLOW_RESULTS_FILE:=}"
+: "${FALLOW_SCOPED_RESULTS_FILE:=}" "${FALLOW_CHANGED_FILES_FILE:=}"
+: "${FALLOW_PR_DECISION_FILE:=}" "${HAS_NATIVE_REPORT:=false}"
+: "${FALLOW_BIN:=fallow}" "${FALLOW_RENDER_PATH_PREFIX_SET:=0}"
+: "${FALLOW_RENDER_PATH_PREFIX:=}" "${FALLOW_ROOT:=.}" "${MAX_ANNOTATIONS:=50}"
 
 # shellcheck source=action/scripts/legacy-render.sh
 . "$(dirname "${BASH_SOURCE[0]}")/legacy-render.sh"
