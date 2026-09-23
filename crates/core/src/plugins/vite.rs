@@ -350,6 +350,27 @@ mod tests {
         );
     }
 
+    /// Issue #2806: Vite reads a leading `/` as relative to the project root.
+    #[test]
+    fn resolve_config_reads_a_leading_slash_alias_as_root_relative() {
+        let source = r#"
+            export default {
+                resolve: { alias: { "@": "/src" } },
+            };
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(
+            result.path_aliases,
+            vec![("@".to_string(), "src".to_string())]
+        );
+    }
+
     #[test]
     fn resolve_config_extracts_embedded_test_alias_and_project_resolve_alias() {
         let source = r#"

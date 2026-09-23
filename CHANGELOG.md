@@ -95,6 +95,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Hotspots (1 files)`. These headers now print `1 file` for a count of one
   and `N files` for other counts. Closes #2808.
 
+||||||| parent of 883d019158a (fix: read an absolute config path under the project root as absolute)
+- **A config path under the project root with a leading slash is read as an
+  absolute path.** Config readers read every path value with a leading `/` as
+  relative to the project root. An absolute path such as
+  `/home/me/app/src/lib` in a config under `/home/me/app` resolved to
+  `home/me/app/src/lib` in the project. Now an absolute path under the project
+  root is read as that path. The webpack, rspack and Rsbuild readers now read
+  a leading `/` as a filesystem path, the same as webpack does. An alias, a
+  `context` or an entry such as `/src/lib` outside the project is no longer
+  read as `src/lib` in the project. Vite and the other readers still read
+  `/src/lib` as relative to the project root. Closes #2806.
+
 - **Nuxt local layers are part of the project.** A local directory in
   `extends` of a `nuxt.config`, and each `layers/<name>` directory, is now a
   layer root when it holds a `nuxt.config`. Its pages, layouts, components,

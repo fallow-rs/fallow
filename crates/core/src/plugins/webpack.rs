@@ -287,7 +287,7 @@ pub(super) fn apply_entries(
     let ConfigFile { path, root } = config;
     let entries = config_parser::extract_config_string_or_array(source, path, entry_key);
     let base = config_parser::extract_config_path(source, path, &[base_key])
-        .and_then(|raw| config_parser::normalize_config_path_buf(&raw, path, root));
+        .and_then(|raw| config_parser::normalize_filesystem_config_path_buf(&raw, path, root));
     result.extend_entry_patterns_or_dependencies(entries, |entry| {
         base.as_ref()
             .map(|base| normalize_context_entry(&entry, base, path, root))
@@ -318,7 +318,7 @@ fn push_path_aliases(result: &mut PluginResult, source: &str, config_path: &Path
         config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
     {
         if let Some(normalized) =
-            config_parser::normalize_config_path(&replacement, config_path, root)
+            config_parser::normalize_filesystem_config_path(&replacement, config_path, root)
         {
             result.path_aliases.push((find, normalized));
         }
@@ -467,7 +467,7 @@ fn webpack_merge_bindings(program: &Program<'_>) -> Vec<String> {
 fn normalize_context_entry(entry: &str, context: &Path, config_path: &Path, root: &Path) -> String {
     let entry_path = config_parser::path_from_config_string(entry);
     if entry.starts_with('/') || entry_path.is_absolute() {
-        return config_parser::normalize_config_path(entry, config_path, root)
+        return config_parser::normalize_filesystem_config_path(entry, config_path, root)
             .unwrap_or_else(|| entry.to_string());
     }
 
@@ -623,6 +623,40 @@ mod tests {
             vec!["src/relative.js", "src/bare.js", "/src/absolute.js"]
         );
         assert!(result.referenced_dependencies.is_empty());
+    }
+
+    /// Issue #2806: webpack reads a leading `/` as a filesystem path, so an
+    /// alias or a context entry outside the project is not read as a project
+    /// path.
+    #[test]
+    fn resolve_config_reads_a_leading_slash_as_a_filesystem_path() {
+        let source = r#"
+            module.exports = {
+                context: "/project/app",
+                entry: ["./main.ts", "/src/absolute.js", "/project/app/admin.ts"],
+                resolve: {
+                    alias: {
+                        "@outside": "/src/absolute",
+                        "@inside": "/project/src/inside",
+                    },
+                },
+            };
+        "#;
+        let plugin = WebpackPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/webpack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(
+            result.path_aliases,
+            vec![("@inside".to_string(), "src/inside".to_string())]
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec!["app/main.ts", "/src/absolute.js", "app/admin.ts"]
+        );
     }
 
     #[test]

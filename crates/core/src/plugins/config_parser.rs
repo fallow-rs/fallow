@@ -830,27 +830,68 @@ pub(crate) fn extract_vite_react_babel_dependencies(source: &str, path: &Path) -
     .unwrap_or_default()
 }
 
+/// How a config reader reads a path value with a leading `/`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeadingSlash {
+    /// Relative to the project root, as Vite reads `/src`.
+    RootRelative,
+    /// A filesystem path, as webpack and Node read `/src`.
+    Filesystem,
+}
+
 /// Normalize a config-relative path to a project-root-relative path.
 ///
 /// Handles values extracted from config files such as `"./src"`, `"src/lib"`,
-/// `"/src"`, or absolute filesystem paths under `root`.
+/// `"/src"`, or absolute filesystem paths under `root`. An absolute path under
+/// `root` is read as absolute. Any other leading `/` is read as relative to
+/// `root`. Use [`normalize_filesystem_config_path_buf`] for a reader whose tool
+/// reads a leading `/` as a filesystem path.
 #[must_use]
 pub(crate) fn normalize_config_path_buf(
     raw: impl AsRef<Path>,
     config_path: &Path,
     root: &Path,
 ) -> Option<PathBuf> {
-    let raw = raw.as_ref();
+    normalize_path_value(raw.as_ref(), config_path, root, LeadingSlash::RootRelative)
+}
+
+/// Normalize a config path value for a reader whose tool reads a leading `/`
+/// as a filesystem path, such as webpack. A leading-`/` path outside `root`
+/// resolves to `None` (issue #2806).
+#[must_use]
+pub(crate) fn normalize_filesystem_config_path_buf(
+    raw: impl AsRef<Path>,
+    config_path: &Path,
+    root: &Path,
+) -> Option<PathBuf> {
+    normalize_path_value(raw.as_ref(), config_path, root, LeadingSlash::Filesystem)
+}
+
+fn normalize_path_value(
+    raw: &Path,
+    config_path: &Path,
+    root: &Path,
+    leading_slash: LeadingSlash,
+) -> Option<PathBuf> {
     if raw.as_os_str().is_empty() {
         return None;
     }
 
     let raw_string = path_to_config_string(raw);
     let raw_path = Path::new(&raw_string);
-    let candidate = if let Some(stripped) = raw_string.strip_prefix('/') {
-        lexical_normalize(&root.join(stripped))
+    let absolute = raw_path
+        .is_absolute()
+        .then(|| lexical_normalize(raw_path))
+        .filter(|absolute| absolute.starts_with(root));
+    let candidate = if let Some(absolute) = absolute {
+        absolute
+    } else if let Some(stripped) = raw_string.strip_prefix('/') {
+        match leading_slash {
+            LeadingSlash::RootRelative => lexical_normalize(&root.join(stripped)),
+            LeadingSlash::Filesystem => return None,
+        }
     } else if raw_path.is_absolute() {
-        lexical_normalize(raw_path)
+        return None;
     } else {
         let base = config_path.parent().unwrap_or(root);
         lexical_normalize(&base.join(raw_path))
@@ -858,6 +899,18 @@ pub(crate) fn normalize_config_path_buf(
 
     let relative = candidate.strip_prefix(root).ok()?;
     (!relative.as_os_str().is_empty()).then(|| relative.to_path_buf())
+}
+
+/// [`normalize_filesystem_config_path_buf`] as a project-root-relative
+/// forward-slash string.
+#[must_use]
+pub(crate) fn normalize_filesystem_config_path(
+    raw: impl AsRef<Path>,
+    config_path: &Path,
+    root: &Path,
+) -> Option<String> {
+    normalize_filesystem_config_path_buf(raw, config_path, root)
+        .map(|path| path_to_config_string(&path))
 }
 
 /// Normalize a config-relative path to a project-root-relative forward-slash string.
@@ -3251,6 +3304,45 @@ mod tests {
         assert_eq!(
             normalize_config_path(".\\src\\..\\app\\lib", &config_path, &root),
             Some("config/app/lib".to_string())
+        );
+    }
+
+    /// Issue #2806: a literal absolute path under the project root is read as
+    /// absolute, not joined onto the root a second time.
+    #[test]
+    fn normalize_config_path_reads_an_absolute_path_under_root_as_absolute() {
+        let root = std::env::temp_dir().join("fallow-2806-project");
+        let config_path = root.join("vite.config.ts");
+        let absolute = path_to_config_string(&root.join("src").join("lib"));
+
+        assert_eq!(
+            normalize_config_path(&absolute, &config_path, &root),
+            Some("src/lib".to_string())
+        );
+        assert_eq!(
+            normalize_filesystem_config_path(&absolute, &config_path, &root),
+            Some("src/lib".to_string())
+        );
+    }
+
+    /// Issue #2806: a reader with filesystem semantics reads a leading `/` as
+    /// an absolute path, so a path outside the project root resolves to nothing.
+    #[test]
+    fn normalize_filesystem_config_path_does_not_read_a_leading_slash_as_root_relative() {
+        let config_path = PathBuf::from("/project/config/webpack.config.js");
+        let root = PathBuf::from("/project");
+
+        assert_eq!(
+            normalize_filesystem_config_path("/src/lib", &config_path, &root),
+            None
+        );
+        assert_eq!(
+            normalize_filesystem_config_path("./src/lib", &config_path, &root),
+            Some("config/src/lib".to_string())
+        );
+        assert_eq!(
+            normalize_config_path("/src/lib", &config_path, &root),
+            Some("src/lib".to_string())
         );
     }
 
