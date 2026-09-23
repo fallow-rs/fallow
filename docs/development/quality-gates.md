@@ -127,6 +127,9 @@ Focused integration checks:
   changes.
 - `npm run conformance:public-smoke` for changes that need public
   real-project evidence.
+- `cargo test -p fallow-cli --test drift` for changes to a finding that the
+  CLI, MCP, and `fallow_api` all report. Build `fallow-mcp` first; see the
+  [drift contract](drift-contract.md).
 - `npm run check:knowledge-architecture` for docs and routing changes.
 - `npm run check:agent-adapters` for skill or adapter changes.
 - `python3 scripts/check_telemetry_doc_sync.py` when telemetry agent-source

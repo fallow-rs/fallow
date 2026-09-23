@@ -362,6 +362,36 @@ jobs:
       - name: Check for uncommitted changes
         run: git diff --exit-code
 
+  drift:
+    name: Drift harness
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: drift
+
+      # The harness drives the MCP server as a separate binary and fails when
+      # it is missing, so build it before the test target.
+      - name: Build fallow-mcp
+        run: cargo build -p fallow-mcp
+
+      # Fixed seed: a failure on a pull request reproduces locally with the
+      # same command. See docs/development/drift-contract.md.
+      - name: Run drift harness
+        env:
+          FALLOW_DRIFT_CASES: '12'
+        run: cargo test -p fallow-cli --test drift
+
   windows-rust:
     name: Windows path and subprocess handling
     needs: changes
@@ -1156,7 +1186,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [check, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
+    needs: [check, drift, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

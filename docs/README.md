@@ -65,6 +65,8 @@ for contributors and maintainers of the open-source codebase.
 
 ## Verification and operations
 
+- [Drift contract](development/drift-contract.md): rules that keep commands
+  and surfaces in agreement, and the harness that checks them.
 - [Benchmarking](benchmarking.md): performance measurement and benchmark
   maintenance.
 - [Public config corpus](public-config-corpus.md): safe public configuration

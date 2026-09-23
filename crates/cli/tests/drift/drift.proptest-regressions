@@ -1,0 +1,3 @@
+# Seeds for failure cases that the drift harness found in the past.
+# The harness replays each seed before it generates new cases.
+# Keep this file under source control. See docs/development/drift-contract.md.

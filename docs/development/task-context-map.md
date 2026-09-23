@@ -24,6 +24,7 @@ the change reaches them.
 | Change docs, skills, or agent routing | [Knowledge architecture](knowledge-architecture.md), [AI tooling](ai-tooling.md), [quality gates](quality-gates.md) | Analyzer internals |
 | Prepare a release | [Release procedure](release-procedure.md), [quality gates](quality-gates.md), [release security](release-security.md), [backwards compatibility](../backwards-compatibility.md), changelog and companion-source contracts | Unchanged analyzer internals |
 | Prepare a commit or push | [Quality gates](quality-gates.md), active workflow skill | Unrelated reference catalogues |
+| Change a finding that several commands or surfaces report | [Drift contract](drift-contract.md), [review routing](review-routing.md), [quality gates](quality-gates.md) | Unaffected specialist lenses |
 | Review a cross-surface change | [Review routing](review-routing.md), [quality gates](quality-gates.md), affected durable references | Unaffected specialist lenses |
 
 Use live command help and generated contracts for volatile CLI details. Do not

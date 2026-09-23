@@ -279,6 +279,32 @@ jobs:
       - name: Format
         run: cargo fmt --check --manifest-path editors/zed/Cargo.toml
 
+  drift-full:
+    name: Drift harness (full run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: release-drift-full
+
+      - name: Build fallow-mcp
+        run: cargo build -p fallow-mcp
+
+      # A random seed explores new projects on each run. A failure prints the
+      # seed and the case count, which reproduce it locally.
+      - name: Run drift harness
+        env:
+          FALLOW_DRIFT_CASES: '512'
+          FALLOW_DRIFT_SEED: random
+        run: cargo test -p fallow-cli --test drift
+
   check-codegen:
     name: Check codegen drift
     runs-on: ubuntu-latest

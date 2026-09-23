@@ -94,6 +94,10 @@
         "section": "development"
       },
       {
+        "path": "docs/development/drift-contract.md",
+        "section": "development"
+      },
+      {
         "path": "docs/analyzer-authoring.md",
         "section": "architecture"
       },

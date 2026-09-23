@@ -1,0 +1,236 @@
+# Drift contract
+
+Fallow reports one analysis through several commands and several surfaces. The
+rules below say which results must agree. A result that breaks a rule is drift.
+
+The drift harness in `crates/cli/tests/drift/` generates small projects and
+checks the rules that have the status "checked by the harness". A rule with the
+status "pending" breaks on `main` today. The change that fixes it also adds it
+to the harness, as the test that failed before the fix.
+
+## Terms
+
+- **Surface**: one way to get a result. The harness drives three surfaces:
+  - the CLI binary with `--format json`,
+  - the `fallow-mcp` server over stdio JSON-RPC, on the typed path (in-process
+    `fallow_api`) and on the CLI-fallback path (a `fallow` subprocess),
+  - `fallow_api` in-process. It stands in for the Node bindings, which call
+    the same functions.
+
+  The LSP server is not in the contract yet. It needs a scripted editor session.
+- **Finding key**: the identity of one finding. It is the tuple (issue kind,
+  root-relative path, symbol or package name, line). The harness compares key
+  sets, not presentation fields such as `actions`, columns, or prose.
+- **Volatile field**: a field that changes between two runs of the same
+  analysis: `elapsed_ms` and `_meta.telemetry.analysis_run_id`.
+
+The harness builds keys with one normalizer per envelope shape
+(`crates/cli/tests/drift/keys.rs`):
+
+| Envelope | Issue kind | Path | Symbol | Line |
+|---|---|---|---|---|
+| Dead code | The array name, for example `unused_exports` | `path`, or the `files` joined with ` -> ` | `export_name`, `package_name`, `member_name` (with its parent), `name` or `specifier` | `line`, or 0 |
+| Dupes | `code-duplication`, one key for each clone group | The instance files joined with ` -> ` | Each instance as `file:start-end` | The first start line |
+| Health | `complexity`, one key for each entry in `findings` | `path` | Function `name` | `line` |
+| Combined | The three sections above | | | |
+| Audit | The three sections above, split into introduced and inherited | | | |
+
+An MCP result goes through the normalizer of the envelope in its text content.
+
+## Invariants
+
+| ID | Rule | Status |
+|---|---|---|
+| I1 | `check` output equals `dead-code` output | Checked by the harness |
+| I2 | Finding sets are equal on every surface | Checked by the harness |
+| I3 | Each section of bare `fallow` equals its standalone command | Pending |
+| I4 | Audit attribution covers the head findings in changed files | Pending |
+| I5 | Audit gives the same result on every surface | Pending |
+| I6 | A suppression or a baseline entry never adds a finding | Checked by the harness |
+| I7 | Every machine envelope carries the verdict of the human run | Pending |
+| I8 | Scope flags narrow the same way on every command and surface | Pending |
+
+### I1: `check` is an alias of `dead-code`
+
+- **Statement**: `fallow check` and `fallow dead-code` with the same flags give
+  byte-identical JSON and the same exit code.
+- **Surfaces**: CLI.
+- **Comparison**: the full JSON report, after the volatile fields are removed.
+- **Designed exceptions**: the volatile fields.
+- **Status**: checked by the harness.
+
+### I2: surface equality
+
+- **Statement**: for the same project and flags, the dead-code, dupes and
+  health finding sets are equal on the CLI, on MCP (typed path and
+  CLI-fallback path) and on `fallow_api` in-process.
+- **Surfaces**: CLI `dead-code`, `dupes` and `health`; MCP `analyze`,
+  `find_dupes` and `check_health`; `fallow_api::run_dead_code`,
+  `run_duplication` and `run_health`.
+- **Comparison**: finding keys.
+- **Designed exceptions**: health compares only `findings`. The other health
+  sections (file scores, hotspots, targets) are not finding sets.
+- **Status**: checked by the harness.
+
+### I3: combined composition
+
+- **Statement**: each section of bare `fallow` equals the standalone command
+  with the same flags and baselines.
+- **Surfaces**: CLI bare `fallow` against `dead-code`, `dupes` and `health`.
+- **Comparison**: finding keys for each section.
+- **Designed exceptions**: none.
+- **Status**: pending. Bare `fallow` does not apply a dupes baseline or a
+  health baseline. It gets `--dupes-baseline` and `--health-baseline`, as
+  `audit` has.
+
+### I4: audit attribution
+
+- **Statement**: the introduced findings plus the inherited findings of
+  `audit` equal the head findings in the changed files. A finding is
+  introduced when its key is absent at the base commit, after the base keys
+  follow renames. Dependency findings are in scope only when the manifest
+  changed.
+- **Surfaces**: CLI `audit`.
+- **Comparison**: finding keys, split by attribution.
+- **Designed exceptions**: none.
+- **Status**: pending. `audit` reports dependency findings of a manifest that
+  did not change.
+
+### I5: audit surfaces
+
+- **Statement**: CLI `audit`, MCP `audit` and `fallow_api::run_audit` give the
+  same introduced set, the same inherited set and the same verdict.
+- **Surfaces**: CLI, MCP, `fallow_api` in-process.
+- **Comparison**: finding keys, split by attribution, and the verdict.
+- **Designed exceptions**: none.
+- **Status**: pending. The typed audit path does not follow renames: after
+  `git mv`, MCP `audit` marks an old finding as introduced, and CLI `audit`
+  marks it as inherited.
+
+### I6: suppression and baseline monotonicity
+
+- **Statement**: adding a suppression comment or a baseline entry never adds a
+  finding, on any command.
+- **Surfaces**: CLI `dead-code`, `dupes`, `health` and bare `fallow` for
+  suppression comments; CLI `dead-code`, `dupes` and `health` for baselines.
+- **Comparison**: finding keys. The harness renders each project twice. One
+  copy has the suppression comments, the other has plain comments on the same
+  lines, so no finding moves to another line. For baselines, the harness saves
+  a baseline, keeps a part of its entries, and checks that the full baseline
+  reports a subset of the partial baseline, which reports a subset of no
+  baseline.
+- **Designed exceptions**: `stale_suppressions` findings. They report the
+  suppression comment itself when it matches nothing.
+- **Status**: checked by the harness.
+
+### I7: verdict in every envelope
+
+- **Statement**: every machine envelope carries a verdict in `gate_outcomes`,
+  and that verdict equals the verdict of the human run. The exit code follows
+  the documented rule for each command.
+- **Surfaces**: every CLI command in every machine format, and MCP results.
+- **Comparison**: the verdict and the exit code.
+- **Designed exceptions**: bare `fallow` in a machine format exits 0 when it
+  has findings.
+- **Status**: pending. `fallow --format json` has no verdict when no gate is
+  armed, while the human run exits 1.
+
+### I8: scope flags
+
+- **Statement**: `--changed-since`, `--workspace` and `--production` narrow
+  the same way on every command and every surface.
+- **Surfaces**: the surfaces of I2. MCP `check_changed` takes the place of
+  `analyze` when the run has `--changed-since`.
+- **Comparison**: for each scope flag and each analysis:
+  - the finding keys are equal on every surface,
+  - the scoped run holds no key that the run without the flag lacks
+    (`--changed-since` and `--workspace` only),
+  - every key touches the scope: a changed file, or a path in the selected
+    workspace package (`--changed-since` and `--workspace` only).
+- **Designed exceptions**:
+  - `--changed-since` keeps dependency-level findings (for example
+    `unused_dependencies`) whatever changed. Whether a dependency is unused is
+    a fact about the whole graph, not about one file.
+  - A clone group is in scope when one of its instances is in scope.
+  - MCP `find_dupes` has no `production` parameter, so the harness does not
+    compare MCP for dupes with `--production`.
+  - `--production` can add findings, so it has only the equality check.
+- **Status**: pending. With `--workspace`, CLI `dupes` keeps a clone group that
+  has one instance in the selected package and one instance in another
+  package. `fallow_api::run_duplication` and the MCP typed path drop that
+  group.
+
+## How the harness works
+
+The generator (`crates/cli/tests/drift/model.rs`) is a proptest strategy for a
+small project:
+
+- TypeScript files with used and unused exports, value exports and type
+  exports, and imports between files,
+- `package.json` dependencies, used and unused, in `dependencies` and
+  `devDependencies`,
+- inline suppression comments (`// fallow-ignore-next-line <kind>` and
+  `// fallow-ignore-file unused-file`),
+- a duplicated function and a function above the complexity thresholds,
+- an optional npm workspaces layout with two packages,
+- a base commit and a head commit. The diff adds, edits, renames (`git mv`)
+  and deletes files.
+
+The runners are in `crates/cli/tests/drift/surfaces.rs`. The MCP runner starts
+the `fallow-mcp` binary next to the `fallow` binary, with `FALLOW_BIN` set to
+the CLI under test. To force the CLI-fallback path, it passes `save_baseline`.
+Each analysis tool sends a baseline parameter to the CLI, and saving a baseline
+does not change the findings of the run. The runner then checks that the
+baseline file exists, which proves that the fallback path ran.
+
+The runners remove `FALLOW_*` variables from each child process, so a developer
+shell cannot change one surface and not the others.
+
+## Budgets and CI
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `FALLOW_DRIFT_CASES` | A small fixed count | Cases for each invariant |
+| `FALLOW_DRIFT_SEED` | A fixed seed | A number, or `random` |
+
+- The `drift` job in `.github/workflows/ci.yml` runs the harness with the fixed
+  seed on each pull request that changes `crates/**`. It blocks the merge.
+- The `drift-full` job in `.github/workflows/release-validation.yml` runs a
+  large case count with a random seed. Release validation gates publication and
+  also runs every week.
+
+The harness needs the `fallow-mcp` binary. When the binary is missing, the
+harness fails with the build command. It never skips the MCP surface.
+
+```bash
+cargo build -p fallow-mcp
+cargo test -p fallow-cli --test drift
+```
+
+## Reproduce a failure
+
+A failure message gives the seed, the case count, the shrunk project with its
+files, and the difference between the two key sets.
+
+1. Build the binaries: `cargo build -p fallow-mcp`.
+2. Run the failing test with the same seed and case count:
+
+   ```bash
+   FALLOW_DRIFT_SEED=<seed> FALLOW_DRIFT_CASES=<cases> \
+     cargo test -p fallow-cli --test drift <test name>
+   ```
+
+3. Proptest writes the failing case to
+   `crates/cli/tests/drift/drift.proptest-regressions`. Commit that line with
+   the fix. The harness replays each saved case before it generates new cases.
+
+## Add an invariant
+
+1. Write the predicate in `crates/cli/tests/drift/invariants.rs`. It returns
+   `Ok(())` or a readable difference.
+2. When the invariant reads a new envelope shape, add a normalizer to
+   `crates/cli/tests/drift/keys.rs`.
+3. Add a test in `crates/cli/tests/drift/main.rs` that calls `run_invariant`.
+4. Add a section to this document with the status "checked by the harness".
+5. When the invariant fails on `main`, fix the drift in the same change. Do not
+   add the invariant with an expected failure.
