@@ -739,6 +739,10 @@ export const formatCuratedSeedDrift = (comparison, { recording = false, recordPa
     "A changed seed means the published cell was curated against manifest text that has since",
     "moved. Rewrite the curated cell in the skill tree when its prose no longer matches;",
     "`npm run generate:contracts` records the current seeds.",
+    "A rewritten cell under npm/fallow/skills/fallow must also land in fallow-rs/fallow-skills:",
+    "the Public skills contract check compares the two. Merge a fallow-skills PR first, with",
+    "source-lock.json pinned to this branch's head commit; after the squash merge, pin it to",
+    "the merged commit.",
   );
   return lines.join("\n");
 };

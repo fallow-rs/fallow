@@ -890,6 +890,7 @@ test("seed comparison separates a moved seed from added and dropped cells", () =
   assert.match(report, /recorded seed: Full dead-code analysis/);
   assert.match(report, /current seed: {2}Dead-code analysis with production scoping/);
   assert.match(report, /npm run generate:contracts/);
+  assert.match(report, /fallow-rs\/fallow-skills/);
 });
 
 test("identity-only manifest changes leave every curated seed alone", () => {
