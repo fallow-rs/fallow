@@ -127,12 +127,6 @@ pub fn apply_top(report: &mut DuplicationReport, n: usize, root: &Path) {
     report.sort();
 }
 
-/// Refresh near-clone metrics after a caller filters group instances.
-#[doc(hidden)]
-pub fn refresh_clone_group_metrics(group: &mut CloneGroup) {
-    detector::refresh_near_group_metrics(group);
-}
-
 /// Recompute duplication statistics after clone groups have been filtered.
 ///
 /// Uses per-file line deduplication, matching the detector's stats model, so

@@ -80,10 +80,6 @@ struct IgnoreSet {
     defaults: Vec<&'static str>,
 }
 
-pub(super) fn refresh_near_group_metrics(group: &mut types::CloneGroup) {
-    near::refresh_near_group_metrics(group);
-}
-
 enum IgnoreMatch {
     Default(usize),
     User,
