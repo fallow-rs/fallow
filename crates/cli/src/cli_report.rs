@@ -256,6 +256,21 @@ fn render_saved_ci_target(
 /// The requests are read through `summary_line_for_saved_render`, because the
 /// diff filter governing THIS body was resolved by this process rather than by
 /// the run that saved the envelope.
+/// The status note a comment body rendered from `envelope` carries.
+///
+/// The saved render reaches it through [`saved_ci_conclusion`] and
+/// [`saved_status_message`]. The live combined comment renders its own body and
+/// calls this function on the envelope that `--format json` would print, so the
+/// two bodies state the same clauses in the same order.
+pub fn envelope_status_note(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    grouping_dropped: Option<&str>,
+) -> Result<Option<String>, String> {
+    let (_, existing) = saved_ci_conclusion(kind, envelope)?;
+    Ok(saved_status_message(envelope, existing, grouping_dropped))
+}
+
 fn saved_status_message(
     envelope: &serde_json::Value,
     existing: Option<&'static str>,

@@ -97,11 +97,18 @@ fn assert_saved_report_parity_with_args(root: &Path, command: Option<&str>, extr
             "pr-comment-gitlab",
             "review-github",
             "review-gitlab",
+            "github-summary",
+            "github-annotations",
         ]
     } else {
         // Combined comments use their richer multi-gate presentation while
         // the saved generic renderer preserves the same typed findings.
-        &["codeclimate", "sarif"]
+        &[
+            "codeclimate",
+            "sarif",
+            "github-summary",
+            "github-annotations",
+        ]
     };
     for format in formats {
         let direct = run(root, &analysis_args(command, root, format, extra));
@@ -129,10 +136,44 @@ fn assert_saved_report_parity_with_args(root: &Path, command: Option<&str>, extr
             "saved {format} failed: {}",
             String::from_utf8_lossy(&saved.stderr)
         );
+        let (saved_body, direct_body) = if *format == "github-summary" {
+            (
+                mask_summary_elapsed(&String::from_utf8_lossy(&saved.stdout)),
+                mask_summary_elapsed(&String::from_utf8_lossy(&direct.stdout)),
+            )
+        } else {
+            (
+                String::from_utf8_lossy(&saved.stdout).into_owned(),
+                String::from_utf8_lossy(&direct.stdout).into_owned(),
+            )
+        };
         assert_eq!(
-            saved.stdout, direct.stdout,
+            saved_body, direct_body,
             "saved {format} must be byte-identical to direct rendering"
         );
+    }
+}
+
+/// Mask the one elapsed-time token in the header line of a job summary.
+///
+/// The summary prints the `elapsed_ms` of the envelope it renders. The direct
+/// run and the run that saved the envelope are two processes, so the two values
+/// differ although both renders read the same member. Only the first token after
+/// `· ` or ` in ` is masked, so a count that drifts still fails the comparison.
+fn mask_summary_elapsed(body: &str) -> String {
+    let token = ["\u{b7} ", " in "]
+        .iter()
+        .filter_map(|marker| {
+            body.match_indices(marker).find_map(|(offset, _)| {
+                let start = offset + marker.len();
+                let len = body[start..].bytes().take_while(u8::is_ascii_digit).count();
+                (len > 0 && body[start + len..].starts_with("ms")).then_some((start, start + len))
+            })
+        })
+        .min();
+    match token {
+        Some((start, end)) => format!("{}<n>{}", &body[..start], &body[end..]),
+        None => body.to_owned(),
     }
 }
 
@@ -176,9 +217,9 @@ fn saved_reports_preserve_native_health_duplication_and_combined_output() {
 /// therefore absent from the body they write, and `report --from` renders it from
 /// the saved envelope.
 ///
-/// They are not in the byte-parity list, because both bodies carry the run's
-/// elapsed time, and two runs never share one value. This test asserts the verdict
-/// line on its own instead.
+/// The byte-parity list above compares the two bodies. This test also asserts
+/// that the live body states the gate, so a gate that both renders drop still
+/// fails.
 fn assert_live_github_native_states_the_gate(root: &Path, extra: &[&str]) {
     for format in ["github-summary", "github-annotations"] {
         let direct = run(root, &analysis_args(Some("check"), root, format, extra));

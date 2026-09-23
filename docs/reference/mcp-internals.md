@@ -122,9 +122,12 @@ Contract rules:
   typed route; its absence is stated in the server instructions instead.
   The lookup tables name each envelope
   shape's sites, because `audit` nests its diagnostics inside its `dead_code` /
-  `duplication` / `complexity` sections and publishes its only staleness object
-  under `complexity.summary`, while every other command publishes both at the
-  root. It adds no verdict of
+  `duplication` / `complexity` sections and publishes one staleness object per
+  loaded baseline, at `dead_code.baseline_staleness`,
+  `duplication.baseline_staleness` and
+  `complexity.summary.baseline_staleness`. The other commands publish their
+  diagnostics at the root. `health` publishes its staleness object inside
+  `summary`, and the combined run publishes one per section. It adds no verdict of
   its own and moves no existing member, a response with nothing to state is not
   re-serialized at all, and no result changes its `isError`: an exit-1 gate
   stays a success carrying findings and an exit-8 security gate stays an error
@@ -134,6 +137,16 @@ Contract rules:
   test.
 - Keep parameter names, defaults, license metadata, read-only status, and tool
   descriptions synchronized with the shared manifest.
+- A tool that can write a file declares `read_only_hint = false`. `fix_apply`
+  changes source and declares `destructive_hint = true`. `analyze`,
+  `check_changed`, `find_dupes` and `check_health` write only a baseline,
+  regression baseline or snapshot file when the caller asks. They declare
+  `destructive_hint = false` explicitly, because MCP defaults `destructiveHint`
+  to true when `readOnlyHint` is false. They declare no idempotent hint,
+  because a `save_snapshot` call with no path writes a new file on each call.
+  `code_execute` stays read-only, so it refuses `save_baseline`,
+  `save_regression_baseline` and `save_snapshot` before dispatch and names
+  the standalone tool that declares the write.
 - `tools/list` is budgeted on both of its channels, because every byte of it is
   resident in every agent session that connects whether or not the tool is ever
   called. `crates/mcp/src/server/tests/tool_descriptions.rs` ratchets the total

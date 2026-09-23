@@ -29,8 +29,8 @@ Files not reachable from any entry point.
 
 | File |
 |------|
-| `src/a,b.ts` |
 | `src/München.ts` |
+| `src/a,b.ts` |
 
 </details>
 
@@ -124,8 +124,8 @@ Suppression comments or JSDoc tags that no longer match any active issue.
 | File | Line | Description |
 |------|-----:|-------------|
 | `src/kept.ts` | 11 | `@expected-unused` on `keptExport` |
-| `src/typo.ts` | 5 | unknown kind `not-a-kind` |
 | `src/old.ts` | 1 | `unused-export` |
+| `src/typo.ts` | 5 | unknown kind `not-a-kind` |
 
 </details>
 

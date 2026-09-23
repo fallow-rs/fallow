@@ -138,7 +138,7 @@ fn tools_resource_mirrors_the_shared_manifest() {
         analyze["cli_command"],
         "fallow dead-code --format json --quiet"
     );
-    assert_eq!(analyze["read_only"], true);
+    assert_eq!(analyze["read_only"], false);
     assert_eq!(analyze["license"], "free");
 
     for row in tools {

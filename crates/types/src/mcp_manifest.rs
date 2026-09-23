@@ -57,8 +57,10 @@ pub struct McpToolInfo {
     pub license: McpToolLicense,
     /// Free/paid nuance; populated exactly when `license` is `Freemium`.
     pub license_note: Option<&'static str>,
-    /// Whether the tool leaves the project untouched (only `fix_apply`
-    /// mutates files).
+    /// Whether the tool leaves the project untouched. `fix_apply` changes
+    /// source files. `analyze`, `check_changed`, `find_dupes` and
+    /// `check_health` write a baseline, regression baseline or snapshot file
+    /// when the caller asks for one.
     pub read_only: bool,
     /// camelCase host-API alias when the tool is reachable from Code Mode
     /// (`code_execute`), `None` when it is not. This field is the single
@@ -148,7 +150,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         ],
         license: McpToolLicense::Free,
         license_note: None,
-        read_only: true,
+        read_only: false,
         code_mode_alias: Some("analyze"),
     },
     McpToolInfo {
@@ -159,7 +161,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         key_params: &["since", "baseline", "fail_on_regression"],
         license: McpToolLicense::Free,
         license_note: None,
-        read_only: true,
+        read_only: false,
         code_mode_alias: Some("checkChanged"),
     },
     McpToolInfo {
@@ -234,7 +236,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         ],
         license: McpToolLicense::Free,
         license_note: None,
-        read_only: true,
+        read_only: false,
         code_mode_alias: Some("findDupes"),
     },
     McpToolInfo {
@@ -255,7 +257,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         ],
         license: McpToolLicense::Free,
         license_note: None,
-        read_only: true,
+        read_only: false,
         code_mode_alias: Some("checkHealth"),
     },
     McpToolInfo {
@@ -1343,11 +1345,18 @@ mod tests {
     }
 
     #[test]
-    fn only_fix_apply_mutates() {
+    fn only_fix_apply_and_the_file_writing_tools_are_not_read_only() {
+        let writers = [
+            "fix_apply",
+            "analyze",
+            "check_changed",
+            "find_dupes",
+            "check_health",
+        ];
         for tool in MCP_TOOLS {
             assert_eq!(
                 tool.read_only,
-                tool.name != "fix_apply",
+                !writers.contains(&tool.name),
                 "read_only flag wrong for {}",
                 tool.name
             );

@@ -382,6 +382,51 @@ fn every_diff_stand_down_reports_its_own_reason() {
     assert_eq!(request(&envelope, "diff-filter")["reason"], "not-utf8");
 }
 
+/// A diff over the size cap stands down with its own reason, on the envelope and
+/// in the rendered body. The file is one byte over `MAX_DIFF_BYTES` (10 MiB), so
+/// the size check trips before any content is read.
+#[test]
+fn an_oversize_diff_reports_its_reason_on_the_envelope_and_in_the_body() {
+    const MAX_DIFF_BYTES: usize = 10 * 1024 * 1024;
+    let project = project();
+    let root_path = project.path();
+    let root = root_arg(&project);
+    let oversize = root_path.join("oversize.diff");
+    std::fs::write(&oversize, vec![b' '; MAX_DIFF_BYTES + 1]).expect("oversize diff");
+    let oversize = oversize.to_str().expect("utf8");
+
+    let envelope = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--diff-file",
+        oversize,
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    let entry = request(&envelope, "diff-filter");
+    assert_eq!(entry["status"], "not-applied");
+    assert_eq!(entry["reason"], "oversize");
+
+    let body = run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--diff-file",
+        oversize,
+        "--format",
+        "pr-comment-github",
+        "--quiet",
+    ]);
+    assert!(
+        body.stdout
+            .contains("Request outcomes: not applied diff-filter (oversize)."),
+        "the comment body must name the oversize stand-down: {}",
+        body.stdout
+    );
+}
+
 /// The fifth documented reason, and the only one that needs a repository to
 /// reach: a diff path that resolves under the git toplevel AND under the
 /// analysis root below it names two possible bases, and fallow will not filter
@@ -862,6 +907,55 @@ fn a_re_render_says_its_own_diff_filter_stood_down() {
         !applied.stdout.contains("Request outcomes"),
         "a filter that applied claims nothing of its own: {}",
         applied.stdout
+    );
+}
+
+/// The combined command renders its own comment body, and that body carries the
+/// same status note as the saved render of the same run. A diff filter that
+/// stands down is the fact a reviewer must see on both.
+#[test]
+fn the_combined_comment_states_the_note_the_saved_render_states() {
+    let project = project();
+    let root_path = project.path();
+    let root = root_arg(&project);
+    let missing = root_path.join("absent.diff");
+    let missing = missing.to_str().expect("utf8");
+    let env = [("FALLOW_DIFF_FILE", missing)];
+
+    let saved = run_fallow_raw_with_env(&["--root", root, "--format", "json", "--quiet"], &env);
+    let envelope = root_path.join("envelope.json");
+    std::fs::write(&envelope, &saved.stdout).expect("saved envelope");
+    let rendered = run_fallow_raw_with_env(
+        &[
+            "report",
+            "--from",
+            envelope.to_str().expect("utf8"),
+            "--root",
+            root,
+            "--quiet",
+            "--format",
+            "pr-comment-github",
+        ],
+        &env,
+    );
+    let saved_note = rendered
+        .stdout
+        .lines()
+        .find(|line| line.starts_with("> ") && line.contains("Request outcomes"))
+        .unwrap_or_else(|| panic!("the saved body carries the note: {}", rendered.stdout));
+    assert!(
+        saved_note.contains("not applied diff-filter (unreadable)"),
+        "the note names the stand-down: {saved_note}"
+    );
+
+    let live = run_fallow_raw_with_env(
+        &["--root", root, "--format", "pr-comment-github", "--quiet"],
+        &env,
+    );
+    assert!(
+        live.stdout.lines().any(|line| line == saved_note),
+        "the combined body must carry the saved note `{saved_note}`: {}",
+        live.stdout
     );
 }
 

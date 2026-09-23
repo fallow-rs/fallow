@@ -987,11 +987,35 @@ fn dispatch_host_call(
     deadline: Instant,
     max_output_bytes: usize,
 ) -> Result<String, String> {
+    reject_file_write_params(tool, &params)?;
     if let Some(value) = run_api_tool_with_deadline(tool, params.clone(), deadline)? {
         return Ok(serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string()));
     }
     let args = build_tool_args(tool, params)?;
     run_fallow_sync(binary, "code_execute", &args, deadline, max_output_bytes)
+}
+
+/// Parameters that make a host call write a baseline, regression baseline or
+/// snapshot file.
+const FILE_WRITE_PARAMS: [&str; 3] = ["save_baseline", "save_regression_baseline", "save_snapshot"];
+
+/// Refuse a host call that asks for a file write.
+///
+/// `code_execute` declares a read-only hint, so a host can run it with no
+/// approval prompt. A call inside it must therefore not write a file. The
+/// standalone tools declare the write, and the error names the tool to call.
+fn reject_file_write_params(tool: CodeModeTool, params: &serde_json::Value) -> Result<(), String> {
+    let Some(param) = FILE_WRITE_PARAMS
+        .iter()
+        .find(|param| params.get(**param).is_some_and(|value| !value.is_null()))
+    else {
+        return Ok(());
+    };
+    Err(format!(
+        "invalid tool params: code mode does not write files, and `{param}` writes one. \
+         Call the standalone MCP {name} tool to write it.",
+        name = tool.name()
+    ))
 }
 
 fn timed_dispatch(
@@ -1983,6 +2007,54 @@ mod tests {
         );
         assert_eq!(json["calls"][0]["tool"], "find_similar_code");
         assert_eq!(json["calls"][0]["error_kind"], "unsupported_tool");
+    }
+
+    /// `code_execute` declares a read-only hint, so no call inside it may write
+    /// a file. Each write parameter is refused before any analysis runs, and
+    /// the error names the standalone tool that declares the write.
+    #[test]
+    fn code_mode_refuses_every_file_write_parameter() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("written.json");
+        let target = target.to_str().expect("utf8");
+        for (tool, param) in [
+            ("analyze", "save_baseline"),
+            ("analyze", "save_regression_baseline"),
+            ("check_changed", "save_baseline"),
+            ("check_changed", "save_regression_baseline"),
+            ("find_dupes", "save_baseline"),
+            ("check_health", "save_baseline"),
+            ("check_health", "save_snapshot"),
+        ] {
+            let code = format!(
+                "return fallow.run('{tool}', {{ root: {root:?}, {param}: {target:?} }});",
+                root = dir.path().to_str().expect("utf8"),
+            );
+            let output = execute_code_mode(
+                "fallow".to_string(),
+                CodeExecuteParams {
+                    code,
+                    root: None,
+                    timeout_ms: Some(5_000),
+                    max_output_bytes: Some(10_000),
+                },
+            )
+            .expect_err("Code Mode must refuse a file write");
+            let json: serde_json::Value = serde_json::from_str(&output).expect("code mode JSON");
+            let error = json["error"].as_str().unwrap_or_default();
+            assert!(
+                error.contains(param) && error.contains(&format!("standalone MCP {tool} tool")),
+                "{tool}.{param}: the refusal names the parameter and the tool: {error}"
+            );
+            assert_eq!(
+                json["calls"][0]["error_kind"], "invalid_params",
+                "{tool}.{param}"
+            );
+            assert!(
+                !std::path::Path::new(target).exists(),
+                "{tool}.{param} must write no file"
+            );
+        }
     }
 
     #[test]

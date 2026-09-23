@@ -84,14 +84,11 @@ fn read_only_tools_have_annotations() {
     let tools = server.tool_router.list_all();
     let read_only = [
         "code_execute",
-        "analyze",
-        "check_changed",
         "security_candidates",
         "find_similar_code",
         "inspect_similar_code",
         "inspect_target",
         "guard",
-        "find_dupes",
         "fix_preview",
         "project_info",
         "trace_export",
@@ -103,7 +100,6 @@ fn read_only_tools_have_annotations() {
         "trace_error",
         "trace_import_path",
         "trace_clone",
-        "check_health",
         "audit",
         "decision_surface",
         "fallow_explain",
@@ -126,13 +122,42 @@ fn read_only_tools_have_annotations() {
         if read_only.contains(&name.as_str()) {
             let ann = tool.annotations.as_ref().expect("annotations");
             assert_eq!(ann.read_only_hint, Some(true), "{name} should be read-only");
-        } else {
+        } else if !FILE_WRITING_TOOLS.contains(&name.as_str()) {
             assert_eq!(
                 name, "fix_apply",
-                "{name} is neither listed here nor the one destructive tool, so its read-only \
-                 hint is unasserted; add it to the list when it is read-only"
+                "{name} is neither listed here, nor a file-writing tool, nor the one destructive \
+                 tool, so its read-only hint is unasserted; add it to the right list"
             );
         }
+    }
+}
+
+/// Tools that write a file when the caller asks for it: a baseline, a
+/// regression baseline or a snapshot. They do not change project source.
+const FILE_WRITING_TOOLS: [&str; 4] = ["analyze", "check_changed", "find_dupes", "check_health"];
+
+/// A tool that can write a file must not declare a read-only hint, because a
+/// host can then approve the write with no prompt. MCP defaults
+/// `destructiveHint` to true when `readOnlyHint` is false, so the tool also
+/// states `destructive_hint = false`. It declares no idempotent hint, because
+/// a snapshot write with no path creates a new file on each call.
+#[test]
+fn file_writing_tools_declare_a_non_destructive_write() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    for name in FILE_WRITING_TOOLS {
+        let tool = tools
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap_or_else(|| panic!("{name} is registered"));
+        let ann = tool.annotations.as_ref().expect("annotations");
+        assert_eq!(ann.read_only_hint, Some(false), "{name} writes a file");
+        assert_eq!(
+            ann.destructive_hint,
+            Some(false),
+            "{name} changes no source"
+        );
+        assert_eq!(ann.idempotent_hint, None, "{name} is not idempotent");
     }
 }
 

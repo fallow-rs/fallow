@@ -6652,7 +6652,7 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true,
+        "read_only": false,
         "code_mode_alias": "analyze"
       },
       {
@@ -6667,7 +6667,7 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true,
+        "read_only": false,
         "code_mode_alias": "checkChanged"
       },
       {
@@ -6760,7 +6760,7 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true,
+        "read_only": false,
         "code_mode_alias": "findDupes"
       },
       {
@@ -6781,7 +6781,7 @@
         ],
         "license": "free",
         "license_note": null,
-        "read_only": true,
+        "read_only": false,
         "code_mode_alias": "checkHealth"
       },
       {

@@ -94,6 +94,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markdown `health` output printed `File health scores (1 files)` and
   `Hotspots (1 files)`. These headers now print `1 file` for a count of one
   and `N files` for other counts. Closes #2808.
+- **Rendered output and the MCP tool hints agree with the envelope (#2755).**
+  - The combined pull-request comment of bare `fallow --format
+    pr-comment-github` and `pr-comment-gitlab` now shows the status note, for
+    example a diff filter that did not apply. Before, only
+    `fallow report --from` showed it.
+  - The `github-summary` job summary of a saved `--group-by` run lists the
+    dead-code rows in the same path order as the live render.
+  - The MCP tools `analyze`, `check_changed`, `find_dupes` and `check_health`
+    can write a baseline or snapshot file, and now declare
+    `readOnlyHint: false` and `destructiveHint: false`. A host that approves
+    read-only tools with no prompt now asks before it runs these four tools.
+    `code_execute` stays read-only and refuses `save_baseline`,
+    `save_regression_baseline` and `save_snapshot`.
 
 - **Nuxt local layers are part of the project.** A local directory in
   `extends` of a `nuxt.config`, and each `layers/<name>` directory, is now a

@@ -112,9 +112,9 @@ pub struct AnalyzeParams {
     /// Path to the regression baseline file.
     pub regression_baseline: Option<String>,
 
-    /// Save the current issue counts as a regression baseline. Omit for the
-    /// discovered fallow config (or a new `.fallowrc.json`); provide a path to
-    /// write a standalone file.
+    /// Save the current issue counts as a regression baseline file at this
+    /// path. An empty or absent value writes nothing: this tool cannot write the
+    /// counts into the fallow config.
     pub save_regression_baseline: Option<String>,
 
     /// Group findings by CODEOWNERS ownership, directory, workspace package, or
@@ -286,9 +286,9 @@ pub struct CheckChangedParams {
     /// Path to the regression baseline file.
     pub regression_baseline: Option<String>,
 
-    /// Save the current issue counts as a regression baseline. Omit for the
-    /// discovered fallow config (or a new `.fallowrc.json`); provide a path to
-    /// write a standalone file.
+    /// Save the current issue counts as a regression baseline file at this
+    /// path. An empty or absent value writes nothing: this tool cannot write the
+    /// counts into the fallow config.
     pub save_regression_baseline: Option<String>,
 
     /// Report unused exports in entry files instead of auto-marking them as used.

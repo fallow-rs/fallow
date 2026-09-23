@@ -119,22 +119,22 @@ fn print_machine_combined_report(
     health_result: Option<&HealthResult>,
     total_elapsed: std::time::Duration,
 ) -> Result<Option<u8>, ExitCode> {
+    // A closure, so the config-file probe runs only for the formats that
+    // serialize the envelope.
+    let json_input = || CombinedJsonPrintInput {
+        check_result,
+        dupes_result,
+        health_result,
+        root: opts.root,
+        elapsed: total_elapsed,
+        explain: opts.explain,
+        config_fixable: opts.config_path.is_some()
+            || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
+        fail_on_stale_baseline: opts.fail_on_stale_baseline,
+    };
     match opts.output {
         OutputFormat::Json => {
-            let code = print_combined_json(
-                CombinedJsonPrintInput {
-                    check_result,
-                    dupes_result,
-                    health_result,
-                    root: opts.root,
-                    elapsed: total_elapsed,
-                    explain: opts.explain,
-                    config_fixable: opts.config_path.is_some()
-                        || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
-                    fail_on_stale_baseline: opts.fail_on_stale_baseline,
-                },
-                opts.json_style,
-            );
+            let code = print_combined_json(json_input(), opts.json_style);
             combined_machine_success(code)
         }
         OutputFormat::Sarif => {
@@ -145,12 +145,11 @@ fn print_machine_combined_report(
             let code = print_combined_codeclimate(check_result, dupes_result, health_result);
             combined_machine_success(code)
         }
-        OutputFormat::PrCommentGithub => {
-            print_combined_pr_comment(opts, check_result, dupes_result, health_result, true)
-        }
-        OutputFormat::PrCommentGitlab => {
-            print_combined_pr_comment(opts, check_result, dupes_result, health_result, false)
-        }
+        OutputFormat::PrCommentGithub | OutputFormat::PrCommentGitlab => print_combined_pr_comment(
+            opts,
+            json_input(),
+            matches!(opts.output, OutputFormat::PrCommentGithub),
+        ),
         OutputFormat::ReviewGithub => {
             print_combined_review(check_result, dupes_result, health_result, true)
         }
@@ -159,17 +158,7 @@ fn print_machine_combined_report(
         }
         OutputFormat::GithubAnnotations | OutputFormat::GithubSummary => {
             let code = print_combined_github_format(
-                CombinedJsonPrintInput {
-                    check_result,
-                    dupes_result,
-                    health_result,
-                    root: opts.root,
-                    elapsed: total_elapsed,
-                    explain: opts.explain,
-                    config_fixable: opts.config_path.is_some()
-                        || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
-                    fail_on_stale_baseline: opts.fail_on_stale_baseline,
-                },
+                json_input(),
                 matches!(opts.output, OutputFormat::GithubSummary),
             );
             combined_machine_success(code)
@@ -219,19 +208,25 @@ fn combined_provider(github: bool) -> report::ci::pr_comment::Provider {
 
 fn print_combined_pr_comment(
     opts: &CombinedOptions<'_>,
-    check_result: Option<&CheckResult>,
-    dupes_result: Option<&DupesResult>,
-    health_result: Option<&HealthResult>,
+    input: CombinedJsonPrintInput<'_>,
     github: bool,
 ) -> Result<Option<u8>, ExitCode> {
+    let CombinedJsonPrintInput {
+        check_result,
+        dupes_result,
+        health_result,
+        ..
+    } = input;
+    let status_note = combined_status_note(input, opts.output)?;
     let envelope = build_combined_pr_summary(
         opts.fail_on_issues,
         check_result,
         dupes_result,
         health_result,
         combined_provider(github),
+        status_note.as_deref(),
     );
-    let decision = build_combined_pr_decision(
+    let mut decision = build_combined_pr_decision(
         opts.fail_on_issues,
         opts.fail_on_stale_baseline,
         check_result,
@@ -239,6 +234,11 @@ fn print_combined_pr_comment(
         health_result,
         &envelope,
     );
+    // The Check Run summary carries the note too, as the saved render's does.
+    if let Some(note) = status_note.as_deref() {
+        decision.details.summary_markdown =
+            format!("{}\n\n> {note}", decision.details.summary_markdown);
+    }
     let details = build_combined_pr_details(check_result, dupes_result, health_result);
     report::ci::pr_comment::write_pr_comment_envelope_sidecar(&envelope);
     report::ci::pr_comment::write_pr_decision_sidecar(&decision);
@@ -247,12 +247,39 @@ fn print_combined_pr_comment(
     combined_machine_success(ExitCode::SUCCESS)
 }
 
+/// The status note of the combined comment, read from the envelope that
+/// `--format json` prints for this run.
+///
+/// The saved render reads the note from the same envelope through the same
+/// function, so `fallow report --from` and the live comment state the same
+/// clauses in the same order.
+fn combined_status_note(
+    input: CombinedJsonPrintInput<'_>,
+    output: OutputFormat,
+) -> Result<Option<String>, ExitCode> {
+    let envelope = build_combined_json_output(input)?;
+    crate::cli_report::envelope_status_note(
+        report::github_annotations::EnvelopeKind::Combined,
+        &envelope,
+        None,
+    )
+    .map_err(|error| {
+        crate::emit_known_failure(
+            &error,
+            2,
+            output,
+            crate::telemetry::FailureReason::Validation,
+        )
+    })
+}
+
 fn build_combined_pr_summary(
     fail_on_issues: bool,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
     provider: report::ci::pr_comment::Provider,
+    status_note: Option<&str>,
 ) -> PrCommentEnvelope {
     let codeclimate = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
     let findings = combined_pr_summary_findings(&codeclimate);
@@ -269,6 +296,7 @@ fn build_combined_pr_summary(
         max_findings: report::ci::pr_comment::max_comments(),
         details_url: None,
         layout: report::ci::pr_comment::pr_comment_layout_from_env(),
+        status_note,
     })
 }
 
@@ -1344,6 +1372,7 @@ mod tests {
             None,
             None,
             crate::report::ci::pr_comment::Provider::Github,
+            None,
         );
 
         assert!(envelope.is_clean);

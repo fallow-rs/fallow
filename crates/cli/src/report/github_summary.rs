@@ -446,7 +446,19 @@ struct SectionSpec {
 }
 
 fn render_check_section(env: &Value, spec: &SectionSpec) -> String {
-    let items: Vec<&Value> = arr(env, spec.key).collect();
+    let mut items: Vec<&Value> = arr(env, spec.key).collect();
+    // The job summary is one flat document, so its rows follow the flat path
+    // order of the live render. A saved `--group-by` envelope lists its items
+    // group by group, and `report --from` flattens them in that order. The sort
+    // gives both renders one order. The serialized item breaks ties, so the
+    // order is total and does not depend on the input order.
+    items.sort_by_cached_key(|item| {
+        (
+            row_sort_path(item).map(str::to_owned),
+            item.get("line").and_then(Value::as_u64),
+            item.to_string(),
+        )
+    });
     let n = items.len();
     if n == 0 {
         return String::new();
@@ -469,6 +481,17 @@ fn render_check_section(env: &Value, spec: &SectionSpec) -> String {
         "\n<details><summary><strong>{} ({n})</strong></summary>\n\n{}{rows}{tail}\n\n</details>\n",
         spec.name, spec.header,
     )
+}
+
+/// The path a dead-code row sorts on: `path`, the source file of a boundary
+/// violation, or the first file of a cycle. Rows with none (a duplicate export
+/// or an unlisted dependency) sort on the serialized item, which starts with
+/// the name.
+fn row_sort_path(item: &Value) -> Option<&str> {
+    item.get("path")
+        .or_else(|| item.get("from_path"))
+        .or_else(|| item.get("files").and_then(|files| files.get(0)))
+        .and_then(Value::as_str)
 }
 
 fn check_workspace_context(item: &Value) -> String {
@@ -3071,5 +3094,25 @@ mod tests {
             "DEAD_CODE_CATEGORIES must match the counted result metadata \
              (label, result key, docs anchor).\nMissing rows: {missing:?}\nRows not in the registry: {extra:?}"
         );
+    }
+
+    /// A saved `--group-by` envelope lists rows group by group. The summary
+    /// renders them in one order whatever the input order is.
+    #[test]
+    fn dead_code_rows_render_in_one_order_for_any_input_order() {
+        let envelope = |paths: [&str; 3]| {
+            serde_json::json!({
+                "total_issues": 3,
+                "elapsed_ms": 1,
+                "unused_files": paths.map(|path| serde_json::json!({ "path": path })),
+            })
+        };
+        let flat = super::render_check_summary(&envelope(["src/a.ts", "src/b.ts", "src/c.ts"]));
+        let grouped = super::render_check_summary(&envelope(["src/a.ts", "src/c.ts", "src/b.ts"]));
+        assert_eq!(grouped, flat);
+        let a = flat.find("`src/a.ts`").expect("a");
+        let b = flat.find("`src/b.ts`").expect("b");
+        let c = flat.find("`src/c.ts`").expect("c");
+        assert!(a < b && b < c, "rows follow path order: {flat}");
     }
 }

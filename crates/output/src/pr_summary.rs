@@ -92,6 +92,10 @@ pub struct PrSummaryInput<'a> {
     pub details_url: Option<&'a str>,
     /// Body layout variant.
     pub layout: PrCommentLayout,
+    /// The status note, rendered as one blockquote line under the callout. The
+    /// caller joins it with the same function as the saved render, so both
+    /// bodies state the same clauses in the same order.
+    pub status_note: Option<&'a str>,
 }
 
 /// Renders the sticky PR summary comment body, prefixed with its identity
@@ -111,6 +115,9 @@ pub fn render_pr_summary(input: &PrSummaryInput<'_>) -> PrCommentEnvelope {
     body.push('\n');
     render_header(&mut body, input);
     render_callout(&mut body, status, is_clean, input.findings.len());
+    if let Some(note) = input.status_note.filter(|note| !note.is_empty()) {
+        let _ = writeln!(body, "> {note}\n");
+    }
     match input.layout {
         PrCommentLayout::Default | PrCommentLayout::Details => {
             render_area_table(&mut body, input.areas);
@@ -338,7 +345,30 @@ mod tests {
             max_findings: DEFAULT_MAX_FINDINGS,
             details_url: None,
             layout: PrCommentLayout::Default,
+            status_note: None,
         }
+    }
+
+    #[test]
+    fn status_note_renders_as_one_blockquote_line_under_the_callout() {
+        let custom = PrSummaryInput {
+            status_note: Some("Request outcomes: not applied diff-filter (unreadable)."),
+            ..input(&[], &[])
+        };
+
+        let body = render_pr_summary(&custom).body;
+
+        let callout = body.find("> [!").expect("callout");
+        let note = body
+            .find("\n> Request outcomes: not applied diff-filter (unreadable).\n")
+            .expect("note line");
+        assert!(note > callout, "the note follows the callout: {body}");
+        assert!(
+            !render_pr_summary(&input(&[], &[]))
+                .body
+                .contains("Request outcomes"),
+            "no note, no line"
+        );
     }
 
     #[test]
