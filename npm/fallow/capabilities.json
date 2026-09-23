@@ -496,6 +496,18 @@
       "description": "Absolute prefix to strip from Istanbul file paths in combined mode. Also settable via `FALLOW_COVERAGE_ROOT` or `health.coverageRoot`"
     },
     {
+      "name": "--dupes-baseline",
+      "type": "string",
+      "required": false,
+      "description": "Compare duplication clone groups against a saved baseline in combined mode (produced by `fallow dupes --save-baseline`)"
+    },
+    {
+      "name": "--health-baseline",
+      "type": "string",
+      "required": false,
+      "description": "Compare health findings against a saved baseline in combined mode (produced by `fallow health --save-baseline`)"
+    },
+    {
       "name": "--include-entry-exports",
       "type": "bool",
       "required": false,

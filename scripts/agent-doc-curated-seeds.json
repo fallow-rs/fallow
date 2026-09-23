@@ -1198,6 +1198,12 @@
     },
     {
       "section": "flags:global",
+      "row": "--dupes-baseline",
+      "column": "Description",
+      "seed": "Compare duplication clone groups against a saved baseline in combined mode (produced by `fallow dupes --save-baseline`)"
+    },
+    {
+      "section": "flags:global",
       "row": "--dupes-cross-language",
       "column": "Description",
       "seed": "Enable cross-language duplicate detection in combined mode"
@@ -1297,6 +1303,12 @@
       "row": "--group-by",
       "column": "Description",
       "seed": "Group output by owner or by directory"
+    },
+    {
+      "section": "flags:global",
+      "row": "--health-baseline",
+      "column": "Description",
+      "seed": "Compare health findings against a saved baseline in combined mode (produced by `fallow health --save-baseline`)"
     },
     {
       "section": "flags:global",

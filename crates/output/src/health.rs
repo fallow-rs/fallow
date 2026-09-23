@@ -52,13 +52,13 @@ pub struct HealthOutput<Report, Group> {
     /// Per-bucket recomputed metrics; present only in grouped output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<Group>>,
-    /// Every gate this run ARMED, keyed by name, absent when it armed none.
-    /// Each entry is the same rule that decides the exit code, so a CI
-    /// integration reads the verdict instead of guessing from a process status
-    /// it usually cannot see. A gate fails the build when `status` is `fail`
-    /// AND `enforced` is true. Armed, not evaluated: fallow's default severity
-    /// rules fail a run with no flag at all, so an absent object means "no gate
-    /// was asked for", never "nothing failed". See [`crate::GateOutcomes`].
+    /// The verdict of every gate this run evaluated, keyed by name. The CLI
+    /// always emits it, with the command's default exit rule in it also when
+    /// no flag armed a gate, so a CI integration reads the verdict instead of
+    /// guessing from a process status it usually cannot see. A gate fails the
+    /// build when `status` is `fail` AND `enforced` is true. The typed
+    /// programmatic API runs no CLI gate and leaves it absent. See
+    /// [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
     /// Every narrowing or shaping request this run RECEIVED, keyed by name,

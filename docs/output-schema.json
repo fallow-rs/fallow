@@ -38,7 +38,7 @@
               "type": "null"
             }
           ],
-          "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the default exit rule of each section that ran\n(`error-severity-findings`, `health-findings`). The machine formats of\nthe combined run exit 0 for findings, so most entries have `enforced:\nfalse`, and `status` gives the verdict of the human run. A gate fails\nthe build when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API leaves it absent. See [`crate::GateOutcomes`]."
         },
         "request_outcomes": {
           "anyOf": [
@@ -187,7 +187,7 @@
               "type": "null"
             }
           ],
-          "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the command's default exit rule in it also when\nno flag armed a gate, so a CI integration reads the verdict instead of\nguessing from a process status it usually cannot see. A gate fails the\nbuild when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API runs no CLI gate and leaves it absent. See\n[`crate::GateOutcomes`]."
         },
         "_meta": {
           "anyOf": [
@@ -922,7 +922,7 @@
               "type": "null"
             }
           ],
-          "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the command's default exit rule in it also when\nno flag armed a gate, so a CI integration reads the verdict instead of\nguessing from a process status it usually cannot see. A gate fails the\nbuild when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API runs no CLI gate and leaves it absent. See\n[`crate::GateOutcomes`]."
         },
         "request_outcomes": {
           "anyOf": [
@@ -1035,7 +1035,7 @@
               "type": "null"
             }
           ],
-          "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the command's default exit rule in it also when\nno flag armed a gate, so a CI integration reads the verdict instead of\nguessing from a process status it usually cannot see. A gate fails the\nbuild when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API runs no CLI gate and leaves it absent. See\n[`crate::GateOutcomes`]."
         },
         "request_outcomes": {
           "anyOf": [
@@ -1683,7 +1683,7 @@
               "type": "null"
             }
           ],
-          "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the command's default exit rule in it also when\nno flag armed a gate, so a CI integration reads the verdict instead of\nguessing from a process status it usually cannot see. A gate fails the\nbuild when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API runs no CLI gate and leaves it absent. See\n[`crate::GateOutcomes`]."
         },
         "request_outcomes": {
           "anyOf": [
@@ -2931,7 +2931,7 @@
               "type": "null"
             }
           ],
-          "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run armed, keyed by name, absent when\nit armed none. `dupes` has no default exit rule: a run with no armed\ngate always exits 0, so an absent object means that the run passed. A\ngate fails the build when `status` is `fail` AND `enforced` is true.\nSee [`crate::GateOutcomes`]."
         },
         "request_outcomes": {
           "anyOf": [
@@ -12993,7 +12993,7 @@
               "type": "null"
             }
           ],
-          "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the command's default exit rule in it also when\nno flag armed a gate, so a CI integration reads the verdict instead of\nguessing from a process status it usually cannot see. A gate fails the\nbuild when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API runs no CLI gate and leaves it absent. See\n[`crate::GateOutcomes`]."
         },
         "request_outcomes": {
           "anyOf": [
@@ -14320,7 +14320,7 @@
               "type": "null"
             }
           ],
-          "description": "Every gate this run ARMED, keyed by name, absent when it armed none.\nEach entry is the same rule that decides the exit code, so a CI\nintegration reads the verdict instead of guessing from a process status\nit usually cannot see. A gate fails the build when `status` is `fail`\nAND `enforced` is true. Armed, not evaluated: fallow's default severity\nrules fail a run with no flag at all, so an absent object means \"no gate\nwas asked for\", never \"nothing failed\". See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the command's default exit rule in it also when\nno flag armed a gate, so a CI integration reads the verdict instead of\nguessing from a process status it usually cannot see. A gate fails the\nbuild when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API runs no CLI gate and leaves it absent. See\n[`crate::GateOutcomes`]."
         },
         "request_outcomes": {
           "anyOf": [
@@ -26376,7 +26376,7 @@
         },
         "enforced": {
           "type": "boolean",
-          "description": "True when a `fail` from this gate makes the run exit non-zero. False\nwhen the verdict is published for information only, because the gate was\nnever armed or because the run was told never to fail."
+          "description": "True when a `fail` from this gate makes the run exit non-zero. False\nwhen the verdict is published for information only: the gate was never\narmed, the run was told never to fail, or the combined machine formats\nexit 0 for the gate."
         },
         "observed": {
           "type": [
@@ -26506,7 +26506,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/GateOutcome"
       },
-      "description": "Every gate a run ARMED, keyed by name.\n\nArmed, not evaluated: a gate is armed by a flag or by config, never merely\nbecause the rule behind it exists. Fallow's default severity rules fail a\nrun with no flag at all, so a `dead-code` run can exit 1 carrying no object\nwhatsoever. Read an absent object as \"no gate was asked for\", never as\n\"nothing failed\".\n\nAbsent from an envelope whenever it is empty, so a run that armed no gate is\nbyte-identical to one produced before this object existed. An empty object\nis never emitted: it would assert that gates were armed and none tripped,\nwhich is a different and false claim.\n\nThe names this build can emit are `error-severity-findings`, `regression`,\n`stale-baseline`, `duplication-threshold`, `health-min-score`,\n`health-min-severity`, `health-findings`, `health-coverage-gaps`,\n`health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`\nand `type-aware-require`. The set is OPEN: a name a consumer does not\nrecognise means \"some gate\", not an error."
+      "description": "The verdict of every gate a run evaluated, keyed by name.\n\nA gate is armed by a flag or by config. The default exit rule of a command\nis always in the object, also when no flag armed a gate:\n`error-severity-findings` on `dead-code`, `check` and the combined run\n(with `health-findings` when the combined run analyzed health),\n`health-findings` on `health`, `security-advisory` on `security` and\n`audit-verdict` on `audit`. A reader of the JSON sees a failing run without\nthe exit code. `dupes` has no default exit rule, so a `dupes` run that armed\nno gate carries no object and always exits 0.\n\nAn empty object is never emitted. The typed programmatic API runs no CLI\ngate and leaves the object absent.\n\nThe names this build can emit are `error-severity-findings`, `regression`,\n`stale-baseline`, `duplication-threshold`, `health-min-score`,\n`health-min-severity`, `health-findings`, `health-coverage-gaps`,\n`health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`\nand `type-aware-require`. The set is OPEN: a name a consumer does not\nrecognise means \"some gate\", not an error."
     },
     "RequestOutcomes": {
       "type": "object",

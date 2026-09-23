@@ -1487,13 +1487,13 @@ base_snapshot_skipped?: (boolean | null)
 summary: AuditSummary
 attribution: AuditAttribution
 /**
- * Every gate this run ARMED, keyed by name, absent when it armed none.
- * Each entry is the same rule that decides the exit code, so a CI
- * integration reads the verdict instead of guessing from a process status
- * it usually cannot see. A gate fails the build when `status` is `fail`
- * AND `enforced` is true. Armed, not evaluated: fallow's default severity
- * rules fail a run with no flag at all, so an absent object means "no gate
- * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
+ * The verdict of every gate this run evaluated, keyed by name. The CLI
+ * always emits it, with the command's default exit rule in it also when
+ * no flag armed a gate, so a CI integration reads the verdict instead of
+ * guessing from a process status it usually cannot see. A gate fails the
+ * build when `status` is `fail` AND `enforced` is true. The typed
+ * programmatic API runs no CLI gate and leaves it absent. See
+ * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
@@ -1579,18 +1579,19 @@ styling_inherited: number
 duplication_demoted: number
 }
 /**
- * Every gate a run ARMED, keyed by name.
+ * The verdict of every gate a run evaluated, keyed by name.
  *
- * Armed, not evaluated: a gate is armed by a flag or by config, never merely
- * because the rule behind it exists. Fallow's default severity rules fail a
- * run with no flag at all, so a `dead-code` run can exit 1 carrying no object
- * whatsoever. Read an absent object as "no gate was asked for", never as
- * "nothing failed".
+ * A gate is armed by a flag or by config. The default exit rule of a command
+ * is always in the object, also when no flag armed a gate:
+ * `error-severity-findings` on `dead-code`, `check` and the combined run
+ * (with `health-findings` when the combined run analyzed health),
+ * `health-findings` on `health`, `security-advisory` on `security` and
+ * `audit-verdict` on `audit`. A reader of the JSON sees a failing run without
+ * the exit code. `dupes` has no default exit rule, so a `dupes` run that armed
+ * no gate carries no object and always exits 0.
  *
- * Absent from an envelope whenever it is empty, so a run that armed no gate is
- * byte-identical to one produced before this object existed. An empty object
- * is never emitted: it would assert that gates were armed and none tripped,
- * which is a different and false claim.
+ * An empty object is never emitted. The typed programmatic API runs no CLI
+ * gate and leaves the object absent.
  *
  * The names this build can emit are `error-severity-findings`, `regression`,
  * `stale-baseline`, `duplication-threshold`, `health-min-score`,
@@ -1623,8 +1624,9 @@ export interface GateOutcome {
 status: GateStatus
 /**
  * True when a `fail` from this gate makes the run exit non-zero. False
- * when the verdict is published for information only, because the gate was
- * never armed or because the run was told never to fail.
+ * when the verdict is published for information only: the gate was never
+ * armed, the run was told never to fail, or the combined machine formats
+ * exit 0 for the gate.
  */
 enforced: boolean
 /**
@@ -2941,13 +2943,13 @@ baseline_staleness?: (BaselineStaleness | null)
  */
 regression?: (RegressionResult | null)
 /**
- * Every gate this run ARMED, keyed by name, absent when it armed none.
- * Each entry is the same rule that decides the exit code, so a CI
- * integration reads the verdict instead of guessing from a process status
- * it usually cannot see. A gate fails the build when `status` is `fail`
- * AND `enforced` is true. Armed, not evaluated: fallow's default severity
- * rules fail a run with no flag at all, so an absent object means "no gate
- * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
+ * The verdict of every gate this run evaluated, keyed by name. The CLI
+ * always emits it, with the command's default exit rule in it also when
+ * no flag armed a gate, so a CI integration reads the verdict instead of
+ * guessing from a process status it usually cannot see. A gate fails the
+ * build when `status` is `fail` AND `enforced` is true. The typed
+ * programmatic API runs no CLI gate and leaves it absent. See
+ * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
@@ -11296,13 +11298,13 @@ grouped_by?: (GroupByMode | null)
  */
 groups?: (HealthGroup[] | null)
 /**
- * Every gate this run ARMED, keyed by name, absent when it armed none.
- * Each entry is the same rule that decides the exit code, so a CI
- * integration reads the verdict instead of guessing from a process status
- * it usually cannot see. A gate fails the build when `status` is `fail`
- * AND `enforced` is true. Armed, not evaluated: fallow's default severity
- * rules fail a run with no flag at all, so an absent object means "no gate
- * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
+ * The verdict of every gate this run evaluated, keyed by name. The CLI
+ * always emits it, with the command's default exit rule in it also when
+ * no flag armed a gate, so a CI integration reads the verdict instead of
+ * guessing from a process status it usually cannot see. A gate fails the
+ * build when `status` is `fail` AND `enforced` is true. The typed
+ * programmatic API runs no CLI gate and leaves it absent. See
+ * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
@@ -11499,13 +11501,11 @@ groups?: (DuplicationGroup[] | null)
  */
 baseline_staleness?: (BaselineStaleness | null)
 /**
- * Every gate this run ARMED, keyed by name, absent when it armed none.
- * Each entry is the same rule that decides the exit code, so a CI
- * integration reads the verdict instead of guessing from a process status
- * it usually cannot see. A gate fails the build when `status` is `fail`
- * AND `enforced` is true. Armed, not evaluated: fallow's default severity
- * rules fail a run with no flag at all, so an absent object means "no gate
- * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
+ * The verdict of every gate this run armed, keyed by name, absent when
+ * it armed none. `dupes` has no default exit rule: a run with no armed
+ * gate always exits 0, so an absent object means that the run passed. A
+ * gate fails the build when `status` is `fail` AND `enforced` is true.
+ * See [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
@@ -11686,13 +11686,13 @@ groups: CheckGroupedEntry[]
  */
 baseline_staleness?: (BaselineStaleness | null)
 /**
- * Every gate this run ARMED, keyed by name, absent when it armed none.
- * Each entry is the same rule that decides the exit code, so a CI
- * integration reads the verdict instead of guessing from a process status
- * it usually cannot see. A gate fails the build when `status` is `fail`
- * AND `enforced` is true. Armed, not evaluated: fallow's default severity
- * rules fail a run with no flag at all, so an absent object means "no gate
- * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
+ * The verdict of every gate this run evaluated, keyed by name. The CLI
+ * always emits it, with the command's default exit rule in it also when
+ * no flag armed a gate, so a CI integration reads the verdict instead of
+ * guessing from a process status it usually cannot see. A gate fails the
+ * build when `status` is `fail` AND `enforced` is true. The typed
+ * programmatic API runs no CLI gate and leaves it absent. See
+ * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
@@ -12375,13 +12375,13 @@ version: ToolVersion
 elapsed_ms: ElapsedMs
 config: SecurityOutputConfig
 /**
- * Every gate this run ARMED, keyed by name, absent when it armed none.
- * Each entry is the same rule that decides the exit code, so a CI
- * integration reads the verdict instead of guessing from a process status
- * it usually cannot see. A gate fails the build when `status` is `fail`
- * AND `enforced` is true. Armed, not evaluated: fallow's default severity
- * rules fail a run with no flag at all, so an absent object means "no gate
- * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
+ * The verdict of every gate this run evaluated, keyed by name. The CLI
+ * always emits it, with the command's default exit rule in it also when
+ * no flag armed a gate, so a CI integration reads the verdict instead of
+ * guessing from a process status it usually cannot see. A gate fails the
+ * build when `status` is `fail` AND `enforced` is true. The typed
+ * programmatic API runs no CLI gate and leaves it absent. See
+ * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
@@ -13021,13 +13021,13 @@ version: ToolVersion
 elapsed_ms: ElapsedMs
 config: SecurityOutputConfig
 /**
- * Every gate this run ARMED, keyed by name, absent when it armed none.
- * Each entry is the same rule that decides the exit code, so a CI
- * integration reads the verdict instead of guessing from a process status
- * it usually cannot see. A gate fails the build when `status` is `fail`
- * AND `enforced` is true. Armed, not evaluated: fallow's default severity
- * rules fail a run with no flag at all, so an absent object means "no gate
- * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
+ * The verdict of every gate this run evaluated, keyed by name. The CLI
+ * always emits it, with the command's default exit rule in it also when
+ * no flag armed a gate, so a CI integration reads the verdict instead of
+ * guessing from a process status it usually cannot see. A gate fails the
+ * build when `status` is `fail` AND `enforced` is true. The typed
+ * programmatic API runs no CLI gate and leaves it absent. See
+ * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
@@ -13324,13 +13324,13 @@ schema_version: CombinedSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
- * Every gate this run ARMED, keyed by name, absent when it armed none.
- * Each entry is the same rule that decides the exit code, so a CI
- * integration reads the verdict instead of guessing from a process status
- * it usually cannot see. A gate fails the build when `status` is `fail`
- * AND `enforced` is true. Armed, not evaluated: fallow's default severity
- * rules fail a run with no flag at all, so an absent object means "no gate
- * was asked for", never "nothing failed". See [`crate::GateOutcomes`].
+ * The verdict of every gate this run evaluated, keyed by name. The CLI
+ * always emits it, with the default exit rule of each section that ran
+ * (`error-severity-findings`, `health-findings`). The machine formats of
+ * the combined run exit 0 for findings, so most entries have `enforced:
+ * false`, and `status` gives the verdict of the human run. A gate fails
+ * the build when `status` is `fail` AND `enforced` is true. The typed
+ * programmatic API leaves it absent. See [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**

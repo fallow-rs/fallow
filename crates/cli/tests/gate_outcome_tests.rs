@@ -406,29 +406,168 @@ fn save_regression_baseline(root: &Path, file: &str) {
     );
 }
 
-/// The headline invariant: a run that arms no gate is byte-identical to one
-/// produced before the object existed, on every command. Without this the
-/// additive-field exemption in `docs/backwards-compatibility.md` would not
-/// apply and six envelopes would owe a `schema_version` bump.
+/// The default exit rule of each command, which its envelope always carries.
+/// `dupes` has none: a run with no armed gate always exits 0.
+const DEFAULT_RULES: &[(&str, &str)] = &[
+    ("dead-code", "error-severity-findings"),
+    ("check", "error-severity-findings"),
+    ("health", "health-findings"),
+    ("security", "security-advisory"),
+    ("", "error-severity-findings"),
+];
+
+/// The headline invariant: every envelope with a default exit rule carries
+/// that rule in `gate_outcomes`, also when no flag armed a gate. A reader of
+/// the JSON sees a failing run without the exit code.
 #[test]
-fn a_run_that_arms_no_gate_emits_no_gate_outcomes_key() {
+fn every_envelope_carries_its_default_exit_rule() {
     let project = orphan_project(2);
     let root = root_arg(&project);
-    for args in [
-        vec!["dead-code", "--root", root, "--format", "json", "--quiet"],
-        vec!["dupes", "--root", root, "--format", "json", "--quiet"],
-        vec!["health", "--root", root, "--format", "json", "--quiet"],
-        vec!["security", "--root", root, "--format", "json", "--quiet"],
-        vec!["--root", root, "--format", "json", "--quiet"],
-    ] {
-        let envelope = parse_json(&run(&args));
-        assert!(
-            envelope.get("gate_outcomes").is_none(),
-            "`{}` armed no gate and must carry no key: {}",
-            args[0],
+    for (command, rule) in DEFAULT_RULES {
+        let mut args: Vec<&str> = if command.is_empty() {
+            Vec::new()
+        } else {
+            vec![command]
+        };
+        args.extend(["--root", root, "--format", "json", "--quiet"]);
+        let output = run(&args);
+        let envelope = parse_json(&output);
+        let entry = gate(&envelope, rule);
+        let failed = entry["status"] == "fail";
+        let enforced = entry["enforced"].as_bool().expect("enforced is a boolean");
+        assert_eq!(
+            output.code,
+            i32::from(failed && enforced),
+            "`{command}` exits on its default rule exactly when the entry says so: {}",
             envelope["gate_outcomes"]
         );
     }
+    let dupes = parse_json(&run(&[
+        "dupes", "--root", root, "--format", "json", "--quiet",
+    ]));
+    assert!(
+        dupes.get("gate_outcomes").is_none(),
+        "`dupes` has no default exit rule and armed no gate: {}",
+        dupes["gate_outcomes"]
+    );
+}
+
+/// Bare `fallow` in a machine format exits 0 for findings, and its envelope
+/// still says that the run failed. `dead-code` states the same verdict and
+/// exits on it.
+#[test]
+fn a_failing_run_says_so_in_json_without_the_exit_code() {
+    let project = orphan_project(2);
+    let root = root_arg(&project);
+
+    let combined = run(&["--root", root, "--format", "json", "--quiet"]);
+    assert_eq!(
+        combined.code, 0,
+        "the combined machine path exits 0 for findings: {}",
+        combined.stderr
+    );
+    let envelope = parse_json(&combined);
+    let entry = gate(&envelope, "error-severity-findings");
+    assert_eq!(entry["status"], "fail", "{}", envelope["gate_outcomes"]);
+    assert_eq!(entry["enforced"], Value::Bool(false));
+
+    let human = run(&["--root", root, "--quiet"]);
+    assert_eq!(
+        human.code, 1,
+        "the human run fails on the same finding: {}",
+        human.stderr
+    );
+
+    let dead_code = run(&["dead-code", "--root", root, "--format", "json", "--quiet"]);
+    assert_eq!(dead_code.code, 1, "{}", dead_code.stderr);
+    let envelope = parse_json(&dead_code);
+    let entry = gate(&envelope, "error-severity-findings");
+    assert_eq!(entry["status"], "fail");
+    assert_eq!(entry["enforced"], Value::Bool(true));
+}
+
+/// Bare `fallow` applies a dupes baseline and a health baseline, so each
+/// section equals the standalone command with the same baseline.
+#[test]
+fn bare_fallow_applies_dupes_and_health_baselines() {
+    let dupes_project = cloned_project();
+    let dupes_baseline = dupes_project.path().join("dupes-baseline.json");
+    save_baseline("dupes", &dupes_project, &dupes_baseline);
+    let without = parse_json(&run(&[
+        "--root",
+        root_arg(&dupes_project),
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    assert!(
+        !without["dupes"]["clone_groups"]
+            .as_array()
+            .expect("clone groups")
+            .is_empty(),
+        "the fixture has a clone group without the baseline"
+    );
+    let output = run(&[
+        "--root",
+        root_arg(&dupes_project),
+        "--format",
+        "json",
+        "--quiet",
+        "--dupes-baseline",
+        dupes_baseline.to_str().expect("utf8"),
+    ]);
+    let with = parse_json(&output);
+    assert_eq!(
+        with["dupes"]["clone_groups"],
+        Value::Array(Vec::new()),
+        "the baselined clone group is gone: {}",
+        output.stderr
+    );
+    assert_eq!(
+        with["dupes"]["baseline_staleness"]["matched_entries"],
+        with["dupes"]["baseline_staleness"]["baseline_entries"],
+        "the dupes section says what the baseline matched: {}",
+        with["dupes"]
+    );
+
+    let health_project = complex_project();
+    let health_baseline = health_project.path().join("health-baseline.json");
+    save_baseline("health", &health_project, &health_baseline);
+    let without = parse_json(&run(&[
+        "--root",
+        root_arg(&health_project),
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    assert!(
+        !without["health"]["findings"]
+            .as_array()
+            .expect("findings")
+            .is_empty(),
+        "the fixture has a complexity finding without the baseline"
+    );
+    let output = run(&[
+        "--root",
+        root_arg(&health_project),
+        "--format",
+        "json",
+        "--quiet",
+        "--health-baseline",
+        health_baseline.to_str().expect("utf8"),
+    ]);
+    let with = parse_json(&output);
+    assert_eq!(
+        with["health"]["findings"],
+        Value::Array(Vec::new()),
+        "the baselined complexity finding is gone: {}",
+        output.stderr
+    );
+    assert_eq!(
+        gate(&with, "health-findings")["status"],
+        "pass",
+        "the verdict reads the baselined findings"
+    );
 }
 
 /// `gate_outcomes["regression"].status` is `regression.exceeded`, not a second
@@ -616,10 +755,10 @@ fn the_health_severity_entry_appears_and_agrees_with_the_exit_code() {
 /// unenforced, or a job following the published contract fails a green build
 /// whose own stderr says the gate stood down.
 ///
-/// The gate has to be ARMED for this to mean anything: `--report-only` is
-/// mutually exclusive with `--min-score` and `--min-severity`, so a bare
-/// `--report-only` run arms nothing and emits no object at all. A rotted
-/// baseline is the one gate that composes with it.
+/// A gate has to be ARMED for this to mean more than the default rule:
+/// `--report-only` is mutually exclusive with `--min-score` and
+/// `--min-severity`, so a bare `--report-only` run publishes only
+/// `health-findings`. A rotted baseline is the one gate that composes with it.
 #[test]
 fn report_only_publishes_every_verdict_and_enforces_none() {
     let project = complex_project();

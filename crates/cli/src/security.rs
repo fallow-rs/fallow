@@ -922,6 +922,10 @@ fn render_security_github(opts: &SecurityOptions<'_>, output: &SecurityOutput) -
 /// returns before the advisory, so the advisory is recorded as `skipped` there
 /// rather than left to be inferred from silence: a passing gate suppressing an
 /// advisory-tier backlog is exactly the shadowing a consumer cannot see today.
+///
+/// Without `--gate`, the advisory is the command's default exit rule and is
+/// always in the object. It is `enforced` only when `--fail-on-issues` or an
+/// `error` rule severity lets it fail the run.
 fn security_gate_outcomes(
     opts: &SecurityOptions<'_>,
     output: &SecurityOutput,
@@ -944,22 +948,16 @@ fn security_gate_outcomes(
         );
         return gates.into_option();
     }
-    if opts.fail_on_issues
+    let enforced = opts.fail_on_issues
         || effective_severities.leak == Severity::Error
-        || effective_severities.sink == Severity::Error
-    {
-        gates.insert(
-            GateName::SecurityAdvisory,
-            GateOutcome::new(
-                crate::gates::status_of(security_advisory_failed(
-                    opts,
-                    output,
-                    effective_severities,
-                )),
-                true,
-            ),
-        );
-    }
+        || effective_severities.sink == Severity::Error;
+    gates.insert(
+        GateName::SecurityAdvisory,
+        GateOutcome::new(
+            crate::gates::status_of(security_advisory_failed(opts, output, effective_severities)),
+            enforced,
+        ),
+    );
     gates.into_option()
 }
 

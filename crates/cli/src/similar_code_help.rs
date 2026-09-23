@@ -194,6 +194,8 @@ fn unsupported_universal_analysis_option(
         (cli.save_snapshot.is_some(), "--save-snapshot"),
         (cli.coverage.is_some(), "--coverage"),
         (cli.coverage_root.is_some(), "--coverage-root"),
+        (cli.dupes_baseline.is_some(), "--dupes-baseline"),
+        (cli.health_baseline.is_some(), "--health-baseline"),
         (cli.include_entry_exports, "--include-entry-exports"),
         (cli.type_aware, "--type-aware"),
         (cli.no_type_aware, "--no-type-aware"),

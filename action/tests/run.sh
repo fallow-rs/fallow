@@ -4259,6 +4259,29 @@ else
   fail "gate: an unowned failure leaves the job green" "got $GATE_EXIT"
 fi
 
+# Every envelope carries its default exit rule, also when no gate was armed.
+# A failing default rule belongs to the count gate: with fail-on-issues false
+# it prints nothing and leaves the job green, whether the CLI enforced it or
+# (combined mode) did not.
+for default_case in \
+  'dead-code|{"error-severity-findings":{"status":"fail","enforced":true}}|' \
+  'health|{"health-findings":{"status":"fail","enforced":true}}|"summary":{"functions_above_threshold":2}' \
+  'dead-code|{"error-severity-findings":{"status":"fail","enforced":false},"health-findings":{"status":"fail","enforced":false}}|' \
+  ; do
+  IFS='|' read -r default_command default_gates default_extra <<< "$default_case"
+  run_gate_analyze "$(gate_envelope "$default_gates" "$default_extra")" \
+    INPUT_COMMAND="$default_command" INPUT_FAIL_ON_ISSUES="false"
+  assert_not_contains "$GATE_STDOUT" "gate reports a failure" \
+    "gate: a default rule on $default_command $default_gates prints no gate line"
+  assert_not_contains "$GATE_STDOUT" "::error::" \
+    "gate: a default rule on $default_command $default_gates prints no error"
+  if [ "$GATE_EXIT" = "0" ]; then
+    pass "gate: a default rule on $default_command leaves the job green"
+  else
+    fail "gate: a default rule on $default_command leaves the job green" "got $GATE_EXIT: $GATE_STDOUT"
+  fi
+done
+
 # A gate the CLI reports as unenforced (combined mode, --report-only) is
 # honoured rather than overridden, and says which it was.
 run_gate_analyze "$(gate_envelope '{"duplication-threshold":{"status":"fail","enforced":false,"observed":100.0,"threshold":5.0}}' '"stats":{"clone_groups":1}')" \

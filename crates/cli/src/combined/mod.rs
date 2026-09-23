@@ -35,10 +35,19 @@ pub struct CombinedOptions<'a> {
     /// health hotspots / ownership pass instead of `git log`. Resolved relative
     /// to `root` inside the health pipeline.
     pub churn_file: Option<&'a std::path::Path>,
+    /// The dead-code baseline (`--baseline`).
     pub baseline: Option<&'a std::path::Path>,
     pub save_baseline: Option<&'a std::path::Path>,
-    /// Fail the run when a loaded `baseline` has entries that match nothing.
-    /// Only the dead-code sub-pass receives a baseline in combined mode.
+    /// The duplication baseline (`--dupes-baseline`), applied as standalone
+    /// `dupes --baseline` applies it.
+    pub dupes_baseline: Option<&'a std::path::Path>,
+    /// The health baseline (`--health-baseline`), applied as standalone
+    /// `health --baseline` applies it.
+    pub health_baseline: Option<&'a std::path::Path>,
+    pub health_baseline_mode: fallow_engine::baseline::HealthBaselineMode,
+    pub health_baseline_mode_explicit: bool,
+    /// Fail the run when a loaded baseline of any sub-pass has entries that
+    /// match nothing.
     pub fail_on_stale_baseline: bool,
     pub production: bool,
     pub production_dead_code: Option<bool>,
@@ -141,6 +150,13 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
 
     if let Err(code) = run_combined_health(opts, &mut check_result, &mut health_result) {
         return code;
+    }
+    if let Some(result) = health_result.as_ref() {
+        crate::health::note_unrecognised_health_baseline(
+            result,
+            opts.health_baseline,
+            "--health-baseline",
+        );
     }
 
     let total_elapsed = start.elapsed();
@@ -506,10 +522,10 @@ fn build_combined_dupes_options<'a>(
         // `--dupes-no-ignore-imports` (`Some(false)`) overrides config.
         ignore_imports: opts.dupes_ignore_imports,
         top: None,
-        baseline_path: None,
-        baseline_flag: "--baseline",
+        baseline_path: opts.dupes_baseline,
+        baseline_flag: "--dupes-baseline",
         save_baseline_path: None,
-        fail_on_stale_baseline: false,
+        fail_on_stale_baseline: opts.fail_on_stale_baseline,
         production: opts.production_dupes.unwrap_or(opts.production),
         production_override: opts.production_dupes,
         trace: None,
@@ -566,10 +582,10 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         use_shared_diff_index: true,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
-        baseline: None,
+        baseline: opts.health_baseline,
         save_baseline: None,
-        baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
-        baseline_mode_explicit: false,
+        baseline_mode: opts.health_baseline_mode,
+        baseline_mode_explicit: opts.health_baseline_mode_explicit,
         complexity: true,
         file_scores: true,
         coverage_gaps: false,
@@ -692,6 +708,10 @@ mod tests {
             churn_file: None,
             baseline: None,
             save_baseline: None,
+            dupes_baseline: None,
+            health_baseline: None,
+            health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+            health_baseline_mode_explicit: false,
             fail_on_stale_baseline: false,
             production: false,
             production_dead_code: None,

@@ -1354,7 +1354,6 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
     );
     let baseline_staleness = envelope_baseline_staleness(result);
     let gate_outcomes = crate::gates::check_gate_outcomes(&crate::gates::CheckGateInputs {
-        fail_on_issues: result.fail_on_issues,
         has_error_severity,
         regression: result.regression.as_ref(),
         baseline_staleness: baseline_staleness.as_ref(),

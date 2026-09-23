@@ -1293,13 +1293,15 @@ variables:
             GATE_FAILED_NAMES="${GATE_FAILED_NAMES:+${GATE_FAILED_NAMES},}${gate}"
             if gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
               record_gate_failure "$gate"
-            elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "audit-verdict" ]; then
-              # Both are governed by FALLOW_FAIL_ON_ISSUES rather than by a
-              # variable of their own. The severity rule is the CLI's, which the
-              # count gate deliberately does not follow; the audit verdict is
-              # already applied by the count gate below, and an audit pipeline
-              # with FALLOW_FAIL_ON_ISSUES false is a deliberate reporting
-              # configuration. Both reach dotenv and never the log.
+            elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ]; then
+              # All three are default exit rules, governed by
+              # FALLOW_FAIL_ON_ISSUES rather than by a variable of their own,
+              # and every envelope carries them. The two findings rules are the
+              # CLI's, which the count gate deliberately does not follow; the
+              # audit verdict is already applied by the count gate below, and an
+              # audit pipeline with FALLOW_FAIL_ON_ISSUES false is a deliberate
+              # reporting configuration. All three reach dotenv and never the
+              # log.
               :
             elif gate_is_owned "$gate"; then
               # The variable asked for the gate and the CLI still reports it

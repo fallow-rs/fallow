@@ -2,8 +2,9 @@
 //!
 //! One shape for every command that can fail a build, so a consumer reads the
 //! same members whether the envelope came from `dead-code`, `dupes`, `health`,
-//! `audit` or `security`. Carried as `gate_outcomes` at the envelope root,
-//! absent whenever the run evaluated no gate.
+//! `audit` or `security`. Carried as `gate_outcomes` at the envelope root. The
+//! CLI always emits it with the command's default exit rule, except on `dupes`,
+//! which has no default rule.
 //!
 //! Every entry is a projection of the rule that decides the exit code, computed
 //! once and then read by the exit path, so nothing here restates a rule that
@@ -22,7 +23,7 @@
 //! one is a machine verdict a build gates on. Hence the different key
 //! (`gate_outcomes`, not `gates`) and the absence of any prose member here.
 //!
-//! The display array is DERIVED from this object for the gates a run armed, so
+//! The display array is DERIVED from this object for every entry in it, so
 //! a tripped gate reaches the check run as a named gate rather than as a failed
 //! step. That is a one-way projection into display text: a consumer that needs
 //! the verdict reads this object, never the rendered row.
@@ -181,8 +182,9 @@ pub struct GateOutcome {
     /// What the rule concluded.
     pub status: GateStatus,
     /// True when a `fail` from this gate makes the run exit non-zero. False
-    /// when the verdict is published for information only, because the gate was
-    /// never armed or because the run was told never to fail.
+    /// when the verdict is published for information only: the gate was never
+    /// armed, the run was told never to fail, or the combined machine formats
+    /// exit 0 for the gate.
     pub enforced: bool,
     /// The measured value the gate compared, when there is one: the duplication
     /// percentage, the health score, or the number of findings at or above the
@@ -259,18 +261,19 @@ impl GateOutcome {
     }
 }
 
-/// Every gate a run ARMED, keyed by name.
+/// The verdict of every gate a run evaluated, keyed by name.
 ///
-/// Armed, not evaluated: a gate is armed by a flag or by config, never merely
-/// because the rule behind it exists. Fallow's default severity rules fail a
-/// run with no flag at all, so a `dead-code` run can exit 1 carrying no object
-/// whatsoever. Read an absent object as "no gate was asked for", never as
-/// "nothing failed".
+/// A gate is armed by a flag or by config. The default exit rule of a command
+/// is always in the object, also when no flag armed a gate:
+/// `error-severity-findings` on `dead-code`, `check` and the combined run
+/// (with `health-findings` when the combined run analyzed health),
+/// `health-findings` on `health`, `security-advisory` on `security` and
+/// `audit-verdict` on `audit`. A reader of the JSON sees a failing run without
+/// the exit code. `dupes` has no default exit rule, so a `dupes` run that armed
+/// no gate carries no object and always exits 0.
 ///
-/// Absent from an envelope whenever it is empty, so a run that armed no gate is
-/// byte-identical to one produced before this object existed. An empty object
-/// is never emitted: it would assert that gates were armed and none tripped,
-/// which is a different and false claim.
+/// An empty object is never emitted. The typed programmatic API runs no CLI
+/// gate and leaves the object absent.
 ///
 /// The names this build can emit are `error-severity-findings`, `regression`,
 /// `stale-baseline`, `duplication-threshold`, `health-min-score`,

@@ -630,6 +630,16 @@ struct Cli {
     #[arg(hide_short_help = true, long = "coverage-root", value_name = "PATH")]
     coverage_root: Option<PathBuf>,
 
+    /// Compare duplication clone groups against a saved baseline in combined
+    /// mode (produced by `fallow dupes --save-baseline`).
+    #[arg(hide_short_help = true, long = "dupes-baseline", value_name = "PATH")]
+    dupes_baseline: Option<PathBuf>,
+
+    /// Compare health findings against a saved baseline in combined mode
+    /// (produced by `fallow health --save-baseline`).
+    #[arg(hide_short_help = true, long = "health-baseline", value_name = "PATH")]
+    health_baseline: Option<PathBuf>,
+
     /// Report unused exports in entry files instead of auto-marking them as used.
     #[arg(hide_short_help = true, long, global = true)]
     include_entry_exports: bool,
@@ -3573,6 +3583,8 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
         (cli.save_snapshot.is_some(), "--save-snapshot"),
         (cli.coverage.is_some(), "--coverage"),
         (cli.coverage_root.is_some(), "--coverage-root"),
+        (cli.dupes_baseline.is_some(), "--dupes-baseline"),
+        (cli.health_baseline.is_some(), "--health-baseline"),
         (cli.include_entry_exports, "--include-entry-exports"),
         (cli.type_aware, "--type-aware"),
         (cli.no_type_aware, "--no-type-aware"),
@@ -3688,6 +3700,10 @@ fn run_bare_combined(
         churn_file: cli.churn_file.as_deref(),
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
+        dupes_baseline: cli.dupes_baseline.as_deref(),
+        health_baseline: cli.health_baseline.as_deref(),
+        health_baseline_mode: cli.baseline_mode.unwrap_or_default().into(),
+        health_baseline_mode_explicit: cli.baseline_mode.is_some(),
         fail_on_stale_baseline: cli.fail_on_stale_baseline,
         production: cli.production,
         production_dead_code: Some(production.dead_code),

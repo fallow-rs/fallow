@@ -22,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes a warning and keeps the error in the step log. The job summary shows
   one line that says the summary could not be rendered.
 
+- **JSON output always states whether the run passed.** The JSON output of
+  bare `fallow`, `dead-code`, `check`, `health`, `security` and `audit` now
+  always has `gate_outcomes`, also when you give no gate flag. It holds the
+  default rule of the command, for example `error-severity-findings`, with
+  its `status` (`pass` or `fail`). Before, you could not see a failing run in
+  the JSON without the exit code. No exit code changes. Bare
+  `fallow --format json` still exits 0 when it has findings: its entries show
+  `enforced: false`, and `status` tells you whether `fallow` in the terminal
+  fails. `dupes` has no default rule, so its JSON has `gate_outcomes` only
+  when you give a gate flag.
+
 ### Fixed
 
 - **Runtime coverage help says what is free.** The `--runtime-coverage`
@@ -56,6 +67,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that directory. An entry without an extension, such as `./lib` or
   `./src/app`, now matches the file with a source extension or the directory
   index file, also when `context` or `root` is set. (#2753)
+
+- **Bare `fallow` now applies dupes and health baselines.** Use
+  `fallow --dupes-baseline <file>` and `fallow --health-baseline <file>`.
+  They hide the clone groups and the complexity findings in the baseline, as
+  `fallow dupes --baseline` and `fallow health --baseline` do. Before, bare
+  `fallow` read only the dead-code `--baseline`, so its dupes and health
+  sections showed findings that the standalone commands hid.
+  `--fail-on-stale-baseline` now checks all three baselines.
 
 - **Traces pick the file you name in a monorepo.** A trace of `src/a.ts`
   (for example `dead-code --trace-file src/a.ts` or

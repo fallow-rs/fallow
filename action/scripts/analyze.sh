@@ -1403,13 +1403,15 @@ classify_gate() {
       GATE_FAILED_NAMES+=("$gate")
       if gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
         record_gate_failure "$gate"
-      elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "audit-verdict" ]; then
-        # Both are governed by fail-on-issues rather than by an input of their
-        # own. `error-severity-findings` is the CLI's own severity rule, which
-        # the action's count gate deliberately does not follow; `audit-verdict`
-        # is already applied by the count gate below, and an audit job with
-        # fail-on-issues: false is a deliberate reporting configuration. Both
-        # are reported in the outputs and never in the log.
+      elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ]; then
+        # All three are default exit rules, governed by fail-on-issues rather
+        # than by an input of their own, and every envelope carries them.
+        # `error-severity-findings` and `health-findings` are the CLI's own
+        # findings rules, which the action's count gate deliberately does not
+        # follow; `audit-verdict` is already applied by the count gate below,
+        # and an audit job with fail-on-issues: false is a deliberate reporting
+        # configuration. All three are reported in the outputs and never in
+        # the log.
         :
       elif gate_is_owned "$gate"; then
         # The input asked for the gate, and the CLI still reports the verdict

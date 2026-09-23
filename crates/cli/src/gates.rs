@@ -8,19 +8,21 @@
 //!
 //! # When an entry appears
 //!
-//! An entry appears when the gate was ARMED on this run, never merely because
-//! the rule behind it exists. `--fail-on-issues` arms
-//! [`GateName::ErrorSeverityFindings`], a loaded baseline arms
-//! [`GateName::StaleBaseline`], `--threshold` arms
-//! [`GateName::DuplicationThreshold`], and so on. A run that arms nothing emits
-//! no object at all, which is what keeps every existing consumer's wire shape
-//! byte-identical.
+//! A gate entry appears when the gate was ARMED on this run: `--fail-on-issues`
+//! arms [`GateName::ErrorSeverityFindings`] as an enforced rule, a loaded
+//! baseline arms [`GateName::StaleBaseline`], `--threshold` arms
+//! [`GateName::DuplicationThreshold`], and so on.
 //!
-//! The one deliberate exception is a gate that is armed but cannot be enforced:
-//! `health --report-only` and a change-scoped baseline comparison both publish
-//! their verdict with `enforced: false` rather than hiding it, because a gate a
-//! repository asked for that then says nothing is the failure mode this object
-//! exists to remove.
+//! The default exit rule of a command is always in its object, also when no
+//! flag armed a gate: `error-severity-findings` on `dead-code`, `check` and the
+//! combined run, `health-findings` on `health`, `security-advisory` on
+//! `security` and `audit-verdict` on `audit`. A JSON reader then sees a failing
+//! run without the exit code. `dupes` has no default rule, so a `dupes` run
+//! that armed nothing publishes no object and always exits 0.
+//!
+//! A gate that is armed but cannot be enforced publishes its verdict with
+//! `enforced: false` rather than hiding it: `health --report-only`, a
+//! change-scoped baseline comparison and the combined machine formats.
 
 use fallow_output::{GateName, GateOutcome, GateOutcomes, GateStatus};
 
@@ -135,15 +137,12 @@ pub fn type_aware_outcome(
 ///
 /// Severity-aware rather than a count: a project with a rule set to `warn`
 /// reports findings and still passes, and `--fail-on-issues` is what promotes
-/// those warns into the rule. It is always `enforced`, because this rule always
-/// decides the exit code.
+/// those warns into the rule. It is always `enforced` on the standalone
+/// commands, because this rule always decides their exit code.
 ///
-/// `--fail-on-issues` arms it, and it is ALSO emitted whenever the object
-/// exists for any other reason. Without the second half, a run gated only on
-/// `--fail-on-regression` could exit 1 for an error-severity finding while
-/// every entry in its object reported a pass, leaving the object unable to
-/// explain the exit code it sits beside. A run that arms nothing still
-/// publishes no object, so nothing on the wire moves for it.
+/// It is the default exit rule, so it is in every `dead-code` and `check`
+/// object. Without it, a run gated only on `--fail-on-regression` could exit 1
+/// for an error-severity finding while every entry reported a pass.
 pub const fn error_severity_outcome(has_error_severity: bool) -> GateOutcome {
     GateOutcome::new(status_of(has_error_severity), true)
 }
@@ -176,7 +175,6 @@ pub fn duplication_threshold_outcome(
 
 /// Collect the gates a dead-code or check run evaluated.
 pub struct CheckGateInputs<'a> {
-    pub fail_on_issues: bool,
     pub has_error_severity: bool,
     pub regression: Option<&'a crate::regression::RegressionOutcome>,
     pub baseline_staleness: Option<&'a fallow_output::BaselineStaleness>,
@@ -185,7 +183,8 @@ pub struct CheckGateInputs<'a> {
     pub type_aware_meta: Option<&'a fallow_types::envelope::TypeAwareMeta>,
 }
 
-/// Build the dead-code envelope's `gate_outcomes`, `None` when nothing armed.
+/// Build the dead-code envelope's `gate_outcomes`. Always present, because the
+/// severity rule always decides the exit code.
 pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> {
     let mut gates = GateOutcomes::new();
     gates.insert_if(
@@ -200,12 +199,10 @@ pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> 
         GateName::TypeAwareRequire,
         type_aware_outcome(input.type_aware_require, input.type_aware_meta),
     );
-    if input.fail_on_issues || !gates.is_empty() {
-        gates.insert(
-            GateName::ErrorSeverityFindings,
-            error_severity_outcome(input.has_error_severity),
-        );
-    }
+    gates.insert(
+        GateName::ErrorSeverityFindings,
+        error_severity_outcome(input.has_error_severity),
+    );
     gates.into_option()
 }
 
@@ -214,20 +211,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_run_that_arms_nothing_emits_no_object() {
+    fn a_run_that_arms_nothing_still_states_the_default_rule() {
         let gates = check_gate_outcomes(&CheckGateInputs {
-            fail_on_issues: false,
             has_error_severity: true,
             regression: None,
             baseline_staleness: None,
             fail_on_stale_baseline: false,
             type_aware_require: fallow_config::TypeAwareRequire::BestEffort,
             type_aware_meta: None,
-        });
-        assert!(
-            gates.is_none(),
-            "an ungated run stays byte-identical, even one the severity rule fails"
-        );
+        })
+        .expect("the default exit rule is always published");
+        let outcome = gates
+            .get(GateName::ErrorSeverityFindings)
+            .expect("the default exit rule");
+        assert_eq!(outcome.status, GateStatus::Fail);
+        assert!(outcome.fails_run());
     }
 
     /// The object has to explain the exit code it sits beside, so once it
@@ -235,7 +233,6 @@ mod tests {
     #[test]
     fn the_object_always_carries_the_rule_that_decides_the_exit_code() {
         let gates = check_gate_outcomes(&CheckGateInputs {
-            fail_on_issues: false,
             has_error_severity: true,
             regression: Some(&crate::regression::RegressionOutcome::Pass {
                 baseline_total: 1,

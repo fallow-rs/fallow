@@ -652,13 +652,10 @@ fn health_report_context<'a>(
 /// clamped with the rest rather than reporting the flag it was armed with.
 ///
 /// A gate armed by an explicit flag or by config always produces an entry.
-/// `health-findings` is the exception: it fails a plain `fallow health` run on
-/// any finding, which is the command's default rather than a gate a repository
-/// asked for, so it appears only once something else armed. That keeps an
-/// unarmed run byte-identical to one produced before this object existed, and
-/// it is why an absent object must be read as "no gate was asked for" rather
-/// than "nothing failed". Once the object exists the default rule is always in
-/// it, so the object can explain the exit code it sits beside.
+/// `health-findings` fails a plain `fallow health` run on any finding. It is
+/// the command's default exit rule, so it is always in the object, also when
+/// no flag armed a gate. A JSON reader then sees a failing run without the
+/// exit code.
 fn health_gate_outcomes(
     result: &HealthResult,
     options: HealthPrintOptions<'_>,
@@ -744,13 +741,8 @@ fn health_gate_outcomes(
         ),
     );
 
-    if gates.is_empty() {
-        return None;
-    }
-
-    // The default findings rule, reached only once a gate was armed. With
-    // `--min-severity` the findings gate IS the severity gate, already
-    // recorded above under its own name.
+    // The default findings rule. With `--min-severity` the findings gate IS
+    // the severity gate, already recorded above under its own name.
     if options.gates.min_severity.is_none() {
         gates.insert(
             GateName::HealthFindings,

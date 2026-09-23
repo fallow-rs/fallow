@@ -50,6 +50,8 @@ pub(super) fn print_combined_report(
         return Ok(machine_combined_code_with_stale_baseline_gate(
             opts,
             check_result,
+            dupes_result,
+            health_result,
             code,
         ));
     }
@@ -68,25 +70,47 @@ pub(super) fn print_combined_report(
 /// The machine renderers collapse every gate to zero: the bare run has never
 /// exited non-zero for issues in `--format json`, `sarif`, `codeclimate` or the
 /// GitHub formats, and that stays true. `--fail-on-stale-baseline` is the
-/// exception because it is opt-in and its condition appears in no envelope: a
-/// CI job that asked for the gate and renders JSON, which is the documented
-/// machine-readable shape, would otherwise be green forever. The gate prints
-/// its line on stderr, so stdout is byte-identical with and without the flag.
+/// exception because it is opt-in: a CI job that asked for the gate and renders
+/// JSON, which is the documented machine-readable shape, would otherwise be
+/// green forever. The gate prints its line on stderr, so stdout is
+/// byte-identical with and without the flag.
 ///
-/// The human path reaches the same gate through `print_check_result`, so only
-/// one of the two evaluates it on any given run. Only the dead-code sub-pass
-/// receives a baseline in combined mode.
+/// The human path reaches the same gate through each section's own print
+/// function, so only one of the two evaluates it on any given run. Every
+/// sub-pass baseline is judged, and each tripped one prints its own line.
 fn machine_combined_code_with_stale_baseline_gate(
     opts: &CombinedOptions<'_>,
     check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
     code: u8,
 ) -> u8 {
-    let failed = crate::baseline_gate::gate_failed(
+    let dead_code = crate::baseline_gate::gate_failed(
         check_result.and_then(|result| result.baseline_staleness.as_ref()),
         opts.fail_on_stale_baseline,
         fallow_engine::baseline::BaselineKind::DeadCode,
     );
-    if failed { code.max(1) } else { code }
+    let dupes = crate::baseline_gate::gate_failed(
+        dupes_result.and_then(|result| result.baseline_staleness.as_ref()),
+        opts.fail_on_stale_baseline,
+        fallow_engine::baseline::BaselineKind::Dupes,
+    );
+    let health = health_result
+        .and_then(|result| result.report.summary.baseline_staleness.as_ref())
+        .is_some_and(|staleness| {
+            crate::baseline_gate::gate_failed_from_envelope(
+                staleness,
+                opts.health_baseline,
+                opts.fail_on_stale_baseline,
+                None,
+                fallow_engine::baseline::BaselineKind::Health,
+            )
+        });
+    if dead_code || dupes || health {
+        code.max(1)
+    } else {
+        code
+    }
 }
 
 fn print_machine_combined_report(
@@ -108,6 +132,7 @@ fn print_machine_combined_report(
                     explain: opts.explain,
                     config_fixable: opts.config_path.is_some()
                         || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
+                    fail_on_stale_baseline: opts.fail_on_stale_baseline,
                 },
                 opts.json_style,
             );
@@ -144,6 +169,7 @@ fn print_machine_combined_report(
                     explain: opts.explain,
                     config_fixable: opts.config_path.is_some()
                         || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
+                    fail_on_stale_baseline: opts.fail_on_stale_baseline,
                 },
                 matches!(opts.output, OutputFormat::GithubSummary),
             );
@@ -208,6 +234,7 @@ fn print_combined_pr_comment(
     );
     let decision = build_combined_pr_decision(
         opts.fail_on_issues,
+        opts.fail_on_stale_baseline,
         check_result,
         dupes_result,
         health_result,
@@ -248,6 +275,7 @@ fn build_combined_pr_summary(
 
 fn build_combined_pr_decision(
     fail_on_issues: bool,
+    fail_on_stale_baseline: bool,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
@@ -269,7 +297,13 @@ fn build_combined_pr_decision(
     let conclusion = combined_decision_conclusion(&gates);
     let summary_markdown = combined_decision_summary(conclusion, issues.len(), &gates);
     gates.extend(report::gate_outcome_text::gate_rows_for_gates(
-        combined_gate_outcomes(check_result, dupes_result, health_result).as_ref(),
+        combined_gate_outcomes(
+            check_result,
+            dupes_result,
+            health_result,
+            fail_on_stale_baseline,
+        )
+        .as_ref(),
     ));
 
     PrDecisionSurface {
@@ -678,8 +712,11 @@ fn print_health_section(
         crate::health::HealthPrintOptions {
             quiet: opts.quiet,
             explain: opts.explain,
-            gates: fallow_engine::health::HealthGateOptions::default(),
-            baseline_path: None,
+            gates: fallow_engine::health::HealthGateOptions {
+                fail_on_stale_baseline: opts.fail_on_stale_baseline,
+                ..fallow_engine::health::HealthGateOptions::default()
+            },
+            baseline_path: opts.health_baseline,
             baseline_saved_by: None,
             summary: opts.summary,
             summary_heading: !show_headers,
@@ -828,6 +865,7 @@ struct CombinedJsonPrintInput<'a> {
     elapsed: std::time::Duration,
     explain: bool,
     config_fixable: bool,
+    fail_on_stale_baseline: bool,
 }
 
 fn print_combined_json(
@@ -894,6 +932,7 @@ fn build_combined_json_output(
             input.check_result,
             input.dupes_result,
             input.health_result,
+            input.fail_on_stale_baseline,
         ),
         request_outcomes: crate::requests::request_outcomes(),
         check: input.check_result.map(|result| CombinedCheckJsonSection {
@@ -915,7 +954,36 @@ fn build_combined_json_output(
         next_steps,
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
+    .map(|mut envelope| {
+        insert_dupes_baseline_staleness(&mut envelope, input.dupes_result);
+        envelope
+    })
     .map_err(|err| json_output_error(&err))
+}
+
+/// Publish the duplication sub-pass's view of its loaded baseline at the
+/// `dupes` section root, where the standalone `dupes` envelope carries the same
+/// key.
+///
+/// Inserted into the serialized value for the reason audit gives in
+/// `insert_duplication_baseline_staleness`: the section payload is flattened
+/// into the standalone envelope, which owns a `baseline_staleness` of its own.
+fn insert_dupes_baseline_staleness(
+    envelope: &mut serde_json::Value,
+    dupes_result: Option<&DupesResult>,
+) {
+    let Some(loaded) = dupes_result.and_then(|result| result.baseline_staleness.as_ref()) else {
+        return;
+    };
+    let Some(section) = envelope
+        .get_mut("dupes")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    if let Ok(staleness) = serde_json::to_value(loaded.to_envelope(0)) {
+        section.insert("baseline_staleness".into(), staleness);
+    }
 }
 
 fn combined_next_steps(
@@ -982,12 +1050,18 @@ pub fn combined_type_aware_gate_failed(
             })
 }
 
-/// The gates a combined run armed, merged into one root-level object.
+/// The combined run's verdicts, merged into one root-level object.
 ///
 /// Root rather than per-section, matching where the combined envelope already
 /// carries `workspace_diagnostics`, so a consumer reads one place instead of
 /// three and the `.check.regression` versus `.regression` split stops mattering
 /// for the verdict.
+///
+/// Always present when any analysis ran. It carries the default exit rule of
+/// each section that ran: `error-severity-findings` for dead code and
+/// `health-findings` for health. Dupes has no default rule. With these rules
+/// in it, the `status` members say whether the human run of the same flags
+/// fails.
 ///
 /// `enforced` is not the standalone commands' answer. The combined machine
 /// renderers collapse every gate to exit 0 except the stale-baseline gate and
@@ -999,11 +1073,12 @@ pub fn combined_type_aware_gate_failed(
 ///
 /// Combined mode accepts none of the health gate flags (`--min-score`,
 /// `--min-severity`, `--threshold`), so the health sub-analysis arms nothing
-/// here; the gates below are the ones combined mode can actually arm.
+/// but its default rule here.
 fn combined_gate_outcomes(
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
+    fail_on_stale_baseline: bool,
 ) -> Option<fallow_output::GateOutcomes> {
     let mut gates = fallow_output::GateOutcomes::new();
     if let Some(result) = check_result {
@@ -1011,18 +1086,16 @@ fn combined_gate_outcomes(
             fallow_output::GateName::Regression,
             crate::gates::regression_outcome(result.regression.as_ref(), true),
         );
-        gates.insert_if(
-            fallow_output::GateName::StaleBaseline,
-            crate::gates::stale_baseline_outcome(
-                result
-                    .baseline_staleness
-                    .as_ref()
-                    .map(|loaded| loaded.to_envelope(0))
-                    .as_ref(),
-                result.fail_on_stale_baseline,
-            ),
-        );
     }
+    gates.insert_if(
+        fallow_output::GateName::StaleBaseline,
+        combined_stale_baseline_outcome(
+            check_result,
+            dupes_result,
+            health_result,
+            fail_on_stale_baseline,
+        ),
+    );
     if combined_type_aware_requested(check_result, health_result) {
         gates.insert(
             fallow_output::GateName::TypeAwareRequire,
@@ -1045,14 +1118,9 @@ fn combined_gate_outcomes(
             ),
         );
     }
-    let armed_by_flag = check_result.is_some_and(|result| result.fail_on_issues);
-    if gates.is_empty() && !armed_by_flag {
-        return None;
-    }
-
-    // The rule that decides this run's exit code, so the object can explain the
-    // status beside it. Evaluated only once a gate armed the object, because
-    // it walks every findings array and an unarmed run publishes nothing.
+    // The default rules below are `enforced: false` like the rest: the
+    // combined machine renderers collapse them to exit 0. See the doc comment
+    // above.
     if let Some(result) = check_result {
         let has_error_severity = crate::check::rules::has_error_severity_issues(
             &result.results,
@@ -1062,16 +1130,59 @@ fn combined_gate_outcomes(
         );
         gates.insert(
             fallow_output::GateName::ErrorSeverityFindings,
+            fallow_output::GateOutcome::new(crate::gates::status_of(has_error_severity), false),
+        );
+    }
+    if let Some(result) = health_result {
+        gates.insert(
+            fallow_output::GateName::HealthFindings,
             fallow_output::GateOutcome::new(
-                crate::gates::status_of(has_error_severity),
-                // The combined machine renderers collapse this one to exit 0
-                // like the rest; see the doc comment above.
+                crate::gates::status_of(!result.report.findings.is_empty()),
                 false,
             ),
         );
     }
 
     gates.into_option()
+}
+
+/// One stale-baseline verdict for every baseline the combined run loaded.
+///
+/// A tripped baseline fails the entry, a judged baseline passes it, and the
+/// entry stands down only when every loaded baseline stood down. `None` when
+/// the run loaded no baseline.
+fn combined_stale_baseline_outcome(
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    fail_on_stale_baseline: bool,
+) -> Option<fallow_output::GateOutcome> {
+    use fallow_output::GateStatus;
+
+    let loaded = [
+        check_result
+            .and_then(|result| result.baseline_staleness.as_ref())
+            .map(|loaded| loaded.to_envelope(0)),
+        dupes_result
+            .and_then(|result| result.baseline_staleness.as_ref())
+            .map(|loaded| loaded.to_envelope(0)),
+        health_result.and_then(|result| result.report.summary.baseline_staleness),
+    ];
+    let outcomes: Vec<fallow_output::GateOutcome> = loaded
+        .iter()
+        .filter_map(|staleness| {
+            crate::gates::stale_baseline_outcome(staleness.as_ref(), fail_on_stale_baseline)
+        })
+        .collect();
+    let judged = |status: GateStatus| {
+        outcomes
+            .iter()
+            .find(|outcome| outcome.status == status)
+            .cloned()
+    };
+    judged(GateStatus::Fail)
+        .or_else(|| judged(GateStatus::Pass))
+        .or_else(|| outcomes.first().cloned())
 }
 
 /// Whether the combined run asked for the type-aware completeness gate at all,
