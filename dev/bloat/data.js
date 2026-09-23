@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790174477154,
+  "lastUpdate": 1790178794618,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "88b1bb6193f8d66e263bbeaf2defd39b93ba7945",
-          "message": "fix(audit): keep concurrent base worktree paths distinct and reclaim abandoned caches (#2500)\n\nTwo audits in one process could compose the same temporary base worktree name, because the name came from the process id plus a non-monotonic wall-clock reading, so the second git worktree add failed with 'already exists'. The name now carries a process-global monotonic counter, with the process id kept as the first segment for orphan reclamation.\n\nfallow audit-cache prune --max-age-days 0 documented that it still collects entries whose recorded owner root is gone, but a probed-dead owner fell through to the switched-off age gate. Those entries are abandoned and nothing else can reclaim them, so they now reclaim outright under a new owner-missing reason. Caches whose owner root still exists stay under their own project's policy.",
-          "timestamp": "2026-08-31T19:34:37+02:00",
-          "tree_id": "a2550cd69d4b4da6da571a82179d3015be943a9e",
-          "url": "https://github.com/fallow-rs/fallow/commit/88b1bb6193f8d66e263bbeaf2defd39b93ba7945"
-        },
-        "date": 1788198892535,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 548010760,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21337352,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 27962616,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 41862968,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43715400,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5862f7ef099a155809269f394d5c1433197f9448",
+          "message": "perf: compile guard rule scopes once and drop repeated boundary work (#2811)\n\n- guard: compile the files and exclude globs of each rule-pack rule once\n  per report. Before, guard compiled them again for each target file.\n- rule packs: validate zone references against the expanded zone names.\n  The check no longer compiles the zone globs, and it skips the boundary\n  expansion when no rule has a zones scope.\n- trace: compare module paths through a borrowed forward-slash view. The\n  lookup no longer allocates two strings per module.\n- boundaries: build one glob candidate per path in classify_zone instead\n  of one per glob.\n- re-export cycles: Tarjan SCC no longer allocates a vector for each\n  single-node component. An acyclic barrel chain has one per node.",
+          "timestamp": "2026-09-23T17:25:10+02:00",
+          "tree_id": "aecc16cd17f5211cbb9417a08a0be6a78501d468",
+          "url": "https://github.com/fallow-rs/fallow/commit/5862f7ef099a155809269f394d5c1433197f9448"
+        },
+        "date": 1790178791140,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 576294632,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21687400,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28803672,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43731080,
             "unit": "bytes"
           }
         ]
