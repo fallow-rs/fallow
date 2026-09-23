@@ -12,8 +12,8 @@
 //!
 //! Run with: `cargo bench --bench allocations`
 //!
-//! Output is printed in a machine-parseable `key: value` format so that
-//! `scripts/alloc-check.sh` can compare against a saved baseline.
+//! Output is printed in the machine-parseable `key: value` format that
+//! `.github/workflows/allocs.yml` parses.
 
 #![expect(
     deprecated,
@@ -37,7 +37,7 @@ fn main() {
 
     #[expect(
         clippy::print_stdout,
-        reason = "intentional bench output for alloc-check.sh"
+        reason = "intentional bench output that the allocs workflow parses"
     )]
     {
         println!("alloc_total_bytes: {}", stats.total_bytes);

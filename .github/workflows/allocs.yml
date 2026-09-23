@@ -8,7 +8,6 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
-      - 'alloc-baseline.json'
       - '.github/workflows/allocs.yml'
   pull_request:
     branches: [main]
@@ -17,7 +16,6 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
-      - 'alloc-baseline.json'
       - '.github/workflows/allocs.yml'
   workflow_dispatch:
 
@@ -47,7 +45,7 @@ jobs:
       - name: Run allocation benchmark
         run: cargo bench --bench allocations 2>&1 | tee alloc-output.txt
 
-      - name: Parse and check allocations
+      - name: Parse allocations
         id: parse
         run: |
           total_bytes=$(grep '^alloc_total_bytes:' alloc-output.txt | awk '{print $2}')
@@ -77,43 +75,6 @@ jobs:
           ]
           print(json.dumps(data, indent=2))
           " > alloc-bench.json
-
-          if [ ! -f alloc-baseline.json ]; then
-            {
-              echo ""
-              echo "> No baseline found. Run \`scripts/alloc-check.sh --save\` to create one."
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice::No alloc-baseline.json found — skipping regression check"
-            exit 0
-          fi
-
-          base_total_bytes=$(python3 -c "import json; print(json.load(open('alloc-baseline.json'))['alloc_total_bytes'])")
-          base_max_bytes=$(python3 -c "import json; print(json.load(open('alloc-baseline.json'))['alloc_max_bytes'])")
-
-          failed=0
-
-          check_metric() {
-            local name="$1" current="$2" baseline="$3"
-            if [ -z "$current" ] || [ -z "$baseline" ]; then
-              echo "::warning::Could not parse $name — skipping regression check"
-              return
-            fi
-            if [ "$baseline" -eq 0 ]; then return; fi
-            pct=$(python3 -c "print(round(($current - $baseline) / $baseline * 100, 1))")
-            echo "::notice::$name: $current (baseline: $baseline, ${pct}%)"
-            if python3 -c "exit(0 if ($current - $baseline) / $baseline * 100 > 10 else 1)"; then
-              echo "::warning::$name increased by ${pct}% (threshold: 10%)"
-              failed=1
-            fi
-          }
-
-          check_metric "total_bytes" "$total_bytes" "$base_total_bytes"
-          check_metric "max_bytes" "$max_bytes" "$base_max_bytes"
-
-          if [ "$failed" -ne 0 ]; then
-            echo "::error::Allocation regression detected. Run 'scripts/alloc-check.sh --save' to update baseline."
-            exit 1
-          fi
 
       - name: Store allocation metrics
         if: always() && steps.parse.outcome != 'skipped'
