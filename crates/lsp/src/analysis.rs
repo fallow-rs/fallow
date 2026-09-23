@@ -368,23 +368,6 @@ pub fn run_blocking_analysis(
     })
 }
 
-/// Test helper over the editor API accumulator.
-#[cfg(test)]
-pub fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
-    let mut output =
-        EditorAnalysisOutput::new(std::mem::take(target), DuplicationReport::default());
-    output.merge_results(source);
-    *target = output.results;
-}
-
-/// Test helper over the editor API accumulator.
-#[cfg(test)]
-pub fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) {
-    let mut output = EditorAnalysisOutput::new(AnalysisResults::default(), std::mem::take(target));
-    output.merge_duplication(source);
-    *target = output.duplication;
-}
-
 struct ChangedSinceScope {
     files: Option<FxHashSet<PathBuf>>,
     message: Option<(MessageType, String)>,

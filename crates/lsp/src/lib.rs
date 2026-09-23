@@ -121,7 +121,7 @@ use analysis::{
     BlockingAnalysisInput, BlockingAnalysisOutput, LspAnalysisSnapshot, run_blocking_analysis,
 };
 #[cfg(test)]
-use analysis::{ProjectRootAnalysisInput, analyze_project_root, merge_duplication, merge_results};
+use analysis::{ProjectRootAnalysisInput, analyze_project_root};
 use diagnostic_filter::{attach_changed_since_data, filter_disabled_diagnostics};
 use document_state::{
     DocumentSnapshot, DocumentState, VersionSnapshot, document_matches_disk, uri_is_stale,
