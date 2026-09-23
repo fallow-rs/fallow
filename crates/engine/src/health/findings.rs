@@ -186,11 +186,8 @@ fn collect_complexity_finding(
         input.threshold_resolver.global,
         applied_thresholds.effective,
     );
-    let exceeds_cyclomatic = fc.cyclomatic > applied_thresholds.effective.max_cyclomatic;
-    let exceeds_cognitive = fc.cognitive > applied_thresholds.effective.max_cognitive;
-    if !exceeds_cyclomatic && !exceeds_cognitive {
-        return None;
-    }
+    let (exceeds_cyclomatic, exceeds_cognitive) =
+        complexity_exceeded(fc, applied_thresholds.effective)?;
 
     Some(ComplexityViolation {
         path: path.to_path_buf(),
@@ -230,6 +227,21 @@ fn collect_complexity_finding(
             .override_index
             .map(|_| fallow_output::ThresholdSource::Override),
     })
+}
+
+/// Which complexity thresholds a function exceeds, or `None` when it exceeds
+/// neither. The health findings and the editor code lens both read this rule.
+pub(super) const fn complexity_exceeded(
+    fc: &fallow_types::extract::FunctionComplexity,
+    effective: fallow_output::HealthEffectiveThresholds,
+) -> Option<(bool, bool)> {
+    let exceeds_cyclomatic = fc.cyclomatic > effective.max_cyclomatic;
+    let exceeds_cognitive = fc.cognitive > effective.max_cognitive;
+    if exceeds_cyclomatic || exceeds_cognitive {
+        Some((exceeds_cyclomatic, exceeds_cognitive))
+    } else {
+        None
+    }
 }
 
 /// Clone the per-decision-point breakdown onto a finding only when the caller

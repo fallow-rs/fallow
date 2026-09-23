@@ -41,6 +41,8 @@ mod grouping;
 mod health_error;
 mod hotspots;
 mod ignore;
+mod inline;
+pub use inline::{InlineComplexity, inline_complexity};
 mod large_functions;
 mod output_build;
 pub mod ownership;

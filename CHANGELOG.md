@@ -180,6 +180,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   work only without a subcommand: `fallow --dupes-baseline <file> dead-code`
   stops with exit 2.
 
+- **The editor complexity code lens follows `health.thresholdOverrides`.**
+  The VS Code extension and the language server showed a complexity code
+  lens for each function above the global `maxCyclomatic` or `maxCognitive`.
+  They did not read `health.thresholdOverrides`, so a function that an
+  override lets through still had a lens, while `fallow health` did not
+  report it. The code lens now uses the same thresholds as `fallow health`.
+
 - **The MCP `find_dupes` tool and the Node API keep a clone group across
   workspaces.** With a workspace scope, `fallow dupes --workspace pkg-a` keeps
   every clone group that has at least one copy in `pkg-a`, and shows all of
