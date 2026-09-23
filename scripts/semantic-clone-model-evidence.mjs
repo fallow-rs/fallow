@@ -223,4 +223,4 @@ if (isMain) {
   });
 }
 
-export { generateEvidence, parseArgs, validateRuntimeProvenance };
+export { parseArgs };

@@ -962,18 +962,27 @@ echo "=== Wrapper trap parity (action vs gitlab) ==="
 ACTION_ANALYZE_SH="$DIR/../../action/scripts/analyze.sh"
 CI_TEMPLATE_YAML="$DIR/../gitlab-ci.yml"
 
+# Each trap must be present in each wrapper. A missing trap in one or both
+# wrappers is a failure.
+assert_wrapper_parity() {
+  local desc="$1" action_pattern="$2" gitlab_pattern="$3"
+  shift 3
+  local missing=""
+  grep -qE "$action_pattern" "$@" 2>/dev/null || missing="action"
+  grep -qE "$gitlab_pattern" "$CI_TEMPLATE_YAML" 2>/dev/null || missing="${missing:+$missing, }gitlab"
+  if [ -z "$missing" ]; then
+    pass "parity: $desc"
+  else
+    fail "parity: $desc" "trap missing in: $missing"
+  fi
+}
+
 # Audit baseline rejection: both must check command=audit AND a non-empty
 # generic baseline / save-baseline before invoking fallow.
-ACTION_HAS_AUDIT_BASELINE_TRAP=$(grep -cE 'INPUT_COMMAND.*=.*"audit".*INPUT_(SAVE_)?BASELINE' "$ACTION_ANALYZE_SH" 2>/dev/null || echo 0)
-CI_HAS_AUDIT_BASELINE_TRAP=$(grep -cE 'FALLOW_COMMAND.*=.*"audit".*FALLOW_(SAVE_)?BASELINE' "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
-if [ "$ACTION_HAS_AUDIT_BASELINE_TRAP" != "0" ] && [ "$CI_HAS_AUDIT_BASELINE_TRAP" != "0" ]; then
-  pass "parity: both wrappers reject generic baseline on audit"
-elif [ "$ACTION_HAS_AUDIT_BASELINE_TRAP" = "0" ] && [ "$CI_HAS_AUDIT_BASELINE_TRAP" = "0" ]; then
-  pass "parity: neither wrapper has audit baseline trap (consistent)"
-else
-  fail "parity: audit baseline trap" \
-    "asymmetric: action=$ACTION_HAS_AUDIT_BASELINE_TRAP, gitlab=$CI_HAS_AUDIT_BASELINE_TRAP"
-fi
+assert_wrapper_parity "both wrappers reject generic baseline on audit" \
+  'INPUT_COMMAND.*=.*"audit".*INPUT_(SAVE_)?BASELINE' \
+  'FALLOW_COMMAND.*=.*"audit".*FALLOW_(SAVE_)?BASELINE' \
+  "$ACTION_ANALYZE_SH"
 
 # Both must point users at the audit-specific baseline inputs by name.
 assert_contains "$(cat "$ACTION_ANALYZE_SH")" "dead-code-baseline" \
@@ -981,41 +990,27 @@ assert_contains "$(cat "$ACTION_ANALYZE_SH")" "dead-code-baseline" \
 assert_contains "$(cat "$CI_TEMPLATE_YAML")" "FALLOW_AUDIT_DEAD_CODE_BASELINE" \
   "parity: gitlab error message names FALLOW_AUDIT_DEAD_CODE_BASELINE"
 
-# Structured-error trap: both must inspect `.error == true` in
-# fallow-results.json BEFORE any `// 0`-defaulted issue extraction.
-ACTION_HAS_ERROR_TRAP=$(grep -cE "jq -e.*\.error == true.*fallow-results\.json" "$ACTION_ANALYZE_SH" 2>/dev/null || echo 0)
-CI_HAS_ERROR_TRAP=$(grep -cE "jq -e.*\.error == true.*fallow-results\.json" "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
-if [ "$ACTION_HAS_ERROR_TRAP" != "0" ] && [ "$CI_HAS_ERROR_TRAP" != "0" ]; then
-  pass "parity: both wrappers trap structured fallow errors before issue extraction"
-elif [ "$ACTION_HAS_ERROR_TRAP" = "0" ] && [ "$CI_HAS_ERROR_TRAP" = "0" ]; then
-  pass "parity: neither wrapper has structured-error trap (consistent)"
-else
-  fail "parity: structured-error trap" \
-    "asymmetric: action=$ACTION_HAS_ERROR_TRAP, gitlab=$CI_HAS_ERROR_TRAP"
-fi
+# Structured-error trap: both must inspect `.error == true` in the main
+# results file BEFORE any `// 0`-defaulted issue extraction.
+assert_wrapper_parity "both wrappers trap structured fallow errors before issue extraction" \
+  "jq -e '\\.error == true' \"\\\$RESULTS_FILE\"" \
+  "jq -e '\\.error == true' fallow-results\\.json" \
+  "$ACTION_ANALYZE_SH"
 
 # Verdict-driven threshold for audit: both wrappers must gate on
 # `verdict == "fail"` for audit (severity-aware), not on raw issue count.
 # Otherwise warn-tier findings fail CI even though the verdict says "warn"
 # (the original issue #302 bug).
-ACTION_HAS_VERDICT_GATE=$(grep -cE 'VERDICT.*=.*"fail"|VERDICT" = "fail"' "$ACTION_ANALYZE_SH" "$DIR/../../action.yml" 2>/dev/null | awk -F: '{s+=$2} END {print s}')
-CI_HAS_VERDICT_GATE=$(grep -cE 'VERDICT.*=.*"fail"|VERDICT" = "fail"' "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
-if [ "$ACTION_HAS_VERDICT_GATE" != "0" ] && [ "$CI_HAS_VERDICT_GATE" != "0" ]; then
-  pass "parity: both wrappers gate audit on verdict, not raw count"
-else
-  fail "parity: verdict-driven threshold" \
-    "asymmetric: action=$ACTION_HAS_VERDICT_GATE, gitlab=$CI_HAS_VERDICT_GATE"
-fi
+assert_wrapper_parity "both wrappers gate audit on verdict, not raw count" \
+  'VERDICT.*=.*"fail"|VERDICT" = "fail"' \
+  'VERDICT.*=.*"fail"|VERDICT" = "fail"' \
+  "$ACTION_ANALYZE_SH" "$DIR/../../action.yml"
 
 # Both wrappers must extract verdict + gate from audit JSON before issue count.
-ACTION_HAS_VERDICT_EXTRACT=$(grep -cE 'VERDICT=\$\(jq -r .*\.verdict' "$ACTION_ANALYZE_SH" 2>/dev/null || echo 0)
-CI_HAS_VERDICT_EXTRACT=$(grep -cE 'VERDICT=\$\(jq -r .*\.verdict' "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
-if [ "$ACTION_HAS_VERDICT_EXTRACT" != "0" ] && [ "$CI_HAS_VERDICT_EXTRACT" != "0" ]; then
-  pass "parity: both wrappers extract verdict from audit JSON"
-else
-  fail "parity: verdict extraction" \
-    "asymmetric: action=$ACTION_HAS_VERDICT_EXTRACT, gitlab=$CI_HAS_VERDICT_EXTRACT"
-fi
+assert_wrapper_parity "both wrappers extract verdict from audit JSON" \
+  'VERDICT=\$\(jq -r .*\.verdict' \
+  'VERDICT=\$\(jq -r .*\.verdict' \
+  "$ACTION_ANALYZE_SH"
 
 # Security gate support must stay symmetric across the official wrappers.
 assert_contains "$(cat "$ACTION_ANALYZE_SH")" 'INPUT_COMMAND" in' \

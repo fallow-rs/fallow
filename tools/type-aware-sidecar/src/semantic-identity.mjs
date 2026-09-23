@@ -63,7 +63,7 @@ export const relativePath = (root, fileName) =>
 
 export const sourceFileIdentity = (sourceFile) => canonicalFileIdentity(sourceFile.fileName);
 
-export const positions = (node) => {
+const positions = (node) => {
   const sourceFile = node.getSourceFile();
   const nodes = node.name ? [node, node.name] : [node];
   return nodes.map((candidate) => {
@@ -79,7 +79,7 @@ export const positions = (node) => {
 
 export const nodeText = (node) => node?.text;
 
-export const declarationKind = (node) =>
+const declarationKind = (node) =>
   DECLARATION_KIND_RULES.find(([checks]) => matchesAny(node, checks))?.[1];
 
 export const declarationNamespaces = (node) =>
@@ -95,7 +95,7 @@ const ownerName = (node) => {
   return ownerName(node.parent);
 };
 
-export const declarationOwner = (node) => ownerName(node.parent);
+const declarationOwner = (node) => ownerName(node.parent);
 
 export const ownerDeclaration = (node) => {
   let current = node?.parent;

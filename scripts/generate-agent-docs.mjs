@@ -115,7 +115,7 @@ const CLI_REFERENCE_SECTION_IDS = [
   "flags:security",
   "flags:config",
 ];
-export const SECTION_IDS = [
+const SECTION_IDS = [
   ...SKILL_SECTION_IDS,
   ...MCP_REFERENCE_SECTION_IDS,
   ...ISSUE_TYPE_REFERENCE_SECTION_IDS,
@@ -629,7 +629,7 @@ const RENDERERS = {
 };
 
 /** Stable identity of one curated cell: section, row key, column header. */
-export const curatedSeedKey = (section, row, column) => `${section}\u0000${row}\u0000${column}`;
+const curatedSeedKey = (section, row, column) => `${section}\u0000${row}\u0000${column}`;
 
 /** A stand-in for a parsed table that owns no cells and reports every seed the
  * renderer reaches for. Renderers treat it exactly like an empty table, so
@@ -657,7 +657,7 @@ export const curatedSeeds = (schema, sectionIds = SECTION_IDS) => {
   );
 };
 
-export const renderCuratedSeedRecord = (seeds) =>
+const renderCuratedSeedRecord = (seeds) =>
   `${JSON.stringify(
     {
       schema_version: 1,

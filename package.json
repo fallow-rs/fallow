@@ -9,8 +9,6 @@
     "verify:full": "node scripts/verify-repo.mjs --full",
     "generate:contracts": "node scripts/generate-all.mjs",
     "generate:contracts:check": "node scripts/generate-all.mjs --check",
-    "generate:all": "node scripts/generate-all.mjs",
-    "generate:all:check": "node scripts/generate-all.mjs --check",
     "generate:agent-adapters": "node scripts/generate-agent-adapters.mjs",
     "check:agent-adapters": "node scripts/generate-agent-adapters.mjs --check",
     "check:knowledge-architecture": "node scripts/check-knowledge-architecture.mjs",
