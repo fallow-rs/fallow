@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790177376669,
+  "lastUpdate": 1790186351723,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "0beb9fb4ae56c799fca0088b7e167430d815254d",
-          "message": "fix(cli): complete the knip and jscpd migration tables (#2523)\n\nCloses #2507.\n\nA systematic diff against knip 6.34.0 and @jscpd/core 4.2.5 found 128 knip gaps\nand 15 jscpd gaps. The serious category is not the missing entries: 16 keys were\nclaimed as auto-detected by fallow when no fallow plugin covers them, so\nmigration was telling users their tooling was handled when it was not. Those now\nreport honestly as unsupported.\n\nCoverage is exact. The covered and unsupported knip tables together are the 184\nreal keys, taken as the union of knip's Plugins map and its published schema.\njscpd is 6 mapped plus 31 reported across IOptions plus colors. Plausible but\nunreal mappings were rejected rather than padding the covered list: metro is\nonly reachable through the react-native plugin, i18next is the library rather\nthan the CLI, and parsing a file type is not plugin coverage.\n\nThe tables are now guarded rather than merely correct. A first pass claimed the\ntests pinned each table against the upstream key set; they asserted sorting and\neight hardcoded names and consulted nothing, so renaming a plugin would have\nleft every test green while migration promised auto-detection that would not\nhappen. Every covered key now resolves through a named alias table to the\nbuilt-in plugin roster, with the reverse check and a no-stale-alias check.\n\nUnknown keys no longer vanish either. Both migrators were allowlist-only with no\nelse branch, so a real knip root key produced zero warnings. They now report what\nneither table names, following the existing unmapped-rule-key wording.\n\nAlso maps knip's cycles rule to circular-dependencies, which fallow has and the\ntable missed.\n\nFallow still has no Marko plugin; only the table side is fixed here.\n\nThanks @VariableVince for the report, and for the hunch that more than Marko was\nmissing.",
-          "timestamp": "2026-09-01T16:43:48+02:00",
-          "tree_id": "4e92ea67e3ab4cccf52afdc3108411b5b2bcc67c",
-          "url": "https://github.com/fallow-rs/fallow/commit/0beb9fb4ae56c799fca0088b7e167430d815254d"
-        },
-        "date": 1788274300138,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9707735,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49333,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1171803,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8387,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8620,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d6e4fdf5b104402b51e69e8d767e9d78c9ba84b3",
+          "message": "fix: apply combined baselines and state the verdict in every JSON envelope (#2810)\n\nBare fallow applies --dupes-baseline and --health-baseline. Every machine envelope with a default exit rule always carries that rule in gate_outcomes, so a JSON reader can see a failing run. Exit codes do not change. The drift harness checks I3 and I7.",
+          "timestamp": "2026-09-23T19:53:24+02:00",
+          "tree_id": "7de9478ff67ea975a394141ddb9805b386e6c3e1",
+          "url": "https://github.com/fallow-rs/fallow/commit/d6e4fdf5b104402b51e69e8d767e9d78c9ba84b3"
+        },
+        "date": 1790186347482,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10173223,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51592,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1197421,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8393,
             "unit": "allocations"
           }
         ]
