@@ -3,11 +3,12 @@
 //! - A nested key that ends in `components` or `imports` (a `routeRules` path)
 //!   does not keep a surface's convention patterns when the config object is
 //!   readable, so unreferenced convention files report with `autoImports` on.
-//! - A local directory in `extends`, and each `layers/*` directory, is a layer
-//!   root: its convention files are entry points with `autoImports` off, and its
-//!   components and composables are auto-import sources with `autoImports` on.
-//! - `#layers/<name>/` resolves to a local layer, named by its `$meta.name` or
-//!   else by its directory name.
+//! - A local directory in `extends`, and each `layers/*` directory, that holds a
+//!   Nuxt config is a layer root: its convention files are entry points with
+//!   `autoImports` off, and its components and composables are auto-import
+//!   sources with `autoImports` on. A directory without a config is no layer.
+//! - `#layers/<name>/` resolves to a local layer named by its `$meta.name`. A
+//!   `layers/*` directory without one is named by its directory name.
 
 use std::path::Path;
 
@@ -47,6 +48,23 @@ fn nested_surface_keys_do_not_keep_convention_patterns() {
     }
 }
 
+/// Directories without a Nuxt config: Nuxt skips them as layers, so their
+/// unreferenced files keep reporting.
+const NOT_LAYER_FILES: &[&str] = &[
+    "bare/components/Bare.vue",
+    "layers/legacy/components/Old.vue",
+    "layers/legacy/utils/oldHelper.ts",
+];
+
+fn assert_not_layer_files_report(unused: &[String]) {
+    for dead in NOT_LAYER_FILES {
+        assert!(
+            unused.contains(&(*dead).to_string()),
+            "{dead} is not in a layer and must report, got: {unused:?}"
+        );
+    }
+}
+
 const LAYER_FILES_IN_USE: &[&str] = &[
     "base/components/Banner.vue",
     "base/composables/useMark.ts",
@@ -73,6 +91,7 @@ fn local_layer_conventions_are_entry_points_with_flag_off() {
             "{alive} is a layer convention file and must not report, got: {unused:?}"
         );
     }
+    assert_not_layer_files_report(&unused);
 }
 
 #[test]
@@ -94,10 +113,11 @@ fn local_layer_sources_are_auto_imported_with_flag_on() {
         unused.contains(&"base/components/DeadBanner.vue".to_string()),
         "an unreferenced layer component must report with the flag on, got: {unused:?}"
     );
+    assert_not_layer_files_report(&unused);
 }
 
 #[test]
-fn layer_alias_resolves_by_meta_name_or_directory_name() {
+fn layer_alias_follows_meta_name_and_auto_registered_directory_name() {
     let root = fixture_path("nuxt-layer-aliases");
     let config = create_config(root.clone());
 
@@ -113,14 +133,14 @@ fn layer_alias_resolves_by_meta_name_or_directory_name() {
         unresolved.is_empty(),
         "every #layers/ import must resolve, got: {unresolved:?}"
     );
-    for alive in [
-        "tiers/marketing/lib/mark.ts",
-        "tiers/plain/lib/tool.ts",
-        "layers/docs/lib/guide.ts",
-    ] {
+    for alive in ["tiers/marketing/lib/mark.ts", "layers/docs/lib/guide.ts"] {
         assert!(
             !unused.contains(&alive.to_string()),
             "{alive} is imported through #layers/ and must not report, got: {unused:?}"
         );
     }
+    assert!(
+        unused.contains(&"tiers/plain/lib/tool.ts".to_string()),
+        "an extends layer without `$meta.name` gets no #layers/ alias, got: {unused:?}"
+    );
 }

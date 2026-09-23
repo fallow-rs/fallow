@@ -425,6 +425,37 @@ fn a_modeled_nuxt_config_carries_no_advisory() {
     );
 }
 
+/// A `hooks` object or an environment override that does not touch a surface
+/// keeps the static proof of the top-level keys: `components: false` still drops
+/// the component patterns, and a nested `routeRules` path is not a surface key.
+/// The unreferenced component reports, and no advisory names a key fallow models.
+#[test]
+fn an_unrelated_hook_or_override_keeps_the_surface_modeled() {
+    for config in [
+        "export default { components: false, hooks: { 'pages:extend'() {} } };\n",
+        "export default { components: false, $production: { routeRules: {} } };\n",
+        "export default { routeRules: { '/docs/components': { prerender: true } }, hooks: { 'pages:extend'() {} } };\n",
+    ] {
+        let project = nuxt_project(config);
+        let envelope = parse_json(&dead_code_json(&root_arg(&project), &["--quiet"]));
+        assert!(
+            of_kind(&envelope, NOT_MODELED).is_empty(),
+            "{config}: {}",
+            envelope["workspace_diagnostics"]
+        );
+        let unused: Vec<&str> = envelope["unused_files"]
+            .as_array()
+            .map_or(&[] as &[Value], Vec::as_slice)
+            .iter()
+            .filter_map(|entry| entry["path"].as_str())
+            .collect();
+        assert!(
+            unused.contains(&"app/components/Widget.vue"),
+            "{config}: the unreferenced component must report, got {unused:?}"
+        );
+    }
+}
+
 /// `fallow check` is the other command a CI job runs, and it reaches the array
 /// through the same generic route, so no per-command wiring is needed.
 #[test]

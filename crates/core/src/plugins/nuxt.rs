@@ -108,6 +108,18 @@ const CONFIG_PATTERNS: &[&str] = &["nuxt.config.{ts,js}", "src/module.{ts,js}"];
 /// File names Nuxt reads as the config of a project or a layer.
 const NUXT_CONFIG_FILES: &[&str] = &["nuxt.config.ts", "nuxt.config.js"];
 
+/// Config file names that make a directory a Nuxt layer. Nuxt skips a layer
+/// directory without one, so fallow does too. These are the extensions c12
+/// loads, wider than the files this plugin parses.
+const LAYER_CONFIG_FILES: &[&str] = &[
+    "nuxt.config.ts",
+    "nuxt.config.js",
+    "nuxt.config.mjs",
+    "nuxt.config.cjs",
+    "nuxt.config.mts",
+    "nuxt.config.cts",
+];
+
 /// Directory under the project root whose children Nuxt 3.12+ registers as
 /// layers without an `extends` entry.
 const AUTO_LAYERS_DIR: &str = "layers";
@@ -376,21 +388,32 @@ fn resolve_nuxt_main_config(
         extends.into_iter().partition(|entry| is_local_path(entry));
     add_referenced_packages(result, &package_extends);
 
-    let mut layers = local_layer_dirs(&local_extends, config_path, root, &src_dir);
-    if config_path.parent() == Some(root) {
-        for layer in auto_registered_layer_dirs(root) {
-            if !layers.contains(&layer) {
-                layers.push(layer);
-            }
-        }
+    let auto_registered = if config_path.parent() == Some(root) {
+        auto_registered_layer_dirs(root)
+    } else {
+        Vec::new()
+    };
+    let extended = local_layer_dirs(&local_extends, config_path, root, &src_dir);
+    for layer in &auto_registered {
+        add_local_layer_support(result, root, layer, true);
     }
-    for layer in &layers {
-        add_local_layer_support(result, root, layer);
+    for layer in extended
+        .iter()
+        .filter(|layer| !auto_registered.contains(layer))
+    {
+        add_local_layer_support(result, root, layer, false);
     }
 }
 
+/// Whether a directory holds a Nuxt config, which is what makes it a layer.
+fn has_layer_config(dir: &Path) -> bool {
+    LAYER_CONFIG_FILES
+        .iter()
+        .any(|file| dir.join(file).is_file())
+}
+
 /// Resolve the local directories named in `extends` to root-relative paths.
-/// A directory outside the root is skipped, like every other config path.
+/// A directory outside the root, or one without a Nuxt config, is skipped.
 fn local_layer_dirs(
     entries: &[String],
     config_path: &Path,
@@ -403,7 +426,7 @@ fn local_layer_dirs(
             continue;
         };
         let dir = dir.trim_end_matches('/').to_string();
-        if !dir.is_empty() && !dirs.contains(&dir) {
+        if !dir.is_empty() && !dirs.contains(&dir) && has_layer_config(&root.join(&dir)) {
             dirs.push(dir);
         }
     }
@@ -411,7 +434,8 @@ fn local_layer_dirs(
 }
 
 /// The root-relative `layers/<name>` directories that Nuxt 3.12+ registers as
-/// layers without an `extends` entry, in a stable order.
+/// layers without an `extends` entry, in a stable order. A directory without a
+/// Nuxt config is no layer.
 fn auto_registered_layer_dirs(root: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(root.join(AUTO_LAYERS_DIR)) else {
         return Vec::new();
@@ -419,6 +443,7 @@ fn auto_registered_layer_dirs(root: &Path) -> Vec<String> {
     let mut dirs: Vec<String> = entries
         .flatten()
         .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+        .filter(|entry| has_layer_config(&entry.path()))
         .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
         .map(|name| format!("{AUTO_LAYERS_DIR}/{name}"))
         .collect();
@@ -428,9 +453,13 @@ fn auto_registered_layer_dirs(root: &Path) -> Vec<String> {
 
 /// Treat a local layer like the project root: its convention directories are
 /// entry points, its root files are always used, and `#layers/<name>/`
-/// resolves to it. The name is the layer's `$meta.name`, else its directory
-/// name. See issue #2752.
-fn add_local_layer_support(result: &mut PluginResult, root: &Path, layer: &str) {
+/// resolves to it when it has a name. See issue #2752.
+fn add_local_layer_support(
+    result: &mut PluginResult,
+    root: &Path,
+    layer: &str,
+    auto_registered: bool,
+) {
     let prefix = Path::new(layer);
     result.extend_entry_patterns(
         ENTRY_PATTERNS
@@ -447,23 +476,29 @@ fn add_local_layer_support(result: &mut PluginResult, root: &Path, layer: &str) 
     }
     add_prefixed_default_used_exports(result, prefix, DEFAULT_EXPORT_ENTRY_PATTERNS);
 
-    if let Some(name) = layer_name(root, layer) {
+    if let Some(name) = layer_name(root, layer, auto_registered) {
         result
             .path_aliases
             .push((format!("#layers/{name}/"), layer.to_string()));
     }
 }
 
-/// The name a local layer is addressed by in `#layers/<name>/`.
-fn layer_name(root: &Path, layer: &str) -> Option<String> {
+/// The name a local layer is addressed by in `#layers/<name>/`: its
+/// `$meta.name`. Nuxt names an auto-registered `layers/<name>` directory by its
+/// directory name when `$meta.name` is absent, and gives an `extends` layer no
+/// name then.
+fn layer_name(root: &Path, layer: &str, auto_registered: bool) -> Option<String> {
     let dir = root.join(layer);
-    let meta_name = NUXT_CONFIG_FILES.iter().find_map(|file| {
+    let meta_name = LAYER_CONFIG_FILES.iter().find_map(|file| {
         let path = dir.join(file);
         let source = std::fs::read_to_string(&path).ok()?;
         config_parser::extract_config_string(&source, &path, &["$meta", "name"])
     });
     meta_name
         .or_else(|| {
+            if !auto_registered {
+                return None;
+            }
             Path::new(layer)
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -1372,9 +1407,10 @@ pub fn auto_import_settings(root: &Path) -> AutoImportSettings {
 ///
 /// A readable top-level object decides whether a surface key is present: a
 /// nested key such as a `routeRules` path that ends in `components` does not
-/// configure a surface. The key regexes are the fallback for a source whose
-/// config object the parser cannot resolve, and for an object whose nested
-/// properties can configure a surface. A surface whose key is present starts at
+/// configure a surface, while a nested key in an environment override or a
+/// `components:*` or `imports:*` hook does. The key regexes are the fallback for
+/// a source whose config object the parser cannot resolve, and for an override
+/// or `hooks` object it cannot read. A surface whose key is present starts at
 /// `Custom`, and the AST can narrow it to `Disabled`. A top-level property the
 /// AST cannot resolve statically hides a key, so it puts both surfaces on
 /// `Custom`. See issue #2752.
@@ -1418,8 +1454,9 @@ struct ConfigProof {
     components_disabled: bool,
     /// The `imports` surface scans no more than the modeled defaults.
     scripts_disabled: bool,
-    /// The surface keys of the top-level object, absent when the object cannot
-    /// be read or a nested property can configure a surface.
+    /// The surface keys of the top-level object and of the overrides that
+    /// can set a surface, absent when the object or such an override cannot be
+    /// read statically.
     keys: Option<SurfaceKeys>,
 }
 
@@ -1442,31 +1479,35 @@ fn read_config_proof(source: &str, path: &Path) -> ConfigProof {
                 ..ConfigProof::default()
             });
         }
+        let Some(overrides) = nested_surface_overrides(obj) else {
+            return Some(ConfigProof::default());
+        };
         let components = sole_static_property(obj, "components");
         let imports = sole_static_property(obj, "imports");
-        let keys = (!has_nested_surface_override(obj)).then_some(SurfaceKeys {
-            components: !matches!(components, PropertyLookup::Absent),
-            imports: !matches!(imports, PropertyLookup::Absent),
-        });
-        if keys.is_none() || !matches!(sole_static_property(obj, "extends"), PropertyLookup::Absent)
-        {
+        let keys = SurfaceKeys {
+            components: overrides.components || !matches!(components, PropertyLookup::Absent),
+            imports: overrides.imports || !matches!(imports, PropertyLookup::Absent),
+        };
+        if !matches!(sole_static_property(obj, "extends"), PropertyLookup::Absent) {
             return Some(ConfigProof {
-                keys,
+                keys: Some(keys),
                 ..ConfigProof::default()
             });
         }
         Some(ConfigProof {
             unresolvable: false,
-            components_disabled: match components {
-                PropertyLookup::Found(expr) => components_value_proves_disabled(expr),
-                PropertyLookup::Absent | PropertyLookup::Unknown => false,
-            },
-            scripts_disabled: match imports {
-                PropertyLookup::Found(expr) => config_parser::object_expression(expr)
-                    .is_some_and(imports_object_proves_disabled),
-                PropertyLookup::Absent | PropertyLookup::Unknown => false,
-            },
-            keys,
+            components_disabled: !overrides.components
+                && match components {
+                    PropertyLookup::Found(expr) => components_value_proves_disabled(expr),
+                    PropertyLookup::Absent | PropertyLookup::Unknown => false,
+                },
+            scripts_disabled: !overrides.imports
+                && match imports {
+                    PropertyLookup::Found(expr) => config_parser::object_expression(expr)
+                        .is_some_and(imports_object_proves_disabled),
+                    PropertyLookup::Absent | PropertyLookup::Unknown => false,
+                },
+            keys: Some(keys),
         })
     })
     .unwrap_or_default()
@@ -1491,22 +1532,97 @@ fn has_unresolvable_top_level_property(obj: &ObjectExpression<'_>) -> bool {
     })
 }
 
-/// Whether a top-level property holds nested config that can set a surface: an
-/// environment override such as `$production` merges a nested `components` or
-/// `imports` key into the config, and a `components:dirs` or `imports:dirs`
-/// hook can add scan directories. `$meta` is layer metadata, not config.
-fn has_nested_surface_override(obj: &ObjectExpression<'_>) -> bool {
-    obj.properties.iter().any(|property| {
+/// Environment override keys whose object Nuxt merges into the config.
+const ENVIRONMENT_OVERRIDE_KEYS: &[&str] = &["$production", "$development", "$test"];
+
+/// Which surfaces the nested config of a top-level property can set, or `None`
+/// when such a property cannot be read statically. An environment override
+/// (`$production`, `$development`, `$test`, and each `$env.<name>`) merges its
+/// nested `components` and `imports` keys into the config. A `components:*` or
+/// `imports:*` hook in `hooks` can change the scan. Other hooks and other
+/// override keys do not touch a surface. See issue #2752.
+fn nested_surface_overrides(obj: &ObjectExpression<'_>) -> Option<SurfaceKeys> {
+    let mut touched = SurfaceKeys {
+        components: false,
+        imports: false,
+    };
+    for property in &obj.properties {
         let ObjectPropertyKind::ObjectProperty(property) = property else {
-            return false;
+            continue;
         };
-        let name = match &property.key {
-            PropertyKey::StaticIdentifier(id) => id.name.as_str(),
-            PropertyKey::StringLiteral(literal) => literal.value.as_str(),
-            _ => return false,
+        let Some(name) = static_key_name(&property.key) else {
+            continue;
         };
-        name == "hooks" || (name.starts_with('$') && name != "$meta")
+        let found = if name == "hooks" {
+            hook_surfaces(&property.value)?
+        } else if name == "$env" {
+            let environments = config_parser::object_expression(&property.value)?;
+            let mut found = SurfaceKeys {
+                components: false,
+                imports: false,
+            };
+            for environment in &environments.properties {
+                let ObjectPropertyKind::ObjectProperty(environment) = environment else {
+                    return None;
+                };
+                static_key_name(&environment.key)?;
+                let keys = override_surfaces(&environment.value)?;
+                found.components |= keys.components;
+                found.imports |= keys.imports;
+            }
+            found
+        } else if ENVIRONMENT_OVERRIDE_KEYS.contains(&name) {
+            override_surfaces(&property.value)?
+        } else {
+            continue;
+        };
+        touched.components |= found.components;
+        touched.imports |= found.imports;
+    }
+    Some(touched)
+}
+
+/// Which surface keys one environment override object carries, or `None` when
+/// the object cannot be read statically.
+fn override_surfaces(expr: &Expression<'_>) -> Option<SurfaceKeys> {
+    let obj = config_parser::object_expression(expr)?;
+    let lookup = |key| match sole_static_property(obj, key) {
+        PropertyLookup::Found(_) => Some(true),
+        PropertyLookup::Absent => Some(false),
+        PropertyLookup::Unknown => None,
+    };
+    Some(SurfaceKeys {
+        components: lookup("components")?,
+        imports: lookup("imports")?,
     })
+}
+
+/// Which surfaces the hooks in a `hooks` object can change, or `None` when the
+/// object or one of its keys cannot be read statically.
+fn hook_surfaces(expr: &Expression<'_>) -> Option<SurfaceKeys> {
+    let obj = config_parser::object_expression(expr)?;
+    let mut found = SurfaceKeys {
+        components: false,
+        imports: false,
+    };
+    for property in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(property) = property else {
+            return None;
+        };
+        let name = static_key_name(&property.key)?;
+        found.components |= name.starts_with("components:");
+        found.imports |= name.starts_with("imports:");
+    }
+    Some(found)
+}
+
+/// The name of a static identifier or string literal key.
+fn static_key_name<'a>(key: &'a PropertyKey<'a>) -> Option<&'a str> {
+    match key {
+        PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
+        PropertyKey::StringLiteral(literal) => Some(literal.value.as_str()),
+        _ => None,
+    }
 }
 
 fn surface_setting(key_present: bool, proven_disabled: bool) -> AutoImportSetting {
@@ -2009,11 +2125,11 @@ mod tests {
                 extends: ["github:acme/layer", "@acme/layer", "./base"]
             });
         "#;
-        let result = NuxtPlugin.resolve_config(
-            Path::new("/project/nuxt.config.ts"),
-            source,
-            Path::new("/project"),
-        );
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("base")).unwrap();
+        std::fs::write(root.join("base/nuxt.config.mjs"), "export default {}\n").unwrap();
+        let result = NuxtPlugin.resolve_config(&root.join("nuxt.config.ts"), source, root);
         assert!(has_entry_pattern(
             &result,
             "base/components/**/*.{vue,ts,tsx,js,jsx}"
@@ -3042,6 +3158,60 @@ mod tests {
             let settings = classify(body);
             assert_eq!(settings.components, AutoImportSetting::Custom, "{body}");
             assert_eq!(settings.scripts, AutoImportSetting::Custom, "{body}");
+        }
+    }
+
+    #[test]
+    fn classify_config_source_keeps_the_proof_beside_an_unrelated_override() {
+        for body in [
+            "components: false, hooks: { 'pages:extend'() {} }",
+            "components: false, $production: { routeRules: {} }",
+            "components: false, $env: { staging: { routeRules: {} } }",
+        ] {
+            let settings = classify(body);
+            assert_eq!(settings.components, AutoImportSetting::Disabled, "{body}");
+            assert_eq!(settings.scripts, AutoImportSetting::Default, "{body}");
+        }
+        let settings = classify(
+            "routeRules: { '/docs/components': { prerender: true } }, hooks: { 'pages:extend'() {} }",
+        );
+        assert_eq!(settings.components, AutoImportSetting::Default);
+        assert_eq!(settings.scripts, AutoImportSetting::Default);
+    }
+
+    #[test]
+    fn classify_config_source_reads_each_override_shape() {
+        let cases: &[(&str, AutoImportSetting, AutoImportSetting)] = &[
+            (
+                "components: false, $env: { staging: { components: { dirs: ['~/s'] } } }",
+                AutoImportSetting::Custom,
+                AutoImportSetting::Default,
+            ),
+            (
+                "components: false, $test: { imports: { dirs: ['t'] } }",
+                AutoImportSetting::Disabled,
+                AutoImportSetting::Custom,
+            ),
+            (
+                "components: false, hooks: { 'imports:extend'() {} }",
+                AutoImportSetting::Disabled,
+                AutoImportSetting::Custom,
+            ),
+            (
+                "components: false, hooks: { ...sharedHooks }",
+                AutoImportSetting::Custom,
+                AutoImportSetting::Default,
+            ),
+            (
+                "components: false, $production: productionConfig",
+                AutoImportSetting::Custom,
+                AutoImportSetting::Default,
+            ),
+        ];
+        for (body, components, scripts) in cases {
+            let settings = classify(body);
+            assert_eq!(settings.components, *components, "components for `{body}`");
+            assert_eq!(settings.scripts, *scripts, "scripts for `{body}`");
         }
     }
 

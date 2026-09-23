@@ -1,3 +1,3 @@
 export default defineNuxtConfig({
-  extends: ['./base', 'github:acme/remote-layer'],
+  extends: ['./base', './bare', 'github:acme/remote-layer'],
 })
