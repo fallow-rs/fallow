@@ -22,6 +22,17 @@ Analysis logic belongs below the CLI. A CLI module may validate arguments,
 resolve paths, select an execution mode, render a result, and map the result to
 an exit code.
 
+A decision that more than one command or surface makes has one implementation.
+The scope filters are `fallow_engine::dead_code::apply_scope`,
+`fallow_engine::duplicates::apply_scope` and `fallow_engine::diff_scope`. The
+production mode of each analysis is
+`fallow_engine::project_config::ProductionFlags`. The error-severity rule is
+`fallow_engine::error_severity`. The dead-code baseline loader is
+`fallow_engine::baseline::apply_dead_code_baseline`. The editor complexity lens
+is `fallow_engine::health::inline_complexity`. In the CLI, `crate::gates`
+builds every `gate_outcomes` entry, and `crate::exit_codes::gate_exit_code`
+maps a gate verdict to the exit code.
+
 ## High-value paths
 
 - `crates/cli/src/audit.rs`: the CLI runners and the review brief of the

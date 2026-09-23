@@ -106,11 +106,10 @@ fn machine_combined_code_with_stale_baseline_gate(
                 fallow_engine::baseline::BaselineKind::Health,
             )
         });
-    if dead_code || dupes || health {
-        code.max(1)
-    } else {
-        code
-    }
+    code.max(crate::exit_codes::gate_failed_exit_code(
+        fallow_output::GateName::StaleBaseline,
+        dead_code || dupes || health,
+    ))
 }
 
 fn print_machine_combined_report(
@@ -747,9 +746,10 @@ pub(super) fn handle_regression_and_summary(
         if !quiet {
             regression::print_regression_outcome(outcome);
         }
-        if outcome.is_failure() {
-            *max_exit = (*max_exit).max(1);
-        }
+        *max_exit = (*max_exit).max(crate::exit_codes::gate_failed_exit_code(
+            fallow_output::GateName::Regression,
+            outcome.is_failure(),
+        ));
     }
 
     if *max_exit > 0 && !quiet {

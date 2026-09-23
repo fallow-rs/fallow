@@ -49,22 +49,27 @@ pub fn print_audit_result_with_style(
         return format_exit;
     }
 
-    match result.verdict {
-        AuditVerdict::Fail => ExitCode::from(1),
-        AuditVerdict::Pass | AuditVerdict::Warn => ExitCode::SUCCESS,
+    crate::exit_codes::run_exit_code([crate::exit_codes::gate_exit_code(
+        fallow_output::GateName::AuditVerdict,
+        audit_verdict_status(result.verdict),
+    )])
+}
+
+/// The gate status of an audit verdict.
+const fn audit_verdict_status(verdict: AuditVerdict) -> fallow_output::GateStatus {
+    match verdict {
+        AuditVerdict::Pass => fallow_output::GateStatus::Pass,
+        AuditVerdict::Warn => fallow_output::GateStatus::Warn,
+        AuditVerdict::Fail => fallow_output::GateStatus::Fail,
     }
 }
 
 /// The audit run's rule-severity verdict, for the envelope's `gate_outcomes`.
 fn audit_gate_outcomes(result: &AuditResult) -> Option<fallow_output::GateOutcomes> {
-    use fallow_output::GateStatus;
-
-    let status = match result.verdict {
-        AuditVerdict::Pass => GateStatus::Pass,
-        AuditVerdict::Warn => GateStatus::Warn,
-        AuditVerdict::Fail => GateStatus::Fail,
-    };
-    crate::gates::audit_gate_outcomes(status, audit_loaded_any_baseline(result))
+    crate::gates::audit_gate_outcomes(
+        audit_verdict_status(result.verdict),
+        audit_loaded_any_baseline(result),
+    )
 }
 
 /// Whether this audit loaded any of its three baselines.

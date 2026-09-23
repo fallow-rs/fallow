@@ -602,15 +602,11 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions<'_
         return ExitCode::SUCCESS;
     }
 
-    if health_exit_gate_failed(result, options) {
-        return ExitCode::from(1);
+    let code = health_exit_code(result, options);
+    if code == 0 {
+        maybe_print_score_gate_note(result, options);
     }
-    if result.should_fail_on_coverage_gaps && result.coverage_gaps_has_findings {
-        return ExitCode::from(1);
-    }
-    maybe_print_score_gate_note(result, options);
-
-    ExitCode::SUCCESS
+    crate::exit_codes::run_exit_code([code])
 }
 
 fn health_report_context<'a>(
@@ -678,19 +674,42 @@ fn health_gate_outcomes(
     })
 }
 
-/// The OR of every health exit gate, with each one evaluated before the verdict
-/// is combined so that none of them can swallow another's stderr line.
+/// The exit code of every health exit gate, with each gate evaluated before
+/// the codes are combined so that none of them can swallow another's stderr
+/// line.
 ///
 /// The baseline gate is why this is not a short-circuiting chain: the score and
 /// findings gates have their condition printed in the report, a stale baseline
 /// has it nowhere, so a run that already fails the findings gate would exit 1
 /// with nothing about the baseline the user explicitly gated on.
-fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
-    let score = score_gate_failed(result, options);
-    let findings = findings_gate_failed(result, options);
-    let runtime_coverage = has_failing_runtime_coverage(result);
-    let stale_baseline = stale_baseline_gate_failed(result, options);
-    score || findings || runtime_coverage || stale_baseline
+fn health_exit_code(result: &HealthResult, options: HealthPrintOptions<'_>) -> u8 {
+    use crate::exit_codes::gate_failed_exit_code;
+    use fallow_output::GateName;
+
+    let findings_gate = if options.gates.min_severity.is_some() {
+        GateName::HealthMinSeverity
+    } else {
+        GateName::HealthFindings
+    };
+    [
+        gate_failed_exit_code(GateName::HealthMinScore, score_gate_failed(result, options)),
+        gate_failed_exit_code(findings_gate, findings_gate_failed(result, options)),
+        gate_failed_exit_code(
+            GateName::HealthRuntimeCoverage,
+            has_failing_runtime_coverage(result),
+        ),
+        gate_failed_exit_code(
+            GateName::StaleBaseline,
+            stale_baseline_gate_failed(result, options),
+        ),
+        gate_failed_exit_code(
+            GateName::HealthCoverageGaps,
+            result.should_fail_on_coverage_gaps && result.coverage_gaps_has_findings,
+        ),
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(0)
 }
 
 /// Say what this run made of the loaded baseline, and record it for the

@@ -9,9 +9,11 @@ use fallow_types::results::AnalysisResults;
 use crate::baseline::{BaselineData, BaselineStaleness, BaselineStalenessWarning};
 use crate::baseline_gate::LoadedBaselineStaleness;
 use crate::error::emit_error;
+use crate::exit_codes::gate_failed_exit_code;
 use crate::load_config_for_analysis;
 use crate::regression::{self, RegressionOpts, RegressionOutcome};
 use crate::report;
+use fallow_output::GateName;
 
 #[expect(
     clippy::redundant_pub_crate,
@@ -1420,7 +1422,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     // Evaluation order, and with it the order the lines print, is unchanged,
     // and so is exit precedence.
     let type_aware_failed = type_aware_completeness_failed(result, prepared.quiet);
-    let regression_exit = check_regression_exit_code(result.regression.as_ref(), prepared.quiet);
+    let regression_failed = check_regression_failed(result.regression.as_ref(), prepared.quiet);
 
     print_load_data_key_abstain_note(result, prepared.quiet);
     print_unused_component_props_exempted_note(result, prepared.quiet);
@@ -1432,21 +1434,12 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         fallow_engine::baseline::BaselineKind::DeadCode,
     );
 
-    if type_aware_failed {
-        return ExitCode::from(1);
-    }
-    if let Some(exit) = regression_exit {
-        return exit;
-    }
-    if stale_baseline_failed {
-        return ExitCode::from(1);
-    }
-
-    if prepared.has_error_severity {
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
-    }
+    crate::exit_codes::run_exit_code([
+        gate_failed_exit_code(GateName::TypeAwareRequire, type_aware_failed),
+        gate_failed_exit_code(GateName::Regression, regression_failed),
+        gate_failed_exit_code(GateName::StaleBaseline, stale_baseline_failed),
+        gate_failed_exit_code(GateName::ErrorSeverityFindings, prepared.has_error_severity),
+    ])
 }
 
 /// This run's view of the loaded baseline, in the shape the JSON envelope
@@ -1556,15 +1549,14 @@ fn print_type_aware_warnings(result: &CheckResult, quiet: bool) {
     }
 }
 
-fn check_regression_exit_code(
-    outcome: Option<&RegressionOutcome>,
-    quiet: bool,
-) -> Option<ExitCode> {
-    let outcome = outcome?;
+fn check_regression_failed(outcome: Option<&RegressionOutcome>, quiet: bool) -> bool {
+    let Some(outcome) = outcome else {
+        return false;
+    };
     if !quiet {
         regression::print_regression_outcome(outcome);
     }
-    outcome.is_failure().then(|| ExitCode::from(1))
+    outcome.is_failure()
 }
 
 fn print_load_data_key_abstain_note(result: &CheckResult, quiet: bool) {

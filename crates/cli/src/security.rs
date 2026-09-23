@@ -45,7 +45,6 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
 use crate::error::emit_error;
-use crate::exit_codes::SECURITY_GATE_EXIT_CODE;
 use crate::health::HealthOptions;
 use crate::load_config_for_analysis;
 use fallow_output::{
@@ -939,17 +938,19 @@ fn security_exit_code(
     output: &SecurityOutput,
     effective_severities: SecurityRuleSeverities,
 ) -> ExitCode {
-    if let Some(gate) = &output.gate {
-        if gate.verdict == SecurityGateVerdict::Fail {
-            ExitCode::from(SECURITY_GATE_EXIT_CODE)
-        } else {
-            ExitCode::SUCCESS
-        }
-    } else if security_advisory_failed(opts, output, effective_severities) {
-        ExitCode::from(1)
+    // A configured gate decides the exit code before the advisory.
+    let code = if let Some(gate) = &output.gate {
+        crate::exit_codes::gate_failed_exit_code(
+            fallow_output::GateName::Security,
+            gate.verdict == SecurityGateVerdict::Fail,
+        )
     } else {
-        ExitCode::SUCCESS
-    }
+        crate::exit_codes::gate_failed_exit_code(
+            fallow_output::GateName::SecurityAdvisory,
+            security_advisory_failed(opts, output, effective_severities),
+        )
+    };
+    crate::exit_codes::run_exit_code([code])
 }
 
 fn security_advisory_failed(

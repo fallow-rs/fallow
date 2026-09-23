@@ -278,9 +278,10 @@ fn finish_combined_run(
         Err(code) => return code,
     };
 
-    if super::combined::output::combined_type_aware_gate_failed(check_result, health_result) {
-        max_exit = max_exit.max(1);
-    }
+    max_exit = max_exit.max(crate::exit_codes::gate_failed_exit_code(
+        fallow_output::GateName::TypeAwareRequire,
+        super::combined::output::combined_type_aware_gate_failed(check_result, health_result),
+    ));
 
     handle_regression_and_summary(
         &mut max_exit,

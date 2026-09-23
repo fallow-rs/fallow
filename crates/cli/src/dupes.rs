@@ -910,11 +910,16 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         fallow_engine::baseline::BaselineKind::Dupes,
     );
 
-    if threshold_exceeded || stale_baseline_failed {
-        return ExitCode::from(1);
-    }
-
-    ExitCode::SUCCESS
+    crate::exit_codes::run_exit_code([
+        crate::exit_codes::gate_failed_exit_code(
+            fallow_output::GateName::DuplicationThreshold,
+            threshold_exceeded,
+        ),
+        crate::exit_codes::gate_failed_exit_code(
+            fallow_output::GateName::StaleBaseline,
+            stale_baseline_failed,
+        ),
+    ])
 }
 
 pub fn print_default_ignore_note(result: &DupesResult, quiet: bool) {
