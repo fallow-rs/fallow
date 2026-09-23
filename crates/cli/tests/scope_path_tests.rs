@@ -348,3 +348,73 @@ fn audit_scope_narrows_changed_universe() {
         "scoped audit should hide out-of-scope changes. output: {combined}"
     );
 }
+
+/// `dup` is exported by `src/x.ts`, `src/y.ts` and `src/z.ts`, and
+/// `ignoreFindings` matches `src/x.ts` and `src/y.ts`. The full run reports
+/// the duplicate export, because `src/z.ts` is not ignored.
+fn create_ignored_duplicate_export_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"ignored-duplicate-export","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"ignoreFindings":["src/x.ts","src/y.ts"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "export * from \"./x\";\nexport * from \"./y\";\nexport * from \"./z\";\n",
+    )
+    .unwrap();
+    for name in ["x", "y", "z"] {
+        fs::write(
+            dir.join(format!("src/{name}.ts")),
+            "export const dup = 1;\n",
+        )
+        .unwrap();
+    }
+    tmp
+}
+
+fn duplicate_export_names(json: &serde_json::Value) -> Vec<String> {
+    json["duplicate_exports"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|finding| finding["export_name"].as_str().map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn file_filter_hides_a_duplicate_export_that_only_ignored_files_hold() {
+    let tmp = create_ignored_duplicate_export_fixture();
+    let dir = tmp.path();
+
+    let full = run_fallow_in_root("dead-code", dir, &["--format", "json", "--quiet"]);
+    assert_eq!(
+        duplicate_export_names(&parse_json(&full)),
+        vec!["dup".to_string()],
+        "the full run reports `dup`, because src/z.ts is not ignored: {}",
+        full.stdout
+    );
+
+    let scoped = run_fallow_in_root(
+        "dead-code",
+        dir,
+        &[
+            "--file", "src/x.ts", "--file", "src/y.ts", "--format", "json", "--quiet",
+        ],
+    );
+    assert_eq!(
+        duplicate_export_names(&parse_json(&scoped)),
+        Vec::<String>::new(),
+        "after `--file` only src/x.ts and src/y.ts hold `dup` and `ignoreFindings` \
+         matches both, so the finding is hidden: {}",
+        scoped.stdout
+    );
+}

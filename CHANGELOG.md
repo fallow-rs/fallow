@@ -203,7 +203,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CLI then checked `ignoreFindings` again. The MCP typed tools, the Node API,
   the language server and the VS Code extension did not, so they showed a
   finding that the CLI hid. They now narrow a dead-code report through the
-  same code as the CLI.
+  same code as the CLI. `fallow dead-code --file` now applies the same rule: a
+  duplicate export that only ignored files hold after `--file` is hidden.
 
 - **Traces pick the file you name in a monorepo.** A trace of `src/a.ts`
   (for example `dead-code --trace-file src/a.ts` or
