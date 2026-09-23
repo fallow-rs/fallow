@@ -352,12 +352,24 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
     // Bracketed route filenames are the Next.js convention, so an unescaped
     // target would both miss the exposed file and credit an unrelated one.
     let escaped = globset::escape(&normalized);
-    if super::has_source_extension(&normalized) {
-        result.push_entry_pattern(escaped);
-        return;
+    let patterns = if super::has_source_extension(&normalized) {
+        vec![escaped]
+    } else {
+        vec![
+            format!("{escaped}.{EXPOSE_EXTENSIONS}"),
+            format!("{escaped}/index.{EXPOSE_EXTENSIONS}"),
+        ]
+    };
+    // Only a target that climbs out of the plugin root is parent-relative, so
+    // only it asks the workspace prefix to resolve its `../` segments.
+    let parent_relative = normalized.starts_with("../");
+    for pattern in patterns {
+        if parent_relative {
+            result.push_parent_relative_entry_pattern(pattern);
+        } else {
+            result.push_entry_pattern(pattern);
+        }
     }
-    result.push_entry_pattern(format!("{escaped}.{EXPOSE_EXTENSIONS}"));
-    result.push_entry_pattern(format!("{escaped}/index.{EXPOSE_EXTENSIONS}"));
 }
 
 /// A relative target that climbs out of the plugin root, as a path relative to
@@ -365,8 +377,9 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
 ///
 /// A workspace package is read with its own directory as the root, so a target
 /// in a sibling workspace climbs out of it while it stays inside the project.
-/// The workspace prefix resolves the `../` segments later. A target that climbs
-/// out of the project keeps them and matches no project file.
+/// The entry rule is marked parent-relative, so the workspace prefix resolves
+/// the `../` segments later. A target that climbs out of the project keeps them
+/// and matches no project file.
 fn parent_relative_target(target: &str, base: &Path, root: &Path) -> Option<String> {
     if !target.starts_with("../") {
         return None;
@@ -504,8 +517,8 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
     /// doubt. A spread or an import that is not readable can hold each key the
     /// readable part does not declare, so it is recorded against each of those
     /// keys. An unrecognized call can change each key it receives, so it is
-    /// recorded against each key the options declare, or against both keys
-    /// when they declare none.
+    /// recorded against each key its argument declares, or against both keys
+    /// when the options declare none.
     fn merge(&mut self, options: ResolvedOptions, federation_specific: bool) {
         let has_unread_part =
             options.unreadable_spread || options.unreadable_import || options.unrecognized_call;
@@ -529,7 +542,8 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
             let declared = options.declared.contains(&key);
             let reasons = [
                 (
-                    options.unrecognized_call && (declared || options.declared.is_empty()),
+                    options.unrecognized_keys.contains(&key)
+                        || (options.unrecognized_call && options.declared.is_empty()),
                     UnreadReason::UnrecognizedCall,
                 ),
                 (
@@ -568,6 +582,35 @@ struct ResolvedOptions {
     /// Whether the options pass through a call that is not a known identity
     /// wrapper, so what was read is a lower bound.
     unrecognized_call: bool,
+    /// The Federation keys that the argument of an unrecognized call declares.
+    unrecognized_keys: Vec<FederationKey>,
+}
+
+impl ResolvedOptions {
+    /// Take what a nested resolution read.
+    fn absorb(&mut self, other: Self) {
+        for target in other.config.exposed_targets {
+            push_unique(&mut self.config.exposed_targets, target);
+        }
+        for package in other.config.exposed_packages {
+            push_unique(&mut self.config.exposed_packages, package);
+        }
+        for alias in other.config.remote_aliases {
+            push_unique(&mut self.config.remote_aliases, alias);
+        }
+        for declaration in other.unread {
+            push_unique(&mut self.unread, declaration);
+        }
+        for key in other.declared {
+            push_unique(&mut self.declared, key);
+        }
+        for key in other.unrecognized_keys {
+            push_unique(&mut self.unrecognized_keys, key);
+        }
+        self.unreadable_spread |= other.unreadable_spread;
+        self.unreadable_import |= other.unreadable_import;
+        self.unrecognized_call |= other.unrecognized_call;
+    }
 }
 
 /// Read every object literal that an options expression resolves to: an object
@@ -629,19 +672,26 @@ fn resolve_wrapped_options(
     depth: usize,
     options: &mut ResolvedOptions,
 ) -> bool {
+    // Resolve the argument on its own, so the keys it declares are known.
+    let mut received = ResolvedOptions::default();
     let resolved = call
         .arguments
         .first()
         .and_then(Argument::as_expression)
-        .is_some_and(|argument| resolve_options(program, path, argument, depth + 1, options))
+        .is_some_and(|argument| resolve_options(program, path, argument, depth + 1, &mut received))
         || config_parser::extract_object_from_expression(expr).is_some_and(|object| {
-            read_options_object(program, path, object, depth + 1, options);
+            read_options_object(program, path, object, depth + 1, &mut received);
             true
         });
-    if resolved && !is_identity_wrapper(&call.callee) {
-        options.unrecognized_call = true;
+    if !resolved {
+        return false;
     }
-    resolved
+    if !is_identity_wrapper(&call.callee) {
+        received.unrecognized_call = true;
+        received.unrecognized_keys.clone_from(&received.declared);
+    }
+    options.absorb(received);
+    true
 }
 
 /// Whether a callee is a known identity wrapper, called by name or as a
@@ -2164,6 +2214,32 @@ mod tests {
             bundler(r"export default { plugins: [federation(withShared({ name: 'app' }))] };");
         assert_eq!(config, FederationConfig::default());
         assert!(computed.is_empty(), "got {computed:?}");
+    }
+
+    /// Only the keys that come from the unrecognized call are recorded. A key
+    /// declared by a literal outside the call is read in full.
+    #[test]
+    fn an_unrecognized_call_records_only_the_keys_it_receives() {
+        let (config, computed) = bundler(
+            r"
+            module.exports = { plugins: [new ModuleFederationPlugin({
+                ...withShared({ exposes: { './Button': './src/Button.tsx' } }),
+                remotes: { checkout: 'checkout@x' },
+            })] };
+            ",
+        );
+        assert_eq!(
+            config,
+            FederationConfig {
+                exposed_targets: vec!["./src/Button.tsx".to_string()],
+                remote_aliases: vec!["checkout".to_string()],
+                ..FederationConfig::default()
+            }
+        );
+        assert_eq!(
+            computed,
+            unread(FederationKey::Exposes, UnreadReason::UnrecognizedCall)
+        );
     }
 
     /// A followed relative import or `require` whose target cannot be read is

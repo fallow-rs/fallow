@@ -189,7 +189,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A bare rollup, rolldown or vite input no longer reports its package as
   unused.** An `input` value such as `my-lib/client` can name a package or a
-  path. It now credits the package and keeps the entry pattern. Before,
+  path. It now credits the package and keeps the entry pattern. When the
+  value names a project file, such as `lib/index` with a local
+  `lib/index.js`, it credits no package. Before,
   `my-lib` was reported as an unused dependency with a `remove-dependency`
   action. An input or a vite `build.lib.entry` without an extension, such as
   `src/app`, now matches `src/app.js` or `src/app/index.js`. Vite

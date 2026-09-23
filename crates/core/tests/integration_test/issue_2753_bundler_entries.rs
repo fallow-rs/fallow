@@ -406,3 +406,30 @@ fn a_bare_bundler_input_credits_the_package_and_the_file() {
         );
     }
 }
+
+/// A bare input that names a project file is a path, so it does not credit a
+/// declared package that has the same first segment. A package that no code
+/// imports stays reported.
+#[test]
+fn a_bare_input_that_names_a_project_file_credits_no_package() {
+    let package_json = r#"{ "name": "bare-input", "private": true, "dependencies": { "lib": "^1.0.0", "my-lib": "^1.0.0" }, "devDependencies": { "rollup": "^4.0.0" } }"#;
+    let (unused, unused_dependencies) = unused_files_and_dependencies(
+        package_json,
+        &[
+            (
+                "rollup.config.mjs",
+                r#"export default { input: ["lib/index", "my-lib/client"] };"#,
+            ),
+            ("lib/index.js", "export const lib = 1;"),
+        ],
+    );
+    assert_used("local file", &unused, &["lib/index.js"]);
+    assert!(
+        unused_dependencies.contains(&"lib".to_string()),
+        "a local file does not credit the package, got {unused_dependencies:?}"
+    );
+    assert!(
+        !unused_dependencies.contains(&"my-lib".to_string()),
+        "a value with no local file credits the package, got {unused_dependencies:?}"
+    );
+}

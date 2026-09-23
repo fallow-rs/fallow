@@ -180,6 +180,7 @@ fn plugin_result_with_patterns(
                 exclude_globs: Vec::new(),
                 exclude_regexes: Vec::new(),
                 exclude_segment_regexes: Vec::new(),
+                parent_relative: false,
             };
             (rule, format!("bench-plugin-{index}"))
         })

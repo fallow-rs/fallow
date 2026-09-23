@@ -168,7 +168,7 @@ define_plugin!(
             config_path,
             &["build", "rollupOptions", "input"],
         );
-        result.extend_entry_patterns_and_dependencies(rollup_input);
+        result.extend_entry_patterns_and_dependencies(rollup_input, root);
 
         let lib_entry = config_parser::extract_config_string_or_array(
             source,

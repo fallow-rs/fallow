@@ -379,3 +379,45 @@ fn an_exposes_target_in_a_sibling_workspace_is_credited() {
         "an unexposed file still reports, got {unused:?}"
     );
 }
+
+/// The sibling-workspace resolution belongs to the Federation reader only. A
+/// Storybook `stories` pattern such as `../src/**` is relative to its config
+/// directory, so it must not credit a file one directory above the workspace.
+#[test]
+fn a_storybook_parent_pattern_does_not_climb_out_of_its_workspace() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "sb-monorepo", "private": true, "workspaces": ["packages/*"] }"#,
+    );
+    write(
+        &root.join("packages/ui/package.json"),
+        r#"{ "name": "ui", "private": true, "main": "src/index.ts", "devDependencies": { "storybook": "^8.0.0", "@storybook/react": "^8.0.0" } }"#,
+    );
+    write(
+        &root.join("packages/ui/.storybook/main.ts"),
+        r#"export default { stories: ["../src/**/*.docs.tsx"] };"#,
+    );
+    write(
+        &root.join("packages/ui/src/index.ts"),
+        "export const x = 1;",
+    );
+    write(
+        &root.join("packages/src/stray.docs.tsx"),
+        "export const stray = 1;",
+    );
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        unused
+            .iter()
+            .any(|path| path.ends_with("packages/src/stray.docs.tsx")),
+        "a file outside the workspace is not a story, got {unused:?}"
+    );
+}

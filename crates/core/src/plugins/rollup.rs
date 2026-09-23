@@ -20,12 +20,12 @@ define_plugin! {
     config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
-    resolve_config(config_path, source, _root) {
+    resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
 
         let inputs = config_parser::extract_config_string_or_array(source, config_path, &["input"]);
-        result.extend_entry_patterns_and_dependencies(inputs);
+        result.extend_entry_patterns_and_dependencies(inputs, root);
 
         let external =
             config_parser::extract_config_shallow_strings(source, config_path, "external");

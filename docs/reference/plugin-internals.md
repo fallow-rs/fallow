@@ -145,8 +145,12 @@ does not route to the remote. That declaration keeps its `array-form` advisory.
 A workspace package is read with its own directory as the plugin root. An
 `exposes` target that climbs out of that directory, such as
 `../shared/src/Thing.tsx`, keeps its leading `../` segments in the entry
-pattern. The workspace prefix pass resolves them against the package prefix, so
-the target names a file in a sibling workspace. A target that climbs out of the
+pattern, and the reader marks the rule as parent-relative. The workspace prefix
+pass resolves the segments of a marked rule against the package prefix, so the
+target names a file in a sibling workspace. An unmarked rule keeps the plain
+prefix, because other plugins emit patterns relative to a config directory,
+such as the Storybook `../src/**`, and these must not climb out of the
+workspace. A target that climbs out of the
 project keeps the segments and matches no project file. It records nothing,
 because the run loses nothing that it could measure.
 
@@ -200,9 +204,11 @@ Rollup `input`, rolldown `input` and vite `build.rollupOptions.input` are the
 exception. These tools resolve an `input` value with no importer: a resolve
 plugin can read it as a module request, and without one it is a path relative
 to the working directory. A value that the predicate calls a module request can
-therefore name either one, so it credits the package AND keeps the entry
-pattern. The extra package credit only filters an unused-dependency finding, so
-it cannot create a finding. Vite `build.lib.entry` stays a path only, because
+therefore name either one, so it keeps the entry pattern AND credits the
+package. The package credit is skipped when the value names a file under the
+plugin root (the value, the value with a source extension, or a directory
+index). Then the value is a path, and the credit must not hide an unused package
+with the same first segment. Vite `build.lib.entry` stays a path only, because
 vite resolves it against its root with `path.resolve`. Webpack keeps the module
 request reading, because webpack resolves an entry without `./` as a module.
 
